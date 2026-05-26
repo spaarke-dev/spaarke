@@ -1,0 +1,51 @@
+<task id="AIPU2-115" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Verify audit log immutability</title>
+    <phase>6</phase>
+    <tags>testing, compliance, cosmos-db</tags>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPU2-033</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    The audit log (AIPU2-033) must be immutable: no update or delete operations should be
+    possible on audit entries after they are written. This is a compliance requirement for
+    legal workspace AI usage — audit trails must be tamper-evident. This test verifies the
+    immutability at the Cosmos DB level (RBAC / stored procedure restrictions) and at the
+    API level (no update/delete endpoints exposed). Additionally, the retention policy must
+    be verified to be set, and audit data must be exportable to Azure Blob for compliance
+    archiving.
+  </prompt>
+  <role>Security engineer or compliance-focused developer.</role>
+  <goal>
+    Audit entries cannot be modified or deleted by any means available to the BFF API identity
+    or through the audit API. Retention policy is confirmed set on the audit Cosmos container.
+    Audit data can be exported to Azure Blob Storage. All findings documented in
+    notes/audit-immutability-test-report.md.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Audit</file>
+      <file>infrastructure/cosmos</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Write a test audit entry to the Cosmos audit container using the AuditLogService (AIPU2-033). Record the entry ID and etag.</step>
+    <step>Attempt to update the audit entry directly via Cosmos SDK using the BFF Managed Identity (or a test identity with equivalent permissions). Assert the operation fails with a permission denied or precondition error.</step>
+    <step>Attempt to delete the audit entry directly via Cosmos SDK. Assert deletion fails.</step>
+    <step>Verify there are no BFF API endpoints that expose update or delete operations on audit records. Scan AuditEndpoints.cs and the audit service for any PATCH/PUT/DELETE handlers targeting audit records.</step>
+    <step>Verify the Cosmos container TTL or retention policy: confirm the audit container has a TTL set to the required retention period (e.g. 7 years = 220752000 seconds) or that a separate Azure policy enforces retention.</step>
+    <step>Test audit export to Azure Blob: trigger the export function (manual or via a test endpoint), verify that audit entries appear in the configured Azure Blob container as JSON or CSV, verify the export is complete and not truncated.</step>
+    <step>Document all findings in notes/audit-immutability-test-report.md: test steps, expected vs. actual results, retention policy configuration, export verification.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Attempt to update an audit entry via Cosmos SDK fails with a permission or precondition error.</criterion>
+    <criterion>Attempt to delete an audit entry via Cosmos SDK fails.</criterion>
+    <criterion>No BFF API endpoint exposes update or delete operations on audit records.</criterion>
+    <criterion>Cosmos audit container has a TTL or retention policy set to the required compliance period.</criterion>
+    <criterion>Audit entries can be exported to Azure Blob Storage and the export is complete.</criterion>
+    <criterion>Test report written to notes/audit-immutability-test-report.md with all findings.</criterion>
+  </acceptance-criteria>
+</task>

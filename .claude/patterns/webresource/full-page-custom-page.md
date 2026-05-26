@@ -13,7 +13,7 @@ Building a full navigation page or side pane hosted in a Dataverse Model-Driven 
 3. `src/solutions/EventsPage/src/App.tsx` — `FluentProvider` + theme wiring skeleton
 4. `src/solutions/EventsPage/src/providers/ThemeProvider.ts` — `resolveTheme()` + `setupThemeListener()` (copy for new pages)
 5. `src/solutions/EventsPage/index.html` — CSS reset: `html, body, #root { margin:0; height:100%; overflow:hidden }`
-6. `.claude/patterns/auth/spaarke-auth-initialization.md` — auth bootstrap for pages calling BFF API
+6. `.claude/patterns/auth/spaarke-sso-binding.md` — Spaarke Auth v2 bootstrap (INV-1..INV-8 + `initAuth()` + `useAuth()` + `authenticatedFetch` per [ADR-028](../../adr/ADR-028-spaarke-auth-architecture.md))
 
 ## Constraints
 - **ADR-006**: Full-page surfaces MUST be Code Pages; PCF platform injects React 16 — `createRoot` and `useId()` fail at runtime
@@ -25,4 +25,4 @@ Building a full navigation page or side pane hosted in a Dataverse Model-Driven 
 - `viteSingleFile()` + `assetsInlineLimit: 100000000` + `manualChunks: undefined` are all mandatory for single-file output
 - Never use React Router — client-side routing has no meaning inside Dataverse
 - Always guard Xrm access: `const xrm = getXrm(); if (!xrm) return;` — code also runs in dev server
-- BFF-calling pages MUST bootstrap auth before `createRoot`; never use module-level `getMsalClientId()` calls
+- BFF-calling pages MUST call `await initAuth({...})` from `@spaarke/auth` before `createRoot`; consume tokens via `useAuth()` (React) or `authenticatedFetch` (non-React). NEVER use module-level `getMsalClientId()` calls or add `accessToken: string` props (v2 contract per ADR-028)

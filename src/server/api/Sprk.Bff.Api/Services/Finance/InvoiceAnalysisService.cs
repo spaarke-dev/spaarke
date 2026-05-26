@@ -2,7 +2,7 @@ using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using OpenAI.Chat;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance.Models;
 
 namespace Sprk.Bff.Api.Services.Finance;
@@ -12,43 +12,52 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// Implements Playbook A (classification) and Playbook B (extraction) for the Finance Intelligence Module.
 /// </summary>
 /// <remarks>
-/// Per ADR-013: Extends BFF API with AI analysis capability.
-/// Per ADR-014: Prompts loaded from Dataverse via IPlaybookService, not hardcoded strings.
+/// Per refined ADR-013 (2026-05-20): CRUD code consumes AI through the
+/// <see cref="IInvoiceAi"/> public facade (Services/Ai/PublicContracts/) rather than
+/// injecting the AI-internal playbook + completion types directly.
+/// Per ADR-014: Prompts loaded from Dataverse via the facade's GetPlaybookByNameAsync,
+/// not hardcoded strings.
 /// Per ADR-015: NEVER log document content, extracted text, or prompts. Only log IDs, sizes, timings.
 ///
 /// Classification uses gpt-4o-mini (fast, cost-effective) for binary invoice/not-invoice decisions.
 /// Extraction uses gpt-4o (accurate) for detailed structured data extraction from invoice text.
 /// </remarks>
-public class InvoiceAnalysisService : IInvoiceAnalysisService
+public sealed class InvoiceAnalysisService : IInvoiceAnalysisService
 {
-    private readonly IOpenAiClient _openAiClient;
-    private readonly IPlaybookService _playbookService;
+    private readonly IInvoiceAi? _invoiceAi;
     private readonly FinanceOptions _options;
     private readonly ILogger<InvoiceAnalysisService> _logger;
 
     /// <summary>
     /// Playbook name for attachment classification (Playbook A).
-    /// Loaded from Dataverse via IPlaybookService.GetByNameAsync.
+    /// Loaded from Dataverse via the IInvoiceAi facade.
     /// </summary>
     internal const string ClassificationPlaybookName = "FinanceClassification";
 
     /// <summary>
     /// Playbook name for invoice fact extraction (Playbook B).
-    /// Loaded from Dataverse via IPlaybookService.GetByNameAsync.
+    /// Loaded from Dataverse via the IInvoiceAi facade.
     /// </summary>
     internal const string ExtractionPlaybookName = "FinanceExtraction";
 
     public InvoiceAnalysisService(
-        IOpenAiClient openAiClient,
-        IPlaybookService playbookService,
         IOptions<FinanceOptions> options,
-        ILogger<InvoiceAnalysisService> logger)
+        ILogger<InvoiceAnalysisService> logger,
+        IInvoiceAi? invoiceAi = null)
     {
-        _openAiClient = openAiClient;
-        _playbookService = playbookService;
+        _invoiceAi = invoiceAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
         _options = options.Value;
         _logger = logger;
     }
+
+    /// <summary>
+    /// Returns the AI facade or throws if AI features are disabled. Invoice analysis has no
+    /// non-AI fallback — when AI is disabled, callers should treat the throw as the expected
+    /// "feature disabled" signal (the endpoint or job handler will surface a 503 / dead-letter).
+    /// </summary>
+    private IInvoiceAi RequireAi() =>
+        _invoiceAi ?? throw new InvalidOperationException(
+            "Invoice analysis requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable.");
 
     /// <inheritdoc />
     public async Task<ClassificationResult> ClassifyAttachmentAsync(
@@ -61,8 +70,8 @@ public class InvoiceAnalysisService : IInvoiceAnalysisService
             "Starting attachment classification. DocumentTextLength={TextLength}",
             documentText.Length);
 
-        // 1. Load classification playbook prompt from Dataverse (ADR-014)
-        var playbook = await _playbookService.GetByNameAsync(ClassificationPlaybookName, ct);
+        // 1. Load classification playbook prompt from Dataverse (ADR-014) via IInvoiceAi facade
+        var playbook = await RequireAi().GetPlaybookByNameAsync(ClassificationPlaybookName, ct);
         var systemPrompt = playbook.Description
             ?? throw new InvalidOperationException(
                 $"Playbook '{ClassificationPlaybookName}' has no description (system prompt).");
@@ -87,8 +96,8 @@ public class InvoiceAnalysisService : IInvoiceAnalysisService
             new UserChatMessage(userPrompt)
         };
 
-        // 3. Call structured completion with classification schema
-        var result = await _openAiClient.GetStructuredCompletionAsync<ClassificationResult>(
+        // 3. Call structured completion with classification schema via IInvoiceAi facade
+        var result = await RequireAi().GetStructuredCompletionAsync<ClassificationResult>(
             messages,
             FinanceJsonSchemas.ClassificationResultSchema,
             nameof(ClassificationResult),
@@ -117,8 +126,8 @@ public class InvoiceAnalysisService : IInvoiceAnalysisService
             "Starting invoice fact extraction. DocumentTextLength={TextLength}, HasReviewerHints={HasHints}",
             documentText.Length, reviewerHints is not null);
 
-        // 1. Load extraction playbook prompt from Dataverse (ADR-014)
-        var playbook = await _playbookService.GetByNameAsync(ExtractionPlaybookName, ct);
+        // 1. Load extraction playbook prompt from Dataverse (ADR-014) via IInvoiceAi facade
+        var playbook = await RequireAi().GetPlaybookByNameAsync(ExtractionPlaybookName, ct);
         var systemPrompt = playbook.Description
             ?? throw new InvalidOperationException(
                 $"Playbook '{ExtractionPlaybookName}' has no description (system prompt).");
@@ -157,8 +166,8 @@ public class InvoiceAnalysisService : IInvoiceAnalysisService
             new UserChatMessage(userPrompt)
         };
 
-        // 3. Call structured completion with extraction schema
-        var result = await _openAiClient.GetStructuredCompletionAsync<ExtractionResult>(
+        // 3. Call structured completion with extraction schema via IInvoiceAi facade
+        var result = await RequireAi().GetStructuredCompletionAsync<ExtractionResult>(
             messages,
             FinanceJsonSchemas.ExtractionResultSchema,
             nameof(ExtractionResult),

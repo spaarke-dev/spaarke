@@ -5,18 +5,27 @@
  * Used to populate the playbook selector UI (quick-action chips)
  * before a chat session is created.
  *
+ * Auth v2 (D-AUTH-1, D-AUTH-7):
+ * - Accepts `authenticatedFetch` from the caller instead of a snapshotted
+ *   `accessToken: string`. The fetch function handles Bearer attachment,
+ *   X-Tenant-Id, and 401 retry internally.
+ *
  * @see ADR-022 - React 16 APIs only (useState, useEffect, useCallback)
  * @see ChatEndpoints.cs - GET /api/ai/chat/playbooks
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { IPlaybookOption } from '../types';
+import { IPlaybookOption, AuthenticatedFetchFn } from '../types';
 
 interface UseChatPlaybooksOptions {
   /** Base URL for the BFF API */
   apiBaseUrl: string;
-  /** Bearer token for API authentication */
-  accessToken: string;
+  /**
+   * Authenticated fetch function (typically from `@spaarke/auth` or `useAuth()`).
+   * MUST attach a fresh Bearer token on every call. Replaces the previous
+   * `accessToken: string` snapshot prop.
+   */
+  authenticatedFetch: AuthenticatedFetchFn;
   /** Optional name filter for playbook search */
   nameFilter?: string;
 }
@@ -42,12 +51,12 @@ export interface IUseChatPlaybooksResult {
  * ```tsx
  * const { playbooks, isLoading, error, refresh } = useChatPlaybooks({
  *   apiBaseUrl: "https://spe-api-dev-67e2xz.azurewebsites.net",
- *   accessToken: token,
+ *   authenticatedFetch, // from @spaarke/auth / useAuth()
  * });
  * ```
  */
 export function useChatPlaybooks(options: UseChatPlaybooksOptions): IUseChatPlaybooksResult {
-  const { apiBaseUrl, accessToken, nameFilter } = options;
+  const { apiBaseUrl, authenticatedFetch, nameFilter } = options;
 
   const [playbooks, setPlaybooks] = useState<IPlaybookOption[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -56,34 +65,15 @@ export function useChatPlaybooks(options: UseChatPlaybooksOptions): IUseChatPlay
   // Normalize URL
   const baseUrl = apiBaseUrl.replace(/\/+$/, '');
 
-  /**
-   * Extract tenant ID from JWT for X-Tenant-Id header.
-   */
-  const extractTenantId = (token: string): string | null => {
-    try {
-      const parts = token.split('.');
-      if (parts.length !== 3) return null;
-      const payload = JSON.parse(atob(parts[1]));
-      return payload.tid || null;
-    } catch {
-      return null;
-    }
-  };
-
   const fetchPlaybooks = useCallback(async (): Promise<void> => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const tenantId = extractTenantId(accessToken);
       const params = nameFilter ? `?nameFilter=${encodeURIComponent(nameFilter)}` : '';
-      const response = await fetch(`${baseUrl}/api/ai/chat/playbooks${params}`, {
+      const response = await authenticatedFetch(`${baseUrl}/api/ai/chat/playbooks${params}`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-          ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
-        },
+        headers: { 'Content-Type': 'application/json' },
       });
 
       if (!response.ok) {
@@ -108,7 +98,7 @@ export function useChatPlaybooks(options: UseChatPlaybooksOptions): IUseChatPlay
     } finally {
       setIsLoading(false);
     }
-  }, [baseUrl, accessToken, nameFilter]);
+  }, [baseUrl, authenticatedFetch, nameFilter]);
 
   // Fetch on mount and when dependencies change
   useEffect(() => {

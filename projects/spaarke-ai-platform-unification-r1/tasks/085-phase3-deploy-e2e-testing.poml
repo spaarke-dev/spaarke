@@ -1,0 +1,75 @@
+<task id="AIPU-085" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Phase 3 deploy + end-to-end testing (FR-19, FR-20, all NFRs)</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <wave>9</wave>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>deploy, testing, integration-test</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>AIPU-080, AIPU-081</dependencies>
+  </metadata>
+
+  <prompt>
+    Deploy final BFF with evaluation pipeline and OTEL tracing to dev environment, then run end-to-end tests covering FR-19 (evaluation pipeline produces quality scores) and FR-20 (OTEL traces visible in Application Insights). Also verify all NFRs: output widget rendering < 200ms (NFR-01), source pane load < 2s (NFR-02), routing decision < 50ms (NFR-03), dark mode (NFR-04), and no Analysis Workspace regression (NFR-06). Document results in notes/phase3-test-results.md.
+  </prompt>
+
+  <role>QA engineer with end-to-end testing and performance verification experience</role>
+
+  <goal>
+    All Phase 3 requirements verified, all NFRs measured and passing, and comprehensive test results documented. Any failures triaged and recorded.
+  </goal>
+
+  <relevant-files>
+    <file>scripts/Deploy-BffApi.ps1</file>
+    <file>projects/spaarke-ai-platform-unification-r1/notes/phase3-test-results.md</file>
+    <file>projects/spaarke-ai-platform-unification-r1/spec.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="pipeline">MUST deploy before testing — no testing against stale environment</constraint>
+    <constraint source="pipeline">MUST measure all 6 NFRs with quantitative results</constraint>
+    <constraint source="pipeline">MUST document all results in notes/phase3-test-results.md</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r1/spec.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build BFF API with all Phase 3 changes</step>
+    <step order="2">Deploy to dev environment using Deploy-BffApi.ps1</step>
+    <step order="3">Verify /healthz returns 200</step>
+    <step order="4">Run evaluation pipeline and verify quality scores generated (FR-19)</step>
+    <step order="5">Verify OTEL traces in Application Insights (FR-20)</step>
+    <step order="6">Measure output widget rendering time against 200ms target (NFR-01)</step>
+    <step order="7">Measure source pane document load against 2s target (NFR-02)</step>
+    <step order="8">Measure routing decision time against 50ms target (NFR-03)</step>
+    <step order="9">Verify dark mode across all widgets (NFR-04)</step>
+    <step order="10">Run Analysis Workspace regression test (NFR-06)</step>
+    <step order="11">Document all results in notes/phase3-test-results.md</step>
+    <step order="12">Escalate any failures with evidence</step>
+  </steps>
+
+  <tools>
+    <tool>Bash</tool>
+    <tool>Read</tool>
+    <tool>Write</tool>
+  </tools>
+
+  <outputs>
+    <output>Deployed BFF with Phase 3 changes</output>
+    <output>notes/phase3-test-results.md with all FR/NFR results</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>BFF deployed and healthy</criterion>
+    <criterion>FR-19: Evaluation pipeline produces scores</criterion>
+    <criterion>FR-20: OTEL traces visible in Application Insights</criterion>
+    <criterion>All 6 NFRs measured with pass/fail and evidence</criterion>
+    <criterion>notes/phase3-test-results.md exists with comprehensive results</criterion>
+  </acceptance-criteria>
+</task>

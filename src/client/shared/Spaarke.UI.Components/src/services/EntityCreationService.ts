@@ -74,7 +74,7 @@ export interface ISendEmailInput {
   cc?: string | string[];
   subject: string;
   body: string;
-  bodyFormat?: 'HTML' | 'Text';
+  bodyFormat?: 'HTML' | 'PlainText'; // matches server enum BodyFormat (Sprk.Bff.Api.Services.Communication.Models.BodyFormat); 'Text' was an incorrect alias and is rejected by the BFF (2026-05-25)
   associations?: Array<{
     entityType: string;
     entityId: string;
@@ -267,6 +267,10 @@ export class EntityCreationService {
           sprk_graphitemid: file.id,
           sprk_graphdriveid: containerId ?? null,
           sprk_filepath: file.webUrl ?? null,
+          // Upload to SPE succeeded by the time we reach here — mark the file flag.
+          // BFF treats DriveId/ItemId as authoritative, but downstream consumers
+          // (RAG indexing filter, scheduled jobs, form ribbon visibility) read this flag.
+          sprk_hasfile: true,
         };
 
         // Add @odata.bind navigation property to link document to parent entity

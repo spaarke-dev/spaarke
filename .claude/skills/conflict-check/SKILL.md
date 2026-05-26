@@ -4,12 +4,16 @@ tags: [git, conflict, parallel-development, operations]
 techStack: [git, gh-cli]
 appliesTo: ["parallel sessions", "before merge", "conflict detection"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
 # Conflict Check
 
 > **Category**: Operations
-> **Last Updated**: January 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: Conflict detection runs against ephemeral PR state and live branches — no stable artifact to reference.
 
 ---
 
@@ -262,6 +266,17 @@ Recommendations:
 - `push-to-github` - Pre-push conflict detection
 - `project-pipeline` - Project planning overlap detection
 - `task-execute` - End-of-task sync check
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| `gh pr list` returns stale data — recent PRs missed | gh CLI uses cached state; new PR opened in the last few minutes not visible | Force-refresh with `gh pr list --state open --json number,title,headRefName,files` (no cache flag needed when JSON-formatted). If still stale, `gh api repos/{owner}/{repo}/pulls --jq '.[].head.ref'` bypasses cache entirely. |
+| Detected "overlap" turns out to be a non-conflict (e.g., both PRs add to the same file in different lines) | File-level intersection check is too coarse — line-level conflict only shows up at merge time | Use the detected overlap as a SIGNAL to coordinate, not an absolute block. Two PRs editing the same file can usually coexist if scope is clearly partitioned. |
+| Missed overlap — two parallel sessions modify the same file without warning | Check wasn't run, OR PR not yet opened (work is local-only) | Run conflict-check at session start AND before any major file modification. For pre-PR local work, scan other worktrees: `git worktree list` + `git status` in each. |
+| False positive on "stale" worktree | Worktree has uncommitted but legitimate work-in-progress | Don't auto-cleanup based on conflict-check signals — let the user decide. The skill warns; the user resolves. |
 
 ---
 

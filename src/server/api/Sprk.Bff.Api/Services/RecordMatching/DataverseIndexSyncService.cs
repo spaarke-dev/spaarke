@@ -3,7 +3,6 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using Azure;
 using Azure.Core;
-using Azure.Identity;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
@@ -61,25 +60,20 @@ public class DataverseIndexSyncService : IDataverseIndexSyncService
         HttpClient httpClient,
         IOptions<DocumentIntelligenceOptions> options,
         IConfiguration configuration,
+        TokenCredential credential,
         ILogger<DataverseIndexSyncService> logger)
     {
         _httpClient = httpClient;
         _options = options.Value;
         _configuration = configuration;
         _logger = logger;
+        _credential = credential;
 
         // Initialize Dataverse connection
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
-        var tenantId = configuration["TENANT_ID"]
-            ?? throw new InvalidOperationException("TENANT_ID configuration is required");
-        var clientId = configuration["API_APP_ID"]
-            ?? throw new InvalidOperationException("API_APP_ID configuration is required");
-        var clientSecret = configuration["Dataverse:ClientSecret"]
-            ?? throw new InvalidOperationException("Dataverse:ClientSecret configuration is required");
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
-        _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");

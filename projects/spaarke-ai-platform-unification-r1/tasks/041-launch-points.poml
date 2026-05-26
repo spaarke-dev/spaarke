@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPU-041" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Launch Points — Command Bar Buttons, Deep-Link URL, M365 Copilot Handoff</title>
+    <status>completed</status>
+    <phase>4</phase>
+    <wave>4</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>code-page, ribbon, frontend</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-040</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the four launch points that open the SpaarkeAi Code Page (sprk_spaarkeai) with the
+    correct entity context assembled as URL parameters:
+    1. Workspace command bar button — opens SpaarkeAi from the Spaarke workspace global nav.
+    2. Entity form command bar button — opens SpaarkeAi pre-seeded with the current Dataverse
+       record's logical name and ID (e.g. a matter, contact, or document record).
+    3. Deep-link URL — documented format that external systems can construct to open SpaarkeAi
+       for a specific entity.
+    4. M365 Copilot handoff — documented URL pattern (sprk_spaarkeai?matterId=X) that the M365
+       Copilot agent can invoke to hand off a conversation context.
+    All launch points use Xrm.Navigation.navigateTo with pageType "webresource". Business logic
+    must NOT live in ribbon scripts — only invocation code belongs there.
+  </prompt>
+
+  <role>Frontend developer with Dataverse ribbon/command bar experience and familiarity with
+  Xrm.Navigation APIs and ribbon XML customization.</role>
+
+  <goal>All four launch points open sprk_spaarkeai with the correct entity context encoded in URL
+  parameters. Ribbon scripts contain invocation code only (no business logic). Deep-link and M365
+  handoff URL formats are documented in docs/guides/.</goal>
+
+  <relevant-files>
+    <file>src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+    <file>src/solutions/SpaarkeAi/src/ribbon/WorkspaceLaunch.ts</file>
+    <file>src/solutions/SpaarkeAi/src/ribbon/EntityFormLaunch.ts</file>
+    <file>docs/guides/spaarkeai-launch-points.md</file>
+    <file>projects/spaarke-ai-platform-unification-r1/spec.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint id="ADR-006">Ribbon scripts must be minimal — invocation only. No business logic
+    in ribbon/command bar scripts. All parameter assembly logic belongs in launch-resolver.ts, not
+    in the ribbon script itself. The ribbon script calls a single exported function from
+    launch-resolver.ts.</constraint>
+    <constraint id="xrm-navigation">Use Xrm.Navigation.navigateTo with pageType "webresource" and
+    webresourceName "sprk_spaarkeai". Pass entity context as the data string parameter. Open in a
+    dialog (target: 2) sized at 90% width and 90% height, or as a full page (target: 1) — follow
+    spec.md guidance for each launch point type.</constraint>
+    <constraint id="no-logic-in-ribbon">The ribbon script file must contain only: import of
+    launch-resolver function + a single exported function that calls it. All URL construction,
+    entity ID resolution, and parameter encoding lives in launch-resolver.ts.</constraint>
+    <constraint id="m365-handoff">M365 Copilot handoff URL must use the matterId parameter so
+    StandaloneAiProvider can pre-seed entity context without requiring an Xrm form context.
+    Document the full URL format so it can be referenced from M365 Copilot agent configuration.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/webresource.md</file>
+      <file>docs/architecture/M365-COPILOT-INTEGRATION-ARCHITECTURE.md</file>
+      <file>docs/architecture/code-pages-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern>Xrm.Navigation.navigateTo for webresource:
+      Xrm.Navigation.navigateTo(
+        { pageType: "webresource", webresourceName: "sprk_spaarkeai",
+          data: new URLSearchParams({ entityLogicalName, entityId, matterId }).toString() },
+        { target: 2, width: { value: 90, unit: "%" }, height: { value: 90, unit: "%" } }
+      );
+      </pattern>
+      <pattern>Entity form ribbon script pattern: the script receives primaryControl as first
+      argument from the ribbon command. Use primaryControl.data.entity.getId() and
+      primaryControl.data.entity.getEntityName() to extract context. Pass to launch-resolver.
+      </pattern>
+      <pattern>Deep-link URL format (for external systems without Xrm):
+      https://{org}.crm.dynamics.com/WebResources/sprk_spaarkeai?entityLogicalName=X&amp;entityId=Y
+      This URL opens the web resource directly; no Xrm context is available so the page must
+      gracefully handle missing Xrm globals.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step id="1">Read spec.md section on launch points (FR-09) and docs/architecture/M365-COPILOT-INTEGRATION-ARCHITECTURE.md to understand the required URL parameter contract for each launch point.</step>
+    <step id="2">Create src/solutions/SpaarkeAi/src/utils/launch-resolver.ts: export function
+    buildLaunchUrl(params: { entityLogicalName?: string; entityId?: string; matterId?: string }):
+    string that assembles and encodes the data query string. Export function
+    openSpaarkeAi(params, target?: 1 | 2) that calls Xrm.Navigation.navigateTo with the assembled
+    params. Handle cases where Xrm is not available (deep-link / M365 context) gracefully.
+    </step>
+    <step id="3">Create src/solutions/SpaarkeAi/src/ribbon/WorkspaceLaunch.ts: single exported
+    function openFromWorkspace() that calls openSpaarkeAi({ }) with no entity context (opens global
+    AI assistant). This is registered as the workspace command bar button handler.</step>
+    <step id="4">Create src/solutions/SpaarkeAi/src/ribbon/EntityFormLaunch.ts: single exported
+    function openFromEntityForm(primaryControl: Xrm.FormContext) that extracts entityLogicalName
+    and entityId from primaryControl then calls openSpaarkeAi({ entityLogicalName, entityId }).
+    </step>
+    <step id="5">Document the deep-link URL format in docs/guides/spaarkeai-launch-points.md:
+    include the full URL pattern, all supported query parameters with descriptions, and an example
+    for opening SpaarkeAi for a specific matter record.</step>
+    <step id="6">Document the M365 Copilot handoff URL pattern in the same guide: the specific
+    parameter name (matterId), how the agent should construct the URL, and how SpaarkeAi loads
+    the matter context on receipt.</step>
+    <step id="7">Verify TypeScript compiles cleanly: run tsc --noEmit in src/solutions/SpaarkeAi/
+    and resolve any type errors in launch-resolver.ts or ribbon scripts. Ensure @types/xrm is
+    referenced so Xrm.Navigation types resolve.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion id="AC-1">launch-resolver.ts exports buildLaunchUrl and openSpaarkeAi with correct
+    TypeScript signatures and no implicit any types.</criterion>
+    <criterion id="AC-2">WorkspaceLaunch.ts contains only an import and a single exported function
+    — no inline URL construction or business logic.</criterion>
+    <criterion id="AC-3">EntityFormLaunch.ts extracts entityLogicalName and entityId from
+    primaryControl and passes them to openSpaarkeAi — no direct Xrm.Navigation call in the
+    ribbon script.</criterion>
+    <criterion id="AC-4">docs/guides/spaarkeai-launch-points.md documents all 4 launch points
+    with URL format, parameters, and examples.</criterion>
+    <criterion id="AC-5">M365 Copilot handoff URL format using matterId parameter is documented
+    and the parameter is handled in launch-resolver.ts.</criterion>
+    <criterion id="AC-6">tsc --noEmit passes with zero errors in src/solutions/SpaarkeAi/.
+    </criterion>
+  </acceptance-criteria>
+</task>

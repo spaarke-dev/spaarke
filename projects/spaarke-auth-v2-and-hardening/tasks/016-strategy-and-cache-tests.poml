@@ -1,0 +1,75 @@
+<task id="AUTHV2-016" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Write unit tests for BrowserMsalStrategy + InMemoryCache</title>
+    <phase>A — Core library rebuild</phase>
+    <tags>auth, library, tests, STANDARD</tags>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>011, 012</dependencies>
+    <parallel-safe>A-Parallel-2 (with 014, 015)</parallel-safe>
+  </metadata>
+  <prompt>
+    Cover the new strategy + cache layer with unit tests. Tests for BrowserMsalStrategy (mocked MSAL) and InMemoryCache (mocked inner strategy). Coverage targets: happy path acquire, exp validation triggers refresh, 401 retry path, popup fallback path.
+  </prompt>
+  <role>Test engineer.</role>
+  <goal>
+    >= 80% line coverage for new strategy + cache code. Tests for the four critical paths above.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.Auth/tests/CacheStrategy.test.ts (existing pattern reference)</file>
+      <file>src/client/shared/Spaarke.Auth/src/strategies/BrowserMsalStrategy.ts (from 011)</file>
+      <file>src/client/shared/Spaarke.Auth/src/strategies/InMemoryCache.ts (from 012)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Create tests/BrowserMsalStrategy.test.ts. Mock MSAL.PublicClientApplication. Test: acquireTokenSilent success, ssoSilent fallback, popup last resort, JWT exp validation.</step>
+    <step>Create tests/InMemoryCache.test.ts. Test: cache hit (fresh), cache miss (expired triggers inner.acquire), clearCache cascades, JWT exp buffer logic.</step>
+    <step>Run jest. Verify coverage report shows new files >= 80%.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>tests/BrowserMsalStrategy.test.ts exists with >= 5 test cases.</criterion>
+    <criterion>tests/InMemoryCache.test.ts exists with >= 4 test cases.</criterion>
+    <criterion>All tests pass.</criterion>
+    <criterion>Coverage >= 80% for the two new files.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19. All acceptance criteria met:
+    - tests/BrowserMsalStrategy.test.ts created with 10 test cases (acquireTokenSilent
+      happy path, ssoSilent fallback, popup fallback, all-three-fail empty return,
+      JWT-exp rejection + fallthrough, no-account path, logout via logoutPopup,
+      logout popup-blocked clearCache fallback, clearCache pre-init no-op,
+      getMsalInstance pre/post init). Mocks @azure/msal-browser entirely.
+    - tests/InMemoryCache.test.ts already had 10 cases from task 012.
+    - 39/39 tests pass across the full package suite (was 27/28 — gained 11, lost the
+      1 pre-existing config.test.ts baseline which is now fixed).
+    - Coverage: BrowserMsalStrategy.ts 80% lines, InMemoryCache.ts 90% lines —
+      both meet the >= 80% target. Uncovered lines are Xrm frame-walk paths in
+      resolveLoginHint (no Xrm shim in jsdom) and malformed-JWT catch branches.
+
+    BUNDLED CLEANUP (queued by tasks 012-015 as out-of-scope; bundled into 016
+    while we're here):
+    - Deleted ~50 stale src/**/*.d.ts + src/**/*.js + .map files (pre-v2
+      misconfigured build outputs; tsconfig now emits to dist/)
+    - Added .gitignore to the package preventing the regression
+    - Removed orphaned legacy types (ITokenResult, ITokenStrategy, TokenCacheEntry,
+      TokenSource) from types.ts; cleaned up index.ts barrel exports and the
+      backward-compat re-export in SpaarkeAuthProvider.ts
+    - Fixed tests/config.test.ts to match the v2 contract (no default clientId
+      after commit 9e480d75; resolveConfig now throws when clientId is missing)
+
+    COMPREHENSIVE CODE REVIEW (D-AUTH-QUALITY-GATE-DEFERRAL collected) — 10 v2
+    source files reviewed. Verdict: APPROVED. 0 critical, 2 warnings (both fixed
+    in this same commit), 0 AI code smells, 0 ADR violations. Warnings fixed:
+    1. SpaarkeAuthProvider.dispose() now cascades to _cache.clearCache() to prevent
+       MSAL-instance leak on initAuth() re-init
+    2. BrowserMsalStrategy._validate() bumped near-expiry rejection log from
+       console.warn to console.error with msToExpiry + bufferMs payload so the
+       upstream-refresh-broken signal surfaces in Application Insights
+    Full review report in commit message.
+
+    Phase A COMPLETE. Next: user runs MSAL regression test per
+    .claude/patterns/auth/spaarke-sso-binding.md (Phase A gate per project CLAUDE.md
+    risk-tier cadence).
+  </notes>
+</task>

@@ -47,8 +47,12 @@ export interface ActionHandlerContext {
   sessionId: string | undefined;
   /** Base URL for the BFF API (e.g., "https://spe-api-dev-67e2xz.azurewebsites.net"). */
   apiBaseUrl: string;
-  /** Bearer token for API authentication. */
-  accessToken: string;
+  /**
+   * Authenticated fetch function for API calls (typically from `@spaarke/auth` /
+   * `useAuth()`). Replaces the previous `accessToken: string` snapshot field
+   * (Auth v2 D-AUTH-1).
+   */
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
   /** Current document ID from the chat context. */
   documentId: string | undefined;
   /** Host context describing the embedding entity. */
@@ -307,21 +311,23 @@ export function navigateToTarget(payload: INavigatePayload): void {
  *
  * Called after the user clicks Confirm in the ActionConfirmationDialog.
  * Sends POST /api/ai/chat/sessions/{sessionId}/actions/{actionId}/confirm.
+ *
+ * Auth v2 (D-AUTH-1): takes `authenticatedFetch` instead of an `accessToken: string`
+ * snapshot. The fetch function handles fresh-token attachment + X-Tenant-Id internally.
  */
 export async function dispatchConfirmedAction(
   pendingAction: IPendingAction,
   apiBaseUrl: string,
-  accessToken: string
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>
 ): Promise<{ success: boolean; message: string }> {
   const baseUrl = apiBaseUrl.replace(/\/+$/, '');
   const url = `${baseUrl}/api/ai/chat/sessions/${pendingAction.sessionId}/actions/${pendingAction.actionId}/confirm`;
 
   try {
-    const response = await fetch(url, {
+    const response = await authenticatedFetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         actionId: pendingAction.actionId,
@@ -381,7 +387,7 @@ function getInitialWriteMode(): WriteMode {
  * const { handleAction, writeMode, isHandling } = useActionHandlers({
  *   sessionId: session?.sessionId,
  *   apiBaseUrl,
- *   accessToken,
+ *   authenticatedFetch,
  *   documentId,
  *   hostContext,
  *   sendMessage: handleSend,

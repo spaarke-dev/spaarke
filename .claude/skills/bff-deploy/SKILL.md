@@ -4,16 +4,25 @@ tags: [deploy, azure, api, bff, app-service]
 techStack: [dotnet, azure, app-service]
 appliesTo: ["deploy bff", "deploy api", "publish bff", "bff deploy", "update bff api"]
 alwaysApply: false
+exemplar: scripts/Deploy-BffApi.ps1
+last-reviewed: 2026-05-16
 ---
 
 # BFF API Deployment
 
 > **Category**: Operations
-> **Last Updated**: May 12, 2026 (added SHA-256 verification + auto-recover after observing silent deploy failures on Windows App Service)
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-B — `leave-alone-justified`; extracted future-migration section to references/; otherwise gold-standard incident-grounded skill)
+> **Exemplar rationale**: The deploy script `Deploy-BffApi.ps1` IS the canonical operational pattern — it's exercised every deploy. Recent change history is the most useful reference.
+> **Hardened 2026-05-14**: Default health-check window 120 s (Linux cold-start tolerance); hash-verify + auto-recover for silent file-lock failures; FAILURE-MODES.md G-2 documents the incident.
 
 Deploy the BFF API (`Sprk.Bff.Api`) to Azure App Service.
 
 > 🚨 **CRITICAL — Silent Deploy Failures (May 2026)**: `az webapp deploy --type zip` has been observed to return HTTP 200 + Kudu `status=4 success` while NOT actually replacing the DLLs on disk. The running .NET host holds file locks on the DLLs and Windows refuses overwrites — but the deploy mechanism reports success anyway. **Never trust the success message alone.** Always verify with SHA-256 hash comparison via Kudu VFS. The hardened `Deploy-BffApi.ps1` does this automatically; manual deploys MUST verify (see Manual Verification section below).
+
+> 🟡 **Linux App Service cold-start note (2026-05-14)**: After a `stop → Kudu zipdeploy → start` cycle (the script's auto-recover path), Linux App Service often takes **90–120 seconds** to respond to `/healthz`. Before 2026-05-14 the script's default health window was 60 s and reported a false failure here even though the deploy was successful and hash-verify had passed. The default is now **24 retries × 5 s = 120 s**, overridable via `-MaxHealthCheckRetries`. If hash-verify passes but `/healthz` still times out, the deploy is correct — the app is just still booting. Re-run `curl /healthz` manually after another 30–60 s instead of redeploying.
+
+> ✅ **The two-layer safety net**: (1) **Hash-verify** catches the silent-success-but-not-replaced case (Windows file lock). (2) **Health check** catches the case where files are correct but startup fails. Both run after every deploy. If hash-verify **fails**, the deploy is broken — the script auto-recovers via Kudu zipdeploy. If hash-verify **passes** but health check times out, the deploy is **correct** — the app needs more time to start. Never re-deploy in response to a healthz-only failure when hash-verify succeeded.
 
 ---
 
@@ -26,6 +35,24 @@ Deploy the BFF API (`Sprk.Bff.Api`) to Azure App Service.
 | Resource Group | `spe-infrastructure-westus2` |
 | Health Check | `https://spe-api-dev-67e2xz.azurewebsites.net/healthz` |
 | Deploy Script | `scripts/Deploy-BffApi.ps1` |
+| Auth setup (operator runbook) | [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) — 10-section runbook incl. §7 Exchange ApplicationAccessPolicy |
+| Canonical auth ADR | [`ADR-028`](../../adr/ADR-028-spaarke-auth-architecture.md) — function-based contract, MI, HMAC webhooks, named API keys |
+
+---
+
+## Auth Setup (post-deploy verification)
+
+After every fresh-env deploy OR cutover involving MI/auth changes, verify per [`auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) §9 smoke tests:
+- §9a `/healthz` returns 200
+- §9b OBO endpoint round-trip (proves JWT validation + OBO exchange)
+- §9c `/healthz/dataverse/doc/{id}` (proves MI → Dataverse)
+- §9d EXO mailbox access — no 403 in `InboundPollingBackupService` logs (if Email/Communication enabled)
+- §9e Browser MSAL regression on any Spaarke PCF/Code Page (no popup, tenant-specific authority)
+
+**Common post-deploy auth failure modes** (not deploy-script issues):
+- MI deploy succeeds but Graph 403 → MI missing `Sites.Selected` or other app role grants. See `auth-deployment-setup.md` §5.
+- MI deploy succeeds but Dataverse 401 → MI not registered as Dataverse Application User in the target env. See §6.
+- Graph `Mail.*` returns `ErrorAccessDenied` → Exchange `ApplicationAccessPolicy` not configured for BFF MI or app reg. See §7.
 
 ---
 
@@ -107,10 +134,18 @@ Expected output:
 [2/4] Creating deployment package...
   Package created: ~61 MB          # <-- VERIFY: must be 55-65 MB
 [3/4] Deploying to Azure...
-  Deployment complete
-[4/4] Verifying deployment...
-  Health check passed!
+  Deployment complete (or: auto-recovered via Kudu zipdeploy)
+[4/4] Verifying file replacement on server...
+  All 6 critical files match local build (SHA-256 verified)   # <-- the silent-failure guard
+[5/4] Verifying health endpoint...
+  health check passed!                                         # <-- up to 120 s on Linux
 ```
+
+**Reading the output**:
+- "All 6 critical files match" = **deploy is genuinely complete**. The new DLLs are on disk.
+- "health check passed" = the app started up successfully.
+- "All 6 critical files match" + "health check failed after 24 attempts" = **deploy is correct, app is slow to boot**. Wait another 30–60 s and `curl /healthz` manually. Do NOT redeploy.
+- "Hash MISMATCH on file X" = real deploy failure. Script auto-recovers via stop → Kudu zipdeploy → start.
 
 ### Step 3: Verify Endpoints
 
@@ -193,76 +228,23 @@ If any file shows MISMATCH, the deploy did NOT replace it. Recover with stop →
 
 ## Future Migration: WEBSITE_RUN_FROM_PACKAGE (planned, not yet executed)
 
-The current mitigation (hash verify + auto-recover) is reliable but inelegant — every deploy that hits a file lock pays a stop/start cycle. The long-term fix is to migrate the App Service to **Run-From-Package mode**, where the deployed zip is mounted as a read-only filesystem and wwwroot is never written to. File locks become impossible because there are no physical files to lock.
+> **Detailed migration procedure**: [`references/run-from-package-migration.md`](references/run-from-package-migration.md)
 
-**Status**: queued, not yet performed. The hardened script handles the current pain reliably so there's no urgency, but the migration eliminates the failure class entirely.
+**Summary**: The current hash-verify + auto-recover pattern is reliable but inelegant — every deploy that hits a file lock pays a stop/start cycle. Long-term, migrate the App Service to **Run-From-Package mode** (mounted read-only zip; file locks become impossible).
 
-### Risk-managed migration procedure
+**Status**: Queued, not yet performed. No urgency — the hardened script handles current pain reliably. See the linked reference doc for the full risk-managed migration procedure (7 steps, things that break / don't break under Run-From-Package, rollback path).
 
-When ready to switch, follow these steps in order. Do NOT skip steps — each catches a class of breakage.
+---
 
-1. **Audit assumptions of mutable wwwroot**:
-   - Search the repo for any code that writes to `wwwroot/`, `/home/site/wwwroot/`, `/site/wwwroot/`, or `D:\home\site\wwwroot`. None should exist in BFF runtime code (the BFF doesn't self-modify), but check.
-   - Search Kudu console history for ad-hoc edits (e.g., someone hand-editing `web.config` or `appsettings.json` in the portal). Document and re-apply those as build-time changes.
-   - Check CI/CD pipelines for assumptions about deploy targets.
+## Failure Modes & Recovery
 
-2. **Test on a staging slot first** (NOT directly on dev):
-   ```bash
-   # Create a staging slot if it doesn't exist
-   az webapp deployment slot create --name spe-api-dev-67e2xz \
-     --resource-group spe-infrastructure-westus2 --slot staging-rfp-test
-
-   # Enable run-from-package on the staging slot only
-   az webapp config appsettings set --name spe-api-dev-67e2xz \
-     --resource-group spe-infrastructure-westus2 --slot staging-rfp-test \
-     --settings WEBSITE_RUN_FROM_PACKAGE=1
-
-   # Deploy to the staging slot with the hardened script
-   .\scripts\Deploy-BffApi.ps1 -UseSlotDeploy -SlotName staging-rfp-test
-   ```
-
-3. **Smoke test the staging slot for at least one full workday**:
-   - All BFF endpoints respond
-   - Sign-in flow works
-   - File upload + AI processing works end-to-end
-   - Background workers (Service Bus consumers) still process messages
-   - No new errors in Application Insights vs. the production slot baseline
-
-4. **Verify the deploy mechanism itself**:
-   - Make a small text-only change (e.g., a log message)
-   - Re-deploy to the staging slot
-   - Confirm the new code is running (use `/swagger` or a known endpoint that returns the changed text)
-   - The hardened script's hash-verify should still PASS — it just verifies files inside the mounted zip rather than on wwwroot
-
-5. **Cutover**:
-   - Enable `WEBSITE_RUN_FROM_PACKAGE=1` on the production slot
-   - Deploy with the hardened script
-   - Verify hash-match and health endpoints
-   - Monitor Application Insights for 15-30 min for new error patterns
-
-6. **Document in this skill**: once cutover is complete and stable, update this section to note the new mode is live + remove the "future migration" framing. Note any operational quirks discovered.
-
-7. **Rollback path** (keep handy during migration):
-   ```bash
-   # If run-from-package causes problems, disable it and redeploy
-   az webapp config appsettings delete --name spe-api-dev-67e2xz \
-     --resource-group spe-infrastructure-westus2 \
-     --setting-names WEBSITE_RUN_FROM_PACKAGE
-   .\scripts\Deploy-BffApi.ps1
-   ```
-
-### Things that break under Run-From-Package
-
-- Hot-editing files in Kudu console (wwwroot is read-only) — must use proper deploy
-- Anything that writes to `wwwroot/` at runtime (logs, generated files) — should already be writing to `/home/LogFiles/` or `/home/site/logs/`, but verify
-- Diagnostic file uploads via Kudu VFS PUT — read-only
-
-### Things that DON'T break
-
-- `/home/data/`, `/home/LogFiles/`, `/home/site/deployments/` — all remain writable
-- Application Insights, Service Bus, Key Vault — unaffected
-- Slot deploys + swap — fully supported
-- The hardened deploy script — its hash-verify works identically because Kudu VFS transparently reads from the mounted zip
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| `az webapp deploy --type zip` returns 200 + "Deployment successful" but DLLs not actually replaced | Running .NET host holds file locks on `Sprk.Bff.Api.dll`; Windows silently refuses overwrites; OneDeploy reports success regardless | **2026-05-14 G-2 incident.** Always verify with SHA-256 hash via Kudu VFS. The hardened `Deploy-BffApi.ps1` does this automatically + auto-recovers via stop → Kudu zipdeploy → start. NEVER trust deploy "success" alone. |
+| Health check fails at 60s but the deploy actually succeeded | Default window sized for Windows warm-restart; Linux App Service cold-start is 90-120s | Default is now 120s (24 retries × 5s). Hash-verify success + healthz timeout = deploy correct, still booting. Wait one more cycle before declaring failure. |
+| Package size < 40 MB after publish | Incomplete zip — missing nested DLLs because publish ran from `/tmp` or outside project tree | Always publish from `src/server/api/Sprk.Bff.Api/` (not external dirs). Verify package is 55-65 MB. |
+| Health check passes but specific endpoints return 404 | Incomplete package: route handler couldn't compile at startup due to missing DLL | Test specific endpoints behind `.RequireAuthorization()` — should return 401 (route found, auth needed), NEVER 404. If 404, deploy is incomplete. |
+| MSB3030 error during publish | Nested `publish/publish/` directory from leftover prior publish | Delete `src/server/api/Sprk.Bff.Api/publish/` before re-publishing. The script does this automatically (Step 1). |
 
 ---
 

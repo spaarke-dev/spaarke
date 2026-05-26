@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPU2-003" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Verify and Provision Azure AI Content Safety Resource</title>
+    <phase>1</phase>
+    <tags>infrastructure, ai-safety</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    The R2 safety perimeter requires Azure AI Content Safety with Prompt Shields (jailbreak + indirect attack detection) and the Groundedness Detection API. Before provisioning a new resource, we must check whether one already exists in the dev subscription. If it does exist, we need to verify that Prompt Shields and Groundedness API are available in that resource's region (West US 2). If the resource does not exist or is in an unsupported region, provision a new S0 SKU Content Safety resource in West US 2.
+
+    The outcome must be a verified, functional Content Safety endpoint documented in auth-AI-azure-resources.md so the BFF API AddAiSafetyModule (task AIPU2-006) can reference it without discovery queries.
+  </prompt>
+  <role>Azure infrastructure engineer with AI Cognitive Services expertise.</role>
+  <goal>
+    An Azure AI Content Safety resource (S0 SKU, West US 2) is confirmed operational in the dev environment with both Prompt Shields and Groundedness Detection API endpoints verified as reachable. The resource name, endpoint URL, and key vault secret reference are documented in docs/architecture/auth-AI-azure-resources.md.
+  </goal>
+  <knowledge>
+    <files>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>infrastructure/bicep/platform.bicep</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read docs/architecture/auth-AI-azure-resources.md in full to check whether an Azure AI Content Safety resource is already documented for the dev environment.</step>
+    <step>Read .claude/constraints/azure-deployment.md to confirm any constraints on resource provisioning approach, naming conventions, or SKU selection.</step>
+    <step>Run: az cognitiveservices account list --resource-group spe-infrastructure-westus2 --query "[?kind=='ContentSafety']" to check for an existing Content Safety resource.</step>
+    <step>If an existing resource is found: verify its region is westus2 (Prompt Shields and Groundedness API require West US 2 or East US 2 as of 2026). If region is incorrect, note that a new resource must be created.</step>
+    <step>If no resource exists (or region is unsupported): provision a new resource using:
+      az cognitiveservices account create
+        --name spaarke-contentsafety-dev
+        --resource-group spe-infrastructure-westus2
+        --kind ContentSafety
+        --sku S0
+        --location westus2
+        --yes</step>
+    <step>Retrieve the endpoint and key: az cognitiveservices account show --name {resourceName} --resource-group spe-infrastructure-westus2 --query properties.endpoint; az cognitiveservices account keys list --name {resourceName} --resource-group spe-infrastructure-westus2.</step>
+    <step>Store the API key in Azure Key Vault (spaarke-spekvcert): az keyvault secret set --vault-name spaarke-spekvcert --name ContentSafety--ApiKey --value {key}.</step>
+    <step>Verify Prompt Shields API is reachable by calling the shieldPrompt endpoint with a test payload using curl or Invoke-RestMethod. Confirm HTTP 200 response.</step>
+    <step>Verify Groundedness Detection API is reachable by calling the detectGroundedness endpoint with a test payload. Confirm HTTP 200 response.</step>
+    <step>Update docs/architecture/auth-AI-azure-resources.md to add (or update) the Content Safety resource entry with: resource name, endpoint URL, region, SKU, Key Vault secret reference, and confirmed API capabilities (Prompt Shields, Groundedness Detection).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>An Azure AI Content Safety resource (S0 SKU) exists in the spe-infrastructure-westus2 resource group in the westus2 region.</criterion>
+    <criterion>The Prompt Shields API endpoint returns HTTP 200 for a valid test request.</criterion>
+    <criterion>The Groundedness Detection API endpoint returns HTTP 200 for a valid test request.</criterion>
+    <criterion>The API key is stored in Key Vault under the secret name ContentSafety--ApiKey.</criterion>
+    <criterion>docs/architecture/auth-AI-azure-resources.md contains a Content Safety entry with resource name, endpoint, region, SKU, Key Vault secret reference, and capability list.</criterion>
+    <criterion>No secrets or API keys appear in any committed file.</criterion>
+  </acceptance-criteria>
+</task>

@@ -35,17 +35,19 @@ This directory contains AI-optimized versions of Architecture Decision Records. 
 | ADR-023 | ~~Choice Dialog Pattern~~ | _Superseded — demoted to pattern_ | Superseded (2026-03-19) |
 | ADR-026 | Code Page Build Standard | Vite + `vite-plugin-singlefile` + React 19 for all Code Pages | Accepted (Revised 2026-03-19) |
 | ADR-027 | Subscription Isolation & Dataverse Solution Mgmt | Managed solutions for prod; env-separated subscriptions | Accepted |
+| ADR-028 | Spaarke Auth Architecture (v2) | Function-based contract; managed identity for outbound; named API key schemes; HMAC webhooks; audit middleware | Accepted (2026-05-19) |
+| ADR-029 | BFF Publish Hygiene | Framework-dependent linux-x64, sourcemap exclusion, transitive CVE override pattern, size baseline ratchet | Accepted (2026-05-26) |
 
 ---
 
 ## Usage by AI Agents
 
 Load concise ADRs proactively when creating new components:
-- Creating API → Load ADR-001, ADR-008, ADR-010
-- Creating PCF → Load ADR-006, ADR-012, ADR-022 (React 16 compatibility)
-- Creating Code Page (dialog, wizard, full page) → Load ADR-006, ADR-026, ADR-021 (React 19)
+- Creating API → Load ADR-001, ADR-008, ADR-010, **ADR-028** (auth)
+- Creating PCF → Load ADR-006, ADR-012, ADR-022 (React 16 compatibility), **ADR-028** (auth)
+- Creating Code Page (dialog, wizard, full page) → Load ADR-006, ADR-026, ADR-021 (React 19), **ADR-028** (auth)
 - Creating Plugin → Load ADR-002
-- Working with auth → Load ADR-004, ADR-016
+- **Working with auth → Load ADR-028 (canonical) + ADR-003 (server seams + OBO) + ADR-008 (filters) + ADR-009 (Redis caching) + `.claude/constraints/auth.md` (operational MUST/MUST NOT)**
 - Working with SPE → Load ADR-007, ADR-019
 - Working with UI/UX → Load ADR-021, ADR-022
 - Working with shared components → Load ADR-012 (service architecture, portability tiers)

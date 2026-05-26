@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted** |
+| Status | **Accepted (refined 2026-05-20)** |
 | Date | 2025-12-05 |
-| Updated | 2026-01-02 |
+| Updated | 2026-05-20 |
 | Authors | Spaarke Engineering |
 | Sprint | Sprint 7 - AI Foundation (R3 Phases 1-5 Complete) |
 
@@ -34,7 +34,26 @@ Without a clear architecture decision, we risk:
 
 ## Decision
 
-**We will extend Sprk.Bff.Api with AI endpoints following the established architectural patterns, using Azure OpenAI, AI Search, and Document Intelligence as the foundation.**
+**Default: extend `Sprk.Bff.Api` with AI endpoints in-process.** The bulk of AI synthesis, chat, RAG, safety, capability routing, session persistence, and orchestration MUST live in BFF because these workloads have tight latency budgets and transactional coupling that a service boundary would break — specifically:
+
+- Capability routing: <50ms (Layer 1), <500ms (Layer 2) targets
+- RAG / knowledge retrieval: <100ms target with embedding cache co-location
+- Streaming chat: <500ms TTFB, retroactive safety annotation in the same request lifecycle
+- Session persistence: write-through Cosmos transaction tied to chat response
+- Safety perimeter: streaming-response pipeline annotation; cannot be HTTP-hopped without breaking it
+
+**Exceptions** (separate deployable IS permitted) when ALL of the following hold:
+
+1. The workload has **no latency coupling** with BFF synthesis (no <500ms TTFB requirement against BFF state)
+2. The workload has **no transactional coupling** with BFF session/safety/audit state
+3. The workload has a **bounded, well-defined integration surface** (HTTP contract, MCP tools, etc.)
+4. Separation does **not require duplicating** latency-sensitive components in both processes
+
+Workloads currently meeting all four criteria:
+- **Azure Functions for sync/extraction/scheduled work** — already permitted by ADR-001. The Insights Engine sync pipelines (Dataverse → AI Search; closure-extraction triggers; scheduled re-indexing) are the canonical example.
+- **MCP server (e.g., `Sprk.Insights.Mcp`)** — a thin facade over the Insights Engine designed for external consumers (M365 Copilot, declarative agents). This is a DESIGN-TIME consideration when Insights Engine Phase 1 lands; it is NOT pre-decided. A successor ADR or amendment is required before standing one up.
+
+**This decision supersedes the prior categorical rejection of "separate AI microservice."** The 2026-05-20 BFF AI extraction assessment ([`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](../assessments/bff-ai-extraction-assessment-2026-05-20.md)) examined extraction with evidence (composition, coupling, operational profile, release cadence) and concluded that the categorical rejection had the right outcome but the wrong rationale. The current decision reflects the right rationale: separation is permitted but rare, governed by technical criteria, not by an absolute rule.
 
 ### Core Principles
 
@@ -44,6 +63,7 @@ Without a clear architecture decision, we risk:
 4. **Redis-First Caching** - Embeddings and search results cached in Redis (ADR-009)
 5. **Job Contract for Indexing** - Document indexing uses async job pattern (ADR-004)
 6. **DI Minimalism** - Single-responsibility AI services (ADR-010)
+7. **External CRUD Consumers Use Facades** — CRUD code (Finance, Workspace, Jobs handlers in non-AI folders, etc.) MUST consume AI capabilities through `Services/Ai/PublicContracts/` facade types. Direct injection of `IOpenAiClient`, `IPlaybookService`, or other AI-internal types into CRUD code is prohibited going forward. The remediation project `sdap-bff-api-remediation-fix` migrates existing direct dependencies to the facade pattern.
 
 ### AI Services Architecture
 
@@ -162,19 +182,22 @@ AI work frequently introduces **temporary shortcuts** (e.g., temporarily disable
 
 ### Alternative 1: Separate AI Microservice
 
-**Description:** Deploy AI functionality as a separate microservice.
+**Description:** Deploy AI functionality as a separate microservice (e.g., `Sprk.Ai.Bff.Api` or `Sprk.Insights.Api`).
 
 **Pros:**
 - Independent scaling
+- Independent deployment cadence
 - Technology flexibility
+- Bounds BFF blast radius for pre-release AI package churn
 
-**Cons:**
-- Additional deployment complexity
-- Network latency between services
-- Duplicated authentication/authorization logic
-- Violates our simplicity-first architecture
+**Cons (verified against evidence 2026-05-20):**
+- **Network latency breaks documented budgets**: routing <50ms, RAG <100ms, streaming TTFB <500ms cannot accommodate a service hop without degrading user experience or duplicating components in both services
+- **Transactional coupling**: chat streaming + retroactive safety annotation + Cosmos session writes share one request lifecycle; splitting them breaks atomicity or duplicates safety code
+- **Duplicated cross-cutting concerns**: auth, correlation, ProblemDetails, telemetry would exist in both services
+- **20 inbound CRUD→AI dependencies** (per 2026-05-20 assessment) would require ~3–4 weeks of refactoring before extraction is safe
+- **No team specialization benefit**: 100% author overlap between AI and CRUD work (per 2026-05-20 assessment) means extraction adds context-switching cost without unlocking parallel teams
 
-**Decision:** Rejected - adds unnecessary complexity for current scale.
+**Decision (refined 2026-05-20):** Rejected as a **default** policy. Specific narrow-scope deployables (Functions for sync, MCP server for external integration) ARE permitted when the four exception criteria in the Decision section are met. A successor ADR is required to authorize standing up any new AI service; the criteria provide the evidence framework that ADR must address.
 
 ### Alternative 2: Direct Azure AI SDK Calls from PCF
 
@@ -191,20 +214,28 @@ AI work frequently introduces **temporary shortcuts** (e.g., temporarily disable
 
 **Decision:** Rejected - significant security concerns.
 
-### Alternative 3: Azure Functions for AI
+### Alternative 3: Azure Functions for AI BFF endpoints
 
-**Description:** Use Azure Functions for AI processing.
+**Description:** Host AI BFF endpoints (chat, analysis, RAG search) in Azure Functions instead of `Sprk.Bff.Api`.
 
 **Pros:**
 - Consumption-based scaling
 - Independent deployment
 
 **Cons:**
-- Cold start latency
-- Different deployment model than BFF
-- Inconsistent patterns
+- Cold start latency on user-facing AI requests
+- Duplicates BFF cross-cutting concerns (auth, correlation, ProblemDetails) in a parallel runtime
+- Inconsistent patterns vs. the rest of the BFF
 
-**Decision:** Rejected - prefer unified BFF approach per ADR-001.
+**Decision:** Rejected for AI BFF endpoints — unified BFF approach per ADR-001.
+
+**Note (2026-05-19):** This rejection applies only to BFF endpoints. Azure Functions ARE permitted for **out-of-band AI integration work** that meets the criteria in ADR-001 — examples relevant to the AI subsystem include:
+- Dataverse → AI Search sync (event-driven + scheduled reconciliation)
+- Closure-extraction pipelines triggered by matter-lifecycle events
+- Scheduled re-indexers and embedding refresh jobs
+- Webhook receivers from external AI services
+
+These workloads are genuinely independent of the BFF request pipeline. See ADR-001 for the full criteria.
 
 ---
 
@@ -561,6 +592,7 @@ public class AiIndexingJobHandler : IJobHandler<AiIndexingJob>
 | 2025-12-05 | Spaarke Engineering | Initial ADR created |
 | 2026-01-02 | Spaarke Engineering | R3 Phases 1-5 complete: RAG, Export, Monitoring, Security |
 | 2026-02-24 | Spaarke Engineering | SprkChat system: ChatHostContext, entity-scoped RAG, playbook discovery, boolean filter logic |
+| 2026-05-20 | Spaarke Engineering | Decision rationale refined per BFF AI extraction assessment ([docs/assessments/bff-ai-extraction-assessment-2026-05-20.md](../assessments/bff-ai-extraction-assessment-2026-05-20.md)). Categorical "no separate AI microservice" rule replaced with four technical exception criteria. External CRUD consumers must use `Services/Ai/PublicContracts/` facades — direct injection of AI-internal types into CRUD code prohibited. |
 
 ---
 

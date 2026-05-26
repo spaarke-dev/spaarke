@@ -156,7 +156,8 @@ Email documents are automatically indexed after archival:
 | Idempotency via Redis | Processing lock + processed marker | Exactly-once semantics across concurrent trigger paths | — |
 | RFC 2822 .eml format | Industry standard | Compatible with email clients and AI Document Intelligence pipeline | — |
 | Auto-enqueue RAG indexing | Default enabled | Email content becomes searchable knowledge without manual action | — |
-| App-only auth | `GraphClientFactory.ForApp()` | No user context in webhooks/background jobs | ADR-008 |
+| App-only auth | `GraphClientFactory.ForApp()` via `DefaultAzureCredential` (managed identity) per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md). Mailbox-scoped Graph requires Exchange `ApplicationAccessPolicy` (see [`auth-deployment-setup.md`](../guides/auth-deployment-setup.md) §7). | No user context in webhooks/background jobs | ADR-008, ADR-028 |
+| HMAC-SHA256 webhook signing | `Communication__WebhookSigningKey` / `EmailProcessing__WebhookSigningKey` (48-byte base64) | Phase C hardening replaced shared-secret validation with HMAC-SHA256 (constant-time compare); fail-closed if signing key missing | ADR-028 |
 | Child document excludes `sprk_email` | Avoid alternate key violation | Parent owns the email relationship | — |
 | Attachment filtering | Blocked extensions + signature image filter | Reduces storage noise from executables and email signatures | — |
 

@@ -1,15 +1,19 @@
 ---
 description: Draft or update an operational guide for a Spaarke functional module
 tags: [documentation, guide]
-techStack: []
+techStack: [all]
 appliesTo: ["write guide", "update guide", "draft guide", "docs-guide"]
 alwaysApply: false
+exemplar: docs/guides/DATAVERSE-MCP-INTEGRATION-GUIDE.md
+last-reviewed: 2026-05-16
 ---
 
 # Guide Document Skill
 
 > **Category**: Documentation
-> **Last Updated**: April 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A) — `leave-alone-justified` (hub of docs-* family; 6 see-also inbound)
+> **Exemplar rationale**: `DATAVERSE-MCP-INTEGRATION-GUIDE.md` follows the prescribed structure with prerequisites, configuration steps, verification, and troubleshooting — representative of a good operational guide.
 
 ---
 
@@ -257,6 +261,17 @@ Before finalizing any guide:
 **Good**: "| `Redis:Enabled` | `appsettings.json` | `false` | Set to `true` in production to use Redis instead of in-memory cache |"
 
 **Bad**: "Redis caching follows ADR-009's Redis-first principle, where the DistributedCacheExtensions class provides GetOrCreate..." (→ this belongs in an architecture doc or pattern pointer)
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Guide steps fail when followed verbatim — commands don't work | Guide was written against an older tool version (Azure CLI, PAC CLI, gh, etc.) | Stamp each guide with the tool version it was validated against. Re-validate quarterly per `doc-drift-audit`. |
+| User follows guide and reaches a state where they don't know how to verify success | Guide skipped the verification step | Every guide MUST include a verification section. If you can't write the verification, you don't understand the procedure well enough to document it. |
+| Two guides give contradictory instructions for the same task | Guides written by different authors at different times | Designate one as canonical (often the most recently updated); the other becomes a pointer with a note. `doc-drift-audit` flags this. |
+| Guide cites an environment-specific value (URL, key) as if it were universal | Author copy-pasted from their working environment | Use placeholders: `https://{env}-bff.azurewebsites.net` not `https://spe-api-dev-67e2xz.azurewebsites.net` (unless the dev URL is the example case). Document the placeholder convention at the top of the guide. |
 
 ---
 

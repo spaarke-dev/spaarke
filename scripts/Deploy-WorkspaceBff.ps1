@@ -15,7 +15,7 @@
     Prerequisites:
     - Azure CLI installed and authenticated (az login)
     - Correct subscription selected
-    - App Service spe-api-dev-67e2xz is running
+    - App Service spaarke-bff-dev is running
 
 .PARAMETER SkipBuild
     Skip the dotnet publish step (use existing ./publish folder).
@@ -56,8 +56,8 @@ $ZipPath        = Join-Path $ApiProject "publish.zip"
 
 # Azure resources (dev environment)
 $ResourceGroup  = "spe-infrastructure-westus2"
-$AppServiceName = "spe-api-dev-67e2xz"
-$BaseUrl        = "https://spe-api-dev-67e2xz.azurewebsites.net"
+$AppServiceName = "spaarke-bff-dev"
+$BaseUrl        = "https://spaarke-bff-dev.azurewebsites.net"
 $HealthCheckUrl = "$BaseUrl/healthz"
 
 # Workspace endpoint URLs for smoke tests

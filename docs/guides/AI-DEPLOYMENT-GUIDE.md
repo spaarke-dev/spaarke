@@ -1,9 +1,14 @@
 # AI Document Intelligence - Deployment Guide
 
-> **Version**: 2.3
+> **Version**: 3.0
 > **Created**: 2025-12-28
-> **Updated**: 2026-01-16
-> **Projects**: AI Document Intelligence R1 + R2 + R3 + Email-to-Document R2 + RAG Pipeline R1
+> **Updated**: 2026-05-17 (Auth v2 callout added 2026-05-20)
+> **Last Reviewed**: 2026-05-17
+> **Projects**: AI Document Intelligence R1 + R2 + R3 + Email-to-Document R2 + RAG Pipeline R1 + AI Platform Unification R2
+
+---
+
+> **⚠️ Auth v2 Update (2026-05-19, per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md))**: For the auth-specific portion of AI deployment (App Service settings incl. `Graph__ManagedIdentity__Enabled=true`, Dataverse env vars incl. `sprk_TenantId`, MI Graph permission grants, webhook signing keys, Exchange ApplicationAccessPolicy for mailbox-scoped Mail.* operations), follow [`auth-deployment-setup.md`](auth-deployment-setup.md) as the canonical operator runbook. This guide remains canonical for AI-specific resources (Cosmos RBAC, AI Search admin keys, OpenAI deployments, Document Intelligence). The `AzureAd__ClientSecret` patterns below are pre-v2 reference; in production environments where MI is enabled, the BFF MI is the canonical identity for Graph + Dataverse outbound. `EmailProcessing__WebhookSecret` is deprecated — use `EmailProcessing__WebhookSigningKey` (HMAC-SHA256, 48-byte base64) per Phase C.
 
 ---
 
@@ -125,6 +130,41 @@ dotnet --version
 node --version
 npm --version
 ```
+
+### Cosmos DB (mandatory for BFF AI startup)
+
+Since Phase 5 (sdap-bff-api-remediation-fix project), the BFF requires a Cosmos DB account at startup. `AiPersistenceModule.cs:56` throws `InvalidOperationException` if `CosmosPersistence__Endpoint` is null → BFF fails to start.
+
+#### Required infrastructure per environment
+
+1. **Cosmos DB account** (Serverless SKU recommended for non-prod):
+   ```bash
+   # One-time per subscription: register provider
+   az provider register --namespace Microsoft.DocumentDB --wait
+   # Create account
+   az cosmosdb create --name spaarke-cosmos-{env}-ai --resource-group {rg} \
+     --locations regionName={region} failoverPriority=0 isZoneRedundant=False \
+     --capabilities EnableServerless --default-consistency-level Session
+   ```
+
+2. **Database**: `spaarke-ai`
+
+3. **5 containers** (all `/tenantId` partition key): `sessions`, `prompts`, `audit`, `memory`, `feedback`. **On Git Bash on Windows**, use `MSYS_NO_PATHCONV=1` to avoid path mangling:
+   ```bash
+   for CONTAINER in sessions prompts audit memory feedback; do
+     MSYS_NO_PATHCONV=1 az cosmosdb sql container create \
+       --account-name spaarke-cosmos-{env}-ai --database-name spaarke-ai \
+       --resource-group {rg} --name $CONTAINER --partition-key-path "/tenantId"
+   done
+   ```
+
+4. **BFF MI data-plane RBAC**: grant Cosmos DB Built-in Data Contributor (role definition `00000000-0000-0000-0000-000000000002`) to the BFF MI principal.
+
+5. **App Settings**:
+   - `CosmosPersistence__Endpoint=https://spaarke-cosmos-{env}-ai.documents.azure.com:443/`
+   - `CosmosPersistence__DatabaseName=spaarke-ai`
+
+Reference: `auth-deployment-setup.md` §3.5 Cosmos provisioning sequence for full per-env walkthrough.
 
 ---
 
@@ -612,7 +652,7 @@ Email-to-Document automation converts Dataverse email records to documents store
 | Setting | Required | Description | Default |
 |---------|----------|-------------|---------|
 | `EmailProcessing__EnableWebhook` | Yes | Enable Dataverse webhook triggers | `true` |
-| `EmailProcessing__WebhookSecret` | Yes | Shared secret for webhook validation | — |
+| `EmailProcessing__WebhookSigningKey` | Yes | Shared secret for webhook validation | — |
 | `EmailProcessing__DefaultContainerId` | Yes | SPE Container ID for email storage | — |
 | `EmailProcessing__EnablePolling` | No | Enable backup polling for missed emails | `true` |
 | `EmailProcessing__AutoIndexToRag` | No | Auto-queue emails for RAG indexing | `false` |
@@ -681,6 +721,110 @@ File → Download → Extract Text → Chunk → Generate Embeddings → Index t
 - `DocumentIntelligence__AiSearchKey`
 
 Without these, you'll see: `⚠ RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key)`
+
+---
+
+## Phase 9: AI Platform Unification R2
+
+### 9.1 Cosmos DB Infrastructure
+
+Deploy the Cosmos DB account, database, and containers using the provisioning script.
+
+```powershell
+# Preview changes (no modifications applied)
+.\scripts\Provision-CosmosDb.ps1 -Environment dev -WhatIf
+
+# Deploy Cosmos DB resources
+.\scripts\Provision-CosmosDb.ps1 -Environment dev
+
+# With RBAC assignment for App Service managed identity
+.\scripts\Provision-CosmosDb.ps1 -Environment dev -AppServicePrincipalId <object-id>
+```
+
+**Resources deployed**:
+
+| Resource | Name Pattern | Details |
+|----------|-------------|---------|
+| Cosmos DB Account | `spaarke-cosmos-{env}` | Serverless, RBAC-only (no master keys in app code) |
+| Database | `spaarke-ai` | 5 containers |
+| Container: sessions | partition key `/userId`, TTL 90 days | AI conversation sessions |
+| Container: prompts | partition key `/sessionId`, TTL 90 days | Prompt/completion pairs |
+| Container: audit | partition key `/tenantId`, no TTL | Immutable compliance audit trail |
+| Container: memory | partition key `/userId`, TTL 90 days | AI memory snapshots |
+| Container: feedback | partition key `/tenantId`, TTL 90 days | User feedback records |
+
+**RBAC assignment**: The App Service managed identity requires `Cosmos DB Built-in Data Contributor` (role ID `00000000-0000-0000-0000-000000000002`) scoped to the Cosmos DB account. This is granted automatically by the Bicep module (`infrastructure/bicep/modules/cosmos-db.bicep`) when `AppServicePrincipalId` is provided.
+
+### 9.2 BFF API Services Configuration (R2)
+
+Add the following App Service settings for R2 services:
+
+**Cosmos DB Persistence**:
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `CosmosPersistence__Endpoint` | `https://spaarke-cosmos-{env}.documents.azure.com:443/` | Cosmos DB account endpoint |
+| `CosmosPersistence__DatabaseName` | `spaarke-ai` | Target database name |
+
+**Azure AI Content Safety**:
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `AiSafety__ContentSafety__Endpoint` | `https://spaarke-contentsafety-{env}.cognitiveservices.azure.com/` | Content Safety REST API endpoint |
+| `AiSafety__ContentSafety__ApiKey` | (from Key Vault) | Content Safety API key (supports dynamic rotation) |
+
+```bash
+# Set Cosmos DB configuration
+az webapp config appsettings set \
+  --name spe-api-dev-67e2xz \
+  --resource-group spe-infrastructure-westus2 \
+  --settings \
+    "CosmosPersistence__Endpoint=https://spaarke-cosmos-dev.documents.azure.com:443/" \
+    "CosmosPersistence__DatabaseName=spaarke-ai"
+
+# Set Content Safety configuration
+az webapp config appsettings set \
+  --name spe-api-dev-67e2xz \
+  --resource-group spe-infrastructure-westus2 \
+  --settings \
+    "AiSafety__ContentSafety__Endpoint=https://spaarke-contentsafety-dev.cognitiveservices.azure.com/" \
+    "AiSafety__ContentSafety__ApiKey=<api-key>"
+```
+
+### 9.3 SpaarkeAi Web Resource Deployment
+
+The SpaarkeAi Code Page is deployed as a Dataverse web resource. Build the solution and deploy using the deployment script.
+
+```bash
+# Build the SpaarkeAi solution
+cd src/solutions/SpaarkeAi
+npm install --legacy-peer-deps --no-audit --no-fund
+npm run build:prod
+
+# Deploy web resource to Dataverse
+.\scripts\Deploy-SpaarkeAi.ps1
+```
+
+**Web resource name**: `sprk_spaarkeai`
+
+**Source path**: `src/solutions/SpaarkeAi/dist`
+
+### 9.4 Verify R2 Deployment
+
+```bash
+# 1. Verify Cosmos DB is accessible (check API startup logs)
+# Look for: "CosmosClient initialized" or no CosmosPersistence errors
+
+# 2. Verify Content Safety is configured
+# Look for: no "AiSafety:ContentSafety:ApiKey is not configured" warnings
+
+# 3. Verify SpaarkeAi web resource is deployed
+pac solution list
+# Should show updated sprk_spaarkeai web resource
+
+# 4. Check health endpoint
+curl https://{api-url}/healthz
+```
 
 ---
 
@@ -830,7 +974,7 @@ Without these, you'll see: `⚠ RAG services disabled (requires DocumentIntellig
 | Setting | Value | Description |
 |---------|-------|-------------|
 | `EmailProcessing__EnableWebhook` | `true` | Enable webhook processing |
-| `EmailProcessing__WebhookSecret` | (configured) | Webhook validation secret |
+| `EmailProcessing__WebhookSigningKey` | (configured) | Webhook validation secret |
 | `EmailProcessing__DefaultContainerId` | (configured) | SPE Container for emails |
 | `EmailProcessing__EnablePolling` | `true` | Enable backup polling |
 | `EmailProcessing__AutoIndexToRag` | `false` | Auto-queue for RAG (set to `true` for testing) |

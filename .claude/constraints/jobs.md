@@ -47,7 +47,7 @@ Load when:
 
 - ❌ **MUST NOT** place document bytes or large blobs in payload
 - ❌ **MUST NOT** assume exactly-once delivery
-- ❌ **MUST NOT** use Durable Functions for orchestration
+- ❌ **MUST NOT** use Durable Functions for orchestration (use Service Bus + state machine; ADR-001 permits Azure Functions for narrow out-of-band integration work but not for multi-step orchestration)
 
 ### Job Status (ADR-017)
 

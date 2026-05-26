@@ -1,0 +1,46 @@
+<task id="AIPU2-062" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Extend ChatEndpoints with New R2 SSE Event Types</title>
+    <phase>3</phase>
+    <tags>bff-api, sse, api</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-007</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    R1 ChatEndpoints emits a limited set of SSE event types (token, done, error). R2 introduces
+    six new event types required by the three-pane shell: workspace_widget (triggers widget render
+    in Workspace pane), context_update (updates Context pane stage), context_highlight (scrolls
+    context to a cited passage), workspace_action (triggers an in-pane action), capability_change
+    (notifies client of tool set change), and safety_annotation (carries post-stream groundedness
+    data). Extend ChatEndpoints and the SseWriter delegate to emit all six new types. The R1
+    event types must remain unchanged for backward compatibility.
+  </prompt>
+  <role>Senior .NET developer with SSE streaming and HTTP response pipeline experience.</role>
+  <goal>
+    All six R2 SSE events flow to the client through ChatEndpoints. Existing R1 event types are
+    unchanged. The SseWriter delegate handles all new types without breaking existing consumers.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ChatEndpoints.cs and streaming-endpoints.md pattern to understand the current SseWriter delegate signature and event emission pattern.</step>
+    <step>Define a SseEventType enum (or string constants) covering all R1 types plus: workspace_widget, context_update, context_highlight, workspace_action, capability_change, safety_annotation.</step>
+    <step>Extend SseWriter delegate (or the WriteEventAsync helper) to accept the new event types and serialize their payloads correctly (JSON body, event: field set to the type name).</step>
+    <step>Add emission points in ChatEndpoints for each new event type at the correct stage of the stream lifecycle (workspace_widget and capability_change during streaming; safety_annotation after last token).</step>
+    <step>Ensure context_highlight carries a citationId and characterRange payload so the frontend can scroll to the passage.</step>
+    <step>Write unit tests for each new event type: correct event: field value, correct JSON payload shape, emitted at the correct lifecycle point.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All six new SSE event types are defined and emittable from ChatEndpoints.</criterion>
+    <criterion>R1 event types (token, done, error) are unchanged — no breaking change to existing consumers.</criterion>
+    <criterion>SseWriter delegate serializes each new event type with correct event: header and JSON payload.</criterion>
+    <criterion>safety_annotation events are emitted only after the last token (post-stream).</criterion>
+    <criterion>Unit tests for all six new event types pass.</criterion>
+  </acceptance-criteria>
+</task>

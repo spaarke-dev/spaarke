@@ -2,7 +2,6 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Azure.Identity;
 using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai;
@@ -35,6 +34,7 @@ public class ScopeResolverService : IScopeResolverService
         AnalysisToolService toolService,
         HttpClient httpClient,
         IConfiguration configuration,
+        TokenCredential credential,
         ILogger<ScopeResolverService> logger)
     {
         _playbookService = playbookService;
@@ -44,18 +44,12 @@ public class ScopeResolverService : IScopeResolverService
         _toolService = toolService;
         _httpClient = httpClient;
         _logger = logger;
+        _credential = credential;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
-        var tenantId = configuration["TENANT_ID"]
-            ?? throw new InvalidOperationException("TENANT_ID configuration is required");
-        var clientId = configuration["API_APP_ID"]
-            ?? throw new InvalidOperationException("API_APP_ID configuration is required");
-        var clientSecret = configuration["API_CLIENT_SECRET"]
-            ?? throw new InvalidOperationException("API_CLIENT_SECRET configuration is required");
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
-        _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");

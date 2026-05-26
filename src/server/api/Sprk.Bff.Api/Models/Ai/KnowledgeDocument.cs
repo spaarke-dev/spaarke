@@ -194,6 +194,18 @@ public class KnowledgeDocument
     [SearchableField(AnalyzerName = LexicalAnalyzerName.Values.StandardLucene, IsSortable = true)]
     [JsonPropertyName("parentEntityname")]
     public string? ParentEntityName { get; set; }
+
+    /// <summary>
+    /// Azure AD group IDs that are authorised to retrieve this document chunk.
+    /// Empty collection means the document is public (no privilege restriction).
+    /// Filterable string collection — used by privilege-aware retrieval (AIPU2-027).
+    /// </summary>
+    [SimpleField(IsFilterable = true)]
+    [JsonPropertyName("privilege_group_ids")]
+    // Default to empty list — Azure Search Collection(Edm.String) is implicitly Nullable=False
+    // and rejects null writes (400 Bad Request). Empty list correctly signals "public document"
+    // to the privilege filter (matches "not privilege_group_ids/any()" clause).
+    public IList<string>? PrivilegeGroupIds { get; set; } = new List<string>();
 }
 
 /// <summary>

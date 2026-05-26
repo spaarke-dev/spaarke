@@ -452,11 +452,80 @@ Xrm.Navigation.navigateTo(
 
 ---
 
+## RAG Indexing Contract (2026-05-22)
+
+Every wizard upload triggers a Phase 4 call to `POST /api/ai/rag/index-file` so the document is searchable via the Semantic Search PCF, Find Similar, and the AI Search visualization graph. The contract between the wizard and the BFF is **load-bearing** — a partial caller produces orphan chunks (indexed but not linked back to Dataverse), which silently breaks the downstream UX.
+
+### Required request body fields
+
+```json
+{
+  "tenantId": "a221a95e-...",        // REQUIRED — Azure AD tenant; tenant isolation
+  "driveId": "b!yLRdWE...",          // REQUIRED — SPE drive ID
+  "itemId": "01LBYCMX5QS2...",       // REQUIRED — SPE drive-item ID (becomes speFileId in index)
+  "fileName": "Memo.docx",           // REQUIRED — display name
+  "documentId": "5f2b684b-...",      // REQUIRED for wizard/ribbon — Dataverse sprk_document GUID, lowercase
+  "parentEntity": {                   // OPTIONAL but recommended when parent is known
+    "entityType": "matter",          //   short form — strip the `sprk_` prefix
+    "entityId": "12345...",          //   lowercase GUID
+    "entityName": "Acme v Smith"
+  }
+}
+```
+
+### Why each field matters
+
+| Field | If missing | Symptom users see |
+|---|---|---|
+| `documentId` | Index chunk has no Dataverse FK ("orphan") | Search Indexed = No on the Dataverse record; Find Similar can't resolve the source vector; Open / Download buttons can't navigate; nothing in DocumentRelationshipViewer graph |
+| `parentEntity` | `parentEntityType` / `parentEntityId` null on chunk | Entity-scoped search misses the doc; matter / project workspaces won't surface it in context |
+| `tenantId` | BFF returns 400 (validated) | Hard failure (visible) — not a silent issue |
+| `documentId` not lowercased | Chunk has uppercase GUID, mismatches lowercase lookups | Find Similar / related-doc queries return no results for that document |
+
+The BFF defensively lowercases `documentId` in `FileIndexingService.IndexTextInternalAsync`, but clients should also normalize at source for a cleaner contract. See [`.claude/patterns/ai/indexing-pipeline.md`](../../.claude/patterns/ai/indexing-pipeline.md) for the canonical convergence point.
+
+### Verifying a wizard-uploaded document is correctly indexed
+
+Three checks, in order:
+
+```bash
+# 1. Did the BFF endpoint return success? (App Insights)
+az monitor app-insights query --apps spe-insights-dev-67e2xz \
+  --resource-group spe-infrastructure-westus2 \
+  --analytics-query "traces | where timestamp > ago(15m) | where message has '<FileName>' | order by timestamp asc"
+# Expect: "Resolved deployment ... IndexName=spaarke-knowledge-index-v2", then
+#         "Batch indexed N/N documents", then
+#         "Indexed <FileName> ... speFileId=01LBY... N/N chunks in Xms"
+
+# 2. Did the chunk land with the linkage fields populated? (Azure AI Search)
+SEARCH_KEY=$(az search admin-key show --service-name spaarke-search-dev \
+  --resource-group spe-infrastructure-westus2 --query "primaryKey" -o tsv)
+curl -s -H "api-key: $SEARCH_KEY" -H "Content-Type: application/json" \
+  -X POST "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index-v2/docs/search?api-version=2024-07-01" \
+  -d '{"search":"<FileName>","searchFields":"fileName","top":10,
+       "select":"id,fileName,createdAt,documentId,parentEntityType,parentEntityId"}'
+# Expect: every chunk has documentId populated and lowercase; parentEntityType set if scoped
+
+# 3. Did the Dataverse tracking field flip to Yes?
+# Open the sprk_document record — Search Indexed toggle should show Yes,
+# sprk_searchindexed=true, sprk_searchindexedon = recent UTC timestamp.
+```
+
+### Failure modes documented in [.claude/FAILURE-MODES.md](../../.claude/FAILURE-MODES.md)
+
+- **AP-2**: Orphan chunks from optional-field omission (the wizard / ribbon pair that drifted apart).
+- **AP-3**: GUID case mismatch between Xrm and Dataverse Web API clients.
+- **G-4**: Privilege filter on a non-filterable index field (the dev environment trap).
+
+---
+
 ## Related
 
 - [HOW-TO-ADD-SDAP-TO-NEW-ENTITY.md](HOW-TO-ADD-SDAP-TO-NEW-ENTITY.md) — Adding document upload support to new entities
 - [PCF-DEPLOYMENT-GUIDE.md](PCF-DEPLOYMENT-GUIDE.md) — PCF control deployment
 - [RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md](RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md) — Adding ribbon buttons
+- [RAG-TROUBLESHOOTING.md](RAG-TROUBLESHOOTING.md) — Diagnostic commands and known failure modes for the indexing pipeline
+- [`.claude/patterns/ai/indexing-pipeline.md`](../../.claude/patterns/ai/indexing-pipeline.md) — Pattern pointer file for indexing code
 - ADR-006 — Code Pages for standalone dialogs
 - ADR-021 — Fluent UI v9 design system
 - ADR-022 — PCF platform libraries vs Code Page bundled React 18

@@ -1,0 +1,49 @@
+<task id="AIPU2-077" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build WorkspacePane + WorkspaceTabManager (Max 3 Tabs)</title>
+    <phase>4B</phase>
+    <tags>frontend, workspace, tabs</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-072, AIPU2-075</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    The Workspace pane displays AI-generated outputs as tabs, one tab per workspace_widget SSE
+    event received. R1's OutputPanel.tsx rendered a single output at a time with no tab
+    management. R2 requires up to 3 simultaneous tabs with the oldest auto-closing when a 4th
+    would be opened. WorkspacePane subscribes to the 'workspace' PaneEventBus channel, resolves
+    the widget via WorkspaceWidgetRegistry, and delegates tab lifecycle to WorkspaceTabManager.
+    Tab-change events are dispatched back to PaneEventBus so other panes can react to which
+    result is currently active.
+  </prompt>
+  <role>Frontend developer with React 19 tab management, Fluent v9, and event-driven architecture experience.</role>
+  <goal>
+    AI results render as lazy-loaded widgets in tabs. Maximum 3 tabs enforced (oldest auto-closes
+    on overflow). Tab-change events flow to PaneEventBus. R1's OutputPanel.tsx is replaced.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/solutions/SpaarkeAi/src/components/OutputPanel.tsx</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read OutputPanel.tsx to understand the R1 output rendering model and what state needs to migrate to the tab-based model.</step>
+    <step>Create src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts (plain TypeScript, not a component): manages tab array state, enforces max 3 limit by removing the oldest tab when a 4th is added, exposes addTab(widgetType, data), closeTab(tabId), setActiveTab(tabId).</step>
+    <step>Create src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx subscribing to the 'workspace' PaneEventBus channel via usePaneEvent.</step>
+    <step>On each workspace_widget event: call WorkspaceTabManager.addTab with the widget type and data payload; call resolveWorkspaceWidget to lazy-load the widget implementation; render the resolved widget in the new tab.</step>
+    <step>Use Fluent v9 TabList and Tab components for the tab bar. Apply Fluent design tokens — no hard-coded colors (ADR-021).</step>
+    <step>On active tab change: dispatch a workspace_action event to PaneEventBus with type 'tab-changed' and the active widget type and data (so ContextPaneController can react).</step>
+    <step>Place WorkspacePane in the workspace slot of ThreePaneShell (replace placeholder div).</step>
+    <step>Write unit tests for WorkspaceTabManager: adding tabs 1-3 works normally; adding tab 4 removes the oldest and adds the new one; closeTab removes the correct tab.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>WorkspacePane subscribes to the 'workspace' PaneEventBus channel and renders received widgets in tabs.</criterion>
+    <criterion>WorkspaceTabManager enforces the 3-tab maximum — oldest tab auto-closes when a 4th is added.</criterion>
+    <criterion>Widgets load lazily via WorkspaceWidgetRegistry — no widget code bundled at shell startup.</criterion>
+    <criterion>Tab-change dispatches workspace_action event to PaneEventBus with active widget info.</criterion>
+    <criterion>Fluent v9 components and design tokens used — no hard-coded colors (ADR-021 compliant).</criterion>
+    <criterion>R1's OutputPanel.tsx is replaced by WorkspacePane.</criterion>
+    <criterion>WorkspaceTabManager unit tests (add, overflow, close) pass.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,54 @@
+<task id="AIPU2-021" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build GroundednessCheckService — Hallucination Detection</title>
+    <phase>2B</phase>
+    <tags>bff-api, ai-safety, groundedness</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-003, AIPU2-006</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build GroundednessCheckService, which calls the Azure AI Content Safety Groundedness Detection API after
+    each LLM response to identify claims that are not supported by the retrieved source documents. Unlike
+    PromptShield (which blocks before the LLM), groundedness checking is non-blocking — ungrounded segments
+    are flagged and annotated in the SSE stream (as a safety_annotation event) rather than suppressed. This
+    allows the user to see AI output while being informed of which parts lack document support. Latency budget
+    is under 200ms and runs in parallel with the streaming response where possible.
+  </prompt>
+  <role>Senior .NET backend engineer with Azure AI Content Safety and SSE streaming experience.</role>
+  <goal>
+    After each LLM response, ungrounded claim segments are identified via the Groundedness Detection API and
+    emitted as a safety_annotation SSE event. The check completes in under 200ms and is non-blocking.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read AI-ARCHITECTURE.md to understand the current SSE streaming pipeline and where post-LLM processing hooks exist.</step>
+    <step>Create IGroundednessCheckService.cs interface with: Task&lt;GroundednessResult&gt; CheckAsync(GroundednessRequest request, CancellationToken ct).</step>
+    <step>Create GroundednessRequest.cs record: LlmResponse (string — full text of AI answer), SourceDocuments (IReadOnlyList&lt;string&gt; — retrieved passage texts).</step>
+    <step>Create GroundednessResult.cs record: IsGrounded (bool), UngroundedSegments (IReadOnlyList&lt;UngroundedSegment&gt;), LatencyMs (double). Create UngroundedSegment record: Text (string), Reason (string?).</step>
+    <step>Create GroundednessCheckService.cs implementing IGroundednessCheckService. Use named HttpClient "ContentSafety" (same as PromptShield). Call POST https://{endpoint}/contentsafety/text:detectGroundedness?api-version=2024-09-15 with body { "domain": "generic", "task": "QnA", "qna": { "query": "...", "answer": llmResponse }, "groundingSources": sourceDocuments }.</step>
+    <step>Parse response: extract ungroundedDetected and ungroundedDetails[].text. Build GroundednessResult. If SourceDocuments is empty, skip the API call and return IsGrounded = true (no sources to check against).</step>
+    <step>Handle failure modes: timeout (&gt;200ms), HTTP 429, HTTP 5xx → return GroundednessResult with IsGrounded = true and log warning (non-blocking, fail-safe).</step>
+    <step>Emit safety_annotation SSE event after the main response stream completes (or concurrently if the streaming pipeline supports it). Event payload: { "type": "groundedness", "isGrounded": bool, "ungroundedSegments": [...] }.</step>
+    <step>Register IGroundednessCheckService in AddAiSafetyModule(). Emit OTEL counter ai_safety_groundedness_ungrounded_total and histogram ai_safety_groundedness_latency_ms.</step>
+    <step>Write unit tests: ungrounded response → segments returned, fully grounded → empty segments, empty sources → skipped (IsGrounded=true), timeout → fail-safe IsGrounded=true.</step>
+    <step>Run `dotnet build` and `dotnet test --filter "Groundedness"` to verify.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Ungrounded segments identified by the API are included in GroundednessResult.UngroundedSegments.</criterion>
+    <criterion>safety_annotation SSE event emitted after each LLM response with groundedness data.</criterion>
+    <criterion>Service completes in under 200ms (P95).</criterion>
+    <criterion>Empty source document list causes the check to be skipped (returns IsGrounded = true).</criterion>
+    <criterion>API failures result in fail-safe behavior (IsGrounded = true, warning logged) — never blocks the response.</criterion>
+    <criterion>OTEL counter and histogram emitted correctly.</criterion>
+    <criterion>Unit tests pass: `dotnet test --filter "Groundedness"`.</criterion>
+  </acceptance-criteria>
+</task>

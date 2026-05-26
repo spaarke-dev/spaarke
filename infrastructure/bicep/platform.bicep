@@ -99,6 +99,9 @@ var logAnalyticsName = 'sprk-platform-${environmentName}-logs'
 // Short-form names (sprk- prefix) for length-constrained resources (Key Vault: 24 chars)
 var keyVaultName = 'sprk-platform-${environmentName}-kv'
 
+// Cosmos DB account name (spaarke- prefix, max 44 chars)
+var cosmosAccountName = 'spaarke-cosmos-${environmentName}'
+
 // ============================================================================
 // RESOURCE GROUP
 // ============================================================================
@@ -260,6 +263,22 @@ module docIntelligence 'modules/doc-intelligence.bicep' = {
 }
 
 // ============================================================================
+// 8. COSMOS DB — spaarke-ai database (serverless, RBAC-only, no connection strings)
+// ============================================================================
+
+module cosmosDb 'modules/cosmos-db.bicep' = {
+  scope: rg
+  name: 'platform-cosmosdb'
+  params: {
+    accountName: cosmosAccountName
+    location: location
+    databaseName: 'spaarke-ai'
+    appServicePrincipalId: bffApi.outputs.appServicePrincipalId
+    tags: tags
+  }
+}
+
+// ============================================================================
 // OUTPUTS — Exported for customer.bicep and deployment scripts
 // ============================================================================
 
@@ -290,3 +309,8 @@ output docIntelligenceName string = docIntelligence.outputs.docIntelligenceName
 output appInsightsName string = monitoring.outputs.appInsightsName
 output appInsightsConnectionString string = monitoring.outputs.connectionString
 output logAnalyticsWorkspaceId string = monitoring.outputs.logAnalyticsWorkspaceId
+
+// Cosmos DB — endpoint only (no keys; application uses DefaultAzureCredential)
+output cosmosAccountName string = cosmosDb.outputs.accountName
+output cosmosEndpoint string = cosmosDb.outputs.accountEndpoint
+output cosmosDatabaseName string = cosmosDb.outputs.databaseName

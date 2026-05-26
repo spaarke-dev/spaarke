@@ -1,0 +1,144 @@
+<task id="019" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Migrate dev BFF from Windows to Linux App Service</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>~25 minutes wall-clock (incl. ~13 min first-boot wait)</actual-effort>
+    <assigned>AI agent (Azure CLI)</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
+    <tags>bff-api, azure, infrastructure, phase-1.5</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Infrastructure provisioning; new resource group + App Service creation must be sequential</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Migrate the dev BFF from Windows App Service (`spe-api-dev-67e2xz`, `kind: app`, `reserved: false`)
+    to Linux App Service (`spaarke-bff-dev`, `kind: app,linux`, `reserved: true`) to align dev with
+    demo + prod + customer-deployment canonical pattern (codified in `infrastructure/bicep/modules/app-service.bicep`).
+
+    Per Phase 1 Finding 1: design.md §2.4 assumption "App Service is unambiguously Linux" was wrong
+    for dev. Phase 2 candidate categorization (esp. FR-A1 `--runtime linux-x64`) depends on env
+    consistency. Migrating dev to Linux also eliminates the Windows-specific FAILURE-MODES G-2
+    file-lock incident at the dev tier.
+
+    Critical enabler: the BFF uses a User-Assigned Managed Identity (`mi-bff-api-dev`, clientId
+    `5967251e-...`) for all outbound auth. The UAMI is a separate Azure resource that survives App
+    Service replacement; all cross-platform registrations (Dataverse Application User, Graph app
+    role grants, Key Vault role assignments, Exchange ApplicationAccessPolicy) bind to the UAMI
+    principal, not the App Service identity. Cross-RG UAMI attachment means ZERO re-registration
+    is needed at any of those platforms.
+  </prompt>
+
+  <role>Azure infrastructure engineer with App Service + Managed Identity awareness.</role>
+
+  <goal>
+    New Linux App Service `spaarke-bff-dev` provisioned in canonical `rg-spaarke-dev` resource
+    group in dev subscription `484bc857-...`, with `mi-bff-api-dev` UAMI attached cross-RG, all
+    175 App Settings migrated (2 colon-keys skipped — both had `__` siblings), and the BFF code
+    deployed + fully functional (verified via `/healthz`, `/ping`, `/api/documents/test/preview-url`
+    401, AND `/healthz/dataverse` 200 which exercises the full UAMI → Dataverse chain).
+
+    Old Windows dev (`spe-api-dev-67e2xz`) left running in parallel. Operator owns cutover timing.
+  </goal>
+
+  <inputs>
+    <file purpose="bicep-canonical">infrastructure/bicep/modules/app-service.bicep</file>
+    <file purpose="bicep-canonical">infrastructure/bicep/modules/app-service-plan.bicep</file>
+    <file purpose="deploy-script">scripts/Deploy-BffApi.ps1</file>
+    <file purpose="auth-doc">docs/guides/auth-deployment-setup.md</file>
+    <file purpose="inventory">projects/sdap-bff-api-remediation-fix/inventory/INVENTORY.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §2.4 (revised)">Target Linux .NET 8 per canonical Bicep template</constraint>
+    <constraint source="canonical naming">Resource group: rg-spaarke-{purpose}; App Service: spaarke-bff-{purpose}; Plan: spaarke-{purpose}-plan</constraint>
+    <constraint source="auth-r2 reality">UAMI mi-bff-api-dev is the canonical auth principal; do not create new SAMI-bound permissions</constraint>
+    <constraint source="parallel-running discipline">Do not decommission old Windows dev in this task — operator owns cutover timing after stability period</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>infrastructure/bicep/modules/app-service.bicep</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/app-service-runtime.json</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 1 task 017 discovered dev was Windows. Phase 2 FR-A1 (`--runtime linux-x64`) requires
+      env consistency. This task is pre-Phase-2 infrastructure to resolve Finding 1. Owner ACK'd
+      decision A.2 (consolidate to Linux) on 2026-05-24.
+
+      Subscription topology:
+      - dev: 484bc857-3802-427f-9ea5-ca47b43db0f0 (also contains unused prod `spaarke-bff-prod` in rg-spaarke-platform-prod)
+      - demo: 2ff9ee48-6f1d-4664-865c-f11868dd1b50 (contains `spaarke-bff-demo` in rg-spaarke-demo)
+    </background>
+    <dependencies>
+      <dependency task="017" status="completed">App Service OS state captured</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Inventory current Windows dev (App Settings, MI principals, RG, plan, siteConfig)</step>
+    <step order="2">Scan current App Settings for misdirected values (refs to old hostname/RG); flag for cutover</step>
+    <step order="3">Create new RG `rg-spaarke-dev` in West US 2</step>
+    <step order="4">Create new App Service Plan `spaarke-dev-plan` (Linux P2v3) in new RG</step>
+    <step order="5">Create new App Service `spaarke-bff-dev` (Linux .NET 8) on new plan</step>
+    <step order="6">Attach existing UAMI `mi-bff-api-dev` cross-RG to new App Service</step>
+    <step order="7">Apply siteConfig: httpsOnly, alwaysOn, http2, minTls 1.2, ftps disabled, healthCheckPath /healthz</step>
+    <step order="8">Bulk-PUT all App Settings (skip `:`-separator keys; preserve `__` siblings)</step>
+    <step order="9">Deploy current BFF code via `Deploy-BffApi.ps1 -ResourceGroupName rg-spaarke-dev -AppServiceName spaarke-bff-dev`</step>
+    <step order="10">Verify: /healthz 200, /ping pong, auth-protected 401, /healthz/dataverse 200 (UAMI → Dataverse)</step>
+    <step order="11">Write migration record at `baseline/linux-dev-migration.md`</step>
+    <step order="12">Update INVENTORY.md (Finding 1 status: RESOLVED)</step>
+    <step order="13">Update TASK-INDEX.md (add task 019 as ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="az">App Service / RG / Plan / Identity / config commands</tool>
+    <tool name="powershell">Bulk App Settings PUT via Invoke-RestMethod</tool>
+    <tool name="Deploy-BffApi.ps1">Parameterized deploy (already supports -ResourceGroupName + -AppServiceName)</tool>
+  </tools>
+
+  <outputs>
+    <output type="azure-resource">rg-spaarke-dev (RG, West US 2)</output>
+    <output type="azure-resource">spaarke-dev-plan (Linux P2v3 App Service Plan)</output>
+    <output type="azure-resource">spaarke-bff-dev (Linux .NET 8 App Service, UAMI attached, 173 App Settings)</output>
+    <output type="report">projects/sdap-bff-api-remediation-fix/baseline/linux-dev-migration.md</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/inventory/INVENTORY.md (Finding 1 RESOLVED)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">New App Service `spaarke-bff-dev` exists, kind: app,linux, reserved: true</criterion>
+    <criterion testable="true">UAMI mi-bff-api-dev attached (verified via `az webapp identity show`)</criterion>
+    <criterion testable="true">/healthz returns 200; /ping returns 200 + "pong"</criterion>
+    <criterion testable="true">/healthz/dataverse returns 200 (UAMI → Dataverse end-to-end verified)</criterion>
+    <criterion testable="true">Old Windows dev `spe-api-dev-67e2xz` still healthy (parallel run preserved)</criterion>
+    <criterion testable="true">baseline/linux-dev-migration.md committed with all provisioning steps + cutover checklist</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      Migration succeeded. New Linux dev fully functional. UAMI strategy proved correct — zero
+      re-registration needed in Dataverse/Graph/Exchange. Old Windows dev parallel-running and
+      healthy. Operator owns cutover timing.
+    </completion-summary>
+    <operator-cutover-checklist>
+      Before decommissioning old Windows dev, operator must:
+      1. Update `Communication__WebhookNotificationUrl` on new dev to its own URL
+      2. PATCH Graph subscription notificationUrl to new dev (via Graph API)
+      3. Update `Cors__AllowedOrigins` if any client surface references old hostname
+      4. Update GitHub workflow `deploy-bff-api.yml` to default to new env
+      5. 24-48h bake on new dev
+      6. Delete `spe-api-dev-67e2xz` App Service + `spe-plan-dev-67e2xz` Plan (UAMI stays — used elsewhere)
+    </operator-cutover-checklist>
+    <doc-drift-flagged>
+      docs/guides/auth-deployment-setup.md line 50 says "system-assigned managed identity" — stale per auth-r2 Phase C reality (UAMI). Separate small fix commit forthcoming.
+    </doc-drift-flagged>
+  </notes>
+</task>

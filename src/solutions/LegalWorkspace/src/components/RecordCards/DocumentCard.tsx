@@ -20,10 +20,11 @@ import {
   DocumentSearchRegular,
   SparkleRegular,
   FolderOpenRegular,
+  OpenRegular,
 } from "@fluentui/react-icons";
 import type { IDocument } from "../../types/entities";
 import { getFileTypeIcon } from "../../utils/fileIconMap";
-import { navigateToEntity } from "../../utils/navigation";
+import { navigateToEntity, openRecordDialog } from "../../utils/navigation";
 import { getEffectiveDarkMode } from "../../providers/ThemeProvider";
 import { authenticatedFetch } from "../../services/authInit";
 import { getDocumentOpenLinks } from "../../services/DocumentApiService";
@@ -151,6 +152,16 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
     const handlePreview = React.useCallback(() => {
       setFilePreviewOpen(true);
     }, []);
+
+    // ----- Tool: Expand (open sprk_document record in modal dialog) -----
+    // R8 Wave 3 task 111: operator-requested explicit expand affordance.
+    // Existing double-click + Enter handlers still open via openForm
+    // (full-frame); this dedicated button opens as a modal dialog
+    // (`Xrm.Navigation.navigateTo` with target: 2) so users can dismiss
+    // back to the workspace pane without losing scroll/tab state.
+    const handleExpand = React.useCallback(() => {
+      openRecordDialog("sprk_document", doc.sprk_documentid);
+    }, [doc.sprk_documentid]);
 
     // ----- Tool: Open File -----
     const handleOpenFile = React.useCallback(async () => {
@@ -299,6 +310,15 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
                   icon={<DocumentSearchRegular aria-hidden="true" />}
                   aria-label="Find Similar"
                   onClick={handleFindSimilar}
+                />
+              </Tooltip>
+              <Tooltip content="Expand" relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="medium"
+                  icon={<OpenRegular aria-hidden="true" />}
+                  aria-label="Expand document"
+                  onClick={handleExpand}
                 />
               </Tooltip>
             </>

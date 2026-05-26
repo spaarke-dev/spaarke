@@ -30,7 +30,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { DocumentArrowUp20Regular } from '@fluentui/react-icons';
-import type { IChatMessage } from './types';
+import type { IChatMessage, AuthenticatedFetchFn } from './types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,8 +44,12 @@ export interface ISprkChatExportWordProps {
   messages: IChatMessage[];
   /** Base URL for the BFF API. */
   apiBaseUrl: string;
-  /** Bearer token for API authentication. */
-  accessToken: string;
+  /**
+   * Authenticated fetch function (typically from `@spaarke/auth` or `useAuth()`).
+   * MUST attach a fresh Bearer token on every call. Replaces the previous
+   * `accessToken: string` snapshot prop (Auth v2 D-AUTH-1).
+   */
+  authenticatedFetch: AuthenticatedFetchFn;
   /**
    * Callback fired when export fails.
    * The parent can use this to show a toast or error notification.
@@ -105,7 +109,7 @@ const useStyles = makeStyles({
  *   sessionId={session?.sessionId ?? null}
  *   messages={messages}
  *   apiBaseUrl="https://spe-api-dev-67e2xz.azurewebsites.net"
- *   accessToken={token}
+ *   authenticatedFetch={authenticatedFetch}
  *   onError={(msg) => setExportError(msg)}
  *   onSuccess={(url) => console.log("Opened:", url)}
  * />
@@ -115,7 +119,7 @@ export const SprkChatExportWord: React.FC<ISprkChatExportWordProps> = ({
   sessionId,
   messages,
   apiBaseUrl,
-  accessToken,
+  authenticatedFetch,
   onError,
   onSuccess,
 }) => {
@@ -178,11 +182,10 @@ export const SprkChatExportWord: React.FC<ISprkChatExportWordProps> = ({
 
       const baseUrl = apiBaseUrl.replace(/\/+$/, '');
       const url = `${baseUrl}/api/ai/chat/export/word`;
-      const response = await fetch(url, {
+      const response = await authenticatedFetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           sessionId,
@@ -211,7 +214,7 @@ export const SprkChatExportWord: React.FC<ISprkChatExportWordProps> = ({
     } finally {
       setIsExporting(false);
     }
-  }, [isDisabled, sessionId, apiBaseUrl, accessToken, assembleExportContent, onError, onSuccess]);
+  }, [isDisabled, sessionId, apiBaseUrl, authenticatedFetch, assembleExportContent, onError, onSuccess]);
 
   // Render the button icon: Spinner when exporting, DocumentArrowUp otherwise
   const buttonIcon = isExporting

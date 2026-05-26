@@ -1,0 +1,32 @@
+<task id="AUTHV2-083" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Rebuild + deploy Outlook + Word Add-in bundles</title>
+    <phase>B4 — Office Add-ins consolidation</phase>
+    <tags>auth, office-addins, deploy, STANDARD</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>081, 082</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>After Office consolidation tasks land, rebuild Outlook + Word Add-in bundles against @spaarke/auth v2 and redeploy to Azure Static Web Apps via SWA CLI (per office-addins-deploy skill).</prompt>
+  <role>Office Add-ins deployment engineer.</role>
+  <goal>Outlook + Word Add-ins built and deployed; load successfully in their host apps.</goal>
+  <knowledge>
+    <files>
+      <file>.claude/skills/office-addins-deploy/SKILL.md</file>
+      <file>src/client/office-addins/outlook/</file>
+      <file>src/client/office-addins/word/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Build Outlook Add-in (npm run build:prod). Confirm no @spaarke/auth v2 compile errors.</step>
+    <step>Build Word Add-in.</step>
+    <step>Invoke office-addins-deploy skill for each.</step>
+    <step>Load each Add-in in its host app (Outlook web, Word web) and verify auth flow works (no popup in steady state per NAA broker).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Both Add-ins build cleanly with v2.</criterion>
+    <criterion>Both deployed to SWA dev.</criterion>
+    <criterion>Both load and authenticate without errors in their host apps.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,7 +1,20 @@
+---
+description: Document and interact with GitHub Actions CI/CD workflows — checking build status, understanding pipeline stages, and integrating with deployment workflows
+tags: [ci-cd, github-actions, deployment, workflows, automation]
+techStack: [github-actions, dotnet, azure, dataverse]
+appliesTo: [".github/workflows/", "ci-cd", "build status", "pipeline"]
+alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
+---
+
 # CI/CD Pipeline Skill
 
 > **Category**: Operations
-> **Last Updated**: January 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: Workflows evolve quarterly; no single canonical pipeline holds steady. Inventory + status checks live in `notes/inventory/workflows.md` (Phase 0 task 003).
+> **Inventory anomaly #1 RESOLVED**: This skill had zero frontmatter before 2026-05-16. Frontmatter block now in place.
 
 ---
 
@@ -349,7 +362,7 @@ No secrets required - runs in read-only mode.
 
 ---
 
-## Tips for AI
+## Operator Notes
 
 - Always check `gh pr checks` before suggesting merge
 - If CI fails, read logs with `gh run view {id} --log` before suggesting fixes
@@ -376,3 +389,14 @@ No secrets required - runs in read-only mode.
 4. Sync main repo → cd {main-repo} && git pull origin master
 5. Report all statuses to user
 ```
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Workflow fails in 0-2 seconds with "failed" status | Workflow startup failure — action version doesn't exist in registry (e.g., `actions/checkout@v6` when current major is v4). See [`FAILURE-MODES.md#G-3`](../../FAILURE-MODES.md#g-3-zero-second-github-actions-workflow-failures-are-startup-failures-not-test-failures) | Look at action version pins FIRST before debugging test logic. `actionlint` (Phase 4b) catches this pre-merge. |
+| CI green but staging deploy didn't trigger | Slot-swap workflow's `workflow_run` trigger depends on the CI workflow's name — rename broke the chain | Inspect the deploy workflow's `on: workflow_run: workflows: [<name>]` block. After renaming any workflow, update every workflow that depends on it. |
+| Required-status check failing but not gating the PR | Branch protection allows merge despite failing status (admin-bypass enabled OR check not marked required) | Re-audit required status checks in repo settings. Branch protection bypass during ai-procedure-quality-r1 is acceptable; re-audit at project wrap. |
+| Action version is pinned to a major tag (`@v4`) instead of SHA | SHA pinning not enforced in any current workflow (0 of 115 actions are SHA-pinned per Phase 0 inventory) | Phase 4b task 070 introduces SHA pinning; until then, treat major-tag pins as a known security/reproducibility gap. |

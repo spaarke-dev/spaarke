@@ -1,9 +1,13 @@
 # Spaarke Environment Deployment Guide
 
 > **Version**: 1.1
-> **Last Updated**: 2026-03-26
-> **Status**: Production Ready (fully validated — demo environment deployed and healthy)
+> **Last Updated**: 2026-03-26 (Auth v2 callout added 2026-05-20)
+> **Status**: Production Ready (validated for infrastructure provisioning; **auth setup superseded by [`auth-deployment-setup.md`](auth-deployment-setup.md) per Auth v2**)
 > **Applies To**: Deploying Spaarke to any new Dataverse + Azure environment
+
+---
+
+> **⚠️ Auth v2 Update (2026-05-19)**: For Spaarke Auth v2 setup specifically — Dataverse env vars (4 required incl. `sprk_TenantId`), App Service settings (8 required incl. `Graph__ManagedIdentity__Enabled=true`, webhook signing keys), Azure AD MI Graph permission grants, Dataverse Application User registration of the MI, and **Exchange ApplicationAccessPolicy (required when Email/Communication modules enabled)** — follow [`auth-deployment-setup.md`](auth-deployment-setup.md) as the canonical operator runbook. That guide is the 10-section mechanical checklist for v2 auth in a new environment. This `ENVIRONMENT-DEPLOYMENT-GUIDE.md` remains canonical for the broader infrastructure provisioning (Bicep, SPE, solutions, etc.). The two are complementary.
 
 ---
 

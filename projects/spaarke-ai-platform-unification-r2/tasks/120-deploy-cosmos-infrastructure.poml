@@ -1,0 +1,50 @@
+<task id="AIPU2-120" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Deploy Cosmos DB infrastructure to dev environment</title>
+    <phase>7</phase>
+    <tags>deploy, infrastructure, cosmos-db</tags>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPU2-002</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    Deploy the Cosmos DB infrastructure (account, database, containers) defined in the
+    infrastructure Bicep templates (AIPU2-002) to the dev environment. This is the first
+    deployment step: the BFF API services for session persistence, audit logging, and
+    conversation history all depend on Cosmos DB being available. RBAC access for the BFF
+    Managed Identity must be configured so the API can read/write without connection strings
+    or keys. Verify with a smoke test before marking complete.
+  </prompt>
+  <role>DevOps engineer with Azure Cosmos DB and Bicep experience.</role>
+  <goal>
+    Cosmos DB account, database, and all R2 containers (sessions, messages, audit) are
+    deployed and accessible from the BFF Managed Identity. A smoke test confirms read/write
+    access. No connection strings or keys are used — all access is via RBAC.
+  </goal>
+  <knowledge>
+    <files>
+      <file>infrastructure/cosmos</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>docs/guides/AI-DEPLOYMENT-GUIDE.md</file>
+      <file>scripts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Review the Cosmos DB Bicep template from AIPU2-002: verify it defines the account (serverless or provisioned), database, and all required containers (sessions, messages, audit) with correct partition key paths and TTL settings.</step>
+    <step>Run az deployment group create targeting resource group spe-infrastructure-westus2 with the Cosmos Bicep template. Capture the deployment output (account endpoint, database name, container names).</step>
+    <step>Assign Cosmos DB Built-in Data Contributor role to the BFF Managed Identity (spe-api-dev-67e2xz system-assigned identity) on the Cosmos DB account using az cosmosdb sql role assignment create.</step>
+    <step>Verify RBAC assignment: confirm the assignment appears in az cosmosdb sql role assignment list and matches the BFF identity principal ID.</step>
+    <step>Run smoke test: use a test script (or az cosmosdb sql container show) to verify each container exists with the correct configuration (partition key, TTL). Then write and read a test document via the BFF /healthz or a dedicated /api/test/cosmos endpoint to confirm Managed Identity access works.</step>
+    <step>Update docs/architecture/auth-azure-resources.md with the new Cosmos DB account name, endpoint, and database name if not already present.</step>
+    <step>Record deployment result (container names, partition keys, RBAC assignment) in notes/deploy-cosmos-infrastructure-log.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Cosmos DB account, database, and all R2 containers are created in the spe-infrastructure-westus2 resource group.</criterion>
+    <criterion>Each container has the correct partition key path and TTL configuration per AIPU2-002 design.</criterion>
+    <criterion>BFF Managed Identity has Cosmos DB Built-in Data Contributor role assignment on the account.</criterion>
+    <criterion>Smoke test confirms read/write access from the BFF identity — no connection string or key used.</criterion>
+    <criterion>auth-azure-resources.md updated with Cosmos DB endpoint and resource names.</criterion>
+    <criterion>Deployment log written to notes/deploy-cosmos-infrastructure-log.md.</criterion>
+  </acceptance-criteria>
+</task>

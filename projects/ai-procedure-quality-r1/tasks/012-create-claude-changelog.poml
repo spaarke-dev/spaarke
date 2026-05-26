@@ -1,0 +1,49 @@
+<task id="012" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Create .claude/CHANGELOG.md (forward-only)</title>
+    <phase>1</phase>
+    <stream>infrastructure</stream>
+    <tags>changelog, infrastructure</tags>
+    <estimate>20min</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>1-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>none</dependencies>
+    <writes-to>.claude/CHANGELOG.md</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Establish a curated changelog for procedure-surface changes. Forward-only — no back-fill from history.</goal>
+    <context>Per resolved decision #5: forward-only. Git history of .claude/ exists but is hard to query for "when did skill X change?" or "when did the hooks last work?" A curated CHANGELOG.md is the answer.</context>
+    <constraints>
+      - parallel-safe: false — main session only
+      - Forward-only, no back-fill
+      - First entry: this project's deliverables
+      - Format: Keep a Changelog conventions (https://keepachangelog.com/)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-quality-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create .claude/CHANGELOG.md with header: "Procedure-Surface Changelog — Forward-only from 2026-05-14"</step>
+    <step>Add a one-paragraph "How to maintain this" note: every PR that touches .claude/skills/, .claude/agents/, .claude/settings.json, .claude/patterns/, or .claude/constraints/ MUST add an entry to the "Unreleased" section</step>
+    <step>Add categories under "Unreleased": Added, Changed, Deprecated, Removed, Fixed</step>
+    <step>First release entry: "## [ai-procedure-quality-r1] - 2026-05-14" with the deliverables listed under appropriate categories (researcher subagent under Added, skill template under Added, etc.)</step>
+    <step>Reference this CHANGELOG from the new (post-rewrite) CLAUDE.md once Phase 3b lands</step>
+  </steps>
+
+  <outputs>
+    <output>.claude/CHANGELOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>File exists with header explaining forward-only convention</criterion>
+    <criterion>First release entry contains this project's planned deliverables</criterion>
+    <criterion>"How to maintain" instructions are clear enough that the next contributor adds entries without prompting</criterion>
+  </acceptance-criteria>
+</task>

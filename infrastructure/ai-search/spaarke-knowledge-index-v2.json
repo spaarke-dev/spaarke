@@ -223,6 +223,15 @@
       "sortable": true,
       "facetable": false,
       "analyzer": "standard.lucene"
+    },
+    {
+      "name": "privilege_group_ids",
+      "type": "Collection(Edm.String)",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": false
     }
   ],
   "vectorSearch": {

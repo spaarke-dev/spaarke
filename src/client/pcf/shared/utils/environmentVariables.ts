@@ -83,15 +83,24 @@ function normalizeBffUrl(raw: string): string {
 const CACHE_DURATION_MS = 5 * 60 * 1000;
 
 /**
- * Default fallback values for development
- * These should ONLY be used in development - production should always use environment variables
+ * Default fallback values.
+ *
+ * IMPORTANT (task 024, 2026-05-25): URL-bearing values are intentionally EMPTY.
+ * Hardcoded URL fallbacks caused silent breakage when `spe-api-dev-67e2xz` was
+ * decommissioned during Linux migration — consumers received a deleted URL and
+ * failed with `ERR_NAME_NOT_RESOLVED`. The Dataverse env var
+ * `sprk_BffApiBaseUrl` is now the sole source of truth.
+ *
+ * Consumers MUST handle the empty-string case by throwing a clear error when
+ * the underlying env var is not configured (see `getApiBaseUrl` below and
+ * `SpeDocumentViewerHost.tsx` post-task-024 for the canonical pattern).
  */
 const DEFAULT_VALUES: Record<KnownEnvironmentVariable, string> = {
-  sprk_BffApiBaseUrl: 'https://spe-api-dev-67e2xz.azurewebsites.net',
+  sprk_BffApiBaseUrl: '', // task 024: no URL fallback; throw on missing in getApiBaseUrl
   sprk_BffApiAppId: '',
   sprk_MsalClientId: '',
   sprk_TenantId: '',
-  sprk_AzureOpenAiEndpoint: 'https://spaarke-openai-dev.openai.azure.com/',
+  sprk_AzureOpenAiEndpoint: '', // task 024: no URL fallback (parity with BFF URL)
   sprk_ApplicationInsightsKey: '',
   sprk_SharePointEmbeddedContainerId: '',
   sprk_DefaultPlaybookId: '',
@@ -226,58 +235,34 @@ export async function getEnvironmentVariableOrDefault(
  * The Dataverse env var stores the value WITH /api suffix, but this function strips it
  * via normalizeBffUrl() to match @spaarke/auth's resolveRuntimeConfig() convention.
  *
- * DO NOT construct URLs manually with template literals — use buildBffApiUrl() below.
- * Manual concatenation has been the source of multiple production bugs.
+ * DO NOT construct URLs manually with template literals — use `buildBffApiUrl()`
+ * from `@spaarke/auth` (the canonical implementation). Manual concatenation has
+ * been the source of multiple production bugs.
  *
  * @param webApi - The PCF WebAPI instance
  * @returns The BFF API base URL (host only, no /api suffix)
  */
 export async function getApiBaseUrl(webApi: ComponentFramework.WebApi): Promise<string> {
   const raw = await getEnvironmentVariableOrDefault(webApi, 'sprk_BffApiBaseUrl');
+  if (!raw || !raw.trim()) {
+    throw new Error(
+      "[Spaarke.EnvVar] sprk_BffApiBaseUrl Dataverse environment variable is not configured. " +
+      "Set it in the SpaarkeCore solution to the host of the target BFF API " +
+      "(e.g., 'https://spaarke-bff-dev.azurewebsites.net'). No hardcoded fallback is " +
+      "supplied (task 024) to prevent silent breakage when the URL changes."
+    );
+  }
   return normalizeBffUrl(raw);
 }
 
-/**
- * Build a BFF API URL from a base URL and a path.
- *
- * Use this helper for ALL BFF API URL construction in PCF controls.
- * It is idempotent and accepts paths with or without the `/api/` prefix.
- *
- * @example
- *   const base = await getApiBaseUrl(context.webAPI);
- *   const url = buildBffApiUrl(base, '/ai/visualization/related/123');
- *   // → 'https://host.azurewebsites.net/api/ai/visualization/related/123'
- *
- * @example
- *   // Idempotent: accepts /api/... and adds it if missing
- *   buildBffApiUrl(base, '/ai/chat/sessions')     // OK
- *   buildBffApiUrl(base, '/api/ai/chat/sessions') // OK (same result)
- *   buildBffApiUrl(base, 'ai/chat/sessions')      // OK (same result)
- *
- * @param baseUrl - BFF base URL (host only). Trailing slashes are tolerated.
- * @param path    - Endpoint path. The helper guarantees a single `/api/` prefix.
- * @returns Full URL ready for fetch().
- * @throws Error if baseUrl is empty or missing.
- *
- * @see docs/architecture/AUTH-AND-BFF-URL-PATTERN.md
- * @see .claude/constraints/auth.md → "BFF Base URL Convention"
- */
-export function buildBffApiUrl(baseUrl: string, path: string): string {
-  if (!baseUrl || baseUrl.trim() === '') {
-    throw new Error(
-      '[buildBffApiUrl] baseUrl is empty. Did you forget to await getApiBaseUrl() first?'
-    );
-  }
-  const base = baseUrl.replace(/\/+$/, '');
-  let normalizedPath = path.trim();
-  if (!normalizedPath.startsWith('/')) {
-    normalizedPath = '/' + normalizedPath;
-  }
-  if (!/^\/api(\/|$)/i.test(normalizedPath)) {
-    normalizedPath = '/api' + normalizedPath;
-  }
-  return base + normalizedPath;
-}
+// NOTE: buildBffApiUrl was previously defined here as a duplicate of the canonical
+// implementation in `@spaarke/auth`. It was removed in task AUTHV2-030 (Phase B,
+// 2026-05-19) to eliminate drift risk. ALL consumers must import buildBffApiUrl
+// from '@spaarke/auth' — there is no longer a PCF-local copy.
+//
+//   import { buildBffApiUrl } from '@spaarke/auth';
+//
+// See: src/client/shared/Spaarke.Auth/src/buildBffApiUrl.ts
 
 /**
  * Get the Azure OpenAI endpoint from environment variables

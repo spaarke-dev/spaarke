@@ -1,10 +1,10 @@
 # Authentication Azure Resources & GUIDs
 
 > **Source**: AUTHENTICATION-ARCHITECTURE.md
-> **Last Updated**: 2026-04-05
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
-> **Status**: Current (OpenAI region corrected; config keys aligned with `DocumentIntelligence` section)
+> **Last Updated**: 2026-05-17
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-platform-unification-r2
+> **Status**: Current (R2: Cosmos DB containers added; Content Safety resource added; RBAC updated)
 > **Applies To**: Debugging, deployment, configuration lookup
 
 ---
@@ -90,7 +90,9 @@ Both are listed in `knownClientApplications` on the BFF API app (`1e40baad-e065-
 
 **Historical reason**: PCF controls were the original SPA client and used the Dataverse App registration with a redirect URI pointing to the Dataverse org URL. When Code Pages were introduced, they required their own app registration because SPA redirect URIs must differ per registration — Code Pages run in a different context (HTML web resources loaded as iframes) and needed separate redirect URI configuration.
 
-**Future**: The planned `@spaarke/auth` shared package will standardize token acquisition across PCF and Code Pages, potentially allowing consolidation to a single app registration.
+**v2 update (ADR-028)**: `@spaarke/auth` standardizes token acquisition across PCF, Code Pages, and Office Add-ins via `useAuth()` / `authenticatedFetch`. Two separate client app registrations remain because PCF and Code Pages have different redirect URI requirements; consolidation requires SPA redirect-URI engineering and is not currently scheduled.
+
+**For new-environment setup, see**: [`docs/guides/auth-deployment-setup.md`](../guides/auth-deployment-setup.md) — 10-section operator runbook including §3 App Service settings, §5 MI Graph permission grants, §6 Dataverse Application User, §7 Exchange ApplicationAccessPolicy (required when Email/Communication modules enabled).
 
 ---
 
@@ -186,16 +188,74 @@ DocumentIntelligence__SummarizeModel=gpt-4o-mini
 
 ---
 
+### Cosmos DB (AI Platform — spaarke-ai)
+
+| Property | Value |
+|----------|-------|
+| **Name** | `spaarke-cosmos-dev` |
+| **Resource Group** | `spe-infrastructure-westus2` |
+| **Region** | West US 2 |
+| **Capacity Mode** | Serverless |
+| **Endpoint** | `https://spaarke-cosmos-dev.documents.azure.com:443/` |
+| **Database** | `spaarke-ai` |
+| **Bicep Module** | `infrastructure/bicep/modules/cosmos-db.bicep` |
+| **Provisioning Script** | `scripts/Provision-CosmosDb.ps1` |
+
+**Containers**:
+
+| Container | Partition Key | TTL | Notes |
+|-----------|--------------|-----|-------|
+| `sessions` | `/userId` | 90 days (7,776,000 s) | AI conversation sessions |
+| `prompts` | `/sessionId` | 90 days (7,776,000 s) | Individual prompt/completion pairs |
+| `audit` | `/tenantId` | None (-1) | Immutable audit trail; analyticalStorageTtl=-1 |
+| `memory` | `/userId` | 90 days (7,776,000 s) | AI memory snapshots |
+| `feedback` | `/userId` | None (-1) | User feedback on AI responses |
+
+**Access Pattern**: Application code uses `DefaultAzureCredential` (Managed Identity). No connection strings or master keys in app settings. App Service managed identity is granted `Cosmos DB Built-in Data Contributor` (role ID `00000000-0000-0000-0000-000000000002`) scoped to the account.
+
+**Deploy**:
+```powershell
+# Preview changes
+.\scripts\Provision-CosmosDb.ps1 -Environment dev -WhatIf
+
+# Apply
+.\scripts\Provision-CosmosDb.ps1 -Environment dev
+```
+
+---
+
+### Azure AI Content Safety (R2)
+
+| Property | Value |
+|----------|-------|
+| **Name** | `spaarke-contentsafety-dev` |
+| **Resource Group** | `spe-infrastructure-westus2` |
+| **Region** | West US 2 |
+| **Endpoint** | `https://spaarke-contentsafety-dev.cognitiveservices.azure.com/` |
+| **SKU** | S0 (Standard) |
+| **Purpose** | Prompt injection detection (PromptShieldService) and groundedness annotation (GroundednessCheckService) |
+
+**App Service Settings** (bound via `AiSafetyModule`):
+```
+AiSafety__ContentSafety__Endpoint=https://spaarke-contentsafety-dev.cognitiveservices.azure.com/
+AiSafety__ContentSafety__ApiKey=(from Key Vault or App Settings)
+```
+
+**API used**: `POST {endpoint}/contentsafety/text:shieldPrompt?api-version=2024-09-01`
+
+---
+
 ### Managed Identity
 
 | Property | Value |
 |----------|-------|
 | **Type** | System-assigned |
 | **Principal** | App Service's identity |
-| **Purpose** | Access Key Vault secrets |
+| **Purpose** | Access Key Vault secrets, Cosmos DB data plane |
 
-**Required Role Assignment**:
+**Required Role Assignments**:
 - Key Vault: `Key Vault Secrets User`
+- Cosmos DB: `Cosmos DB Built-in Data Contributor` (role ID `00000000-0000-0000-0000-000000000002`, scoped to account `spaarke-cosmos-{env}`, granted by `infrastructure/bicep/modules/cosmos-db.bicep`)
 
 ---
 
@@ -383,15 +443,15 @@ This is the complete flow for AI Summary/Analysis authorization:
    → Return 403 to PCF
 ```
 
-### MSAL Configuration for OBO
+### MSAL Configuration for OBO (delegated only)
 
 **Code Location**: `src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs`
 
 ```csharp
-// Build confidential client application
+// Build confidential client application — OBO requires a confidential client per OAuth spec
 var app = ConfidentialClientApplicationBuilder
     .Create(clientId: "1e40baad-e065-4aea-a8d4-4b7ab273458c")
-    .WithClientSecret(clientSecret: API_CLIENT_SECRET)  // l8b8Q~J...
+    .WithClientSecret(clientSecret: API_CLIENT_SECRET)  // BFF-API-ClientSecret from KV; retained for OBO only
     .WithAuthority(authority: "https://login.microsoftonline.com/a221a95e-6abc-4434-aecc-e48338a1b2f2")
     .Build();
 
@@ -403,6 +463,8 @@ var result = await app.AcquireTokenOnBehalfOf(
 
 string dataverseToken = result.AccessToken;
 ```
+
+> **Auth v2 (ADR-028) note**: This `ConfidentialClientApplication` + `AcquireTokenOnBehalfOf` pattern applies ONLY to OBO exchange (acting on behalf of a user). For **app-only** Dataverse calls (background jobs, system operations), v2 mandates `DefaultAzureCredential` (managed identity) — the BFF App Service's MI is the Dataverse Application User. See [`docs/guides/auth-deployment-setup.md`](../guides/auth-deployment-setup.md) §6 for MI registration as Dataverse Application User.
 
 ### Required Azure AD Permissions
 

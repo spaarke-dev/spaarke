@@ -1,0 +1,60 @@
+<task id="071" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>CI: fail on non-Linux RIDs in publish (FR-C1)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, ci-cd, codification, outcome-c, phase-6</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential codification</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Add CI step in `.github/workflows/sdap-ci.yml` that runs `dotnet publish --runtime linux-x64` and fails if any non-Linux native runtime folder is present in the output.
+  </prompt>
+
+  <role>CI/CD engineer.</role>
+  <goal>Workflow step exists; PR test injection (`win-x64/` folder added) fails CI.</goal>
+
+  <inputs>
+    <file purpose="workflow">.github/workflows/sdap-ci.yml</file>
+    <file purpose="csproj">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-C1">Fails on win-x64/osx-x64/osx-arm64/linux-musl-x64/linux-arm64 presence</constraint>
+    <constraint source="spec.md FR-C4">PR labels `[allow-size-growth]` provide escape (implement in task 074)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Codifies the linux-x64 publish policy from task 040.</background>
+    <dependencies><dependency task="054" status="not-started">Phase 4 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Add workflow step: `dotnet publish --runtime linux-x64 -o publish-test`</step>
+    <step order="2">Bash check: `find publish-test/runtimes -mindepth 1 -maxdepth 1 -type d ! -name linux-x64 | wc -l` — fail if non-zero</step>
+    <step order="3">Test by intentionally injecting `win-x64/` in a PR; verify CI fails</step>
+    <step order="4">Document the escape hatch behavior (`[allow-size-growth]` PR label — implemented in task 074)</step>
+    <step order="5">Commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="git">commit</tool><tool name="gh">verify CI on synthetic PR</tool></tools>
+
+  <outputs><output type="code">.github/workflows/sdap-ci.yml (new step)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Workflow step exists and runs on every PR</criterion>
+    <criterion testable="true">Synthetic test: PR with `win-x64/` injected fails CI</criterion>
+    <criterion testable="true">PR without escape label: CI fails on non-Linux RIDs</criterion>
+  </acceptance-criteria>
+</task>

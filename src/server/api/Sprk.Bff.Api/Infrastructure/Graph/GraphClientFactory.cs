@@ -11,9 +11,20 @@ namespace Sprk.Bff.Api.Infrastructure.Graph;
 
 /// <summary>
 /// Factory implementation for creating Microsoft Graph clients.
-/// Uses client secret authentication for app-only operations and OBO flow for user operations.
+/// Authentication modes:
+///   * App-only (background jobs, SpeAdminGraphService):
+///       - Production / Azure-hosted: <c>DefaultAzureCredential</c> when <c>Graph:ManagedIdentity:Enabled = true</c>
+///         (chains EnvironmentCredential → WorkloadIdentityCredential → ManagedIdentityCredential →
+///         VisualStudioCredential → AzureCliCredential, so devs running locally via <c>az login</c>
+///         authenticate without code changes).
+///       - Fallback: <c>ClientSecretCredential</c> when MI is disabled (legacy local-dev mode).
+///   * On-Behalf-Of (per-request, user context): always uses <see cref="IConfidentialClientApplication"/>
+///     with the BFF's client secret — OBO cannot be done with managed identity (Task 041 scope: only
+///     app-only flow changes; OBO stays).
 /// Updated for Task 4.1: Uses IHttpClientFactory for centralized resilience via GraphHttpMessageHandler.
 /// Updated for Phase 4: Caches OBO tokens in Redis, reducing Azure AD load by 97% (ADR-009).
+/// Updated for Task 041 (Phase C): App-only Graph auth migrated to DefaultAzureCredential (managed identity)
+/// when <c>Graph:ManagedIdentity:Enabled = true</c>. Eliminates a secret rotation surface for app-only Graph.
 /// </summary>
 public sealed class GraphClientFactory : IGraphClientFactory
 {
@@ -23,6 +34,8 @@ public sealed class GraphClientFactory : IGraphClientFactory
     private readonly string? _tenantId;
     private readonly string? _clientId;
     private readonly string? _clientSecret;
+    private readonly bool _managedIdentityEnabled;
+    private readonly string? _managedIdentityClientId;
     private readonly IConfidentialClientApplication _cca;
     private readonly Lazy<GraphServiceClient> _appOnlyClient;
 
@@ -41,6 +54,15 @@ public sealed class GraphClientFactory : IGraphClientFactory
         _clientId = configuration["AZURE_CLIENT_ID"] ?? configuration["API_APP_ID"];
         _clientSecret = configuration["AZURE_CLIENT_SECRET"] ?? configuration["API_CLIENT_SECRET"];
 
+        // Task 041: Managed Identity flag for app-only Graph auth.
+        // Sensible default: false (preserves legacy ClientSecretCredential behavior for local dev /
+        // environments that haven't opted in). Production deployments set
+        // Graph__ManagedIdentity__Enabled=true and Graph__ManagedIdentity__ClientId (UAMI) if not
+        // using system-assigned MI.
+        _managedIdentityEnabled = bool.TryParse(
+            configuration["Graph:ManagedIdentity:Enabled"], out var miEnabled) && miEnabled;
+        _managedIdentityClientId = configuration["Graph:ManagedIdentity:ClientId"];
+
         var tenantId = configuration["TENANT_ID"] ??
             throw new InvalidOperationException("TENANT_ID not configured");
         var apiAppId = configuration["API_APP_ID"] ??
@@ -52,6 +74,11 @@ public sealed class GraphClientFactory : IGraphClientFactory
         _logger.LogInformation("Using TENANT_ID length: {TenantIdLength}",
             tenantId?.Length ?? 0);
         _logger.LogInformation("Client secret configured: {HasSecret}", !string.IsNullOrWhiteSpace(clientSecret));
+        _logger.LogInformation(
+            "Graph app-only auth mode: {Mode} (Graph:ManagedIdentity:Enabled={Enabled}, UAMI clientId set: {HasUami})",
+            _managedIdentityEnabled ? "ManagedIdentity (DefaultAzureCredential)" : "ClientSecret (legacy)",
+            _managedIdentityEnabled,
+            !string.IsNullOrWhiteSpace(_managedIdentityClientId));
 
         var builder = ConfidentialClientApplicationBuilder
             .Create(apiAppId)
@@ -70,25 +97,56 @@ public sealed class GraphClientFactory : IGraphClientFactory
     }
 
     /// <summary>
-    /// Creates Graph client using Client Secret credentials.
-    /// For app-only operations (platform/admin tasks).
+    /// Creates Graph client for app-only operations (platform/admin tasks).
     /// Uses Graph SDK v5 with TokenCredentialAuthenticationProvider.
     /// Task 4.1: Now uses named HttpClient with GraphHttpMessageHandler for centralized resilience.
+    /// Task 041 (Phase C): When <c>Graph:ManagedIdentity:Enabled = true</c>, uses
+    /// <see cref="DefaultAzureCredential"/> (App Service managed identity in Azure; chains through
+    /// EnvironmentCredential / WorkloadIdentityCredential / VisualStudioCredential / AzureCliCredential
+    /// for local dev so <c>az login</c> works without code changes). Falls back to
+    /// <see cref="ClientSecretCredential"/> when the flag is false (legacy local-dev mode).
     /// </summary>
     private GraphServiceClient CreateAppOnlyClient()
     {
-        // Validate required configuration
-        if (string.IsNullOrWhiteSpace(_clientSecret) ||
-            string.IsNullOrWhiteSpace(_tenantId) ||
-            string.IsNullOrWhiteSpace(_clientId))
-        {
-            throw new InvalidOperationException(
-                "Client secret authentication requires TENANT_ID, API_APP_ID, and API_CLIENT_SECRET to be configured");
-        }
+        TokenCredential credential;
 
-        // Use ClientSecretCredential for app-only access
-        var credential = new ClientSecretCredential(_tenantId, _clientId, _clientSecret);
-        _logger.LogDebug("Creating app-only Graph client with ClientSecretCredential");
+        if (_managedIdentityEnabled)
+        {
+            // Task 041: DefaultAzureCredential — App Service managed identity in Azure.
+            // Chains through dev credentials for local development (az login, VS, env vars).
+            var credentialOptions = new DefaultAzureCredentialOptions();
+            if (!string.IsNullOrWhiteSpace(_managedIdentityClientId))
+            {
+                // User-Assigned Managed Identity: pin the credential to this UAMI client id.
+                credentialOptions.ManagedIdentityClientId = _managedIdentityClientId;
+                _logger.LogInformation(
+                    "Creating app-only Graph client with DefaultAzureCredential (UAMI clientId: {Length} chars)",
+                    _managedIdentityClientId.Length);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Creating app-only Graph client with DefaultAzureCredential (system-assigned MI or dev credential chain)");
+            }
+
+            credential = new DefaultAzureCredential(credentialOptions);
+        }
+        else
+        {
+            // Legacy path: ClientSecretCredential. Required when MI is not available (older local-dev
+            // workflows that don't have `az login`). Production should set Graph:ManagedIdentity:Enabled=true.
+            if (string.IsNullOrWhiteSpace(_clientSecret) ||
+                string.IsNullOrWhiteSpace(_tenantId) ||
+                string.IsNullOrWhiteSpace(_clientId))
+            {
+                throw new InvalidOperationException(
+                    "ClientSecretCredential mode requires TENANT_ID, API_APP_ID, and API_CLIENT_SECRET to be configured. " +
+                    "To use managed identity instead, set Graph:ManagedIdentity:Enabled=true (recommended for Azure-hosted environments).");
+            }
+
+            credential = new ClientSecretCredential(_tenantId, _clientId, _clientSecret);
+            _logger.LogDebug("Creating app-only Graph client with ClientSecretCredential (legacy mode)");
+        }
 
         var authProvider = new AzureIdentityAuthenticationProvider(
             credential,
@@ -98,7 +156,9 @@ public sealed class GraphClientFactory : IGraphClientFactory
         // Get HttpClient with GraphHttpMessageHandler (retry, circuit breaker, timeout)
         var httpClient = _httpClientFactory.CreateClient("GraphApiClient");
 
-        _logger.LogInformation("Created app-only Graph client with centralized resilience handler");
+        _logger.LogInformation(
+            "Created app-only Graph client with centralized resilience handler (auth mode: {Mode})",
+            _managedIdentityEnabled ? "ManagedIdentity" : "ClientSecret");
 
         // Use beta endpoint for SharePoint Embedded support
         return new GraphServiceClient(httpClient, authProvider, "https://graph.microsoft.com/beta");
@@ -229,7 +289,9 @@ public sealed class GraphClientFactory : IGraphClientFactory
     /// <remarks>
     /// PPI-014: Returns a cached singleton GraphServiceClient for app-only operations.
     /// The credential and auth provider are created once via Lazy&lt;T&gt; and reused,
-    /// eliminating per-call allocation of ClientSecretCredential and AzureIdentityAuthenticationProvider.
+    /// eliminating per-call allocation of the TokenCredential and AzureIdentityAuthenticationProvider.
+    /// Task 041: The cached credential is either <see cref="DefaultAzureCredential"/> (managed identity)
+    /// or <see cref="ClientSecretCredential"/> depending on <c>Graph:ManagedIdentity:Enabled</c>.
     /// OBO (per-user) clients remain per-request since they depend on user tokens.
     /// </remarks>
     public GraphServiceClient ForApp()

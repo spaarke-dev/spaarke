@@ -1,12 +1,19 @@
-# spaarke-conventions
-
 ---
 description: Apply Spaarke coding standards from CLAUDE.md - naming, structure, file organization, and technology patterns
 tags: [conventions, standards, naming, code-style, patterns]
 techStack: [csharp, typescript, aspnet-core, react]
 appliesTo: ["**/*.cs", "**/*.ts", "**/*.tsx"]
 alwaysApply: true
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
+
+# spaarke-conventions
+
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: Conventions evolve with the tech stack (Fluent UI v9 supplanted v8; React 18 in Code Pages but 16 in PCF; Redis-first caching per ADR-009). A single frozen exemplar would lag the rules. The conventions themselves are the canonical reference.
+> **Drift-prevention note**: This skill codifies rules from root `CLAUDE.md` Coding Standards section. When `CLAUDE.md` changes, this skill must update in lockstep. `Find-SkillReferenceDrift.ps1` (Phase 4a) will catch missed propagation.
 
 ## Purpose
 
@@ -183,6 +190,39 @@ export const MyComponent: React.FC<IProps> = ({ items, onSelect }) => {
 };
 ```
 
+### Auth v2 client contract (ADR-028)
+
+```typescript
+// ✅ DO: Bootstrap once, consume via useAuth() or authenticatedFetch
+import { initAuth, useAuth, authenticatedFetch } from '@spaarke/auth';
+
+// Top-level (main.tsx / index.tsx) — call ONCE before render
+await initAuth({ clientId, tenantId, bffBaseUrl, bffApiScope });
+
+// In React components — use the hook
+const { getAccessToken } = useAuth();
+
+// For BFF calls — use authenticatedFetch (handles bearer + 401 retry automatically)
+const response = await authenticatedFetch('/api/...', { method: 'POST', body });
+
+// ❌ DON'T: Raw fetch with manual Authorization header
+const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } }); // WRONG
+
+// ❌ DON'T: Pass accessToken as a typed prop or constructor arg
+<MyComponent accessToken={token} />  // WRONG (use authenticatedFetch)
+new ApiClient(baseUrl, getAccessToken)  // WRONG (factory should accept authenticatedFetch)
+
+// ❌ DON'T: Instantiate PublicClientApplication directly outside @spaarke/auth
+const msal = new PublicClientApplication(config);  // WRONG (violates INV-7)
+
+// ❌ DON'T: Reference retired token-transport symbols
+window.__SPAARKE_BFF_TOKEN__  // WRONG — deleted in Phase A
+import { tokenBridge } from '...';  // WRONG — deleted in Phase A
+new BridgeStrategy() / new XrmStrategy() / new MsalSilentStrategy()  // WRONG — deleted in Phase A
+```
+
+**Canonical reference**: [`.claude/adr/ADR-028-spaarke-auth-architecture.md`](../../adr/ADR-028-spaarke-auth-architecture.md), [`.claude/patterns/auth/spaarke-sso-binding.md`](../../patterns/auth/spaarke-sso-binding.md), [`.claude/constraints/auth.md`](../../constraints/auth.md).
+
 ### Dataverse Plugins
 
 ```csharp
@@ -351,3 +391,18 @@ When generating or reviewing code, automatically check:
 - **code-review**: Uses these conventions for review checklist
 - **adr-check**: Deeper architectural validation
 - **project-init**: Ensures new projects follow structure
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| New code mixes Fluent UI v8 and v9 imports | Author copied snippet from older code or external example | v8 imports are an instant ADR-021 violation. Use `import { ... } from "@fluentui/react-components"` (v9) exclusively. `/adr-check` catches this. |
+| PCF control attempts `createRoot()` from React 18 | Author treated PCF like a Code Page — they're different per ADR-022 | PCF (field-bound) uses React 16 APIs from `ComponentFramework.ReactControl`. Code Pages (standalone dialogs) use React 18 `createRoot`. NEVER mix. The error you'll see: `createRoot is not a function`. |
+| BFF API uses global authorization middleware (`app.UseMiddleware<AuthorizationMiddleware>()`) | Author followed generic ASP.NET tutorial | Per ADR-008: use endpoint filters (`AddEndpointFilter<DocumentAuthorizationFilter>()`), never global middleware for resource authorization. |
+| Code injects `GraphServiceClient` directly into controller | Author bypassed the SpeFileStore facade | Per ADR-007: never let Graph SDK types leak above SpeFileStore. Inject the facade, not the underlying client. |
+| New webresource (`.js` or `.html`) created instead of PCF/Code Page | Author followed legacy Dataverse customization pattern | Per ADR-006: field-bound controls → PCF (`pcf-deploy`); standalone dialogs → React Code Pages (`code-page-deploy`). No new legacy JS webresources. |
+| Project-scoped CLAUDE.md and root CLAUDE.md disagree on a convention | Both updated separately; drift introduced | Root CLAUDE.md is canonical for cross-cutting standards. Project CLAUDE.md may NARROW (add stricter rules) but not RELAX or CONTRADICT. |
+| Raw `fetch(url, { headers: { Authorization: 'Bearer ...' } })` or `window.__SPAARKE_BFF_TOKEN__` / `tokenBridge` regression | Author copied snippet from pre-v2 code or external tutorial | Per ADR-028 (Spaarke Auth v2): use `authenticatedFetch` from `@spaarke/auth`. Tokens are managed by `useAuth()` hook. Never snapshot. `/adr-check` catches raw fetch patterns and retired symbols. |
+| Per-PCF `MsalAuthProvider.ts` / direct `new PublicClientApplication(...)` | Author bypassed `@spaarke/auth` singleton | Per ADR-028 INV-7: all consumers share ONE PCA via `@spaarke/auth`. The only remaining pre-v2 PCF is `UniversalQuickCreate` (V3 cleanup target — do NOT pattern new PCFs on it). |

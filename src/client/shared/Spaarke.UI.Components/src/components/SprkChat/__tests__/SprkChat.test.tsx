@@ -33,10 +33,24 @@ function createFetchResponse(body: unknown, status = 200): Response {
   } as unknown as Response;
 }
 
+// Auth v2 (D-AUTH-1): SprkChat takes authenticatedFetch + getAccessToken instead of
+// a snapshotted accessToken string. The test wires both to the mocked fetch so
+// existing fetch-assertions remain valid.
+const mockAuthenticatedFetch = (url: string, init?: RequestInit) =>
+  mockFetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: 'Bearer test-access-token',
+    },
+  });
+const mockGetAccessToken = () => Promise.resolve('test-access-token');
+
 const defaultProps = {
   playbookId: 'test-playbook-id',
   apiBaseUrl: 'https://api.example.com',
-  accessToken: 'test-access-token',
+  authenticatedFetch: mockAuthenticatedFetch,
+  getAccessToken: mockGetAccessToken,
 };
 
 describe('SprkChat', () => {
@@ -215,8 +229,12 @@ describe('SprkChat', () => {
       expect(screen.getByTestId('chat-send-button')).toBeInTheDocument();
     });
 
-    it('should disable input while session is loading', async () => {
-      // Use a delayed fetch to keep loading state visible
+    it('should keep input editable on cold load while session is being created (FR-06)', async () => {
+      // FR-06: input is editable on cold load (no session yet). Previously
+      // disabled while `useChatSession` was loading. Now only `isStreaming`
+      // disables the input — typing is allowed during the mount-time
+      // session-creation window and the message is sent after the session
+      // becomes available.
       let resolveCreate: (value: any) => void;
       mockFetch.mockImplementationOnce(
         () =>
@@ -229,12 +247,12 @@ describe('SprkChat', () => {
         renderWithProviders(<SprkChat {...defaultProps} />);
       });
 
-      // Input should be disabled while session is being created
+      // Input should NOT be disabled while session is being created (FR-06)
       const textarea = screen.getByTestId('chat-input-textarea');
       const nativeTextarea = textarea.querySelector('textarea') || textarea;
-      expect(nativeTextarea).toBeDisabled();
+      expect(nativeTextarea).not.toBeDisabled();
 
-      // Resolve the session creation
+      // Resolve the session creation so cleanup proceeds cleanly
       await act(async () => {
         resolveCreate!(
           createFetchResponse({
@@ -243,6 +261,29 @@ describe('SprkChat', () => {
           })
         );
       });
+    });
+
+    it('should create session on mount so first send routes to a ready session (FR-06)', async () => {
+      // FR-06 acceptance: the existing mount-time createSession flow is
+      // preserved. After mount, the session is available and the input
+      // remains enabled (only `isStreaming` would disable it).
+      await act(async () => {
+        renderWithProviders(<SprkChat {...defaultProps} />);
+      });
+
+      // Confirm POST /sessions was issued — session is created so first
+      // send routes through `handleSend` to a ready session.
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          'https://api.example.com/api/ai/chat/sessions',
+          expect.objectContaining({ method: 'POST' })
+        );
+      });
+
+      // Input remains enabled after session is established (no streaming).
+      const textarea = screen.getByTestId('chat-input-textarea');
+      const nativeTextarea = textarea.querySelector('textarea') || textarea;
+      expect(nativeTextarea).not.toBeDisabled();
     });
 
     it('should accept custom maxCharCount', async () => {

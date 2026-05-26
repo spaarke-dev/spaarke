@@ -22,7 +22,7 @@
 
 | # | Anti-Pattern | Why It's Wrong | Correct Approach | Reference |
 |---|-------------|---------------|-----------------|-----------|
-| 1 | **Using Azure Functions for async work** — creating Function App projects with `[FunctionName]` or `[ServiceBusTrigger]` bindings | Duplicates cross-cutting concerns (auth, retries, correlation) across two runtimes; complicates debugging and deployment | Use `BackgroundService` + Service Bus in the single BFF App Service | [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) |
+| 1 | **Hosting BFF endpoints in Azure Functions** — moving Minimal API endpoints (chat, documents, AI analysis) to a Function App, or using Functions to duplicate BFF auth/correlation/ProblemDetails | Duplicates BFF cross-cutting concerns across two runtimes; fragments debugging and deployment; cold-start latency on user-facing requests | Keep BFF endpoints in `Sprk.Bff.Api` (Minimal API). Azure Functions ARE permitted for out-of-band integration work (Dataverse → AI Search sync, scheduled indexers, webhook receivers) — see ADR-001 criteria | [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) |
 | 2 | **Creating a separate AI microservice** — deploying AI endpoints in a standalone service outside the BFF | Adds network hops, separate auth, deployment complexity with no isolation benefit | Extend `Sprk.Bff.Api` with AI endpoints following Minimal API patterns | [ADR-013](../../.claude/adr/ADR-013-ai-architecture.md) |
 | 3 | **Global middleware for resource authorization** — `app.UseMiddleware<DocumentSecurityMiddleware>()` | Runs before routing completes; has no access to route values like `documentId` or request body | Use endpoint filters: `.AddEndpointFilter<DocumentAuthorizationFilter>()` | [ADR-008](../../.claude/adr/ADR-008-endpoint-filters.md) |
 | 4 | **Injecting GraphServiceClient directly** — `public class Controller(GraphServiceClient graph)` | Graph SDK types leak above the facade; callers depend on Microsoft.Graph internals | Route all SPE operations through `SpeFileStore` facade; expose only SDAP DTOs | [ADR-007](../../.claude/adr/ADR-007-spefilestore.md) |
@@ -79,11 +79,23 @@
 |---|-------------|---------------|-----------------|-----------|
 | Bonus | **Adding L1 `IMemoryCache` without profiling proof** — introducing hybrid L1+L2 caching for performance | Hybrid caching adds coherence complexity with no demonstrated benefit; stale L1 data causes authorization bypass risks | Use Redis (`IDistributedCache`) for cross-request caching; `RequestCache` for within-request de-dupe; require profiling evidence before any `IMemoryCache` use | [ADR-009](../../.claude/adr/ADR-009-redis-caching.md) |
 
+### Auth (Spaarke Auth v2 — retired patterns)
+
+| # | Anti-Pattern | Why It's Wrong | Correct Approach | Reference |
+|---|-------------|---------------|-----------------|-----------|
+| AUTH-1 | **Raw `fetch(url, { headers: { Authorization: \`Bearer ${token}\` } })`** | Bypasses `authenticatedFetch` 401-retry + token-refresh; couples consumer to token shape; can't be banned at type level | Use `authenticatedFetch` from `@spaarke/auth` — handles bearer header, 401 retry, and token refresh automatically | [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md), [`.claude/constraints/auth.md`](../../.claude/constraints/auth.md) |
+| AUTH-2 | **`accessToken: string` or `getAccessToken: () => Promise<string>` as a typed prop or constructor arg** | Snapshots a token across component boundaries; expires mid-flow; was root cause of 401 bugs that Spaarke Auth v2 fixed | Pass `authenticatedFetch` function reference, or use `useAuth()` hook inside the component | [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) (D-AUTH-1) |
+| AUTH-3 | **Referencing `tokenBridge`, `window.__SPAARKE_BFF_TOKEN__`, `__spaarke_bff_token_cache__`** | All retired in Spaarke Auth v2 Phase A; MSAL `localStorage` covers cross-tab/iframe sharing via browser SOP | If you genuinely need cross-iframe invalidation (logout, revocation), use `BroadcastChannel('spaarke-auth-events')` — never for token transport | [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) ("What was retired") |
+| AUTH-4 | **Hand-rolled MSAL strategies in PCF/Code Page (`new BridgeStrategy()`, `new XrmStrategy()`, `new MsalSilentStrategy()`, `new MsalRedirectStrategy()`, per-PCF `MsalAuthProvider.ts`)** | Bypasses `@spaarke/auth` singleton (violates INV-7 "one PCA via getAuthProvider"); fires popup on every tab open; isolated MSAL cache | Use `initAuth({...})` from `@spaarke/auth` once at startup; consume via `useAuth()` / `authenticatedFetch`. (UniversalQuickCreate is the only remaining pre-v2 PCF — V3 cleanup target; do NOT pattern new PCFs on it.) | [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md), [`.claude/patterns/auth/spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md) (INV-7) |
+| AUTH-5 | **MSAL authority `/common` or `/organizations`** | Causes 401-after-refresh in per-tenant deployment model (D-AUTH-5); was a root cause of v2 hotfix bugs | Omit `authority` in `initAuth({...})` — library derives tenant-specific authority from `tenantId` parameter (INV-3/INV-6) | [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) (INV-3, INV-6) |
+| AUTH-6 | **`ClientSecretCredential` for app-only Graph or Dataverse when MI is available** | Production-equivalent environments enable `Graph__ManagedIdentity__Enabled=true` per ADR-028; using ClientSecret on those envs is wasteful + breaks audit assumption that MI is the actor | Use `DefaultAzureCredential` (managed identity) in Azure environments; `ClientSecretCredential` is local-dev fallback only. See [`docs/guides/auth-deployment-setup.md`](../guides/auth-deployment-setup.md) §3. | [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) (D-AUTH-6) |
+| AUTH-7 | **Webhook handler using `Communication__WebhookSecret` or `EmailProcessing__WebhookSecret`** (pre-v2 shared-secret pattern) | Phase C replaced shared-secret validation with HMAC-SHA256 signature validation (constant-time compare) | Use `Communication__WebhookSigningKey` / `EmailProcessing__WebhookSigningKey` (HMAC-SHA256, 48-byte base64). Generate via `openssl rand -base64 48`. See [`auth-deployment-setup.md`](../guides/auth-deployment-setup.md) §3-§4. | [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md), [`auth-deployment-setup.md`](../guides/auth-deployment-setup.md) |
+
 ---
 
 ## Related
 
-- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) -- Minimal API + BackgroundService (no Azure Functions)
+- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) -- Minimal API + BackgroundService as BFF runtime; Azure Functions permitted for narrow out-of-band integration
 - [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) -- Thin Dataverse plugins (no HTTP/Graph calls)
 - [ADR-006](../../.claude/adr/ADR-006-pcf-over-webresources.md) -- Code Pages and PCF over legacy JS
 - [ADR-007](../../.claude/adr/ADR-007-spefilestore.md) -- SpeFileStore facade (no Graph SDK leaks)
@@ -93,3 +105,4 @@
 - [ADR-013](../../.claude/adr/ADR-013-ai-architecture.md) -- AI architecture (extend BFF, no separate service)
 - [ADR-021](../../.claude/adr/ADR-021-fluent-design-system.md) -- Fluent UI v9 design system
 - [ADR-022](../../.claude/adr/ADR-022-pcf-platform-libraries.md) -- PCF platform libraries (React 16 only)
+- [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) -- Spaarke Auth v2 (function-based client contract, MI for outbound, HMAC webhooks, named API keys, MSAL invariants INV-1..INV-8)

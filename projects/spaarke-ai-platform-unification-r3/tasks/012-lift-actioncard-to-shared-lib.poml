@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Verify ActionCard reusability and lift to @spaarke/ui-components if context-agnostic</title>
+    <phase>Phase A — Foundations</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>041</blocks>
+    <tags>react, frontend, refactoring, shared-components</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>May lift code into the `@spaarke/ui-components` shared library (load-bearing per ADR-012). The decision drives task 041 (GetStartedCardsWidget) downstream. Whether the outcome is a lift or a "stay in LegalWorkspace" decision, FULL rigor applies because the import path established here is consumed by multiple Phase D widgets.</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Examine `ActionCard` at `src/solutions/LegalWorkspace/src/components/GetStarted/ActionCard.tsx`
+    (and its handlers) to determine whether it is context-agnostic per ADR-012. If yes,
+    lift it into `@spaarke/ui-components` and update LegalWorkspace to import from shared.
+    If no, document the coupling explicitly and approve a direct import from the
+    LegalWorkspace package for use by the new `GetStartedCardsWidget` (task 041). Either
+    way, produce a decision memo so task 041 has a clean import path.
+  </prompt>
+
+  <role>
+    React/TypeScript developer who has shipped shared-design-system component lifts
+    before. Bias toward minimum-viable extraction — only lift if it's actually
+    context-agnostic; do not invent ports/adapters to force a lift.
+  </role>
+
+  <goal>
+    A decision memo at
+    `projects/spaarke-ai-platform-unification-r3/notes/drafts/012-actioncard-decision.md`
+    + either (a) a new
+    `src/client/shared/Spaarke.UI.Components/src/components/ActionCard/` folder with the
+    component lifted + LegalWorkspace updated to import from shared, OR (b) a confirmation
+    that ActionCard stays in LegalWorkspace and a documented import path that task 041
+    can use directly. Either outcome unblocks task 041.
+  </goal>
+
+  <context>
+    <background>
+      FR-18 requires the new `GetStartedCardsWidget` (Context-pane welcome state) to render
+      7 cards reusing LegalWorkspace's `ActionCard`. ADR-012 mandates context-agnostic
+      shared components live in `@spaarke/ui-components`. Risk A-3 in the spec flags that
+      ActionCard may have LegalWorkspace-specific dependencies (Dataverse APIs, routing,
+      etc.) that would block a clean lift. This task makes the explicit decision.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/GetStarted/ActionCard.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/GetStarted/ActionCardHandlers.ts</file>
+      <file>src/solutions/LegalWorkspace/src/components/GetStarted/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Context-agnostic shared components MUST live in `@spaarke/ui-components`. Context-coupled components stay in their solution package; coupling must be explicitly documented before approving a direct cross-solution import.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only. If lifting, scrub any hex / rgba literals at lift time.</constraint>
+    <constraint source="ADR-022">React 19 only.</constraint>
+    <constraint source="project">If lifted, LegalWorkspace MUST continue to function identically (FR-25, NFR-10) — verify the imports are updated and the standalone solution still builds + renders.</constraint>
+    <constraint source="project">Do not lift `ActionCardHandlers.ts` if it pulls LegalWorkspace-specific dependencies (e.g., entity creation, routing). Handlers are typically context-specific; the visual `ActionCard` is more likely to be agnostic.</constraint>
+    <constraint source="project">The decision memo MUST be written even if the answer is "stay in LegalWorkspace" — task 041 needs a documented import path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read ActionCard + handlers">
+      Open `ActionCard.tsx` and `ActionCardHandlers.ts`. Enumerate the imports of each.
+      Categorize each import as:
+      (a) Fluent v9 / React / generic utility (agnostic-safe)
+      (b) `@spaarke/ui-components` internal (agnostic-safe)
+      (c) LegalWorkspace-specific path (`src/solutions/LegalWorkspace/...`) → coupled
+      (d) Dataverse / Xrm.Navigation / routing / entity-creation API → coupled
+    </step>
+    <step order="2" name="Make the decision">
+      If ActionCard.tsx itself depends ONLY on (a) + (b), it is context-agnostic — proceed
+      to lift. If it depends on (c) or (d), it stays in LegalWorkspace. ActionCardHandlers
+      almost certainly stays where it is regardless. Document the decision and the
+      evidence (specific imports observed) in the memo.
+    </step>
+    <step order="3" name="Path A — lift to shared">
+      If lifting:
+      (a) Create `src/client/shared/Spaarke.UI.Components/src/components/ActionCard/`.
+      (b) Move (or copy + delete) `ActionCard.tsx` into it; scrub any hex/rgba literals;
+          confirm tokens-only colors per ADR-021.
+      (c) Add `index.ts` barrel exporting `ActionCard` and its props type.
+      (d) Add the export to `src/client/shared/Spaarke.UI.Components/src/index.ts`.
+      (e) Update LegalWorkspace imports of ActionCard to consume from
+          `@spaarke/ui-components`.
+      (f) Build both the shared library and LegalWorkspace solution to confirm zero
+          regressions. Update or add a snapshot test in the shared component folder.
+    </step>
+    <step order="4" name="Path B — keep in LegalWorkspace">
+      If NOT lifting:
+      (a) Document the specific coupling that blocks the lift (e.g., "imports
+          `useEntityRouter` from LegalWorkspace routing module").
+      (b) Approve a direct import path from LegalWorkspace for task 041, OR document an
+          alternative (e.g., "task 041 should create its own minimal card component using
+          the same visual tokens"). Recommend an approach.
+    </step>
+    <step order="5" name="Write the decision memo">
+      Create
+      `projects/spaarke-ai-platform-unification-r3/notes/drafts/012-actioncard-decision.md`
+      with sections: Decision (LIFT vs STAY), Evidence (import categorization),
+      Action taken (file changes, if any), Impact on task 041 (exact import path),
+      Follow-up notes (deferred work).
+    </step>
+    <step order="6" name="Verify builds">
+      Run `npm run build` for the shared-components workspace AND for LegalWorkspace
+      (if Path A). Confirm both build clean with zero TypeScript errors and no new lint
+      warnings. If Path B, no builds are strictly required but a quick `npm run build`
+      sanity check of LegalWorkspace is encouraged.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read ActionCard, ActionCardHandlers, and shared-components index</tool>
+    <tool name="Grep">Categorize imports; find all current usages of ActionCard for the lift sweep</tool>
+    <tool name="Edit">Update imports if lifting</tool>
+    <tool name="Write">Create new component files and the decision memo</tool>
+    <tool name="Bash">npm build for shared-components and LegalWorkspace</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r3/notes/drafts/012-actioncard-decision.md</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ActionCard/* (Path A only)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (modified — Path A only)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/components/GetStarted/* (modified imports — Path A only)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The decision memo exists at `projects/spaarke-ai-platform-unification-r3/notes/drafts/012-actioncard-decision.md` with a clear LIFT or STAY decision, evidence, and the import path task 041 will use.</criterion>
+    <criterion testable="true">If lifted: `ActionCard` is importable as `import { ActionCard } from '@spaarke/ui-components'`; LegalWorkspace imports updated; both packages build clean.</criterion>
+    <criterion testable="true">If staying: the documented import path for task 041 is concrete (file path + symbol name), and the blocking coupling is named explicitly.</criterion>
+    <criterion testable="true">Standalone LegalWorkspace still builds and (if lifted) renders identically — no regression in any GetStarted cards on the standalone surface (per FR-25 / NFR-10).</criterion>
+    <criterion testable="true">If lifted: zero hex / rgba literals in the lifted `ActionCard.tsx` (ADR-021 scrub at lift time).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    FULL rigor applies — code-review + adr-check at Step 9.5 because the decision (and any lift)
+    has direct downstream impact on task 041 and on the LegalWorkspace standalone surface.
+  </execution>
+</task>

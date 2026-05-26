@@ -57,7 +57,7 @@ The dependency direction is strictly one-way: `Spaarke.Core` depends on `Spaarke
 ### Dataverse Access Query (OBO vs Service Principal)
 
 1. If `userAccessToken` is provided: `DataverseAccessDataSource` performs OBO token exchange via MSAL to get a Dataverse token as the user
-2. If `userAccessToken` is null: uses service principal (app-only) `ClientSecretCredential` or `DefaultAzureCredential`
+2. If `userAccessToken` is null: uses service principal — `DefaultAzureCredential` (canonical per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md); managed identity in Azure when `Graph__ManagedIdentity__Enabled=true`) with `ClientSecretCredential` fallback for local dev only
 3. Maps Azure AD Object ID to Dataverse `systemuserid` via OData query
 4. Queries document access by attempting direct record retrieval — if the OBO-authenticated call succeeds, user has at least Read access (Dataverse enforces row-level security)
 5. Returns `AccessSnapshot` with combined `AccessRights` from all permission sources
@@ -78,7 +78,7 @@ The dependency direction is strictly one-way: `Spaarke.Core` depends on `Spaarke
 | Consumed by | AI Authorization | `IAccessDataSource` | OBO-based access checks for AI features |
 | Consumed by | BFF API caching | `DistributedCacheExtensions`, `RequestCache` | Redis + per-request cache layers |
 | Consumed by | Office Add-ins | `DesktopUrlBuilder` | Desktop protocol URL generation |
-| Depends on | Azure AD / Entra ID | `ClientSecretCredential`, `DefaultAzureCredential` | Token acquisition for Dataverse |
+| Depends on | Azure AD / Entra ID | `DefaultAzureCredential` (canonical per ADR-028), `ClientSecretCredential` (local dev fallback) | Token acquisition for Dataverse |
 | Depends on | Dataverse Web API | REST API v9.2 | CRUD operations, metadata queries |
 | Depends on | Redis | `IDistributedCache` | Distributed caching (ADR-009) |
 

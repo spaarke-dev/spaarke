@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPU2-007" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Define JSON Schema Contracts for All R2 SSE Event Types</title>
+    <phase>1</phase>
+    <tags>bff-api, sse, contracts</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    The R2 AI platform defines a richer set of SSE event types than R1. Clients (PCF AiToolAgent control, Code Pages) need to know the exact shape of each event to render UI correctly. Without formal JSON Schema contracts, the PCF client team and the BFF API team will make independent assumptions about field names and types, leading to integration failures at the end of sprint.
+
+    Define JSON Schema draft-07 contracts for all R2 SSE event types specified in FR-801 of the project spec: workspace_widget, context_update, context_highlight, workspace_action, suggestions, capability_change, and safety_annotation. Create the schema files in a dedicated directory, and create a C# validation utility that can validate a serialized SSE event payload against its schema at runtime (for use in integration tests and debug middleware).
+  </prompt>
+  <role>API contract engineer with JSON Schema and SSE streaming expertise.</role>
+  <goal>
+    Seven JSON Schema files (one per R2 SSE event type) exist in infrastructure/contracts/sse-events/. A C# SseEventSchemaValidator utility class exists in the BFF API project that can validate a JsonElement against the correct schema for a given event type. All schemas are internally consistent (shared $defs for common structures). A schema index file (README or manifest JSON) documents each event type.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/spec.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read projects/spaarke-ai-platform-unification-r2/spec.md in full, focusing on FR-801 and any sections describing R2 SSE event types, their fields, and semantics.</step>
+    <step>Read .claude/patterns/ai/streaming-endpoints.md to understand the existing SSE event envelope format (how type and data fields are structured in R1) so R2 schemas are backward-compatible where possible.</step>
+    <step>Read docs/architecture/AI-ARCHITECTURE.md for any event type specifications or streaming protocol details already documented.</step>
+    <step>Create the directory infrastructure/contracts/sse-events/ if it does not exist.</step>
+    <step>Create a shared definitions file infrastructure/contracts/sse-events/_shared-defs.json with $defs for common structures: SseEnvelope (type, timestamp, sessionId, traceId), DocumentReference (documentId, title, url), RangeHighlight (startOffset, endOffset, text).</step>
+    <step>Create infrastructure/contracts/sse-events/workspace-widget.schema.json for the workspace_widget event type:
+      - Extends SseEnvelope (type must equal "workspace_widget")
+      - widgetId: string
+      - widgetType: enum (document-preview, action-panel, suggestion-list, capability-status)
+      - payload: object (widgetType-specific, use oneOf discriminated by widgetType)
+      - priority: integer (1-10)</step>
+    <step>Create infrastructure/contracts/sse-events/context-update.schema.json for the context_update event:
+      - type: "context_update"
+      - contextType: enum (document, entity, conversation, user-intent)
+      - contextId: string
+      - delta: object with added/removed/modified arrays
+      - confidence: number (0.0-1.0)</step>
+    <step>Create infrastructure/contracts/sse-events/context-highlight.schema.json for the context_highlight event:
+      - type: "context_highlight"
+      - documentId: string
+      - highlights: array of RangeHighlight
+      - highlightType: enum (relevant, cited, conflicting)
+      - reason: string</step>
+    <step>Create infrastructure/contracts/sse-events/workspace-action.schema.json for the workspace_action event:
+      - type: "workspace_action"
+      - actionId: string
+      - actionType: enum (navigate, open-document, run-playbook, dismiss)
+      - label: string
+      - parameters: object (action-specific)
+      - requiresConfirmation: boolean</step>
+    <step>Create infrastructure/contracts/sse-events/suggestions.schema.json for the suggestions event:
+      - type: "suggestions"
+      - suggestions: array of {suggestionId: string, text: string, confidence: number, category: enum(action, question, insight)}
+      - maxSuggestions: integer (must match array length)</step>
+    <step>Create infrastructure/contracts/sse-events/capability-change.schema.json for the capability_change event:
+      - type: "capability_change"
+      - capability: enum (search, summarize, cite, memory, safety, playbook)
+      - status: enum (available, degraded, unavailable)
+      - reason: string (optional)
+      - retryAfterSeconds: integer (optional, present when status=degraded)</step>
+    <step>Create infrastructure/contracts/sse-events/safety-annotation.schema.json for the safety_annotation event:
+      - type: "safety_annotation"
+      - severity: enum (info, warning, blocked)
+      - category: enum (jailbreak, indirect-attack, groundedness, content-policy)
+      - affectedSegment: RangeHighlight (optional)
+      - action: enum (logged, filtered, blocked)
+      - userMessage: string (safe message to display to user)</step>
+    <step>Create infrastructure/contracts/sse-events/manifest.json: a JSON array listing each schema file, its event type string, and a one-line description.</step>
+    <step>Create src/server/api/Sprk.Bff.Api/Infrastructure/Sse/SseEventSchemaValidator.cs:
+      - Static class or singleton service
+      - Method: ValidateAsync(string eventType, JsonElement payload) returning ValidationResult (IsValid, Errors)
+      - Loads schemas from embedded resources or the contracts directory
+      - Uses NJsonSchema or JsonSchema.Net (whichever is already referenced in the project; if neither, use JsonDocument-based structural validation as a fallback)
+      - Designed for use in integration tests and optional debug middleware (not hot path production validation)</step>
+    <step>Run dotnet build src/server/api/Sprk.Bff.Api/ and confirm zero errors.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>infrastructure/contracts/sse-events/ contains exactly eight files: _shared-defs.json, manifest.json, and one .schema.json file per event type (workspace-widget, context-update, context-highlight, workspace-action, suggestions, capability-change, safety-annotation).</criterion>
+    <criterion>Each schema file is valid JSON Schema draft-07 and passes schema linting (jsonschema validate or equivalent).</criterion>
+    <criterion>Each schema uses $ref to reference common structures from _shared-defs.json rather than duplicating field definitions.</criterion>
+    <criterion>manifest.json lists all seven event types with their schema file references and descriptions.</criterion>
+    <criterion>SseEventSchemaValidator.cs exists in src/server/api/Sprk.Bff.Api/Infrastructure/Sse/ and compiles without errors.</criterion>
+    <criterion>SseEventSchemaValidator exposes a ValidateAsync method accepting eventType string and JsonElement payload.</criterion>
+    <criterion>dotnet build src/server/api/Sprk.Bff.Api/ exits with code 0.</criterion>
+    <criterion>The safety_annotation schema includes the severity, category, action, and userMessage fields as required fields.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,12 +1,19 @@
-# task-create
-
 ---
 description: Decompose a project plan into numbered POML task files for systematic AI-assisted execution
 tags: [tasks, planning, project-structure, poml]
 techStack: [all]
 appliesTo: ["projects/*/plan.md", "create tasks", "decompose plan"]
 alwaysApply: false
+exemplar: projects/ai-procedure-quality-r1/tasks/
+last-reviewed: 2026-05-17
 ---
+
+# task-create
+
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2c — `leave-alone-justified` on body length per dereferencing-reliability concern; light extract: 3 worked Examples moved to `examples/examples.md`)
+> **Exemplar rationale**: `projects/ai-procedure-quality-r1/tasks/` is a recent multi-task project (32 tasks across 7 phases) produced by this skill — a live reference output.
+> **Justified length**: procedural Workflow body kept inline. Task POML callers cite Step 3.5.5, 3.65, 3.8 — these step numbers are external API and stay in body. Examples moved to `examples/` because they're reference content, not procedure.
 
 ## Purpose
 
@@ -84,7 +91,7 @@ When a task has these tags, ALWAYS include these knowledge files:
 | `pcf`, `react`, `fluent-ui`, `frontend`, `e2e-test` | `.claude/constraints/pcf.md` | `.claude/patterns/pcf/control-initialization.md`, `.claude/patterns/pcf/theme-management.md` | `src/client/pcf/CLAUDE.md`, `docs/guides/PCF-DEPLOYMENT-GUIDE.md`, `.claude/skills/ui-test/SKILL.md` |
 | `bff-api`, `api`, `minimal-api`, `endpoints` | `.claude/constraints/api.md` | `.claude/patterns/api/endpoint-definition.md`, `.claude/patterns/api/endpoint-filters.md` | `src/server/api/CLAUDE.md` (if exists) |
 | `dataverse`, `solution`, `fields`, `plugin` | `.claude/constraints/plugins.md` | `.claude/patterns/dataverse/plugin-structure.md` | `.claude/skills/dataverse-deploy/SKILL.md` |
-| `auth`, `oauth`, `authorization` | `.claude/constraints/auth.md` | `.claude/patterns/auth/obo-flow.md`, `.claude/patterns/auth/oauth-scopes.md` | — |
+| `auth`, `oauth`, `authorization` | `.claude/constraints/auth.md` | `.claude/patterns/auth/spaarke-sso-binding.md` (canonical v2), `.claude/patterns/auth/obo-flow.md`, `.claude/patterns/auth/oauth-scopes.md` | `.claude/adr/ADR-028-spaarke-auth-architecture.md`, `docs/guides/auth-deployment-setup.md` |
 | `cache`, `redis`, `caching` | `.claude/constraints/data.md` | `.claude/patterns/caching/distributed-cache.md` | — |
 | `ai`, `azure-openai`, `document-intelligence` | `.claude/constraints/ai.md` | `.claude/patterns/ai/streaming-endpoints.md` | — |
 | `deploy` | — | — | `.claude/skills/dataverse-deploy/SKILL.md`, `docs/guides/PCF-DEPLOYMENT-GUIDE.md` |
@@ -677,55 +684,22 @@ Recommended sections:
 
 ## Examples
 
-### Example 1: Decompose SDAP Refactor Plan
-**Trigger**: "/task-create sdap-refactor"
+See [`examples/examples.md`](examples/examples.md) for 3 worked examples:
+- **Example 1**: Decomposing the SDAP Refactor plan into 14 POML files across 4 phases
+- **Example 2**: Fine-grained decomposition (15 tasks vs 8, each ~1-2 hours)
+- **Example 3**: Handling missing WBS in plan.md (graceful failure with recovery prompt)
 
-**Input plan.md phases**:
-```
-Phase 1: Assessment (2 tasks)
-Phase 2: API Restructure (5 tasks)
-Phase 3: Worker Migration (4 tasks)
-Phase 4: Testing (3 tasks)
-```
+---
 
-**Output**:
-```
-tasks/
-├── TASK-INDEX.md
-├── 001-inventory-endpoints.poml
-├── 002-document-dependencies.poml
-├── 010-create-minimal-api-structure.poml
-├── 011-migrate-policy-endpoints.poml
-├── 012-migrate-document-endpoints.poml
-├── 013-migrate-sync-endpoints.poml
-├── 014-implement-auth-filters.poml
-├── 020-extract-sync-worker.poml
-├── 021-extract-notification-worker.poml
-├── 022-implement-job-queue.poml
-├── 023-configure-worker-hosting.poml
-├── 030-unit-tests.poml
-├── 031-integration-tests.poml
-└── 032-e2e-validation.poml
-```
+## Failure Modes & Recovery
 
-### Example 2: Fine-Grained Decomposition
-**Trigger**: "Create tasks for redis-caching project with fine granularity"
-
-**Result**: 15 tasks instead of 8, each ~1-2 hours
-
-### Example 3: Handle Missing Dependencies
-**Trigger**: "/task-create my-project"
-
-**If plan.md lacks WBS**:
-```
-⚠️ Cannot create tasks: plan.md missing work breakdown structure
-
-Required in plan.md Section 5:
-  - At least one phase with name and description
-  - Deliverables or outcomes for each phase
-
-Would you like me to help complete the plan first?
-```
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Generated POML files have empty `<knowledge><files>` blocks | Tag-to-knowledge mapping (Step 3.5.5) didn't match the task's tags | Verify the mapping table covers the task's tags. If a tag has no mapping, add one OR change the task to use a known tag. The mapping is the connective tissue between tasks and ADRs/constraints. |
+| TASK-INDEX.md missing parallel-group annotations | Step 3.8 (parallel grouping) skipped or incomplete | Always run Step 3.8 — it identifies independent tasks that can run in parallel, which is critical for efficient execution (per project-pipeline orchestration). |
+| Task POMLs lack `<ui-tests>` for PCF/frontend tasks | Step 3.65 (UI test annotation) skipped | PCF/frontend tasks MUST include `<ui-tests>` sections so `task-execute` Step 9.7 can invoke `ui-test` skill against them. The skill body Step 3.65 covers the format. |
+| Generated task numbering collides with existing tasks | Author re-ran task-create over an existing tasks/ directory without merge logic | task-create is idempotent ON FIRST RUN but doesn't merge. If re-running, delete existing `tasks/` first OR manually merge. Don't overwrite without confirmation. |
+| External callers (e.g., `task-execute` referencing Step 3.5.5) silently break | Step numbers in Workflow body got renumbered during refinement | **Step number scaffolding is external API** (callers cite by number). NEVER renumber Step 3.5.5, 3.65, 3.8, etc. without coordinating with all callers (verified post-edit via `grep -rn "Step 3.5"`). |
 
 ## Validation Checklist
 

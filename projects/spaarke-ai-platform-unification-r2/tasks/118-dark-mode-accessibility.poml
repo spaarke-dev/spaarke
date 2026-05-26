@@ -1,0 +1,52 @@
+<task id="AIPU2-118" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Dark mode and accessibility compliance (ADR-021)</title>
+    <phase>6</phase>
+    <tags>testing, accessibility, fluent-ui</tags>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-090, AIPU2-091, AIPU2-092</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    ADR-021 mandates that all UI uses Fluent UI v9 tokens with no hard-coded colors and that
+    dark mode and high-contrast mode work correctly. This task validates the new R2 UI
+    components — safety annotations (AIPU2-090), confidence/feedback UI (AIPU2-091), and
+    citation verification badges (AIPU2-092) — against ADR-021 requirements. Additionally,
+    WCAG 2.1 AA compliance must be verified for all interactive elements in the new components.
+    Any hard-coded colors found must be fixed before deployment.
+  </prompt>
+  <role>Frontend developer with Fluent UI v9 theming expertise and accessibility knowledge.</role>
+  <goal>
+    All new R2 UI components (safety annotations, confidence bars, feedback UI, citation badges,
+    widget frames) use only Fluent UI v9 tokens. Dark mode renders correctly without any
+    invisible or clashing elements. High-contrast mode is navigable. All interactive elements
+    meet WCAG 2.1 AA contrast requirements. Zero hard-coded colors remain in R2 components.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/theme-consistency.md</file>
+      <file>src/solutions/SpaarkeAi/src/components/SafetyAnnotations</file>
+      <file>src/solutions/SpaarkeAi/src/components/ConfidenceFeedback</file>
+      <file>src/solutions/SpaarkeAi/src/components/CitationBadges</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Enumerate all R2 UI components added in Phase 4 (safety annotation overlays, confidence bars, thumbs up/down feedback, citation verification badges, widget frames/headers, WorkspaceTabManager tab bar). Create a checklist of every component.</step>
+    <step>Scan each component's TSX for hard-coded color values: search for hex codes (#), rgb(, rgba(, named CSS colors, and inline style color properties. Any found must be replaced with the appropriate Fluent UI v9 token (e.g. tokens.colorBrandBackground, tokens.colorNeutralForeground1).</step>
+    <step>Toggle to dark mode (webDarkTheme FluentProvider) in the dev environment. Visually inspect each R2 component: verify no elements are invisible (white on white, black on black), no colors clash, all text remains readable.</step>
+    <step>Toggle to high-contrast mode (teamsHighContrastTheme). Verify all interactive elements (buttons, chips, badges, tab items) are visible and have sufficient contrast. Verify focus indicators are visible.</step>
+    <step>Run automated WCAG 2.1 AA contrast checks on all interactive R2 elements using axe-core or similar tool. Fix any violations found.</step>
+    <step>Verify keyboard navigation through R2 components: citation badge tooltip accessible via keyboard, feedback thumbs accessible via keyboard, safety annotation dismissable via keyboard, widget tab navigation works with Tab/Arrow keys.</step>
+    <step>Document findings in notes/dark-mode-accessibility-report.md: list of components checked, hard-coded colors found and fixed, dark mode issues found and fixed, high-contrast issues, WCAG violations found and fixed, keyboard navigation status.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Zero hard-coded color values remain in any R2 UI component after fixes.</criterion>
+    <criterion>All R2 components render correctly in dark mode (webDarkTheme) — no invisible or clashing elements.</criterion>
+    <criterion>All R2 components are navigable in high-contrast mode (teamsHighContrastTheme).</criterion>
+    <criterion>All interactive R2 elements meet WCAG 2.1 AA contrast ratio (4.5:1 for normal text, 3:1 for large text and UI components).</criterion>
+    <criterion>All R2 interactive elements are keyboard-accessible with visible focus indicators.</criterion>
+    <criterion>Accessibility report written to notes/dark-mode-accessibility-report.md with findings and fixes.</criterion>
+  </acceptance-criteria>
+</task>

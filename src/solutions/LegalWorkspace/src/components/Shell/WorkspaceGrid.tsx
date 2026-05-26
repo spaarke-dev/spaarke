@@ -98,6 +98,14 @@ export interface IWorkspaceGridProps {
   initialWorkspaceId?: string;
   /** Called when workspace header data is ready — parent renders it in PageHeader toolbar. */
   onHeaderReady?: (state: WorkspaceHeaderState) => void;
+  /**
+   * Round 4 Fix 4.1 (2026-05-21): when `true`, forwards `embedded` to
+   * `useWorkspaceLayouts` so the hook isolates sessionStorage from sibling
+   * embedded tabs. Standalone LegalWorkspace passes this flag `false`
+   * (default), preserving the cache-first behaviour and FR-25 / NFR-10
+   * byte-identical bundle behaviour.
+   */
+  embedded?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +119,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   userId,
   onHeaderReady,
   initialWorkspaceId,
+  embedded = false,
 }) => {
   // -------------------------------------------------------------------------
   // DataverseService for DocumentsTab
@@ -157,7 +166,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     error: layoutError,
     setActiveLayoutById,
     refetch: refetchLayouts,
-  } = useWorkspaceLayouts(initialWorkspaceId);
+  } = useWorkspaceLayouts({ initialWorkspaceId, embedded });
 
   // -------------------------------------------------------------------------
   // Record counts for section badges

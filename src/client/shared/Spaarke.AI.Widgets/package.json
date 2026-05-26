@@ -1,0 +1,63 @@
+{
+  "name": "@spaarke/ai-widgets",
+  "version": "0.1.0",
+  "description": "Spaarke AI widget library — WorkspaceWidgets and ContextWidgets for the three-pane shell. React 19, NOT PCF-safe.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:ci": "jest --ci --coverage --maxWorkers=2"
+  },
+  "keywords": [
+    "spaarke",
+    "react",
+    "typescript",
+    "fluent-ui",
+    "ai",
+    "widgets",
+    "workspace-widgets",
+    "context-widgets",
+    "three-pane"
+  ],
+  "author": "Spaarke Engineering Team",
+  "license": "UNLICENSED",
+  "peerDependencies": {
+    "@fluentui/react-components": "^9.0.0",
+    "@fluentui/react-icons": "^2.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "dependencies": {
+    "@spaarke/ai-outputs": "file:../Spaarke.AI.Outputs",
+    "@spaarke/ui-components": "file:../Spaarke.UI.Components"
+  },
+  "devDependencies": {
+    "@fluentui/react-components": "^9.73.2",
+    "@fluentui/react-icons": "^2.0.320",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/jest": "^30.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9.17.0",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.2.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "ts-jest": "^29.4.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}

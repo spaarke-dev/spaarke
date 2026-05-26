@@ -1,25 +1,39 @@
-# project-pipeline
-
 ---
 description: Automated pipeline from SPEC.md to ready-to-execute tasks — runs autonomously by default with parallel task execution
 tags: [project-pipeline, orchestration, automation]
 techStack: [all]
 appliesTo: ["projects/*/", "start project", "initialize project"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-17
 ---
+
+# project-pipeline
+
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2c — `leave-alone-justified` on body length; **fixed AP-1: stale `MAX_THINKING_TOKENS=50000` prescription** — IGNORED on Opus 4.6+ per root CLAUDE.md adaptive-thinking model)
+> **Exemplar rationale**: Pipeline runs are project-specific; no canonical snapshot holds. The skill's 12-step structure is the contract.
+> **Justified length** (943 lines): operationally dense orchestrator chaining 12 component-skill invocations. Splitting to references/ would risk dereference reliability (per Phase 2b Wave 2c decision 2026-05-17): an agent executing this pipeline needs procedural detail inline, not gestured-at.
 
 ## Prerequisites
 
-### Claude Code Extended Context Configuration
+### Claude Code Effort & Output Configuration
 
-**CRITICAL**: This orchestrator skill REQUIRES extended context settings:
+**CRITICAL — Updated 2026-05-17**: This orchestrator runs best with **adaptive thinking on high or max effort** + extended output tokens. The previous prescription of `MAX_THINKING_TOKENS=50000` is **OBSOLETE on Opus 4.6+** — Anthropic moved to adaptive thinking where the model decides depth dynamically. See root [`CLAUDE.md`](../../../CLAUDE.md) for current configuration guidance.
+
+**Current prerequisites:**
 
 ```bash
-MAX_THINKING_TOKENS=50000
+# Output tokens (still load-bearing; project-pipeline emits a lot)
 CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
+
+# MAX_THINKING_TOKENS — IGNORED on Opus 4.6+ (adaptive thinking applies)
+# If running on older models, the previous prescription was 50000
 ```
 
-**Why Extended Context is Critical**:
+**Effort guidance**: invoke `/project-pipeline` on Opus with effort `high` or `max` — multi-phase, deep resource discovery, 100+ task files. Subagents the pipeline spawns (general-purpose, Explore) can run on `low` or `medium`.
+
+**Why Output Tokens is Critical**:
 - **Resource Discovery (Step 2)**: Loads ADRs, skills, knowledge docs, and existing code patterns
 - **Artifact Generation (Step 2)**: Calls `project-setup` which generates README, PLAN, CLAUDE.md
 - **Task Decomposition (Step 3)**: Creates 50-200+ task files with tag-to-knowledge mapping
@@ -42,7 +56,7 @@ echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
 # Should output: 50000 and 64000
 ```
 
-**If not set**, the pipeline may fail or produce incomplete results. See root [CLAUDE.md](../../../CLAUDE.md#development-environment) for setup instructions.
+**If output tokens not set**, the pipeline may produce truncated artifacts. See root [`CLAUDE.md`](../../../CLAUDE.md) for full guidance. (The legacy `MAX_THINKING_TOKENS` env var is IGNORED on Opus 4.6+ — adaptive thinking applies; invoke this skill on Opus with effort `high` or `max`.)
 
 ### Permission Mode: Plan Mode (REQUIRED for Steps 0-3)
 
@@ -937,6 +951,19 @@ Pipeline successful when:
 - [ ] Feature branch created and pushed to remote (Step 4)
 - [ ] Initial commit made with project artifacts (Step 4)
 - [ ] User confirmed ready to execute Task 001 (or declined) (Step 5)
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Pipeline skipped Step 2 ADR/resource discovery — generated artifacts have no ADR awareness | Operator ran a manual mini-version OR step was elided due to time pressure | Always run Step 2 (comprehensive resource discovery) — it's the load-bearing step connecting spec to existing ADRs/skills/patterns. No shortcut available. |
+| Step 4 created feature branch but no initial commit | Pre-commit hook rejected the commit | Re-run Step 4. Common cause: hook validating commit-message format. Fix the message and retry. |
+| Step 3 generated 0 task files | `plan.md` lacks a phased WBS; task-create couldn't decompose | Verify `plan.md` has a "Phase Breakdown" section with deliverables. If not, return to Step 2.2 (plan generation) and re-author. |
+| Pipeline "completes" but Task 001 fails at Step 0 | Pipeline ran with insufficient effort — Step 2 missed critical ADRs | Re-run pipeline on Opus with effort `max`. Adaptive thinking won't compensate for rushed upstream resource discovery. |
+| Generated CLAUDE.md references stale skills or wrong paths | Author hand-edited instead of using `project-setup` (which uses canonical `references/claudemd-template.md`) | Always invoke `project-setup` as Step 2. Don't author CLAUDE.md from memory. |
+| Stale `MAX_THINKING_TOKENS=50000` setting carried forward by ops scripts | Older docs prescribed this env var; it's IGNORED on Opus 4.6+ | This was an AP-1 hit fixed 2026-05-17. On current models use `/effort max` or specify effort in the slash-command invocation. |
 
 ---
 

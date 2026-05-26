@@ -1,0 +1,54 @@
+<task id="AIPU2-041" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build RecordSyncJob BackgroundService (Dataverse to AI Search)</title>
+    <phase>2D</phase>
+    <tags>bff-api, background-job, ai-search</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-006</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build a RecordSyncJob BackgroundService that incrementally synchronizes key Dataverse
+    entity records into the spaarke-records-index in Azure AI Search. This enables the
+    SearchDiscovery AI tool to find both documents AND structured Dataverse records (matters,
+    projects, contacts, accounts) in a single search call. The job must run periodically,
+    query only records modified since the last successful sync (incremental sync using a
+    watermark), and push indexed documents to AI Search using the SDK. The job follows the
+    existing BackgroundService pattern in the codebase.
+  </prompt>
+  <role>Senior .NET developer familiar with Azure AI Search SDK (Azure.Search.Documents), Dataverse OData, and .NET BackgroundService patterns.</role>
+  <goal>
+    RecordSyncJob runs on a configurable schedule, syncs only changed records (incremental),
+    and the spaarke-records-index contains current data from all supported entity types.
+    SearchDiscovery queries return both documents and records in unified results.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>infrastructure/ai-search/spaarke-records-index.json</file>
+      <file>scripts/ai-search/Sync-RecordsToIndex.ps1</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read background-workers.md and ADR-004-job-contract.md to understand the BackgroundService pattern, cancellation token handling, and job contract requirements. Read spaarke-records-index.json to understand the target index schema before mapping entity fields.</step>
+    <step>Read Sync-RecordsToIndex.ps1 to understand any existing field mappings or sync logic that can be ported to C#.</step>
+    <step>Create RecordSyncJob.cs in src/server/api/Sprk.Bff.Api/Services/Jobs/. Extend BackgroundService following the existing pattern. Inject IConfiguration for schedule interval (default: 15 minutes).</step>
+    <step>Implement watermark persistence: store the last successful sync timestamp in a dedicated Cosmos DB document (or Redis key, consistent with existing job infrastructure). On each run, read the watermark, query Dataverse for records where modifiedon > watermark, update watermark on success.</step>
+    <step>Implement Dataverse query per entity type: sprk_matter, sprk_project, contact, account. Use OData $filter=modifiedon gt {watermark} and $select limited to indexed fields only (no bulk field pull). Batch in pages of 100.</step>
+    <step>Map each entity to a search document matching the spaarke-records-index schema. Include: id (entityType_entityId), entityType, displayName, status, tenantId, matterId (if applicable), lastModified, searchableText (concatenation of key text fields for full-text search).</step>
+    <step>Push documents to Azure AI Search using SearchClient.MergeOrUploadDocumentsAsync in batches of 50. Use DefaultAzureCredential for the Search client. Handle 429 throttling with exponential backoff (3 retries max).</step>
+    <step>Register RecordSyncJob as a hosted service in Program.cs (AddHostedService). Log sync start, entity counts per type, and completion time at Information level. Log failures at Error level with retry context.</step>
+    <step>Write unit tests: (a) watermark is read on start and updated on success, (b) watermark is NOT updated on failure (next run re-syncs failed records), (c) documents are batched in groups of 50, (d) 429 response triggers retry with backoff, (e) cancellation token is honoured (job stops cleanly mid-batch).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>RecordSyncJob runs as a BackgroundService on a configurable interval (default 15 minutes).</criterion>
+    <criterion>Only records modified since the last watermark are queried — full re-sync is not triggered on every run.</criterion>
+    <criterion>Watermark is only advanced after a fully successful sync batch — partial failures cause re-sync of affected records on the next run.</criterion>
+    <criterion>Documents pushed to AI Search match the spaarke-records-index schema (id, entityType, displayName, tenantId, searchableText are all populated).</criterion>
+    <criterion>429 throttling is handled with exponential backoff up to 3 retries before logging an error.</criterion>
+    <criterion>Cancellation token is respected — the job exits cleanly within 5 seconds of cancellation.</criterion>
+    <criterion>All unit tests pass (dotnet test).</criterion>
+  </acceptance-criteria>
+</task>

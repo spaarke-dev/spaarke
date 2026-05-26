@@ -1,0 +1,61 @@
+<task id="060" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Deploy cumulative changeset to `spaarke-demo`</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <assigned>Project owner + owner (per NFR-08 revised)</assigned>
+    <tags>bff-api, deploy, promote, phase-5</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase 5 promotion is strictly sequential</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Deploy the cumulative Phase 4 changeset to `spaarke-demo` via `Deploy-BffApi.ps1` (or canonical demo deploy process if documented). Dual approver authorization required.
+  </prompt>
+
+  <role>Deploy engineer + owner (per NFR-08 revised).</role>
+  <goal>Demo deploy succeeds; healthz green; smoke tests pass.</goal>
+
+  <inputs>
+    <file purpose="deploy-script">scripts/Deploy-BffApi.ps1</file>
+    <file purpose="execution-log">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-027">Managed solutions for prod (and demo where applicable)</constraint>
+    <constraint source="NFR-08 revised 2026-05-24">Owner sign-off + AI-directed verification + CI guards; no second human approver</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-managed-solutions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Demo is the broader test audience; 48h bake gives a stronger regression signal than dev's 24h.</background>
+    <dependencies><dependency task="054" status="not-started">Phase 4 gate passed</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Dual approver ACK to deploy</step>
+    <step order="2">`Deploy-BffApi.ps1 -Environment demo` (or canonical demo procedure)</step>
+    <step order="3">healthz verify; hash-verify per script</step>
+    <step order="4">Smoke test against demo endpoints</step>
+    <step order="5">Log to EXECUTION-LOG.md; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="powershell">Deploy-BffApi.ps1</tool></tools>
+
+  <outputs><output type="docs">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Demo deploy completes; healthz returns 200</criterion>
+    <criterion testable="true">Smoke test parity with dev baseline</criterion>
+    <criterion testable="true">Dual approver ACK recorded</criterion>
+  </acceptance-criteria>
+</task>

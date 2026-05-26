@@ -1,12 +1,19 @@
 ---
 description: Pull latest changes from GitHub and sync local branch
+tags: [git, pull, sync, github, branches, operations]
+techStack: [git, gh-cli]
+appliesTo: ["pull from github", "git pull", "sync branch", "update from remote", "get latest"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
 # Pull from GitHub
 
 > **Category**: Operations
-> **Last Updated**: January 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A — normalized minimal frontmatter)
+> **Exemplar rationale**: Pull operations target per-session branch state; no stable reference applies.
 
 ---
 
@@ -284,3 +291,15 @@ git stash drop
 - Use `git rev-parse --git-common-dir` to detect worktree
 - After successful rebase + push, CI will run on the updated branch
 - If user says "update my branch" or "get latest", this means: fetch + rebase origin/master + force push
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| `git checkout master` run in a worktree — fails with "branch already checked out" | Skill or user forgot the worktree constraint | NEVER `git checkout master` in a worktree. Detect via `git rev-parse --git-common-dir`. If user wants master, switch to main repo first. |
+| Pull overwrites local uncommitted changes | User had work-in-progress that wasn't stashed | ALWAYS stash before pull (Stash Workflow section). On pull conflict, prefer `git stash pop` AFTER resolution, not before. |
+| Rebase produced silent merge conflicts that built clean but broke tests | `--strategy-option=theirs` or `ours` chose one side automatically | NEVER use `-X theirs` or `-X ours` unless explicitly justified. Manual resolution is safer than auto-pick. |
+| Force-with-lease push rejected — "stale info" | Remote has commits the local fetch didn't see | Re-fetch (`git fetch`), then re-rebase, then push. Don't escalate to `--force` (which discards remote work). |
+| Pulled latest but CI shows stale status | gh CLI cache hit | Run `gh run list --limit 5 --branch <branch>` to force-refresh. Don't trust the CI badge for branches you just updated. |

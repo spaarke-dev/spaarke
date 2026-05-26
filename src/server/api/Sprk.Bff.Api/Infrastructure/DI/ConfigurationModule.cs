@@ -4,6 +4,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Startup;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Foundry;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -71,6 +72,51 @@ public static class ConfigurationModule
             .AddOptions<PowerBiOptions>()
             .Bind(configuration.GetSection(PowerBiOptions.SectionName))
             .ValidateDataAnnotations();
+
+        // Agent Service options (AIPU-061) — gated on AgentService:Enabled kill switch (ADR-018).
+        // Validation deferred (no ValidateOnStart): Endpoint/AgentId are [Required] but only
+        // needed when Enabled=true. App starts cleanly with Enabled=false and no Foundry config.
+        // AgentServiceClient.GuardEnabled() enforces the kill switch at call time.
+        services
+            .AddOptions<AgentServiceOptions>()
+            .Bind(configuration.GetSection(AgentServiceOptions.SectionName))
+            .ValidateDataAnnotations();
+
+        // Code Interpreter options (AIPU-070) — gated on CodeInterpreter:Enabled kill switch (ADR-018).
+        // Validation deferred (no ValidateOnStart) so the app starts cleanly when disabled.
+        // CodeInterpreterTools checks Enabled before every sandbox invocation.
+        services
+            .AddOptions<Sprk.Bff.Api.Services.Ai.Foundry.CodeInterpreterOptions>()
+            .Bind(configuration.GetSection(Sprk.Bff.Api.Services.Ai.Foundry.CodeInterpreterOptions.SectionName))
+            .ValidateDataAnnotations();
+
+        // Bing Grounding options (AIPU-071) — gated on BingGrounding:Enabled kill switch (ADR-018).
+        // Validation deferred (no ValidateOnStart): BingConnectionName is [Required] but only
+        // needed when Enabled=true. App starts cleanly with Enabled=false and no Bing config.
+        // LegalResearchTools.ResearchLegalAsync/LookupCaseAsync check Enabled at call time.
+        services
+            .AddOptions<Sprk.Bff.Api.Services.Ai.Foundry.BingGroundingOptions>()
+            .Bind(configuration.GetSection(Sprk.Bff.Api.Services.Ai.Foundry.BingGroundingOptions.SectionName))
+            .ValidateDataAnnotations();
+
+        // Workspace options — pre-fill / AI summary playbook IDs used by MatterPreFillService,
+        // ProjectPreFillService, and WorkspaceAiService. All properties are nullable with code-side
+        // fallbacks to hardcoded defaults, so validation is deferred (no ValidateOnStart) and the
+        // app starts cleanly when the "Workspace" section is absent.
+        services
+            .AddOptions<WorkspaceOptions>()
+            .Bind(configuration.GetSection(WorkspaceOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // SharePoint Embedded options — StagingContainerId used by pre-fill services (matter/project)
+        // for staged file uploads. Nullable with code-side fallback (in-memory text extraction when
+        // unset), so binding succeeds even when the "SharePointEmbedded" section is absent.
+        services
+            .AddOptions<SharePointEmbeddedOptions>()
+            .Bind(configuration.GetSection(SharePointEmbeddedOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // Custom validation for conditional requirements
         services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();

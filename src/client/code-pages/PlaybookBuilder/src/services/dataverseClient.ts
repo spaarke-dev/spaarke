@@ -8,7 +8,15 @@
  *     dialog), uses session cookies automatically — no Bearer token needed.
  *     Sending a wrong-scope Bearer token overrides cookies and causes 401.
  *   - When running standalone (dev server, different origin), falls back to
- *     Bearer token from AuthService (Xrm platform strategies or MSAL).
+ *     a Bearer token from @spaarke/auth (acquired fresh per request from
+ *     SpaarkeAuthProvider.getAccessToken() via the authInit re-export).
+ *
+ * Auth v2 (D-AUTH-7): this file CANNOT use `authenticatedFetch` from
+ * @spaarke/auth — that wrapper is BFF-scoped and would route relative URLs
+ * through buildBffApiUrl(). Dataverse Web API calls need a different host
+ * and (in cross-origin scenarios) a Dataverse-audience token rather than the
+ * BFF-audience token. The token here is acquired fresh per request via
+ * `getAccessToken()` — no snapshot, no React state.
  *
  * Supports:
  *   - CRUD: createRecord, retrieveRecord, updateRecord, deleteRecord
@@ -48,6 +56,8 @@ async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Re
 
   // When running inside Dataverse (same origin), rely on session cookies.
   // Only add Bearer token when running cross-origin (dev server, etc.).
+  // Auth v2 (D-AUTH-7): fresh token acquired per request from the @spaarke/auth
+  // provider — no snapshot. authenticatedFetch cannot be used here (BFF-scoped).
   if (!isSameOriginDataverse()) {
     try {
       const token = await getAccessToken();

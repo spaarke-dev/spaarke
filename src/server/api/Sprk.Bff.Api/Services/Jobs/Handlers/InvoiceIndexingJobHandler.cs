@@ -6,6 +6,7 @@ using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -14,13 +15,14 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 /// Job handler for invoice indexing into Azure AI Search.
 /// Indexes invoices with embeddings for semantic search and filtering.
 ///
-/// Follows ADR-013: AI via BFF API (not separate service).
+/// Follows ADR-013 (refined 2026-05-20): AI consumed through
+/// <see cref="IInvoiceAi"/> facade per FR-E2 part 3 (task 049).
 /// Follows ADR-015: No content logging (IDs only).
 /// </summary>
-public class InvoiceIndexingJobHandler : IJobHandler
+public sealed class InvoiceIndexingJobHandler : IJobHandler
 {
     private readonly SearchIndexClient _searchIndexClient;
-    private readonly IOpenAiClient _openAiClient;
+    private readonly IInvoiceAi? _invoiceAi;
     private readonly IDocumentDataverseService _documentService;
     private readonly TextExtractorService _textExtractorService;
     private readonly FinanceTelemetry _telemetry;
@@ -39,19 +41,28 @@ public class InvoiceIndexingJobHandler : IJobHandler
 
     public InvoiceIndexingJobHandler(
         SearchIndexClient searchIndexClient,
-        IOpenAiClient openAiClient,
         IDocumentDataverseService documentService,
         TextExtractorService textExtractorService,
         FinanceTelemetry telemetry,
-        ILogger<InvoiceIndexingJobHandler> logger)
+        ILogger<InvoiceIndexingJobHandler> logger,
+        IInvoiceAi? invoiceAi = null)
     {
         _searchIndexClient = searchIndexClient ?? throw new ArgumentNullException(nameof(searchIndexClient));
-        _openAiClient = openAiClient ?? throw new ArgumentNullException(nameof(openAiClient));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _textExtractorService = textExtractorService ?? throw new ArgumentNullException(nameof(textExtractorService));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _invoiceAi = invoiceAi; // Nullable: when AI is disabled, RequireAi() throws → job is dead-lettered → operator can re-enable AI and re-enqueue.
     }
+
+    /// <summary>
+    /// Returns the AI facade or throws if AI features are disabled. Embedding generation
+    /// for invoice indexing has no non-AI fallback — if the throw escapes, the job will be
+    /// dead-lettered (acceptable: operator can re-enable AI and retry).
+    /// </summary>
+    private IInvoiceAi RequireAi() =>
+        _invoiceAi ?? throw new InvalidOperationException(
+            "Invoice indexing requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable.");
 
     public string JobType => JobTypeName;
 
@@ -117,7 +128,7 @@ public class InvoiceIndexingJobHandler : IJobHandler
             {
                 try
                 {
-                    embedding = await _openAiClient.GenerateEmbeddingAsync(
+                    embedding = await RequireAi().GenerateEmbeddingAsync(
                         documentText,
                         model: "text-embedding-3-large",
                         dimensions: 3072,

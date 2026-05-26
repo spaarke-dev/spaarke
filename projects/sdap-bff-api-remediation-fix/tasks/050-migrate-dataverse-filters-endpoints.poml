@@ -1,0 +1,77 @@
+<task id="050" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Migrate Dataverse + Filters + Endpoints consumers to facade (FR-E2 part 4)</title>
+    <status>completed</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, ai-boundary, facade, migration, outcome-e, phase-4</tags>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Different folders from Group F siblings (Dataverse, Api/Filters, Api/Ai/*Endpoints)</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <!-- Merge strategy: this commit is part of the squashed atomic Outcome E PR (tasks 046–051) per plan.md Process Rules. See task 046 prompt for full context. -->
+  <prompt>
+    Migrate remaining CRUD→AI consumers across Dataverse (0 files actual per pre-flight; spec said 2), `Api/Filters/` (1 file: `PlaybookAuthorizationFilter`; spec said 5+), and Api endpoints (6 additional files: `DailyBriefingEndpoints`, `PlaybookEndpoints`, `ChatEndpoints`, `AiPlaybookBuilderEndpoints`, `AgentEndpoints`, `WorkspaceMatterEndpoints` — confirmed at pre-flight). Use facade interfaces from task 046.
+
+    PF-3 reminder: this is the most scope-divergent area vs spec. Use inventory/usage-map-static.md as source of truth.
+  </prompt>
+
+  <role>Senior .NET developer + endpoint-layer familiarity.</role>
+
+  <goal>
+    `grep -r "IOpenAiClient\|IPlaybookService" src/server/api/Sprk.Bff.Api/{Services/Dataverse,Api/Filters,Api/Agent,Api/Ai}/` returns 0 except where files are AI-internal (Services/Ai/). Tests pass ±5%.
+  </prompt>
+
+  <inputs>
+    <file purpose="facade">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+    <file purpose="dataverse">src/server/api/Sprk.Bff.Api/Services/Dataverse/</file>
+    <file purpose="filters">src/server/api/Sprk.Bff.Api/Api/Filters/</file>
+    <file purpose="endpoints">src/server/api/Sprk.Bff.Api/Api/</file>
+    <file purpose="inventory">projects/sdap-bff-api-remediation-fix/inventory/usage-map-static.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013 refined">External CRUD consumers MUST use facade</constraint>
+    <constraint source="ADR-008">Endpoint filters preserved; pattern unchanged</constraint>
+    <constraint source="spec.md FR-E2">Zero direct refs outside Services/Ai/</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Largest scope-drift area: spec said 5+ filters / 2 Dataverse / no endpoints; actual is 1 filter / 0 Dataverse / 6 endpoints. Inventory is authoritative.</background>
+    <dependencies><dependency task="046" status="not-started">Facade interfaces</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">From inventory/usage-map-static.md, enumerate exact files to migrate</step>
+    <step order="2">For each: replace direct injection with facade interface (selecting the right interface per consumer concern)</step>
+    <step order="3">Replace call sites; preserve endpoint filter signatures (ADR-008)</step>
+    <step order="4">build + test ±5% baseline</step>
+    <step order="5">Acceptance grep returns 0 in target folders</step>
+    <step order="6">Single commit (or split per-folder if size warrants); update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="dotnet">build, test</tool><tool name="git">commit(s)</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/*.cs (if any consumers)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/PlaybookAuthorizationFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/{Ai,Agent}/*Endpoints.cs (6 files)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep returns 0 in Dataverse, Filters, and target Endpoints folders</criterion>
+    <criterion testable="true">Endpoint filter signatures unchanged (ADR-008 preserved)</criterion>
+    <criterion testable="true">Test pass count ±5% baseline</criterion>
+  </acceptance-criteria>
+</task>

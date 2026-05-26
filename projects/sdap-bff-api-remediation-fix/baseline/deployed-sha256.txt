@@ -1,0 +1,43 @@
+# Deployed file SHA-256 baseline
+# Captured: 2026-05-25
+# App Service: spaarke-bff-dev (Linux, rg-spaarke-dev)
+# Subscription: 484bc857-3802-427f-9ea5-ca47b43db0f0
+# Kudu base: https://spaarke-bff-dev.scm.azurewebsites.net/api/vfs/site/wwwroot
+# Total bytes hashed: 10,080,301 across 10 files
+# Capture method: Kudu VFS GET + sha256sum (Bash)
+
+# === Application assemblies (Sprk.* + Spaarke.*) ===
+Sprk.Bff.Api.dll                e7b8c16548ee60d8a3fa04e7cc96d3c6530b34891cd119f3599db8426a3f9a0b
+Sprk.Bff.Api.deps.json          b57ab3294d43d80be5e5d9180d0a4cf7b3462d1ed4c8bee4dd0c8a34fc569bd8
+Sprk.Bff.Api.exe                5d19320aa2fb6cbd4debdb61a96644b6ea32531fb70244fdee1179c80698884c
+Sprk.Bff.Api.pdb                30f9ebacfc48c0f3e2bc24fdf45ebd9ba957e0522a229afd25422cc1016f66d6
+Sprk.Bff.Api.runtimeconfig.json ad77c8a2dc54f7761739115b1cbfe79c3965c9da54f04c08a9f6687d52d0111a
+Spaarke.Core.dll                9810319495282b5bab109a4d505e67780553f37046f09ae91130ff9de67d7ee2
+Spaarke.Core.pdb                dc4d71f89bbb2eb63edff1d1e774f103dbf7e2ecdcfcd658b03eb87ba54ef6db
+Spaarke.Dataverse.dll           1b7bf95f46dd1fd97846964f5e9ec17c30fe644e68e2133c0259abe704ad77da
+Spaarke.Dataverse.pdb           0bc47a85bfd84423f7a466adf3c9a75b7178e8d9d2822dae597dae2f5321168a
+
+# === Host config ===
+web.config                      25d50dddfebda5e5d748ecd1c79ac3f8bd1a79b4e9a73ab3c7a748e98dc9226b
+
+# === Notes ===
+#   web.config: PRESENT (552 bytes) — despite Linux, the published artifact still ships web.config
+#       (likely a leftover from `dotnet publish` defaults; not used by the Linux Kestrel/dotnet startup
+#       pipeline, but bytes-identical re-deploy is still a valid rollback signal).
+#   appsettings.json: ABSENT from /site/wwwroot — configuration is supplied via Azure App Service
+#       Application Settings (env vars / IConfiguration), not a deployed file. No appsettings*.json
+#       found at root, /config/, or /Configuration/. This is expected for this deployment pattern.
+#   PDB files included: Sprk.Bff.Api.pdb, Spaarke.Core.pdb, Spaarke.Dataverse.pdb — they will change
+#       on every rebuild even when source is identical (timestamps embedded). For rollback verification
+#       focus on the .dll + .deps.json + .runtimeconfig.json + web.config hashes.
+#   Sprk.Bff.Api.exe: present alongside .dll — apphost shim; OK to include in baseline.
+#
+# === Source-of-truth for rollback verification ===
+#   The 4 hashes that MUST match after a successful Phase 4 rollback (or to confirm a clean re-deploy
+#   of the current build) are:
+#     - Sprk.Bff.Api.dll
+#     - Sprk.Bff.Api.deps.json
+#     - Spaarke.Core.dll
+#     - Spaarke.Dataverse.dll
+#   web.config + runtimeconfig.json should also match unless intentionally changed.
+#   PDBs are informational only (rebuild-sensitive).

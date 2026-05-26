@@ -1,0 +1,100 @@
+<task id="AUTHV2-080" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Implement OfficeNaaStrategy in @spaarke/auth</title>
+    <phase>B4 — Office Add-ins consolidation</phase>
+    <tags>auth, office-addins, naa, FULL</tags>
+    <status>completed</status>
+    <completed>2026-05-19</completed>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>Phase A</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Office Add-ins use Nested App Authentication (NAA) — different MSAL config than Dataverse. Add OfficeNaaStrategy implementing the AuthStrategy interface so Add-ins can use @spaarke/auth's useAuth() hook with NAA behavior under the hood. Deprecate the parallel authConfig.ts MSAL stack.</prompt>
+  <role>Office Add-ins + MSAL.js + NAA expertise.</role>
+  <goal>Office Add-ins use @spaarke/auth.initAuth({ strategy: new OfficeNaaStrategy(config) }). authConfig.ts deleted or stub re-export.</goal>
+  <knowledge>
+    <files>
+      <file>src/client/office-addins/shared/auth/authConfig.ts (current NAA setup — port logic)</file>
+      <file>src/client/office-addins/shared/auth/NaaAuthService.ts</file>
+      <file>src/client/office-addins/shared/auth/DialogAuthService.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Implement src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts. Wrap NAA MSAL config (brk-multihub://localhost redirect, NAA broker).</step>
+    <step>Move logic from NaaAuthService.ts + DialogAuthService.ts into the strategy.</step>
+    <step>Update Office Add-in init code to call initAuth({ strategy: new OfficeNaaStrategy(...) }) — replaces authConfig.ts module-level setup.</step>
+    <step>Delete authConfig.ts, NaaAuthService.ts, DialogAuthService.ts (or stub them as deprecated re-exports for back-compat in the short term).</step>
+    <step>Rebuild + deploy Outlook + Word Add-ins.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>OfficeNaaStrategy implements AuthStrategy interface.</criterion>
+    <criterion>Office Add-ins use unified initAuth + useAuth pattern.</criterion>
+    <criterion>Separate authConfig.ts stack gone (or reduced to stubs).</criterion>
+    <criterion>Add-ins build + load in Outlook/Word.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19 (Phase B4 task 080).
+
+    Scope adjustment per parent task instructions: this task implemented
+    `OfficeNaaStrategy` in `@spaarke/auth` and marked the legacy Office Add-in
+    auth files as deprecated (NOT deleted). The full Office Add-in entry-point
+    rewrite (consuming `initAuth({ strategy: new OfficeNaaStrategy(...) })`)
+    and the rebuild/redeploy of Outlook + Word Add-ins is sequenced into
+    tasks 081 (Outlook) and 082 (Word).
+
+    Files created:
+    - src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts
+
+    Files modified:
+    - src/client/shared/Spaarke.Auth/src/strategies/AuthStrategy.ts (JSDoc: OfficeNaaStrategy logout contract documented)
+    - src/client/shared/Spaarke.Auth/src/index.ts (export OfficeNaaStrategy + IOfficeNaaConfig)
+    - src/client/office-addins/shared/auth/authConfig.ts (deprecation banner)
+    - src/client/office-addins/shared/auth/NaaAuthService.ts (deprecation banner)
+    - src/client/office-addins/shared/auth/DialogAuthService.ts (deprecation banner)
+    - src/client/office-addins/shared/auth/index.ts (deprecation banner)
+
+    Verification:
+    - `npx tsc --noEmit` in src/client/shared/Spaarke.Auth/ → 0 diagnostics
+    - No D-AUTH-1 (`accessToken: string`) or D-AUTH-7 (Bearer literal) violations
+    - JWT exp validation + 5-min buffer + clearCache/logout contract are symmetric
+      with BrowserMsalStrategy
+    - MSAL config differs intentionally for Office (sessionStorage,
+      supportsNestedAppAuth, no Entra cookie) — documented in class JSDoc
+
+    Coordination notes for tasks 081 + 082:
+    - Bootstrap pattern Outlook + Word should adopt:
+      ```ts
+      import { initAuth, OfficeNaaStrategy, resolveConfig } from '@spaarke/auth';
+      const cfg = resolveConfig({
+        clientId: process.env.ADDIN_CLIENT_ID,
+        tenantId: process.env.TENANT_ID,
+        bffApiScope: `api://${process.env.BFF_API_CLIENT_ID}/user_impersonation`,
+        bffBaseUrl: process.env.BFF_API_BASE_URL,
+      });
+      await initAuth({ ...cfg, /* IAuthConfig fields */ });
+      // Then anywhere in the app:
+      // const fetch = useAuth().authenticatedFetch;
+      ```
+      Strictly speaking, `initAuth(config)` currently always wires
+      `BrowserMsalStrategy` (see `SpaarkeAuthProvider` constructor default).
+      For tasks 081/082 you'll need to add a `strategy` option to `initAuth`
+      OR construct the provider directly:
+      ```ts
+      const provider = new SpaarkeAuthProvider(cfg, new OfficeNaaStrategy(cfg));
+      ```
+      Recommendation: extend `initAuth` to accept `{ strategy?: AuthStrategy }`
+      as the cleanest public API. That's a one-line change to `initAuth.ts`
+      (pass `strategy` through to `new SpaarkeAuthProvider(config, strategy)`)
+      and a non-breaking addition since the existing `BrowserMsalStrategy`
+      default is preserved.
+    - After 081 + 082 swap their entry points, the Office Add-in files
+      `authConfig.ts`, `NaaAuthService.ts`, `DialogAuthService.ts`, and
+      `shared/auth/index.ts` should be deleted entirely (plus the wrapping
+      `shared/services/AuthService.ts` — verify no remaining consumers).
+    - Per project CLAUDE.md "Regression test cadence": Phase B4 requires the
+      MSAL binding regression test (Office Add-ins have a different auth model
+      and need separate validation). Test gate sits with 082 (after Word ships).
+    - Per the parent task: NO commit for this task. Main session commits after
+      the Phase B4 wave settles (after 081 + 082 land).
+  </notes>
+</task>

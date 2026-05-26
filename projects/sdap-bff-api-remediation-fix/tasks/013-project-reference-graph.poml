@@ -1,0 +1,66 @@
+<task id="013" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Project reference graph (recursive)</title>
+    <status>completed</status>
+    <estimated-effort>15 minutes</estimated-effort>
+    <actual-effort>~2 minutes</actual-effort>
+    <assigned>AI agent</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
+    <tags>bff-api, inventory, phase-1</tags>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only `dotnet list reference`</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Build the recursive project-reference graph rooted at `Sprk.Bff.Api.csproj` — every
+    `ProjectReference` plus the transitive closure through `Spaarke.Core`, `Spaarke.Dataverse`,
+    and any other referenced projects. Records baseline shape.
+  </prompt>
+
+  <role>.NET solution structure analyst.</role>
+
+  <goal>
+    File `inventory/project-references.md` containing a tree of ProjectReferences from
+    `Sprk.Bff.Api` down to leaf-level shared libraries.
+  </goal>
+
+  <inputs>
+    <file purpose="csproj">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §3 UQ-06">`Spaarke.Core`/`Spaarke.Dataverse` are inventory-only (default); do not propose edits</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Recursive reference graph reveals which shared projects' transitive packages bleed into the BFF publish. Important for understanding what packages can be removed vs which are forced by a referenced project.</background>
+    <dependencies><dependency task="008" status="not-started">Phase 0 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">`dotnet list src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj reference`</step>
+    <step order="2">For each referenced project, recursively `dotnet list reference` to build tree</step>
+    <step order="3">Write tree representation to `inventory/project-references.md`</step>
+    <step order="4">Update TASK-INDEX.md status</step>
+  </steps>
+
+  <tools><tool name="dotnet">List references</tool></tools>
+
+  <outputs>
+    <output type="report">projects/sdap-bff-api-remediation-fix/inventory/project-references.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All direct ProjectReferences enumerated</criterion>
+    <criterion testable="true">Tree extends to leaf-level (Spaarke.Core, Spaarke.Dataverse, etc.)</criterion>
+  </acceptance-criteria>
+</task>

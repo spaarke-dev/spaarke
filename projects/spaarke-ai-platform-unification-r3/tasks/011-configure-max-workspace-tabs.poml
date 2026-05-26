@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Configure MAX_WORKSPACE_TABS = 8 + FIFO eviction in WorkspaceTabManager</title>
+    <phase>Phase A — Foundations</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>032</blocks>
+    <tags>react, frontend, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies load-bearing code in `src/solutions/SpaarkeAi/` that governs tab lifecycle. Boundary behavior (Home exemption + FIFO at the 9th widget) must be correct for FR-13 acceptance + NFR-09 persistence. FULL rigor with code-review + adr-check at Step 9.5.</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Refactor `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts` to
+    expose a configurable constant `MAX_WORKSPACE_TABS = 8` and enforce a FIFO eviction
+    policy when a 9th non-Home widget arrives. The Home tab is exempt from the cap and
+    must never be evicted. Update the relevant unit tests, including a boundary test for
+    the 9th-widget eviction case.
+  </prompt>
+
+  <role>
+    React/TypeScript developer comfortable with state-management refactors and tab
+    lifecycle logic. Bias toward a single source of truth for the constant and tightly
+    scoped unit tests for boundary cases.
+  </role>
+
+  <goal>
+    `WorkspaceTabManager.ts` exports `MAX_WORKSPACE_TABS = 8`. When a new non-Home tab is
+    added beyond the cap, the oldest non-Home tab is evicted (FIFO). The Home tab is
+    never evicted. Unit tests pass, including a 9th-widget boundary test. Build is clean.
+  </goal>
+
+  <context>
+    <background>
+      FR-13 raises the workspace tab limit from R2's previous cap to 8 non-Home tabs,
+      configurable in one place, with Home exempt. This is the foundational change Phase
+      C (Workspace pane refactor) builds on, and a separate boundary test ensures the
+      eviction order is FIFO and Home is preserved across many adds.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Do not duplicate the constant across files. `MAX_WORKSPACE_TABS` is exported from `WorkspaceTabManager.ts` and consumed by reference everywhere.</constraint>
+    <constraint source="ADR-021">Any incidental UI strings should remain in English and not introduce new tokens or hex literals.</constraint>
+    <constraint source="ADR-022">React 19 only. No React 16 fallbacks.</constraint>
+    <constraint source="project">Home tab MUST be exempt from the cap and from FIFO eviction in all code paths.</constraint>
+    <constraint source="project">Eviction order is strictly FIFO over non-Home tabs (oldest-added first). Do not introduce LRU or any other policy without an ADR change.</constraint>
+    <constraint source="project">Do not alter the standalone LegalWorkspace tab model — this task scopes to SpaarkeAi's WorkspaceTabManager only (FR-25 backwards compatibility).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read current WorkspaceTabManager">
+      Open `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts` and
+      read the current model (state shape, add-tab function, any existing cap). Identify
+      the Home-tab marker — there must be a stable identifier (e.g., `id === 'home'` or
+      `kind === 'home'`) that distinguishes it from widget tabs.
+    </step>
+    <step order="2" name="Add the constant">
+      Add `export const MAX_WORKSPACE_TABS = 8;` near the top of the file. If a related
+      constant already exists under a different name, replace it (do not leave two).
+    </step>
+    <step order="3" name="Implement FIFO eviction">
+      Modify the add-tab logic: when a non-Home tab is added and the count of non-Home
+      tabs would exceed `MAX_WORKSPACE_TABS`, remove the oldest non-Home tab first, then
+      append the new tab. Use a stable insertion order (preserve existing order semantics
+      — typically array order with new tabs pushed to the end). Home is filtered out of
+      the eviction candidates.
+    </step>
+    <step order="4" name="Update / add unit tests">
+      Locate the existing test file for WorkspaceTabManager (or create one if absent
+      following the SpaarkeAi test convention). Add at minimum:
+      (a) a test that adds 8 non-Home tabs and confirms none are evicted,
+      (b) a test that adds a 9th non-Home tab and confirms the oldest non-Home tab
+          (not Home) is evicted,
+      (c) a test that confirms Home is preserved after 20+ adds.
+      Keep existing tests passing.
+    </step>
+    <step order="5" name="Build and verify">
+      Run `npm install --legacy-peer-deps --no-audit --no-fund` if needed, then
+      `npm run build` for SpaarkeAi. Run the test suite. Confirm clean build + green tests.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read WorkspaceTabManager.ts and existing tests</tool>
+    <tool name="Edit">Modify WorkspaceTabManager.ts and the test file</tool>
+    <tool name="Write">Create a test file if one doesn't exist</tool>
+    <tool name="Bash">npm build + test in the SpaarkeAi solution</tool>
+    <tool name="Grep">Confirm `MAX_WORKSPACE_TABS` is referenced by name everywhere and not duplicated</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts (modified)</output>
+    <output type="test">Updated / new unit tests covering FIFO + Home-exemption boundary</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`MAX_WORKSPACE_TABS = 8` is exported from `WorkspaceTabManager.ts` as a single source of truth.</criterion>
+    <criterion testable="true">Adding 9 non-Home tabs in sequence evicts exactly the oldest non-Home tab (FIFO); Home is preserved.</criterion>
+    <criterion testable="true">After adding 20 non-Home tabs, exactly `MAX_WORKSPACE_TABS` non-Home tabs remain and Home is present.</criterion>
+    <criterion testable="true">All unit tests for the file pass, including the new boundary tests.</criterion>
+    <criterion testable="true">`npm run build` of SpaarkeAi succeeds with zero TypeScript errors.</criterion>
+    <criterion testable="true">A repo-wide search confirms only one definition of the cap constant (no shadow copies).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    FULL rigor applies — code-review + adr-check at Step 9.5 because this modifies tab
+    lifecycle logic that gates Phase C's WorkspacePane refactor.
+  </execution>
+
+  <notes date="2026-05-20">
+    Completed via `task-execute` (FULL rigor). Refactored
+    `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts`:
+    - Renamed `MAX_TABS = 3` to `export const MAX_WORKSPACE_TABS = 8` (ADR-012 single source of truth).
+    - Introduced `WorkspaceTabKind = 'home' | 'widget'` discriminant + `kind` field on `WorkspaceTab`.
+    - Added `ensureHomeTab(displayName?, widgetData?, Component?)` factory that installs the
+      always-present non-closable Home tab at index 0 (idempotent — second call updates in place).
+    - FIFO eviction in `addTab()` now operates only on non-Home indices: Home is excluded
+      from candidates and untouched.
+    - `closeTab()` short-circuits with no state change when the target kind is 'home'.
+    - `clearAllTabs()` preserves Home when present; activeTabId falls back to Home id.
+    Updated `WorkspacePane.tsx` comment reference (cosmetic — no behavior change in non-Home flows).
+    Tests: replaced existing test file with 36 unit tests covering FR-13 boundary at 9 (literal
+    threshold), Home exemption at 20 and 50 adds, idempotent `ensureHomeTab`, closeTab no-op for
+    Home, and clearAllTabs Home preservation. All 36 tests pass via `npx jest`.
+    Build: `npm run build` clean. `npx tsc --noEmit` shows zero new errors in modified files
+    (pre-existing errors in `@spaarke/ai-widgets` are unrelated to this task).
+    Note: SpaarkeAi `package.json` doesn't yet list jest as a devDependency or have a `test`
+    script — tests were verified via locally-installed jest. Follow-up infrastructure task
+    (out of FR-13 scope) should wire jest into package.json + CI.
+  </notes>
+</task>

@@ -51,6 +51,7 @@ const ENV_VAR_NAMES = {
   BFF_BASE_URL: 'sprk_BffApiBaseUrl',
   BFF_APP_ID: 'sprk_BffApiAppId',
   MSAL_CLIENT_ID: 'sprk_MsalClientId',
+  TENANT_ID: 'sprk_TenantId',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -309,14 +310,16 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
     );
   }
 
-  // Capture tenantId from Xrm organizationSettings while we have Xrm access
+  // Capture Xrm tenantId as a fallback (in Code Page contexts this is frequently
+  // undefined — the env var below is the primary source).
   const xrmTenantId = xrmContext.organizationSettings?.tenantId ?? '';
 
-  // 2. Query all three environment variables in a single batch
+  // 2. Query all four environment variables in a single batch
   const envVars = await queryEnvironmentVariables(clientUrl, [
     ENV_VAR_NAMES.BFF_BASE_URL,
     ENV_VAR_NAMES.BFF_APP_ID,
     ENV_VAR_NAMES.MSAL_CLIENT_ID,
+    ENV_VAR_NAMES.TENANT_ID,
   ]);
 
   // 3. Extract and validate — fail loudly if missing
@@ -349,12 +352,20 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
     );
   }
 
+  // Resolve tenantId: env var (sprk_TenantId) is authoritative — Xrm fallback
+  // is only used if the env var isn't set or returns empty. This is the
+  // canonical fix for the long-running "auth doesn't pick up tenant ID" issue:
+  // Xrm.organizationSettings.tenantId is unreliable in Code Page contexts;
+  // the customer-set env var is the source of truth.
+  const envTenantId = envVars.get(ENV_VAR_NAMES.TENANT_ID);
+  const resolvedTenantId = envTenantId && envTenantId.trim() ? envTenantId.trim() : xrmTenantId;
+
   // 4. Build config — normalize URL and construct OAuth scope
   const config: IRuntimeConfig = {
     bffBaseUrl: normalizeUrl(bffBaseUrl),
     bffOAuthScope: `api://${bffAppId}/user_impersonation`,
     msalClientId,
-    tenantId: xrmTenantId,
+    tenantId: resolvedTenantId,
   };
 
   // 5. Cache in memory + localStorage (localStorage enables full-screen fallback)
@@ -362,10 +373,15 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
   cacheTimestamp = Date.now();
   saveToLocalStorage(config);
 
+  const tenantSource = envTenantId && envTenantId.trim()
+    ? 'env-var'
+    : xrmTenantId
+      ? 'xrm-fallback'
+      : 'none';
   console.log(
     `[Spaarke.RuntimeConfig] Resolved: bffBaseUrl=${config.bffBaseUrl}, ` +
       `scope=api://${bffAppId.substring(0, 8)}..., clientId=${msalClientId.substring(0, 8)}..., ` +
-      `tenantId=${xrmTenantId ? xrmTenantId.substring(0, 8) + '...' : '(empty)'}`
+      `tenantId=${resolvedTenantId ? resolvedTenantId.substring(0, 8) + '...' : '(empty)'} (source=${tenantSource})`
   );
 
   return config;

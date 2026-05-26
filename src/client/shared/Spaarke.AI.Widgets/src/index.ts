@@ -1,0 +1,489 @@
+// @spaarke/ai-widgets — barrel export
+
+// ---------------------------------------------------------------------------
+// Side-effect: register all R1 output widgets into WorkspaceWidgetRegistry
+// (AIPU2-080 — data-refreshed restore, D-08)
+// ---------------------------------------------------------------------------
+import { registerWorkspaceWidgets } from './widgets/workspace/register-workspace-widgets';
+registerWorkspaceWidgets();
+
+// ---------------------------------------------------------------------------
+// Side-effect: register all 6 R1 source widgets into ContextWidgetRegistry
+// (AIPU2-081 — migrate source widgets to context pane)
+// ---------------------------------------------------------------------------
+import { registerContextWidgets } from './widgets/context/register-context-widgets';
+registerContextWidgets();
+
+// ---------------------------------------------------------------------------
+// Types — React component prop contracts (tasks AIPU2-072/073)
+// ---------------------------------------------------------------------------
+
+export type {
+  WorkspaceWidgetProps,
+  WorkspaceWidgetComponent,
+  ContextWidgetProps,
+  ContextWidgetComponent,
+  // Re-exports of task-071 types (via widget-types.ts pass-through):
+  WidgetRenderContext,
+  Selection,
+  ActionResult,
+  WidgetState,
+  WidgetRegistryEntry,
+  WidgetRegistryMetadata,
+  WorkspaceWidget,
+  WidgetActionDescriptor,
+  ContextWidget,
+} from './types/widget-types';
+
+// WidgetMetadata — canonical definition from shared.ts (task AIPU2-071).
+// Required by WorkspaceWidgetRegistry.registerWorkspaceWidget().
+export type { WidgetMetadata } from './types/shared';
+
+export * from './types/event-types';
+
+// ---------------------------------------------------------------------------
+// Registries: WorkspaceWidgetRegistry and ContextWidgetRegistry
+// ---------------------------------------------------------------------------
+
+// WorkspaceWidgetRegistry — lazy-load with GenericTextWidget fallback
+export {
+  registerWorkspaceWidget,
+  replaceWorkspaceWidget,
+  resolveWorkspaceWidget,
+  getWorkspaceWidgetMetadata,
+  getAllWorkspaceWidgetTypes,
+  hasWorkspaceWidget,
+  clearWorkspaceRegistry,
+} from './registry/WorkspaceWidgetRegistry';
+
+export type { WorkspaceWidgetRegistration } from './registry/WorkspaceWidgetRegistry';
+
+// ContextWidgetRegistry — lazy-load with null-return for unknown types
+export {
+  registerContextWidget,
+  replaceContextWidget,
+  resolveContextWidget,
+  hasContextWidget,
+  getAllContextWidgetTypes,
+  clearContextRegistry,
+} from './registry/ContextWidgetRegistry';
+
+export type { ContextWidgetRegistration } from './registry/ContextWidgetRegistry';
+
+// ---------------------------------------------------------------------------
+// Widgets: GenericTextWidget (fallback for unregistered workspace widget types)
+// ---------------------------------------------------------------------------
+
+export { default as GenericTextWidget } from './widgets/GenericTextWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: RedlineViewerWidget — side-by-side document comparison (AIPU2-085)
+// Exported so consumers can reference the component directly and type-check
+// DocumentDiff payloads. Registration under 'redline-viewer' occurs via the
+// register-workspace-widgets side-effect import at the top of this file.
+// ---------------------------------------------------------------------------
+
+export { default as RedlineViewerWidget } from './widgets/workspace/RedlineViewerWidget';
+export type {
+  RedlineViewerData,
+  RedlineViewerActions,
+  RedlineViewerQueryParams,
+  DiffSection,
+  DiffChange,
+  DiffChangeType,
+} from './widgets/workspace/RedlineViewerWidget';
+export { serializeRedlineState } from './widgets/workspace/RedlineViewerWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: CreateMatterWizardWidget — embedded Create Matter flow (AIPU2-104)
+//
+// Embeds CreateMatterWizard from @spaarke/ui-components in a workspace tab
+// without modal chrome. Subscribes to wizard_step PaneEventBus events so
+// ConversationPane AI can drive step navigation and field pre-fill.
+// Registered under 'create-matter-wizard' via register-workspace-widgets.ts.
+// ---------------------------------------------------------------------------
+
+export { default as CreateMatterWizardWidget } from './widgets/workspace/CreateMatterWizardWidget';
+export type {
+  CreateMatterWizardData,
+  CreateMatterWizardQueryParams,
+} from './widgets/workspace/CreateMatterWizardWidget';
+export { serializeCreateMatterWizardState } from './widgets/workspace/CreateMatterWizardWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: DocumentUploadWizardWidget — embedded document upload (AIPU2-104)
+//
+// Three-step file upload flow (Select → Details → Review & Upload) embedded
+// as a workspace tab. On completion dispatches widget_load for DocumentViewer
+// and context_update with the new document entity info.
+// Registered under 'document-upload-wizard' via register-workspace-widgets.ts.
+// ---------------------------------------------------------------------------
+
+export { default as DocumentUploadWizardWidget } from './widgets/workspace/DocumentUploadWizardWidget';
+export type {
+  DocumentUploadWizardData,
+  DocumentUploadWizardQueryParams,
+} from './widgets/workspace/DocumentUploadWizardWidget';
+export { serializeDocumentUploadWizardState } from './widgets/workspace/DocumentUploadWizardWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: SearchSelectWizardWidget — embedded search-and-select (AIPU2-104)
+//
+// Two-step record picker (Search → Confirm) embedded as a workspace tab.
+// On selection dispatches context_update with entity id/type/name so the
+// Context pane can update its entity chip.
+// Registered under 'search-select-wizard' via register-workspace-widgets.ts.
+// ---------------------------------------------------------------------------
+
+export { default as SearchSelectWizardWidget } from './widgets/workspace/SearchSelectWizardWidget';
+export type {
+  SearchSelectWizardData,
+  SearchSelectWizardQueryParams,
+  SearchResultItem,
+} from './widgets/workspace/SearchSelectWizardWidget';
+export { serializeSearchSelectWizardState } from './widgets/workspace/SearchSelectWizardWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: EmailComposeWidget — Analysis Builder intent dispatcher (task 044)
+//
+// Thin dispatcher that opens the Analysis Builder (Playbook Library Code Page)
+// with the `email-compose` intent pre-configured (FR-19: Send Email card).
+// Registered under 'email-compose' via register-workspace-widgets.ts.
+// ---------------------------------------------------------------------------
+
+export { default as EmailComposeWidget } from './widgets/workspace/EmailComposeWidget';
+export type { EmailComposeData } from './widgets/workspace/EmailComposeWidget';
+export { serializeEmailComposeState } from './widgets/workspace/EmailComposeWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: MeetingScheduleWidget — Analysis Builder intent dispatcher (task 044)
+//
+// Thin dispatcher that opens the Analysis Builder (Playbook Library Code Page)
+// with the `meeting-schedule` intent pre-configured (FR-19: Schedule Meeting).
+// Registered under 'meeting-schedule' via register-workspace-widgets.ts.
+// ---------------------------------------------------------------------------
+
+export { default as MeetingScheduleWidget } from './widgets/workspace/MeetingScheduleWidget';
+export type { MeetingScheduleData } from './widgets/workspace/MeetingScheduleWidget';
+export { serializeMeetingScheduleState } from './widgets/workspace/MeetingScheduleWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: CreateProjectWizardWidget — Existing Code Page dispatcher (task 043)
+//
+// Thin dispatcher that opens the existing `sprk_createprojectwizard` Code
+// Page via `Xrm.Navigation.navigateTo` (FR-19: Create Project card). The
+// widget is a launcher only — the wizard UI lives in the existing Code Page
+// (REUSE per OC-04 / ADR-012, NOT re-authored).
+// Registered under 'create-project-wizard' via register-workspace-widgets.ts.
+// ---------------------------------------------------------------------------
+
+export { default as CreateProjectWizardWidget } from './widgets/workspace/CreateProjectWizardWidget';
+export type { CreateProjectWizardData } from './widgets/workspace/CreateProjectWizardWidget';
+export { serializeCreateProjectWizardState } from './widgets/workspace/CreateProjectWizardWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: FindSimilarWizardWidget — Existing Code Page dispatcher (task 043)
+//
+// Thin dispatcher that opens the existing `sprk_findsimilar` Code Page via
+// `Xrm.Navigation.navigateTo` (FR-19: Find Similar card). The widget is a
+// launcher only — the Find Similar UI lives in the existing Code Page
+// (REUSE per OC-04 / ADR-012, NOT re-authored).
+// Registered under 'find-similar-wizard' via register-workspace-widgets.ts.
+// ---------------------------------------------------------------------------
+
+export { default as FindSimilarWizardWidget } from './widgets/workspace/FindSimilarWizardWidget';
+export type { FindSimilarWizardData } from './widgets/workspace/FindSimilarWizardWidget';
+export { serializeFindSimilarWizardState } from './widgets/workspace/FindSimilarWizardWidget';
+
+// ---------------------------------------------------------------------------
+// Launchers: REMOVED in Round 4 Fix 2 (task 085)
+//
+// The package-local `launchAssignWorkWizard` (task 045) has been superseded by
+// the shared `launchAssignWorkWizard` exported from `@spaarke/ui-components`
+// (see `WorkspaceShell/wizardLaunchers.ts`). The shared launcher uses the same
+// verbatim Xrm.Navigation shape as LegalWorkspace's WorkspaceGrid.tsx and
+// applies frame-walking Xrm resolution (the package-local helper only checked
+// `window.Xrm`, which missed nested-iframe cases).
+//
+// Migration:
+//   - Old: `import { launchAssignWorkWizard } from '@spaarke/ai-widgets'`
+//   - New: `import { launchAssignWorkWizard } from '@spaarke/ui-components'`
+//
+// The shared module also exports launchers for the other six Get Started
+// wizards (Create Matter, Create Project, Summarize Files, Find Similar,
+// Email Compose, Schedule Meeting) — see `@spaarke/ui-components` exports.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Widgets: ProgressTrackerWidget (context pane — workflow step progress)
+//
+// Exported so consumers can reference the component directly and type-check
+// context_update payloads. The registerContextWidget() call below registers
+// the widget at module-load time under the 'progress-tracker' type key.
+// ---------------------------------------------------------------------------
+
+export { default as ProgressTrackerWidget } from './widgets/context/ProgressTrackerWidget';
+export type {
+  ProgressTrackerData,
+  WorkflowStep,
+} from './widgets/context/ProgressTrackerWidget';
+
+import { registerContextWidget } from './registry/ContextWidgetRegistry';
+import type { ContextWidgetComponent } from './types/widget-types';
+registerContextWidget('progress-tracker', {
+  factory: () =>
+    import('./widgets/context/ProgressTrackerWidget').then((m) => ({ default: m.default })),
+});
+
+// ---------------------------------------------------------------------------
+// Widgets: PlaybookGalleryWidget (context pane — Welcome / playbook-gallery stage)
+//
+// Exported so consumers can reference the component directly and type-check
+// PlaybookGalleryData payloads. Registered under 'playbook-gallery'.
+// ---------------------------------------------------------------------------
+
+export { default as PlaybookGalleryWidget } from './widgets/context/PlaybookGalleryWidget';
+export type {
+  PlaybookGalleryData,
+  PlaybookSummary,
+} from './widgets/context/PlaybookGalleryWidget';
+
+registerContextWidget('playbook-gallery', {
+  factory: () =>
+    import('./widgets/context/PlaybookGalleryWidget').then((m) => ({ default: m.default })),
+});
+
+// ---------------------------------------------------------------------------
+// Widgets: GetStartedCardsWidget (context pane — Welcome stage, FR-18)
+//
+// Exported so consumers (ContextPaneController in SpaarkeAi) can render it
+// directly with an `onCardClick` callback prop. Also registered under
+// 'get-started-cards' for symmetry with the other context widgets and so
+// the registry stays the single source of truth for "what can render in
+// the Context pane".
+//
+// Note: GetStartedCardsWidget's props (`onCardClick`, `className`) are NOT
+// the standard `ContextWidgetProps` shape — it is a client-driven welcome
+// widget, not a server-driven `context_update` target. The registry factory
+// uses a type cast at the boundary so the widget can still be discovered by
+// `resolveContextWidget('get-started-cards')` if needed; callers that need
+// to wire `onCardClick` should import the named export directly and render
+// it themselves (this is what ContextPaneController does for the welcome
+// stage). PlaybookGalleryWidget registration is RETAINED above for FR-21
+// (non-welcome stage resolution).
+// ---------------------------------------------------------------------------
+
+export { GetStartedCardsWidget } from './widgets/context/GetStartedCardsWidget';
+export type {
+  GetStartedCardId,
+  GetStartedCardsWidgetProps,
+} from './widgets/context/GetStartedCardsWidget';
+
+registerContextWidget('get-started-cards', {
+  factory: () =>
+    import('./widgets/context/GetStartedCardsWidget').then((m) => ({
+      // Intentional cast: GetStartedCardsWidget's prop shape differs from
+      // ContextWidgetComponent's (it takes `onCardClick` + `className` instead
+      // of `data` + `widgetType` + `isLoading`). The registry entry exists
+      // for discoverability + symmetry; the actual render uses the named
+      // export directly so the callback is wirable.
+      default: m.GetStartedCardsWidget as unknown as ContextWidgetComponent,
+    })),
+});
+
+// ---------------------------------------------------------------------------
+// Widgets: FindingsWidget (context pane — sources-citations stage)
+//
+// Exported so consumers can reference the component directly and type-check
+// FindingsData payloads. Registered under 'findings'.
+// Citation link clicks dispatch context_highlight to the 'context' channel
+// so the active DocumentViewer scrolls to / highlights the cited passage.
+// ---------------------------------------------------------------------------
+
+export { default as FindingsWidget } from './widgets/context/FindingsWidget';
+export type {
+  FindingsData,
+  Finding,
+  Citation,
+  RiskLevel,
+} from './widgets/context/FindingsWidget';
+
+registerContextWidget('findings', {
+  factory: () =>
+    import('./widgets/context/FindingsWidget').then((m) => ({ default: m.default })),
+});
+
+// ---------------------------------------------------------------------------
+// Providers: AiSessionProvider (R2 session state + PaneEventBus routing)
+// ---------------------------------------------------------------------------
+
+// AiSessionProvider — replaces R1 StandaloneAiProvider; routes SSE events to PaneEventBus
+export { AiSessionProvider } from './providers/AiSessionProvider';
+export type {
+  AiSessionContextValue,
+  AiSessionProviderProps,
+  AiContextMapping,
+} from './providers/AiSessionProvider';
+export { AI_SESSION_CHAT_SESSION_KEY, AI_SESSION_PLAYBOOK_KEY } from './providers/AiSessionProvider';
+
+// useAiSession — consumer hook for AiSessionContext (replaces R1 useStandaloneAi)
+export { useAiSession } from './providers/useAiSession';
+
+// ---------------------------------------------------------------------------
+// Components: ConfidenceIndicator (AIPU2-091)
+//
+// Per-response confidence bar rendered below AI messages. Driven by the safety
+// pipeline confidence score; color-coded high/medium/low using Fluent v9
+// semantic status tokens. Low confidence adds a disclaimer text.
+// ---------------------------------------------------------------------------
+
+export { ConfidenceIndicator } from './components/ConfidenceIndicator';
+export type { ConfidenceIndicatorProps, ConfidenceLevel } from './components/ConfidenceIndicator';
+
+// ---------------------------------------------------------------------------
+// Components: FeedbackButtons (thumbs up/down + optional comment — AIPU2-092)
+//
+// Non-intrusive rating control rendered beneath each completed AI message.
+// Thumbs-up submits immediately; thumbs-down reveals an optional Textarea.
+// Calls POST /api/ai/feedback and shows a brief checkmark confirmation.
+// Only render when streaming is complete (isStreaming === false).
+// ---------------------------------------------------------------------------
+
+export { FeedbackButtons } from './components/FeedbackButtons';
+export type { FeedbackButtonsProps, FeedbackRating } from './components/FeedbackButtons';
+
+// ---------------------------------------------------------------------------
+// Interactions: text-selection cross-pane integration (AIPU2-101)
+//
+// TextSelectionListener — declarative wrapper component for workspace widgets.
+//   Listens for mouseup/selectionchange, debounces 300 ms, enforces minimum
+//   selection length, and dispatches selection_changed on the workspace channel.
+//
+// useTextSelection — imperative hook for advanced widget authors who need direct
+//   control over when selection events are dispatched (e.g. virtual-scroll canvases).
+// ---------------------------------------------------------------------------
+
+export { TextSelectionListener } from './interactions/TextSelectionListener';
+export type { TextSelectionListenerProps } from './interactions/TextSelectionListener';
+
+export { useTextSelection } from './interactions/useTextSelection';
+export type { UseTextSelectionResult } from './interactions/useTextSelection';
+
+// ---------------------------------------------------------------------------
+// Events: PaneEventBus, typed channels, React context + hooks
+// ---------------------------------------------------------------------------
+
+// Core bus class (for advanced usage and testing — most consumers use the hooks)
+export { PaneEventBus } from './events/PaneEventBus';
+
+// Typed event definitions
+export type {
+  PaneChannel,
+  PaneChannelEventMap,
+  PaneEventHandler,
+  WorkspacePaneEvent,
+  ContextPaneEvent,
+  ConversationPaneEvent,
+  SafetyPaneEvent,
+  PlaybookWidgetConfig,
+  WizardStepEvent,
+} from './events/PaneEventTypes';
+
+// React context provider — wrap the three-pane shell root with this
+export { PaneEventBusProvider } from './events/PaneEventBusContext';
+export type { PaneEventBusProviderProps } from './events/PaneEventBusContext';
+
+// React hooks — primary API for components
+export { usePaneEvent } from './events/usePaneEvent';
+export { useDispatchPaneEvent } from './events/useDispatchPaneEvent';
+export type { DispatchPaneEvent } from './events/useDispatchPaneEvent';
+
+// ---------------------------------------------------------------------------
+// Safety annotation UI (AIPU2-090 — FR-402, FR-403)
+//
+// SafetyAnnotationOverlay — subscribes to 'safety' PaneEventBus channel and
+// applies retroactive groundedness highlights + citation verification badges
+// ~200 ms after the last streaming token (D-03: stream + retroactive).
+//
+// AnnotatedMessageContent — stateless unified render of groundedness +
+// citation badge layers; exported for direct use when annotation state is
+// already available (e.g. in tests or server-side pre-annotated payloads).
+//
+// CitationBadge — inline Fluent v9 Badge for citation verification status.
+//   Variants: verified (green CheckmarkCircle), unverified (orange Warning),
+//             partial (blue ArrowSwap).
+//
+// GroundednessHighlight — wraps text with visual indicators for ungrounded
+//   segments: dashed underline + colorStatusWarningBackground1 fill.
+// ---------------------------------------------------------------------------
+
+export { default as SafetyAnnotationOverlay } from './components/SafetyAnnotationOverlay';
+export { AnnotatedMessageContent } from './components/SafetyAnnotationOverlay';
+export type {
+  SafetyAnnotationOverlayProps,
+  AnnotatedMessageContentProps,
+} from './components/SafetyAnnotationOverlay';
+
+export { CitationBadge } from './components/CitationBadge';
+export type {
+  CitationBadgeProps,
+  CitationVerificationResult,
+  CitationVerificationStatus,
+} from './components/CitationBadge';
+
+export { GroundednessHighlight } from './components/GroundednessHighlight';
+export type {
+  GroundednessHighlightProps,
+  GroundednessSegment,
+} from './components/GroundednessHighlight';
+
+// ---------------------------------------------------------------------------
+// Interactions: TabContextMapping (AIPU2-103 — cross-pane tab/context adapter)
+//
+// getContextWidgetForTab — maps a workspace widget type to the recommended
+//   context widget type. Returns null when no recommendation exists (keep
+//   the current context widget unchanged).
+//
+// TAB_CONTEXT_MAPPING — the underlying readonly mapping Record, exported for
+//   testing and for consumers that need to inspect or extend the mapping.
+// ---------------------------------------------------------------------------
+
+export { getContextWidgetForTab, TAB_CONTEXT_MAPPING } from './interactions/TabContextMapping';
+
+// ---------------------------------------------------------------------------
+// Interactions: StageTransitionRules (AIPU2-105 — four-stage pane lifecycle)
+//
+// determineStage — pure function: SessionState → PaneStage. Centralises all
+//   stage transition logic so every pane and the ShellStageManager compute
+//   the current stage consistently from the same inputs.
+//
+// shouldReset — convenience predicate for the "any → welcome" hard reset
+//   (session cleared / deleted).
+//
+// PaneStage / SessionState — exported types for consumer type-safety.
+// ---------------------------------------------------------------------------
+
+export type { PaneStage, SessionState } from './interactions/StageTransitionRules';
+export { determineStage, shouldReset } from './interactions/StageTransitionRules';
+
+// ---------------------------------------------------------------------------
+// Interactions: Citation link cross-pane highlight flow (AIPU2-100)
+//
+// handleCitationClick — pure utility dispatching context_highlight to the
+//   'context' PaneEventBus channel. Accepts a pre-resolved dispatch function so
+//   it is usable outside React (event callbacks, tests, imperative code).
+//
+// useCitationLink — React hook returning a stable handleCitationClick callback.
+//   Wire the returned function to citation anchor click handlers in workspace
+//   widgets. Dispatches context_highlight synchronously (<50 ms, AC-1).
+//   Requires a PaneEventBusProvider ancestor.
+//
+// CitationClickPayload — payload type for handleCitationClick.
+// CitationClickHandler — function type returned by useCitationLink.
+// ---------------------------------------------------------------------------
+
+export { handleCitationClick } from './interactions/CitationLinkHandler';
+export type { CitationClickPayload } from './interactions/CitationLinkHandler';
+
+export { useCitationLink } from './interactions/useCitationLink';
+export type { CitationClickHandler } from './interactions/useCitationLink';

@@ -39,7 +39,7 @@ import {
   type SlashCommand,
   type SlashCommandSource,
 } from '../../SlashCommandMenu/slashCommandMenu.types';
-import type { IHostContext } from '../types';
+import type { IHostContext, AuthenticatedFetchFn } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // API Response Types (mirror BFF CommandResolutionResponse)
@@ -84,8 +84,12 @@ export interface UseDynamicSlashCommandsOptions {
   sessionId: string | undefined;
   /** Base URL for the BFF API. */
   apiBaseUrl: string;
-  /** Bearer token for API authentication. */
-  accessToken: string;
+  /**
+   * Authenticated fetch function (typically from `@spaarke/auth` or `useAuth()`).
+   * MUST attach a fresh Bearer token on every call. Replaces the previous
+   * `accessToken: string` snapshot prop.
+   */
+  authenticatedFetch: AuthenticatedFetchFn;
   /** Active playbook ID — re-fetch when playbook changes. */
   playbookId?: string;
   /** Host context — re-fetch when entity context changes. */
@@ -160,7 +164,7 @@ function buildCacheKey(
  * const { commands, isLoading, refresh } = useDynamicSlashCommands({
  *   sessionId: session?.sessionId,
  *   apiBaseUrl: "https://spe-api-dev-67e2xz.azurewebsites.net",
- *   accessToken: token,
+ *   authenticatedFetch, // from @spaarke/auth / useAuth()
  *   playbookId,
  *   hostContext,
  * });
@@ -169,7 +173,7 @@ function buildCacheKey(
 export function useDynamicSlashCommands(
   options: UseDynamicSlashCommandsOptions
 ): IUseDynamicSlashCommandsResult {
-  const { sessionId, apiBaseUrl, accessToken, playbookId, hostContext } = options;
+  const { sessionId, apiBaseUrl, authenticatedFetch, playbookId, hostContext } = options;
 
   // Playbook commands change when playbookId changes; scope commands only change
   // when the host entity context changes (FR-11: scope capabilities independent
@@ -192,21 +196,6 @@ export function useDynamicSlashCommands(
 
   // Normalise URL — remove trailing slash
   const baseUrl = apiBaseUrl.replace(/\/+$/, '');
-
-  /**
-   * Extract tenant ID from JWT for X-Tenant-Id header.
-   * Matches the pattern in useChatContextMapping.ts / useChatPlaybooks.ts.
-   */
-  const extractTenantId = (token: string): string | null => {
-    try {
-      const parts = token.split('.');
-      if (parts.length !== 3) return null;
-      const payload = JSON.parse(atob(parts[1]));
-      return payload.tid || null;
-    } catch {
-      return null;
-    }
-  };
 
   /**
    * Convert a BFF command response item to a SlashCommand for the UI.
@@ -269,16 +258,11 @@ export function useDynamicSlashCommands(
     setIsLoading(true);
 
     try {
-      const tenantId = extractTenantId(accessToken);
       const url = `${baseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/commands`;
 
-      const response = await fetch(url, {
+      const response = await authenticatedFetch(url, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-          ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
-        },
+        headers: { 'Content-Type': 'application/json' },
       });
 
       if (!response.ok) {
@@ -330,7 +314,7 @@ export function useDynamicSlashCommands(
       setIsLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseUrl, accessToken, sessionId, playbookId, scopeId, hostContext?.entityType]);
+  }, [baseUrl, authenticatedFetch, sessionId, playbookId, scopeId, hostContext?.entityType]);
 
   // Clear scope commands when the host entity context changes — scope commands
   // are tied to the entity, not the playbook (ADR-013: flow ChatHostContext).

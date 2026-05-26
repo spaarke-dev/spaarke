@@ -1,0 +1,106 @@
+<task id="003" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Determine prod deploy process scope (UQ-02; decides Phase 5)</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>~10 min (docs/procedures search + Deploy-Release.ps1 verification)</actual-effort>
+    <assigned>Project owner</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
+    <tags>coordination, governance, phase-0, deploy</tags>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent owner coordination; no file conflicts with sibling Group A tasks</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Determine whether a canonical production deploy process exists for `Sprk.Bff.Api`. This
+    decides whether Phase 5 includes the prod deploy + 7-day observation (tasks 062, 063) or
+    scopes this project to dev+demo only with prod promotion handed off to a follow-up project.
+    Per design §3 Resolved Decisions, the default is: define before Phase 5, NOT mid-project.
+  </prompt>
+
+  <role>Project coordinator with deploy operations awareness.</role>
+
+  <goal>
+    A clear YES/NO answer on whether a canonical prod deploy process exists, plus either
+    (a) a link to the canonical process documentation (if YES) or (b) confirmation that
+    tasks 062 + 063 are deferred to follow-up project (if NO).
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
+    <file purpose="ai-spec">projects/sdap-bff-api-remediation-fix/spec.md</file>
+    <file purpose="deploy-skill">.claude/skills/bff-deploy/SKILL.md</file>
+    <file purpose="ops-procedure">docs/procedures/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §3">Define before Phase 5 starts, NOT mid-project</constraint>
+    <constraint source="ADR-027">Managed solutions for prod; subscription isolation</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-027-subscription-isolation-managed-solutions.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 5 has high blast radius (production touch). approach.md §9 left this open ("currently TBD,
+      may need to be defined as part of this project"). The design refined this: do NOT define
+      the prod process inside this project; if no canonical process exists, this project ends at
+      demo and prod promotion is a follow-up project owned by ops.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Owner sign-off required first</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Search docs/procedures/, docs/guides/ for "prod" / "production" deploy docs for Sprk.Bff.Api</step>
+    <step order="2">Verify whether `.github/workflows/deploy-bff-api.yml` covers prod or just staging</step>
+    <step order="3">Owner consults ops team if process is unclear</step>
+    <step order="4">Record decision (YES with link / NO with deferral) in CLAUDE.md → Decisions Made</step>
+    <step order="5">If NO: mark tasks 062, 063 as ⏸ (deferred) in TASK-INDEX.md and flag as follow-up project</step>
+    <step order="6">Update Phase 0 checklist item 5 to checked</step>
+    <step order="7">Update TASK-INDEX.md status of task 003 from 🔲 to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Update task index + CLAUDE.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (Decisions Made entry)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md (status update + 062/063 status if deferred)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">YES/NO answer recorded in CLAUDE.md Decisions Made</criterion>
+    <criterion testable="true">If YES: canonical prod process doc path documented</criterion>
+    <criterion testable="true">If NO: tasks 062, 063 marked ⏸ deferred in TASK-INDEX.md</criterion>
+    <criterion testable="true">Phase 0 checklist item 5 marked complete</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      Investigation: Glob'd docs/procedures/, docs/guides/ and found docs/procedures/production-release.md
+      (Last Updated 2026-04-06; Owner: Platform Operations). It documents the canonical 3-track release:
+      (1) Dataverse SpaarkeMaster solution via pac, (2) Azure BFF API via Deploy-BffApi.ps1 + Office Add-ins
+      via Deploy-OfficeAddins.ps1, (3) Reference Data via Deploy-NotificationPlaybooks.ps1 +
+      Deploy-ChatContextMappings.ps1 + Deploy-CopilotAgent.ps1. Master orchestration: scripts/Deploy-Release.ps1
+      (verified present). Validation: scripts/Validate-DeployedEnvironment.ps1. Sequential per-environment.
+      Tagged via git tag at completion.
+    </completion-summary>
+    <answer>YES — canonical prod deploy process exists</answer>
+    <doc-path>docs/procedures/production-release.md</doc-path>
+    <orchestration-script>scripts/Deploy-Release.ps1</orchestration-script>
+    <impact>Tasks 062 + 063 STAY IN SCOPE. Phase 5 includes prod deploy + 7-day observation as originally designed. Phase 5 procedure must invoke Deploy-Release.ps1 (or the canonical 3-track sequence) — NOT a bespoke prod-deploy procedure.</impact>
+  </notes>
+</task>

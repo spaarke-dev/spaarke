@@ -1,0 +1,34 @@
+<task id="AUTHV2-060" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Add CSP + Trusted Types middleware on BFF</title>
+    <phase>D — Reasonable security hardening</phase>
+    <tags>security, server, csp, xss, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>Phase C</dependencies>
+    <parallel-safe>D-Parallel-1</parallel-safe>
+  </metadata>
+  <prompt>localStorage tokens are only as safe as XSS defense. Add strict CSP headers + Trusted Types on BFF responses serving HTML/JS. Code Pages hosted in Dataverse get appropriate CSP via Dataverse env config (document separately).</prompt>
+  <role>Security-focused .NET engineer.</role>
+  <goal>Strict CSP: script-src 'self', no inline, no eval. Trusted Types enforced in production builds. Customer security questionnaires can answer "yes, strict CSP".</goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §"What they'd push back on" #3 (XSS posture)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Implement SecurityHeadersMiddleware that adds CSP + Trusted Types headers on every response.</step>
+    <step>CSP: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://login.microsoftonline.com https://graph.microsoft.com; frame-ancestors https://*.dynamics.com https://*.crm.dynamics.com;`. Tune per actual needs.</step>
+    <step>Trusted Types: `require-trusted-types-for 'script'`. Use Report-Only initially to surface violations without breaking.</step>
+    <step>Add HSTS, X-Content-Type-Options, Referrer-Policy headers.</step>
+    <step>Wire middleware first in pipeline.</step>
+    <step>Test via curl + browser: verify headers present.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>SecurityHeadersMiddleware adds CSP + Trusted Types + HSTS + supporting headers.</criterion>
+    <criterion>CSP policy documented + tunable.</criterion>
+    <criterion>Trusted Types in Report-Only mode initially.</criterion>
+    <criterion>BFF endpoints work without CSP-induced breakage.</criterion>
+  </acceptance-criteria>
+</task>

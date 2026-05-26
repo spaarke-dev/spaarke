@@ -35,7 +35,7 @@
     "messageTeamMembers"
   ],
   "validDomains": [
-    "spe-api-dev-67e2xz.azurewebsites.net",
+    "spaarke-bff-dev.azurewebsites.net",
     "spaarkedev1.crm.dynamics.com"
   ]
 }

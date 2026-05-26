@@ -1,0 +1,78 @@
+<task id="AUTHV2-048" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Implement audit logging middleware — standard identity fields</title>
+    <phase>C — Server hardening</phase>
+    <tags>auth, server, observability, audit, FULL</tags>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>C-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>Add middleware that enriches every authenticated request with standardized identity fields into the structured log scope: oid (Azure AD object ID), appid (calling app), obo flag (true if OBO flow active), tenantId, correlationId. Customer pipes structured logs to their Sentinel/Log Analytics via Diagnostic Settings — uniform fields make their integration mechanical.</prompt>
+  <role>Senior .NET engineer with logging + identity expertise.</role>
+  <goal>Every authenticated request emits structured log entries with the 5 standard fields. Customer can pipe to their SIEM without per-customer engineering.</goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs (middleware pipeline)</file>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §3 H-? (claims hardening), §4.1 #5 (audit middleware)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Create AuditEnrichmentMiddleware in src/Infrastructure/Logging/. Reads HttpContext.User claims: oid, appid (or azp), and detects OBO via amr/scp.</step>
+    <step>Use ILogger.BeginScope with dictionary of all 5 fields. Subsequent logs within the request automatically include them.</step>
+    <step>Wire in Program.cs after authentication middleware (so claims are available) and before endpoint routing.</step>
+    <step>Test: hit an endpoint, inspect App Insights traces. Each trace should have oid, appid, obo, tenantId, correlationId properties.</step>
+    <step>Document the field semantics in a README or pattern note.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>AuditEnrichmentMiddleware exists and is wired into Program.cs.</criterion>
+    <criterion>App Insights traces show all 5 fields on authenticated requests.</criterion>
+    <criterion>OBO detection works (test with an endpoint that exchanges OBO).</criterion>
+    <criterion>Field semantics documented.</criterion>
+  </acceptance-criteria>
+  <notes>
+Completed 2026-05-19 — Phase C / Workstream C8.
+
+Files created:
+- src/server/api/Sprk.Bff.Api/Infrastructure/Logging/AuditEnrichmentMiddleware.cs
+
+Files modified:
+- src/server/api/Sprk.Bff.Api/Infrastructure/DI/MiddlewarePipelineExtensions.cs
+  (added `using Sprk.Bff.Api.Infrastructure.Logging;` + `app.UseAuditEnrichment();`
+   call placed AFTER `app.UseAuthentication()` + `app.UseAuthorization()` and BEFORE
+   `app.UseRateLimiter()`)
+
+Implementation:
+- AuditEnrichmentMiddleware pushes `oid`, `appid`, `obo`, `tenantId`, `correlationId`
+  into the structured log scope via `ILogger&lt;T&gt;.BeginScope(IDictionary&lt;string, object?&gt;)`
+  on every AUTHENTICATED request. Anonymous requests (e.g. `/healthz`) pass through
+  unchanged.
+- Field semantics + sourcing fully documented in XML doc comments on the class and
+  on the `IsOnBehalfOfFlow` helper (single source of truth, no separate README needed).
+
+Claim resolution (matches existing patterns in ResourceAccessHandler.cs / AnalysisRagProcessor.cs):
+- `oid`: short claim → `http://schemas.microsoft.com/identity/claims/objectidentifier`
+- `appid`: `appid` (v1) → `azp` (v2)
+- `tenantId`: `tid` → long URI → `tenant_id`
+- `correlationId`: `HttpContext.TraceIdentifier` (W3C TraceParent)
+- `obo`: `true` when delegated `scp` claim present AND `oid` present; explicitly `false`
+  when `idtyp == "app"`.
+
+Security/PII rules enforced:
+- Never logs raw JWT, secrets, or Authorization header
+- Never logs UPN / email / display name (canonical identity = `oid` per task D3)
+- Anonymous endpoints get no scope
+
+Build: `dotnet build src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` → 0 errors. Only
+pre-existing warnings unrelated to this change.
+
+Parallel-execution coordination: Touched ONLY new file + narrow edits to
+MiddlewarePipelineExtensions.cs (NOT Program.cs as the task originally suggested —
+the actual pipeline registration lives in MiddlewarePipelineExtensions.cs). No
+collision with parallel tasks 043-047.
+
+Runtime verification (App Insights traces visible to customer) is deferred to the
+next deployment — the structured-scope contract is exercised by App Insights /
+OpenTelemetry / Serilog and is the standard mechanism for this pattern.
+  </notes>
+</task>

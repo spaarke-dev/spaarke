@@ -17,6 +17,8 @@ import { quickSummaryRegistration } from "./sections/quickSummary.registration";
 import { latestUpdatesRegistration } from "./sections/latestUpdates.registration";
 import { todoRegistration } from "./sections/todo.registration";
 import { documentsRegistration } from "./sections/documents.registration";
+import { dailyBriefingRegistration } from "./sections/dailyBriefing/dailyBriefing.registration";
+import { calendarRegistration } from "./sections/calendar.registration";
 
 /** All available workspace sections in default display order. */
 export const SECTION_REGISTRY: readonly SectionRegistration[] = [
@@ -25,6 +27,8 @@ export const SECTION_REGISTRY: readonly SectionRegistration[] = [
   latestUpdatesRegistration,
   todoRegistration,
   documentsRegistration,
+  dailyBriefingRegistration,
+  calendarRegistration,
 ] as const;
 
 // ---------------------------------------------------------------------------

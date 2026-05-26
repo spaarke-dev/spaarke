@@ -21,6 +21,7 @@ import { useEffect, useState } from 'react';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth } from './authInit';
 import { EmailProcessingDashboard } from './EmailProcessingDashboard';
+import { getApiBaseUrl } from '../../shared/utils/environmentVariables';
 import {
   getEffectiveDarkMode,
   setupThemeListener,
@@ -39,15 +40,19 @@ export const EmailProcessingMonitorHost: React.FC<IEmailProcessingMonitorHostPro
   const ctxAny = context as any;
   const clientAppId: string = ctxAny.parameters?.clientAppId?.raw || '';
   const bffAppId: string = ctxAny.parameters?.bffAppId?.raw || '';
-  const bffApiUrl: string =
-    ctxAny.parameters?.bffApiUrl?.raw || 'https://spe-api-dev-67e2xz.azurewebsites.net';
+  // bffApiUrl resolved from sprk_BffApiBaseUrl Dataverse env var (single source of truth).
+  // Per-instance PCF property removed (task 024) -- every environment must keep the env var current.
   const refreshIntervalSeconds: number = ctxAny.parameters?.refreshIntervalSeconds?.raw ?? 30;
   const controlHeight: number = ctxAny.parameters?.controlHeight?.raw ?? 400;
 
   const [authReady, setAuthReady] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [bffApiUrl, setBffApiUrl] = useState<string>('');
   const [isDarkTheme, setIsDarkTheme] = useState(() => getEffectiveDarkMode(context));
 
+  // Auth init -- runs once on mount.
+  // Resolves BFF URL from sprk_BffApiBaseUrl Dataverse env var FIRST, then initializes auth.
+  // This replaces the per-instance bffApiUrl PCF property (removed in task 024).
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -57,7 +62,17 @@ export const EmailProcessingMonitorHost: React.FC<IEmailProcessingMonitorHostPro
             'Missing required configuration: clientAppId and bffAppId must be provided'
           );
         }
-        await initializeAuth(clientAppId, bffAppId, bffApiUrl);
+        // Resolve BFF base URL from Dataverse env var (single source of truth across all clients)
+        const resolvedBffUrl = await getApiBaseUrl(ctxAny.webAPI);
+        if (!resolvedBffUrl) {
+          throw new Error(
+            'sprk_BffApiBaseUrl Dataverse environment variable is not set or empty. Configure it in the SpaarkeCore solution.'
+          );
+        }
+        if (cancelled) return;
+        setBffApiUrl(resolvedBffUrl);
+        console.log(`[EmailProcessingMonitorHost] Resolved BFF URL: ${resolvedBffUrl}`);
+        await initializeAuth(clientAppId, bffAppId, resolvedBffUrl);
         if (!cancelled) setAuthReady(true);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -68,7 +83,7 @@ export const EmailProcessingMonitorHost: React.FC<IEmailProcessingMonitorHostPro
     return () => {
       cancelled = true;
     };
-  }, [clientAppId, bffAppId, bffApiUrl]);
+  }, [clientAppId, bffAppId, ctxAny.webAPI]);
 
   useEffect(() => {
     const cleanup = setupThemeListener(setIsDarkTheme, context);

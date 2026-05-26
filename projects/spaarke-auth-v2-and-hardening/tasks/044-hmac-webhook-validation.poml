@@ -1,0 +1,124 @@
+<task id="AUTHV2-044" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Replace webhook clientState with HMAC-SHA256 signature validation</title>
+    <phase>C — Server hardening</phase>
+    <tags>auth, server, security, webhooks, FULL</tags>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>C-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>/api/communications/incoming-webhook and /api/v1/emails/webhook-trigger currently use plain string match for clientState (CommunicationEndpoints.cs:401). Replace with HMAC-SHA256 signature validation. Remove DEVELOPMENT_MODE bypass.</prompt>
+  <role>Senior .NET engineer + Graph webhooks expertise.</role>
+  <goal>Webhook handlers verify HMAC signature before processing. No bypass. Compromise of webhook URL alone insufficient to forge notifications.</goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Communication/CommunicationEndpoints.cs (line 401)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Email/EmailWebhookEndpoints.cs (or similar)</file>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §3 C-3</file>
+      <file>.claude/patterns/auth/graph-webhooks.md (Graph webhook reference)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Add Communication:WebhookSigningKey and Email:WebhookSigningKey as Key Vault references in appsettings.template.json.</step>
+    <step>Implement WebhookSignatureFilter (endpoint filter) that reads X-Hub-Signature-256 header (or equivalent), computes HMAC-SHA256(secret, body), compares constant-time.</step>
+    <step>Apply filter to /api/communications/incoming-webhook and /api/v1/emails/webhook-trigger.</step>
+    <step>Remove DEVELOPMENT_MODE bypass entirely.</step>
+    <step>Update Graph subscription registration to include signing key (Graph sends X-Hub-Signature-256 or similar).</step>
+    <step>Test: valid signature passes; tampered body fails; missing signature fails.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>WebhookSignatureFilter exists and validates HMAC-SHA256.</criterion>
+    <criterion>Both webhook endpoints require the filter (verified by integration test).</criterion>
+    <criterion>No DEVELOPMENT_MODE bypass remains.</criterion>
+    <criterion>Constant-time comparison used (prevent timing attacks).</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19 in Phase C parallel-2 wave.
+
+    === Files created ===
+    - src/server/api/Sprk.Bff.Api/Api/Filters/WebhookSignatureFilter.cs (new)
+      Reusable IEndpointFilter. Validates HMAC-SHA256 over the raw UTF-8 body
+      with CryptographicOperations.FixedTimeEquals. Configurable header + key
+      accessor so a single filter type serves both endpoints. Fail-closed
+      (returns 401 if signing key is null/empty). Subscription-validation
+      handshakes (?validationToken=) bypass the HMAC check so Graph can
+      complete the subscription creation handshake.
+
+    === Files modified ===
+    - src/server/api/Sprk.Bff.Api/Configuration/CommunicationOptions.cs
+      Added [Required] WebhookSigningKey (HMAC key for X-Hub-Signature-256).
+      WebhookClientState retained (still the in-body Graph-native shared secret).
+    - src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs
+      Added WebhookSigningKey (HMAC key for X-Dataverse-Signature).
+      WebhookSecret marked [Obsolete] but retained for config-back-compat.
+    - src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs
+      - Applied .RequireWebhookSignature("X-Hub-Signature-256", ...) on
+        /api/communications/incoming-webhook.
+      - Removed DEVELOPMENT_MODE bypass on body clientState validation.
+      - Switched clientState compare to CryptographicOperations.FixedTimeEquals.
+      - If WebhookClientState is unset, server now returns 500 (misconfigured),
+        not 202 (silent accept).
+    - src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs
+      - Applied .RequireWebhookSignature("X-Dataverse-Signature", ...) on
+        /api/v1/emails/webhook-trigger.
+      - Removed inline ValidateWebhookSignatureAsync helper (~70 lines deleted),
+        which had: (a) DEVELOPMENT_MODE skip, (b) direct-secret-equals-signature
+        bypass (insecure), (c) non-constant-time comparison.
+      - Removed unused System.Security.Cryptography import.
+    - src/server/api/Sprk.Bff.Api/appsettings.template.json
+      Added Communication:WebhookSigningKey and Email:WebhookSigningKey
+      as Key Vault references with explanatory _*_comment fields.
+
+    === Config user MUST set per-env (Phase C deployment, task 040) ===
+    Two new Key Vault secrets:
+      1. communication-webhook-signing-key
+         App Service config: Communication:WebhookSigningKey
+         Used by: WebhookSignatureFilter on /api/communications/incoming-webhook
+         For Graph webhooks: a signing relay (Logic App / Function / APIM) sits
+         in front of the endpoint and adds X-Hub-Signature-256 over the body,
+         since Graph itself does not sign notification bodies.
+      2. Email-WebhookSigningKey
+         App Service config: EmailProcessing:WebhookSigningKey
+         Used by: WebhookSignatureFilter on /api/v1/emails/webhook-trigger
+         Must match the secret configured on the Dataverse Service Endpoint
+         (authtype = HttpHeader or WebKey).
+    Both secrets MUST be high-entropy (recommend `openssl rand -base64 48`)
+    and rotated every 90 days. The existing communication-webhook-secret
+    Key Vault secret (the in-body clientState) is still required.
+
+    === Architecture note: Graph webhooks ===
+    Microsoft Graph does NOT natively sign notification bodies. The two
+    integrity primitives for Graph webhooks are:
+      (a) HTTPS + endpoint URL secrecy (weak — URL can leak).
+      (b) clientState shared secret in the body (Graph-native).
+    This task adds defense-in-depth by introducing a signing relay in front
+    of the endpoint that adds X-Hub-Signature-256. Deployments that don't
+    use a relay can satisfy Communication:WebhookSigningKey with a key
+    known only to the relay and the BFF — the filter is still fail-closed,
+    so omitting the relay = no traffic accepted (intentional). If a future
+    deployment chooses to skip the relay, the Communication endpoint
+    registration line can be changed to drop .RequireWebhookSignature(...)
+    BUT the in-body clientState constant-time check (now mandatory in the
+    handler) remains.
+
+    === Build verification ===
+    `dotnet build src/server/api/Sprk.Bff.Api/`
+    Result: Build succeeded. 0 Errors, 17 Warnings (all pre-existing — no
+    new warnings introduced by this task).
+
+    === Out of scope / NOT changed ===
+    - GraphSubscriptionManager.cs still uses CommunicationOptions.WebhookClientState
+      for subscription creation (unchanged — this is the body clientState, not the HMAC key).
+    - No CommunicationModule.cs / EmailServicesModule.cs DI registration needed
+      because WebhookSignatureFilter is instantiated inline by the extension
+      method and resolves the signing key per-request via the signing-key accessor.
+    - No code outside src/server/api/Sprk.Bff.Api/ was touched.
+
+    === Tests ===
+    Per task POML, manual verification (valid/tampered/missing) is listed but
+    not gated as an acceptance criterion. Integration tests should be added
+    in a follow-up testing task; the unit-level guarantees are in the filter's
+    fail-closed logic + CryptographicOperations.FixedTimeEquals.
+  </notes>
+</task>

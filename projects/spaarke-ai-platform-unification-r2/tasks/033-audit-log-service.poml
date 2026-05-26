@@ -1,0 +1,53 @@
+<task id="AIPU2-033" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build AuditLogService (append-only compliance log in Cosmos DB)</title>
+    <phase>2C</phase>
+    <tags>bff-api, cosmos-db, audit, compliance</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-002, AIPU2-006</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build an AuditLogService that writes an append-only compliance log of all AI interactions
+    to a dedicated Cosmos DB container. Each audit entry must record: timestamp, userId,
+    sessionId, action performed, tools called, documents accessed, a SHA-256 hash of the
+    response content (for tamper detection), safety filter results, and matter context.
+    The container must be configured with an immutable policy so that no updates or deletes
+    are possible — entries are permanent. Default retention is 7 years to satisfy legal
+    compliance requirements. The service must integrate into the existing AI request pipeline
+    without affecting streaming latency.
+  </prompt>
+  <role>Senior .NET developer with experience in Cosmos DB immutability policies, compliance logging, and .NET cryptography (SHA-256 hashing).</role>
+  <goal>
+    Audit entries are written for every AI interaction. Entries are immutable (no update/delete
+    possible via SDK). Retention is configured for 7 years. The SHA-256 response hash enables
+    tamper detection. The service does not add measurable latency to streaming responses (fire-and-forget write pattern).
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ADR-015-ai-data-governance.md and ai.md to confirm audit field requirements, retention rules, and immutability constraints before implementing.</step>
+    <step>Create AuditLogService.cs in src/server/api/Sprk.Bff.Api/Services/Ai/Audit/. Define IAuditLogService with LogInteractionAsync(AuditEntry entry) returning ValueTask.</step>
+    <step>Define AuditEntry record with all required fields: Timestamp (DateTimeOffset), UserId (string), SessionId (string), TenantId (string), Action (string), ToolsCalled (IReadOnlyList of string), DocumentsAccessed (IReadOnlyList of string), ResponseHash (string, SHA-256 hex), SafetyResults (SafetyCheckResult), MatterContext (MatterRef). Include a computed id property (sessionId + "_" + Guid.NewGuid()) to ensure uniqueness.</step>
+    <step>Implement SHA-256 hashing: hash the raw response string using System.Security.Cryptography.SHA256.HashData and encode as lowercase hex. Never store raw response text in the audit log.</step>
+    <step>Configure AuditLogService to target the `audit` Cosmos DB container with partition key /tenantId. Use DefaultAzureCredential. Use CreateItemAsync only (never UpsertItemAsync, ReplaceItemAsync, or DeleteItemAsync) to enforce append-only semantics in code.</step>
+    <step>Document (in a code comment above the container configuration) that the Cosmos `audit` container must be created with an immutable policy in Bicep/Terraform — reference infrastructure/cosmos/audit-container-policy.json or equivalent. If the file does not exist, create a placeholder JSON file documenting the required policy settings.</step>
+    <step>Implement fire-and-forget write: call LogInteractionAsync from the AI pipeline after streaming completes. Wrap in try/catch — audit failures must log at Error level but must not surface to the user or affect the response.</step>
+    <step>Register AuditLogService in AddAiPersistenceModule.</step>
+    <step>Write unit tests: (a) entry written to Cosmos with correct fields, (b) SHA-256 hash is deterministic for same input, (c) audit failure does not throw, (d) CreateItemAsync used (not Upsert/Replace/Delete).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>AuditEntry includes all required fields: timestamp, userId, sessionId, action, toolsCalled, documentsAccessed, responseHash (SHA-256), safetyResults, matterContext.</criterion>
+    <criterion>Only CreateItemAsync is used — no update or delete operations appear in the service implementation.</criterion>
+    <criterion>Response content is hashed (SHA-256), never stored as plaintext in the audit log.</criterion>
+    <criterion>Audit write failure does not propagate as an exception to callers or affect streaming.</criterion>
+    <criterion>An infrastructure placeholder (policy JSON or Bicep comment) documents the required immutable container policy.</criterion>
+    <criterion>Service is registered in AddAiPersistenceModule.</criterion>
+    <criterion>All unit tests pass (dotnet test).</criterion>
+  </acceptance-criteria>
+</task>

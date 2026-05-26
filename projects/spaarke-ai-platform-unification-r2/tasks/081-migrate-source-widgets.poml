@@ -1,0 +1,49 @@
+<task id="AIPU2-081" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Migrate 6 R1 Source Widgets to ContextWidgetRegistry</title>
+    <phase>4C</phase>
+    <tags>frontend, widgets, migration</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-073</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    R1 implemented 6 source widgets (DocumentViewer, WebSource, LegalLibrary, Citation,
+    ImageViewer, CodeViewer) rendered in SourcePanel. These must be adapted to implement the
+    ContextWidget interface (AIPU2-071) and registered in ContextWidgetRegistry so they render
+    in ContextPaneController. The citation highlight functionality (scrolling to a specific
+    passage when context_highlight is received) must be preserved — each widget that supports
+    citation highlighting must implement the onHighlight method. No serialize/restore is
+    required for context widgets (they are ephemeral per session).
+  </prompt>
+  <role>Frontend developer with React 19, TypeScript, and document rendering experience.</role>
+  <goal>
+    All 6 source widgets implement ContextWidget, are registered in ContextWidgetRegistry,
+    render correctly in ContextPaneController, and citation highlighting works. Existing widget
+    rendering behavior is unchanged.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.AI.Outputs/src/registry/source-registry.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read source-registry.ts to find all 6 widget file locations and their current factory pattern.</step>
+    <step>For each of the 6 widgets (DocumentViewer, WebSource, LegalLibrary, Citation, ImageViewer, CodeViewer): adapt to implement the ContextWidget interface (render, and optionally onHighlight).</step>
+    <step>For DocumentViewer, LegalLibrary, and Citation widgets: implement onHighlight(citationId) to scroll the rendered content to the cited passage (preserve existing R1 highlight scroll behavior if it exists).</step>
+    <step>For WebSource, ImageViewer, CodeViewer: implement onHighlight as a no-op (these widget types do not support in-document citation highlighting).</step>
+    <step>Register all 6 widgets in ContextWidgetRegistry with their dynamic import factory.</step>
+    <step>Verify each widget renders correctly in ContextPaneController when a context_update event with the matching widget type is received.</step>
+    <step>Verify citation highlight: dispatch a context_highlight event to PaneEventBus; confirm ContextPaneController calls onHighlight on the active widget with the correct citationId.</step>
+    <step>Write tests: (a) each widget renders from context_update data; (b) DocumentViewer.onHighlight scrolls to correct passage; (c) WebSource.onHighlight is a no-op (no error).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All 6 source widgets implement the ContextWidget interface and compile in strict TypeScript.</criterion>
+    <criterion>All 6 widgets registered in ContextWidgetRegistry with dynamic import factory.</criterion>
+    <criterion>DocumentViewer, LegalLibrary, Citation implement onHighlight with citation scroll behavior.</criterion>
+    <criterion>WebSource, ImageViewer, CodeViewer implement onHighlight as safe no-op.</criterion>
+    <criterion>All 6 widgets render correctly in ContextPaneController when triggered by context_update events.</criterion>
+    <criterion>Tests for rendering and highlight behavior pass.</criterion>
+  </acceptance-criteria>
+</task>

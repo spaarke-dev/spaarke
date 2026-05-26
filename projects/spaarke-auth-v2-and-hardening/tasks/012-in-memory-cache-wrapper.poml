@@ -1,0 +1,64 @@
+<task id="AUTHV2-012" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Implement in-memory cache wrapper with JWT exp validation</title>
+    <phase>A — Core library rebuild</phase>
+    <tags>auth, library, typescript, FULL</tags>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>010</dependencies>
+    <parallel-safe>A-Parallel-1 (with 011)</parallel-safe>
+  </metadata>
+  <prompt>
+    Simplify the cache layer: replace the old CacheStrategy + SessionStorageStrategy (two layers) with a single InMemoryCache wrapper around BrowserMsalStrategy. MSAL.localStorage already provides cross-tab persistence; sessionStorage layer is redundant.
+
+    InMemoryCache: holds the most recent TokenResult per-instance. On acquire(), check exp claim; if within 5-min buffer, delegate to underlying strategy. Otherwise return cached.
+  </prompt>
+  <role>Senior TypeScript engineer focused on cache semantics.</role>
+  <goal>
+    InMemoryCache wrapper exists. Old CacheStrategy.ts and SessionStorageStrategy.ts are deleted. SpaarkeAuthProvider uses the wrapper around BrowserMsalStrategy. JWT exp validation is the only freshness check.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.Auth/src/strategies/CacheStrategy.ts (existing — delete after lift)</file>
+      <file>src/client/shared/Spaarke.Auth/src/strategies/SessionStorageStrategy.ts (existing — delete)</file>
+      <file>src/client/shared/Spaarke.Auth/src/config.ts (TOKEN_EXPIRY_BUFFER_MS = 5 min)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read CacheStrategy.ts — note the in-memory storage pattern and exp validation logic.</step>
+    <step>Create src/client/shared/Spaarke.Auth/src/strategies/InMemoryCache.ts: class InMemoryCache implements AuthStrategy. Constructor takes (innerStrategy: AuthStrategy). acquire() checks cached.exp vs Date.now() + 5min buffer; if fresh, return cached; otherwise call innerStrategy.acquire() and store result.</step>
+    <step>Implement clearCache(): null out cached entry + call innerStrategy.clearCache().</step>
+    <step>Update SpaarkeAuthProvider to use: new InMemoryCache(new BrowserMsalStrategy(config)).</step>
+    <step>Delete CacheStrategy.ts and SessionStorageStrategy.ts.</step>
+    <step>Update tests/CacheStrategy.test.ts: rewrite as InMemoryCache.test.ts covering: fresh return from cache, exp validation triggers refresh, clearCache cascades.</step>
+    <step>Run tsc --noEmit. Run tests.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>InMemoryCache.ts exists and wraps an inner AuthStrategy.</criterion>
+    <criterion>JWT exp validated with 5-min buffer on every acquire().</criterion>
+    <criterion>CacheStrategy.ts and SessionStorageStrategy.ts deleted.</criterion>
+    <criterion>SpaarkeAuthProvider composes InMemoryCache(BrowserMsalStrategy()).</criterion>
+    <criterion>Unit tests for InMemoryCache pass.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19. InMemoryCache.ts wraps any AuthStrategy with JWT-exp
+    freshness validation (5-min buffer matching BrowserMsalStrategy). Cache name
+    is composite ("in-memory-cache(browser-msal)") so the SpaarkeAuth log line
+    surfaces both layers. Two surfaces preserved for SpaarkeAuthProvider use:
+    `getCachedToken()` (sync — for JWT `tid` extraction) and `invalidate()`
+    (non-cascading — for proactive refresh, lets MSAL serve silently on next
+    acquire). `clearCache()` cascades to inner (logout / 401 retry).
+
+    SpaarkeAuthProvider simplified: dropped `_cacheStrategy`, `_sessionStorageStrategy`,
+    `_cacheToken()`, `_hasValidCache()` (was a no-op). Tenant ID still extracted
+    from JWT `tid` via `_extractTidFromCachedToken()` → now reads via
+    `_cache.getCachedToken()`.
+
+    Tests: 10/10 InMemoryCache.test.ts pass. config.test.ts has one pre-existing
+    failure (stale fixture expecting removed default clientId) — out of scope;
+    candidate for cleanup in task 016.
+
+    Quality gates deferred per D-AUTH-QUALITY-GATE-DEFERRAL (single comprehensive
+    code-review + adr-check after task 016).
+  </notes>
+</task>

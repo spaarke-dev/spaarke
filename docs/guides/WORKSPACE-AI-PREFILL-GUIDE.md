@@ -16,7 +16,7 @@ AI Pre-Fill analyzes uploaded files during entity creation (e.g., Create New Mat
 
 > **Critical**: Wizard code pages that call the BFF API **must** initialize MSAL authentication before making any requests. Using `fetch.bind(window)` without auth causes `401 Unauthorized` on all BFF endpoints.
 
-Wizard code pages (e.g., `sprk_creatematterwizard`) are **standalone Dataverse dialogs** opened via `Xrm.Navigation.navigateTo`. They do not inherit auth context from the calling page. Auth must be initialized explicitly in `main.tsx` using `@spaarke/auth`:
+Wizard code pages (e.g., `sprk_creatematterwizard`) are **standalone Dataverse dialogs** opened via `Xrm.Navigation.navigateTo`. They do not inherit auth context from the calling page. Auth must be initialized explicitly in `main.tsx` using `@spaarke/auth` per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md):
 
 ```typescript
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";

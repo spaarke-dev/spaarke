@@ -4,12 +4,16 @@ tags: [deploy, dataverse, power-platform, pac-cli, pcf, solutions]
 techStack: [dataverse, pcf-framework, power-platform]
 appliesTo: ["**/Solutions/**", "**/pcf/**", "deploy to dataverse", "pac pcf push"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
 # Dataverse Deploy
 
 > **Category**: Operations
-> **Last Updated**: January 19, 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A — **hub #2 with 269 refs; additive-only refinement**)
+> **Exemplar rationale**: PCF deployment specifics change frequently with PAC CLI updates (v1.34 → v1.46 → ...). No single canonical reference holds steady.
 > **Primary Guide**: [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md)
 
 ---
@@ -765,7 +769,7 @@ gh workflow run deploy-staging.yml -f deploy_plugins=true
 
 ---
 
-## Tips for AI
+## Operator Notes
 
 **🚨 CRITICAL: Control Manifest Version is the Cache Key**
 
@@ -800,3 +804,15 @@ If `pac solution pack` + `pac solution import` succeeds but the solution is empt
       Solution/src/WebResources/sprk_Spaarke.Controls.{ControlName}/
    ```
 6. **Prevention**: Copy the generated `Customizations.xml` structure to your Solution folder for future `pac solution pack` deployments
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| `pac pcf push` "succeeds" but Dataverse shows old control version | PAC bypasses solution.xml versioning — Dataverse cache hits the old version. See the four `🚨 CRITICAL` callouts in this skill | Always bump `ControlManifest.Input.xml` `version=` BEFORE `pac pcf push`. Sync the Solution folder after push (Critical Rule #5) so subsequent `pac solution pack` deployments aren't stale. |
+| Empty solution import succeeds but no controls deploy | Solution ZIP missing the control root in `Solution/src/WebResources/<sprk_...>/`, OR `customizations.xml` doesn't reference the control | Verify ZIP contents BEFORE import: `unzip -l <solution>.zip` should show the control bundle.js + ControlManifest.xml at the expected path. |
+| Solution import fails with "missing dependency" | Required entity/option set not yet in the target environment | Run `pac solution check --solution-zip <path>` BEFORE import. Resolve dependencies upstream first. |
+| Bundle deployed but PCF renders blank | Bundle is dev-mode (not tree-shaken) — exceeded Dataverse runtime size limit silently. See `pcf-deploy` AP-1 for canonical fix | Always use `npm run build:prod` (NOT `npm run build`). Bundle size sanity check: `out/controls/<name>/bundle.js` should be < 1 MB for typical controls. |
+| Web resource import succeeds but resource doesn't appear in form | Cache or publish step missing | After import, ALWAYS run `pac solution publish-customizations` (or click "Publish All Customizations" in maker portal). Refresh browser. |

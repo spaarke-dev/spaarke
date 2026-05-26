@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Workspace.Models;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Api.Workspace;
@@ -160,12 +161,27 @@ public static class WorkspaceMatterEndpoints
 
     private static async Task HandleAiSummary(
         AiSummaryRequest request,
-        IOpenAiClient openAiClient,
         HttpContext httpContext,
         ILogger<Program> logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        IBriefingAi? briefingAi = null)
     {
         var response = httpContext.Response;
+
+        // Fail fast when AI is disabled — matter AI summary has no non-AI fallback.
+        if (briefingAi is null)
+        {
+            response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            response.ContentType = "application/problem+json";
+            await response.WriteAsync(
+                JsonSerializer.Serialize(new
+                {
+                    title = "Service Unavailable",
+                    status = 503,
+                    detail = "Matter AI summary requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable."
+                }, JsonOptions), ct);
+            return;
+        }
 
         if (string.IsNullOrWhiteSpace(request?.MatterName))
         {
@@ -215,7 +231,7 @@ public static class WorkspaceMatterEndpoints
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(30));
 
-            var summaryText = await openAiClient.GetCompletionAsync(prompt, cancellationToken: timeoutCts.Token);
+            var summaryText = await briefingAi.GenerateNarrativeAsync(prompt, cancellationToken: timeoutCts.Token);
 
             var resultJson = JsonSerializer.Serialize(new { summary = summaryText.Trim() }, JsonOptions);
             await WriteSSEAsync(response, AnalysisStreamChunk.Result(resultJson), ct);

@@ -1,3 +1,14 @@
+---
+> **Auth v2 / [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) status (2026-05-19)**
+>
+> - **`buildBffApiUrl()` URL construction (§"The Golden Rule")** — canonical in v2, unchanged.
+> - **Token acquisition (§"Token Acquisition (Spaarke Auth v2)")** — updated to v2 two-layer model (`InMemoryCache` over pluggable `AuthStrategy`). The retired 6-strategy cascade is documented as "Pre-v2 historical".
+> - **MUST NOT** reference `BridgeStrategy`, `XrmStrategy`, `MsalSilentStrategy`, `MsalRedirectStrategy`, `window.__SPAARKE_BFF_TOKEN__`, `tokenBridge`, `accessToken: string` typed props.
+> - Use `useAuth()` + `authenticatedFetch` from `@spaarke/auth`.
+>
+> See also: [`auth-deployment-setup.md`](../guides/auth-deployment-setup.md) for the operator runbook.
+---
+
 # BFF Authentication & URL Construction Pattern
 
 > **Last Updated**: 2026-04-05
@@ -168,32 +179,34 @@ const apiBaseUrl = process.env.BFF_API_BASE_URL || 'https://spe-api-dev-67e2xz.a
 
 ---
 
-## Token Acquisition Strategy (6-Strategy Cascade)
+## Token Acquisition (Spaarke Auth v2 — ADR-028)
 
-`SpaarkeAuthProvider.getAccessToken()` tries these in order (updated 2026-05-12; canonical reference: [`.claude/patterns/auth/spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md)):
+`SpaarkeAuthProvider.getAccessToken()` uses a simplified two-layer model. Canonical references: [ADR-028](../adr/ADR-028-spaarke-auth-architecture.md), [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md).
 
-| # | Strategy | Speed | When It Works |
-|---|----------|-------|---------------|
-| 1 | **In-memory cache** | ~0.1ms | Token already acquired this session |
-| 2 | **SessionStorage cache** | ~0.5ms | Same-origin neighbor stored `__spaarke_bff_token_cache__` |
-| 3 | **Bridge token** | ~0.1ms | Parent iframe published `window.__SPAARKE_BFF_TOKEN__` (dialog scenarios) |
-| 4 | **Xrm platform** | ~10-50ms | `Xrm.WebApi` token — **Dataverse-scoped only, NOT for BFF API** |
-| 5 | **MSAL silent** | ~100-200ms | Existing Azure AD session (`acquireTokenSilent` / `ssoSilent`); requires `cacheLocation: 'localStorage'` + `storeAuthStateInCookie: true` + tenant-specific authority |
-| 6 | **MSAL popup** | ~500-1300ms | Interactive login (last resort — firing this is a regression) |
+| Layer | Speed | Behavior |
+|-------|-------|----------|
+| **InMemoryCache wrapper** | ~0.1ms | Validates JWT `exp` with 5-min buffer. Returns cached token if fresh; otherwise delegates to strategy. |
+| **AuthStrategy (pluggable)** | varies | `BrowserMsalStrategy` (Dataverse PCFs + Code Pages) or `OfficeNaaStrategy` (Office Add-ins) |
 
-If all strategies return null, `getAccessToken()` returns empty string `""`.
-`authenticatedFetch()` will then send a request without a valid Bearer token → BFF returns 401.
+`BrowserMsalStrategy.acquire()` tries MSAL `acquireTokenSilent` → `ssoSilent` → `acquireTokenPopup` in order. MSAL's `localStorage` cache handles cross-tab/iframe sharing (same-origin browser SOP). Required MSAL config (INV-1..INV-3): `cacheLocation: 'localStorage'`, `storeAuthStateInCookie: true`, tenant-specific authority via `resolveDefaultAuthority()`.
 
-**Diagnostic logging** (enabled in current build):
+> **Pre-v2 historical**: The original 6-strategy cascade (CacheStrategy → SessionStorageStrategy → BridgeStrategy → XrmStrategy → MsalSilentStrategy → MsalPopupStrategy) was **deleted in Phase A of Spaarke Auth v2** (commits leading up to `e649f244`). Cross-iframe sharing via `window.__SPAARKE_BFF_TOKEN__` (BridgeStrategy) and `__spaarke_bff_token_cache__` (SessionStorageStrategy) were retired because MSAL's `localStorage` cache covers their use cases with less complexity. `XrmStrategy` was retired because Xrm tokens are Dataverse-scoped only and never work for BFF API calls. See ADR-028 §"What was retired" for the full rationale.
+
+If all silent paths fail, `BrowserMsalStrategy` falls back to `acquireTokenPopup`. Firing the popup in steady state is a regression (likely INV-3 violation — authority `/organizations` or `/common`).
+
+**Diagnostic logging** (Auth v2 — `BrowserMsalStrategy` + `InMemoryCache`):
 ```
-[SpaarkeAuth:MsalSilent] Accounts: 1 scope: api://1e40baad-.../user_impersonation
-[SpaarkeAuth] Token acquired via MSAL silent
+[SpaarkeAuth:BrowserMsal] acquireTokenSilent OK — scope: api://1e40baad-.../SDAP.Access
+[SpaarkeAuth:InMemoryCache] hit (exp valid + 5min buffer)
 ```
 
-If all strategies fail:
+If silent acquisition fails (cache miss + MSAL fallback chain exhausted):
 ```
-[SpaarkeAuth] All 6 token strategies failed. Config: { clientId: "170c98e1...", authority: "...", ... }
+[SpaarkeAuth:BrowserMsal] silent paths exhausted; falling back to interactive — clientId: "1e40baad...", tenantId: "{tenant-guid}"
+[SpaarkeAuth] InteractionRequiredAuthError → redirect (popup fallback is regression — likely INV-3 violation)
 ```
+
+> **Pre-v2 historical**: Earlier logs referenced `[SpaarkeAuth:MsalSilent]` (strategy class) and "All 6 token strategies failed" (the retired 6-strategy cascade). Both were deleted in Phase A.
 
 ---
 
@@ -235,6 +248,8 @@ await authenticatedFetch('/ai/chat/sessions');
 
 **Important**: `sprk_BffApiBaseUrl` is stored WITH `/api` for historical reasons. All code MUST strip it before use.
 
+> ⚠️ **Cross-environment consistency**: The `sprk_BffApiBaseUrl` env var must use the **same** format across all envs (dev, demo, prod). `normalizeUrl()` in `@spaarke/auth` strips a trailing `/api` if present, so the value is functionally equivalent whether stored as `https://host.azurewebsites.net` or `https://host.azurewebsites.net/api`. **However**: PCF controls and Code Pages deployed to multiple environments must all behave the same — inconsistent formats cause confusing operator handoffs. **Recommendation**: store host-only (no `/api`) for clarity. Phase 5 of the `sdap-bff-api-remediation-fix` project ([EXECUTION-LOG.md](../../projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md) §Task 060 step 9) aligned demo with dev's `/api`-suffixed value to match the operator-visible setting, even though runtime behavior is identical.
+
 ---
 
 ## Checklist: Adding a New BFF API Integration
@@ -247,6 +262,7 @@ await authenticatedFetch('/ai/chat/sessions');
 - [ ] Handle `AuthError` with code `'auth_exhausted'` gracefully in UI
 - [ ] Handle `ApiError` with ProblemDetails for user-friendly error messages
 - [ ] For tenant ID: use `getAuthProvider().getTenantId()` — it reads the JWT `tid` claim from any token source
+- [ ] **Verify `sprk_BffApiBaseUrl` value matches dev's format** (currently `/api`-suffixed) across all target Dataverse environments for operator consistency
 
 ---
 

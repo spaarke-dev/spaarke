@@ -1,0 +1,51 @@
+<task id="AIPU2-110" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Safety perimeter end-to-end test</title>
+    <phase>6</phase>
+    <tags>testing, ai-safety</tags>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-065, AIPU2-090</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    Validate the complete safety perimeter end-to-end: prompt injection blocking, groundedness
+    annotation, citation verification, and privilege filtering. This test suite covers the four
+    safety capabilities implemented in Phase 3 (AIPU2-065) and the UI annotation layer
+    (AIPU2-090). These are not unit tests of individual services — they are integration tests
+    that exercise the full path from SSE request to annotated response, verifying that safety
+    checks fire correctly and that unsafe outputs are either blocked or annotated before
+    reaching the user.
+  </prompt>
+  <role>QA or security-focused test developer with knowledge of the AI safety pipeline.</role>
+  <goal>
+    An automated (or scripted manual) test suite covers all four safety perimeter capabilities.
+    All prompt injection payloads are blocked. All ungrounded claims are annotated. All citation
+    verification badge states (valid, invalid, partial) render correctly. Privilege filter
+    prevents cross-matter content. Results are documented in a test report.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Safety</file>
+      <file>src/solutions/SpaarkeAi/src/components/SafetyAnnotations</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Compile a prompt injection test payload library: at least 5 direct injection payloads (e.g. "Ignore previous instructions and...") and 3 indirect injections embedded in document content. Use Azure Content Safety PromptShield test vectors where available.</step>
+    <step>Test direct prompt injection: send each payload via the SSE chat endpoint, verify HTTP 400 or safety-blocked SSE event is returned, verify no AI response is generated.</step>
+    <step>Test indirect prompt injection: upload a document containing injection text, ask the AI to summarize it, verify the injection is neutralized and the summary does not follow injected instructions.</step>
+    <step>Test groundedness annotation: send a query where the AI is likely to produce an ungrounded claim (no supporting document loaded), verify the response includes a groundedness annotation badge (ungrounded state) on the relevant claim.</step>
+    <step>Test citation verification: (a) valid citation — verify green badge; (b) invalid citation (hallucinated source) — verify red badge; (c) partial citation (document exists but text not found) — verify amber badge. Use controlled test documents.</step>
+    <step>Test privilege filter: create two matter contexts (Matter A, Matter B). Load documents in Matter A, switch context to Matter B without loading new documents, send a query. Verify AI does not reference Matter A content, and a privilege boundary notification appears in the UI.</step>
+    <step>Document all test cases, payloads, expected results, and actual results in notes/safety-e2e-test-report.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All 5+ direct prompt injection payloads return a blocked response — no AI-generated text reaches the client.</criterion>
+    <criterion>All 3 indirect injection payloads are neutralized — AI summary does not execute injected instructions.</criterion>
+    <criterion>Ungrounded claims are annotated with an ungrounded groundedness badge in the UI.</criterion>
+    <criterion>Valid citations show green badge, invalid citations show red badge, partial citations show amber badge.</criterion>
+    <criterion>Cross-matter query returns no privileged content from the previous matter and shows a privilege boundary notification.</criterion>
+    <criterion>Test report is written to notes/safety-e2e-test-report.md with all payloads, results, and pass/fail verdicts.</criterion>
+  </acceptance-criteria>
+</task>

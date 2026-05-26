@@ -28,7 +28,8 @@ public class DataverseAccessDataSource : IAccessDataSource
         IDataverseService dataverseService,
         HttpClient httpClient,
         IConfiguration configuration,
-        ILogger<DataverseAccessDataSource> logger)
+        ILogger<DataverseAccessDataSource> logger,
+        TokenCredential? credential = null)
     {
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -45,7 +46,10 @@ public class DataverseAccessDataSource : IAccessDataSource
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
         _dataverseScope = $"{dataverseUrl.TrimEnd('/')}/.default";
 
-        // Use managed identity if no client secret, otherwise use client credentials
+        // Use ClientSecretCredential when configured (enables OBO token exchange), else use the
+        // DI-injected TokenCredential (UAMI-pinned via the BFF's ManagedIdentityCredentialFactory).
+        // Constructor TokenCredential is optional for backwards-compat with non-DI instantiation;
+        // production registrations from BFF will always provide it.
         if (!string.IsNullOrEmpty(clientSecret) && !string.IsNullOrEmpty(tenantId) && !string.IsNullOrEmpty(clientId))
         {
             _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
@@ -62,9 +66,14 @@ public class DataverseAccessDataSource : IAccessDataSource
         }
         else
         {
-            _credential = new DefaultAzureCredential();
+            // BFF-FIX-2026-05-24: prefer the DI-injected TokenCredential (pinned to UAMI clientId).
+            // Falls back to DefaultAzureCredential() for cases where this type is instantiated
+            // outside the BFF DI container (e.g. tooling, integration tests).
+            _credential = credential ?? new DefaultAzureCredential();
             _cca = null; // No OBO support with managed identity
-            _logger.LogInformation("DataverseAccessDataSource using DefaultAzureCredential (managed identity) - OBO not available");
+            _logger.LogInformation(
+                "DataverseAccessDataSource using {CredentialKind} - OBO not available",
+                credential != null ? "DI-injected TokenCredential" : "DefaultAzureCredential (fallback)");
         }
     }
 

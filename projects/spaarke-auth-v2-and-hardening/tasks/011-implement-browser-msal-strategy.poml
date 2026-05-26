@@ -1,0 +1,98 @@
+<task id="AUTHV2-011" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Implement BrowserMsalStrategy — full implementation replacing 6-strategy cascade for Dataverse contexts</title>
+    <phase>A — Core library rebuild</phase>
+    <tags>auth, library, typescript, msal, FULL</tags>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>010</dependencies>
+    <parallel-safe>A-Parallel-1 (with 012)</parallel-safe>
+  </metadata>
+  <prompt>
+    Replace the 6-strategy cascade with a clean BrowserMsalStrategy that uses MSAL.js directly. MSAL's localStorage cache handles cross-tab/iframe sharing (no separate BridgeStrategy needed). The acquire() method tries acquireTokenSilent → ssoSilent → acquireTokenPopup in that order. Decode JWT exp on every return to validate freshness.
+
+    Critical: INV-1..INV-7 must be preserved. Read the comparison after implementation and verify no MSAL config value changed from the original SpaarkeAuthProvider constructor.
+  </prompt>
+  <role>Senior MSAL.js engineer.</role>
+  <goal>
+    BrowserMsalStrategy.acquire() returns a TokenResult with valid (non-expired) accessToken. Uses MSAL's localStorage + cookie-state. No popup in steady state (verified by MSAL regression test from spaarke-sso-binding.md).
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §4.4 (INV-1..INV-7)</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md §"Required MSAL Configuration"</file>
+      <file>src/client/shared/Spaarke.Auth/src/strategies/MsalSilentStrategy.ts (existing — fold logic into BrowserMsalStrategy)</file>
+      <file>src/client/shared/Spaarke.Auth/src/strategies/MsalPopupStrategy.ts (existing — fold logic)</file>
+      <file>src/client/shared/Spaarke.Auth/src/config.ts (resolveTenantFromXrm + resolveDefaultAuthority — INV-3 source)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read MsalSilentStrategy.ts and MsalPopupStrategy.ts — understand the existing acquireTokenSilent + ssoSilent + acquireTokenPopup flow.</step>
+    <step>Implement BrowserMsalStrategy.acquire(): try MSAL acquireTokenSilent first (with cached account from MSAL); fallback to ssoSilent with loginHint from Xrm; final fallback to acquireTokenPopup. Decode JWT exp from result.accessToken and validate it's not within 5-min expiry buffer.</step>
+    <step>Implement BrowserMsalStrategy.clearCache(): call MSAL's removeAccount on the active account (which clears MSAL's localStorage cache for that account).</step>
+    <step>Preserve loginHint resolution from Xrm.userSettings.userName via frame-walk (MsalSilentStrategy lines 12-30).</step>
+    <step>Delete MsalSilentStrategy.ts + MsalPopupStrategy.ts; logic is now inside BrowserMsalStrategy.</step>
+    <step>Update SpaarkeAuthProvider to call strategy.acquire() instead of the old 6-strategy cascade. Keep in-memory CacheStrategy as a wrapper (full simplification in 012).</step>
+    <step>Run tsc --noEmit. Run the MSAL regression test from spaarke-sso-binding.md (clear all caches → close browser → reopen → verify no popup).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>BrowserMsalStrategy.acquire() returns non-expired tokens.</criterion>
+    <criterion>JWT exp validation with 5-min buffer is present in code.</criterion>
+    <criterion>loginHint via Xrm frame-walk preserved.</criterion>
+    <criterion>MsalSilentStrategy.ts + MsalPopupStrategy.ts deleted.</criterion>
+    <criterion>MSAL regression test passes: authority in console log contains tenant GUID, no popup.</criterion>
+    <criterion>INV-1, INV-2, INV-3 visible in code with comments referencing the audit doc invariants.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19.
+
+    Full BrowserMsalStrategy implementation. Folds in the logic from MsalSilent + MsalPopup
+    and deletes both. Adds the bug fix that resolves the popup-on-startup symptom.
+
+    Acquisition order in BrowserMsalStrategy.acquire():
+      1. acquireTokenSilent (with cached account, if any)
+      2. ssoSilent (with UPN login hint)
+      3. acquireTokenPopup (last resort — logs a warn-level "regression in steady state" message)
+
+    CRITICAL BUG FIX — UPN as loginHint (vs. pre-v2 display-name):
+      The pre-v2 MsalSilentStrategy.resolveLoginHint() read `Xrm.userSettings.userName`
+      which on most tenants returns the DISPLAY NAME (e.g. "Ralph Schroeder"). AAD's
+      ssoSilent matches loginHint against the UPN, not display name, so AADSTS50058
+      was the result → popup. The user reported this on 2026-05-18 during the Phase 0
+      regression test gate; see project memory `project_auth_v2_baseline_msal_bug.md`.
+
+      New resolution order in BrowserMsalStrategy.resolveLoginHint(msal):
+        1. msal.getAllAccounts()[0].username  ← authoritative UPN once MSAL has any account
+        2. Xrm.userSettings.userPrincipalName  ← correct UPN field per Dataverse SDK
+        3. Xrm.userSettings.userName           ← legacy fallback (the broken path; kept for
+                                                 hosts where userName happens to equal UPN)
+
+      This fix is the practical reason Phase A unblocks the regression test gate.
+
+    JWT exp validation:
+      _validate() decodes the JWT and prefers the `exp` claim over MSAL's reported expiresOn.
+      Tokens already within the 5-min EXPIRY_BUFFER_MS window are rejected with a warn log
+      so the caller can surface a diagnostic. Eliminates the class of bug where MSAL hands
+      back a near-expired token that fails on the next BFF call.
+
+    MSAL Config invariants — preserved by literal lift:
+      - INV-1: cacheLocation 'localStorage' (line 109, inline comment)
+      - INV-2: storeAuthStateInCookie true (line 110, inline comment)
+      - INV-3: authority from config.authority (resolved by config.ts resolveDefaultAuthority via Xrm)
+
+    clearCache():
+      Uses MSAL.js v3 `instance.clearCache()` (fire-and-forget; logout caller doesn't await).
+      Replaces the per-account `removeAccount` loop that doesn't exist in v3.
+
+    Deleted (10 files):
+      - src/strategies/MsalSilentStrategy.{ts,d.ts,d.ts.map,js,js.map}
+      - src/strategies/MsalPopupStrategy.{ts,d.ts,d.ts.map,js,js.map}
+
+    Verification:
+      - tsc --noEmit: ✅ clean
+      - jest: 11 of 12 tests pass (same pre-existing config.test.ts failure as task 010 — stale test, not a regression)
+      - MSAL regression test: deferred to Phase A gate (manual browser test by user)
+
+    Quality gate (Step 9.5) note: deferred to end-of-Phase-A comprehensive review per the risk-tiered cadence.
+  </notes>
+</task>

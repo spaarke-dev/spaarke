@@ -1,0 +1,51 @@
+<task id="AIPU2-080" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Migrate 7 R1 Output Widgets to WorkspaceWidgetRegistry with Serialize/Restore</title>
+    <phase>4C</phase>
+    <tags>frontend, widgets, migration</tags>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <dependencies>AIPU2-072</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    R1 implemented 7 output widgets (BudgetDashboard, SearchResults, AnalysisEditor,
+    ContractComparison, StatusSummary, Recommendation, ActionPlan) that rendered in the
+    OutputPanel. These must be migrated to implement the WorkspaceWidget interface (AIPU2-071)
+    and registered in WorkspaceWidgetRegistry so they render as tabs in WorkspacePane. The
+    key addition beyond a simple interface adaptation is serializeState/restoreState: R2
+    uses data-refreshed restore (restore calls the BFF to re-fetch fresh data rather than
+    persisting stale widget data) to avoid stale content after session resume. Each widget's
+    registration must include displayName and category metadata.
+  </prompt>
+  <role>Frontend developer with React 19, TypeScript generics, and data fetching (React Query or equivalent) experience.</role>
+  <goal>
+    All 7 output widgets implement WorkspaceWidget, are registered in WorkspaceWidgetRegistry,
+    render correctly in WorkspacePane tabs, and their data-refreshed restore works (restoreState
+    calls BFF to re-fetch fresh data). Existing widget rendering behavior is unchanged.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.AI.Outputs/src/registry/output-registry.ts</file>
+      <file>projects/spaarke-ai-platform-unification-r2/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read output-registry.ts to find all 7 widget file locations and their current factory pattern.</step>
+    <step>Read spec.md FR-203 section for the data-refreshed restore specification (what BFF endpoints to call, what state to serialize).</step>
+    <step>For each of the 7 widgets (BudgetDashboard, SearchResults, AnalysisEditor, ContractComparison, StatusSummary, Recommendation, ActionPlan): adapt the class/function to implement WorkspaceWidget&lt;TData, TActions&gt; with the correct TData and TActions types for that widget.</step>
+    <step>Implement serializeState() on each widget: return a WidgetState containing only the identifiers needed to re-fetch (e.g., sessionId, turnId, documentId) — do NOT serialize the full data payload.</step>
+    <step>Implement restoreState(state) on each widget: call the appropriate BFF endpoint with the serialized identifiers to re-fetch fresh data; update widget display with the refreshed data.</step>
+    <step>Register all 7 widgets in WorkspaceWidgetRegistry with their dynamic import factory, displayName, and category (e.g., 'financial', 'search', 'analysis', 'document', 'status', 'recommendation', 'planning').</step>
+    <step>Verify each widget renders correctly when triggered by a workspace_widget SSE event in WorkspacePane.</step>
+    <step>Write integration tests for at least 2 widgets: (a) widget renders from SSE event data; (b) serializeState returns only identifiers; (c) restoreState calls BFF and updates display.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All 7 output widgets implement the WorkspaceWidget interface and compile in strict TypeScript.</criterion>
+    <criterion>All 7 widgets are registered in WorkspaceWidgetRegistry with displayName, category, and dynamic import factory.</criterion>
+    <criterion>serializeState() returns only identifiers (sessionId, turnId, etc.) — not full data payloads.</criterion>
+    <criterion>restoreState() calls the BFF to re-fetch fresh data, not deserializes stale state.</criterion>
+    <criterion>All 7 widgets render correctly in WorkspacePane tabs when triggered by workspace_widget SSE events.</criterion>
+    <criterion>Integration tests for serialize/restore on at least 2 widgets pass.</criterion>
+  </acceptance-criteria>
+</task>

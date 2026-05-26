@@ -1041,6 +1041,59 @@ redis-cli -h <redis-host> -p 6380 -a <password> --tls \
   ttl "sdap:embedding:your-key-hash"
 ```
 
+### Verify a specific file was indexed correctly (added 2026-05-22)
+
+When a user reports "I uploaded X but Search Indexed = No / Find Similar returns nothing," run these three checks in order. They will pinpoint whether the issue is the write side (chunk didn't land), the linkage side (chunk landed but orphan), or the read side (chunk linked correctly but UI broken).
+
+```bash
+# Acquire admin key once for the session
+SEARCH_KEY=$(az search admin-key show --service-name spaarke-search-dev \
+  --resource-group spe-infrastructure-westus2 --query "primaryKey" -o tsv)
+
+# Step 1 — Did chunks for this file land in the index? (write side)
+curl -s -H "api-key: $SEARCH_KEY" -H "Content-Type: application/json" \
+  -X POST "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index-v2/docs/search?api-version=2024-07-01" \
+  -d '{"search":"<keyword from filename>","searchFields":"fileName","top":20,
+       "orderby":"createdAt desc",
+       "select":"id,fileName,createdAt,documentId,parentEntityType,chunkIndex,chunkCount","count":true}'
+# If matching:0 → chunks never landed. Move to Step 4 (BFF logs).
+# If matching:N but documentId is null → orphan chunks. AP-2 / AP-3 (FAILURE-MODES.md).
+
+# Step 2 — Are docIds lowercase (linkage side)?
+# Inspect the documentId field of returned chunks. Lowercase = correct.
+# Uppercase = AP-3 (FAILURE-MODES.md). Re-index via Send to Index after BFF + ribbon
+# fixes from commit fbbaee29.
+
+# Step 3 — Is documentVector3072 populated (visualization side)?
+curl -s -H "api-key: $SEARCH_KEY" \
+  "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index-v2/docs/<chunk-id>?api-version=2024-07-01" \
+  | python -c "import sys,json; d=json.load(sys.stdin); print('contentVector3072 len:', len(d.get('contentVector3072') or [])); print('documentVector3072 len:', len(d.get('documentVector3072') or []))"
+# Expect 3072 / 3072. If 0 / 0 → embedding generation failed; check BFF logs for OpenAI errors.
+
+# Step 4 — BFF pipeline trace in App Insights
+az monitor app-insights query --apps spe-insights-dev-67e2xz \
+  --resource-group spe-infrastructure-westus2 \
+  --analytics-query "traces | where timestamp > ago(30m) | where message has '<FileName>' or message has 'Resolved deployment' or message has 'Batch indexed' | project timestamp, severityLevel, message | order by timestamp asc"
+# Expect three log lines per successful indexing:
+#   "Resolved deployment for tenant ...: Model=Shared, IndexName=spaarke-knowledge-index-v2, ..."
+#   "Batch indexed N/N documents for tenant ... to spaarke-knowledge-index-v2"
+#   "Indexed <FileName> for tenant ... speFileId=... N/N chunks in Xms"
+# Absence of these → either ApplicationInsights LogLevel filter set above Information
+# (set Logging__ApplicationInsights__LogLevel__Default=Information), or the BFF
+# endpoint was never called (check upstream client logs).
+```
+
+### Common diagnostic findings and what they mean
+
+| Observation | Interpretation | Reference |
+|---|---|---|
+| `matching:0` for a fileName that the user just uploaded | Chunks never landed. Check BFF logs (Step 4) — endpoint likely returned 500 or wasn't called | Investigate per ISSUE.md §4 |
+| Chunks exist but `documentId: null` | Orphan chunks — the client (wizard or ribbon) didn't pass `documentId`. The Dataverse `sprk_searchindexed` field stays No. Find Similar, Open, Graph all fail | FAILURE-MODES.md AP-2 |
+| Chunks exist with mixed-case `documentId` (some lower, some UPPER) | GUID case drift between client paths. Find Similar fails for the uppercase set | FAILURE-MODES.md AP-3 |
+| `contentVector3072: 0 values, contentVector: 1536 values` | Document was indexed against the **old** vector field. Re-index to populate 3072-dim. See [`projects/x-ai-azure-search-module/notes/071-final-configuration-state.md`](../../projects/x-ai-azure-search-module/notes/071-final-configuration-state.md) | n/a |
+| 400 on filter `privilege_group_ids/any()` | Field exists but `filterable: false` on dev. Cannot filter on it; either remove the filter or rebuild the index | FAILURE-MODES.md G-4 |
+| `Indexed X for tenant ... 0/N chunks` (silent-success guard now fires) | All chunks were rejected by Azure Search (likely schema validation). Check per-chunk warning logs `Azure Search rejected chunk Y in {IndexName}: status=... error=...` | n/a |
+
 ---
 
 ## Logging and Monitoring

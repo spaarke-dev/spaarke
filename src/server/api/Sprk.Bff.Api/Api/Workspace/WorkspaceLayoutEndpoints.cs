@@ -40,8 +40,12 @@ public static class WorkspaceLayoutEndpoints
             .WithName("GetDefaultWorkspaceLayout")
             .WithSummary("Get the default workspace layout for the authenticated user")
             .WithDescription(
-                "Returns the user's default workspace layout. If no user default is set, " +
-                "falls back to the Corporate Workspace system layout.")
+                "Returns the user's default workspace layout using a four-step cascade: " +
+                "(1) the user's per-user default, (2) the Dataverse-stored system default " +
+                "(sprk_issystem=true AND sprk_isdefault=true — Daily Briefing in dev), " +
+                "(3) a hard-coded system layout flagged as global default, or (4) null " +
+                "if no default is available. Returns 200 OK with null body for case 4 — " +
+                "clients should not auto-install a tab in that case.")
             .Produces<WorkspaceLayoutDto>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
@@ -162,7 +166,11 @@ public static class WorkspaceLayoutEndpoints
     }
 
     /// <summary>
-    /// Returns the user's default workspace layout.
+    /// Returns the user's default workspace layout, or null if no default is
+    /// available (per the service's four-step cascade — see
+    /// <see cref="WorkspaceLayoutService.GetDefaultLayoutAsync"/>). Wave 2b
+    /// (task 109): returns 200 OK with null body in the "no default" case so
+    /// clients can distinguish it from a fetch failure.
     /// GET /api/workspace/layouts/default
     /// </summary>
     private static async Task<IResult> GetDefaultLayout(
@@ -179,11 +187,21 @@ public static class WorkspaceLayoutEndpoints
         {
             var layout = await layoutService.GetDefaultLayoutAsync(userId, ct);
 
-            logger.LogInformation(
-                "Returning default layout {LayoutId} for user {UserId}. CorrelationId={CorrelationId}",
-                layout.Id, userId, httpContext.TraceIdentifier);
+            if (layout is null)
+            {
+                logger.LogInformation(
+                    "No default layout available for user {UserId}. CorrelationId={CorrelationId}",
+                    userId, httpContext.TraceIdentifier);
+                // Return 200 with explicit null body — frontend distinguishes
+                // "no default" from a 5xx fetch failure.
+                return TypedResults.Ok<WorkspaceLayoutDto?>(null);
+            }
 
-            return TypedResults.Ok(layout);
+            logger.LogInformation(
+                "Returning default layout {LayoutId} (isSystem={IsSystem}) for user {UserId}. CorrelationId={CorrelationId}",
+                layout.Id, layout.IsSystem, userId, httpContext.TraceIdentifier);
+
+            return TypedResults.Ok<WorkspaceLayoutDto?>(layout);
         }
         catch (Exception ex)
         {

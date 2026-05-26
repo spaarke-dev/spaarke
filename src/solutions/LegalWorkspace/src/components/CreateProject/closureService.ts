@@ -60,7 +60,7 @@ export interface ICloseProjectResult {
 export async function closeSecureProject(
   request: ICloseProjectRequest
 ): Promise<ICloseProjectResult> {
-  const url = `${getBffBaseUrl()}/v1/external-access/close-project`;
+  const url = `${getBffBaseUrl()}/api/v1/external-access/close-project`;
 
   try {
     const response = await authenticatedFetch(url, {

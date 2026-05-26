@@ -13,11 +13,15 @@
  * @see ADR-012 - Shared component library
  */
 
+// Deep import per ADR-012 — avoids the barrel which transitively pulls in
+// RichTextEditor → @lexical/react .prod.mjs (broken ESM resolution in webpack).
+// Webpack alias resolves @spaarke/ui-components → Spaarke.UI.Components/src
+// so the path below resolves to .../src/utils/themeStorage.
 import {
   resolveCodePageTheme,
   setupCodePageThemeListener,
   getEffectiveDarkMode,
-} from "@spaarke/ui-components";
+} from "@spaarke/ui-components/utils/themeStorage";
 import type { Theme } from "@fluentui/react-components";
 
 /**

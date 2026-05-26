@@ -1,0 +1,57 @@
+# Vulnerable Package Scan (Task 011)
+
+# Captured: 2026-05-24
+# Source: dotnet list package --vulnerable --include-transitive
+
+# ===== SEVERITY SUMMARY =====
+# HIGH:      2 entries (1 direct, 1 transitive)
+# Moderate:  3 entries (all transitive)
+# Low:       0 entries
+# Total:     5 vulnerability advisories across 4 packages
+
+# ===== KEY FINDING: HIGH NU1903 on Kiota is OUT OF SCOPE per current spec =====
+# Microsoft.Kiota.Abstractions 1.21.2 has GHSA-7j59-v9qr-6fq9 (HIGH).
+# Per src/server/api/Sprk.Bff.Api/CLAUDE.md: "All Kiota packages MUST be the same version"
+# Per spec.md §Out of Scope: "Graph SDK or Kiota version changes (Kiota chain footgun)"
+# Latest Kiota is 2.0.0 (per outdated.txt) — major version bump.
+# Latest Microsoft.Graph is 6.1.0 (current 5.101.0) — major version bump.
+#
+# IMPLICATION: Fixing the HIGH Kiota CVE requires revisiting the Out-of-Scope binding
+# OR upgrading the entire Graph SDK + Kiota chain (significant test surface).
+# Phase 2 must address this: either (a) HIGH-tier candidate with explicit owner decision
+# to revisit scope, OR (b) document as "accepted risk pending separate Graph SDK upgrade project."
+
+# ===== DEPENDABOT PR CROSS-REFERENCE =====
+# Open Dependabot PRs touching Sprk.Bff.Api / Spaarke.Dataverse:
+# - #293: Azure.Identity 1.17.1 → 1.21.0           (not in vuln scan; safe modernization)
+# - #292: Azure.Core + 3 others (Spaarke.Dataverse) (TRANSITIVE bumps; may address some)
+# - #289: Microsoft.Agents.AI + 2 others           (PRE-RELEASE chain — out of scope)
+# - #266: DocumentFormat.OpenXml 3.4.1 → 3.5.1     (not in vuln scan)
+# - #265: coverlet.collector (test-only)           (no production impact)
+# - #253: Microsoft.Extensions.Caching.* bump       (not in vuln scan)
+# - #248: Azure.Security.KeyVault.Secrets 4.6→4.9  (not in vuln scan)
+# - #236: Microsoft.AspNetCore.Mvc.Testing (test-only)
+# - #175: Microsoft.ApplicationInsights + OpenTelemetry.Instrumentation.Http
+#         (POSSIBLY addresses OpenTelemetry.Api 1.15.0 Moderate — verify)
+#
+# Per plan.md PR-1 (Process Rule): "Dependabot PRs touching BFF csproj auto-deferred
+# to weekly owner triage during this remediation project."
+# These PRs do NOT auto-merge during Phase 3 baseline or Phase 4 bake windows.
+
+# ===== RAW dotnet list package --vulnerable --include-transitive OUTPUT =====
+
+The following sources were used:
+   https://api.nuget.org/v3/index.json
+   C:\Program Files (x86)\Microsoft SDKs\NuGetPackages\
+
+Project `Sprk.Bff.Api` has the following vulnerable packages
+   [net8.0]:
+   Top-level Package                   Requested   Resolved   Severity   Advisory URL
+   > Microsoft.Kiota.Abstractions      1.21.2      1.21.2     High       https://github.com/advisories/GHSA-7j59-v9qr-6fq9
+
+   Transitive Package                      Resolved   Severity   Advisory URL
+   > OpenMcdf                              3.1.0      Moderate   https://github.com/advisories/GHSA-jxpf-xq2m-q525
+                                                      Moderate   https://github.com/advisories/GHSA-5qwm-7pvp-w988
+   > OpenTelemetry.Api                     1.15.0     Moderate   https://github.com/advisories/GHSA-g94r-2vxg-569j
+   > System.Security.Cryptography.Xml      8.0.1      High       https://github.com/advisories/GHSA-37gx-xxp4-5rgx
+                                                      High       https://github.com/advisories/GHSA-w3x6-4m5h-cxqf

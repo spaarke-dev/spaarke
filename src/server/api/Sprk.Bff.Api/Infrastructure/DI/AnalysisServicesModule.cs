@@ -1,5 +1,6 @@
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 
@@ -46,6 +47,9 @@ public static class AnalysisServicesModule
 
             services.AddRecordSearch();
             Console.WriteLine("\u2713 Record search enabled (index: spaarke-records-index)");
+
+            AddPublicContractsFacade(services);
+            Console.WriteLine("\u2713 AI public-contracts facade enabled (Services/Ai/PublicContracts) \u2014 task 046, FR-E1");
 
             services.AddAiModule(configuration);
             Console.WriteLine("\u2713 AI Platform Foundation module enabled (DocumentParserRouter, SemanticDocumentChunker, RagQueryBuilder)");
@@ -100,6 +104,37 @@ public static class AnalysisServicesModule
         services.AddHostedService<Sprk.Bff.Api.Services.PlaybookSchedulerService>();
     }
 
+    /// <summary>
+    /// Registers the <c>Services/Ai/PublicContracts/</c> facade introduced by task 046
+    /// (sdap-bff-api-remediation-fix, FR-E1) and required by refined ADR-013 (2026-05-20).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// External CRUD code (Finance, Workspace, Jobs handlers outside <c>Services/Ai/</c>,
+    /// Filters, non-AI Endpoints) MUST consume AI through these facades rather than
+    /// injecting <see cref="IOpenAiClient"/> / <see cref="IPlaybookService"/> /
+    /// <see cref="IPlaybookOrchestrationService"/> / <see cref="RecordSearch.IRecordSearchService"/>
+    /// directly. See <c>.claude/constraints/bff-extensions.md</c> §A.4 for the binding
+    /// pre-merge checklist and ADR-007 for the canonical facade pattern.
+    /// </para>
+    /// <para>
+    /// Lifetimes: scoped uniformly. Constrained by <see cref="IPlaybookService"/>
+    /// (transient typed HttpClient) and <see cref="IPlaybookOrchestrationService"/>
+    /// (scoped). Scoped is the safe choice that respects every wrapped lifetime.
+    /// </para>
+    /// <para>
+    /// Consumer migration (tasks 047–050) is OUT OF SCOPE for task 046: this method
+    /// adds registrations only. No existing registrations are removed.
+    /// </para>
+    /// </remarks>
+    private static void AddPublicContractsFacade(IServiceCollection services)
+    {
+        services.AddScoped<IBriefingAi, BriefingAi>();
+        services.AddScoped<IInvoiceAi, InvoiceAi>();
+        services.AddScoped<IWorkspacePrefillAi, WorkspacePrefillAi>();
+        services.AddScoped<IRecordMatchingAi, RecordMatchingAi>();
+    }
+
     private static void AddBuilderServices(IServiceCollection services)
     {
         services.AddScoped<IAiPlaybookBuilderService, AiPlaybookBuilderService>();
@@ -147,6 +182,17 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.AiAnalysisNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.CreateNotificationNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.QueryDataverseNodeExecutor>();
+
+        // AgentServiceNodeExecutor — ActionType.AgentService = 60 (Phase 2, ADR-010, AIPU-061).
+        // Requires AgentServiceClient singleton (AIPU-060). Kill switch: AgentService:Enabled.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Foundry.AgentServiceClient>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.AgentServiceNodeExecutor>();
+
+        // CodeInterpreterBridge — thin wrapper around AgentServiceClient for Code Interpreter sandbox
+        // invocations (AIPU-070). Singleton: stateless, thread-safe. Kill switch: CodeInterpreter:Enabled.
+        // CodeInterpreterTools are NOT registered here — they are factory-instantiated by SprkChatAgentFactory
+        // following the WebSearchTools pattern (ADR-010: no unnecessary DI registrations).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Foundry.CodeInterpreterBridge>();
     }
 
     private static void AddRagServices(IServiceCollection services, IConfiguration configuration)

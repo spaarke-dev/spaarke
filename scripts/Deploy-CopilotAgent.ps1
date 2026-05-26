@@ -19,7 +19,7 @@
 
 .PARAMETER BffApiUrl
     BFF API base URL for the target environment.
-    Default: https://spe-api-dev-67e2xz.azurewebsites.net
+    Default: https://spaarke-bff-dev.azurewebsites.net
 
 .PARAMETER BotAppId
     Entra app registration ID for the Copilot Bot in this environment.
@@ -48,7 +48,7 @@
 
 param(
     [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
-    [string]$BffApiUrl = "https://spe-api-dev-67e2xz.azurewebsites.net",
+    [string]$BffApiUrl = "https://spaarke-bff-dev.azurewebsites.net",
     [string]$BotAppId = "f257a0a9-1061-4f9b-8918-3ad056fe90db",
     [string]$BffAppId = "1e40baad-e065-4aea-a8d4-4b7ab273458c",
     [string]$Version = "1.0.0",
@@ -129,7 +129,7 @@ Copy-Item (Join-Path $copilotDir "spaarke-api-plugin.json") $tempDir
 
 # Update OpenAPI spec server URL
 $openapiContent = Get-Content (Join-Path $copilotDir "spaarke-bff-openapi.yaml") -Raw
-$openapiContent = $openapiContent -replace "https://spe-api-dev-67e2xz\.azurewebsites\.net", $BffApiUrl
+$openapiContent = $openapiContent -replace "https://spaarke-bff-dev\.azurewebsites\.net", $BffApiUrl
 Set-Content (Join-Path $tempDir "spaarke-bff-openapi.yaml") $openapiContent -Encoding UTF8
 
 # Generate icons if not present

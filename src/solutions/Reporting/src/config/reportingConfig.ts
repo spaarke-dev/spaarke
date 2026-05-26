@@ -6,7 +6,8 @@
  * MUST be stored in Dataverse Environment Variables and retrieved from the BFF.
  * MUST NOT be hardcoded here per project CLAUDE.md MUST rules.
  *
- * Lazy getters follow the pattern from .claude/patterns/auth/spaarke-auth-initialization.md:
+ * Lazy getters follow the pattern from .claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md
+ * (DEPRECATED — superseded by Spaarke Auth v2 useAuth(); see .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md):
  * use functions, not module-level constants, to avoid "config not initialized" errors.
  *
  * @see ADR-021 - No hardcoded colors

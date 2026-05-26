@@ -11,7 +11,7 @@ Use when a shared wizard/dialog component from `@spaarke/ui-components` must be 
 1. `src/solutions/CreateMatterWizard/src/main.tsx` — canonical wrapper: theme, params, service adapters, `open={true}` + `embedded={true}`
 2. `src/solutions/CreateMatterWizard/vite.config.ts` — required resolve aliases for `@spaarke/ui-components` and Fluent UI
 3. `src/solutions/CreateMatterWizard/index.html` — CSS reset for Dataverse iframe context
-4. `.claude/patterns/auth/spaarke-auth-initialization.md` — auth bootstrap required before BFF calls
+4. `.claude/patterns/auth/spaarke-sso-binding.md` — Spaarke Auth v2 bootstrap (INV-1..INV-8 + `initAuth()` + `useAuth()` + `authenticatedFetch` per [ADR-028](../../adr/ADR-028-spaarke-auth-architecture.md)) + `.claude/patterns/auth/bff-url-normalization.md`
 
 ## Constraints
 - **ADR-006**: Standalone dialog surfaces MUST be Code Pages, not PCF controls
@@ -22,5 +22,5 @@ Use when a shared wizard/dialog component from `@spaarke/ui-components` must be 
 - Always pass `open={true}` and `embedded={true}` — Code Page is the dialog chrome
 - Use `resolveCodePageTheme()` + `setupCodePageThemeListener()`, not PCF theme detection
 - Call `navigationService.closeDialog()` for `onClose` — closes the Dataverse navigateTo modal
-- Auth: wizard Code Pages MUST call `resolveRuntimeConfig()` + `initAuth()` before rendering; NEVER `fetch.bind(window)` for BFF calls
+- Auth: wizard Code Pages MUST call `await initAuth({...})` from `@spaarke/auth` before rendering; consume tokens inside the tree via `useAuth()` (React hook) or `authenticatedFetch` from `@spaarke/auth`. NEVER `fetch.bind(window)` for BFF calls; NEVER snapshot the token into component state or pass `accessToken: string` as a prop (v2 contract per ADR-028)
 - `vite.config.ts` resolve aliases are mandatory — build fails without them

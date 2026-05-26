@@ -4,12 +4,16 @@ tags: [git, worktree, sync, merge, rebase, operations]
 techStack: [all]
 appliesTo: ["sync worktree", "worktree sync", "full sync", "sync branch with master", "update worktree from master", "make sure we have everything"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
 # worktree-sync
 
 > **Category**: Operations
-> **Last Updated**: March 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A — renamed `## Tips for AI` → `## Failure Modes & Recovery`; added `wc -l` PowerShell portability bullet)
+> **Exemplar rationale**: Branch state is per-session — no stable reproducible artifact.
 
 ---
 
@@ -401,7 +405,7 @@ Overall:        {✅ FULLY SYNCED | ⚠️ PARTIAL — see items above}
 
 ---
 
-## Tips for AI
+## Failure Modes & Recovery
 
 - **ABSOLUTE RULE: `git fetch origin` before ANY ref comparison.** The #1 cause of false "up to date" reports is comparing against stale local refs. Step 0 fetches; every subsequent step that verifies also fetches. This is intentional redundancy — better to fetch 5 times than report stale data once.
 - **Never use `git push --force`** — always `--force-with-lease`. This prevents overwriting someone else's commits on the same branch.
@@ -411,6 +415,7 @@ Overall:        {✅ FULLY SYNCED | ⚠️ PARTIAL — see items above}
 - **The final report must be honest.** If any step was skipped (Push Only, Update Only), show "Not checked" rather than "Synced". Never infer status from a previous step — always verify with a fresh command.
 - **When in doubt, re-fetch.** An extra `git fetch origin` costs milliseconds. A stale ref comparison costs hours of debugging.
 - **Worktree detection**: `git rev-parse --git-common-dir` differs from `git rev-parse --git-dir` in worktrees. If they're the same, you're in the main repo, not a worktree.
+- **`wc -l` portability gotcha**: The skill's `git status --porcelain | wc -l` pattern assumes bash/git-bash. On native PowerShell, `wc` is not on PATH — use `(git status --porcelain | Measure-Object -Line).Lines` instead. The Spaarke convention is to invoke this skill from git-bash; if invoked from PowerShell, swap the line-count command accordingly.
 
 ---
 

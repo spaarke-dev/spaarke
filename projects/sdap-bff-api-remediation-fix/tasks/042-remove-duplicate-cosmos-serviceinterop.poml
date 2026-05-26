@@ -1,0 +1,67 @@
+<task id="042" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Remove duplicate Cosmos `ServiceInterop.dll` if FR-A1 didn't (FR-A3)</title>
+    <status>completed</status>
+    <estimated-effort>1 hour active + 24h bake</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, publish, size-reduction, outcome-a, phase-4, deploy</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential by 24h bake window</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    After tasks 040 + 041 land, inspect publish output for remaining duplicate Cosmos `ServiceInterop.dll`. If FR-A1 (linux-x64 RID trim) already removed it, this task is a no-op verification. Otherwise add explicit MSBuild exclusion for the `runtimes/win-x64/native/` copy.
+  </prompt>
+
+  <role>.NET publish engineer + Cosmos SDK familiarity.</role>
+
+  <goal>Only one copy of `ServiceInterop.dll` in publish tree (or zero). 24h bake passes if a removal action was taken.</goal>
+
+  <inputs>
+    <file purpose="csproj">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    <file purpose="inventory">projects/sdap-bff-api-remediation-fix/inventory/native-binaries.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-A3">Only one copy of `ServiceInterop.dll` in publish (or zero)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/native-binaries.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Pipeline pre-flight identified duplicate as ~10 MB uncompressed. FR-A1 may already trim it; verify first before edits.</background>
+    <dependencies><dependency task="040" status="not-started">FR-A1 stable</dependency><dependency task="041" status="not-started">FR-A2 stable</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">After 040 + 041 baked, inspect publish: `find deploy/api-publish -name "ServiceInterop.dll"`</step>
+    <step order="2">If 1 copy: no action needed. Document in EXECUTION-LOG.md. Mark ✅.</step>
+    <step order="3">If 2+ copies: identify which path is canonical (Cosmos runtime expects); add MSBuild exclusion for redundant path</step>
+    <step order="4">Single commit + build + test + publish + verify count = 1</step>
+    <step order="5">Deploy to dev; smoke test; 24h bake</step>
+    <step order="6">Log to EXECUTION-LOG.md; mark ✅ on stable</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+    <tool name="powershell">Deploy-BffApi.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (if exclusion added)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`find deploy/api-publish -name "ServiceInterop.dll" | wc -l` returns 0 or 1</criterion>
+    <criterion testable="true">Cosmos calls work post-deploy (smoke test against Cosmos-touching endpoints)</criterion>
+    <criterion testable="true">24h bake passes (if removal action taken)</criterion>
+  </acceptance-criteria>
+</task>

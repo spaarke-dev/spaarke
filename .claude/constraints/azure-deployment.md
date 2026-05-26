@@ -38,8 +38,12 @@ Load when:
 
 - **MUST** publish to `deploy/api-publish/` (outside the project source tree) to avoid recursive artifact nesting
 - **MUST** set `stdoutLogEnabled="true"` in the published `web.config` before packaging (dotnet publish resets it to false)
-- **MUST** verify zip entry count (~240) and size (~60 MB) before deploying — oversized zips indicate stale publish dirs in source
+- **MUST** set `<RuntimeIdentifier>linux-x64</RuntimeIdentifier>` + `<SelfContained>false</SelfContained>` in `Sprk.Bff.Api.csproj` — framework-dependent Linux publish (FR-A1 per `sdap-bff-api-remediation-fix` project). Eliminates the entire `runtimes/` directory tree (10 RIDs → eliminated on Linux App Service) and matches the target App Service OS.
+- **MUST** exclude wwwroot sourcemaps from publish via `<Content Update="wwwroot\**\*.js.map" CopyToPublishDirectory="Never" />` in `Sprk.Bff.Api.csproj` (FR-A2). Sourcemaps remain in the source tree for local debugging but never ship.
+- **MUST** verify zip entry count (~240) and size (~45 MB) before deploying — oversized zips indicate stale publish dirs in source. Phase 5 post-Outcome-A baseline is 45.65 MB compressed (was 72.9 MB pre-project).
 - **MUST** use `az webapp deploy --type zip` or Kudu zipdeploy API for deployment (ensures atomic replacement)
+
+> **Phase 5 demo deploy verified** the framework-dependent linux-x64 publish removes the entire `runtimes/` directory tree (10 RIDs → eliminated). See `projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md` Phase 4 Outcome A for evidence.
 
 ### Minimal API Endpoints
 

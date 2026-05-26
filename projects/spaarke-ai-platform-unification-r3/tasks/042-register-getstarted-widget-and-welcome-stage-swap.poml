@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Register GetStartedCardsWidget + welcome-stage swap + wire widget_load events (FR-18, FR-19, FR-21)</title>
+    <phase>Phase D — Context pane</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>040, 041</dependencies>
+    <blocks></blocks>
+    <tags>react, frontend, ai, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Multi-FR composite (FR-18, FR-19, FR-21) touching the widget registry + the canonical ContextPaneController. Wires the load-bearing PaneEventBus `workspace` channel dispatch path — getting widget_type values wrong breaks all 7 GetStarted cards. Modifies the same file as task 040 (must serialize). Registry change has cross-cutting impact: PlaybookGalleryWidget MUST remain resolvable for non-welcome stages.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ContextPaneController.tsx (same file as task 040) and ContextWidgetRegistry.ts (shared registry). Must serialize after 040 completes.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Wire `GetStartedCardsWidget` (built in task 041) into the application: (a) register it
+    in `ContextWidgetRegistry` so it can be resolved by widget type, (b) update
+    `ContextPaneController.tsx` so the welcome stage renders `GetStartedCardsWidget` INSTEAD
+    of `PlaybookGalleryWidget` (FR-21: PlaybookGalleryWidget remains REGISTERED for non-welcome
+    stages — do NOT remove it from the registry), (c) wire each card's onClick to dispatch
+    a `widget_load` event on the `workspace` PaneEventBus channel with the FR-19 widget-type
+    mapping. The Assign Work card has special handling — it dispatches to a launcher built
+    in task 045 (or you may pass through a special widget_type the launcher subscribes to).
+  </prompt>
+
+  <role>
+    React 19 + Fluent v9 frontend developer experienced with widget registries, PaneEventBus
+    multi-subscriber wiring, and three-pane shell stage lifecycle. Comfortable with the
+    `workspace` channel dispatch pattern from R2 lessons-learned.
+  </role>
+
+  <goal>
+    Three changes ship together:
+    (1) `ContextWidgetRegistry.ts` registers `GetStartedCardsWidget` under the widget type
+        `get-started-cards` (or equivalent canonical name). `PlaybookGalleryWidget` registration
+        is RETAINED — both widgets remain resolvable by type.
+    (2) `ContextPaneController.tsx` welcome-stage rendering swaps from PlaybookGalleryWidget to
+        GetStartedCardsWidget. Non-welcome stages continue to resolve PlaybookGalleryWidget
+        (or any other context widget via existing `context_update` events).
+    (3) The `onCardClick` callback passed to `GetStartedCardsWidget` dispatches a `widget_load`
+        event on the `workspace` PaneEventBus channel with the correct widget type per the
+        FR-19 mapping table. Assign Work click is handled per task 045 (either dispatch a
+        special widget_type that the AssignWorkWizardLauncher subscribes to, or invoke its
+        function export directly — chosen consistent with task 045 design).
+  </goal>
+
+  <context>
+    <background>
+      FR-18 places GetStartedCardsWidget on the welcome stage of the Context pane. FR-19
+      maps each card to a Workspace-pane widget via the `workspace` PaneEventBus channel
+      (the canonical multi-subscriber pattern from R2). FR-21 preserves backward
+      compatibility: PlaybookGalleryWidget remains registered so non-welcome stages (or
+      mid-session `context_update` events that switch to a playbook) still work. This task
+      brings tasks 040 + 041 together and is the focal point where the welcome-state
+      redesign goes live.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/ContextWidgetRegistry.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">GetStartedCardsWidget consumed via its package export (`src/client/shared/Spaarke.AI.Widgets/...`). Do NOT inline its implementation. PlaybookGalleryWidget registration MUST be retained — its registry entry is required for non-welcome stage resolution per FR-21.</constraint>
+    <constraint source="ADR-021">No hex literals, no `rgba(...)` literals introduced in any code edited here. Any new styling uses `tokens.*`.</constraint>
+    <constraint source="ADR-028">No `accessToken` props or state. The widget_load dispatcher does NOT pass tokens via event payloads. Workspace pane subscribers fetch tokens themselves via `authenticatedFetch` / `useAuth()`.</constraint>
+    <constraint source="spec">Welcome stage MUST render GetStartedCardsWidget. Non-welcome stages MUST continue to render PlaybookGalleryWidget (or whichever widget the stage lifecycle resolves to). Reusing the existing `workspace` PaneEventBus channel is REQUIRED — do NOT invent new channels (per project CLAUDE.md "do NOT invent new channels" rule).</constraint>
+    <constraint source="project">FR-19 mapping table (exact widget_type strings): Create Matter → `create-matter-wizard`; Create Project → `create-project-wizard`; Assign Work → launcher invocation (per task 045 — coordinate exact mechanism); Summarize Files → `document-upload-wizard`; Find Similar → `find-similar-wizard`; Send Email → `email-compose`; Schedule Meeting → `meeting-schedule`. These strings MUST match exactly what `WorkspaceWidgetRegistry` and tasks 043, 044, 045 expect.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read ContextWidgetRegistry + ContextPaneController">
+      Open both files. In the registry, locate how `PlaybookGalleryWidget` is registered
+      (registration pattern, key name, lazy-resolution approach). In the controller, locate
+      the welcome-stage branch that currently renders PlaybookGalleryWidget. Map out the
+      minimum surface area to edit.
+    </step>
+    <step order="2" name="Register GetStartedCardsWidget in ContextWidgetRegistry">
+      Add a registration for GetStartedCardsWidget under widget type `get-started-cards`
+      (or the canonical name aligned with task 041's export). Follow the existing
+      lazy-import / factory pattern used by PlaybookGalleryWidget. Do NOT remove or modify
+      the PlaybookGalleryWidget registration.
+    </step>
+    <step order="3" name="Swap welcome stage to GetStartedCardsWidget in ContextPaneController">
+      In `ContextPaneController.tsx`, update the welcome-stage rendering path so it resolves
+      `get-started-cards` instead of the previous PlaybookGalleryWidget reference. Preserve
+      non-welcome stage logic (it should still resolve PlaybookGalleryWidget for stages /
+      events that request it).
+    </step>
+    <step order="4" name="Get PaneEventBus workspace-channel handle">
+      Inside ContextPaneController (or via a small helper hook), obtain the `workspace`
+      channel dispatcher from PaneEventBusContext. This is the existing canonical channel —
+      do NOT create a new one.
+    </step>
+    <step order="5" name="Define onCardClick handler dispatching widget_load">
+      Build an `onCardClick(widgetType: string)` function:
+      <steps>
+        <step>If widgetType === 'assign-work' OR equivalent special-cased value, invoke the
+              AssignWorkWizardLauncher (task 045) — exact mechanism per task 045's contract
+              (either a direct function call or a dedicated event type the launcher subscribes to).</step>
+        <step>Otherwise, dispatch a `widget_load` event on the `workspace` channel with the
+              widgetType in the event payload.</step>
+      </steps>
+      Pass this handler as `onCardClick` to `&lt;GetStartedCardsWidget /&gt;` on the welcome stage.
+    </step>
+    <step order="6" name="Verify mapping table — exact strings">
+      Cross-check each card's widgetType against tasks 043 (`create-project-wizard`,
+      `find-similar-wizard`), 044 (`email-compose`, `meeting-schedule`), 045 (Assign Work),
+      and existing widgets (`create-matter-wizard`, `document-upload-wizard`). The strings
+      MUST match exactly. If task 041 used different strings, harmonize here OR update task
+      041 — but harmonize.
+    </step>
+    <step order="7" name="Smoke-test the wiring end-to-end">
+      Build SpaarkeAi. In Vite dev or Power Apps host: load welcome state, confirm 7
+      GetStarted cards render. Click "Create Matter" — confirm the existing
+      `CreateMatterWizardWidget` opens as a new top-tab in the Workspace pane (active). Click
+      "Summarize Files" — confirm `DocumentUploadWizardWidget` opens. Switch to a non-welcome
+      stage (or trigger a `context_update` for `playbook-gallery`) — confirm PlaybookGallery
+      still resolves.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing registry + controller + PaneEventBusContext</tool>
+    <tool name="Edit">Register widget, swap welcome-stage rendering, wire onCardClick</tool>
+    <tool name="Grep">Find all consumers of `workspace` channel + verify widget_type strings consistent across tasks 043, 044, 045</tool>
+    <tool name="Bash">Run `npm run build` against affected solutions + widget package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/registry/ContextWidgetRegistry.ts</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx</output>
+    <output type="report">Task completion report confirming registry + welcome swap + widget_load wiring + smoke-test pass</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ContextWidgetRegistry.ts` registers `GetStartedCardsWidget` AND retains `PlaybookGalleryWidget` registration (both resolvable by type).</criterion>
+    <criterion testable="true">`ContextPaneController.tsx` welcome-stage rendering resolves GetStartedCardsWidget; non-welcome stages still resolve PlaybookGalleryWidget when requested.</criterion>
+    <criterion testable="true">`onCardClick` handler dispatches `widget_load` events on the `workspace` PaneEventBus channel with the FR-19 widget_type mapping exactly.</criterion>
+    <criterion testable="true">Click Create Matter → CreateMatterWizardWidget opens as a new top-tab in Workspace pane (becomes active).</criterion>
+    <criterion testable="true">Click Summarize Files → DocumentUploadWizardWidget opens as a new top-tab in Workspace pane.</criterion>
+    <criterion testable="true">Click Create Project / Find Similar / Send Email / Schedule Meeting → corresponding widgets (from tasks 043, 044) open as new top-tabs.</criterion>
+    <criterion testable="true">Click Assign Work → AssignWorkWizardLauncher (task 045) invoked per its contract.</criterion>
+    <criterion testable="true">Switching to a non-welcome stage continues to resolve PlaybookGalleryWidget when applicable.</criterion>
+    <criterion testable="true">No new channels invented; only the existing `workspace` channel is dispatched on.</criterion>
+    <criterion testable="true">`npm run build` succeeds with no new TS / lint errors.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Welcome stage renders GetStartedCardsWidget">
+      Load SpaarkeAi cold (welcome stage). Confirm Context pane shows 7 GetStarted cards in 2-col grid
+      (per task 041). PlaybookGalleryWidget is NOT visible.
+    </test>
+    <test name="Non-welcome stage still resolves PlaybookGalleryWidget">
+      Trigger a stage transition to a stage that historically rendered PlaybookGallery (e.g., via a
+      `context_update` event dispatching `playbook-gallery`). Confirm PlaybookGalleryWidget renders.
+    </test>
+    <test name="Each card click opens the correct widget in Workspace pane">
+      Click each of the 7 cards in turn. Confirm:
+      <steps>
+        <step>Create Matter → CreateMatterWizardWidget tab opens (active)</step>
+        <step>Create Project → CreateProjectWizardWidget tab opens (active)</step>
+        <step>Assign Work → Dataverse custom page sprk_createworkassignmentwizard opens (or placeholder in Vite dev)</step>
+        <step>Summarize Files → DocumentUploadWizardWidget tab opens (active)</step>
+        <step>Find Similar → FindSimilarWizardWidget tab opens (active)</step>
+        <step>Send Email → Analysis Builder in email-compose mode opens (active)</step>
+        <step>Schedule Meeting → Analysis Builder in meeting-schedule mode opens (active)</step>
+      </steps>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021, NFR-06)">
+      Toggle dark mode. Confirm all 7 cards adapt correctly (no hex leaks, no white in dark mode).
+    </test>
+    <test name="No console errors during widget dispatch">
+      Open browser devtools, click each card, confirm zero errors or React warnings.
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The user invokes it via "work on task 042" / "continue" / similar trigger phrases per the
+    Auto-Detection Rules in the project CLAUDE.md. Do NOT read this POML file and implement
+    manually — `task-execute` ensures ADRs are loaded, `current-task.md` is tracked, and the
+    Step 9.5 code-review + adr-check gates run at FULL rigor.
+  </execution>
+</task>

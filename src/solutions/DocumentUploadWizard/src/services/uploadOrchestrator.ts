@@ -410,6 +410,8 @@ async function kickOffBackgroundTasks(
                 record.itemId,
                 record.fileName,
                 effectiveTenantId,
+                record.recordId,
+                config.parentContext,
                 config,
                 logger,
             ).catch((err) => {
@@ -429,32 +431,69 @@ async function kickOffBackgroundTasks(
 /**
  * Phase 4: Trigger RAG indexing via BFF API.
  * POST /api/ai/rag/index-file
+ *
+ * Passes documentId + parentEntity so the indexed chunks are linked back to the Dataverse
+ * record. Without these the chunks are orphans — present in the index but disconnected from
+ * Dataverse, breaking Open / Related / Graph affordances and the sprk_searchindexed tracking
+ * field on the document record.
  */
 async function triggerRagIndexing(
     driveId: string,
     itemId: string,
     fileName: string,
     tenantId: string,
+    documentId: string | undefined,
+    parentContext: UploadOrchestratorConfig["parentContext"],
     config: UploadOrchestratorConfig,
     logger: ILogger,
 ): Promise<void> {
+    // Map Dataverse logical name (e.g., "sprk_matter") to the short form the BFF stores
+    // ("matter"). Mirrors the convention used by RagEndpoints.SendToIndex when building
+    // ParentEntityContext from a Document's lookups.
+    const shortEntityType = parentContext.parentEntityName?.startsWith("sprk_")
+        ? parentContext.parentEntityName.substring("sprk_".length)
+        : parentContext.parentEntityName ?? "";
+
+    const parentEntity =
+        shortEntityType && parentContext.parentRecordId
+            ? {
+                  entityType: shortEntityType,
+                  entityId: parentContext.parentRecordId,
+                  entityName: parentContext.parentDisplayName ?? "",
+              }
+            : undefined;
+
     try {
         const response = await authenticatedFetch(
             "/api/ai/rag/index-file",
             {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ driveId, itemId, fileName, tenantId }),
+                body: JSON.stringify({
+                    driveId,
+                    itemId,
+                    fileName,
+                    tenantId,
+                    documentId,
+                    parentEntity,
+                }),
             },
         );
 
         if (response.ok) {
-            logger.info("UploadOrchestrator", `RAG indexing triggered for: ${fileName}`);
+            logger.info(
+                "UploadOrchestrator",
+                `RAG indexing triggered for: ${fileName} (documentId=${documentId ?? "none"}, parent=${shortEntityType || "none"})`,
+            );
         } else {
-            logger.warn("UploadOrchestrator", `RAG indexing returned ${response.status} for: ${fileName}`);
+            const errorBody = await response.text().catch(() => "");
+            logger.error(
+                "UploadOrchestrator",
+                `RAG indexing returned ${response.status} for: ${fileName} — ${errorBody.substring(0, 300)}`,
+            );
         }
     } catch (err) {
-        logger.warn("UploadOrchestrator", `RAG indexing trigger failed for: ${fileName}`, err);
+        logger.error("UploadOrchestrator", `RAG indexing trigger failed for: ${fileName}`, err);
     }
 }
 

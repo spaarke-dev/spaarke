@@ -4,7 +4,6 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Azure.Identity;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 
@@ -40,11 +39,13 @@ public class RegistrationDataverseService : IDisposable
         IConfiguration configuration,
         IOptions<DemoProvisioningOptions> options,
         TrackingIdGenerator trackingIdGenerator,
+        TokenCredential credential,
         ILogger<RegistrationDataverseService> logger)
     {
         _logger = logger;
         _options = options.Value;
         _trackingIdGenerator = trackingIdGenerator;
+        _credential = credential;
 
         // Admin Dataverse URL: prefer DATAVERSE_URL config, fall back to legacy Environments config
         var dataverseUrl = configuration["DATAVERSE_URL"];
@@ -64,19 +65,6 @@ public class RegistrationDataverseService : IDisposable
         }
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
-
-        // S2S auth using same app registration (client credentials — works across all tenant environments)
-        var clientId = configuration["API_APP_ID"];
-        var clientSecret = configuration["API_CLIENT_SECRET"];
-        var tenantId = configuration["TENANT_ID"];
-
-        if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret) || string.IsNullOrEmpty(tenantId))
-        {
-            throw new InvalidOperationException(
-                "RegistrationDataverseService requires TENANT_ID, API_APP_ID, and API_CLIENT_SECRET configuration.");
-        }
-
-        _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
         _logger.LogInformation("RegistrationDataverseService targeting Dataverse at {ApiUrl}", _apiUrl);
 
         _httpClient = new HttpClient

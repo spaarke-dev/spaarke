@@ -34,7 +34,7 @@ import {
   CheckmarkCircleRegular,
   CircleRegular,
 } from '@fluentui/react-icons';
-import type { ITodoEffortScore } from '../../hooks/useTodoScoring';
+import type { ITodoEffortScore } from './todoScoringTypes';
 
 // ---------------------------------------------------------------------------
 // Styles

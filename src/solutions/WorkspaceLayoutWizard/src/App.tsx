@@ -67,6 +67,17 @@ interface AppProps {
   sourceName: string | null;
   /** Authenticated fetch function from @spaarke/auth for BFF API calls. */
   authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
+  /**
+   * Optional subset of layout template IDs to surface in Step 1. When `undefined`
+   * (default), the wizard renders all 9 canonical templates — preserves backwards
+   * compatibility for the standalone LegalWorkspace per FR-25 / NFR-10. When provided,
+   * the Step 1 template selector is restricted to the listed IDs (FR-14, used by
+   * SpaarkeAi's `WorkspacePaneMenu` to surface a curated 6-template subset).
+   *
+   * Typed against the exact `LayoutTemplateId` union — NOT widened to `string[]` —
+   * so callers get compile-time safety.
+   */
+  templateFilter?: readonly LayoutTemplateId[];
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +167,109 @@ function parseSectionsJson(
   return { sectionIds, assignments };
 }
 
+// ---------------------------------------------------------------------------
+// Pin-to-Start persistence (task 092 / round 5 — multi-pin localStorage)
+//
+// Task 091 stubbed pin persistence in `sessionStorage` with a single-pin
+// layout ID. Task 092 (this revision) upgrades to a multi-pin model in
+// `localStorage` keyed `spaarke:workspace:pinned-list` — same shape consumed
+// by SpaarkeAi's `services/pinnedWorkspaces.ts` (the source of truth for
+// auto-open behavior on SpaarkeAi cold load). The wizard cannot import from
+// SpaarkeAi's solution at build time (separate Vite app), so the storage
+// shape is replicated verbatim here. Both files MUST stay in sync — if the
+// key or record shape changes, update both.
+//
+// Why localStorage (not sessionStorage):
+//   sessionStorage is cleared when the browser tab/window closes; the
+//   operator requested that pinned workspaces survive a full browser restart.
+//
+// TODO(BFF migration, next review):
+//   Replace this localStorage layer with a BFF `user-preferences` endpoint
+//   (no such endpoint exists today — the `UserPreferences` records in
+//   `AiIntentClassificationSchema.cs` / `PlaybookRunContext.cs` are
+//   AI-pipeline payloads, not a generic preferences surface). Cross-device
+//   sync is the motivating use case. Until then, pins are device-local.
+//
+// Standalone LegalWorkspace is unaffected: its `WorkspaceGrid.handleOpenWizard`
+// passes neither `templateFilter` nor any pin-related prop; `pinToStart`
+// defaults to `false` for create mode and to whatever's in localStorage for
+// edit mode.
+// ---------------------------------------------------------------------------
+
+const PIN_STORAGE_KEY = "spaarke:workspace:pinned-list";
+
+interface PinnedWorkspaceRecord {
+  layoutId: string;
+  layoutName: string;
+}
+
+/** Read the pinned-workspace list from localStorage. Returns `[]` on error. */
+function readPinnedList(): PinnedWorkspaceRecord[] {
+  try {
+    const raw = window.localStorage?.getItem(PIN_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry): PinnedWorkspaceRecord[] => {
+      if (
+        entry &&
+        typeof entry === "object" &&
+        typeof (entry as PinnedWorkspaceRecord).layoutId === "string" &&
+        typeof (entry as PinnedWorkspaceRecord).layoutName === "string"
+      ) {
+        return [
+          {
+            layoutId: (entry as PinnedWorkspaceRecord).layoutId,
+            layoutName: (entry as PinnedWorkspaceRecord).layoutName,
+          },
+        ];
+      }
+      return [];
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** Read pin state for a given layoutId — returns true if pinned. */
+function readPinToStartForLayout(layoutId: string | null): boolean {
+  if (!layoutId) return false;
+  return readPinnedList().some((p) => p.layoutId === layoutId);
+}
+
+/**
+ * Persist the pin-to-Start choice. Multiple workspaces may be pinned
+ * simultaneously; pinning ADDS (or refreshes) and unpinning REMOVES the
+ * matching entry. Failures (private browsing, quota exceeded) degrade
+ * silently — the in-memory wizard state is the user's source of truth for
+ * the current dialog session.
+ */
+function writePinToStartForLayout(
+  layoutId: string,
+  layoutName: string,
+  pinned: boolean,
+): void {
+  if (!layoutId) return;
+  try {
+    const current = readPinnedList();
+    let next: PinnedWorkspaceRecord[];
+    if (pinned) {
+      const exists = current.some((p) => p.layoutId === layoutId);
+      next = exists
+        ? current.map((p) =>
+            p.layoutId === layoutId ? { layoutId, layoutName } : p,
+          )
+        : [...current, { layoutId, layoutName }];
+    } else {
+      next = current.filter((p) => p.layoutId !== layoutId);
+      if (next.length === current.length) return; // not pinned — no-op
+    }
+    window.localStorage?.setItem(PIN_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    /* localStorage unavailable — no-op */
+  }
+}
+
 /**
  * Build the sectionsJson string from current wizard state.
  * Transforms slot assignments (Map<slotKey, sectionId>) into the LayoutJson
@@ -190,7 +304,7 @@ function buildSectionsJson(
 // App Component
 // ---------------------------------------------------------------------------
 
-export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sectionsJson, sourceName, authenticatedFetch }) => {
+export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sectionsJson, sourceName, authenticatedFetch, templateFilter }) => {
   // ---------------------------------------------------------------------------
   // SaveAs pre-population: parse source layout data once at mount time
   // ---------------------------------------------------------------------------
@@ -213,6 +327,15 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
   >(() => saveAsData?.sectionIds ?? new Set(DEFAULT_SECTION_IDS));
   const [workspaceName, setWorkspaceName] = React.useState(saveAsData?.name ?? "");
   const [isDefault, setIsDefault] = React.useState(false);
+  // Pin-to-Start — task 092 / round 5. Persistence is now a multi-pin
+  // localStorage list (`spaarke:workspace:pinned-list`) shared with
+  // SpaarkeAi's `services/pinnedWorkspaces.ts`; the wizard treats the saved
+  // value as opaque: read on saveAs/edit prefill, write on save. BFF-backed
+  // cross-device sync is still a follow-on once a user-preferences endpoint
+  // exists (no such endpoint today).
+  const [pinToStart, setPinToStart] = React.useState<boolean>(() =>
+    readPinToStartForLayout(mode === "edit" ? layoutId : null),
+  );
   const [scope, setScope] = React.useState<"my" | "all">("my");
   const scopeRef = React.useRef(scope);
   scopeRef.current = scope;
@@ -304,9 +427,29 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
       const savedLayout = await response.json();
       const savedId = savedLayout?.id ?? savedLayout?.Id ?? layoutId;
 
+      // ---------------------------------------------------------------------
+      // Persist pinToStart (task 092 / round 5 — multi-pin localStorage)
+      //
+      // Writes to `localStorage` key `spaarke:workspace:pinned-list` — the
+      // same shape SpaarkeAi's `services/pinnedWorkspaces.ts` reads on cold
+      // load to auto-open pinned workspaces as tabs. Multiple workspaces may
+      // be pinned simultaneously (additive ADD; explicit REMOVE on unpin).
+      //
+      // TODO(BFF migration): replace with a BFF `user-preferences` endpoint
+      // (does NOT exist today) so pins sync across devices. Until then, pins
+      // are device-local but persist across browser restarts.
+      // ---------------------------------------------------------------------
+      if (savedId) {
+        writePinToStartForLayout(
+          String(savedId),
+          workspaceName.trim() || "Workspace",
+          pinToStart,
+        );
+      }
+
       // Set dialog result for parent to read
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__dialogResult = { confirmed: true, layoutId: savedId };
+      (window as any).__dialogResult = { confirmed: true, layoutId: savedId, pinToStart };
 
       // Return success config — WizardShell displays the success screen
       return {
@@ -353,7 +496,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
         throw new Error(apiErr.message ?? "Failed to save workspace layout. Please try again.");
       }
     }
-  }, [mode, layoutId, selectedTemplateId, sectionAssignments, workspaceName, isDefault, authenticatedFetch]);
+  }, [mode, layoutId, selectedTemplateId, sectionAssignments, workspaceName, isDefault, pinToStart, authenticatedFetch]);
 
   // ---------------------------------------------------------------------------
   // WizardShell step configurations
@@ -376,6 +519,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
           <TemplateStep
             selectedTemplateId={selectedTemplateId}
             onSelect={setSelectedTemplateId}
+            templateFilter={templateFilter}
           />
         ),
       },
@@ -406,9 +550,11 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
               sectionAssignments={sectionAssignments}
               workspaceName={workspaceName}
               isDefault={isDefault}
+              pinToStart={pinToStart}
               onAssignmentsChange={setSectionAssignments}
               onNameChange={setWorkspaceName}
               onDefaultChange={setIsDefault}
+              onPinToStartChange={setPinToStart}
             />
           ) : null,
       },
@@ -422,7 +568,9 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
       sectionAssignments,
       workspaceName,
       isDefault,
+      pinToStart,
       scope,
+      templateFilter,
     ],
   );
 

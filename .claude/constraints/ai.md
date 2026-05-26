@@ -2,8 +2,8 @@
 
 > **Domain**: AI Features, Azure OpenAI, Document Intelligence
 > **Source ADRs**: ADR-013, ADR-014, ADR-015, ADR-016
-> **Last Updated**: 2026-04-05
-> **Last Reviewed**: 2026-04-05
+> **Last Updated**: 2026-05-17
+> **Last Reviewed**: 2026-05-17
 > **Reviewed By**: ai-procedure-refactoring-r2
 > **Status**: Current (pattern file links corrected)
 
@@ -38,13 +38,16 @@ Load when:
 - ✅ **MUST** include version input in cache keys
 - ✅ **MUST** scope cache keys by tenant
 
-### Data Governance (ADR-015)
+### Data Governance (ADR-015, amended 2026-05-17)
 
 - ✅ **MUST** send minimum text required to AI services
-- ✅ **MUST** log only identifiers, sizes, timings, outcome codes
-- ✅ **MUST** scope all persisted AI artifacts by tenant
+- ✅ **MUST** log only identifiers, sizes, timings, outcome codes (Tier 1 app logs)
+- ✅ **MUST** scope all persisted AI artifacts by tenant (`/tenantId` partition key)
 - ✅ **MUST** define retention for stored AI outputs
 - ✅ **MUST** version prompts/templates
+- ✅ **MUST** store only metadata + hashes in Tier 2 audit log (never verbatim text)
+- ✅ **MUST** apply immutable policy to Tier 2 audit container (append-only)
+- ✅ **MUST** support GDPR right-to-erasure for Tier 3 work history data
 
 ### Rate Limits (ADR-016)
 
@@ -61,7 +64,7 @@ Load when:
 
 - ❌ **MUST NOT** create separate AI microservice
 - ❌ **MUST NOT** call Azure AI directly from PCF
-- ❌ **MUST NOT** use Azure Functions for AI
+- ❌ **MUST NOT** host AI BFF endpoints in Azure Functions (Functions are permitted for out-of-band AI integration work — e.g., Dataverse → AI Search sync, closure-extraction pipelines, scheduled re-indexers — see ADR-001)
 - ❌ **MUST NOT** expose API keys to clients
 
 ### Caching (ADR-014)
@@ -70,11 +73,13 @@ Load when:
 - ❌ **MUST NOT** cache streaming tokens
 - ❌ **MUST NOT** inline string cache keys
 
-### Data Governance (ADR-015)
+### Data Governance (ADR-015, amended 2026-05-17)
 
 - ❌ **MUST NOT** place document bytes in job payloads
-- ❌ **MUST NOT** log document contents or extracted text
-- ❌ **MUST NOT** log full prompts or model responses
+- ❌ **MUST NOT** log document contents or extracted text (Tier 1 app logs)
+- ❌ **MUST NOT** log full prompts or model responses (Tier 1 app logs)
+- ❌ **MUST NOT** store verbatim text in Tier 2 audit log (hash only)
+- ❌ **MUST NOT** allow programmatic deletion of Tier 2 audit entries
 
 ### Rate Limits (ADR-016)
 
@@ -107,13 +112,14 @@ var key = DistributedCacheExtensions.CreateKey(
 
 ### Data Classification
 
-| Class | Send to AI? | Log? |
-|-------|-------------|------|
-| Identifiers | ✅ | ✅ |
-| Derived metadata | ✅ | ✅ |
-| User prompts | ✅ (minimize) | ⚠️ length only |
-| Document content | ⚠️ when required | ❌ |
-| Secrets | ❌ | ❌ |
+| Class | Send to AI? | Tier 1 (App Logs) | Tier 2 (Audit) | Tier 3 (Work History) |
+|-------|-------------|-------------------|----------------|----------------------|
+| Identifiers | ✅ | ✅ | ✅ | ✅ |
+| Derived metadata | ✅ | ✅ | ✅ | ✅ |
+| User prompts | ✅ (minimize) | ⚠️ length only | ❌ (hash only) | ✅ (user-owned) |
+| AI responses | N/A | ⚠️ length only | ❌ (hash only) | ✅ (user-owned) |
+| Document content | ⚠️ when required | ❌ | ❌ | ❌ |
+| Secrets | ❌ | ❌ | ❌ | ❌ |
 
 ---
 

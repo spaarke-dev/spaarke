@@ -485,7 +485,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
               to: currentEmailTo.split(/[;,]/).map((a: string) => a.trim()).filter(Boolean),
               subject: currentEmailSubject,
               body: currentEmailBody,
-              bodyFormat: 'Text',
+              bodyFormat: 'PlainText', // BFF enum is BodyFormat.{PlainText,HTML} — 'Text' is rejected (2026-05-25)
             }),
           }
         );

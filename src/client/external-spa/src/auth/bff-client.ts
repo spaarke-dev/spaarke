@@ -7,8 +7,37 @@
  * Token caching is handled by MSAL internally (no manual cache management needed).
  * On 401: MSAL's silent token refresh will handle expiry automatically on the next call.
  *
+ * AUTH STRATEGY CHOICE (Auth v2, Phase B / task 027)
+ * --------------------------------------------------
+ * This SPA intentionally does NOT use `@spaarke/auth`'s `authenticatedFetch` or
+ * `SpaarkeAuthProvider`. The Spaarke Auth v2 library is designed for the
+ * INTERNAL Spaarke surfaces (PCFs + internal Code Pages) hosted inside a
+ * customer's own Azure tenant — its MSAL config uses `localStorage` for
+ * cross-tab survival, which is the right call there but the wrong call here.
+ *
+ * The Secure Project Workspace is a B2B portal: external guest users from many
+ * different organizations sign in via Entra B2B into the main Spaarke workforce
+ * tenant. Each browser tab can be a different user/organization, so the SPA
+ * uses MSAL `sessionStorage` to prevent token leakage across tabs. See
+ * `msal-config.ts` for the full rationale.
+ *
+ * Adopting `@spaarke/auth` here would require either (a) a B2B-aware
+ * `OfficeNaaStrategy`-style strategy, or (b) running two `PublicClientApplication`
+ * instances (one from `@spaarke/auth`, one from `@azure/msal-react`), which
+ * fragments the MSAL cache. Neither is in scope for Phase B; the task POML
+ * (027 step 3) explicitly defers a B2B strategy to a later workstream.
+ *
+ * What Phase B DOES enforce here: the raw `Authorization: Bearer ${token}`
+ * literal is centralized into the single internal helper `executeFetch` so
+ * the project's ESLint Bearer-literal ban (task 070) has exactly one
+ * allowlisted exception in the external SPA. All public-facing API methods
+ * (`bffApiCall`, `getExternalUserContext`, `grantAccess`, etc.) call
+ * `bffApiCall`, which calls `executeFetch`. There is no other place in the
+ * external SPA where a Bearer header is set.
+ *
  * See: docs/architecture/power-pages-spa-guide.md — Authentication section
  * See: notes/auth-migration-b2b-msal.md
+ * See: .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md — external SPA out-of-scope rationale
  */
 
 import { BFF_API_URL } from "../config";
@@ -129,6 +158,11 @@ export async function bffApiCall<T>(
 
 /**
  * Internal helper: perform the actual fetch with the Authorization header set.
+ *
+ * This is the SOLE Bearer-literal site in the external SPA — the project's
+ * Phase E ESLint rule banning `Authorization: \`Bearer ${...}\`` literals
+ * outside `authenticatedFetch.ts` will allowlist this path because the
+ * external SPA is out of scope for `@spaarke/auth` (see file header).
  */
 async function executeFetch(
   path: string,
@@ -139,6 +173,9 @@ async function executeFetch(
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    // Auth v2 (D-AUTH-7): External SPA uses sessionStorage MSAL (B2B threat
+    // model) — opts out of @spaarke/auth's authenticatedFetch. This is the
+    // single allowlisted Bearer-literal site for this surface.
     "Authorization": `Bearer ${token}`,
     ...(options.headers as Record<string, string> | undefined),
   };

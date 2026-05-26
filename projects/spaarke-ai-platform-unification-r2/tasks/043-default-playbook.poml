@@ -1,0 +1,52 @@
+<task id="AIPU2-043" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Create "Spaarke AI General" default playbook record in Dataverse</title>
+    <phase>2D</phase>
+    <tags>dataverse, playbook, configuration</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    Create the "Spaarke AI General" default playbook as a sprk_analysisplaybook record in
+    Dataverse. This playbook is the baseline configuration that loads automatically when the
+    SpaarkeAi control runs in standalone mode (no context playbook supplied by the host form).
+    It must include the core set of AI tools that are always available regardless of matter
+    context: SearchDocuments, SearchDiscovery, GetKnowledgeSource, RefineText, GenerateSummary,
+    and QueryEntities. The record must be flagged as the system default so the SpaarkeAi control
+    can auto-load it. Create the record via a Dataverse configuration script and verify it loads
+    correctly in standalone mode.
+  </prompt>
+  <role>Dataverse developer familiar with sprk_analysisplaybook schema, pac CLI, and Spaarke playbook architecture.</role>
+  <goal>
+    The "Spaarke AI General" sprk_analysisplaybook record exists in Dataverse, is marked as
+    the system default, includes all six core tools, and is automatically loaded by the
+    SpaarkeAi control when no context playbook is provided by the host. Verified by loading
+    SpaarkeAi in standalone mode and confirming the correct tool set is active.
+  </goal>
+  <knowledge>
+    <files>
+      <file>docs/guides/SCOPE-CONFIGURATION-GUIDE.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read SCOPE-CONFIGURATION-GUIDE.md and playbook-architecture.md to understand the sprk_analysisplaybook schema, required fields, tool list format, and the default-detection mechanism used by SpaarkeAi.</step>
+    <step>Identify the exact field names for: playbook name, tool list (JSON or lookup), isDefault flag, status, and any required relationship fields. Confirm field names against the current Dataverse schema using mcp__dataverse__describe_table("sprk_analysisplaybook").</step>
+    <step>Create a configuration script at scripts/dataverse/Create-DefaultPlaybook.ps1 (or .json seed file if the project uses a data-import pattern). The script should: check if the record already exists (by name or isDefault flag) before creating, and skip creation if found (idempotent).</step>
+    <step>Define the playbook record fields: Name = "Spaarke AI General", Description = "Default playbook for standalone Spaarke AI usage. Provides core document search, knowledge retrieval, text refinement, and structured data query capabilities.", IsDefault = true, Status = Active, Tools = ["SearchDocuments", "SearchDiscovery", "GetKnowledgeSource", "RefineText", "GenerateSummary", "QueryEntities"].</step>
+    <step>Run the creation script against the dev Dataverse environment. Capture the created record ID and log it to the script output.</step>
+    <step>Verify the record via mcp__dataverse__read_query: SELECT sprk_analysisplaybookid, sprk_name, sprk_isdefault, sprk_tools FROM sprk_analysisplaybook WHERE sprk_isdefault = 1. Confirm the record appears and all fields are correct.</step>
+    <step>Test standalone load: open the SpaarkeAi control in a standalone/test page without a context playbook parameter. Confirm the control loads "Spaarke AI General" automatically and the tool roster includes all six tools.</step>
+    <step>Document the record ID and the idempotency check in a comment at the top of the creation script so future runs or new-environment setup are self-documenting.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>A sprk_analysisplaybook record named "Spaarke AI General" exists in Dataverse with IsDefault = true and Status = Active.</criterion>
+    <criterion>The playbook tool list contains exactly: SearchDocuments, SearchDiscovery, GetKnowledgeSource, RefineText, GenerateSummary, QueryEntities.</criterion>
+    <criterion>The creation script is idempotent — running it twice does not create duplicate records.</criterion>
+    <criterion>The SpaarkeAi control in standalone mode (no context playbook parameter) auto-loads this playbook and shows the correct six tools in the tool roster.</criterion>
+    <criterion>The created record ID is logged to script output for traceability.</criterion>
+    <criterion>mcp__dataverse__read_query confirms the record with all expected field values.</criterion>
+  </acceptance-criteria>
+</task>

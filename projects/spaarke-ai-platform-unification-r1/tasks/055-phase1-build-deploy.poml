@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPU-055" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Phase 1 Build and Deploy — SpaarkeAi Code Page and BFF API</title>
+    <status>completed</status>
+    <phase>5</phase>
+    <wave>5D</wave>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>deploy</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>AIPU-050, AIPU-051</dependencies>
+  </metadata>
+
+  <prompt>
+    Build all Phase 1 components in dependency order and deploy them to the dev environment. The
+    deployment sequence is:
+    1. Build shared libraries: @spaarke/ai-context, @spaarke/ai-outputs, @spaarke/ui-components.
+    2. Build the SpaarkeAi Code Page (produces single-file HTML for sprk_spaarkeai web resource).
+    3. Build and publish the BFF API (.NET 8) which now includes the standalone context endpoint.
+    4. Deploy all web resources via Deploy-AllWebResources.ps1.
+    5. Deploy BFF API via Deploy-BffApi.ps1.
+    6. Smoke-test that key endpoints respond correctly.
+    No source file changes are made in this task — build and deploy output only.
+  </prompt>
+
+  <role>DevOps engineer with experience deploying Spaarke components: npm Vite builds, .NET 8
+  publish, Dataverse web resource deployment, and Azure App Service deployment.</role>
+
+  <goal>SpaarkeAi Code Page is deployed as the sprk_spaarkeai web resource in the dev Dataverse
+  environment. BFF API is deployed to the dev Azure App Service with the new standalone context
+  endpoint responding correctly. All existing web resources remain functional.</goal>
+
+  <relevant-files>
+    <file>scripts/Build-ViteSolutionsDirect.ps1</file>
+    <file>scripts/Deploy-AllWebResources.ps1</file>
+    <file>scripts/Deploy-BffApi.ps1</file>
+    <file>scripts/Deploy-DataverseSolutions.ps1</file>
+    <file>src/solutions/SpaarkeAi/package.json</file>
+    <file>src/solutions/SpaarkeAi/vite.config.ts</file>
+    <file>src/client/shared/Spaarke.AI.Context/package.json</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/package.json</file>
+    <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+    <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    <file>docs/guides/AI-DEPLOYMENT-GUIDE.md</file>
+    <file>projects/spaarke-ai-platform-unification-r1/spec.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint id="npm-install">Per CLAUDE.md: use npm install --legacy-peer-deps --no-audit
+    --no-fund for any fresh installs in src/solutions/* and src/client/pcf/*. Do NOT use npm ci.
+    If node_modules already exists, skip install and proceed directly to build.</constraint>
+    <constraint id="build-order">Build shared libraries before dependent solutions. Required order:
+    1. @spaarke/ai-context (Spaarke.AI.Context)
+    2. @spaarke/ai-outputs (Spaarke.AI.Outputs)
+    3. @spaarke/ui-components (Spaarke.UI.Components)
+    4. SpaarkeAi solution (src/solutions/SpaarkeAi)
+    5. BFF API (src/server/api/Sprk.Bff.Api)
+    </constraint>
+    <constraint id="existing-scripts">Use existing deploy scripts — do NOT write new PowerShell
+    scripts. If a required script does not exist, log the gap as a finding and use the closest
+    existing script. Do not modify deploy scripts in this task.</constraint>
+    <constraint id="dev-only">Deploy to dev environment only (spaarkedev1.crm.dynamics.com,
+    App Service spe-api-dev-67e2xz). Never deploy to production in this task.</constraint>
+    <constraint id="no-source-changes">This task makes zero changes to source files. If a build
+    failure is caused by a source code issue discovered during build, record it as a blocker and
+    stop — do not attempt to fix source code in this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/AI-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern>Vite build for shared library:
+      cd src/client/shared/Spaarke.AI.Context
+      npm install --legacy-peer-deps --no-audit --no-fund  # only if no node_modules
+      npm run build
+      </pattern>
+      <pattern>Vite build for SpaarkeAi solution:
+      cd src/solutions/SpaarkeAi
+      npm install --legacy-peer-deps --no-audit --no-fund  # only if no node_modules
+      npm run build
+      # Verify dist/ contains a single .html file
+      </pattern>
+      <pattern>BFF API build and publish:
+      dotnet build src/server/api/Sprk.Bff.Api/ --configuration Release
+      dotnet publish src/server/api/Sprk.Bff.Api/ --configuration Release --output ./publish/bff
+      </pattern>
+      <pattern>Smoke test after deploy:
+      curl https://spe-api-dev-67e2xz.azurewebsites.net/healthz  # expect 200 OK
+      curl https://spe-api-dev-67e2xz.azurewebsites.net/api/ai/standalone/context  # expect auth challenge or 200
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step id="1">Read docs/guides/AI-DEPLOYMENT-GUIDE.md to confirm current deployment procedure.
+    Verify all required scripts exist: Build-ViteSolutionsDirect.ps1, Deploy-AllWebResources.ps1,
+    Deploy-BffApi.ps1. Note the dev environment URLs and resource names from CLAUDE.md.</step>
+    <step id="2">Build @spaarke/ai-context: cd src/client/shared/Spaarke.AI.Context. Check if
+    node_modules exists; if not, run npm install --legacy-peer-deps --no-audit --no-fund. Run
+    npm run build. Confirm dist/ output is produced with no errors.</step>
+    <step id="3">Build @spaarke/ai-outputs: cd src/client/shared/Spaarke.AI.Outputs. Same install
+    check then npm run build. Confirm dist/ output.</step>
+    <step id="4">Build @spaarke/ui-components: cd src/client/shared/Spaarke.UI.Components. Same
+    install check then npm run build. Confirm dist/ output.</step>
+    <step id="5">Build SpaarkeAi Code Page: cd src/solutions/SpaarkeAi. Same install check then
+    npm run build. Verify dist/ contains exactly one .html file (single-file build per ADR-026).
+    </step>
+    <step id="6">Build BFF API: dotnet build src/server/api/Sprk.Bff.Api/ --configuration Release.
+    Confirm zero build errors. Then dotnet publish to ./publish/bff/.</step>
+    <step id="7">Deploy web resources: run scripts/Deploy-AllWebResources.ps1 targeting the dev
+    environment. Confirm sprk_spaarkeai web resource is updated. Record the deployment log output.
+    </step>
+    <step id="8">Deploy BFF API: run scripts/Deploy-BffApi.ps1 targeting
+    spe-api-dev-67e2xz. Confirm deployment completes successfully. Record the deployment log.
+    </step>
+    <step id="9">Smoke test: GET /healthz (expect 200), GET /api/ai/standalone/context with a
+    test bearer token (expect non-500 response). Record the results. If endpoints fail, log as a
+    deployment blocker finding — do not attempt to fix source code.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion id="AC-1">All four shared libraries (@spaarke/ai-context, @spaarke/ai-outputs,
+    @spaarke/ui-components, SpaarkeAi) build with zero errors.</criterion>
+    <criterion id="AC-2">BFF API builds and publishes with zero errors in Release configuration.
+    </criterion>
+    <criterion id="AC-3">sprk_spaarkeai web resource is updated in the dev Dataverse environment
+    (confirmed by deployment script output).</criterion>
+    <criterion id="AC-4">BFF API is deployed to spe-api-dev-67e2xz (confirmed by deployment
+    script output or az webapp show).</criterion>
+    <criterion id="AC-5">GET /healthz returns 200 OK after deployment.</criterion>
+    <criterion id="AC-6">No source files were modified during this task. Any build failures
+    encountered are documented as blocker findings with the exact error message.</criterion>
+  </acceptance-criteria>
+</task>

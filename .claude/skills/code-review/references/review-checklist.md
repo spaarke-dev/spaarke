@@ -91,10 +91,16 @@ grep -rn "^\s*//.*{" --include="*.cs"
 
 Note: For full ADR validation (including ADR-013+), use `/adr-check` which loads `.claude/skills/adr-check/references/adr-validation-rules.md` and the ADR index in `docs/adr/README-ADRs.md`.
 
-### ADR-001: No Azure Functions
+### ADR-001: BFF endpoints in Minimal API (Functions OK for out-of-band integration)
 ```
-grep -rn "Microsoft.Azure.Functions" --include="*.cs" --include="*.csproj"
-grep -rn "\[FunctionName" --include="*.cs"
+# Violation: Functions inside the BFF project (BFF endpoints belong in Minimal API)
+grep -rn "\[FunctionName\|\[HttpTrigger" src/server/api/Sprk.Bff.Api/ --include="*.cs"
+
+# Violation: Durable Functions (always)
+grep -rn "DurableTask" --include="*.csproj"
+
+# Review: Functions outside the BFF (likely out-of-band integration — verify it's sync/indexer/webhook/extraction, Bicep-deployable, shares correlation)
+grep -rn "\[FunctionName" --include="*.cs" | grep -v "Sprk.Bff.Api"
 ```
 
 ### ADR-002: Thin Plugins

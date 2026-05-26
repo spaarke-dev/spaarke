@@ -1,0 +1,54 @@
+<task id="AIPU2-040" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build DataverseQueryTools (QueryEntities + GetEntityDetail via OData)</title>
+    <phase>2D</phase>
+    <tags>bff-api, ai-tool, dataverse</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-006</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build DataverseQueryTools — a set of AI tool handler implementations that give the LLM
+    structured access to Dataverse entity data. Two tools are required: (1) QueryEntities,
+    which executes an OData filter query against a supported entity type and returns a paged
+    result set, and (2) GetEntityDetail, which fetches the full detail record for a single
+    entity by type and identifier. Both tools must enforce caller-scoped authorization (the
+    AI can only query data the authenticated user is permitted to see — no elevation). Register
+    both tools via AIFunctionFactory so they appear in the tool roster for playbook-capable
+    sessions. Supported entity types: sprk_matter, sprk_project, contact, account, sprk_document.
+  </prompt>
+  <role>Senior .NET developer familiar with Dataverse OData Web API, the Spaarke AI Tool Framework (IAiToolHandler, AIFunctionFactory), and Microsoft Graph/Dataverse auth patterns.</role>
+  <goal>
+    The AI can issue structured queries against Dataverse entities using the authenticated
+    user's security context. QueryEntities and GetEntityDetail are registered as AI tools,
+    appear in the tool roster, handle unsupported entity types gracefully, and never elevate
+    permissions beyond the caller's Dataverse access.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DocumentSearchTools.cs</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ADR-013-ai-architecture.md to understand the IAiToolHandler registration pattern and AIFunctionFactory usage. Read DocumentSearchTools.cs as a reference implementation to follow the same patterns.</step>
+    <step>Read ai.md constraints to identify any restrictions on Dataverse data exposure through AI tools (data classification, PII handling).</step>
+    <step>Create DataverseQueryTools.cs in src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/. Implement two tool handlers as nested classes or methods following the DocumentSearchTools pattern.</step>
+    <step>Implement QueryEntities tool: accept entityType (string, validated against allow-list), filter (OData filter expression, string), top (int, max 50, default 10). Build OData URL for the target entity set. Execute GET request using an HttpClient configured with the caller's Dataverse access token (OBO flow — use existing auth infrastructure). Return structured result: list of entity summaries (id, displayName, key fields per entity type).</step>
+    <step>Implement GetEntityDetail tool: accept entityType (string, validated against allow-list) and identifier (string, Guid format). Fetch full record from Dataverse OData endpoint. Return all non-system fields as a key-value dictionary. Return 404-style result if entity not found.</step>
+    <step>Define the entity type allow-list as a static readonly set: { "sprk_matter", "sprk_project", "contact", "account", "sprk_document" }. Return a clear error message if the requested type is not in the list.</step>
+    <step>Define per-entity-type field maps (summary fields for QueryEntities): sprk_matter (sprk_name, sprk_status, sprk_mattertype, sprk_clientid), sprk_project (sprk_name, sprk_status, sprk_matterlookup), contact (fullname, emailaddress1, jobtitle), account (name, telephone1, websiteurl), sprk_document (sprk_name, sprk_documenttype, sprk_status).</step>
+    <step>Register both tools via AIFunctionFactory in the existing tool registration path. Add XML doc comments describing each tool for LLM tool-selection quality.</step>
+    <step>Write unit tests: (a) QueryEntities with valid entity type returns paged results, (b) QueryEntities with invalid entity type returns error result (not exception), (c) GetEntityDetail returns full field map, (d) GetEntityDetail for unknown id returns not-found result, (e) top parameter capped at 50.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>QueryEntities and GetEntityDetail are registered as AI tools and appear in the session tool roster.</criterion>
+    <criterion>Only entity types in the allow-list are accepted — others return a descriptive error result, not an exception.</criterion>
+    <criterion>QueryEntities top parameter is capped at 50 — requests for more are silently reduced.</criterion>
+    <criterion>Auth uses the caller's OBO token — no service-account elevation for Dataverse queries.</criterion>
+    <criterion>GetEntityDetail returns a not-found result (not an exception) for unknown entity IDs.</criterion>
+    <criterion>All unit tests pass (dotnet test).</criterion>
+  </acceptance-criteria>
+</task>

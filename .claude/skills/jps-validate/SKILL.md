@@ -1,12 +1,18 @@
-# jps-validate
-
 ---
 description: Validate a JPS JSON file against schema and test rendering
 tags: [ai, jps, testing, validation, prompt-schema]
 techStack: [azure-openai, aspnet-core]
 appliesTo: ["validate JPS", "check JPS", "test JPS definition", "validate prompt schema"]
 alwaysApply: false
+exemplar: .claude/skills/jps-action-create/examples/document-profiler.json
+last-reviewed: 2026-05-17
 ---
+
+# jps-validate
+
+> **Last Reviewed**: 2026-05-17 (Option A move executed; exemplar path now valid)
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A initial; Wave 2d updated post-move)
+> **Exemplar rationale**: `examples/document-profiler.json` (under `jps-action-create/`) is the canonical "valid JPS" reference — shared with `jps-action-create`. Live, verifiable input for validation tests.
 
 ## Purpose
 
@@ -39,7 +45,7 @@ ELSE IF user provides JPS content in conversation:
   PARSE content directly
 ELSE:
   ASK user for file path or content
-  SUGGEST: "Look in projects/ai-json-prompt-schema-system/notes/jps-conversions/"
+  SUGGEST: "Look in .claude/skills/jps-action-create/examples/"
 ```
 
 ### Step 2: JSON Syntax Validation
@@ -182,7 +188,7 @@ Generate validation report.
 
 **Input:**
 ```
-User: "validate JPS projects/ai-json-prompt-schema-system/notes/jps-conversions/document-profiler.json"
+User: "validate JPS .claude/skills/jps-action-create/examples/document-profiler.json"
 ```
 
 **Output:**
@@ -241,7 +247,7 @@ User: "check this JPS: { \"instruction\": { \"role\": \"analyst\" } }"
 
 | Situation | Response |
 |-----------|----------|
-| File not found | Check path, suggest jps-conversions/ directory |
+| File not found | Check path, suggest examples/ directory |
 | Binary/non-text file | Report error, ask for correct file |
 | Valid JSON but not JPS | Explain JPS requirements, offer to convert |
 | All checks pass | Confirm ready for deployment |
@@ -263,3 +269,14 @@ User: "check this JPS: { \"instruction\": { \"role\": \"analyst\" } }"
 - Report ALL issues at once — don't stop at the first failure
 - Offer auto-fix suggestions for every failed check
 - For $choices validation, verify the prefix is one of: `lookup:`, `optionset:`, `multiselect:`, `boolean:`, `downstream:` and the value after the prefix contains exactly one `.` separator (e.g., `entity.field`)
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Schema validator passes but renderer rejects at runtime | `IsJpsFormat()` in `PromptSchemaRenderer.cs` checks more than just the `$schema` field (e.g., requires certain top-level keys) | After schema validation passes, ALWAYS run the render test (Step 6 in Workflow). Schema OK + render OK = ready. |
+| `$choices` reference is syntactically valid but the entity doesn't exist | Reference to `lookup:sprk_<entity>.<field>` where the entity was renamed or deleted | Validate `$choices` prefixes are well-formed (Tip #5), then optionally cross-reference Dataverse via `mcp__dataverse__list_tables()` to confirm the entity exists. |
+| Validator passes but production output has missing fields | JPS structured-output schema lists fields but the AI model doesn't reliably produce all of them | Schema validation can't catch runtime AI behavior. Run a sample render through the actual deployed model BEFORE relying on the JPS in production. |
+| Validator reports false-positive failure | JPS spec evolved; validator wasn't updated | Validators MUST track the schema spec version. If schema version doesn't match validator version, treat as inconclusive (warn-only). |

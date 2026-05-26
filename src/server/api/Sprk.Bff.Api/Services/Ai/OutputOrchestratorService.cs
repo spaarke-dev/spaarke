@@ -316,20 +316,33 @@ public class OutputOrchestratorService : IOutputOrchestratorService
     /// </remarks>
     private OutputMappingConfig? ParseOutputMapping(PlaybookResponse playbook)
     {
-        // TRACKED: GitHub #233 - Determine where outputMapping is stored
-        // Options:
-        // 1. Dedicated field: playbook.OutputMappingJson
-        // 2. Part of ConfigJson: playbook.ConfigJson.outputMapping
-        // 3. Separate entity: sprk_playbook_outputmapping relationship
+        if (string.IsNullOrWhiteSpace(playbook.ConfigJson) || playbook.ConfigJson == "{}")
+        {
+            return null;
+        }
 
-        // For MVP stub, return null (will be implemented once schema is finalized)
-        // In production, parse from JSON and deserialize to OutputMappingConfig
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(playbook.ConfigJson);
 
-        _logger.LogWarning(
-            "ParseOutputMapping not implemented - outputMapping storage location TBD. Playbook: {PlaybookId}",
-            playbook.Id);
+            if (!doc.RootElement.TryGetProperty("outputMapping", out var outputMappingElement))
+            {
+                return null;
+            }
 
-        return null;
+            var config = System.Text.Json.JsonSerializer.Deserialize<OutputMappingConfig>(
+                outputMappingElement.GetRawText(),
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            return config;
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to parse outputMapping from ConfigJson for playbook {PlaybookId}",
+                playbook.Id);
+            return null;
+        }
     }
 }
 

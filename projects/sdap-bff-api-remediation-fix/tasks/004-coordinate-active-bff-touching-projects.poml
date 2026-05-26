@@ -1,0 +1,107 @@
+<task id="004" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Enumerate + coordinate ALL active BFF-touching projects (expanded UQ-03 + senior-review M3)</title>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~10 min (git worktree list + git log per branch)</actual-effort>
+    <assigned>Project owner</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
+    <tags>coordination, phase-0</tags>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent owner coordination ask; no file conflicts with sibling Group A tasks</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Enumerate ALL active projects that may touch `src/server/api/Sprk.Bff.Api/` during this project's Phase 3 baseline (48h calendar gate) + Phase 4 bake windows (24-48h per candidate). For each, confirm dormancy or coordinate a deploy-sequencing plan.
+
+    Per senior review (M3 / item #20): the original task scope (UQ-03 — coordinate with `sdap-bff-api-and-performance-enhancement-r1` only) was too narrow. The shared dev environment `spe-api-dev-67e2xz` is hit by multiple projects intermittently; any mid-bake deploy from any of them invalidates Phase 4 observation windows and contaminates App Insights baseline.
+
+    Output: a written enumeration in `CLAUDE.md → Decisions Made` listing every BFF-touching project, its current status (active / dormant / refinement-only / merged), and its commitment for the 4-6 week window.
+  </prompt>
+
+  <role>Project coordinator.</role>
+
+  <goal>
+    Documented enumeration covering at minimum: `sdap-bff-api-and-performance-enhancement-r1`, `auth-sso-and-email-wizard-2026-05`, `sdap-file-upload-document-r2`, `spaarke-self-service-registration`, `spaarke-ai-platform-unification-r2` (already known: in refinement; sequenced first per 2026-05-20 decision), `ai-spaarke-insights-engine-r1` (separate task 005), plus any others surfaced from `git worktree list` or operator knowledge.
+
+    For each: status + commitment (e.g., "frozen during Phase 3-4", "may deploy after [date]", "no BFF changes planned").
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
+    <file purpose="worktree-list">git worktree list output</file>
+    <file purpose="memory">.claude/projects/{...}/memory/MEMORY.md (active projects context)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §2.3">Mid-bake deploy by sibling invalidates Phase 4 observation windows</constraint>
+    <constraint source="senior review M3 (2026-05-24)">UQ-03 narrow scope is the gap; enumerate ALL active BFF-touching projects, not just perf-enhancement</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Senior review identified that "many projects deploy intermittently to spe-api-dev-67e2xz" makes "within 10% of baseline" (NFR-03/NFR-04) a meaningless gate when the baseline is itself noisy. Coordination is operator-discipline; this task makes it explicit.
+
+      Known projects to query (non-exhaustive — operator MUST surface any others):
+      - `sdap-bff-api-and-performance-enhancement-r1` — original UQ-03 target; ~124-170h scope; orthogonal but BFF-touching
+      - `auth-sso-and-email-wizard-2026-05` — propagating @spaarke/auth fixes to ~30 consumers including BFF
+      - `sdap-file-upload-document-r2` — file upload pipeline; may touch SPE storage + BFF endpoints
+      - `spaarke-self-service-registration` — registration flows; may touch BFF auth + registration endpoints
+      - `spaarke-ai-platform-unification-r2` — already sequenced first per 2026-05-20 decision (refinement completes before this project starts)
+      - `ai-spaarke-insights-engine-r1` — separate Phase 0 task 005 owns this coordination
+      - `ai-spaarke-action-engine-r1` — queued for after this remediation per 2026-05-22 strategic decision
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Owner sign-off required first</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Run `git worktree list` to enumerate all active worktrees</step>
+    <step order="2">For each worktree branch, check recent activity (last 30 days commits touching `src/server/api/Sprk.Bff.Api/`)</step>
+    <step order="3">For each project with BFF-touching activity, contact owner to confirm: (a) is the project active, (b) any BFF deploys expected in next 6 weeks, (c) commitment to freeze BFF deploys during Phase 3 baseline + Phase 4 bake windows</step>
+    <step order="4">If any owner cannot commit to freeze: develop deploy-sequencing plan (specific windows when their work and ours can co-deploy without contention)</step>
+    <step order="5">Write enumeration table to `CLAUDE.md → Decisions Made` with one row per project: name | status | commitment</step>
+    <step order="6">Update Phase 0 checklist item 3 (UQ-03) to checked with note: "Expanded scope per M3"</step>
+    <step order="7">Update TASK-INDEX.md status of task 004 from 🔲 to ✅</step>
+  </steps>
+
+  <tools><tool name="git">worktree list, log per branch</tool><tool name="git">Update CLAUDE.md + task index</tool></tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (enumeration table in Decisions Made)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All worktrees enumerated (or explicitly noted as non-BFF-touching)</criterion>
+    <criterion testable="true">Each known active BFF-touching project has a commitment (freeze / sequence / no impact) recorded</criterion>
+    <criterion testable="true">CLAUDE.md enumeration table present with name | status | commitment columns</criterion>
+    <criterion testable="true">Phase 0 checklist item 3 marked complete</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      Investigation via `git worktree list` (24 active worktrees) + `git log master..&lt;branch&gt; -- src/server/api/Sprk.Bff.Api/`
+      for each branch. Finding: ALL 24 worktree branches are at 0 commits ahead of master (both total + BFF-specific).
+      No unmerged BFF work exists anywhere in the parallel-session ecosystem at Phase 0 close. Dev environment
+      `spe-api-dev-67e2xz` is effectively quiet for Phase 3 baseline capture.
+    </completion-summary>
+    <residual-risk>
+      New BFF-touching work CAN start in any branch during the 4-6 week project window. Operator commits to
+      weekly monitoring via `git log master..&lt;branch&gt; -- src/server/api/Sprk.Bff.Api/` during Phase 3-4 to
+      surface new entrants. If a branch starts BFF-touching work mid-bake, operator coordinates sequencing.
+    </residual-risk>
+    <enumeration-location>CLAUDE.md → Phase 0 Group A Decisions → Task 004 (table with 25 rows incl. this project)</enumeration-location>
+  </notes>
+</task>

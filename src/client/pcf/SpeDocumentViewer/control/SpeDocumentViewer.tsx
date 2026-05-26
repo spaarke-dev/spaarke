@@ -29,8 +29,8 @@ import { BffClient } from './BffClient';
 import './css/SpeDocumentViewer.css';
 
 // Control version — keep in sync with ControlManifest.Input.xml (per /pcf-deploy skill)
-const CONTROL_VERSION = '1.0.24';
-const BUILD_DATE = '2026-05-14';
+const CONTROL_VERSION = '1.0.27';
+const BUILD_DATE = '2026-05-25';
 
 /**
  * DocumentViewerApp - Main React component

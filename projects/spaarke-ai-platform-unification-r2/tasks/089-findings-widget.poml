@@ -1,0 +1,48 @@
+<task id="AIPU2-089" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build FindingsWidget for Context Pane</title>
+    <phase>4D</phase>
+    <tags>frontend, widgets, analysis</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-073</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    After an analysis completes, the Context pane should show a structured findings summary:
+    key items identified (contract clauses, legal issues, risk flags), their risk levels, and
+    the citations that support each finding. Users can click a citation link to highlight the
+    cited passage in the DocumentViewer (via a context_highlight event to PaneEventBus).
+    FindingsWidget is intentionally a read-only display — no editing, no filtering — to keep
+    the first implementation focused. It appears in the Context pane during the sources-citations
+    stage when the server provides findings data alongside source documents.
+  </prompt>
+  <role>Frontend developer with React 19 and Fluent v9 experience.</role>
+  <goal>
+    Analysis findings display with key items, risk levels, and clickable citation links that
+    trigger context_highlight events. Widget registered in ContextWidgetRegistry.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ADR-021 for Fluent v9 risk level color tokens (colorPaletteRedBackground2 for high risk, colorPaletteYellowBackground2 for medium, colorPaletteGreenBackground2 for low) and Badge component usage.</step>
+    <step>Create src/client/shared/Spaarke.AI.Widgets/src/widgets/context/FindingsWidget.tsx implementing ContextWidget.</step>
+    <step>Define FindingsData type: { findings: Finding[] } where Finding has id, title, description, riskLevel ('high' | 'medium' | 'low' | 'info'), citations: Citation[] (each Citation has citationId and displayLabel).</step>
+    <step>Render each finding as a Fluent v9 Card or list item: title, risk level Badge (colored by Fluent token matching riskLevel), description text, and a list of citation links.</step>
+    <step>Implement citation link click handler: call useDispatchPaneEvent() to dispatch a context_highlight event to the 'context' channel carrying the citationId — ContextPaneController will forward this to the active DocumentViewer widget's onHighlight method.</step>
+    <step>Handle empty findings list: render a message "No findings identified" in muted text — not a blank pane.</step>
+    <step>Register FindingsWidget in ContextWidgetRegistry.</step>
+    <step>Write unit tests: (a) findings render with correct risk level badge colors; (b) clicking a citation dispatches context_highlight to 'context' channel with correct citationId; (c) empty findings list renders message text.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Findings render with title, risk level Badge (correct Fluent token color per level), description, and citation links.</criterion>
+    <criterion>Clicking a citation link dispatches context_highlight event to 'context' PaneEventBus channel with the correct citationId.</criterion>
+    <criterion>Empty findings list renders an informational message, not a blank pane.</criterion>
+    <criterion>Widget registered in ContextWidgetRegistry and renders during sources-citations stage.</criterion>
+    <criterion>No hard-coded colors — Fluent v9 risk level tokens only (ADR-021).</criterion>
+    <criterion>Unit tests for rendering, citation dispatch, and empty state pass.</criterion>
+  </acceptance-criteria>
+</task>

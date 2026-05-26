@@ -5,7 +5,7 @@ Write-Host "Job ID: $JobId" -ForegroundColor Gray
 Write-Host ""
 
 try {
-    $response = Invoke-RestMethod -Uri "https://spe-api-dev-67e2xz.azurewebsites.net/office/jobs/$JobId" -Method Get -ErrorAction Stop
+    $response = Invoke-RestMethod -Uri "https://spaarke-bff-dev.azurewebsites.net/office/jobs/$JobId" -Method Get -ErrorAction Stop
 
     Write-Host "Job Status:" -ForegroundColor Yellow
     Write-Host "  Status: $($response.status)" -ForegroundColor White

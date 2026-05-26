@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Performance NFR verification — NFR-01, NFR-02, NFR-03 in deployed env</title>
+    <phase>Phase G — Deploy + Smoke</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>070</dependencies>
+    <blocks>090</blocks>
+    <tags>performance, e2e-test, ui-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Performance verification via Lighthouse + manual timing in deployed environment. STANDARD rigor — no production code edits unless violations surface (which open follow-up perf tasks).</rigor-reason>
+    <parallel-group>G-smoke</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only verification against deployed environment. Parallel with sibling smoke tasks 071, 072, 073.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Verify the three performance NFRs (NFR-01, NFR-02, NFR-03) against the deployed
+    environment from task 070. Use Lighthouse for cold-load measurement and manual
+    sampling (10 samples each) for History overlay timings + session-restore latency.
+    Document p95 metrics in `projects/spaarke-ai-platform-unification-r3/notes/nfr-verification.md`.
+    Open follow-up perf tasks for any FAIL.
+  </prompt>
+
+  <role>
+    Frontend performance reviewer comfortable with Lighthouse audits in Chrome DevTools,
+    manual interaction timing (DevTools Performance panel), and p95 calculation across
+    samples. Familiar with the R2 D-08 session-restore invariant (p95 &lt;500 ms).
+  </role>
+
+  <goal>
+    A verification memo at
+    `projects/spaarke-ai-platform-unification-r3/notes/nfr-verification.md` documents
+    measured timings for NFR-01 (pane render cold load), NFR-02 (History overlay
+    open/populate), and NFR-03 (session restore). Each is PASS or FAIL versus its target.
+    PASS unblocks task 090 wrap-up; any FAIL opens a follow-up perf task.
+  </goal>
+
+  <context>
+    <background>
+      NFR-01 — pane render &lt;500 ms cold load.
+      NFR-02 — History overlay open &lt;200 ms; populate &lt;300 ms p95 for 50 items.
+      NFR-03 — session restore p95 &lt;500 ms (inherits D-08 from R2 — data-refreshed restore).
+      The R2 SessionPersistenceService (D-06 write-through Cosmos + D-08 data-refreshed
+      restore) sets the latency floor. R3 should match or improve.
+    </background>
+    <relevant-files>
+      <file>Deployed SpaarkeAi instance (from task 070)</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md (NFR-01..NFR-03)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">NFR-01 target: pane render &lt;500 ms cold load.</constraint>
+    <constraint source="spec">NFR-02 target: History overlay open &lt;200 ms; populate &lt;300 ms p95 for 50 items.</constraint>
+    <constraint source="spec">NFR-03 target: session restore p95 &lt;500 ms (R2 D-08 inherited).</constraint>
+    <constraint source="project">p95 measurements require ≥10 samples per metric. Document each sample in the memo (raw values + p95 calculation).</constraint>
+    <constraint source="project">Use the deployed environment (from task 070), NOT Vite dev mode. Vite dev has different perf characteristics.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Confirm task 070 deploy success">
+      Read latest deploy memo. Confirm success.
+    </step>
+    <step order="2" name="Run Lighthouse audit on cold-load welcome state">
+      Open Chrome DevTools → Lighthouse. Run a Performance audit on the SpaarkeAi welcome
+      state cold load (incognito, no cache, throttling on the appropriate preset). Capture
+      First Contentful Paint and Largest Contentful Paint as the pane-render approximation
+      for NFR-01.
+    </step>
+    <step order="3" name="Measure History overlay timings (NFR-02)">
+      In the deployed env: 10 samples of (a) click history icon → overlay visible (open time),
+      and (b) overlay-visible → 50 items populated (populate time). Use DevTools Performance
+      panel to capture each sample as precise ms values. Compute p95 across 10 samples.
+    </step>
+    <step order="4" name="Measure session restore latency (NFR-03)">
+      In the deployed env: open 3 non-Home tabs in Workspace pane, refresh, measure
+      from-navigation-start-to-tabs-restored. Repeat 10 samples. Compute p95.
+    </step>
+    <step order="5" name="Write verification memo">
+      Create `projects/spaarke-ai-platform-unification-r3/notes/nfr-verification.md` with:
+      Lighthouse output for NFR-01, 10-sample tables + p95 for NFR-02 and NFR-03, PASS/FAIL
+      per NFR, roll-up verdict.
+    </step>
+    <step order="6" name="Open follow-up perf tasks for FAILs">
+      For any FAIL, draft a follow-up perf POML task and add to TASK-INDEX.md. Block task
+      090 wrap-up until remediated.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Chrome DevTools (manual; not automatable)</tool>
+    <tool name="Skill">`ui-test` skill for assisting with browser orchestration</tool>
+    <tool name="Read">Deploy memo, spec</tool>
+    <tool name="Write">Verification memo; follow-up POMLs</tool>
+    <tool name="Edit">TASK-INDEX.md if opening follow-up tasks</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/nfr-verification.md</output>
+    <output type="docs">Follow-up POML tasks for any FAIL</output>
+    <output type="report">Task completion report with PASS/FAIL per NFR + roll-up</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Verification memo exists at `projects/spaarke-ai-platform-unification-r3/notes/nfr-verification.md`.</criterion>
+    <criterion testable="true">NFR-01: Lighthouse First Contentful Paint / Largest Contentful Paint on cold-load welcome state is &lt;500 ms (or memo documents the gap and opens follow-up).</criterion>
+    <criterion testable="true">NFR-02: 10 samples each for History overlay open + populate are recorded; p95 open &lt;200 ms AND p95 populate &lt;300 ms for 50 items.</criterion>
+    <criterion testable="true">NFR-03: 10 samples for session-restore latency are recorded; p95 &lt;500 ms.</criterion>
+    <criterion testable="true">Memo issues PASS / FAIL per NFR with a roll-up verdict.</criterion>
+    <criterion testable="true">If FAIL, follow-up perf task is opened in TASK-INDEX.md and task 090 is BLOCKED.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Lighthouse cold-load NFR-01">
+      Run Lighthouse Performance audit (incognito, no cache, mobile-emulation-disabled or
+      per-spec preset). Confirm First Contentful Paint or Largest Contentful Paint is
+      &lt;500 ms.
+    </test>
+    <test name="History overlay open + populate timing NFR-02">
+      <steps>
+        <step>Click history icon. Capture time from click to overlay-visible. Sample 10x.</step>
+        <step>Capture time from overlay-visible to 50 history items rendered. Sample 10x.</step>
+        <step>Compute p95 for each. Confirm open p95 &lt;200 ms; populate p95 &lt;300 ms.</step>
+      </steps>
+    </test>
+    <test name="Session restore NFR-03">
+      <steps>
+        <step>Open 3 non-Home tabs in Workspace pane.</step>
+        <step>Refresh page. Capture time from navigation-start to all-tabs-restored.</step>
+        <step>Sample 10x. Compute p95. Confirm &lt;500 ms.</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill. Use `ui-test` skill where
+    helpful for browser orchestration; Lighthouse + DevTools timing are manual operations
+    invoked alongside the skill.
+  </execution>
+</task>

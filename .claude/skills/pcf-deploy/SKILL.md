@@ -1,15 +1,20 @@
 ---
-description: Build, pack, and deploy PCF controls to Dataverse via solution ZIP import
+description: Build, pack, and deploy PCF controls to Dataverse via solution ZIP import — uses npm run build:prod for production mode (AP-1 fix verified 2026-05-14)
 tags: [deploy, pcf, dataverse, power-platform, solution]
 techStack: [pcf-framework, typescript, react, dataverse]
 appliesTo: ["**/pcf/**", "deploy pcf", "build and deploy pcf", "pcf solution import"]
 alwaysApply: false
+exemplar: src/client/pcf/SemanticSearchControl/
+last-reviewed: 2026-05-17
 ---
 
 # PCF Deploy
 
 > **Category**: Operations (Tier 3)
-> **Last Updated**: February 22, 2026
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2d — fixed 2 broken ADR file paths; added FAILURE-MODES.md#AP-1 cross-reference; `leave-alone-justified` on body length per dereferencing-reliability concern)
+> **Exemplar rationale**: `src/client/pcf/SemanticSearchControl/` is the canonical PCF control — named throughout this skill's body. Live, verifiable reference.
+> **AP-1 fix verified in skill** (2026-05-14): Wrong "NEVER use npm run build:prod" instruction was removed. The Bundle Size & Production Mode section now mandates the correct `pcf-scripts build --buildMode production`. See [FAILURE-MODES.md#AP-1](../../FAILURE-MODES.md#ap-1-skill-prescribes-x-but-x-is-wrong) for incident history.
 > **Primary Guide**: [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md)
 
 ---
@@ -71,26 +76,38 @@ Every deployment MUST increment the version in ALL 5 files:
 
 **If you forget #1 (ControlManifest.Input.xml), Dataverse silently keeps the old control.**
 
-### Async Init in ReactControl — Auth Must Live in the Component (CRITICAL)
+### Async Init in ReactControl — Auth Must Live in the Component (CRITICAL — per [ADR-028](../../adr/ADR-028-spaarke-auth-architecture.md))
 
 For `ComponentFramework.ReactControl` (virtual controls), `notifyOutputChanged()` does **NOT** reliably trigger `updateView()`. If the control has no two-way bound field, the framework may ignore the call entirely.
 
-**Rule**: Any async initialization (auth, config fetching) that needs to trigger a re-render MUST use `useState` + `useEffect` inside the React component — NOT the PCF class `init()`.
+**Rule**: Any async initialization (auth, config fetching) that needs to trigger a re-render MUST use `useState` + `useEffect` inside the React component — NOT the PCF class `init()`. Use the v2 contract from `@spaarke/auth`.
 
 ```typescript
-// ✅ CORRECT — auth in React component useEffect
+// ✅ CORRECT — Spaarke Auth v2 contract in React component useEffect
+import { initAuth, useAuth, authenticatedFetch } from '@spaarke/auth';
+
 const [isAuthInitialized, setIsAuthInitialized] = useState(false);
 useEffect(() => {
-  initializeAuth(...).then(() => setIsAuthInitialized(true));
+  initAuth({ clientId, tenantId, bffBaseUrl, bffApiScope })
+    .then(() => setIsAuthInitialized(true));
 }, []);
+// Inside components: const { getAccessToken } = useAuth();
+// For BFF calls: await authenticatedFetch('/api/...', { method: 'POST', body: ... })
+
+// ❌ WRONG — instantiating PublicClientApplication directly
+// new PublicClientApplication({...})  // bypasses @spaarke/auth singleton (INV-7)
 
 // ❌ WRONG — auth in PCF class, triggers notifyOutputChanged()
 // this._authInitialized = true;
 // this.notifyOutputChanged(); // ← updateView() is NOT called for read-only ReactControl
+
+// ❌ WRONG — passing accessToken as a typed prop (function-based contract retired this)
+// <MyComponent accessToken={token} />  // use authenticatedFetch instead
 ```
 
-**Full pattern**: See `.claude/patterns/pcf/control-initialization.md` § "Async Initialization"
-**Canonical implementations**: `SemanticSearchControl.tsx`, `RelatedDocumentCount.tsx`
+**Full pattern**: See `.claude/patterns/pcf/control-initialization.md` § "Async Initialization" + `.claude/patterns/auth/spaarke-sso-binding.md` (INV-1..INV-8) + `.claude/adr/ADR-028-spaarke-auth-architecture.md`
+**Canonical implementations**: `SemanticSearchControl.tsx`, `DocumentRelationshipViewer.tsx`, `RelatedDocumentCount.tsx`
+**Pre-v2 holdout (V3 cleanup target)**: `UniversalQuickCreate` still uses its own local `MsalAuthProvider.ts` — do NOT copy this pattern for new PCFs.
 
 ---
 
@@ -136,10 +153,42 @@ stat -c '%y' src/components/YourChangedComponent/YourChangedComponent.tsx
 - ✅ **MUST** use `pack.ps1` (not `Compress-Archive` — backslashes break import)
 - ✅ **MUST** use unmanaged solution (ADR-022)
 - ✅ **MUST** use publisher `Spaarke` with prefix `sprk_`
-- ❌ **NEVER** use `npm run build:prod` — pcf-scripts does not have a separate production build script; use `npm run build`
+- ✅ **MUST** use `npm run build:prod` for production deploys — runs `pcf-scripts build --buildMode production` which enables tree-shaking + minification. Default `npm run build` runs **development mode** and produces a bundle 10–15× larger because tree-shaking is disabled. See [Bundle Size & Production Mode](#bundle-size--production-mode) below.
 - ❌ **NEVER** use `pac pcf push` — creates temp solutions, rebuilds in dev mode
 - ❌ **NEVER** reuse old solution ZIPs
 - ❌ **NEVER** skip shared lib compilation when shared components were modified — stale `dist/` causes silent failures
+
+### Bundle Size & Production Mode (CRITICAL — verified 2026-05-14)
+
+`pcf-scripts build` defaults to **development mode**. Webpack `mode: 'development'` disables:
+- Tree-shaking — every imported barrel pulls in everything reachable, including `@fluentui/react-icons` chunk files (~500 KB each).
+- Minification — variable names, whitespace, dead code all preserved.
+
+Result: a control that should be 400–600 KB ships as 6–10 MB.
+
+**Always invoke `npm run build:prod`** for any build that will be packed + imported to Dataverse. The script must be:
+```json
+"build:prod": "pcf-scripts build --buildMode production"
+```
+
+**Common malformed variants seen in this repo (DO NOT USE)**:
+- `"pcf-scripts build --production"` — silently ignored, falls through to dev mode
+- `"pcf-scripts build -- --mode production"` — passes `--mode production` as a webpack arg AFTER `--`, but pcf-scripts already configures webpack's mode internally; ignored
+
+**Expected bundle sizes after `build:prod`** (committed reference, May 2026):
+
+| PCF | bundle.js | ZIP |
+|---|---|---|
+| SpeDocumentViewer | 440 KB | 111 KB |
+| SemanticSearchControl | 539 KB | ~140 KB |
+| RelatedDocumentCount | 433 KB | ~110 KB |
+
+If a fresh build comes out >1 MB, the `build:prod` script is almost certainly misconfigured or `npm run build` was used. Verify with:
+```bash
+stat -c '%s bytes' out/controls/{ControlName}/bundle.js
+```
+
+The committed bundle.js sizes in `solution/Controls/.../bundle.js` are authoritative for "known good." If your fresh build dramatically exceeds them, fix the build invocation before packing.
 
 ---
 
@@ -185,10 +234,10 @@ If ANY files in `src/client/shared/Spaarke.UI.Components/src/` were modified, co
 ```bash
 cd src/client/pcf/{ControlName}
 rm -rf out/ bin/
-npm run build
+npm run build:prod         # MUST be build:prod — see Bundle Size & Production Mode
 
-# Verify size (~200-500KB field-based, 1-5MB custom page)
-ls -la out/controls/{ControlName}/bundle.js
+# Verify size (~400-600 KB field-based after build:prod; if >1 MB, build:prod is misconfigured)
+stat -c '%s bytes' out/controls/{ControlName}/bundle.js
 ```
 
 ### Step 3: Copy Build Output to Solution
@@ -369,9 +418,24 @@ When the user wants to deploy manually for fastest iteration:
 
 | ADR | Relevance |
 |-----|-----------|
-| [ADR-006](../../adr/ADR-006-pcf-over-webresources.md) | PCF over legacy webresources |
-| [ADR-021](../../adr/ADR-021-fluent-design-system.md) | Fluent UI v9 design system |
-| [ADR-022](../../adr/ADR-022-pcf-platform-libraries.md) | React 16 compatibility, platform libraries |
+| [ADR-006](../../../docs/adr/ADR-006-prefer-pcf-over-webresources.md) | PCF over legacy webresources |
+| [ADR-021](../../../docs/adr/ADR-021-fluent-ui-design-system.md) | Fluent UI v9 design system |
+| [ADR-022](../../../docs/adr/ADR-022-pcf-platform-libraries.md) | React 16 compatibility, platform libraries |
+
+> **Path fix 2026-05-17**: ADR-006 and ADR-021 filenames updated to actual repo filenames (`ADR-006-prefer-pcf-over-webresources.md` not `ADR-006-pcf-over-webresources.md`; `ADR-021-fluent-ui-design-system.md` not `ADR-021-fluent-design-system.md`). All 3 ADR links verified to resolve.
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| PCF bundle size jumps 5-10× after rebuild (e.g., 440KB → 6.7MB) | `npm run build` (dev mode, no tree-shaking) used instead of `npm run build:prod` | **This is the AP-1 origin.** See [FAILURE-MODES.md#AP-1](../../FAILURE-MODES.md#ap-1-skill-prescribes-x-but-x-is-wrong). ALWAYS use `npm run build:prod` for production deploys. Verify bundle size post-build matches expected ranges (skill's Bundle Size & Production Mode section). |
+| `npm run build:prod` script silently runs dev mode | Wrong flag in `package.json` (`--production` or `-- --mode production` instead of `--buildMode production`) | Verify each PCF's `package.json` `build:prod` script invokes `pcf-scripts build --buildMode production`. Phase 0 inventory caught 3 PCFs with wrong flags; fix at the package.json level. |
+| Solution import succeeds but PCF doesn't appear in form | Schema-name convention drift: `sprk_Sprk.<ControlName>` vs `sprk_Spaarke.Controls.<ControlName>` | Verify the schema name in `ControlManifest.xml` matches what's expected in the Form designer. Both conventions exist in the wild — must match exactly. |
+| Bundle deployed but React not initializing | `ControlManifest.Input.xml` `<platform-library>` for React 16 not declared correctly | Per ADR-022, PCF declares React 16 via `<platform-library name="React" version="16.x.x" />`. Without this, ReactDOM doesn't bootstrap. |
+| Multiple PCFs in one solution but only one deploys | Solution XML missing entries for second PCF | Each PCF needs its own `<RootComponent>` in `solution.xml` + matching directory structure. Don't try to deploy 2 controls from 1 solution unless explicitly set up. |
+| `pac solution import` fails with cryptic XML errors | XML templates in this skill body need updating OR solution.xml structure drifted from PAC CLI expectations | The XML templates in this skill body are kept inline (not extracted to references/) per Phase 2b Wave 2d dereferencing-reliability concern. If templates drift from current PAC CLI behavior, update them here in-place. |
 
 ---
 

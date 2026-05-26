@@ -44,11 +44,12 @@ Read in this order:
 5. **`knowledge/sharepoint-embedded/samples/embedded-chat/`** — `<ChatEmbedded>` reference (boilerplate is non-runnable upstream — annotated snippet is the canonical reference per `SOURCE.md`).
 6. **`knowledge/sharepoint-embedded/docs/learn-overview.md`** + **`docs/learn-containers.md`** + **`docs/learn-containertypes.md`** + **`docs/learn-knowledge-source.md`** + **`docs/learn-semantic-index.md`** — Microsoft Learn snapshots (only read the ones relevant to your specific work pattern).
 
-### Step 2: Apply Spaarke contracts (ADR-007, ADR-005, ADR-001)
+### Step 2: Apply Spaarke contracts (ADR-007, ADR-005, ADR-001, ADR-028)
 
 - **ADR-007 (SpeFileStore facade)**: **No Graph SDK types in controllers or handlers above the facade.** All Graph calls go through `SpeFileStore` or its helpers in `Sprk.Bff.Api/Infrastructure/Graph/`. If you need a Graph capability the facade doesn't expose, extend the facade — don't bypass it.
 - **ADR-005 (Flat storage in SPE)**: **No folder hierarchies in SPE containers.** Represent hierarchy via Dataverse metadata (`sprk_document` + `sprk_documentassociation`). Evaluate permissions via UAC (not SPE native ACLs). MUST access SPE only via `SpeFileStore`.
 - **ADR-001 (Minimal API)**: SPE operations are exposed via endpoints in `Sprk.Bff.Api`. No separate SPE microservice.
+- **ADR-028 (Spaarke Auth Architecture)**: Server-side Graph uses `DefaultAzureCredential` (managed identity) for app-only when `Graph__ManagedIdentity__Enabled=true`; OBO for delegated. Client surfaces (PCFs/Code Pages) consuming SPE-backed endpoints use `useAuth()` + `authenticatedFetch` from `@spaarke/auth`.
 - **Operational policy** (not yet ADR): one container per client. Scope new SPE-backed operations to the relevant client's container. Cross-client operations require explicit BFF-level authorization — never assume.
 
 ### Step 3: Choose the auth pattern
@@ -56,10 +57,11 @@ Read in this order:
 | Operation | Auth pattern | Where to look |
 |---|---|---|
 | User-initiated read/write of a file | OBO (On-Behalf-Of) — user token | `Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` |
-| Background indexing, system-level container ops | App-only (client credentials) | Same factory; app-only path |
+| Background indexing, system-level container ops | App-only via **Managed Identity** (`DefaultAzureCredential`) when `Graph__ManagedIdentity__Enabled=true` — canonical per ADR-028. `ClientSecretCredential` is local-dev fallback only. | Same factory; MI/app-only path |
 | Container type registration in a new tenant | App-only via PowerShell during onboarding | `RegisterContainer.ps1` |
+| Mailbox-scoped Graph (`Mail.*`) | App-only + Exchange `ApplicationAccessPolicy` scoping MI to allowed mailboxes (Phase C hardening) | See [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) §7 |
 
-**Default**: OBO for user-facing endpoints; app-only only when the operation has no acting user.
+**Default**: OBO for user-facing endpoints; app-only via MI only when the operation has no acting user. New-environment setup requires Graph permission grants on the MI principal (see [`auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) §5).
 
 ### Step 4: webUrl-based document opens (don't download-and-reopen)
 

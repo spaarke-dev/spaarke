@@ -1,0 +1,66 @@
+<task id="048" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Migrate Workspace consumers to facade (FR-E2 part 2)</title>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, ai-boundary, facade, migration, outcome-e, phase-4</tags>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent consumer module (Workspace) — no shared files with 047/049/050</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <!-- Merge strategy: this commit is part of the squashed atomic Outcome E PR (tasks 046–051) per plan.md Process Rules. See task 046 prompt for full context. -->
+  <prompt>
+    Migrate ~2 Workspace consumers (`MatterPreFillService`, `BriefingService` — confirmed at pipeline pre-flight; spec said 4) to consume `IBriefingAi` / `IWorkspacePrefillAi` facade interfaces.
+
+    NOTE PF-3: actual count is ~2 files, not the spec's "4". Verify with Phase 1 inventory before commit.
+  </prompt>
+
+  <role>Senior .NET developer.</role>
+  <goal>`grep -r "IOpenAiClient\|IPlaybookService" src/server/api/Sprk.Bff.Api/Services/Workspace/` returns 0. Tests pass ±5%.</goal>
+
+  <inputs>
+    <file purpose="facade">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+    <file purpose="workspace">src/server/api/Sprk.Bff.Api/Services/Workspace/</file>
+    <file purpose="inventory">projects/sdap-bff-api-remediation-fix/inventory/usage-map-static.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013 refined">External CRUD consumers MUST use facade</constraint>
+    <constraint source="spec.md FR-E2">Zero direct refs in Workspace</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/usage-map-static.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Spec FR-E2 claimed 4 files; reality is ~2 (MatterPreFillService, BriefingService). Use inventory output as source of truth.</background>
+    <dependencies><dependency task="046" status="not-started">Facade interfaces</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">List actual Workspace consumer files from inventory</step>
+    <step order="2">For each: replace direct injection with facade interface</step>
+    <step order="3">Replace call sites with facade methods</step>
+    <step order="4">build + test ±5% baseline</step>
+    <step order="5">Acceptance grep returns 0 in Services/Workspace/</step>
+    <step order="6">Single commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="dotnet">build, test</tool><tool name="git">single commit</tool></tools>
+
+  <outputs><output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/*.cs (migrated)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep returns 0 in Services/Workspace/</criterion>
+    <criterion testable="true">Test pass count ±5% baseline</criterion>
+  </acceptance-criteria>
+</task>

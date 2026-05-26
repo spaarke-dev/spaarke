@@ -3,7 +3,7 @@ using Azure;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
-using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -35,10 +35,10 @@ public interface IInvoiceSearchService
 /// <summary>
 /// Implementation of invoice semantic search.
 /// </summary>
-public class InvoiceSearchService : IInvoiceSearchService
+public sealed class InvoiceSearchService : IInvoiceSearchService
 {
     private readonly SearchIndexClient _searchIndexClient;
-    private readonly IOpenAiClient _openAiClient;
+    private readonly IInvoiceAi? _invoiceAi;
     private readonly ILogger<InvoiceSearchService> _logger;
 
     // Index name (MVP: single index, production: per-tenant)
@@ -55,13 +55,21 @@ public class InvoiceSearchService : IInvoiceSearchService
 
     public InvoiceSearchService(
         SearchIndexClient searchIndexClient,
-        IOpenAiClient openAiClient,
-        ILogger<InvoiceSearchService> logger)
+        ILogger<InvoiceSearchService> logger,
+        IInvoiceAi? invoiceAi = null)
     {
         _searchIndexClient = searchIndexClient ?? throw new ArgumentNullException(nameof(searchIndexClient));
-        _openAiClient = openAiClient ?? throw new ArgumentNullException(nameof(openAiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _invoiceAi = invoiceAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
     }
+
+    /// <summary>
+    /// Returns the AI facade or throws if AI features are disabled. Semantic search requires
+    /// embedding generation and has no non-AI fallback.
+    /// </summary>
+    private IInvoiceAi RequireAi() =>
+        _invoiceAi ?? throw new InvalidOperationException(
+            "Invoice search requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable.");
 
     public async Task<InvoiceSearchResponse> SearchAsync(
         string query,
@@ -88,7 +96,7 @@ public class InvoiceSearchService : IInvoiceSearchService
             ReadOnlyMemory<float> queryEmbedding;
             try
             {
-                queryEmbedding = await _openAiClient.GenerateEmbeddingAsync(
+                queryEmbedding = await RequireAi().GenerateEmbeddingAsync(
                     query,
                     model: "text-embedding-3-large",
                     dimensions: 3072,

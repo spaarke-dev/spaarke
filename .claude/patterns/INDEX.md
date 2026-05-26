@@ -45,7 +45,7 @@ Load specific pattern files when implementing related features:
 | HTTP resilience | `api/resilience.md` |
 | Email integration | `api/send-email-integration.md` |
 | Graph API features | `auth/graph-sdk-v5.md` + `auth/graph-endpoints-catalog.md` |
-| Code Page auth | `auth/spaarke-auth-initialization.md` + `auth/xrm-webapi-vs-bff-auth.md` |
+| Code Page auth | `auth/spaarke-sso-binding.md` (canonical: INV-1..INV-8 + v2 contract) + `auth/xrm-webapi-vs-bff-auth.md` + [ADR-028](../adr/ADR-028-spaarke-auth-architecture.md) |
 | Building Code Page SPA | `webresource/full-page-custom-page.md` |
 | Wizard dialog | `webresource/code-page-wizard-wrapper.md` |
 | Polymorphic associations | `dataverse/polymorphic-resolver.md` |

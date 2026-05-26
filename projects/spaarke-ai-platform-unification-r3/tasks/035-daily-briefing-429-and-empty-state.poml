@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Daily Briefing 429 graceful degradation + empty state + error telemetry</title>
+    <phase>Phase C — Workspace Pane</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>013, 034</dependencies>
+    <blocks>none</blocks>
+    <tags>react, frontend, ai, error-handling, telemetry</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation extending the 034 hook + component with error/empty handling. Touches AI rate-limit surface (ADR-016), error telemetry boundary (FR-24, error-only), and FR-16 / NFR-11 UX contract. FULL rigor — code-review + adr-check at Step 9.5 because the failure paths are user-visible and the telemetry is load-bearing for monitoring.</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on task 034's hook + component (extends `useDailyBriefing.ts` + `DailyBriefingSection.tsx`). Must serialize after 034.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend the Daily Briefing hook (`useDailyBriefing.ts`) and section component (`DailyBriefingSection.tsx`)
+    from task 034 with three failure / empty paths per FR-16 + NFR-11:
+    (a) 429 response from `POST /api/ai/daily-briefing/narrate` → render a graceful degraded card with
+        a retry CTA; section stays visible; does NOT block rest of workspace from rendering (NFR-11).
+        Emit `spaarke-ai-error.daily-briefing-429` telemetry via the helper from task 013 (FR-24).
+    (b) Empty result (no tasks, no records, no notifications) → render a friendly empty state:
+        small icon + "Nothing to see right now — enjoy your day" (OC-08). Section remains visible.
+    (c) Success — unchanged from task 034.
+    No happy-path telemetry events (FR-24 strict).
+  </prompt>
+
+  <role>
+    React 19 + Fluent UI v9 frontend developer wiring resilient AI-data-consuming UX. Bias toward
+    keeping the section visible across all three states (success / 429 / empty); never hide; use
+    Fluent v9 tokens for the degraded + empty visuals; emit error telemetry only at the 429 boundary.
+  </role>
+
+  <goal>
+    `DailyBriefingSection.tsx` renders correctly in three states:
+    - SUCCESS: AI bullets in a Fluent v9 Card (unchanged from task 034).
+    - 429: A degraded card with explanatory message + retry button; section remains visible; emits
+      `spaarke-ai-error.daily-briefing-429` telemetry once per failure (not per render).
+    - EMPTY: A friendly empty card with small icon + "Nothing to see right now — enjoy your day";
+      section remains visible; NO telemetry (it's not an error).
+    No happy-path telemetry events emitted anywhere.
+  </goal>
+
+  <context>
+    <background>
+      FR-16 + NFR-11 + OC-08 together define the three-state Daily Briefing UX. The 429 path must
+      degrade gracefully without blocking the rest of the workspace (per NFR-11 — Daily Briefing is
+      one of N sections and its failure must not cascade). Empty state is friendly, NOT an error
+      (per OC-08). FR-24 is strict: this project emits error-only telemetry — no happy-path
+      events. The telemetry helper module is built in task 013; this task consumes it.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/sections/dailyBriefing/useDailyBriefing.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/dailyBriefing/DailyBriefingSection.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">No new BFF service. The 429 / empty handling is frontend-only — consumes the existing endpoint shape.</constraint>
+    <constraint source="ADR-014">TTL cache from task 034 stays in effect. On 429, do NOT poison the cache with the error — leave the previous successful response cached (if any) so it returns on the next read.</constraint>
+    <constraint source="ADR-016">Rate-limit handling per the ADR — surface 429 gracefully; do NOT auto-retry with backoff in this task (the user retries manually via the CTA).</constraint>
+    <constraint source="ADR-021">Use Fluent v9 tokens only. NO hex literals, NO `rgba(...)` literals. The degraded card + empty card must adapt to dark mode by construction.</constraint>
+    <constraint source="ADR-025">Empty-state icon and retry-CTA icon from `@fluentui/react-icons` (v9). No new SVG.</constraint>
+    <constraint source="ADR-028">No change to auth contract. `authenticatedFetch` remains the single auth surface.</constraint>
+    <constraint source="project">FR-24 — emit ONLY error events. NO happy-path events. The empty state is NOT an error and gets NO telemetry. Only the 429 path emits `spaarke-ai-error.daily-briefing-429`.</constraint>
+    <constraint source="project">NFR-11 — Daily Briefing failure (429) must NOT block the rest of the workspace from rendering. The section degrades in place; sibling sections render normally.</constraint>
+    <constraint source="project">OC-08 empty-state copy is hardcoded English: "Nothing to see right now — enjoy your day". Do not localize (OC-10 — English only).</constraint>
+    <constraint source="project">Telemetry deduplication — emit `spaarke-ai-error.daily-briefing-429` ONCE per failure event, not per render. Avoid emit-loops on re-renders.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/bff-url-normalization.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>docs/guides/WORKSPACE-AI-PREFILL-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Extend useDailyBriefing to surface typed error state">
+      Edit `useDailyBriefing.ts` to ensure the hook returns a typed error discriminator:
+      `error: { kind: 'rate-limit' } | { kind: 'other'; message?: string } | null`.
+      When fetch returns HTTP 429, set `error = { kind: 'rate-limit' }`. For other errors, set
+      `{ kind: 'other', ... }`. Detect empty response (no items in payload — match the contract
+      from spec.md OC-08 / FR-16: no tasks, no records, no notifications) and surface `data` as
+      an empty array (NOT null) so the component can distinguish empty vs. error.
+    </step>
+    <step order="2" name="Render degraded card with retry on 429">
+      Edit `DailyBriefingSection.tsx`. When `error.kind === 'rate-limit'`, render a Fluent v9 Card
+      with:
+      - A short explanatory message (e.g., "Daily Briefing temporarily unavailable — try again in a moment.")
+      - A "Retry" button (Fluent v9 `Button`) that re-invokes the hook (e.g., calls a `refetch`
+        function exposed by `useDailyBriefing` — add this if not already present).
+      The section does NOT collapse; it stays visible at the same dimensions as the success state.
+    </step>
+    <step order="3" name="Detect and render empty state">
+      When `data` is an empty array (no bullets), render a friendly empty state:
+      - Small icon (e.g., `EmojiSparkleRegular` or `InfoRegular` from `@fluentui/react-icons`)
+      - Copy: "Nothing to see right now — enjoy your day" (hardcoded English per OC-10)
+      Section remains visible at the same dimensions; NO telemetry emitted.
+    </step>
+    <step order="4" name="Emit 429 telemetry via task-013 helper">
+      Import the error-only telemetry helper from task 013 (the helper module wired to App Insights).
+      On transition into the 429 state, emit `spaarke-ai-error.daily-briefing-429` ONCE per failure
+      (use a `useRef` flag or only emit inside the `useEffect` that handles error transitions —
+      avoid emit-on-every-render). Include relevant properties as the helper's schema supports
+      (e.g., `endpoint`, `userId` if available, `timestamp`).
+    </step>
+    <step order="5" name="Test all three states locally">
+      (a) Success: confirm normal bullets render unchanged from task 034.
+      (b) 429: mock the endpoint to return 429 (via dev tools network override or a test fixture).
+          Confirm degraded card + retry button render; click retry → re-fetch; sibling sections in
+          the layout continue rendering normally (NFR-11).
+      (c) Empty: mock the endpoint to return an empty payload. Confirm "Nothing to see right now —
+          enjoy your day" + icon render; widget stays visible.
+    </step>
+    <step order="6" name="Verify dark mode parity for all three states">
+      Toggle dark mode. Confirm all three states (success, 429, empty) render correctly with no
+      hex / rgba literals. Empty-state icon must adapt color (use `currentColor` or tokens).
+    </step>
+    <step order="7" name="Verify telemetry deduplication">
+      In dev tools, force two consecutive 429 responses + intervening renders. Confirm
+      `spaarke-ai-error.daily-briefing-429` is emitted ONCE per failure transition (not on each
+      render). Use App Insights local sink or console.log instrumentation to verify.
+    </step>
+    <step order="8" name="Confirm NFR-11 — Daily Briefing 429 does not block rest of workspace">
+      With Daily Briefing in 429 state, verify other sections in the same layout still render
+      normally. The Workspace pane stays usable; user can switch tabs; other widgets work.
+    </step>
+    <step order="9" name="Update TASK-INDEX and commit">
+      Update `projects/spaarke-ai-platform-unification-r3/tasks/TASK-INDEX.md`: this task's status
+      to ✅ completed. Commit changes per project conventions.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing useDailyBriefing.ts + DailyBriefingSection.tsx from task 034; read telemetry helper module from task 013</tool>
+    <tool name="Edit">Extend hook with typed error + refetch; extend component with 3-state rendering + telemetry emission</tool>
+    <tool name="Grep">Verify no happy-path telemetry calls; no hex/rgba literals</tool>
+    <tool name="Bash">npm build + lint verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/dailyBriefing/useDailyBriefing.ts (modified — typed error + refetch)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/dailyBriefing/DailyBriefingSection.tsx (modified — three-state rendering + telemetry)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">When `POST /api/ai/daily-briefing/narrate` returns 429, the section renders a degraded card with a Retry button; section remains visible at its normal dimensions (does not collapse).</criterion>
+    <criterion testable="true">Clicking Retry re-invokes the hook (refetch is observable in DevTools Network tab).</criterion>
+    <criterion testable="true">Sibling sections in the layout continue rendering normally while Daily Briefing is in 429 state (NFR-11).</criterion>
+    <criterion testable="true">When the endpoint returns an empty payload, the section renders an empty state: small icon + literal text "Nothing to see right now — enjoy your day".</criterion>
+    <criterion testable="true">Empty state stays visible (does not hide the widget).</criterion>
+    <criterion testable="true">`spaarke-ai-error.daily-briefing-429` is emitted to App Insights exactly once per 429 failure event (not per render); verified via App Insights or the telemetry helper's debug sink.</criterion>
+    <criterion testable="true">No happy-path telemetry events are emitted anywhere in `useDailyBriefing.ts` or `DailyBriefingSection.tsx` (grep confirms no calls to the telemetry helper outside the 429 path).</criterion>
+    <criterion testable="true">All three states (success, 429, empty) render correctly in dark mode; zero hex / rgba literals in the modified files.</criterion>
+    <criterion testable="true">`npm run build` succeeds with zero TypeScript errors and zero new lint warnings.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Daily Briefing 429 Degraded Card (FR-16, NFR-11)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=spaarke_spaarkeai</url>
+      <steps>
+        <step>Navigate to the SpaarkeAi code page with a layout that includes Daily Briefing and at least one sibling section</step>
+        <step>In DevTools Network panel, override `POST /api/ai/daily-briefing/narrate` to return HTTP 429</step>
+        <step>Reload the page</step>
+        <step>Verify Daily Briefing renders the degraded card with a Retry button (section remains visible at normal dimensions)</step>
+        <step>Verify sibling sections render normally (Daily Briefing does NOT block rest of workspace)</step>
+        <step>Click Retry; verify another fetch occurs in Network panel</step>
+        <step>Check App Insights / telemetry sink for one `spaarke-ai-error.daily-briefing-429` event</step>
+      </steps>
+      <expected>Degraded card renders with retry. Sibling sections unaffected. One telemetry event per 429 failure.</expected>
+    </test>
+
+    <test name="Daily Briefing Empty State (FR-16, OC-08)">
+      <steps>
+        <step>Mock `POST /api/ai/daily-briefing/narrate` to return an empty payload (no tasks, no records, no notifications)</step>
+        <step>Reload the workspace</step>
+        <step>Verify Daily Briefing renders: small icon + literal text "Nothing to see right now — enjoy your day"</step>
+        <step>Verify the widget stays visible (does not collapse or hide)</step>
+        <step>Verify NO telemetry event is emitted for the empty state (not an error)</step>
+      </steps>
+      <expected>Empty state shows friendly icon + OC-08 copy. Widget remains visible. No telemetry emitted.</expected>
+    </test>
+
+    <test name="Dark Mode Parity for All Three States (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Verify success state renders correctly in dark mode</step>
+        <step>Verify 429 degraded card (with retry button) renders correctly in dark mode</step>
+        <step>Verify empty state (icon + copy) renders correctly in dark mode — icon uses currentColor or tokens</step>
+      </steps>
+      <expected>All three states render correctly in dark mode. No hex / rgba regressions.</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    FULL rigor applies — extends an AI-data-consuming widget with three user-visible states, error
+    telemetry boundary, and NFR-11 cascading-failure-prevention check. Code-review + adr-check at
+    Step 9.5.
+  </execution>
+</task>

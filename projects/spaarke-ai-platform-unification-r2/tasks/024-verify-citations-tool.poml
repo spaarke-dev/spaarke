@@ -1,0 +1,54 @@
+<task id="AIPU2-024" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build VerifyCitationsTool — Dual-Mode AI Tool</title>
+    <phase>2B</phase>
+    <tags>bff-api, ai-safety, ai-tool</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-022, AIPU2-023</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build VerifyCitationsTool as a dual-mode AI tool: (1) auto-check mode — the BFF automatically calls
+    CitationVerificationService after every AI response and appends verification results as a SSE
+    citation_verification event; (2) explicit tool mode — the orchestrator LLM can invoke the tool by name
+    when the user asks to verify citations in a specific document or passage. Both modes share the same
+    underlying CitationVerificationService. The tool must be registered in the capability tool library so
+    the routing and prompt-building layers can include it in tool schemas.
+  </prompt>
+  <role>Senior .NET backend engineer familiar with Spaarke AI tool handler patterns (IAiToolHandler).</role>
+  <goal>
+    VerifyCitationsTool works in both auto-check and explicit invocation modes. Auto-check runs after every
+    AI response. Explicit invocation is callable by the LLM via the tool schema. Both emit SSE events.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>projects/spaarke-ai-platform-unification-r2/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read existing tool implementations in Services/Ai/Chat/Tools/ to understand the AIFunctionFactory pattern, IAiToolHandler interface, and how tool schemas are registered and exposed to the LLM.</step>
+    <step>Create VerifyCitationsTool.cs in Services/Ai/Safety/Citations/ implementing IAiToolHandler. Inject ICitationVerificationService and ILogger.</step>
+    <step>Define the tool schema using AIFunctionFactory.Create or the project's equivalent annotation pattern. Tool name: "verify_citations". Description: "Verifies legal citations found in the provided text against authoritative sources. Returns verification status, confidence, and source URLs for each citation." Parameter: text (string, required) — the passage to extract and verify citations from.</step>
+    <step>Implement explicit invocation mode: when the LLM calls verify_citations(text=...), call ICitationVerificationService.VerifyAllAsync(text), serialize results to JSON, return as tool result string. Format: array of { citation, isVerified, confidence, sourceUrl, provider }.</step>
+    <step>Implement auto-check mode: create a separate method RunAutoCheckAsync(string llmResponseText, IResponseStream sseStream, CancellationToken ct) called by the AI response pipeline after each full response. Call VerifyAllAsync, then emit a citation_verification SSE event with the full result set.</step>
+    <step>Define the citation_verification SSE event schema: { "type": "citation_verification", "citations": [{ "raw": string, "type": string, "normalized": string, "isVerified": bool, "confidence": float, "sourceUrl": string|null }] }.</step>
+    <step>Integrate auto-check into the existing post-LLM processing pipeline: after the streamed response is complete, call RunAutoCheckAsync. This should be parallel-safe with GroundednessCheckService (both emit different event types).</step>
+    <step>Register VerifyCitationsTool as IAiToolHandler in AddAiSafetyModule(). Add to the capability tool library so the routing layer can include "verify_citations" in tool schemas.</step>
+    <step>Write unit tests: auto-check emits citation_verification event for response with citations, auto-check emits empty citations array when no citations found, explicit invocation returns correct JSON result, auto-check and groundedness check can run concurrently without interference.</step>
+    <step>Run `dotnet build` and `dotnet test --filter "VerifyCitations"` to verify.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>VerifyCitationsTool is registered as an IAiToolHandler and appears in the capability tool library.</criterion>
+    <criterion>LLM can invoke verify_citations(text=...) and receive a JSON array of citation verification results.</criterion>
+    <criterion>Auto-check runs after every AI response and emits a citation_verification SSE event.</criterion>
+    <criterion>citation_verification SSE event follows the defined schema exactly.</criterion>
+    <criterion>Auto-check emits an event with an empty citations array when the response contains no citations (no silent failures).</criterion>
+    <criterion>Auto-check and groundedness check run concurrently without deadlock or event ordering issues.</criterion>
+    <criterion>Unit tests pass: `dotnet test --filter "VerifyCitations"`.</criterion>
+    <criterion>Build succeeds with no new warnings.</criterion>
+  </acceptance-criteria>
+</task>

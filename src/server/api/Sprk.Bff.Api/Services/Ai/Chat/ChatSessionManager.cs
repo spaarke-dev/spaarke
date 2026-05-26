@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
@@ -8,10 +9,16 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// <summary>
 /// Manages the lifecycle of chat sessions: create, retrieve, and delete.
 ///
-/// Storage Strategy (ADR-009, ADR-014, NFR-07):
+/// Storage Strategy (ADR-009, ADR-014, NFR-07, D-06):
 ///   - Hot path: Redis <see cref="IDistributedCache"/> with 24-hour sliding TTL.
+///   - Warm path: Cosmos DB via <see cref="ISessionPersistenceService"/> — write-through on every
+///     Redis write; consulted on Redis miss before falling back to Dataverse (decision D-06).
 ///   - Cold path: Dataverse <c>sprk_aichatsummary</c> for persistent storage and audit.
-///   - On cache miss: reconstructs session from Dataverse and messages from <c>sprk_aichatmessage</c>.
+///   - On cache miss: checks Cosmos DB first (fast warm path), then reconstructs from Dataverse.
+///
+/// Write-through pattern (D-06): every Redis write is immediately followed by a Cosmos DB upsert
+/// executed as a fire-and-forget background task. Cosmos failures are logged at Warning and never
+/// propagate to the caller — the Redis/response path is never blocked.
 ///
 /// Cache Key Pattern (ADR-014): <c>"chat:session:{tenantId}:{sessionId}"</c>
 /// The key is tenant-scoped to enforce multi-tenant isolation (NFR-09).
@@ -28,6 +35,12 @@ public class ChatSessionManager
     private readonly IChatDataverseRepository _dataverseRepository;
     private readonly ILogger<ChatSessionManager> _logger;
 
+    /// <summary>
+    /// Optional Cosmos DB write-through persistence (decision D-06).
+    /// Null when Cosmos DB is not configured (backward-compatible: existing behaviour is preserved).
+    /// </summary>
+    private readonly ISessionPersistenceService? _persistence;
+
     // ADR-014: centralise key pattern in one place
     internal static string BuildCacheKey(string tenantId, string sessionId)
         => $"chat:session:{tenantId}:{sessionId}";
@@ -35,11 +48,13 @@ public class ChatSessionManager
     public ChatSessionManager(
         IDistributedCache cache,
         IChatDataverseRepository dataverseRepository,
-        ILogger<ChatSessionManager> logger)
+        ILogger<ChatSessionManager> logger,
+        ISessionPersistenceService? persistence = null)
     {
         _cache = cache;
         _dataverseRepository = dataverseRepository;
         _logger = logger;
+        _persistence = persistence;
     }
 
     /// <summary>
@@ -94,6 +109,10 @@ public class ChatSessionManager
         // 2. Warm the Redis cache (hot path — fast lookup)
         await CacheSessionAsync(session, ct);
 
+        // 3. Write-through to Cosmos DB (warm path, decision D-06) — fire-and-forget.
+        // Cosmos failure must not block the session create response or fail the request.
+        FireAndForgetCosmosPersist(session);
+
         return session;
     }
 
@@ -129,6 +148,28 @@ public class ChatSessionManager
                 // Refresh sliding TTL on access
                 await _cache.RefreshAsync(key, ct);
                 return cached;
+            }
+        }
+
+        // Warm path: Cosmos DB fallback (decision D-06 — checked before Dataverse on Redis miss)
+        if (_persistence is not null)
+        {
+            _logger.LogDebug(
+                "Cache MISS for session {SessionId} — checking Cosmos DB before Dataverse (tenant={TenantId})",
+                sessionId, tenantId);
+
+            var storedSession = await _persistence.LoadSessionAsync(tenantId, sessionId, ct);
+            if (storedSession is not null)
+            {
+                // Map StoredSession back to ChatSession and re-warm the Redis hot cache
+                var cosmosSession = MapStoredSessionToChatSession(storedSession);
+                await CacheSessionAsync(cosmosSession, ct);
+
+                _logger.LogDebug(
+                    "Cosmos DB HIT for session {SessionId} — Redis re-warmed (tenant={TenantId})",
+                    sessionId, tenantId);
+
+                return cosmosSession;
             }
         }
 
@@ -168,19 +209,42 @@ public class ChatSessionManager
         // Remove from Redis hot cache
         await _cache.RemoveAsync(key, ct);
 
-        // Mark as archived in Dataverse (preserves audit trail)
+        // Mark as archived in Dataverse (preserves audit trail — archive-not-delete pattern)
         await _dataverseRepository.ArchiveSessionAsync(tenantId, sessionId, ct);
+
+        // Remove from Cosmos DB (warm path, D-06) — failure is non-fatal, logged at Warning.
+        if (_persistence is not null)
+        {
+            try
+            {
+                await _persistence.DeleteSessionAsync(tenantId, sessionId, ct);
+                _logger.LogDebug(
+                    "Cosmos DB session {SessionId} deleted successfully (tenant={TenantId})",
+                    sessionId, tenantId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Cosmos DB delete failed for session {SessionId} (tenant={TenantId}) — Dataverse archive still succeeded",
+                    sessionId, tenantId);
+            }
+        }
     }
 
     /// <summary>
-    /// Updates the cached session to reflect the latest message state.
-    /// Called by <see cref="ChatHistoryManager"/> after adding a message.
+    /// Updates the cached session to reflect the latest message state, then writes through to
+    /// Cosmos DB (decision D-06). Called by <see cref="ChatHistoryManager"/> after adding a message.
     /// </summary>
     /// <param name="session">The updated session to cache.</param>
     /// <param name="ct">Cancellation token.</param>
     internal virtual async Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default)
     {
+        // 1. Refresh Redis hot cache
         await CacheSessionAsync(session, ct);
+
+        // 2. Write-through to Cosmos DB (warm path, D-06) — fire-and-forget.
+        // Cosmos failure must not block the message add path or affect the streaming response.
+        FireAndForgetCosmosPersist(session);
     }
 
     // === Private helpers ===
@@ -198,5 +262,109 @@ public class ChatSessionManager
             SlidingExpiration = SessionCacheTtl
         };
         await _cache.SetAsync(key, bytes, options, ct);
+    }
+
+    /// <summary>
+    /// Launches a fire-and-forget Cosmos DB upsert for <paramref name="session"/>.
+    ///
+    /// Uses <c>CancellationToken.None</c> so the Cosmos write survives HTTP request completion.
+    /// Any exception is caught inside <see cref="ISessionPersistenceService.PersistSessionAsync"/>
+    /// and logged at Warning — it is never re-thrown here (ADR-015, D-06).
+    ///
+    /// When <see cref="_persistence"/> is null (Cosmos not configured), this is a no-op.
+    /// </summary>
+    private void FireAndForgetCosmosPersist(ChatSession session)
+    {
+        if (_persistence is null)
+        {
+            return;
+        }
+
+        var stored = MapChatSessionToStoredSession(session);
+
+        // We intentionally do NOT await this. The fire-and-forget pattern (D-06) means
+        // Cosmos writes never block the Redis/response path. CancellationToken.None ensures
+        // the write survives HTTP request cancellation.
+        _ = _persistence.PersistSessionAsync(stored, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Maps a <see cref="ChatSession"/> (hot Redis model) to a <see cref="StoredSession"/>
+    /// (Cosmos DB warm document). Preserves all message content and metadata.
+    ///
+    /// Content is permitted at ADR-015 Tier 3 (user-owned work history, Cosmos warm store).
+    /// </summary>
+    private static StoredSession MapChatSessionToStoredSession(ChatSession session)
+    {
+        var messages = session.Messages
+            .Select(m => new SessionMessage
+            {
+                MessageId  = m.MessageId,
+                Role       = m.Role.ToString().ToLowerInvariant(),
+                Content    = m.Content,
+                Timestamp  = m.CreatedAt,
+                Metadata   = new Dictionary<string, string>
+                {
+                    ["tokenCount"]      = m.TokenCount.ToString(),
+                    ["sequenceNumber"]  = m.SequenceNumber.ToString()
+                }
+            })
+            .ToList();
+
+        return new StoredSession
+        {
+            Id           = session.SessionId,
+            SessionId    = session.SessionId,
+            TenantId     = session.TenantId,
+            PlaybookId   = session.PlaybookId,
+            Messages     = messages,
+            WidgetStates = [],
+            CreatedAt    = session.CreatedAt,
+            LastActivity = session.LastActivity
+        };
+    }
+
+    /// <summary>
+    /// Maps a <see cref="StoredSession"/> (Cosmos warm document) back to a <see cref="ChatSession"/>
+    /// (hot Redis model) for Cosmos-fallback scenarios.
+    ///
+    /// Message content round-trips faithfully. Fields present only on <see cref="StoredSession"/>
+    /// (widget states, entity refs, summary) have no equivalent on <see cref="ChatSession"/> and
+    /// are discarded — they remain in Cosmos and are accessible via <see cref="ISessionPersistenceService"/>.
+    /// </summary>
+    private static ChatSession MapStoredSessionToChatSession(StoredSession stored)
+    {
+        var messages = stored.Messages
+            .Select((m, index) =>
+            {
+                var role = Enum.TryParse<ChatMessageRole>(m.Role, ignoreCase: true, out var parsed)
+                    ? parsed
+                    : ChatMessageRole.User;
+
+                _ = int.TryParse(
+                    m.Metadata.GetValueOrDefault("tokenCount", "0"), out var tokenCount);
+                _ = int.TryParse(
+                    m.Metadata.GetValueOrDefault("sequenceNumber", index.ToString()), out var seqNum);
+
+                return new ChatMessage(
+                    MessageId:      m.MessageId,
+                    SessionId:      stored.SessionId,
+                    Role:           role,
+                    Content:        m.Content,
+                    TokenCount:     tokenCount,
+                    CreatedAt:      m.Timestamp,
+                    SequenceNumber: seqNum);
+            })
+            .ToList()
+            .AsReadOnly();
+
+        return new ChatSession(
+            SessionId:    stored.SessionId,
+            TenantId:     stored.TenantId,
+            DocumentId:   null,          // Not stored in Cosmos — Dataverse is authoritative for document associations
+            PlaybookId:   stored.PlaybookId,
+            CreatedAt:    stored.CreatedAt,
+            LastActivity: stored.LastActivity,
+            Messages:     messages);
     }
 }

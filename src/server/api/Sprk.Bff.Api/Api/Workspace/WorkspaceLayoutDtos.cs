@@ -28,7 +28,24 @@ public record WorkspaceLayoutDto
     /// <summary>Sort order for layout display. Null if unordered.</summary>
     public int? SortOrder { get; init; }
 
-    /// <summary>Whether this is a system-provided (non-editable) layout.</summary>
+    /// <summary>
+    /// Whether this is a system-provided (non-editable) layout.
+    /// SERVER-CONTROLLED. The property uses an init accessor so it can be
+    /// populated by <see cref="Services.Workspace.WorkspaceLayoutService"/>
+    /// during DTO construction. The request DTOs
+    /// (<see cref="CreateWorkspaceLayoutRequest"/> and
+    /// <see cref="UpdateWorkspaceLayoutRequest"/>) do NOT include this
+    /// property — so clients have no way to set it on POST/PUT. The service
+    /// populates this flag based on the data source:
+    ///   - true when the record originates from <c>SystemWorkspaceLayouts.cs</c>
+    ///     (hard-coded code constants such as "Corporate Workspace"), OR when
+    ///     the Dataverse record's <c>sprk_issystem</c> column is true (the four
+    ///     layouts seeded by <c>scripts/Deploy-SystemWorkspaceLayouts.ps1</c>).
+    ///   - false for ordinary user-owned Dataverse records.
+    /// Write protection: <see cref="Services.Workspace.WorkspaceLayoutService"/>
+    /// rejects PUT/DELETE against any record whose IsSystem is true (403 Forbidden)
+    /// as a defense-in-depth complement to client-side disable affordances.
+    /// </summary>
     public bool IsSystem { get; init; }
 }
 

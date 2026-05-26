@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.dev/contracts/sse-events/context-update.schema.json",
+  "title": "context_update SSE Event",
+  "description": "Notifies the client that the AI agent's active context has changed (new document loaded, entity resolved, conversation intent reclassified, etc.). The client uses this to refresh context-sensitive UI (breadcrumbs, pane titles, capability badges).",
+  "allOf": [
+    { "$ref": "_shared-defs.json#/$defs/SseEnvelope" }
+  ],
+  "required": ["type", "contextType", "contextId", "delta", "confidence"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "context_update",
+      "description": "Discriminator — always 'context_update'."
+    },
+    "contextType": {
+      "type": "string",
+      "enum": ["document", "entity", "conversation", "user-intent"],
+      "description": "The category of context that changed."
+    },
+    "contextId": {
+      "type": "string",
+      "description": "Stable identifier for the context object (e.g. document ID, entity record ID, conversation ID)."
+    },
+    "delta": {
+      "type": "object",
+      "description": "Differential description of the context change.",
+      "properties": {
+        "added": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Keys or item IDs added to context."
+        },
+        "removed": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Keys or item IDs removed from context."
+        },
+        "modified": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Keys or item IDs whose values changed."
+        }
+      },
+      "additionalProperties": false
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Model confidence in the context classification (0.0 = low, 1.0 = high)."
+    }
+  },
+  "additionalProperties": true
+}

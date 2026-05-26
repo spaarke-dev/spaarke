@@ -5,10 +5,15 @@
  * and document metadata from the BFF API in parallel.
  * Dataverse is the source of truth for analysis content.
  *
+ * Spaarke Auth v2 (task 026): consumes `authenticatedFetch` instead of a
+ * snapshotted token. The hook re-fires when `isAuthenticated` flips true so
+ * the document metadata load runs once the provider is ready.
+ *
  * @see ADR-007 - Document access through BFF API (SpeFileStore facade)
  */
 
 import { useCallback, useEffect, useState, useRef } from 'react';
+import type { AuthenticatedFetchFn } from '@spaarke/auth';
 import { fetchAnalysis, fetchDocumentMetadata, getDocumentViewUrl } from '../services/analysisApi';
 import type { AnalysisRecord, DocumentMetadata, AnalysisError } from '../types';
 
@@ -21,8 +26,10 @@ export interface UseAnalysisLoaderOptions {
   analysisId: string;
   /** GUID of the source document to load metadata for */
   documentId: string;
-  /** Bearer auth token for BFF API calls */
-  token: string | null;
+  /** Whether the user is authenticated (gate to defer BFF metadata load). */
+  isAuthenticated: boolean;
+  /** Authenticated fetch from useAuth() — wraps Bearer + 401 retry. */
+  authenticatedFetch: AuthenticatedFetchFn;
 }
 
 export interface UseAnalysisLoaderResult {
@@ -55,11 +62,10 @@ export interface UseAnalysisLoaderResult {
  * document metadata (from BFF) in parallel.
  *
  * Analysis loading uses Dataverse Web API directly (same-origin, no token needed).
- * Document metadata loading uses BFF API (requires Bearer token).
- * Both fire when `token` becomes non-null so document metadata can load.
+ * Document metadata loading uses BFF API via authenticatedFetch.
  */
 export function useAnalysisLoader(options: UseAnalysisLoaderOptions): UseAnalysisLoaderResult {
-  const { analysisId, documentId, token } = options;
+  const { analysisId, documentId, isAuthenticated, authenticatedFetch } = options;
 
   // Analysis state
   const [analysis, setAnalysis] = useState<AnalysisRecord | null>(null);
@@ -113,22 +119,22 @@ export function useAnalysisLoader(options: UseAnalysisLoaderOptions): UseAnalysi
   }, [analysisId]);
 
   /**
-   * Load document metadata and preview URL from the BFF API (requires token).
+   * Load document metadata and preview URL from the BFF API via authenticatedFetch.
    * Fetches metadata first, then preview URL, and merges the viewUrl into metadata.
    */
   const loadDocument = useCallback(async () => {
-    if (!documentId || !token) return;
+    if (!documentId || !isAuthenticated) return;
 
     setIsDocumentLoading(true);
     setDocumentError(null);
 
     try {
-      const result = await fetchDocumentMetadata(documentId, token);
+      const result = await fetchDocumentMetadata(documentId, authenticatedFetch);
 
       // If metadata loaded but has no viewUrl, fetch the preview URL separately
       if (!result.viewUrl) {
         try {
-          const previewUrl = await getDocumentViewUrl(documentId, token);
+          const previewUrl = await getDocumentViewUrl(documentId, authenticatedFetch);
           if (previewUrl) {
             result.viewUrl = previewUrl;
           }
@@ -156,18 +162,17 @@ export function useAnalysisLoader(options: UseAnalysisLoaderOptions): UseAnalysi
         setIsDocumentLoading(false);
       }
     }
-  }, [documentId, token]);
+  }, [documentId, isAuthenticated, authenticatedFetch]);
 
   /**
-   * Load both resources in parallel when token becomes available.
+   * Load both resources in parallel once authenticated.
    */
   useEffect(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
 
-    // Fetch in parallel
     loadAnalysis();
     loadDocument();
-  }, [token, loadAnalysis, loadDocument]);
+  }, [isAuthenticated, loadAnalysis, loadDocument]);
 
   /**
    * Retry loading all failed resources.

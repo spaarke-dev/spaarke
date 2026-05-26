@@ -1,0 +1,58 @@
+<task id="052" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Outcome E test verification (FR-E4)</title>
+    <status>completed</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, outcome-e, testing, phase-4</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential verification after migration + relocation</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Run full test suite after Outcome E migrations + relocation (tasks 046–051). Verify pass count + duration within ±5% of Phase 3 baseline. Any failure = abort Outcome E and investigate.
+  </prompt>
+
+  <role>.NET test engineer.</role>
+  <goal>Test pass count + duration match Phase 3 baseline ±5%; document delta in EXECUTION-LOG.md.</goal>
+
+  <inputs>
+    <file purpose="baseline">projects/sdap-bff-api-remediation-fix/baseline/tests.txt</file>
+    <file purpose="test-project">tests/unit/Sprk.Bff.Api.Tests/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-E4">Pass count + duration ±5% baseline</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/baseline/tests.txt</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Outcome E preserves behavior by definition; any test regression means migration logic is wrong.</background>
+    <dependencies><dependency task="051" status="not-started">Handler relocation complete</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">`dotnet test tests/unit/Sprk.Bff.Api.Tests/ --logger "console;verbosity=normal"`</step>
+    <step order="2">Compare pass/fail/skipped + duration vs baseline/tests.txt</step>
+    <step order="3">If ±5%: log to EXECUTION-LOG.md; mark ✅</step>
+    <step order="4">If outside ±5%: abort Outcome E, revert 047–051 in reverse order, investigate</step>
+  </steps>
+
+  <tools><tool name="dotnet">test</tool></tools>
+
+  <outputs><output type="docs">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md (test delta entry)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Pass count within ±5% of baseline</criterion>
+    <criterion testable="true">Duration within ±5% of baseline</criterion>
+    <criterion testable="true">No new failures</criterion>
+  </acceptance-criteria>
+</task>

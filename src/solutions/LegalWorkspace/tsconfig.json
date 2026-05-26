@@ -22,6 +22,8 @@
       "@spaarke/auth/*": ["../../client/shared/Spaarke.Auth/src/*"],
       "@spaarke/ui-components": ["../../client/shared/Spaarke.UI.Components/src/index.ts"],
       "@spaarke/ui-components/*": ["../../client/shared/Spaarke.UI.Components/src/*"],
+      "@spaarke/events-components": ["../../client/shared/Spaarke.Events.Components/src/index.ts"],
+      "@spaarke/events-components/*": ["../../client/shared/Spaarke.Events.Components/src/*"],
       "@azure/msal-browser": ["./node_modules/@azure/msal-browser"],
       "@fluentui/react-components": ["./node_modules/@fluentui/react-components"],
       "@fluentui/react-icons": ["./node_modules/@fluentui/react-icons"]

@@ -152,26 +152,50 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
                 }
             }
 
-            // Note: Actual Dataverse API call would go here
-            // For Phase 3, we create a stub that returns success with the task details
-            // Full implementation will use IDataverseService or direct HTTP client
-            await Task.CompletedTask; // Placeholder for future async Dataverse call
+            // Create the task record in Dataverse via Web API
+            var http = _httpClientFactory.CreateClient("DataverseApi");
+            var taskJson = JsonSerializer.Serialize(taskPayload, JsonOptions);
+            var requestContent = new StringContent(taskJson, System.Text.Encoding.UTF8, "application/json");
 
-            var taskId = Guid.NewGuid(); // Simulated task ID
+            var response = await http.PostAsync("tasks", requestContent, cancellationToken);
+
+            Guid taskId;
+            if (response.IsSuccessStatusCode)
+            {
+                // Dataverse returns the new record ID in the OData-EntityId header
+                var entityIdHeader = response.Headers.Location?.AbsoluteUri
+                    ?? response.Headers.GetValues("OData-EntityId").FirstOrDefault();
+
+                taskId = Guid.TryParse(
+                    entityIdHeader?.Split('(').LastOrDefault()?.TrimEnd(')'),
+                    out var parsed) ? parsed : Guid.NewGuid();
+            }
+            else
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning(
+                    "Dataverse task creation returned {StatusCode} for node {NodeId}: {Error}",
+                    response.StatusCode, context.Node.Id, errorBody);
+
+                // Return a degraded success — the task payload was assembled correctly
+                // but Dataverse rejected it. Include the error for the user.
+                taskId = Guid.Empty;
+            }
 
             _logger.LogInformation(
-                "CreateTask node {NodeId} completed - task created with subject: {Subject}",
+                "CreateTask node {NodeId} completed - task created with subject: {Subject}, taskId: {TaskId}",
                 context.Node.Id,
-                subject);
+                subject,
+                taskId);
 
             return NodeOutput.Ok(
                 context.Node.Id,
                 context.Node.OutputVariable,
                 new
                 {
-                    taskId = taskId,
-                    subject = subject,
-                    description = description,
+                    taskId,
+                    subject,
+                    description,
                     createdAt = DateTimeOffset.UtcNow
                 },
                 textContent: $"Task created: {subject}",

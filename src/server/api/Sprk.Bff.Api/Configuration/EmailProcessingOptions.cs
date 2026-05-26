@@ -167,10 +167,29 @@ public class EmailProcessingOptions
     public bool AutoClassifyAttachments { get; set; } = false;
 
     /// <summary>
-    /// Shared secret for Dataverse webhook validation.
-    /// Must match the secret configured in Dataverse Service Endpoint.
+    /// DEPRECATED (task 044): Legacy shared secret previously compared either
+    /// as plain string OR as the HMAC key, depending on header presence.
+    /// Retained only so existing config does not break deserialization.
+    /// Use <see cref="WebhookSigningKey"/> instead.
     /// </summary>
+    [Obsolete("Use WebhookSigningKey. WebhookSecret is no longer consulted by the webhook handler (task 044).")]
     public string? WebhookSecret { get; set; }
+
+    /// <summary>
+    /// HMAC-SHA256 signing key used by <see cref="Api.Filters.WebhookSignatureFilter"/>
+    /// to validate the <c>X-Dataverse-Signature</c> header on Dataverse webhook requests.
+    /// <para>
+    /// Must match the secret configured on the Dataverse Service Endpoint
+    /// (authtype = HttpHeader or WebKey). MUST be stored in Key Vault and
+    /// referenced via <c>@Microsoft.KeyVault(...)</c>. MUST be rotated on
+    /// incident or on a calendar cadence (e.g., 90 days).
+    /// </para>
+    /// <para>
+    /// SAFETY: there is no DEVELOPMENT_MODE bypass. If this key is unset, every
+    /// webhook request is rejected with 401.
+    /// </para>
+    /// </summary>
+    public string? WebhookSigningKey { get; set; }
 
     /// <summary>
     /// Maximum concurrent emails to process in a batch job.

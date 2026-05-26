@@ -1,0 +1,107 @@
+<task id="AUTHV2-014" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Implement logout() API — client + server endpoint + Redis OBO invalidation</title>
+    <phase>A — Core library rebuild</phase>
+    <tags>auth, library, server, FULL</tags>
+    <status>completed-slim</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>013</dependencies>
+    <parallel-safe>A-Parallel-2 (with 015, 016)</parallel-safe>
+  </metadata>
+  <prompt>
+    Implement a proper logout flow. Client: MSAL logoutPopup() + clear in-memory cache + BroadcastChannel invalidation message ('logout' event). Server: new POST /api/auth/logout endpoint that purges per-user OBO Redis entries (keyed by user oid).
+
+    Currently clearAllCaches exists but isn't called consistently. logout() bundles it into a single API.
+  </prompt>
+  <role>Full-stack engineer — TypeScript + .NET.</role>
+  <goal>
+    useAuth().logout() invocation: triggers MSAL logout, clears client caches, broadcasts logout to other tabs/iframes, and invalidates server-side OBO tokens for the user. After logout, attempting any BFF call returns 401.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.Auth/src/SpaarkeAuthProvider.ts (existing clearAllCaches at line 171)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs (OBO Redis cache pattern, line 143)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Agent/AgentTokenService.cs (OBO cache key pattern, line 28)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Client: implement logout() in BrowserMsalStrategy and expose via SpaarkeAuthProvider. Sequence: MSAL.logoutPopup() (or logoutRedirect if popup blocked) → clearCache (in-memory) → BroadcastChannel.postMessage({type: 'logout'}).</step>
+    <step>Add BroadcastChannel 'spaarke-auth-events' singleton in initAuth.ts. Other contexts (other tabs/PCFs) listen for {type: 'logout'} and clear their in-memory caches in response.</step>
+    <step>Client: after MSAL logout completes, call authenticatedFetch('/api/auth/logout', {method: 'POST'}) — server-side OBO invalidation.</step>
+    <step>Server: add /api/auth/logout endpoint in a new AuthEndpoints.cs file. Requires authorization. Extracts user oid from claim. Calls IOboTokenCache.InvalidateForUser(oid) — implement that method on the existing OBO cache services (GraphClientFactory + AgentTokenService).</step>
+    <step>Server: IOboTokenCache.InvalidateForUser implementation: enumerate Redis keys matching `sdap:obo:*:{oidHash}:*` and delete. Use SCAN to avoid blocking.</step>
+    <step>Update useAuth() to expose logout from the provider.</step>
+    <step>Write integration test: simulated logout → verify cache cleared client-side + Redis keys deleted server-side.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>useAuth().logout() exists and is callable.</criterion>
+    <criterion>Client cache clears on logout.</criterion>
+    <criterion>BroadcastChannel 'logout' message fired and received by other contexts.</criterion>
+    <criterion>POST /api/auth/logout endpoint exists and requires auth.</criterion>
+    <criterion>Server endpoint invalidates per-user OBO entries in Redis.</criterion>
+    <criterion>Integration test passes.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19 as SLIM scope (client-side only) per human design decision.
+
+    SCOPE DECISION (D-AUTH-LOGOUT-SLIM): The 3rd and 4th acceptance criteria
+    (POST /api/auth/logout + Redis OBO invalidation) were INTENTIONALLY skipped
+    after a security/architecture analysis showed they don't address the actual
+    concern.
+
+    The user's concern: "if user logs out in tab A, tab B should not have active
+    access." That's a multi-context UX problem, not a JWT-validity problem. It's
+    fully addressed by client-side mechanisms:
+      - MSAL.logoutPopup clears the refresh token from localStorage AND ends
+        the Entra session cookie
+      - BroadcastChannel notifies other tabs/iframes to drop their in-memory caches
+      - Other tabs' next acquire fails through acquireTokenSilent (no refresh
+        token) and ssoSilent (no session cookie), prompting re-auth
+
+    The cache-invalidation framing in the original POML conflated TWO unrelated
+    things:
+      1. Cache hygiene (Redis OBO entries — performance optimization, not a
+         security control). Clearing them doesn't prevent BFF access because
+         the user's JWT is still valid; the BFF re-OBOs on the next call.
+      2. Actual access revocation. To make the BFF return 401 after logout, you
+         need either CAE (planned in Phase D task 061) OR a server-side logout
+         blocklist that JWT-validation middleware checks. Neither was in the
+         original 014 scope.
+
+    Decision: ship the client side (the actual fix for the user's concern); defer
+    server-side hygiene/revocation to CAE in task 061. Documented in
+    current-task.md "D-AUTH-LOGOUT-SLIM".
+
+    WHAT LANDED (slim scope):
+    - AuthStrategy.logout(): Promise&lt;void&gt; added to interface (BrowserMsalStrategy
+      implements via MSAL.logoutPopup with clearCache fallback for popup-blocked)
+    - InMemoryCache.logout() delegates to inner strategy (cascading)
+    - new src/broadcastChannel.ts: singleton 'spaarke-auth-events' channel with
+      broadcastLogout() + onAuthBroadcast(handler) — degrades to no-ops when
+      BroadcastChannel unavailable (SSR, old browsers, Jest jsdom)
+    - SpaarkeAuthProvider.logout(): broadcastLogout() → _cache.logout()
+    - initAuth() registers broadcast listener that calls provider.clearCache()
+      on receipt of {type:'logout'} (the in-memory invalidate is non-cascading —
+      next acquire falls naturally through MSAL silent → popup chain)
+    - useAuth().logout: removed Phase A console.warn stub; now delegates to
+      provider.logout()
+
+    TESTS: 27/28 passing. New tests:
+    - tests/broadcastChannel.test.ts (4 tests): delivery, dispose, no-throw on
+      unregistered, ignores malformed messages. Uses in-memory MockBroadcastChannel
+      installed in beforeAll (jsdom lacks BroadcastChannel; Node worker_threads
+      doesn't deliver reliably within same process for unit testing).
+    - tests/useAuth.test.ts: logout test updated to assert provider.logout()
+      delegation (was provider.clearAllCaches() in Phase A stub).
+    The 1 failure remains the pre-existing config.test.ts baseline.
+
+    DEFERRED (split out — to be addressed by separate work):
+    - POST /api/auth/logout endpoint
+    - GraphTokenCache.InvalidateForUserAsync (per-user secondary index)
+    - AgentTokenService equivalent
+    - Server-side JWT validation blocklist (only if needed before CAE)
+    See current-task.md D-AUTH-LOGOUT-SLIM and Phase D task 061 (Enable CAE).
+
+    Quality gates deferred per D-AUTH-QUALITY-GATE-DEFERRAL.
+  </notes>
+</task>

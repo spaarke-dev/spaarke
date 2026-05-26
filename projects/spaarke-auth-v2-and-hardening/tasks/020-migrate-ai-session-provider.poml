@@ -1,0 +1,66 @@
+<task id="AUTHV2-020" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Migrate AiSessionProvider context to function-based API</title>
+    <phase>B — Consumer migration</phase>
+    <tags>auth, ai-widgets, react, FULL</tags>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>Phase A complete</dependencies>
+    <parallel-safe>false (foundation for B)</parallel-safe>
+  </metadata>
+  <prompt>
+    AiSessionProvider currently exposes `token: string | null` in its context value (AiSessionProvider.tsx:99-104). This is the snapshot leak that caused the SpaarkeAi 401 bug. Replace with function-based API: { getAccessToken, authenticatedFetch, isAuthenticated, tenantId }. No token value in context.
+
+    The provider also currently RECEIVES token as a prop from App.tsx — that prop is removed entirely. Provider uses useAuth() from @spaarke/auth internally.
+  </prompt>
+  <role>Senior React + TypeScript engineer.</role>
+  <goal>
+    AiSessionContextValue contains no token field. Provider internally uses useAuth() from @spaarke/auth. Every consumer that destructured `.token` will break compile and need migration (covered by tasks 021-022).
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/providers/AiSessionProvider.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/providers/useAiSession.ts</file>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §H-4 (this exact remediation)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Edit AiSessionProvider.tsx: remove `token: string | null` from AiSessionContextValue interface. Add `getAccessToken: () => Promise&lt;string&gt;`, `authenticatedFetch: AuthenticatedFetchFn`, `tenantId: string`. Keep `isAuthenticated: boolean`.</step>
+    <step>Remove `token` and `isAuthenticated` from AiSessionProviderProps. Provider gets them from useAuth() internally instead.</step>
+    <step>Inside the component, call `const { isAuthenticated, getAccessToken, authenticatedFetch, tenantId } = useAuth();` and include them in the context value.</step>
+    <step>Update useAiSession.ts hook return type accordingly.</step>
+    <step>Run tsc --noEmit — every consumer that destructured .token will fail compile. Capture the list (will be addressed in tasks 021-022).</step>
+    <step>Update AiSessionProvider unit tests to reflect new context shape.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>AiSessionContextValue has no `token: string` field.</criterion>
+    <criterion>AiSessionProvider gets auth via useAuth() internally, not via props.</criterion>
+    <criterion>useAiSession() return shape matches new context.</criterion>
+    <criterion>Compile errors at consumer sites are the expected list (not unrelated breakage).</criterion>
+    <criterion>Existing provider tests updated and passing.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19. AiSessionContextValue now exposes the function-based
+    contract: { isAuthenticated, getAccessToken, authenticatedFetch, tenantId,
+    bffBaseUrl, ... } with no token string. Provider internally calls useAuth()
+    from @spaarke/auth; props no longer include token/isAuthenticated.
+
+    Tests: AiSessionProvider.test.tsx 24/24 + sse-event-routing.test.tsx 16/16
+    (the latter was also renamed from .ts → .tsx to fix a pre-existing JSX
+    parse failure under the current ts-jest).
+
+    Jest mock for @spaarke/auth now exports useAuth (default: authenticated
+    state with stub getAccessToken/authenticatedFetch/tenantId).
+
+    Predicted consumer breakage to address in tasks 021/022/023:
+      - src/solutions/SpaarkeAi/src/components/ChatHistoryPanel.tsx:155
+      - src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx:411
+      - src/solutions/SpaarkeAi/src/components/workspace/WorkspaceLandingWidget.tsx:284
+      - src/client/shared/Spaarke.AI.Widgets/src/components/FeedbackButtons.tsx
+        (still defines `token: string | null` PROP — callers will fail to populate)
+
+    AiSessionProvider.tsx now requires that `initAuth(...)` from @spaarke/auth
+    has been called before mount (useAuth throws otherwise). SpaarkeAi already
+    does this in App.tsx via authInit.ts (post-hotfix v2).
+  </notes>
+</task>

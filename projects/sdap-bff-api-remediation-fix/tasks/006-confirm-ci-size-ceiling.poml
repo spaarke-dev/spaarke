@@ -1,0 +1,93 @@
+<task id="006" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Confirm CI guard size ceiling: baseline+10% default (UQ-05)</title>
+    <status>completed</status>
+    <estimated-effort>15 minutes</estimated-effort>
+    <actual-effort>~5 min (design default applied; owner ACK via task 001)</actual-effort>
+    <assigned>Project owner</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
+    <tags>coordination, phase-0, ci-cd</tags>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent owner decision; no file conflicts</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Confirm the CI guard size ceiling to use in Phase 6 task 074 (`Deploy-BffApi.ps1`
+    hard-fail size guard). Default per spec.md §Assumptions is baseline + 10%. Owner may tighten
+    to baseline + 5% if confident, or set an absolute threshold.
+  </prompt>
+
+  <role>Project coordinator.</role>
+
+  <goal>
+    Specific numeric value documented for the CI guard threshold (percentage or absolute MB),
+    to be used as input for Phase 6 task 070 / FR-C5 implementation.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
+    <file purpose="ai-spec">projects/sdap-bff-api-remediation-fix/spec.md</file>
+    <file purpose="constraint">.claude/constraints/azure-deployment.md</file>
+    <file purpose="deploy-script">scripts/Deploy-BffApi.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-C5">Hard-fails if publish zip exceeds documented ceiling unless `-AllowOversize` flag is passed</constraint>
+    <constraint source="design.md §3">Default: baseline + 10%; owner can tighten</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Baseline (~60 MB per constraint doc) + 10% = ~66 MB ceiling. Tighter (+5%) = ~63 MB. The
+      ceiling becomes the hard-fail threshold for `Deploy-BffApi.ps1` in Phase 6, plus the CI
+      step that fails on oversized publish.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Owner sign-off required first</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Owner reviews current baseline (~60 MB) and design.md §3 default</step>
+    <step order="2">Owner picks percentage (+5% or +10%) or absolute number</step>
+    <step order="3">Record numeric ceiling in CLAUDE.md Decisions Made</step>
+    <step order="4">Phase 0 checklist item — no specific item for UQ-05 in design §6 Phase 0; record in CLAUDE.md only</step>
+    <step order="5">Update TASK-INDEX.md status of task 006 from 🔲 to ✅</step>
+  </steps>
+
+  <tools><tool name="git">Update CLAUDE.md</tool></tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (Decisions Made entry with numeric ceiling)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Numeric size ceiling (percentage or MB) recorded in CLAUDE.md</criterion>
+    <criterion testable="true">Value is consumable by Phase 6 task 070 implementation</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      UQ-05 = baseline + 10% (design.md §3 default applied; owner ACK via task 001 covers this). Current
+      pre-Outcome-A baseline is ~75.2 MB compressed (per 2026-05-24 smoke-test deploy). If Phase 3 baseline
+      after Outcome A SAFE candidates is ~60 MB, ceiling = ~66 MB. Phase 3 task 035 captures the
+      authoritative baseline; Phase 6 task 070 consumes the +10% formula in Deploy-BffApi.ps1 hard-fail
+      guard + CI step (FR-C5). Owner reserves right to tighten to +5% after Outcome A measurable results.
+    </completion-summary>
+    <ceiling-formula>baseline + 10%</ceiling-formula>
+    <baseline-source>Phase 3 task 035 (compressed publish.zip size)</baseline-source>
+    <consumed-by>Phase 6 task 070 (Deploy-BffApi.ps1 hard-fail size guard); CI gate per FR-C5</consumed-by>
+  </notes>
+</task>

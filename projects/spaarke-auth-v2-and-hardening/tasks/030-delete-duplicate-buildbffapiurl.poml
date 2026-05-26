@@ -1,0 +1,56 @@
+<task id="AUTHV2-030" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Delete duplicate buildBffApiUrl in PCF utils; import from @spaarke/auth</title>
+    <phase>B — Consumer migration</phase>
+    <tags>auth, pcf, dedupe, MINIMAL</tags>
+    <status>completed</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <dependencies>Phase A</dependencies>
+    <parallel-safe>B-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>Two copies of buildBffApiUrl exist (`@spaarke/auth` + `src/client/pcf/shared/utils/environmentVariables.ts:265-280`). Delete the PCF duplicate; have PCFs import from @spaarke/auth.</prompt>
+  <role>Senior engineer.</role>
+  <goal>Single source of truth for buildBffApiUrl. No duplicate implementations.</goal>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/shared/utils/environmentVariables.ts (lines 265-280 to delete)</file>
+      <file>src/client/shared/Spaarke.Auth/src/buildBffApiUrl.ts (canonical)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Delete buildBffApiUrl function from environmentVariables.ts.</step>
+    <step>Grep PCFs for `from '../../shared/utils/environmentVariables'` that import buildBffApiUrl — change to import from '@spaarke/auth'.</step>
+    <step>Rebuild affected PCFs (any that import buildBffApiUrl from the old location).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>environmentVariables.ts no longer defines buildBffApiUrl.</criterion>
+    <criterion>All PCF imports point at @spaarke/auth.</criterion>
+    <criterion>PCFs build cleanly.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19 in parallel wave (021/022/023/028/030).
+
+    Findings on audit:
+    - The two implementations were functionally equivalent (same 4 steps: validate non-empty base, strip trailing slash, normalize leading slash on path, add /api/ prefix if missing). Canonical @spaarke/auth version has a slightly more detailed error message ("Did you forget to await resolveRuntimeConfig() or call getApiBaseUrl() first?" vs PCF "Did you forget to await getApiBaseUrl() first?").
+    - ZERO TypeScript source consumers were importing buildBffApiUrl from environmentVariables (or from the shared/utils barrel that re-exported it). Every consumer in the repo — PCFs (RelatedDocumentCount hooks), Code Pages (SpaarkeAi, LegalWorkspace, DocumentUploadWizard), and shared packages (Spaarke.AI.Widgets, Spaarke.AI.Context) — already imports from '@spaarke/auth'.
+    - Therefore Step 2 of the task (rewriting PCF imports) was a no-op. The duplicate was effectively dead code.
+
+    Changes:
+    - Removed the duplicate buildBffApiUrl function (and its JSDoc) from src/client/pcf/shared/utils/environmentVariables.ts (lines 240-280 of the prior file).
+    - Replaced with an inline NOTE comment pointing future readers at '@spaarke/auth' and citing this task.
+    - Updated getApiBaseUrl's JSDoc one-liner to reference '@spaarke/auth's buildBffApiUrl instead of "below".
+    - Re-export from shared/utils/index.ts ('export * from ./environmentVariables') remains; it now exports only the (still-present) env-var accessors. No barrel changes needed.
+
+    Verification:
+    - Grep confirms environmentVariables.ts contains no function/export named buildBffApiUrl (only doc-comment references).
+    - Grep across src/ for `import .* buildBffApiUrl .* from` shows every consumer points at '@spaarke/auth'.
+    - tsc --noEmit on the modified file (using RelatedDocumentCount's typescript + @types/powerapps-component-framework) returns zero errors.
+    - Full tsc -p tsconfig.json on RelatedDocumentCount returns 9 pre-existing baseline errors (missing generated/ManifestTypes from pcf-scripts code-gen + missing @spaarke/ui-components dist files + a @fluentui/react-icons sub-path typings gap). None reference environmentVariables or buildBffApiUrl — these are unrelated baseline issues that task 028 (PCF rebuilds) will resolve via pcf-scripts code-gen + ui-components build.
+
+    ADR check: 6 compliant ADRs, 0 warnings, 0 violations.
+
+    Files modified:
+    - src/client/pcf/shared/utils/environmentVariables.ts (deletion of duplicate + comment replacement)
+    - projects/spaarke-auth-v2-and-hardening/tasks/030-delete-duplicate-buildbffapiurl.poml (status + notes)
+  </notes>
+</task>

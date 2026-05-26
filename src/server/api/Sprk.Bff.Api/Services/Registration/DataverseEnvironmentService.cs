@@ -2,7 +2,6 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Azure.Core;
-using Azure.Identity;
 
 namespace Sprk.Bff.Api.Services.Registration;
 
@@ -25,9 +24,11 @@ public class DataverseEnvironmentService : IDisposable
 
     public DataverseEnvironmentService(
         IConfiguration configuration,
+        TokenCredential credential,
         ILogger<DataverseEnvironmentService> logger)
     {
         _logger = logger;
+        _credential = credential;
 
         // Target the admin Dataverse environment (same as RegistrationDataverseService reads from config)
         var dataverseUrl = configuration["DATAVERSE_URL"]
@@ -35,18 +36,6 @@ public class DataverseEnvironmentService : IDisposable
                 "DataverseEnvironmentService requires DATAVERSE_URL configuration.");
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
-
-        var clientId = configuration["API_APP_ID"];
-        var clientSecret = configuration["API_CLIENT_SECRET"];
-        var tenantId = configuration["TENANT_ID"];
-
-        if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret) || string.IsNullOrEmpty(tenantId))
-        {
-            throw new InvalidOperationException(
-                "DataverseEnvironmentService requires TENANT_ID, API_APP_ID, and API_CLIENT_SECRET configuration.");
-        }
-
-        _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
         _logger.LogInformation("DataverseEnvironmentService targeting Dataverse at {ApiUrl}", _apiUrl);
 
         _httpClient = new HttpClient

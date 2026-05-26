@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>AssignWorkWizardLauncher — Xrm.Navigation dispatcher for sprk_createworkassignmentwizard (FR-20)</title>
+    <phase>Phase D — Context pane</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks></blocks>
+    <tags>react, frontend, dataverse, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Crosses the host boundary into Dataverse via Xrm.Navigation.navigateTo — a host-only API. Feature-detection + Vite-dev placeholder is required (per A-2 + FR-20). UQ-05 unresolved: exact `data` query string format must be verified from user-provided runtime log before going live. Touches the GetStartedCards wiring path (task 042) and must align with its dispatch contract. Risk R-7 explicit in plan §8.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build `AssignWorkWizardLauncher` — a thin dispatcher that invokes the existing Dataverse
+    custom page `sprk_createworkassignmentwizard` via `Xrm.Navigation.navigateTo` per FR-20.
+    Feature-detect `window.Xrm`: in the Power Apps host, call the navigation API; in
+    non-host environments (Vite dev), render a placeholder banner with "Open in Spaarke
+    (host required)" copy. Coordinate with task 042's onCardClick dispatcher so the
+    Assign Work card invokes this launcher (mechanism flexible — either direct function call
+    or a special widget_type the launcher subscribes to). UQ-05 mandates verifying the
+    exact `data` query string format against the user-provided runtime log before going live.
+  </prompt>
+
+  <role>
+    React 19 + Fluent v9 frontend developer experienced with Dataverse host-API integration
+    (Xrm.Navigation), feature detection for cross-environment compatibility, and thin
+    dispatcher patterns. Familiar with the spaarke `bffBaseUrl` query parameter contract.
+  </role>
+
+  <goal>
+    A new file `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/AssignWorkWizardLauncher.ts`
+    exists and exports a `launchAssignWorkWizard(opts: { bffBaseUrl: string })` function (or
+    a small React component if the wiring chosen with task 042 is component-based). The
+    function:
+    (a) Feature-detects `window.Xrm`. If absent, returns / renders a placeholder result
+        indicating non-host environment.
+    (b) If `window.Xrm` is present, calls `Xrm.Navigation.navigateTo({ pageType: 'custom',
+        name: 'sprk_createworkassignmentwizard', data: 'bffBaseUrl=' + encodeURIComponent(bffBaseUrl) })`
+        — with the EXACT `data` format verified against the user-provided runtime log
+        (UQ-05).
+    Task 042's onCardClick handler is updated (or coordinated) to invoke this launcher when
+    the Assign Work card is clicked.
+  </goal>
+
+  <context>
+    <background>
+      FR-20 routes the Assign Work GetStartedCards card to an EXISTING Dataverse custom page,
+      `sprk_createworkassignmentwizard`. Unlike the other 6 cards (which route to in-app
+      widgets in the Workspace pane), Assign Work crosses the host boundary via
+      `Xrm.Navigation.navigateTo` — opening a Dataverse-hosted dialog rather than a tab in
+      the Workspace pane. This requires feature-detection because Vite dev does not have
+      `window.Xrm`. UQ-05 is unresolved: the user provided a runtime log showing the exact
+      query string format that `sprk_createworkassignmentwizard` expects. Verify the
+      format against that log before shipping (failure mode: silent dialog dismissal or
+      missing parameters).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/AssignWorkWizardLauncher.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">If a placeholder UI is needed for non-host environments, keep it inline / minimal — do NOT introduce a new shared component for one placeholder banner. Use the simplest Fluent v9 banner / MessageBar inline.</constraint>
+    <constraint source="ADR-021">Placeholder banner styling uses Fluent v9 tokens only. No hex literals.</constraint>
+    <constraint source="ADR-022">React 19. No React 16 fallbacks.</constraint>
+    <constraint source="ADR-028">`bffBaseUrl` is the Spaarke BFF base URL — sourced from environment / configuration, NOT a token. Do NOT pass any access token through the `data` query string (that would violate ADR-028). The Dataverse-hosted custom page is responsible for its own auth flow.</constraint>
+    <constraint source="spec">A-2: `Xrm.Navigation.navigateTo` is unavailable in Vite dev — feature-detect `window.Xrm` and show "Open in Spaarke" placeholder. UQ-05: exact `data` query string format MUST be verified from user-provided runtime log before going live. R-7 risk register entry tracks this.</constraint>
+    <constraint source="project">Coordinate with task 042: the Assign Work card click must invoke this launcher. Either (a) task 042's onCardClick special-cases the `assign-work` widget_type and calls `launchAssignWorkWizard()` directly, OR (b) registers a subscriber on a dedicated event type. Choose the simplest option that keeps task 042's onCardClick handler readable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>.claude/patterns/pcf/dialog-patterns.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Verify the data query string format (UQ-05)">
+      Locate the user-provided runtime log for `sprk_createworkassignmentwizard`. Confirm the
+      exact `data` parameter format. Verify URL-encoding semantics (`encodeURIComponent` vs.
+      `encodeURI` vs. raw). Document the verified format in the launcher file header. If the
+      log is unavailable, escalate via 🔔 Human Input Required before proceeding.
+    </step>
+    <step order="2" name="Determine bffBaseUrl source">
+      Identify where `bffBaseUrl` is configured in SpaarkeAi (likely via environment variable
+      or a config module). Document the source so the launcher can either accept it as a prop
+      (deferring sourcing to the caller) OR read it directly (simpler API for task 042).
+    </step>
+    <step order="3" name="Scaffold AssignWorkWizardLauncher.ts">
+      Create the file. Export `launchAssignWorkWizard(opts: { bffBaseUrl: string })`:
+      <steps>
+        <step>Feature-detect `typeof window !== 'undefined' && window.Xrm?.Navigation?.navigateTo`.</step>
+        <step>If absent, return / show placeholder (see step 4).</step>
+        <step>If present, call `Xrm.Navigation.navigateTo({ pageType: 'custom', name: 'sprk_createworkassignmentwizard', data: 'bffBaseUrl=' + encodeURIComponent(bffBaseUrl) })` with the exact format verified in step 1.</step>
+      </steps>
+    </step>
+    <step order="4" name="Implement non-host placeholder">
+      If the wiring with task 042 is function-based (most likely), the placeholder is just a
+      `console.warn` / toast / temporary banner indicating "Open in Spaarke (host required)".
+      If the wiring is a widget-component-based subscriber (less likely), render a small
+      Fluent v9 MessageBar in the Workspace pane explaining the host requirement.
+    </step>
+    <step order="5" name="Coordinate with task 042 onCardClick wiring">
+      Update task 042's onCardClick handler (or coordinate via a comment in the launcher
+      file) so that the Assign Work card click invokes `launchAssignWorkWizard()` instead of
+      dispatching a `widget_load` event on the `workspace` channel. The simplest mechanism
+      is special-casing the `assign-work` widget_type in task 042's handler.
+    </step>
+    <step order="6" name="Smoke-test in both environments">
+      Build SpaarkeAi. In Power Apps host: click Assign Work card → confirm
+      `sprk_createworkassignmentwizard` opens (verify the dialog reads the bffBaseUrl correctly
+      and proceeds with its own flow). In Vite dev: click Assign Work → confirm placeholder
+      message appears (toast / banner / log) and no console error fires.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read user-provided runtime log + bffBaseUrl config source</tool>
+    <tool name="Write">Create AssignWorkWizardLauncher.ts</tool>
+    <tool name="Edit">Possibly coordinate update with task 042 (special-case assign-work in its onCardClick)</tool>
+    <tool name="Grep">Find bffBaseUrl config source + existing Xrm.Navigation.navigateTo usage as reference</tool>
+    <tool name="Bash">Run `npm run build` against Spaarke.AI.Widgets</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/AssignWorkWizardLauncher.ts</output>
+    <output type="report">Task completion report confirming launcher feature-detects, verified data format, and Assign Work click works in both Power Apps host and Vite dev</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`AssignWorkWizardLauncher.ts` exists and exports `launchAssignWorkWizard()` (or canonical name).</criterion>
+    <criterion testable="true">Function feature-detects `window.Xrm` before calling `Xrm.Navigation.navigateTo`.</criterion>
+    <criterion testable="true">In the Power Apps host, clicking Assign Work invokes `Xrm.Navigation.navigateTo({ pageType: 'custom', name: 'sprk_createworkassignmentwizard', data: '...' })` with the EXACT `data` format verified against the user-provided runtime log (UQ-05).</criterion>
+    <criterion testable="true">In Vite dev, clicking Assign Work shows a non-host placeholder (banner / toast / warning) without throwing.</criterion>
+    <criterion testable="true">Task 042's onCardClick handler invokes this launcher for the Assign Work card (coordinated wiring).</criterion>
+    <criterion testable="true">No access tokens passed through the `data` query string (ADR-028 invariant preserved).</criterion>
+    <criterion testable="true">No hex literals, no `rgba(...)` literals in placeholder UI.</criterion>
+    <criterion testable="true">`npm run build` succeeds with no new TS / lint errors.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Assign Work in Power Apps host opens custom page">
+      Deploy SpaarkeAi to the Dataverse test environment. Load the welcome state in the Power Apps
+      host. Click the Assign Work card. Confirm the Dataverse custom page
+      `sprk_createworkassignmentwizard` opens as a dialog (not in the Workspace pane). Verify the
+      page reads the bffBaseUrl parameter and proceeds normally.
+    </test>
+    <test name="Assign Work in Vite dev shows placeholder">
+      In Vite dev (`npm run dev` against SpaarkeAi), load the welcome state. Click the Assign Work
+      card. Confirm a placeholder banner / toast / warning appears with "Open in Spaarke (host required)"
+      copy (or equivalent). No console error fires; no exception thrown.
+    </test>
+    <test name="Other GetStartedCards still work">
+      With Assign Work special-cased in task 042's onCardClick, verify the other 6 cards still open
+      their respective widgets (regression check for the dispatcher's switch / mapping logic).
+    </test>
+    <test name="Dark Mode Compliance (ADR-021, NFR-06)">
+      If a placeholder banner is shown in dark mode, confirm it adapts via Fluent v9 tokens (no hex
+      leaks, no white in dark mode).
+    </test>
+    <test name="No console errors in either environment">
+      Open browser devtools in both Power Apps host and Vite dev. Click Assign Work in each. Confirm
+      zero JavaScript errors or React warnings.
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The user invokes it via "work on task 045" / "continue" / similar trigger phrases per the
+    Auto-Detection Rules in the project CLAUDE.md. Do NOT read this POML file and implement
+    manually — `task-execute` ensures ADRs are loaded, `current-task.md` is tracked, and the
+    Step 9.5 code-review + adr-check gates run at FULL rigor.
+  </execution>
+</task>

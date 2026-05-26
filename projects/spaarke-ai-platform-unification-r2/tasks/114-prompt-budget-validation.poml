@@ -1,0 +1,50 @@
+<task id="AIPU2-114" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Validate prompt token budget stays within ~9000 tokens</title>
+    <phase>6</phase>
+    <tags>testing, performance, ai</tags>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPU2-015, AIPU2-061</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    The OrchestratorPromptBuilder (AIPU2-015) must keep the assembled prompt under approximately
+    9000 tokens to leave headroom for the model's context window after the response. The
+    capability router (AIPU2-061) depends on this budget being respected — if prompts exceed
+    the budget, latency increases and routing decisions may be invalidated. This task instruments
+    the prompt builder to log per-component token counts and validates the budget across a range
+    of realistic conversation scenarios, including verifying that history summarization triggers
+    correctly before the budget is exceeded.
+  </prompt>
+  <role>AI engineer with knowledge of prompt construction and token counting.</role>
+  <goal>
+    OrchestratorPromptBuilder emits per-component token counts in debug logs. A validation run
+    across at least 10 conversation scenarios confirms total prompt tokens stay under 9000 in
+    all cases. History summarization triggers correctly as conversation length grows. Results
+    documented in notes/prompt-budget-validation-report.md.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Orchestration</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Routing</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Add token count instrumentation to OrchestratorPromptBuilder: after assembling each component (system prompt, tool index, tool definitions, conversation history, user message), log the component name and token count. Log total as well. Use the tiktoken-c# equivalent or Microsoft.ML.Tokenizers for accurate GPT-4 token counting.</step>
+    <step>Define 10 test scenarios: (1) fresh conversation, simple query; (2) 5-turn conversation; (3) 10-turn conversation approaching summarization threshold; (4) post-summarization conversation; (5) query with 3 tools active; (6) query with all tools active; (7) large system prompt (playbook with many instructions); (8) long user message (500 tokens); (9) document context injected; (10) near-budget scenario (all components at max).</step>
+    <step>Run each scenario through OrchestratorPromptBuilder and collect the per-component and total token counts from the debug log.</step>
+    <step>Verify total tokens are under 9000 in all 10 scenarios. If any scenario exceeds 9000: identify which component is over-contributing and apply a trimming strategy (truncate tool index, reduce history turns, or trigger early summarization).</step>
+    <step>Verify history summarization trigger: simulate a conversation growing to the summarization threshold (configured in AIPU2-015). Confirm the prompt builder switches from raw history to summary + recent turns when the threshold is crossed, and that the resulting prompt is under 9000 tokens.</step>
+    <step>Document results in notes/prompt-budget-validation-report.md: per-scenario table with component breakdown and total tokens, summarization trigger verification, any trimming applied.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>OrchestratorPromptBuilder logs per-component token counts (system, tools, history, user message) for every prompt assembly.</criterion>
+    <criterion>All 10 test scenarios produce prompts under 9000 total tokens.</criterion>
+    <criterion>History summarization triggers correctly when conversation exceeds the configured threshold.</criterion>
+    <criterion>Post-summarization prompts are under 9000 tokens with summary + recent turns.</criterion>
+    <criterion>No scenario requires the model to handle a prompt exceeding its effective context budget.</criterion>
+    <criterion>Validation report written to notes/prompt-budget-validation-report.md with per-scenario token breakdown table.</criterion>
+  </acceptance-criteria>
+</task>

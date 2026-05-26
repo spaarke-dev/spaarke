@@ -4,14 +4,15 @@
  * Zustand v5 store for managing playbook templates.
  * Provides API calls to list templates and clone playbooks.
  *
- * Migrated from R4 PCF: uses AuthService.getAccessToken() for Bearer auth
- * instead of cookie-based auth. Uses BFF API endpoints.
+ * Auth v2: uses `authenticatedFetch` from @spaarke/auth — the canonical
+ * function-based contract. No token snapshots; provider's in-memory cache
+ * returns the fresh token per request.
  *
- * @version 2.0.0 (Code Page migration)
+ * @version 3.0.0 (Auth v2 — function-based contract, task 024)
  */
 
 import { create } from 'zustand';
-import { getAccessToken } from '../services/authInit';
+import { authenticatedFetch } from '../services/authInit';
 
 // ============================================================================
 // Types
@@ -68,30 +69,6 @@ interface TemplateState {
 }
 
 // ============================================================================
-// API Client Helper
-// ============================================================================
-
-async function fetchWithBearerAuth(url: string, options: RequestInit = {}): Promise<Response> {
-  const token = await getAccessToken();
-
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...options.headers,
-    },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || `HTTP ${response.status}: ${response.statusText}`);
-  }
-
-  return response;
-}
-
-// ============================================================================
 // Store
 // ============================================================================
 
@@ -129,7 +106,7 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
         url += `&nameFilter=${encodeURIComponent(nameFilter)}`;
       }
 
-      const response = await fetchWithBearerAuth(url);
+      const response = await authenticatedFetch(url);
       const data: TemplateListResponse = await response.json();
 
       set({
@@ -159,9 +136,10 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
       const url = `${apiBaseUrl}/api/ai/playbooks/${templateId}/clone`;
       const body = newName ? JSON.stringify({ newName }) : '{}';
 
-      const response = await fetchWithBearerAuth(url, {
+      const response = await authenticatedFetch(url, {
         method: 'POST',
         body,
+        headers: { 'Content-Type': 'application/json' },
       });
 
       const clonedPlaybook = await response.json();

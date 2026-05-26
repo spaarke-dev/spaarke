@@ -1,5 +1,5 @@
 # Download logs quietly
-$null = az webapp log download --name spe-api-dev-67e2xz --resource-group spe-infrastructure-westus2 --log-file temp-logs.zip 2>&1
+$null = az webapp log download --name spaarke-bff-dev --resource-group rg-spaarke-dev --log-file temp-logs.zip 2>&1
 
 # Extract eventlog.xml only
 Add-Type -AssemblyName System.IO.Compression.FileSystem

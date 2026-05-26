@@ -15,7 +15,7 @@ import { IInputs, IOutputs } from './generated/ManifestTypes';
 import * as React from 'react';
 import { EmailProcessingMonitorHost } from './EmailProcessingMonitorHost';
 
-const VERSION = '1.1.0';
+const VERSION = '1.1.2';
 
 export class EmailProcessingMonitor
   implements ComponentFramework.ReactControl<IInputs, IOutputs>

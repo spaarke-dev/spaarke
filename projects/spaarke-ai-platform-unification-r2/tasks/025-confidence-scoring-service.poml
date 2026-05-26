@@ -1,0 +1,58 @@
+<task id="AIPU2-025" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build ConfidenceScoringService — Per-Response Confidence Levels</title>
+    <phase>2B</phase>
+    <tags>bff-api, ai-safety</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-021</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build ConfidenceScoringService that produces a calibrated confidence level (High / Medium / Low) for
+    each AI response based on the number and quality of source passages that support the response. The score
+    is derived from the groundedness check results (how many segments are grounded) and the RAG retrieval
+    quality (how many source passages were available). The confidence level is emitted as part of the
+    safety_annotation SSE event so the UI can display a confidence indicator alongside the AI response.
+    See spec.md FR-406 for the full requirements.
+  </prompt>
+  <role>Senior .NET backend engineer with Spaarke AI safety pipeline experience.</role>
+  <goal>
+    ConfidenceScoringService returns High, Medium, or Low for each response, calibrated to source passage
+    count and groundedness ratio. Confidence level is included in the safety_annotation SSE event.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Safety/</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read spec.md FR-406 for the confidence scoring thresholds and calibration rules.</step>
+    <step>Create ConfidenceLevel.cs enum: High, Medium, Low.</step>
+    <step>Create ConfidenceScoringRequest.cs record: SourcePassageCount (int), GroundednessResult (GroundednessResult — from task 021), ResponseLength (int — character count of LLM response), CitationCount (int — citations extracted by CitationExtractor).</step>
+    <step>Create ConfidenceScoringResult.cs record: Level (ConfidenceLevel), Score (float 0-1), Rationale (string — human-readable explanation of why this level was assigned).</step>
+    <step>Create IConfidenceScoringService.cs interface with: ConfidenceScoringResult Score(ConfidenceScoringRequest request).</step>
+    <step>Create ConfidenceScoringService.cs implementing IConfidenceScoringService (synchronous — no I/O, pure computation). Implement scoring logic:
+      - Compute groundedness_ratio = (total_segments - ungrounded_count) / max(total_segments, 1)
+      - Compute source_score = min(SourcePassageCount / 5.0, 1.0) (5+ passages = max source score)
+      - Compute raw_score = (groundedness_ratio * 0.6) + (source_score * 0.4)
+      - Map: raw_score >= 0.75 → High, 0.40-0.74 → Medium, &lt; 0.40 → Low
+      - Override to Low when SourcePassageCount == 0 regardless of other scores
+      - Build Rationale string summarizing the inputs and decision.</step>
+    <step>Integrate into the safety_annotation SSE event: extend the groundedness event payload (from task 021) to include a confidence field: { "type": "groundedness", "isGrounded": bool, "ungroundedSegments": [...], "confidence": { "level": "High|Medium|Low", "score": float, "rationale": string } }. Alternatively emit as a separate safety_annotation sub-event if the existing structure is already emitted separately — follow the established pattern.</step>
+    <step>Register IConfidenceScoringService as a singleton in AddAiSafetyModule().</step>
+    <step>Write unit tests covering all three levels: 5 sources + fully grounded → High, 2 sources + partially grounded → Medium, 0 sources → Low override, 5 sources + 50% ungrounded → Medium.</step>
+    <step>Run `dotnet build` and `dotnet test --filter "ConfidenceScor"` to verify.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ConfidenceLevel.High returned when source_passage_count &gt;= 5 and groundedness_ratio &gt;= 0.75.</criterion>
+    <criterion>ConfidenceLevel.Low always returned when source_passage_count == 0.</criterion>
+    <criterion>ConfidenceLevel.Medium returned for the middle band (0.40-0.74 raw score).</criterion>
+    <criterion>Rationale string is non-empty and describes the inputs that drove the decision.</criterion>
+    <criterion>Confidence level included in the safety_annotation SSE event payload.</criterion>
+    <criterion>Service is synchronous (no async) — no I/O, pure computation.</criterion>
+    <criterion>Unit tests pass: `dotnet test --filter "ConfidenceScor"`.</criterion>
+  </acceptance-criteria>
+</task>

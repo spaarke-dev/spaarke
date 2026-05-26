@@ -55,7 +55,7 @@ import {
 } from './components/ControlPanel';
 // NodeActionBar removed — node click now opens FilePreviewDialog
 import { useVisualizationApi, formatVisualizationError } from './hooks/useVisualizationApi';
-import { getToken } from './services/authInit';
+import { useAuth } from '@spaarke/auth';
 import { exportToCsv } from './services/CsvExportService';
 import { authenticatedFetch } from './services/authInit';
 import { FilePreviewDialog } from './components/FilePreviewDialog';
@@ -197,10 +197,16 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
   const documentId = params.get('documentId') ?? '';
   const tenantId = params.get('tenantId') ?? '';
 
-  // Auth state
-  const [accessToken, setAccessToken] = useState<string | undefined>(undefined);
+  // Auth state — function-based contract per ADR-027 / AUDIT-FINDINGS-AUTH-SYSTEM.
+  // We do NOT snapshot a token in component state. Instead we eagerly prime the
+  // provider's in-memory cache once via getAccessToken() so the first network
+  // request from useVisualizationApi doesn't pay an MSAL silent-acquire latency
+  // (cleared in isAuthReady when the priming call resolves). authenticatedFetch
+  // (used by VisualizationApiService and FilePreviewDialog hooks) fetches the
+  // token fresh on every request.
+  const { getAccessToken } = useAuth();
   const [authError, setAuthError] = useState<string | null>(null);
-  const [isAuthInitializing, setIsAuthInitializing] = useState(true);
+  const [isAuthReady, setIsAuthReady] = useState(false);
 
   // UI state
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
@@ -230,31 +236,27 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
   const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
   const CACHE_MAX_SIZE = 50;
 
-  // Auth token acquisition — auth is already initialized by bootstrap() in index.tsx.
-  // We do NOT call initializeAuth() here — doing so with no params would dispose the
-  // correctly configured provider set up by bootstrap() and re-create one using only
-  // the window.__SPAARKE_MSAL_CLIENT_ID__ fallback.
+  // Prime the auth provider's in-memory token cache before enabling the
+  // visualization fetch. Auth is already initialized by bootstrap() in index.tsx;
+  // this just warms the cache so the first authenticatedFetch hits a fresh token
+  // and we can show a clear error if the user is not signed in.
   useEffect(() => {
     let cancelled = false;
-
-    getToken()
-      .then(token => {
-        if (!cancelled) setAccessToken(token);
+    getAccessToken()
+      .then(() => {
+        if (!cancelled) setIsAuthReady(true);
       })
       .catch((err: unknown) => {
         if (!cancelled) {
           console.error('[App] Auth failed:', err);
           setAuthError(err instanceof Error ? err.message : 'Authentication failed');
+          setIsAuthReady(true);
         }
-      })
-      .finally(() => {
-        if (!cancelled) setIsAuthInitializing(false);
       });
-
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [getAccessToken]);
 
   // Only send documentTypes filter when user has unchecked some types.
   // When all types are selected (default), omit the param so the BFF doesn't
@@ -263,17 +265,17 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
   const effectiveDocumentTypes =
     filters.documentTypes.length < DOCUMENT_TYPES.length ? filters.documentTypes : undefined;
 
-  // Fetch visualization data
+  // Fetch visualization data — auth is wired via authenticatedFetch inside the
+  // service; no token snapshot passed through props.
   const { nodes, edges, metadata, isLoading, error, refetch } = useVisualizationApi({
     apiBaseUrl,
     documentId,
     tenantId,
-    accessToken,
     threshold: filters.similarityThreshold,
     limit: filters.maxNodesPerLevel,
     depth: filters.depthLimit,
     documentTypes: effectiveDocumentTypes,
-    enabled: !isAuthInitializing && !!documentId && !!tenantId,
+    enabled: isAuthReady && !authError && !!documentId && !!tenantId,
   });
 
   const handleNodeSelect = useCallback((node: DocumentNode) => {
@@ -621,7 +623,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
   }
 
   // Auth initializing
-  if (isAuthInitializing) {
+  if (!isAuthReady) {
     return (
       <div className={styles.root}>
         <div className={styles.centerState}>

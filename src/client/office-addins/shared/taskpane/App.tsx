@@ -247,7 +247,7 @@ export const App: React.FC<AppProps> = ({
               const token = await authService.getAccessToken(['user_impersonation']);
               return token || '';
             }}
-            apiBaseUrl={process.env.BFF_API_BASE_URL || 'https://spe-api-dev-67e2xz.azurewebsites.net'}
+            apiBaseUrl={process.env.BFF_API_BASE_URL || 'https://spaarke-bff-dev.azurewebsites.net'}
             onComplete={(docId, docUrl) => {
               console.log('Save complete:', docId, docUrl);
             }}

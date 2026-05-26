@@ -678,12 +678,10 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
         if (driveId && itemId) {
             setIsIndexing(true);
             try {
-                const token = await bffTokenProvider();
-                await fetch(buildBffApiUrl(bffBaseUrl, '/ai/rag/index-file'), {
+                await spaarkeAuthenticatedFetch(buildBffApiUrl(bffBaseUrl, '/ai/rag/index-file'), {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
-                        Authorization: `Bearer ${token}`,
                     },
                     body: JSON.stringify({
                         driveId,
@@ -699,7 +697,7 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
         }
 
         setShowViewer(true);
-    }, [selectedDocumentId, successfulFiles, bffBaseUrl, bffTokenProvider]);
+    }, [selectedDocumentId, successfulFiles, bffBaseUrl]);
 
     return (
         <div className={styles.dynamicStepRoot}>

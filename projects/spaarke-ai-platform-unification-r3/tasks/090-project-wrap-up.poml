@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Project wrap-up — final quality gates, repo cleanup, lessons-learned, status update</title>
+    <phase>Phase H — Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>070, 071, 072, 073, 074</dependencies>
+    <blocks></blocks>
+    <tags>documentation, project-management</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Wrap-up orchestrates `/code-review`, `/adr-check`, `/repo-cleanup`, doc updates, and lessons-learned. STANDARD rigor — the heavy gates (code-review + adr-check) ARE the rigor mechanism for this task. No new production code unless an issue surfaces.</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final wrap-up task — runs alone after all smoke tasks complete.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Run final quality gates and project wrap-up per `task-create` SKILL.md Step 3.7:
+    (1) `/code-review` on all project code; address critical issues. (2) `/adr-check` on
+    all project code; address violations. (3) `/repo-cleanup projects/spaarke-ai-platform-unification-r3`;
+    approve removals (notes/debug/, notes/spikes/, notes/drafts/); archive handoffs.
+    (4) Update README.md: Status → "Complete", Phase → "Complete", Progress → "100%",
+    Completed Date, check all Graduation Criteria, add changelog entry. (5) Update plan.md:
+    Status → "Complete", all milestones ✅. (6) Create `notes/lessons-learned.md` covering
+    PaneHeader lift mechanics, FR-07 attachment design choices, LegalWorkspace embed
+    pattern, ActionCard reuse outcome, layout templateFilter prop pattern, telemetry
+    helper boundary, regressions, ADR candidate updates (PaneEventBus, stage lifecycle).
+    (7) Update TASK-INDEX.md: all tasks ✅. (8) Final verification: all docs current; no
+    critical code-review issues; repo cleanup done.
+  </prompt>
+
+  <role>
+    Project lead / closer comfortable invoking the `code-review`, `adr-check`, and
+    `repo-cleanup` skills, updating project tracking documents, and writing lessons-learned
+    that future projects (R4, sibling projects) will consult. Familiar with the wrap-up
+    protocol from sibling project R2's successful 86/86 closeout (commit b40dc3e6).
+  </role>
+
+  <goal>
+    Project status moves to COMPLETE: (a) `/code-review` issued no critical issues (or all
+    were addressed); (b) `/adr-check` issued no violations (or all were addressed);
+    (c) `/repo-cleanup` removed ephemeral notes/debug, notes/spikes, notes/drafts;
+    (d) README.md Status = "Complete", all Graduation Criteria checked; (e) plan.md
+    Status = "Complete", milestones ✅; (f) `notes/lessons-learned.md` exists with all
+    required sections; (g) TASK-INDEX.md shows all tasks ✅. The project is ready for
+    `merge-to-master`.
+  </goal>
+
+  <context>
+    <background>
+      Sibling project R2 shipped 86/86 tasks COMPLETE with a clean wrap-up at commit
+      `b40dc3e6` and a comprehensive `notes/lessons-learned.md` that this project consulted
+      throughout. R3 must produce the same artifact quality so that R4 / future projects
+      can consult R3's lessons. This is the final task — its completion enables the merge.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-unification-r3/README.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarke-ai-platform-unification-r2/notes/lessons-learned.md (reference)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Per `task-create` SKILL.md Step 3.7 — wrap-up is MANDATORY. This task cannot be skipped.</constraint>
+    <constraint source="project">Any critical issue surfaced by `/code-review` MUST be fixed before completion. Non-critical issues may be deferred but must be tracked.</constraint>
+    <constraint source="project">Any violation surfaced by `/adr-check` MUST be remediated before completion. Load-bearing ADRs (012, 021, 028) admit zero violations.</constraint>
+    <constraint source="project">`/repo-cleanup` removals require explicit approval — review each proposed removal before approving.</constraint>
+    <constraint source="project">Lessons-learned must cover EVERY topic in the prompt above (PaneHeader lift, FR-07 attachment design, LegalWorkspace embed, ActionCard reuse, templateFilter, telemetry helper, regressions, ADR candidates).</constraint>
+    <constraint source="project">Do NOT invoke `merge-to-master` in this task — that's a follow-on operator action after wrap-up is complete.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/task-create/SKILL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r2/notes/lessons-learned.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Run /code-review on all project code">
+      Invoke the `code-review` skill. Scope: all source files touched on this worktree
+      branch versus master (`git diff --name-only master..HEAD` filtered to `src/`). Address
+      every CRITICAL severity finding inline. Defer non-critical findings to a tracked
+      follow-up list in `notes/code-review-findings.md` if any exist.
+    </step>
+    <step order="2" name="Run /adr-check on all project code">
+      Invoke the `adr-check` skill. Scope: same as step 1. Address every violation,
+      especially against load-bearing ADRs (012, 021, 028). Re-run until CLEAN.
+    </step>
+    <step order="3" name="Run /repo-cleanup for this project">
+      Invoke the `repo-cleanup` skill with argument
+      `projects/spaarke-ai-platform-unification-r3`. Review proposed removals; approve
+      removals of `notes/debug/`, `notes/spikes/`, `notes/drafts/` (per template
+      conventions). Archive handoffs to `notes/handoffs/` if not already.
+    </step>
+    <step order="4" name="Update README.md to Complete">
+      Edit `projects/spaarke-ai-platform-unification-r3/README.md`:
+      <list>
+        <item>Status → "Complete"</item>
+        <item>Phase → "Complete"</item>
+        <item>Progress → "100%"</item>
+        <item>Completed Date → today (YYYY-MM-DD)</item>
+        <item>Check every Graduation Criteria item</item>
+        <item>Add a changelog entry summarizing what shipped</item>
+      </list>
+    </step>
+    <step order="5" name="Update plan.md to Complete">
+      Edit `projects/spaarke-ai-platform-unification-r3/plan.md`:
+      Status → "Complete"; mark every milestone ✅.
+    </step>
+    <step order="6" name="Create lessons-learned.md">
+      Create `projects/spaarke-ai-platform-unification-r3/notes/lessons-learned.md` with
+      sections:
+      <list>
+        <item>PaneHeader lift mechanics (Phase A task 010 + consumption across panes)</item>
+        <item>FR-07 attachment design choices (spike outcome, client-only vs BFF extension)</item>
+        <item>LegalWorkspace embed pattern (WorkspaceShell reuse, templateFilter prop)</item>
+        <item>ActionCard reuse outcome (whether lifted vs imported direct from solution)</item>
+        <item>Layout templateFilter prop pattern (6 vs 9 templates by host)</item>
+        <item>Telemetry helper boundary (error-only per OC-09)</item>
+        <item>Any unexpected regressions surfaced during smoke testing</item>
+        <item>ADR candidate updates: PaneEventBus formalization, stage lifecycle codification</item>
+      </list>
+    </step>
+    <step order="7" name="Update TASK-INDEX.md to all ✅">
+      Edit `projects/spaarke-ai-platform-unification-r3/tasks/TASK-INDEX.md`: confirm every
+      task row shows ✅ (or SKIPPED with explanation for tasks 050/051 if applicable).
+    </step>
+    <step order="8" name="Final verification pass">
+      Re-read README.md + plan.md + lessons-learned.md + TASK-INDEX.md. Confirm internal
+      consistency. Confirm `git status` shows no uncommitted ephemeral files. Confirm
+      `/code-review` was re-run after any step-1/2 fixes and is now CLEAN.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">`code-review` skill</tool>
+    <tool name="Skill">`adr-check` skill</tool>
+    <tool name="Skill">`repo-cleanup` skill</tool>
+    <tool name="Edit">README.md, plan.md, TASK-INDEX.md</tool>
+    <tool name="Write">notes/lessons-learned.md</tool>
+    <tool name="Read">All project artifacts for final verification</tool>
+    <tool name="Bash">`git status`, `git diff --name-only master..HEAD`</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/README.md (Status = Complete)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/plan.md (Status = Complete)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/lessons-learned.md (new)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/tasks/TASK-INDEX.md (all ✅)</output>
+    <output type="report">Final task completion report confirming all gates passed and project Status = Complete</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/code-review` was run; CRITICAL findings (if any) were addressed; final result is CLEAN.</criterion>
+    <criterion testable="true">`/adr-check` was run; violations (if any) were addressed; final result is CLEAN especially for load-bearing ADRs (012, 021, 028).</criterion>
+    <criterion testable="true">`/repo-cleanup projects/spaarke-ai-platform-unification-r3` was run; ephemeral notes (debug, spikes, drafts) removed with approval.</criterion>
+    <criterion testable="true">`README.md` Status = "Complete", Phase = "Complete", Progress = "100%", Completed Date is set, all Graduation Criteria checked, changelog entry added.</criterion>
+    <criterion testable="true">`plan.md` Status = "Complete"; all milestones ✅.</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` exists with all required sections (PaneHeader lift, FR-07, LegalWorkspace embed, ActionCard, templateFilter, telemetry, regressions, ADR candidates).</criterion>
+    <criterion testable="true">`TASK-INDEX.md` shows every task as ✅ or SKIPPED (with explanation).</criterion>
+    <criterion testable="true">Final `git status` shows no uncommitted ephemeral files; project is ready for `merge-to-master`.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill. Wrap-up sub-steps invoke
+    `code-review`, `adr-check`, and `repo-cleanup` skills in turn — do not bypass any of
+    them. After this task completes, the operator (not Claude) runs `merge-to-master` as
+    a separate action.
+  </execution>
+</task>

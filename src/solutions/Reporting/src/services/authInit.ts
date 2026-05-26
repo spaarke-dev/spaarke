@@ -5,7 +5,7 @@
  * Initializes the shared auth provider with BFF base URL from runtimeConfig
  * and re-exports authenticatedFetch for use across the module.
  *
- * @see .claude/patterns/auth/spaarke-auth-initialization.md
+ * @see .claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md (DEPRECATED — superseded by Spaarke Auth v2 useAuth(); see .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
  */
 
 import { initAuth, authenticatedFetch as sharedAuthFetch } from "@spaarke/auth";

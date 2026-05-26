@@ -1,0 +1,2629 @@
+{
+  "baseline_captured_at": "2026-05-25T12:36:50.686432+00:00",
+  "target_url": "https://spaarke-bff-dev.azurewebsites.net",
+  "total_routes": 323,
+  "status_distribution": {
+    "401": 305,
+    "200": 9,
+    "500": 2,
+    "400": 5,
+    "404": 2
+  },
+  "regressions_count": 1,
+  "regressions": [
+    {
+      "method": "POST",
+      "path": "/api/office/quickcreate/{entityType}",
+      "observed_status": 404,
+      "note": "candidate-regression (route returns Kestrel 404 with no body; expected 401)"
+    }
+  ],
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/api/admin/builder-scopes/import",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "BuilderScopeAdminEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/builder-scopes/import-json",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "BuilderScopeAdminEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/builder-scopes/status",
+      "observed_status": 200,
+      "expected": "401 (auth required)",
+      "note": "open (intentionally anonymous; verify in code review)",
+      "file": "BuilderScopeAdminEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/email-processing/stats",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EmailEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/knowledge/index-reference/{knowledgeSourceId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AdminKnowledgeEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/knowledge/index-reference/{knowledgeSourceId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AdminKnowledgeEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/knowledge/index-references",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AdminKnowledgeEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/record-matching/status",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RecordMatchingAdminEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/record-matching/sync",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RecordMatchingAdminEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/record-matching/sync-incremental",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RecordMatchingAdminEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/message",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AgentEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/playbooks",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AgentEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/playbooks/status/{jobId:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AgentEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/run-playbook",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AgentEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/analysis/create",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AnalysisEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/analysis/execute",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AnalysisEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/analysis/{analysisId:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AnalysisEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/analysis/{analysisId:guid}/continue",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AnalysisEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/analysis/{analysisId:guid}/export",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AnalysisEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/analysis/{analysisId:guid}/resume",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AnalysisEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/analysis/{analysisId:guid}/save",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AnalysisEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/capabilities/refresh",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "CapabilityEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/context-mappings",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/context-mappings/analysis/{analysisId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AnalysisChatContextEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ai/chat/context-mappings/cache",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/context-mappings/standalone",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "StandaloneChatContextEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/export/word",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatWordExportEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/playbooks",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/sessions",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/sessions",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ai/chat/sessions/{sessionId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/sessions/{sessionId}/actions/{actionId}/confirm",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/sessions/{sessionId}/commands",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/sessions/{sessionId}/documents",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatDocumentEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/sessions/{sessionId}/documents/{documentId}/persist",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatDocumentEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/sessions/{sessionId}/history",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/sessions/{sessionId}/messages",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/sessions/{sessionId}/plan/approve",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/sessions/{sessionId}/refine",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/sessions/{sessionId}/restore",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/sessions/{sessionId}/tabs",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ChatEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/daily-briefing/narrate",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DailyBriefingEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/daily-briefing/summarize",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DailyBriefingEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/document-intelligence/associate-record",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RecordMatchEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/document-intelligence/match-records",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RecordMatchEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/feedback",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FeedbackEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/feedback/capability/{id}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FeedbackEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/feedback/playbook/{id}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FeedbackEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/handlers",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "HandlerEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/handlers/{handlerId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "HandlerEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/knowledge/indexes/health",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "KnowledgeBaseEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/knowledge/indexes/reindex/{documentId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "KnowledgeBaseEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/knowledge/indexes/{indexName}/documents",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "KnowledgeBaseEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ai/knowledge/indexes/{indexName}/documents/{documentId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "KnowledgeBaseEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/knowledge/test-search",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "KnowledgeBaseEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/model-deployments",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ModelEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/model-deployments/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ModelEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/agentic",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AiPlaybookBuilderEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/clarification-response",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AiPlaybookBuilderEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/classify-intent",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AiPlaybookBuilderEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/generate-clarification",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AiPlaybookBuilderEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/generate-plan",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AiPlaybookBuilderEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/process",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AiPlaybookBuilderEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/test-execution",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AiPlaybookBuilderEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/test-execution/production",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AiPlaybookBuilderEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/test-execution/quick",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AiPlaybookBuilderEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/by-name/{name}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/public",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/runs/{runId:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookRunEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/runs/{runId:guid}/cancel",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookRunEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/runs/{runId:guid}/detail",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookRunEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/runs/{runId:guid}/stream",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookRunEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/templates",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/ai/playbooks/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/{id:guid}/canvas",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/ai/playbooks/{id:guid}/canvas",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/{id:guid}/clone",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/{id:guid}/execute",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookRunEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/{id:guid}/nodes",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "NodeEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/{id:guid}/nodes",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "NodeEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/ai/playbooks/{id:guid}/nodes/reorder",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "NodeEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ai/playbooks/{id:guid}/nodes/{nodeId:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "NodeEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/{id:guid}/nodes/{nodeId:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "NodeEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/ai/playbooks/{id:guid}/nodes/{nodeId:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "NodeEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/ai/playbooks/{id:guid}/nodes/{nodeId:guid}/scopes",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "NodeEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/{id:guid}/runs",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookRunEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/{id:guid}/share",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/{id:guid}/sharing",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/{id:guid}/unshare",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/{id:guid}/validate",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookRunEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/{playbookId:guid}/index",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PlaybookEmbeddingEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/prompts",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PromptLibraryEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/prompts",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PromptLibraryEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ai/prompts/{id}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PromptLibraryEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/prompts/{id}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PromptLibraryEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/ai/prompts/{id}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PromptLibraryEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/prompts/{id}/render",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PromptLibraryEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/admin/bulk-index",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RagEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/rag/admin/bulk-index/{jobId}/status",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RagEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/embedding",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RagEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/enqueue-indexing",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RagEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/index",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RagEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/index-file",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RagEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/index/batch",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RagEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/search",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RagEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/send-to-index",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RagEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ai/rag/source/{sourceDocumentId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RagEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ai/rag/{documentId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RagEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/scopes/actions",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ScopeEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/scopes/knowledge",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ScopeEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/scopes/skills",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ScopeEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/scopes/tools",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ScopeEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/search",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "SemanticSearchEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/search/count",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "SemanticSearchEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/search/records",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RecordSearchEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/tools/handlers",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "HandlerEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/visualization/related-from-content",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "VisualizationEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/visualization/related/{documentId:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "VisualizationEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/communications/accounts/{id:guid}/verify",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "CommunicationEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/communications/incoming-webhook",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "CommunicationEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/communications/send",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "CommunicationEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/communications/send-bulk",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "CommunicationEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/communications/{id:guid}/status",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "CommunicationEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/config/client",
+      "observed_status": 200,
+      "expected": "401 (auth required)",
+      "note": "open (intentionally anonymous; verify in code review)",
+      "file": "ConfigEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/containers",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DocumentsEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/containers",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DocumentsEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/containers/{containerId}/drive",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DocumentsEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/containers/{containerId}/files/{*path}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "UploadEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/containers/{containerId}/upload",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "UploadEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/permissions/batch",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PermissionsEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/{documentId:guid}/analyze",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DocumentOperationsEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/{documentId:guid}/checkin",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DocumentOperationsEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/{documentId:guid}/checkout",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DocumentOperationsEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId:guid}/checkout-status",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DocumentOperationsEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/{documentId:guid}/discard",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DocumentOperationsEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/content",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FileAccessEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/download",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FileAccessEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/office",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FileAccessEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/open-links",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FileAccessEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/permissions",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "PermissionsEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/preview",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FileAccessEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/preview-url",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FileAccessEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/view-url",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FileAccessEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/drives/{driveId}/children",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DocumentsEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/drives/{driveId}/items/{itemId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DocumentsEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/drives/{driveId}/items/{itemId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DocumentsEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/drives/{driveId}/items/{itemId}/content",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DocumentsEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/drives/{driveId}/upload",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DocumentsEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/finance/invoice-review/confirm",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FinanceEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/finance/invoice-review/reject",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FinanceEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/finance/invoices/search",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FinanceEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/finance/matters/{matterId:guid}/recalculate",
+      "observed_status": 500,
+      "expected": "401 (auth required)",
+      "note": "server-error (route IS registered; returns ProblemDetails 500 on unauth probe \u2014 internal failure with no auth)",
+      "file": "FinanceRollupEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/finance/matters/{matterId:guid}/summary",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FinanceEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/finance/projects/{projectId:guid}/recalculate",
+      "observed_status": 500,
+      "expected": "401 (auth required)",
+      "note": "server-error (route IS registered; returns ProblemDetails 500 on unauth probe \u2014 internal failure with no auth)",
+      "file": "FinanceRollupEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/matters/{matterId:guid}/recalculate-grades",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ScorecardCalculatorEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "UserEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/me/capabilities",
+      "observed_status": 400,
+      "expected": "401 (auth required)",
+      "note": "ok-400 (model binding failure prior to auth \u2014 route IS registered)",
+      "file": "UserEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/navmap/{childEntity}/{relationship}/lookup",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "NavMapEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/navmap/{entityLogicalName}/entityset",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "NavMapEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/navmap/{parentEntity}/{relationship}/collection",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "NavMapEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/obo/containers/{id}/children",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "OBOEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/obo/containers/{id}/files/{*path}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "OBOEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/obo/drives/{driveId}/items/{itemId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "OBOEndpoints.cs"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/obo/drives/{driveId}/items/{itemId}",
+      "observed_status": 400,
+      "expected": "401 (auth required)",
+      "note": "ok-400 (model binding failure prior to auth \u2014 route IS registered)",
+      "file": "OBOEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/obo/drives/{driveId}/items/{itemId}/content",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "OBOEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/obo/drives/{driveId}/upload-session",
+      "observed_status": 400,
+      "expected": "401 (auth required)",
+      "note": "ok-400 (model binding failure prior to auth \u2014 route IS registered)",
+      "file": "OBOEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/obo/upload-session/chunk",
+      "observed_status": 400,
+      "expected": "401 (auth required)",
+      "note": "ok-400 (model binding failure prior to auth \u2014 route IS registered)",
+      "file": "OBOEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/office/health",
+      "observed_status": 200,
+      "expected": "401 (auth required)",
+      "note": "open (intentionally anonymous; verify in code review)",
+      "file": "OfficeEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/office/jobs/{jobId:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "OfficeEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/office/jobs/{jobId:guid}/stream",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "OfficeEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/office/quickcreate/{entityType}",
+      "observed_status": 404,
+      "expected": "401 (auth required)",
+      "note": "candidate-regression (route returns Kestrel 404 with no body; expected 401)",
+      "file": "OfficeEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/office/recent",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "OfficeEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/office/save",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "OfficeEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/office/save-debug",
+      "observed_status": 404,
+      "expected": "401 (auth required)",
+      "note": "expected-404 (dev-only endpoint; only registered when env.IsDevelopment())",
+      "file": "OfficeEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/office/search/documents",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "OfficeEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/office/search/entities",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "OfficeEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/office/share/attach",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "OfficeEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/office/share/links",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "OfficeEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{projectId:guid}/recalculate-grades",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ScorecardCalculatorEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/registration/demo-request",
+      "observed_status": 400,
+      "expected": "401 (auth required)",
+      "note": "ok-400 (model binding failure prior to auth \u2014 route IS registered)",
+      "file": "RegistrationEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/registration/requests/{id:guid}/approve",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RegistrationEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/registration/requests/{id:guid}/reject",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RegistrationEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reporting/embed-token",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ReportingEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/reporting/export",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ReportingEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reporting/reports",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ReportingEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/reporting/reports",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ReportingEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/reporting/reports/{reportId:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ReportingEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reporting/reports/{reportId:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ReportingEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/reporting/reports/{reportId:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ReportingEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reporting/status",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ReportingEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resilience/circuits",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ResilienceEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resilience/circuits/{serviceName}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ResilienceEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resilience/health",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ResilienceEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/audit",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "AuditLogEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/bulk/delete",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "BulkOperationEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/bulk/permissions",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "BulkOperationEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/bulk/{operationId}/status",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "BulkOperationEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/businessunits",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "BusinessUnitEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/configs",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ConfigEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/configs",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ConfigEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/spe/configs/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ConfigEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/configs/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ConfigEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/spe/configs/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ConfigEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{containerId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerEndpoints.cs"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/spe/containers/{containerId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{containerId}/activate",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{containerId}/columns",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerColumnEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{containerId}/columns",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerColumnEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/spe/containers/{containerId}/columns/{columnId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerColumnEndpoints.cs"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/spe/containers/{containerId}/columns/{columnId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerColumnEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{containerId}/customproperties",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerCustomPropertyEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/spe/containers/{containerId}/customproperties",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerCustomPropertyEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{containerId}/lock",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{containerId}/permissions",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerPermissionEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{containerId}/permissions",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerPermissionEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/spe/containers/{containerId}/permissions/{permissionId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerPermissionEndpoints.cs"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/spe/containers/{containerId}/permissions/{permissionId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerPermissionEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{containerId}/unlock",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{id}/folders",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerItemEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{id}/items",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerItemEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{id}/items/upload",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerItemEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/spe/containers/{id}/items/{itemId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerItemEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{id}/items/{itemId}/content",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerItemEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{id}/items/{itemId}/preview",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerItemEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{id}/items/{itemId}/share",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerItemEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{id}/items/{itemId}/thumbnails",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerItemEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{id}/items/{itemId}/versions",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerItemEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containertypes",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerTypeEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containertypes",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerTypeEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containertypes/{typeId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerTypeEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containertypes/{typeId}/consumers",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ConsumingTenantEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containertypes/{typeId}/consumers",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ConsumingTenantEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/spe/containertypes/{typeId}/consumers/{appId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ConsumingTenantEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/spe/containertypes/{typeId}/consumers/{appId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ConsumingTenantEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containertypes/{typeId}/permissions",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerTypePermissionEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containertypes/{typeId}/register",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerTypeEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/spe/containertypes/{typeId}/settings",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ContainerTypeSettingsEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/dashboard/metrics",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DashboardEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/dashboard/refresh",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DashboardEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/environments",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EnvironmentEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/environments",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EnvironmentEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/spe/environments/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EnvironmentEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/environments/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EnvironmentEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/spe/environments/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EnvironmentEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/recyclebin",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RecycleBinEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/spe/recyclebin/{containerId}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RecycleBinEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/recyclebin/{containerId}/restore",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RecycleBinEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/search/containers",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "SearchContainersEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/search/items",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "SearchItemsEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/security/alerts",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "SecurityEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/security/score",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "SecurityEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/upload-session/chunk",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "UploadEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/containers/{containerId}/documents",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DataverseDocumentsEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/documents",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DataverseDocumentsEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/documents",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DataverseDocumentsEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/documents/{id}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DataverseDocumentsEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/documents/{id}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DataverseDocumentsEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/documents/{id}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DataverseDocumentsEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/documents/{id}/download",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "DataverseDocumentsEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/emails/admin/dlq",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EmailEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/emails/admin/dlq/redrive",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EmailEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/emails/admin/dlq/{sequenceNumber:long}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EmailEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/emails/webhook-trigger",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EmailEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/emails/{emailId:guid}/association-preview",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EmailEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/emails/{emailId:guid}/document-status",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EmailEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/emails/{emailId:guid}/save-as-document",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EmailEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/events",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EventEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/events",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EventEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/events/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EventEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/events/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EventEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/events/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EventEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/events/{id:guid}/cancel",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EventEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/events/{id:guid}/complete",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EventEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/events/{id:guid}/logs",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "EventEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/external-access/close-project",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ExternalAccessEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/external-access/grant",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "GrantExternalAccessEndpoint.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/external-access/invite",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "InviteExternalUserEndpoint.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/external-access/provision-project",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ProvisionProjectEndpoint.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/external-access/revoke",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "RevokeExternalAccessEndpoint.cs"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/external/events/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ExternalProjectDataEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/external/me",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ExternalAccessEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/external/projects",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ExternalProjectDataEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/external/projects/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ExternalProjectDataEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/external/projects/{id:guid}/contacts",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ExternalProjectDataEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/external/projects/{id:guid}/documents",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ExternalProjectDataEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/external/projects/{id:guid}/events",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ExternalProjectDataEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/external/projects/{id:guid}/events",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ExternalProjectDataEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/external/projects/{id:guid}/organizations",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "ExternalProjectDataEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/field-mappings/profiles",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FieldMappingEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/field-mappings/profiles/{sourceEntity}/{targetEntity}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FieldMappingEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/field-mappings/push",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FieldMappingEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/field-mappings/validate",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "FieldMappingEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/work-assignments",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkAssignmentEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/ai/summary",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceAiEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/briefing",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/calculate-scores",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/events/{id:guid}/scores",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/files/extract-text",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceFileEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/files/summarize",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceFileEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/health",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/layouts",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceLayoutEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/layouts",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceLayoutEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/layouts/default",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceLayoutEndpoints.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workspace/layouts/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceLayoutEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/layouts/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceLayoutEndpoints.cs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workspace/layouts/{id:guid}",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceLayoutEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/matters/ai-summary",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceMatterEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/matters/pre-fill",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceMatterEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/portfolio",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceEndpoints.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/projects/pre-fill",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceProjectEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/sections",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceLayoutEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/templates",
+      "observed_status": 401,
+      "expected": "401 (auth required)",
+      "note": "ok",
+      "file": "WorkspaceLayoutEndpoints.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/healthz",
+      "observed_status": 200,
+      "expected": "200 (open)",
+      "note": "open",
+      "file": "EndpointMappingExtensions.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/healthz/dataverse",
+      "observed_status": 200,
+      "expected": "200 (open)",
+      "note": "open",
+      "file": "EndpointMappingExtensions.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/healthz/dataverse/crud",
+      "observed_status": 200,
+      "expected": "200 (open)",
+      "note": "open",
+      "file": "EndpointMappingExtensions.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/healthz/dataverse/doc/{id}",
+      "observed_status": 200,
+      "expected": "200 (open)",
+      "note": "open",
+      "file": "EndpointMappingExtensions.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/ping",
+      "observed_status": 200,
+      "expected": "200 (open)",
+      "note": "open",
+      "file": "EndpointMappingExtensions.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/status",
+      "observed_status": 200,
+      "expected": "200 (open)",
+      "note": "open",
+      "file": "EndpointMappingExtensions.cs"
+    }
+  ],
+  "interpretation_notes": {
+    "method": "Unauthenticated probes. A 401 confirms the route is registered. A 404 is a candidate regression unless explainable.",
+    "probe_strategy": "POST/PUT/PATCH sent with empty `application/json` body; 404 responses retried with `multipart/form-data` to handle file-upload endpoints.",
+    "param_substitution": "GUID-constrained params -> 00000000-0000-0000-0000-000000000000; long/int -> 1; catch-all (*path) -> 'test/path'; other -> 'test-id'.",
+    "expected_open_routes": [
+      "/healthz",
+      "/healthz/dataverse",
+      "/healthz/dataverse/crud",
+      "/healthz/dataverse/doc/{id}",
+      "/ping",
+      "/status"
+    ],
+    "unexpected_200_routes": [
+      "/api/config/client",
+      "/api/office/health",
+      "/api/admin/builder-scopes/status"
+    ],
+    "known_dev_only_routes": [
+      "/api/office/save-debug"
+    ],
+    "phase4_usage": "Re-run the same probe after each Phase 4 candidate deployment. Compare against this baseline to detect any route that newly returns 404 (= route dropped by deploy) or that flips from 401 to 200/500 (= auth regression)."
+  }
+}

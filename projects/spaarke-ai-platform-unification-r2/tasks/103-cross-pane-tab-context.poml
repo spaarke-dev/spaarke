@@ -1,0 +1,50 @@
+<task id="AIPU2-103" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Cross-pane: Workspace tab change updates Context pane</title>
+    <phase>5</phase>
+    <tags>frontend, integration, cross-pane</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPU2-077, AIPU2-078</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    When the user switches tabs in the Workspace pane, the Context pane should automatically
+    adapt to show contextual information relevant to the newly active widget. For example,
+    switching to a document tab should show citation sources in context; switching to a
+    search tab should show search filters. This keeps the three-pane layout coherent and
+    reduces cognitive overhead. Depends on WorkspaceTabManager (AIPU2-077) and
+    ContextPaneController (AIPU2-078).
+  </prompt>
+  <role>Frontend developer experienced with tab management and context-aware UI patterns.</role>
+  <goal>
+    Switching workspace tabs dispatches a TabChangedEvent via PaneEventBus. ContextPaneController
+    receives the event and switches the active context widget to match the metadata of the
+    newly active workspace tab. The transition is smooth and does not reset any ongoing
+    interaction in ConversationPane.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>src/solutions/SpaarkeAi/src/components/WorkspacePane</file>
+      <file>src/solutions/SpaarkeAi/src/components/ContextPane</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Define TabChangedEvent on PaneEventBus: { type: 'tab-changed', tabId: string, widgetType: string, widgetMetadata: Record&lt;string, unknown&gt; }.</step>
+    <step>In WorkspaceTabManager (AIPU2-077), dispatch TabChangedEvent via PaneEventBus whenever the active tab changes, including the widget type and relevant metadata (e.g. documentId, searchQuery).</step>
+    <step>In ContextPaneController (AIPU2-078), subscribe to TabChangedEvent. Implement a contextWidgetMap: { [widgetType]: ContextWidgetFactory } that maps workspace widget types to their corresponding context widgets.</step>
+    <step>On TabChangedEvent, look up the appropriate context widget from contextWidgetMap, mount it (or make it active if already mounted), and pass widgetMetadata as props.</step>
+    <step>Ensure the context widget transition does not affect ConversationPane state — the event must not propagate beyond ContextPaneController.</step>
+    <step>Handle the case where no context widget mapping exists for a given widgetType: show a default "No context available" placeholder rather than erroring.</step>
+    <step>Test: open multiple workspace tabs of different widget types, switch between them, verify Context pane updates each time with the correct widget and metadata.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Every workspace tab switch dispatches TabChangedEvent via PaneEventBus.</criterion>
+    <criterion>ContextPaneController switches to the correct context widget for each widgetType.</criterion>
+    <criterion>Widget metadata (e.g. documentId) is passed as props to the context widget.</criterion>
+    <criterion>ConversationPane state (messages, input) is unaffected by tab changes.</criterion>
+    <criterion>Unknown widget types show a graceful "No context available" placeholder.</criterion>
+    <criterion>Rapid tab switching does not cause stale widget renders (event ordering is correct).</criterion>
+  </acceptance-criteria>
+</task>

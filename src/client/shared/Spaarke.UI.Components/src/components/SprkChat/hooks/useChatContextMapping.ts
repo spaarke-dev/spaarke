@@ -7,11 +7,11 @@
  * Used to populate QuickActionChips and SlashCommandMenu when SprkChat is
  * opened alongside an analysis output in the AnalysisWorkspace Code Page.
  *
- * Follows the same auth and fetching pattern as useChatPlaybooks.ts:
- * - Accepts apiBaseUrl + accessToken as parameters
- * - Uses fetch() directly with Authorization: Bearer {token} header
- * - Normalises the base URL to remove trailing slashes or /api suffix
- * - Only fetches when analysisId and playbookId (or analysisId alone) change
+ * Auth v2 (D-AUTH-1, D-AUTH-7):
+ * - Accepts `authenticatedFetch` from the caller instead of a snapshotted
+ *   `accessToken: string`. The fetch function attaches a fresh Bearer token,
+ *   X-Tenant-Id, and 401 retry internally.
+ * - Same pattern as `useChatPlaybooks` and `useChatSession`.
  *
  * @see ADR-012 - Shared Component Library (no Xrm/ComponentFramework imports)
  * @see ADR-021 - Fluent UI v9
@@ -20,6 +20,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import type { AuthenticatedFetchFn } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Response types (mirror AnalysisChatContextResponse.cs)
@@ -139,8 +140,12 @@ interface UseChatContextMappingOptions {
   playbookId: string | undefined;
   /** Base URL for the BFF API. */
   apiBaseUrl: string;
-  /** Bearer token for API authentication. */
-  accessToken: string;
+  /**
+   * Authenticated fetch function (typically from `@spaarke/auth` or `useAuth()`).
+   * MUST attach a fresh Bearer token on every call. Replaces the previous
+   * `accessToken: string` snapshot prop.
+   */
+  authenticatedFetch: AuthenticatedFetchFn;
 }
 
 export interface IUseChatContextMappingResult {
@@ -167,9 +172,8 @@ export interface IUseChatContextMappingResult {
  * Re-fetches automatically when `analysisId` or `playbookId` changes, ensuring
  * QuickActionChips update when the user switches playbooks (spec FR-08).
  *
- * Auth follows useChatPlaybooks.ts pattern:
- * - Sends `Authorization: Bearer {accessToken}` header
- * - Extracts `X-Tenant-Id` from the JWT tid claim when present
+ * Auth v2 (D-AUTH-1): Uses the caller-provided `authenticatedFetch` which handles
+ * Bearer attachment, X-Tenant-Id, and 401 retry internally.
  *
  * @example
  * ```tsx
@@ -177,14 +181,14 @@ export interface IUseChatContextMappingResult {
  *   analysisId,
  *   playbookId,
  *   apiBaseUrl: "https://spe-api-dev-67e2xz.azurewebsites.net",
- *   accessToken: token,
+ *   authenticatedFetch, // from @spaarke/auth / useAuth()
  * });
  * ```
  */
 export function useChatContextMapping(
   options: UseChatContextMappingOptions
 ): IUseChatContextMappingResult {
-  const { analysisId, playbookId, apiBaseUrl, accessToken } = options;
+  const { analysisId, playbookId, apiBaseUrl, authenticatedFetch } = options;
 
   const [contextMapping, setContextMapping] = useState<IAnalysisChatContextResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -192,21 +196,6 @@ export function useChatContextMapping(
 
   // Normalise URL — remove trailing slash
   const baseUrl = apiBaseUrl.replace(/\/+$/, '');
-
-  /**
-   * Extract tenant ID from JWT for X-Tenant-Id header.
-   * Matches the pattern in useChatPlaybooks.ts.
-   */
-  const extractTenantId = (token: string): string | null => {
-    try {
-      const parts = token.split('.');
-      if (parts.length !== 3) return null;
-      const payload = JSON.parse(atob(parts[1]));
-      return payload.tid || null;
-    } catch {
-      return null;
-    }
-  };
 
   const fetchContextMapping = useCallback(async (): Promise<void> => {
     // Skip when analysisId is absent — SprkChat operates in generic mode
@@ -221,16 +210,11 @@ export function useChatContextMapping(
     setError(null);
 
     try {
-      const tenantId = extractTenantId(accessToken);
       const url = `${baseUrl}/api/ai/chat/context-mappings/analysis/${encodeURIComponent(analysisId)}`;
 
-      const response = await fetch(url, {
+      const response = await authenticatedFetch(url, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-          ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
-        },
+        headers: { 'Content-Type': 'application/json' },
       });
 
       if (response.status === 404) {
@@ -257,7 +241,7 @@ export function useChatContextMapping(
       setIsLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseUrl, accessToken, analysisId, playbookId]);
+  }, [baseUrl, authenticatedFetch, analysisId, playbookId]);
 
   // Fetch on mount and whenever analysisId or playbookId changes (spec FR-08)
   useEffect(() => {

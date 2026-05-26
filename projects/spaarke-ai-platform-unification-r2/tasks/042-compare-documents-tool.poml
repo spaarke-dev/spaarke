@@ -1,0 +1,52 @@
+<task id="AIPU2-042" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build CompareDocumentsTool (structured diff between two documents)</title>
+    <phase>2D</phase>
+    <tags>bff-api, ai-tool, documents</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-006</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build a CompareDocumentsTool AI tool handler that accepts two document IDs, fetches both
+    documents from SharePoint Embedded via the SpeFileStore facade, extracts their text content,
+    and produces a structured diff output broken down by document section. The diff must classify
+    changes as additions, deletions, or modifications and group them per section. The output
+    format must be suitable for rendering in the RedlineViewerWidget without further transformation.
+    Follow the IAiToolHandler pattern and register via AIFunctionFactory.
+  </prompt>
+  <role>Senior .NET developer familiar with the SpeFileStore facade (ADR-007), text diff algorithms, and the Spaarke AI Tool Framework.</role>
+  <goal>
+    Given two valid document IDs, CompareDocumentsTool returns a structured DocumentDiff
+    result that the RedlineViewerWidget can render directly. The diff correctly identifies
+    additions, deletions, and modifications per section. Auth is enforced — both documents
+    must be accessible to the caller.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DocumentSearchTools.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ADR-007-spefilestore.md to understand SpeFileStore usage constraints (no Graph SDK types above the facade). Read DocumentSearchTools.cs as a reference for tool registration and SpeFileStore integration patterns.</step>
+    <step>Create CompareDocumentsTool.cs in src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/. Implement as an IAiToolHandler following the DocumentSearchTools pattern.</step>
+    <step>Define tool inputs: documentIdA (string, Guid format), documentIdB (string, Guid format), compareMode (enum: FullDocument/SectionBySection, default SectionBySection).</step>
+    <step>Implement document fetch: call SpeFileStore.GetDocumentTextAsync for each document ID. Run both fetches in parallel (Task.WhenAll). If either fetch fails due to auth (403/404), return a structured error result indicating which document was inaccessible — do not throw.</step>
+    <step>Implement text segmentation: split each document's text into sections using common heading markers (numbered headings, ALL CAPS lines, "Section X" prefixes). Fall back to paragraph-based segmentation if no headings are detected.</step>
+    <step>Implement structured diff: for each section pair (aligned by heading similarity), compute word-level diff. Classify each change as Addition (in B, not in A), Deletion (in A, not in B), or Modification (changed text in both). Use a diffing algorithm (e.g., Myers diff or a simple LCS approach — do not import external NuGet packages; implement the LCS inline).</step>
+    <step>Define DocumentDiff record: DocumentIdA, DocumentIdB, ComparedAt (DateTimeOffset), TotalChanges (int), Sections (list of SectionDiff: sectionTitle, changeType (Added/Removed/Modified/Unchanged), changesInSection (list of DiffChange: changeType, textA, textB)).</step>
+    <step>Register CompareDocumentsTool via AIFunctionFactory with descriptive XML doc comments explaining inputs and output structure for LLM tool-selection quality.</step>
+    <step>Write unit tests: (a) two identical documents return zero changes, (b) addition in B detected correctly, (c) deletion in A detected correctly, (d) modification (changed word) detected correctly, (e) inaccessible document A returns structured error, (f) both fetches run in parallel (Task.WhenAll verified via mock timing).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>CompareDocumentsTool fetches both documents in parallel using Task.WhenAll.</criterion>
+    <criterion>DocumentDiff output contains section-level grouping with per-section change lists.</criterion>
+    <criterion>Each DiffChange is classified as Addition, Deletion, or Modification — not a freeform string.</criterion>
+    <criterion>An inaccessible document returns a structured error result (not an exception) identifying which document failed and why.</criterion>
+    <criterion>No external diff NuGet packages are added — diff logic is implemented inline.</criterion>
+    <criterion>Tool is registered via AIFunctionFactory and appears in the session tool roster.</criterion>
+    <criterion>All unit tests pass (dotnet test).</criterion>
+  </acceptance-criteria>
+</task>

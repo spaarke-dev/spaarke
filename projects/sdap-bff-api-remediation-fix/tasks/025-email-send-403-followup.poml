@@ -1,0 +1,142 @@
+<task id="025" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Email-send 403 follow-up — Graph "Access is denied" persists after Mail.Send grant + Exchange policy + App Service restart</title>
+    <status>not-started</status>
+    <estimated-effort>30-60 minutes (diagnostic-first)</estimated-effort>
+    <assigned>AI agent + operator (auth changes)</assigned>
+    <tags>bff-api, communications, auth-r2, graph-mail, 403</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Diagnostic-first; depends on live BFF state + Exchange admin</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    POST `/api/communications/send` returns 403 from Graph with message
+    "Access is denied. Check credentials and try again." after every prerequisite
+    has been satisfied (Mail.Send granted to UAMI, Exchange ApplicationAccessPolicy
+    with Test-ApplicationAccessPolicy returning Granted for both target mailboxes,
+    App Service restarted to invalidate any cached MI tokens, >30 min Exchange
+    propagation elapsed). Something is still blocking — diagnostic-first.
+  </prompt>
+
+  <role>Microsoft Graph / Exchange app-only auth diagnostician.</role>
+
+  <goal>
+    Identify the actual blocker that's producing the 403 from Graph sendMail for
+    UAMI `mi-bff-api-dev` (`5967251e-171c-46fe-a6c2-ef843c90309d`) calling
+    `/users/mailbox-central@spaarke.com/sendMail`, then resolve it. End state:
+    POST /api/communications/send returns 2xx for the SharedMailbox SendMode path.
+  </goal>
+
+  <inputs>
+    <file purpose="server-code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (SendAsSharedMailboxAsync, line 173 — graphClient.Users[senderResult.Email].SendMail.PostAsync)</file>
+    <file purpose="server-code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs (CreateAppOnlyClient — DefaultAzureCredential path)</file>
+    <file purpose="auth-runbook">docs/guides/auth-deployment-setup.md (§5 Graph grants + §7 Exchange policies)</file>
+    <file purpose="recovery">projects/sdap-bff-api-remediation-fix/current-task.md (2026-05-25 Auth-r2 entries)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="prior-work-2026-05-25">All prerequisites already done — do NOT re-grant Mail.Send or recreate the Exchange policy. Diagnose what's actually returning 403 before changing anything.</constraint>
+    <constraint source="user">Move past this in current session; resume diagnostic next time.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/current-task.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      ## What's already been done (2026-05-25)
+
+      1. UAMI `mi-bff-api-dev` granted Mail.Send (role id `b633e1c5-b582-4048-a93e-9f11b44c7e96`) via `az rest POST /v1.0/servicePrincipals/9fd47efb-7962-492b-ac44-e5ccd0268ebb/appRoleAssignments`. Grant verified — `az rest GET .../appRoleAssignments` returns Mail.Send + 5 other roles granted same day.
+
+      2. Exchange Online ApplicationAccessPolicy created by operator: `New-ApplicationAccessPolicy -AppId 5967251e-171c-46fe-a6c2-ef843c90309d -PolicyScopeGroupId spaarke-central-email@spaarke.com -AccessRight RestrictAccess`. ScopeIdentity = "Spaarke Email Access20260310215505". `Test-ApplicationAccessPolicy` returned `Granted` for:
+         - mailbox-central@spaarke.com (target sender, per `Communication__DefaultMailbox` App Setting)
+         - demo@demo.spaarke.com
+
+      3. App Service `spaarke-bff-dev` restarted via `az webapp restart` — healthz=200 confirmed. Forces re-acquisition of MI tokens; any pre-grant cached tokens are invalidated.
+
+      4. Waited 1+ hour for Exchange propagation (Microsoft documents up to 30 min).
+
+      Despite all of this, POST `/api/communications/send` returns 403 with Graph error message "Access is denied. Check credentials and try again." This message is GENERIC across many Graph 403 codes — the actual `Error.Code` from Graph would identify the exact cause.
+
+      ## Likely root causes to investigate (ordered by probability)
+
+      ### Hypothesis 1 — Wrong AppId in Exchange policy (most likely)
+      The Exchange policy was created with `-AppId 5967251e-...` which is the UAMI's **client (application) ID**. BUT for some Microsoft tenants, ApplicationAccessPolicy expects the **service principal's appId**, which for UAMI is the same as clientId — UNLESS the policy needs the BFF API app reg's appId (`1e40baad-e065-4aea-a8d4-4b7ab273458c`) instead. Sometimes Exchange Online resolves on a different SP than expected.
+
+      **Verify**: `Get-ApplicationAccessPolicy | Where-Object AppId -eq "5967251e-171c-46fe-a6c2-ef843c90309d"` — confirm it returned the expected one in step 2 above. Also try `Test-ApplicationAccessPolicy -AppId 1e40baad-... -Identity mailbox-central@spaarke.com` to see if BFF app reg also has implicit policy.
+
+      ### Hypothesis 2 — Graph SDK token cache survives App Service restart
+      `DefaultAzureCredential` chains through ManagedIdentityCredential. Tokens are cached PER-PROCESS but the underlying MSAL cache may write to a shared location on Linux App Service. Restart should clear it, but verify.
+
+      **Verify**: tail App Service logs while reproducing the 403:
+      ```bash
+      az webapp log tail --name spaarke-bff-dev --resource-group rg-spaarke-dev --subscription 484bc857-3802-427f-9ea5-ca47b43db0f0
+      ```
+      Look for the `ODataError` log entry — it has the actual `Error.Code` (e.g., `ErrorAccessDenied`, `Authorization_RequestDenied`, `ApplicationThrottled`).
+
+      ### Hypothesis 3 — Different mailbox identifier mismatch
+      `Communication__DefaultMailbox = mailbox-central@spaarke.com` (SMTP) but the policy might be scoped via the group's **UPN** or the mailbox's **objectId** rather than primary SMTP. The Graph call uses the SMTP form: `/users/{smtp}/sendMail`.
+
+      **Verify**: try a different mailbox SMTP form to the same group: `Test-ApplicationAccessPolicy -AppId 5967251e-... -Identity <objectId-of-mailbox>`. Compare with the SMTP form's result.
+
+      ### Hypothesis 4 — Approved sender validator on the BFF rejecting first
+      `ApprovedSenderValidator` (referenced from CommunicationService.cs) runs before Graph. If it rejects, the BFF returns 403 with a wrapped message. But the error message format here ("Graph API error: Access is denied...") matches Graph's response shape, not the validator's. Still worth ruling out by checking the BFF logs for the validator's debug output.
+
+      ### Hypothesis 5 — Tenant-level policy or conditional access
+      Tenant admin may have a Microsoft 365 admin block on app-only Mail.Send for non-RBAC apps. Less likely (would have blocked Mail.Send from working from the start), but verify in Entra Conditional Access policies.
+
+      ## Diagnostic order
+
+      1. **Read the actual Graph error code** via App Service logs (highest signal, lowest effort). 30 sec.
+      2. **Direct-test Graph call** by bypassing BFF — use az cli to acquire a UAMI token and POST sendMail directly:
+         ```bash
+         # From within an Azure compute context where UAMI is attached (or simulate with az):
+         curl -X POST "https://graph.microsoft.com/v1.0/users/mailbox-central@spaarke.com/sendMail" \
+           -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+           -d '{"message":{"subject":"test","body":{"contentType":"Text","content":"test"},"toRecipients":[{"emailAddress":{"address":"ralph.schroeder@spaarke.com"}}]}}'
+         ```
+         If this also 403s with the same code, the issue is at Exchange/Graph not the BFF. If it 200s, the BFF has a bug.
+      3. **Re-verify Exchange policy** with elevated detail: `Get-ApplicationAccessPolicy -Identity "..." | Format-List *` to see all fields.
+
+      Do NOT take corrective action until step 1 returns a specific Error.Code — the message string alone has too many possible causes.
+    </background>
+    <dependencies>
+      <dependency task="023" status="complete">DI-singleton TokenCredential refactor (server uses UAMI for ForApp Graph calls)</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Tail App Service logs: `az webapp log tail --name spaarke-bff-dev --resource-group rg-spaarke-dev --subscription 484bc857-3802-427f-9ea5-ca47b43db0f0`. Have operator retry email send. Capture the ODataError entry — note the Error.Code, the principal claim's `appid` (should be `5967251e-...`), and the Graph URL hit.</step>
+    <step order="2">Based on the Error.Code, choose the right hypothesis: ErrorAccessDenied → likely Exchange policy not effective for UAMI; Authorization_RequestDenied → likely Graph role not granted (re-verify); ApplicationThrottled → unrelated rate-limit issue; other → investigate.</step>
+    <step order="3">If Hypothesis 1 (wrong AppId): re-run `Get-ApplicationAccessPolicy | Format-List` to inspect the policy; if needed, also create a policy for the BFF API app reg (`1e40baad-...`) — but this duplicates auth and isn't ideal.</step>
+    <step order="4">If Hypothesis 2 (cache): try a 2nd restart, or scale-out + scale-in, or modify App Settings to force config reload.</step>
+    <step order="5">If Hypothesis 3 (mailbox identifier): adjust either Communication__DefaultMailbox or the group membership.</step>
+    <step order="6">If Hypothesis 4 (BFF validator): add Debug-level log to ApprovedSenderValidator and re-test.</step>
+    <step order="7">After fix verified: append the root cause + resolution to docs/guides/auth-deployment-setup.md §7 as a troubleshooting entry, so future MI/Exchange policy changes can refer to it.</step>
+  </steps>
+
+  <tools>
+    <tool name="az">webapp log tail; rest POST/GET</tool>
+    <tool name="powershell">EXO commands (operator)</tool>
+    <tool name="curl">direct Graph sendMail probe</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">Diagnostic findings + root cause + fix applied appended to current-task.md decisions log</output>
+    <output type="docs">docs/guides/auth-deployment-setup.md §7 troubleshooting addendum</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/communications/send returns 2xx for default SharedMailbox SendMode against mailbox-central@spaarke.com</criterion>
+    <criterion testable="true">Same path works for demo@demo.spaarke.com</criterion>
+    <criterion testable="true">Root cause + resolution documented in current-task.md and auth-deployment-setup.md</criterion>
+  </acceptance-criteria>
+</task>

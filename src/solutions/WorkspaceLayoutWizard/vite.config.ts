@@ -14,6 +14,9 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+    // Prefer .ts/.tsx over .js so stale tsc-emit siblings (if any escape
+    // .gitignore) never silently shadow source. See Task 112 (2026-05-22).
+    extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs", ".jsx", ".json"],
   },
   build: {
     // Output to dist folder for deployment

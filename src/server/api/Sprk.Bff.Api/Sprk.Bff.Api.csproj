@@ -8,6 +8,9 @@
     <RootNamespace>Sprk.Bff.Api</RootNamespace>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <UserSecretsId>cbc576fa-6ea6-485a-bb2a-d96130f21f20</UserSecretsId>
+    <!-- FR-A1: framework-dependent linux-x64 publish (App Service is Linux). Trims multi-platform native RIDs. -->
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,6 +26,7 @@
     <!-- Agent Framework (Phase 1 - AIPL-002, AIPL-050) - PINNED: Do NOT upgrade without testing -->
     <!-- Microsoft.Agents.AI 1.0.0-rc1 requires Microsoft.Extensions.AI >= 10.3.0 -->
     <!-- Microsoft.Extensions.AI.OpenAI 10.3.0 requires OpenAI >= 2.8.0 (added in AIPL-050 for IChatClient bridge) -->
+    <PackageReference Include="Azure.AI.Projects" Version="1.0.0-beta.8" />
     <PackageReference Include="Microsoft.Agents.Hosting.AspNetCore" Version="1.0.1" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.3.0" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.3.0" />
@@ -31,6 +35,8 @@
     <PackageReference Include="OpenAI" Version="2.8.0" />
 
     <!-- Azure packages -->
+    <!-- Cosmos DB SDK v3 — AI persistence (AIPU2-030: SessionPersistenceService, AIPU2-033: AuditLogService) -->
+    <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.47.0" />
     <PackageReference Include="Azure.AI.DocumentIntelligence" Version="1.0.0" />
     <!-- Azure.AI.OpenAI 2.8.0-beta.1: restores compat with OpenAI 2.8.0 (2.1.0 threw MissingMethodException on SerializedAdditionalRawData) -->
     <PackageReference Include="Azure.AI.OpenAI" Version="2.8.0-beta.1" />
@@ -82,6 +88,10 @@
 
     <!-- Security: Override vulnerable transitive dependency -->
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
+    <!-- FR-B1 (task 044): patch System.Security.Cryptography.Xml transitive 8.0.1 -> 8.0.3 to fix
+         GHSA-37gx-xxp4-5rgx + GHSA-w3x6-4m5h-cxqf (both HIGH). Pulled in transitively via
+         Microsoft.IdentityModel.Tokens (JWT validation stack); same-major bump per Phase 2 MEDIUM-1. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.3" />
 
     <!-- Document Generation -->
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.4.1" />
@@ -108,6 +118,11 @@
   <!-- Exclude template config from publish - all config comes from Azure App Settings -->
   <ItemGroup>
     <Content Update="appsettings.template.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <!-- FR-A2: exclude JS sourcemaps from publish (keep in source tree for dev debugging) -->
+  <ItemGroup>
+    <Content Update="wwwroot\**\*.js.map" CopyToPublishDirectory="Never" />
   </ItemGroup>
 
 </Project>

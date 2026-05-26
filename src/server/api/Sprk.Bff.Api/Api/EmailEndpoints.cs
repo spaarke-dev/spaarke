@@ -1,9 +1,9 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -65,15 +65,27 @@ public static class EmailEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
-        // POST /api/v1/emails/webhook-trigger - Dataverse webhook receiver (AllowAnonymous with secret validation)
+        // POST /api/v1/emails/webhook-trigger - Dataverse webhook receiver
+        // (AllowAnonymous + HMAC-SHA256 signature validation, task 044).
+        // Dataverse Service Endpoint signs the body and sends the digest in
+        // X-Dataverse-Signature. WebhookSignatureFilter validates it against
+        // EmailProcessing:WebhookSigningKey (constant-time compare). The filter
+        // is fail-closed: if the signing key is unset, every request is rejected.
+        // DEVELOPMENT_MODE bypass has been removed entirely.
         app.MapPost("/api/v1/emails/webhook-trigger", HandleWebhookTriggerAsync)
             .AllowAnonymous()
+            .RequireWebhookSignature(
+                signatureHeader: "X-Dataverse-Signature",
+                signingKeyAccessor: sp => sp.GetRequiredService<IOptions<EmailProcessingOptions>>().Value.WebhookSigningKey,
+                filterName: "Email")
+            .RequireRateLimiting("webhook-graph") // Task AUTHV2-049 — 600/min per source IP (defense in depth)
             .WithName("EmailWebhookTrigger")
             .WithTags("Email Conversion")
-            .WithDescription("Receive Dataverse webhook notifications for new email activities")
+            .WithDescription("Receive Dataverse webhook notifications for new email activities (HMAC-signed)")
             .Produces<WebhookTriggerResponse>(StatusCodes.Status202Accepted)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status429TooManyRequests)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
         // Admin endpoints for email processing management
@@ -165,22 +177,7 @@ public static class EmailEndpoints
                     statusCode: StatusCodes.Status400BadRequest);
             }
 
-            // Step 3: Validate webhook signature
-            var signatureValid = await ValidateWebhookSignatureAsync(
-                request,
-                requestBody,
-                emailOptions.Value.WebhookSecret,
-                logger);
-
-            if (!signatureValid)
-            {
-                logger.LogWarning("Invalid webhook signature for request {TraceId}", traceId);
-                telemetry.RecordWebhookRejected(stopwatch, "invalid_signature");
-                return Results.Problem(
-                    title: "Unauthorized",
-                    detail: "Invalid webhook signature",
-                    statusCode: StatusCodes.Status401Unauthorized);
-            }
+            // Step 3: (Signature validation runs in WebhookSignatureFilter before this handler.)
 
             // Step 4: Parse webhook payload
             // Uses DataverseJsonOptions with BracedGuidConverter to handle Dataverse's "{guid}" format
@@ -277,80 +274,11 @@ public static class EmailEndpoints
         }
     }
 
-    /// <summary>
-    /// Validate the webhook signature from Dataverse.
-    /// Dataverse webhooks can be validated using either:
-    /// 1. X-Dataverse-Signature header (HMAC-SHA256 of request body with shared secret)
-    /// 2. HttpHeader authentication type with custom header
-    /// </summary>
-    private static Task<bool> ValidateWebhookSignatureAsync(
-        HttpRequest request,
-        string requestBody,
-        string? webhookSecret,
-        ILogger logger)
-    {
-        // If no secret configured, skip validation (development mode)
-        if (string.IsNullOrEmpty(webhookSecret))
-        {
-            logger.LogWarning("Webhook secret not configured - skipping signature validation (DEVELOPMENT MODE)");
-            return Task.FromResult(true);
-        }
-
-        // Check for Dataverse WebKey authentication header (authtype=4)
-        // Dataverse sends the WebKey value in x-ms-dynamics-msg-keyvalue header
-        var signature = request.Headers["x-ms-dynamics-msg-keyvalue"].FirstOrDefault();
-
-        // Fallback to X-Dataverse-Signature header (HMAC signature mode)
-        if (string.IsNullOrEmpty(signature))
-        {
-            signature = request.Headers["X-Dataverse-Signature"].FirstOrDefault();
-        }
-
-        // Also check for custom header (development/testing)
-        if (string.IsNullOrEmpty(signature))
-        {
-            signature = request.Headers["X-Webhook-Secret"].FirstOrDefault();
-        }
-
-        if (string.IsNullOrEmpty(signature))
-        {
-            logger.LogWarning("No webhook signature header found");
-            return Task.FromResult(false);
-        }
-
-        // For HttpHeader auth type, just compare secrets directly
-        if (signature == webhookSecret)
-        {
-            return Task.FromResult(true);
-        }
-
-        // For HMAC signature, compute and compare
-        try
-        {
-            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(webhookSecret));
-            var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(requestBody));
-            var computedSignature = Convert.ToBase64String(hash);
-
-            // Dataverse may send with or without "sha256=" prefix
-            var signatureToCompare = signature.StartsWith("sha256=", StringComparison.OrdinalIgnoreCase)
-                ? signature[7..]
-                : signature;
-
-            var isValid = string.Equals(computedSignature, signatureToCompare, StringComparison.Ordinal);
-
-            if (!isValid)
-            {
-                logger.LogWarning("Webhook signature mismatch");
-            }
-
-            return Task.FromResult(isValid);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error validating webhook signature");
-            return Task.FromResult(false);
-        }
-    }
+    // ValidateWebhookSignatureAsync was removed in task 044.
+    // HMAC-SHA256 signature validation is now handled by WebhookSignatureFilter
+    // applied at endpoint registration time. The filter is fail-closed (rejects
+    // 401 if EmailProcessing:WebhookSigningKey is unset) and uses constant-time
+    // comparison via CryptographicOperations.FixedTimeEquals.
 
     /// <summary>
     /// Convert a Dataverse email activity to a document.

@@ -9,7 +9,6 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { SseStreamStatus } from './useSseStream';
 
 /**
  * Extracted entities from document analysis

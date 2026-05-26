@@ -12,7 +12,6 @@ export interface UseVisualizationApiOptions {
   apiBaseUrl: string;
   documentId: string;
   tenantId: string;
-  accessToken?: string;
   threshold?: number;
   limit?: number;
   depth?: number;
@@ -35,7 +34,6 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
     apiBaseUrl,
     documentId,
     tenantId,
-    accessToken,
     threshold = 0.65,
     limit = 25,
     depth = 1,
@@ -79,7 +77,7 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
     setError(null);
 
     try {
-      const result = await service.getRelatedDocuments(documentId, queryParams, accessToken);
+      const result = await service.getRelatedDocuments(documentId, queryParams);
       setNodes(result.nodes);
       setEdges(result.edges);
       setMetadata(result.metadata);
@@ -99,7 +97,7 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
     } finally {
       setIsLoading(false);
     }
-  }, [enabled, documentId, tenantId, service, queryParams, accessToken, threshold, limit, depth]);
+  }, [enabled, documentId, tenantId, service, queryParams, threshold, limit, depth]);
 
   useEffect(() => {
     void fetchData();

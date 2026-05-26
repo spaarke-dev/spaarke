@@ -1,0 +1,48 @@
+<task id="AIPU2-076" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build AiSessionProvider Replacing StandaloneAiProvider</title>
+    <phase>4B</phase>
+    <tags>frontend, state, session</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-074</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    R1's StandaloneAiContext.tsx managed SSE streaming state with a single-subscriber ref pattern:
+    only the last component to subscribe to an SSE event type received it. In a three-pane shell,
+    WorkspacePane and ContextPaneController both need to independently receive workspace_widget and
+    context_update events from the same SSE stream. R2 replaces StandaloneAiProvider with
+    AiSessionProvider which routes SSE events to PaneEventBus channels (multi-subscriber) instead
+    of calling a single ref. AiSessionProvider also owns session state (sessionId, playbookId,
+    entityContext), auth state, and streaming state (isStreaming, turnCount).
+  </prompt>
+  <role>Frontend developer with React context, SSE streaming, and state management experience.</role>
+  <goal>
+    Multiple panes subscribe to SSE events independently without conflicts. AiSessionProvider
+    correctly routes all SSE event types to their PaneEventBus channels. StandaloneAiProvider
+    is fully replaced. Unit tests confirm multi-subscriber independence.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.AI.Context/src/providers/StandaloneAiContext.tsx</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read StandaloneAiContext.tsx in full to understand all state managed (session, auth, streaming), the SSE hook used, and all consumers that need migration.</step>
+    <step>Create src/client/shared/Spaarke.AI.Context/src/providers/AiSessionProvider.tsx.</step>
+    <step>Define AiSessionContext value type: { sessionId: string | null; playbookId: string | null; entityContext: EntityContext | null; isStreaming: boolean; turnCount: number; startSession(playbookId): void; endSession(): void; setEntityContext(ctx): void }.</step>
+    <step>In AiSessionProvider, use the SSE hook to consume the chat stream; for each received SSE event, dispatch to the appropriate PaneEventBus channel instead of calling a single ref: workspace_widget and workspace_action dispatch to 'workspace' channel; context_update and context_highlight to 'context' channel; safety_annotation and capability_change to 'safety' channel; user-facing token events remain on AiSessionContext for SprkChat.</step>
+    <step>Preserve auth state initialization pattern from StandaloneAiContext (resolveRuntimeConfig, ensureAuthInitialized sequence).</step>
+    <step>Export useAiSession() hook for accessing AiSessionContext values.</step>
+    <step>Update all consumers of StandaloneAiContext to use useAiSession() or relevant usePaneEvent hooks instead.</step>
+    <step>Write unit tests: (a) workspace_widget SSE event dispatched to 'workspace' channel; (b) two subscribers on 'workspace' channel both receive the event independently; (c) session state updates correctly on startSession/endSession.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>AiSessionProvider routes SSE events to correct PaneEventBus channels, not single-subscriber refs.</criterion>
+    <criterion>Multiple panes can subscribe to workspace or context channel events independently — both receive every event.</criterion>
+    <criterion>Auth initialization sequence from StandaloneAiContext is preserved.</criterion>
+    <criterion>useAiSession() hook is exported and all StandaloneAiContext consumers are migrated.</criterion>
+    <criterion>Unit tests for multi-subscriber SSE routing and session state transitions pass.</criterion>
+  </acceptance-criteria>
+</task>

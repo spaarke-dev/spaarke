@@ -2,18 +2,32 @@
  * BFF API Adapter for IDataService
  *
  * Bridges the Spaarke BFF API to the platform-agnostic IDataService interface,
- * enabling shared components to perform Dataverse CRUD operations in a Power
- * Pages SPA context where no Xrm object is available. All data operations are
- * routed through the BFF API via an authenticated fetch function.
+ * enabling shared components to perform Dataverse CRUD operations in any
+ * context (Code Page SPA, PCF, Office Add-in) by routing data operations
+ * through the BFF API via an authenticated fetch function.
+ *
+ * Auth model (Spaarke Auth v2 — see ADR-027):
+ *   The caller obtains `authenticatedFetch` from the `useAuth()` hook in
+ *   `@spaarke/auth`. The adapter never sees raw access tokens — token
+ *   acquisition, refresh, and `Authorization` header construction happen
+ *   inside `authenticatedFetch`. This is the only canonical way to call
+ *   the BFF from a Spaarke consumer; do NOT pass an `accessToken` string
+ *   or build your own `Authorization: Bearer ...` headers.
  *
  * @see IDataService in ../../types/serviceInterfaces
  * @see ADR-012 - Shared Component Library
+ * @see ADR-027 - Spaarke Auth Architecture (v2) — function-based contract
  *
  * @example
  * ```typescript
+ * import { useAuth } from "@spaarke/auth";
  * import { createBffDataService } from "@spaarke/ui-components";
  *
- * const dataService = createBffDataService(authenticatedFetch, "https://spe-api-dev-67e2xz.azurewebsites.net");
+ * const { authenticatedFetch } = useAuth();
+ * const dataService = createBffDataService(
+ *   authenticatedFetch,
+ *   "https://spe-api-dev-67e2xz.azurewebsites.net"
+ * );
  * const id = await dataService.createRecord("sprk_matter", { sprk_name: "Acme v. Beta" });
  * const record = await dataService.retrieveRecord("sprk_matter", id);
  * ```
@@ -24,9 +38,11 @@ import type { IDataService } from '../../types/serviceInterfaces';
 /**
  * Authenticated fetch function type.
  *
- * In a Power Pages SPA context, authentication is handled externally
- * (e.g. via MSAL). The caller provides a fetch wrapper that automatically
- * attaches the Bearer token to outgoing requests.
+ * Structurally identical to `AuthenticatedFetchFn` exported by `@spaarke/auth`
+ * (kept as a local type alias so this package has zero runtime dependency on
+ * the auth library). The expected caller is the `authenticatedFetch` returned
+ * by `useAuth()` — it acquires a token, attaches `Authorization: Bearer <jwt>`,
+ * and handles silent refresh on 401.
  */
 export type AuthenticatedFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -37,29 +53,37 @@ export type AuthenticatedFetch = (url: string, init?: RequestInit) => Promise<Re
  * The `authenticatedFetch` parameter handles token acquisition and attachment,
  * keeping this adapter free of auth concerns.
  *
- * @param authenticatedFetch - A fetch wrapper that attaches auth credentials
+ * @param authenticatedFetch - The `authenticatedFetch` returned by `useAuth()` from `@spaarke/auth`.
+ *   Must NOT be a hand-rolled fetch wrapper that materializes a Bearer token —
+ *   the canonical wrapper handles refresh and CAE claims-challenge replay.
  * @param bffBaseUrl - Base URL of the Spaarke BFF API (e.g. "https://spe-api-dev-67e2xz.azurewebsites.net")
  * @returns An IDataService backed by the BFF API
  *
  * @example
  * ```typescript
- * // With MSAL-based authenticated fetch
- * const authFetch: AuthenticatedFetch = async (url, init) => {
- *   const token = await msalInstance.acquireTokenSilent({ scopes: ["api://..."] });
- *   return fetch(url, {
- *     ...init,
- *     headers: { ...init?.headers, Authorization: `Bearer ${token.accessToken}` },
- *   });
- * };
+ * // In a React component or hook:
+ * import { useAuth } from "@spaarke/auth";
+ * import { createBffDataService } from "@spaarke/ui-components";
  *
- * const dataService = createBffDataService(authFetch, "https://spe-api-dev-67e2xz.azurewebsites.net");
+ * function MatterListPanel({ bffBaseUrl }: { bffBaseUrl: string }) {
+ *   const { authenticatedFetch } = useAuth();
  *
- * // Retrieve active matters
- * const matters = await dataService.retrieveMultipleRecords(
- *   "sprk_matter",
- *   "?$select=sprk_name&$filter=statecode eq 0&$top=50"
- * );
- * console.log(`Found ${matters.entities.length} active matters`);
+ *   const dataService = useMemo(
+ *     () => createBffDataService(authenticatedFetch, bffBaseUrl),
+ *     [authenticatedFetch, bffBaseUrl]
+ *   );
+ *
+ *   // Retrieve active matters — no token handling required at the call site
+ *   const loadMatters = useCallback(async () => {
+ *     const matters = await dataService.retrieveMultipleRecords(
+ *       "sprk_matter",
+ *       "?$select=sprk_name&$filter=statecode eq 0&$top=50"
+ *     );
+ *     console.log(`Found ${matters.entities.length} active matters`);
+ *   }, [dataService]);
+ *
+ *   // ...
+ * }
  * ```
  */
 export function createBffDataService(

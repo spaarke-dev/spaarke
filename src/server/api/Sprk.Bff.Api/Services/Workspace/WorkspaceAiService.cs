@@ -3,16 +3,19 @@ using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Workspace.Models;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Workspace;
 
 /// <summary>
 /// Generates AI summaries for Legal Operations Workspace feed items and to-do items.
 /// Fetches the referenced entity from Dataverse and delegates to the AI Playbook
-/// platform (IPlaybookOrchestrationService) for analysis.
+/// platform (via the <see cref="IWorkspacePrefillAi"/> public facade) for analysis.
 /// </summary>
 /// <remarks>
-/// Follows ADR-013: Uses PlaybookService (AI Playbook platform) — NOT direct OpenAI calls.
+/// Follows refined ADR-013 (2026-05-20, task 046): AI playbook execution flows through
+/// the <see cref="IWorkspacePrefillAi"/> public facade — no direct injection of
+/// AI-internal orchestration or completion-client types into CRUD code.
 /// Follows ADR-010: Concrete registration, no unnecessary interface seam.
 ///
 /// The service maps an entity type and entity ID to an <see cref="AiSummaryResponse"/>
@@ -26,9 +29,9 @@ namespace Sprk.Bff.Api.Services.Workspace;
 ///
 /// TODO (future tasks): Replace mock Dataverse fetch with real IDataverseService queries.
 /// </remarks>
-public class WorkspaceAiService
+public sealed class WorkspaceAiService
 {
-    private readonly IPlaybookOrchestrationService _playbookService;
+    private readonly IWorkspacePrefillAi? _prefillAi;
     private readonly IGenericEntityService _genericEntityService;
     private readonly IDocumentDataverseService _documentService;
     private readonly ILogger<WorkspaceAiService> _logger;
@@ -53,18 +56,27 @@ public class WorkspaceAiService
     /// Initializes a new instance of <see cref="WorkspaceAiService"/>.
     /// </summary>
     public WorkspaceAiService(
-        IPlaybookOrchestrationService playbookService,
         IGenericEntityService genericEntityService,
         IDocumentDataverseService documentService,
         ILogger<WorkspaceAiService> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IWorkspacePrefillAi? prefillAi = null)
     {
-        _playbookService = playbookService ?? throw new ArgumentNullException(nameof(playbookService));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _prefillAi = prefillAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
     }
+
+    /// <summary>
+    /// Returns the AI facade or throws if AI features are disabled. Workspace AI summaries
+    /// have no non-AI fallback path — when AI is disabled, the endpoint surface should treat
+    /// the throw as the expected "feature disabled" signal.
+    /// </summary>
+    private IWorkspacePrefillAi RequireAi() =>
+        _prefillAi ?? throw new InvalidOperationException(
+            "Workspace AI summaries require AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable.");
 
     /// <summary>
     /// Generates an AI summary for the specified entity using the AI Playbook platform.
@@ -327,7 +339,7 @@ public class WorkspaceAiService
 
         try
         {
-            await foreach (var evt in _playbookService.ExecuteAsync(playbookRequest, httpContext, timeoutCts.Token))
+            await foreach (var evt in RequireAi().ExecutePlaybookAsync(playbookRequest, httpContext, timeoutCts.Token))
             {
                 if (evt.Type == PlaybookEventType.NodeCompleted && evt.NodeOutput != null)
                 {

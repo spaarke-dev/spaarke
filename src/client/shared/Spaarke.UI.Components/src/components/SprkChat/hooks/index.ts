@@ -7,7 +7,7 @@
  * @see ADR-012 - Shared Component Library
  */
 
-export { useSseStream, parseSseEvent } from './useSseStream';
+export { useSseStream, parseSseEvent, parsePaneEvent } from './useSseStream';
 
 export { useChatSession } from './useChatSession';
 
@@ -31,7 +31,24 @@ export { useSelectionListener } from './useSelectionListener';
 export type { UseSelectionListenerOptions, IUseSelectionListenerResult } from './useSelectionListener';
 
 export { useDynamicSlashCommands } from './useDynamicSlashCommands';
+export type { UseDynamicSlashCommandsOptions, IUseDynamicSlashCommandsResult } from './useDynamicSlashCommands';
+
+// FR-07: multi-file chat attachment hook (task 024) — consumed by SprkChat
+// toolbar `+` button (task 025) and outbound payload wiring (task 026).
+export {
+  useChatFileAttachment,
+  MAX_ATTACHMENTS,
+  MAX_FILE_BYTES,
+  MAX_PDF_PAGES,
+  ALLOWED_MIME_TYPES,
+} from './useChatFileAttachment';
 export type {
-  UseDynamicSlashCommandsOptions,
-  IUseDynamicSlashCommandsResult,
-} from './useDynamicSlashCommands';
+  ChatAttachment,
+  AttachmentChip,
+  AttachmentChipStatus,
+  AttachmentError,
+  AttachmentErrorReason,
+  AttachmentExtractionErrorCallback,
+  UseChatFileAttachmentOptions,
+  IUseChatFileAttachmentResult,
+} from './useChatFileAttachment';

@@ -1,12 +1,19 @@
 ---
 description: Validate code changes against Architecture Decision Records (ADRs)
+tags: [adr, architecture, validation, quality, code-review]
+techStack: [all]
+appliesTo: ["**/*.cs", "**/*.ts", "**/*.tsx", "post-task", "pre-commit"]
 alwaysApply: false
+exemplar: tests/Spaarke.ArchTests/
+last-reviewed: 2026-05-16
 ---
 
 # ADR Check
 
 > **Category**: Quality
-> **Last Updated**: December 24, 2025
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: `tests/Spaarke.ArchTests/` is the NetArchTest project — it IS the canonical "what an ADR check actually enforces." A skill that runs against it is auditable; naming this exemplar gives the skill a verifiable anchor.
 
 ---
 
@@ -49,16 +56,33 @@ Quick reference of key constraints:
 
 | ADR | Key Constraint | Check For |
 |-----|----------------|-----------|
-| ADR-001 | No Azure Functions | `Microsoft.Azure.Functions`, `[FunctionName]` |
+| ADR-001 | BFF endpoints in Minimal API (Functions OK for narrow out-of-band integration) | `[FunctionName]` on BFF endpoints; Durable Functions; Functions duplicating BFF auth/correlation |
 | ADR-002 | Thin plugins | `HttpClient` in plugins, >50ms operations |
 | ADR-006 | PCF over webresources | New `.js` files in webresources |
 | ADR-007 | Graph isolation | `Microsoft.Graph` outside Infrastructure |
 | ADR-008 | Endpoint filters | Global `UseAuthorization` middleware |
 | ADR-009 | Redis-first | `IMemoryCache` for cross-request caching |
 | ADR-010 | DI minimalism | Interfaces with single implementation |
+| ADR-013 (refined 2026-05-20) | AI architecture — facade discipline for CRUD→AI consumption | CRUD code injecting `IOpenAiClient`, `IPlaybookService`, or other AI-internal interfaces directly (must consume via `Services/Ai/PublicContracts/` facades); AI work proposed in BFF without checking refined ADR-013 decision criteria |
 | ADR-021 | Fluent v9 design system | `@fluentui/react` (v8), hard-coded colors, missing FluentProvider |
+| ADR-028 | Spaarke Auth v2 client contract | Raw `fetch(... headers: { Authorization: \`Bearer ${...}\` })`, `tokenBridge`, `window.__SPAARKE_BFF_TOKEN__`, `BridgeStrategy`/`XrmStrategy`/`MsalSilentStrategy` references, `accessToken: string` typed props, `PublicClientApplication` instantiated outside `@spaarke/auth`, `ClientSecretCredential` for Graph when MI available, MSAL authority `/common` or `/organizations` |
 
 Note: This table is not exhaustive. Validate against the full ADR index in `docs/adr/README-ADRs.md`.
+
+### Step 2.5: Load BFF Hygiene Constraints (Conditional)
+
+If any file in scope is under:
+- `src/server/api/Sprk.Bff.Api/**`
+- `src/server/shared/Spaarke.Core/**`
+- `src/server/shared/Spaarke.Dataverse/**`
+
+Then ALSO load and apply [`.claude/constraints/bff-extensions.md`](../../constraints/bff-extensions.md) — this is the binding pre-merge checklist for BFF additions per root CLAUDE.md §10. Treat each MUST rule in that file as an ADR-equivalent compliance check. The 5-rule pre-merge checklist (Section A) is mandatory; rules in Sections B–E apply by change type.
+
+Flag as **Violation** (not Warning) any addition that:
+- Lacks a Placement Justification in the PR/design.md (§10 imperative)
+- Introduces a new direct CRUD→AI dependency (must use `Services/Ai/PublicContracts/` facade)
+- Adds a NuGet package without publish-size verification or CVE check
+- Adds endpoints directly in `Program.cs` instead of through a `Map{Feature}Endpoints` extension
 
 ### Step 3: Run Validation Checks
 
@@ -260,10 +284,18 @@ gh workflow run adr-audit.yml
 
 ---
 
-## Tips for AI
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Reviewer marks PR "ADR-clean" but production hits the violated rule at runtime | ADR check only ran on diff, not on full reachable code paths from diff | For changes touching API surface or DI registration, expand check to all callers (use `grep -rn` for usages). NetArchTest catches these structurally — run it locally. |
+| Skill flags an ADR violation that's actually approved/grandfathered | ADR has an exception that's not documented in the ADR itself | Update the ADR with the exception explicitly (`Exceptions:` section). Agent should respect documented exceptions. |
+| ADR-jobs or a newer ADR missed during review | ADR added recently but not in this skill's checklist | Run `/ai-procedure-maintenance` to propagate. The validation checklist must always cover every active ADR in `docs/adr/`. |
+| NetArchTest passes but skill reports a violation (or vice versa) | Skill's grep patterns drift from NetArchTest rule definitions | Treat NetArchTest as authoritative (it's mechanical). Update skill grep patterns to match. File a follow-up if a rule needs both forms. |
+
+## Operator Notes
 
 - Be thorough: check all ADRs in the ADR index even when changes seem small
-- Be thorough: check all ADRs in the ADR index, even when changes seem small
 - Be specific: always include file paths and line numbers
 - Be actionable: provide concrete fixes, not just problem descriptions
 - When in doubt, report as warning rather than skipping

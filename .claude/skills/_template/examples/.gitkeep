@@ -1,0 +1,4 @@
+# Examples subdirectory placeholder.
+# When a skill needs to show concrete usage (canonical implementations, step-by-step walkthroughs,
+# real code snippets), put them in this directory and link from SKILL.md.
+# The agent will dereference these files only when the example is relevant — keeps SKILL.md tight.

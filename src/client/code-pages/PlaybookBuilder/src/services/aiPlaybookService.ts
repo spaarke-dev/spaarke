@@ -4,8 +4,17 @@
  * Handles communication with the /api/ai/playbook-builder/process endpoint.
  * Uses fetch with ReadableStream for SSE streaming (POST request).
  *
- * Migrated from R4 PCF: Token acquisition via AuthService.getAccessToken()
- * instead of PCF context.
+ * Auth v2 (D-AUTH-7): Acquires a fresh Bearer token from @spaarke/auth
+ * (via authInit re-export → SpaarkeAuthProvider.getAccessToken()) once per
+ * stream open. Token is NEVER snapshotted in React state and NEVER reused
+ * across streams. This eliminates the class of bugs where a token was
+ * captured at mount time, expired mid-session, and silently 401'd the SSE
+ * stream (no auto-retry on streaming responses).
+ *
+ * NOTE: `authenticatedFetch` from @spaarke/auth CANNOT be used here because
+ * SSE requires streaming the ReadableStream body, which the wrapper does not
+ * expose. The same constraint applies to the canonical useSseStream hook in
+ * @spaarke/ui-components — see its file header for the full rationale.
  *
  * SSE Event Types:
  * - thinking: AI is processing
@@ -17,7 +26,7 @@
  * - done: Stream complete
  * - error: Error occurred
  *
- * @version 2.0.0 (Code Page migration)
+ * @version 3.0.0 (Auth v2 — function-based contract, task 024)
  */
 
 import { getAccessToken } from './authInit';
@@ -236,8 +245,8 @@ export interface AiPlaybookEventHandlers {
 /**
  * AI Playbook Service for canvas building via SSE streaming.
  *
- * Code Page migration: uses AuthService.getAccessToken() for Bearer token
- * instead of PCF context accessToken.
+ * Auth v2: acquires a fresh Bearer token from the @spaarke/auth provider
+ * once per stream open. No React state snapshot of the token.
  */
 export class AiPlaybookService {
   private config: Required<AiPlaybookServiceConfig>;
@@ -252,7 +261,8 @@ export class AiPlaybookService {
 
   /**
    * Build playbook canvas via SSE streaming.
-   * Acquires Bearer token from AuthService before each request.
+   * Acquires a fresh Bearer token from the @spaarke/auth provider before
+   * opening this stream (D-AUTH-7 — never snapshotted, never reused).
    */
   async buildPlaybookCanvas(request: BuildPlaybookCanvasRequest, handlers: AiPlaybookEventHandlers): Promise<void> {
     // Abort any existing request
@@ -267,7 +277,9 @@ export class AiPlaybookService {
     }, this.config.timeout);
 
     try {
-      // Acquire Bearer token from AuthService
+      // Auth v2 (D-AUTH-7): re-acquire a fresh token for THIS stream open.
+      // Cannot use authenticatedFetch — SSE requires ReadableStream body access
+      // that the wrapper does not expose. See file header for full rationale.
       const accessToken = await getAccessToken();
 
       const url = `${this.config.apiBaseUrl}/api/ai/playbook-builder/process`;

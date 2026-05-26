@@ -73,6 +73,10 @@ public class SpeFileStore
 | [ADR-003](ADR-003-authorization-seams.md) | Storage seam for authorization |
 | [ADR-005](ADR-005-flat-storage.md) | Flat storage model |
 | [ADR-010](ADR-010-di-minimalism.md) | Concrete registration |
+| [ADR-013](ADR-013-ai-architecture.md) | **Refined 2026-05-20**: applies the same facade-over-SDK pattern to AI internal contracts |
+| [ADR-028](ADR-028-spaarke-auth-architecture.md) | Graph client constructed by `IGraphClientFactory` uses `DefaultAzureCredential` (managed identity) for app-only; OBO for delegated |
+
+> **Phase 5 follow-up (2026-05-26)**: ADR-013 refined (2026-05-20) applies the same facade-over-SDK pattern to AI internal contracts. See `Services/Ai/PublicContracts/` (`IBriefingAi`, `IInvoiceAi`, `IRecordMatchingAi`, `IWorkspacePrefillAi`) for the canonical example mirroring this ADR's `SpeFileStore` shape. Per the `sdap-bff-api-remediation-fix` project EXECUTION-LOG.
 
 ---
 

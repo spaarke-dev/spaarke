@@ -1,0 +1,46 @@
+<task id="AUTHV2-005" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Add .claude/CHANGELOG.md entry for auth v2 in-progress markers</title>
+    <phase>0 — Pre-flight</phase>
+    <tags>docs, pre-flight, changelog</tags>
+    <status>completed</status>
+    <estimated-effort>5 minutes</estimated-effort>
+    <dependencies>004</dependencies>
+    <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>
+  </metadata>
+  <prompt>
+    Per root CLAUDE.md §16, every PR touching .claude/ files MUST add an entry to .claude/CHANGELOG.md. This task adds the entry for the auth v2 pre-flight PR.
+  </prompt>
+  <role>Senior engineer maintaining the procedure-surface changelog discipline.</role>
+  <goal>
+    .claude/CHANGELOG.md has a new entry documenting the pre-flight markers (PF-1 through PF-13) applied as part of this PR.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/CHANGELOG.md (file to update)</file>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §8.2 (what was applied)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/CHANGELOG.md to understand the entry format (date, files changed, summary).</step>
+    <step>Add a new entry at the top (most-recent-first convention) dated today. Title: "Auth v2 in-progress markers applied (PF-1..PF-13)". Summary: "Renamed two fully-superseded auth pattern docs with DEPRECATED- prefix. Applied STOP banners to five partially-superseded pattern/constraint/architecture docs. Added prohibition section to project CLAUDE.md. Added pointer to audit doc in root CLAUDE.md §15. Will be retired when v2 ships (Workstream F)."</step>
+    <step>List the files changed in this PR (the result of tasks 001-004 + this CHANGELOG entry itself).</step>
+    <step>Commit with message: "docs(.claude): CHANGELOG entry for auth v2 pre-flight markers (PF-13)" + standard footer.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>.claude/CHANGELOG.md has the new entry.</criterion>
+    <criterion>Entry format matches existing conventions.</criterion>
+    <criterion>All files changed in PR are listed.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-18.
+    Added auth v2 pre-flight bullets to existing [Unreleased] section under Added / Changed / Deprecated / Verified subheadings (introduced new "Verified" subheading for PF-11 since the verification produced no edits but is a meaningful audit-trail entry). Each bullet cites its PF number and commit SHA. Added a "Retirement note" subheading explaining that all PF-* entries are transitional and will be removed during Workstream F.
+
+    Commit SHAs referenced:
+      - c2198007 — PF-1, PF-2 (renames), PF-3 (references)
+      - 281f7210 — PF-4..PF-10 (STOP banners)
+      - f58317b0 — PF-11 (verification, no edits)
+      - 5b04b6ff — PF-12 (root CLAUDE.md pointer)
+      - (this commit) — PF-13 (CHANGELOG entry)
+  </notes>
+</task>

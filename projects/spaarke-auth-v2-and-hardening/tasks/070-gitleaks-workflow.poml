@@ -1,0 +1,30 @@
+<task id="AUTHV2-070" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Gitleaks secret-scanning GitHub Action</title>
+    <phase>E — CI / Bundling hygiene</phase>
+    <tags>ci, security, secrets, STANDARD</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>E-Parallel-1</parallel-safe>
+  </metadata>
+  <prompt>Prevent future secret leaks. Add gitleaks workflow that runs on every PR. Blocks merge on detection. Already prevented one leak during this audit (GitHub Push Protection caught a ClientSecret in audit notes).</prompt>
+  <role>DevOps engineer.</role>
+  <goal>Every PR runs gitleaks. Secrets detected → merge blocked.</goal>
+  <knowledge>
+    <files>
+      <file>.github/workflows/ (existing workflows for reference)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Add .github/workflows/secret-scan.yml using gitleaks/gitleaks-action.</step>
+    <step>Add .gitleaks.toml in repo root with allowlists for known false positives (test fixtures with mock tokens).</step>
+    <step>Mark check as required on PRs to master and work/* branches.</step>
+    <step>Run on a dummy PR to verify it works.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>secret-scan.yml runs on every PR.</criterion>
+    <criterion>.gitleaks.toml documents allowlist.</criterion>
+    <criterion>Check is required for merge.</criterion>
+  </acceptance-criteria>
+</task>

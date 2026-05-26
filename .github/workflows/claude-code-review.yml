@@ -39,7 +39,7 @@ jobs:
 
             ## Architecture Constraints to Check
 
-            **ADR-001**: Backend uses .NET 8 Minimal API + BackgroundService. NO Azure Functions.
+            **ADR-001**: BFF uses .NET 8 Minimal API + BackgroundService. BFF endpoints MUST NOT be hosted in Azure Functions, and Durable Functions are not permitted. Azure Functions ARE permitted for out-of-band integration work (Dataverse → AI Search sync, scheduled indexers, webhook receivers, event-triggered extraction) when they're Bicep-deployable, share App Insights correlation, and use Managed Identity + Key Vault.
             **ADR-008**: Use endpoint filters for authorization, NOT global middleware.
             **ADR-010**: Max 15 non-framework DI registrations. Use concrete types unless a seam is required.
             **ADR-019**: Use ProblemDetails for ALL error responses. Include correlation IDs.

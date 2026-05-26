@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -56,12 +57,21 @@ public static class DailyBriefingEndpoints
     /// </summary>
     private static async Task<IResult> Summarize(
         DailyBriefingSummaryRequest request,
-        IOpenAiClient openAiClient,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IBriefingAi? briefingAi = null)
     {
         var logger = loggerFactory.CreateLogger("DailyBriefingEndpoints");
+
+        // Fail fast when AI is disabled — daily briefing has no non-AI fallback.
+        if (briefingAi is null)
+        {
+            return Results.Problem(
+                statusCode: 503,
+                title: "Service Unavailable",
+                detail: "Daily briefing requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable.");
+        }
 
         // Validate request has at least some data to summarize
         if (request.Categories.Length == 0 && request.PriorityItems.Length == 0)
@@ -80,7 +90,7 @@ public static class DailyBriefingEndpoints
         {
             var prompt = BuildBriefingPrompt(request);
 
-            var briefingText = await openAiClient.GetCompletionAsync(
+            var briefingText = await briefingAi.GenerateNarrativeAsync(
                 prompt,
                 maxOutputTokens: 300,
                 cancellationToken: cancellationToken);
@@ -169,20 +179,46 @@ public static class DailyBriefingEndpoints
     /// </summary>
     private static async Task<IResult> HandleNarrate(
         DailyBriefingNarrateRequest request,
-        IOpenAiClient openAiClient,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IBriefingAi? briefingAi = null)
     {
         var logger = loggerFactory.CreateLogger("DailyBriefingEndpoints");
 
-        // Validate request has at least some data to narrate
-        if (request.Categories.Length == 0 && request.PriorityItems.Length == 0 && request.Channels.Length == 0)
+        // Fail fast when AI is disabled — daily briefing has no non-AI fallback.
+        if (briefingAi is null)
         {
             return Results.Problem(
-                statusCode: 400,
-                title: "Bad Request",
-                detail: "Request must include at least one category, priority item, or channel.");
+                statusCode: 503,
+                title: "Service Unavailable",
+                detail: "Daily briefing requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable.");
+        }
+
+        // Empty-payload tolerance: the frontend `useDailyBriefing` hook may send a request
+        // with all collections empty when the user has no notifications, no priority items,
+        // and no channel content to narrate (e.g., fresh inbox, no overdue work).
+        // Treat this as a normal "nothing to narrate" condition and return 200 with an empty
+        // bullets/channels response — the client renders an empty state (per FR-16 /
+        // task 035 graceful-empty UX). Returning 400 here would force the hook into its
+        // 400-special-case branch and surface as a misleading "Bad Request" in App Insights.
+        if (request.Categories.Length == 0 && request.PriorityItems.Length == 0 && request.Channels.Length == 0)
+        {
+            logger.LogInformation(
+                "Empty narrate request — returning empty bullets (no notifications to narrate).");
+
+            return TypedResults.Ok(new DailyBriefingNarrateResponse
+            {
+                Tldr = new TldrResult
+                {
+                    Briefing = string.Empty,
+                    TopAction = string.Empty,
+                    CategoryCount = 0,
+                    PriorityItemCount = 0
+                },
+                ChannelNarratives = [],
+                GeneratedAtUtc = DateTimeOffset.UtcNow
+            });
         }
 
         logger.LogInformation(
@@ -192,10 +228,10 @@ public static class DailyBriefingEndpoints
         try
         {
             // Fire TL;DR prompt and all channel narration prompts in parallel
-            var tldrTask = GetTldrAsync(request, openAiClient, logger, cancellationToken);
+            var tldrTask = GetTldrAsync(request, briefingAi, logger, cancellationToken);
 
             var channelTasks = request.Channels.Select(channel =>
-                GetChannelNarrationAsync(channel, openAiClient, logger, cancellationToken));
+                GetChannelNarrationAsync(channel, briefingAi, logger, cancellationToken));
 
             var allTasks = new List<Task> { tldrTask };
             var channelTaskList = channelTasks.ToList();
@@ -251,13 +287,13 @@ public static class DailyBriefingEndpoints
     /// </summary>
     private static async Task<TldrResult> GetTldrAsync(
         DailyBriefingNarrateRequest request,
-        IOpenAiClient openAiClient,
+        IBriefingAi briefingAi,
         ILogger logger,
         CancellationToken cancellationToken)
     {
         var prompt = BuildNarrateTldrPrompt(request);
 
-        var briefingText = await openAiClient.GetCompletionAsync(
+        var briefingText = await briefingAi.GenerateNarrativeAsync(
             prompt,
             maxOutputTokens: 500,
             cancellationToken: cancellationToken);
@@ -292,7 +328,7 @@ public static class DailyBriefingEndpoints
     /// </summary>
     private static async Task<ChannelNarrationResult?> GetChannelNarrationAsync(
         ChannelNarrationInput channel,
-        IOpenAiClient openAiClient,
+        IBriefingAi briefingAi,
         ILogger logger,
         CancellationToken cancellationToken)
     {
@@ -309,7 +345,7 @@ public static class DailyBriefingEndpoints
         {
             var prompt = BuildChannelNarrationPrompt(channel);
 
-            var responseJson = await openAiClient.GetCompletionAsync(
+            var responseJson = await briefingAi.GenerateNarrativeAsync(
                 prompt,
                 maxOutputTokens: 300,
                 cancellationToken: cancellationToken);

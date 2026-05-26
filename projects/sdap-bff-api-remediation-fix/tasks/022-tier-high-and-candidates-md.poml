@@ -1,0 +1,84 @@
+<task id="022" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Tier HIGH + REJECT list + commit CANDIDATES.md</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>~10 min (aggregate of 020 + 021 outputs)</actual-effort>
+    <assigned>AI agent</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
+    <tags>bff-api, risk-categorization, phase-2, gate</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Aggregates 020 + 021 outputs; gate for Phase 3</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Categorize HIGH-tier candidates (removes transitive-only dep by removing parent direct ref;
+    requires full integration test + 48h dev observation) and REJECT items (PublishTrimmed, AOT,
+    Graph SDK removal, Identity.Web removal, Kiota single-bumps, pre-release version changes —
+    all from spec.md §Out of Scope). Aggregate SAFE + MEDIUM + HIGH + REJECT into `CANDIDATES.md`
+    at project root. Owner reviews and approves SAFE/MEDIUM/HIGH ordering — without sign-off
+    Phase 3 cannot start.
+  </prompt>
+
+  <role>Risk-tier categorizer + Phase 2 lead.</role>
+
+  <goal>
+    File `projects/sdap-bff-api-remediation-fix/CANDIDATES.md` with all tiers; owner sign-off
+    recorded.
+  </goal>
+
+  <inputs>
+    <file purpose="safe">projects/sdap-bff-api-remediation-fix/inventory/candidates-safe.md</file>
+    <file purpose="medium">projects/sdap-bff-api-remediation-fix/inventory/candidates-medium.md</file>
+    <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
+    <file purpose="ai-spec">projects/sdap-bff-api-remediation-fix/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md §Out of Scope">REJECT: PublishTrimmed, AOT, Graph SDK / Kiota single-bumps, pre-release changes</constraint>
+    <constraint source="design.md §6 Phase 2">Gate: owner approves SAFE/MEDIUM/HIGH ordering</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/candidates-safe.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/candidates-medium.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>CANDIDATES.md is the input to Phase 4 — every Phase 4 task pulls from it.</background>
+    <dependencies>
+      <dependency task="020" status="not-started">SAFE candidates</dependency>
+      <dependency task="021" status="not-started">MEDIUM candidates</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Identify HIGH-tier candidates (transitive removal via direct dep removal)</step>
+    <step order="2">List REJECT items from spec §Out of Scope</step>
+    <step order="3">Aggregate all tiers into `CANDIDATES.md` at project root</step>
+    <step order="4">Propose execution order (SAFE first, then MEDIUM, then HIGH)</step>
+    <step order="5">Owner review + sign-off (PR comment / commit)</step>
+    <step order="6">Update CLAUDE.md → Project Status to "Phase 3 ready"</step>
+    <step order="7">Update TASK-INDEX.md status</step>
+  </steps>
+
+  <tools><tool name="git">Commit CANDIDATES.md</tool></tools>
+
+  <outputs>
+    <output type="report">projects/sdap-bff-api-remediation-fix/CANDIDATES.md</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CANDIDATES.md has 4 tier sections (SAFE, MEDIUM, HIGH, REJECT)</criterion>
+    <criterion testable="true">Each candidate row has all design §6 Phase 2 fields</criterion>
+    <criterion testable="true">Owner sign-off recorded</criterion>
+  </acceptance-criteria>
+</task>

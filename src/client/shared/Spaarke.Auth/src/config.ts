@@ -72,9 +72,35 @@ export function resolveConfig(userConfig?: IAuthConfig): Required<IAuthConfig> {
     );
   }
 
+  // Authority resolution priority:
+  //   1. userConfig.authority (full URL) — explicit override; always wins
+  //   2. userConfig.tenantId — preferred consumer path; library builds the URL
+  //   3. resolveDefaultAuthority() — Xrm frame-walk; falls back to /organizations
+  //      (degraded — see IAuthConfig.authority docs)
+  // Defensive: the typeof guard prevents a TypeError if a consumer accidentally
+  // passes a non-string tenantId (e.g. a Promise<string> — happens when an
+  // async getter shadows a sync one of the same name via import collision; we
+  // hit this once in SpaarkeAi authInit.ts). Falls through to default authority
+  // resolution rather than crashing the whole auth bootstrap.
+  let authority: string;
+  if (typeof userConfig?.authority === 'string' && userConfig.authority) {
+    authority = userConfig.authority;
+  } else if (typeof userConfig?.tenantId === 'string' && userConfig.tenantId.trim()) {
+    authority = `https://login.microsoftonline.com/${userConfig.tenantId.trim()}`;
+  } else {
+    if (userConfig?.tenantId !== undefined && typeof userConfig.tenantId !== 'string') {
+      console.warn(
+        '[SpaarkeAuth] resolveConfig: tenantId is not a string; ignoring. Got:',
+        typeof userConfig.tenantId
+      );
+    }
+    authority = resolveDefaultAuthority();
+  }
+
   return {
     clientId,
-    authority: userConfig?.authority ?? resolveDefaultAuthority(),
+    authority,
+    tenantId: typeof userConfig?.tenantId === 'string' ? userConfig.tenantId : '',
     redirectUri: userConfig?.redirectUri ?? (typeof window !== 'undefined' ? window.location.origin : ''),
     bffApiScope: bffApiScope ?? '',
     bffBaseUrl,

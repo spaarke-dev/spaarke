@@ -1,0 +1,54 @@
+<task id="AIPU2-102" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Cross-pane: Playbook selection in Context specializes Chat agent</title>
+    <phase>5</phase>
+    <tags>frontend, integration, cross-pane</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-074, AIPU2-086, AIPU2-079</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    When a user picks a playbook from the PlaybookGalleryWidget in the Context pane, the
+    ConversationPane's SprkChat should immediately specialize to that playbook's agent
+    (switching system prompt, tool set, and UI labels). Optionally the Workspace may clear
+    or reconfigure its tabs based on the playbook's default widget configuration. This is the
+    primary onboarding flow: Stage 1 (Landing) -> Stage 2 (Playbook Selected) lifecycle
+    transition. Uses PaneEventBus (AIPU2-074), PlaybookGalleryWidget (AIPU2-086), and
+    SprkChat (AIPU2-079).
+  </prompt>
+  <role>Frontend developer responsible for pane lifecycle and playbook integration.</role>
+  <goal>
+    Selecting a playbook in PlaybookGalleryWidget dispatches a PlaybookSelectedEvent via
+    PaneEventBus. ConversationPane receives it and calls SprkChat.setPlaybookId(playbookId),
+    causing the chat to reload with the correct agent configuration. The Workspace pane
+    updates its tab configuration based on the playbook's defaultWidgets list. The shell
+    transitions from Stage 1 to Stage 2 lifecycle state.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>src/solutions/SpaarkeAi/src/components/ContextPane</file>
+      <file>src/solutions/SpaarkeAi/src/components/ConversationPane</file>
+      <file>src/solutions/SpaarkeAi/src/components/SprkChat</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Define PlaybookSelectedEvent on PaneEventBus: { type: 'playbook-selected', playbookId: string, playbookName: string, defaultWidgets: WidgetConfig[] }.</step>
+    <step>In PlaybookGalleryWidget (AIPU2-086), wire the playbook card click handler to dispatch PlaybookSelectedEvent via PaneEventBus with the full playbook config.</step>
+    <step>In ConversationPane, subscribe to PlaybookSelectedEvent. On receipt, call SprkChat.setPlaybookId(playbookId) and update the pane header to show the playbook name.</step>
+    <step>Implement SprkChat.setPlaybookId: close any active SSE stream, reset message history UI (keep persisted history), send a new session-init request with the selected playbookId to the backend, update system prompt label in the UI.</step>
+    <step>In WorkspacePaneController, subscribe to PlaybookSelectedEvent. If defaultWidgets is non-empty, replace workspace tabs with the playbook's default widget set; if empty, retain current tabs.</step>
+    <step>Trigger ThreePaneShell stage transition from Stage 1 (Landing) to Stage 2 (Playbook Selected) on PlaybookSelectedEvent receipt.</step>
+    <step>Add a "Change playbook" affordance so the user can return to Stage 1 / playbook gallery.</step>
+    <step>Test: from landing stage, select a playbook, verify chat reinitializes with correct agent, verify workspace tabs update, verify stage transitions to Stage 2.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Selecting a playbook card dispatches PlaybookSelectedEvent via PaneEventBus.</criterion>
+    <criterion>SprkChat.setPlaybookId is called and the chat reinitializes with the correct playbook agent configuration.</criterion>
+    <criterion>Workspace pane updates tabs to match the playbook's defaultWidgets configuration.</criterion>
+    <criterion>ThreePaneShell transitions from Stage 1 (Landing) to Stage 2 (Playbook Selected).</criterion>
+    <criterion>A "Change playbook" affordance is present and returns the user to Stage 1.</criterion>
+    <criterion>No SSE stream race conditions: any active stream is closed before reinitializing.</criterion>
+  </acceptance-criteria>
+</task>

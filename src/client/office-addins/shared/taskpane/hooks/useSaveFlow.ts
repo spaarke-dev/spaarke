@@ -518,11 +518,24 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   );
 
   // Poll for job status
+  //
+  // Auth v2 (D-AUTH-7 / task 082): `getAccessToken` is invoked PER POLL — not
+  // snapshotted at startSave time. Polling can run for minutes (long-running jobs);
+  // the previous snapshot-once pattern would silently 401 once the cached token
+  // expired. Each call delegates to the caller's provider cache (MSAL NAA / silent),
+  // so this is cheap when the token is still warm.
   const pollJobStatus = useCallback(
-    async (jobId: string, accessToken: string) => {
+    async (jobId: string) => {
       try {
+        const accessToken = await getAccessToken();
         const response = await fetch(`${apiBaseUrl}/api/office/jobs/${jobId}`, {
           headers: {
+            // D-AUTH-7 exception site: this hook is not yet wired through
+            // `authenticatedFetch` (Office Add-in has not adopted `@spaarke/auth`
+            // / `initAuth` yet — out of scope for 082). Bearer literal stays;
+            // staleness is eliminated by the per-call `await getAccessToken()`
+            // above. Full `useAuth()` migration is a future task once the Office
+            // Add-in bootstrap calls `initAuth({}, new OfficeNaaStrategy(cfg))`.
             Authorization: `Bearer ${accessToken}`,
           },
           signal: abortControllerRef.current?.signal,
@@ -648,12 +661,17 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         }
       }
     },
-    [apiBaseUrl, cleanup, onComplete, onError]
+    [apiBaseUrl, cleanup, getAccessToken, onComplete, onError]
   );
 
-  // Start SSE connection with polling fallback
+  // Start SSE connection with polling fallback.
+  //
+  // Auth v2 (D-AUTH-7 / task 082): no longer accepts an `accessToken` snapshot.
+  // The downstream consumers (`pollJobStatus` + `createSseConnection`) each call
+  // `getAccessToken()` per request, so the token used for any given poll or
+  // reconnect is always the freshest one available from the provider cache.
   const startJobTracking = useCallback(
-    async (jobId: string, streamUrl: string, accessToken: string) => {
+    async (jobId: string, streamUrl: string) => {
       setFlowState('processing');
 
       // Reset retry counter at start of tracking
@@ -685,16 +703,19 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       // SSE is optional enhancement but may not receive events if Redis pub/sub isn't configured
       console.log('[SaveFlow] Starting job polling for', jobId);
       pollingIntervalRef.current = setInterval(() => {
-        pollJobStatus(jobId, accessToken);
+        pollJobStatus(jobId);
       }, pollingIntervalMs);
 
       // Also do an immediate poll to get current status
-      pollJobStatus(jobId, accessToken);
+      pollJobStatus(jobId);
 
-      // Try SSE as enhancement (provides faster updates when available)
+      // Try SSE as enhancement (provides faster updates when available).
+      // Auth v2 (D-AUTH-7): pass the `getAccessToken` getter (not a snapshot).
+      // The SSE client invokes it immediately before each fetch — including any
+      // 401-driven reconnects — so the token is always fresh for THIS stream.
       try {
         sseConnectionRef.current = createSseConnection(`${apiBaseUrl}${streamUrl}`, {
-          accessToken,
+          getAccessToken,
           onEvent: handleSseEvent,
           onError: err => {
             console.warn('SSE error (polling continues):', err.message);
@@ -708,7 +729,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         console.warn('Failed to create SSE connection (polling continues):', err);
       }
     },
-    [apiBaseUrl, handleSseEvent, pollJobStatus, pollingIntervalMs, processingOptions, sseTimeoutMs]
+    [apiBaseUrl, getAccessToken, handleSseEvent, pollJobStatus, pollingIntervalMs, processingOptions, sseTimeoutMs]
   );
 
   // Start save operation
@@ -727,7 +748,11 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       abortControllerRef.current = new AbortController();
 
       try {
-        const accessToken = await getAccessToken();
+        // Auth v2 (D-AUTH-7 / task 082): no top-level token snapshot.
+        // The token used for the POST below is acquired inline immediately
+        // before the fetch (see `await getAccessToken()` at the POST call).
+        // `startJobTracking` no longer receives an accessToken either — it
+        // closes over `getAccessToken` so polls + SSE always pull a fresh token.
 
         // Determine content type for server API
         let contentType: 'Email' | 'Attachment' | 'Document';
@@ -855,13 +880,19 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         // Compute idempotency key from legacy format for consistency
         const idempotencyKey = await computeIdempotencyKey(request);
 
-        // Submit save request
+        // Submit save request.
+        // Auth v2 (D-AUTH-7 / task 082): acquire token inline — no snapshot.
+        // D-AUTH-7 exception: this hook is not yet wired through
+        // `authenticatedFetch` (Office Add-in has not adopted `@spaarke/auth` /
+        // `initAuth` yet — out of scope for 082). Per-call `getAccessToken()`
+        // eliminates staleness; the Bearer literal is the documented exception.
         console.log('[SaveFlow] Sending request:', JSON.stringify(serverRequest, null, 2));
+        const saveToken = await getAccessToken();
         const response = await fetch(`${apiBaseUrl}/api/office/save`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${saveToken}`,
             'X-Idempotency-Key': idempotencyKey,
           },
           body: JSON.stringify(serverRequest),
@@ -910,9 +941,12 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           throw new Error(`Save failed: ${response.status}`);
         }
 
-        // Success - start job tracking
+        // Success - start job tracking.
+        // Auth v2 (D-AUTH-7 / task 082): no token passed; `startJobTracking`
+        // closes over `getAccessToken` (function) so polls + SSE always pull
+        // a fresh token from the provider cache.
         const saveResponse = responseData as SaveResponse;
-        await startJobTracking(saveResponse.jobId, saveResponse.streamUrl, accessToken);
+        await startJobTracking(saveResponse.jobId, saveResponse.streamUrl);
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
           return; // Cancelled

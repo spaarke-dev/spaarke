@@ -21,52 +21,26 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 public static class EndpointMappingExtensions
 {
     /// <summary>
-    /// Maps all endpoint groups: health, debug, domain endpoints, and SPA fallback.
+    /// Maps all endpoint groups: health, domain endpoints, and SPA fallback.
     /// </summary>
+    /// <remarks>
+    /// Debug endpoints (/debug/*) were removed per Spaarke Auth v2 hardening (task 043 / audit C-2).
+    /// Do not add new /debug/* routes; use structured logging + Application Insights for diagnostics.
+    /// </remarks>
     public static void MapSpaarkeEndpoints(this WebApplication app)
     {
         MapHealthEndpoints(app);
-        app.MapDebugEndpoints();
         MapDomainEndpoints(app);
         MapSpaFallback(app);
     }
 
     private static void MapHealthEndpoints(WebApplication app)
     {
+        // Anonymous client config endpoint — MSAL bootstrap fallback for direct URL access (AIPU-091)
+        app.MapMsalConfigEndpoints();
+
         app.MapHealthChecks("/healthz").AllowAnonymous();
 
-        // DEBUG: Token inspection endpoint - logs token claims from Copilot
-        // TODO: Remove before production
-        app.MapGet("/debug/token", (HttpContext ctx) =>
-        {
-            var authHeader = ctx.Request.Headers.Authorization.ToString();
-            if (string.IsNullOrEmpty(authHeader))
-                return Results.Ok(new { error = "No Authorization header" });
-
-            try
-            {
-                var token = authHeader.Replace("Bearer ", "");
-                var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
-                var jwt = handler.ReadJwtToken(token);
-                return Results.Ok(new
-                {
-                    audience = jwt.Audiences,
-                    issuer = jwt.Issuer,
-                    subject = jwt.Subject,
-                    appId = jwt.Claims.FirstOrDefault(c => c.Type == "appid")?.Value,
-                    azp = jwt.Claims.FirstOrDefault(c => c.Type == "azp")?.Value,
-                    scp = jwt.Claims.FirstOrDefault(c => c.Type == "scp")?.Value,
-                    oid = jwt.Claims.FirstOrDefault(c => c.Type == "oid")?.Value,
-                    tid = jwt.Claims.FirstOrDefault(c => c.Type == "tid")?.Value,
-                    validFrom = jwt.ValidFrom,
-                    validTo = jwt.ValidTo
-                });
-            }
-            catch (Exception ex)
-            {
-                return Results.Ok(new { error = ex.Message, headerLength = authHeader.Length });
-            }
-        }).AllowAnonymous().WithTags("Debug").ExcludeFromDescription();
         app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
         app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
 
@@ -98,7 +72,9 @@ public static class EndpointMappingExtensions
                 logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
                 return Results.Ok(new { status = "ERROR", documentId = id, error = ex.Message, innerError = ex.InnerException?.Message });
             }
-        }).AllowAnonymous();
+        })
+            .AllowAnonymous()
+            .RequireRateLimiting("anonymous"); // Task AUTHV2-049 — anonymous + hits Dataverse; 10/min per IP
 
         app.MapGet("/ping", () => Results.Text("pong"))
             .AllowAnonymous()
@@ -110,12 +86,12 @@ public static class EndpointMappingExtensions
             return TypedResults.Json(new
             {
                 service = "Sprk.Bff.Api",
-                version = "1.0.1-debug",
-                timestamp = DateTimeOffset.UtcNow,
-                debugEndpoints = new[] { "/healthz/dataverse/doc/{id}" }
+                version = "1.0.2",
+                timestamp = DateTimeOffset.UtcNow
             });
         })
             .AllowAnonymous()
+            .RequireRateLimiting("anonymous") // Task AUTHV2-049 — anonymous, prevent spam scraping; 10/min per IP
             .WithTags("Health")
             .WithDescription("Service status with metadata (no sensitive info).");
     }
@@ -154,6 +130,12 @@ public static class EndpointMappingExtensions
 
         app.MapRagEndpoints();
         app.MapKnowledgeBaseEndpoints();
+        // AIPU2-035: Prompt Library — Personal, Team, Org, System template CRUD + render
+        app.MapPromptLibraryEndpoints();
+        // AIPU2-036: Feedback — per-response thumbs up/down submit + aggregation by playbook/capability
+        app.MapFeedbackEndpoints();
+        // AI Capabilities: webhook-triggered manifest refresh (AIPU2-011)
+        app.MapCapabilityEndpoints();
         app.MapChatEndpoints();
         try { app.MapChatDocumentEndpoints(); }
         catch (Exception ex)
@@ -163,6 +145,7 @@ public static class EndpointMappingExtensions
         }
         app.MapChatWordExportEndpoints();
         app.MapAnalysisChatContextEndpoints();
+        app.MapStandaloneChatContextEndpoints();
 
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
             app.Configuration.GetValue<bool>("Analysis:Enabled", true))

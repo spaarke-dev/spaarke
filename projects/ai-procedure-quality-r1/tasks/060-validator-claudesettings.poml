@@ -1,0 +1,56 @@
+<task id="060" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Build scripts/quality/Validate-ClaudeSettings.ps1 schema validator</title>
+    <phase>4a</phase>
+    <stream>infrastructure</stream>
+    <tags>validator, schema, settings, ci</tags>
+    <estimate>1h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>4a-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>004</dependencies>
+    <writes-to>scripts/quality/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Build a PowerShell script that validates .claude/settings.json, .claude/settings.local.json, and .mcp.json against their published JSON schemas. Must complete in &lt;3s (pre-commit friendly).</goal>
+    <context>The 2026-03 to 2026-05 hook-schema bug went undetected because no automated validator existed. This script is the answer. Used by pre-commit hook + GHA workflow.</context>
+    <constraints>
+      - Runtime budget: &lt;3 seconds total
+      - Must run cross-platform (Windows + Linux GHA runner)
+      - Must support `-Quiet` mode for pre-commit (exit code only)
+      - Must support `-Verbose` mode for GHA (detailed output)
+      - Schema URLs sourced from notes/inventory/settings-state.md (task 004)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/settings-state.md</file>
+      <file>.claude/settings.json</file>
+      <file>.claude/settings.local.json</file>
+      <file>.mcp.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Use ajv-cli, ts-json-schema-validator, or PowerShell's built-in JSON parsing + manual schema check (whichever runs fastest)</step>
+    <step>Cache the schema files locally (under .claude/schemas/) so the validator doesn't fetch from web every run</step>
+    <step>Parameters: -Quiet (exit code only), -Verbose (detailed), -SchemaCacheDir (default .claude/schemas/)</step>
+    <step>Test against current files: must return 0 (pass) after the 2026-05-14 fix</step>
+    <step>Test against deliberately-broken settings.json (the pre-2026-05-14 form): must return non-zero with clear error message</step>
+    <step>Add a usage block at top of the script</step>
+  </steps>
+
+  <outputs>
+    <output>scripts/quality/Validate-ClaudeSettings.ps1</output>
+    <output>.claude/schemas/ (cached schema files)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Script completes in &lt;3s on current files</criterion>
+    <criterion>Current settings files pass (exit 0)</criterion>
+    <criterion>Deliberately-broken test case fails (exit non-zero) with actionable error</criterion>
+    <criterion>Schema cache works (no network call on subsequent runs)</criterion>
+  </acceptance-criteria>
+</task>

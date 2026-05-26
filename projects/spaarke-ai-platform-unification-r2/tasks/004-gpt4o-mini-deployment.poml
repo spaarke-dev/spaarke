@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPU2-004" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Create GPT-4o-mini Deployment on Azure OpenAI Dev Resource</title>
+    <phase>1</phase>
+    <tags>infrastructure, ai-model</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    The R2 AI platform introduces a model tiering strategy: GPT-4o handles complex reasoning and document analysis, while GPT-4o-mini handles high-volume, low-latency classification tasks (intent routing, safety pre-checks, feedback triage). The spaarke-openai-dev Azure OpenAI resource currently has a GPT-4o deployment but no GPT-4o-mini deployment. Without this lower-cost model, all classification workloads will be routed to GPT-4o, inflating cost and latency unnecessarily.
+
+    Create a GPT-4o-mini model deployment on the existing spaarke-openai-dev Azure OpenAI resource, configure it appropriately for the classification workload, and update the resource documentation so the BFF API can reference it without discovery queries.
+  </prompt>
+  <role>Azure AI infrastructure engineer with Azure OpenAI deployment expertise.</role>
+  <goal>
+    A GPT-4o-mini deployment named spaarke-gpt4o-mini exists on the spaarke-openai-dev Azure OpenAI resource with appropriate token capacity for the classification workload. The deployment name, model version, and capacity settings are documented in docs/architecture/auth-AI-azure-resources.md and docs/guides/AI-MODEL-SELECTION-GUIDE.md.
+  </goal>
+  <knowledge>
+    <files>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+      <file>docs/guides/AI-MODEL-SELECTION-GUIDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read docs/architecture/auth-AI-azure-resources.md in full to understand the existing Azure OpenAI resource name (spaarke-openai-dev), its region, existing deployments, and documentation format.</step>
+    <step>Read docs/guides/AI-MODEL-SELECTION-GUIDE.md to understand the intended use cases for GPT-4o-mini vs GPT-4o and any capacity guidance already documented.</step>
+    <step>List existing deployments on the Azure OpenAI resource to confirm GPT-4o-mini does not already exist:
+      az cognitiveservices account deployment list --name spaarke-openai-dev --resource-group spe-infrastructure-westus2 --query "[].{name:name, model:properties.model.name, version:properties.model.version}"</step>
+    <step>Verify GPT-4o-mini model availability in the westus2 region:
+      az cognitiveservices model list --location westus2 --query "[?name=='gpt-4o-mini']"
+      Note the latest available model version.</step>
+    <step>Create the GPT-4o-mini deployment:
+      az cognitiveservices account deployment create
+        --name spaarke-openai-dev
+        --resource-group spe-infrastructure-westus2
+        --deployment-name spaarke-gpt4o-mini
+        --model-name gpt-4o-mini
+        --model-version {latestVersion}
+        --model-format OpenAI
+        --sku-capacity 30
+        --sku-name Standard
+      (30K TPM is sufficient for classification workload at dev scale)</step>
+    <step>Verify the deployment is in the Succeeded state:
+      az cognitiveservices account deployment show --name spaarke-openai-dev --resource-group spe-infrastructure-westus2 --deployment-name spaarke-gpt4o-mini --query properties.provisioningState</step>
+    <step>Test the deployment with a simple classification prompt using the Azure OpenAI REST API or az rest to confirm it returns a valid completion response.</step>
+    <step>Update docs/architecture/auth-AI-azure-resources.md: add the new deployment entry (deployment name: spaarke-gpt4o-mini, model: gpt-4o-mini, version, capacity: 30K TPM, intended use: classification/routing/triage).</step>
+    <step>Update docs/guides/AI-MODEL-SELECTION-GUIDE.md: add or update the GPT-4o-mini section to include the deployment name, confirm classification use cases, and note the 30K TPM capacity limit for dev.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>A deployment named spaarke-gpt4o-mini exists on the spaarke-openai-dev Azure OpenAI resource with provisioningState=Succeeded.</criterion>
+    <criterion>The deployment uses the gpt-4o-mini model (latest available version in westus2).</criterion>
+    <criterion>The deployment capacity is set to 30K TPM (Standard SKU).</criterion>
+    <criterion>A test completion request to the deployment returns a valid response.</criterion>
+    <criterion>docs/architecture/auth-AI-azure-resources.md contains the spaarke-gpt4o-mini deployment entry with model name, version, capacity, and intended use.</criterion>
+    <criterion>docs/guides/AI-MODEL-SELECTION-GUIDE.md references the spaarke-gpt4o-mini deployment name for classification workloads.</criterion>
+    <criterion>No secrets or API keys appear in any committed file.</criterion>
+  </acceptance-criteria>
+</task>

@@ -595,12 +595,13 @@ async function streamSummarize(
   onComplete: () => void,
   onError: (error: string) => void
 ): Promise<void> {
-  const response = await fetch('/api/ai/document-intelligence/analyze', {
+  // Auth v2 (ADR-028): use authenticatedFetch from @spaarke/auth
+  // (handles bearer header + 401 retry automatically; no manual token acquisition)
+  import { authenticatedFetch } from '@spaarke/auth';
+
+  const response = await authenticatedFetch('/api/ai/document-intelligence/analyze', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${getAccessToken()}`
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ documentId, driveId, itemId })
   });
 

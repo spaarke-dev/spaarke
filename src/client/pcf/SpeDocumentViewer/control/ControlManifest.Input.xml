@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke" constructor="SpeDocumentViewer" version="1.0.24" display-name-key="SpeDocumentViewer" description-key="SpeDocumentViewer_Desc" control-type="virtual">
+  <control namespace="Spaarke" constructor="SpeDocumentViewer" version="1.0.27" display-name-key="SpeDocumentViewer" description-key="SpeDocumentViewer_Desc" control-type="virtual">
     <external-service-usage enabled="false">
     </external-service-usage>
 
@@ -21,13 +21,12 @@
               required="false" />
 
     <!-- BFF API Configuration -->
-    <property name="bffApiUrl"
-              display-name-key="BffApiUrl_Display_Key"
-              description-key="BFF API base URL"
-              of-type="SingleLine.Text"
-              usage="input"
-              required="false"
-              default-value="https://spe-api-dev-67e2xz.azurewebsites.net" />
+    <!-- bffApiUrl property removed in v1.0.27 (task 024). The PCF now resolves the
+         BFF base URL from the Dataverse environment variable sprk_BffApiBaseUrl at
+         init time (via getApiBaseUrl in pcf/shared/utils/environmentVariables.ts).
+         Single source of truth across all Spaarke clients (Code Pages, PCFs).
+         Existing form customizations may show a warning about the removed property
+         — Power Apps will simply ignore the stored value. -->
 
     <property name="clientAppId"
               display-name-key="ClientAppId_Display_Key"

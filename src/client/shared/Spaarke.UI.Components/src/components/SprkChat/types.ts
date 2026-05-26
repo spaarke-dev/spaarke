@@ -121,6 +121,46 @@ export interface IChatSession {
 // SSE Event Types
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AI Pane SSE Event Types (output_pane / source_pane / source_highlight)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A raw SSE pane-routing event forwarded from the BFF stream.
+ * These events carry widgetType + payload and are consumed by OutputPanel
+ * and SourcePanel to render the correct widget. They are NOT chat tokens;
+ * SprkChat routes them via the onPaneEvent callback rather than rendering them.
+ *
+ * Mirrors OutputPaneEvent | SourcePaneEvent | SourceHighlightEvent from
+ * @spaarke/ai-outputs types/index.ts, but defined here as a loose shape so
+ * the shared SprkChat library has no dependency on @spaarke/ai-outputs.
+ */
+export interface IAiPaneEvent {
+  /** Discriminates the target pane and event semantics. */
+  event: 'output_pane' | 'source_pane' | 'source_highlight';
+  /**
+   * Widget type string matching OutputWidgetType or SourceWidgetType enum values
+   * (e.g. "AnalysisEditor", "DocumentViewer"). Present on output_pane and source_pane events.
+   */
+  widgetType?: string;
+  /**
+   * Widget-specific data payload (shape is widget-dependent).
+   * Present on output_pane and source_pane events; absent on source_highlight.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload?: any;
+  /**
+   * Source reference identifier for the widget being highlighted.
+   * Present on source_highlight events.
+   */
+  sourceRef?: string;
+  /**
+   * Selection reference within the source widget (e.g. citation ID or range).
+   * Present on source_highlight events.
+   */
+  selectionRef?: string;
+}
+
 /**
  * SSE event types emitted by the streaming endpoints.
  *
@@ -333,6 +373,30 @@ export interface IPredefinedPrompt {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Auth Function Types (Auth v2 — function-based contract; no token snapshots)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Authenticated fetch function — matches `AuthenticatedFetchFn` from `@spaarke/auth`.
+ * Caller-supplied so this library does not take a runtime dependency on @spaarke/auth.
+ * The function MUST attach a fresh Bearer token (and X-Tenant-Id when applicable)
+ * to every call and re-acquire on 401. See `@spaarke/auth/authenticatedFetch`.
+ *
+ * Auth v2 (D-AUTH-1, D-AUTH-7): tokens are NEVER snapshotted as strings in component
+ * state; callers always go through this function.
+ */
+export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+
+/**
+ * Token getter for code paths that cannot use `authenticatedFetch` (e.g., SSE streams
+ * opened via `fetch()` + `ReadableStream`, or XHR uploads that need progress events).
+ * MUST be called immediately before opening each stream — never snapshotted into
+ * component state. Callers of `useSseStream.startStream` pass this through so the
+ * hook can re-fetch a fresh token on every stream open.
+ */
+export type AccessTokenGetter = () => Promise<string>;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Component Props
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -359,8 +423,27 @@ export interface ISprkChatProps {
   playbookId?: string;
   /** Base URL for the BFF API (e.g., "https://spe-api-dev-67e2xz.azurewebsites.net") */
   apiBaseUrl: string;
-  /** Bearer token for API authentication */
-  accessToken: string;
+  /**
+   * Authenticated fetch function — typically `authenticatedFetch` from `@spaarke/auth`
+   * (or the `authenticatedFetch` value returned by `useAuth()`). MUST attach a fresh
+   * Bearer token on every call and re-acquire on 401. SprkChat passes this to its
+   * internal hooks (useChatSession, useChatPlaybooks, useChatContextMapping,
+   * useDynamicSlashCommands) so every JSON API call goes through it.
+   *
+   * Auth v2 (D-AUTH-1, D-AUTH-7): replaces the old `accessToken: string` prop, which
+   * was a token snapshot trap — any token captured at mount time would expire mid-session.
+   */
+  authenticatedFetch: AuthenticatedFetchFn;
+  /**
+   * Fresh-token getter for SSE / XHR code paths (`useSseStream`, `SprkChatUploadZone`,
+   * editor-refine streams, plan-approve streams, document-persist calls). These cannot
+   * use `authenticatedFetch` directly because they need the raw `fetch()`+`ReadableStream`
+   * or `XMLHttpRequest` plumbing. Callers MUST re-invoke `getAccessToken()` immediately
+   * before opening each stream — the token MUST NOT be cached in component state.
+   *
+   * Typically wired to the `getAccessToken` value returned by `useAuth()`.
+   */
+  getAccessToken: AccessTokenGetter;
   /** Callback fired when a new session is created */
   onSessionCreated?: (session: IChatSession) => void;
   /**
@@ -416,6 +499,18 @@ export interface ISprkChatProps {
    * so that prior conversation context is visible when the workspace reopens.
    */
   initialMessages?: IChatMessage[];
+
+  /**
+   * Callback fired for AI pane-routing SSE events (output_pane / source_pane / source_highlight).
+   *
+   * When provided, SprkChat forwards pane-routing events from the BFF stream to this callback.
+   * OutputPanel and SourcePanel subscribe (via StandaloneAiContext) to receive events and render
+   * the correct widget type with the event's payload.
+   *
+   * Uses the same synchronous callback ref pattern as onDocumentStreamEvent — events are
+   * delivered synchronously from the fetch loop without React state batching.
+   */
+  onPaneEvent?: ((event: IAiPaneEvent) => void) | null;
 }
 
 /** Props for SprkChatMessage sub-component. */
@@ -450,6 +545,28 @@ export interface ISprkChatInputProps {
    * When omitted, only DEFAULT_SLASH_COMMANDS are shown in the menu.
    */
   dynamicSlashCommands?: import('../SlashCommandMenu/slashCommandMenu.types').SlashCommand[];
+  /**
+   * FR-09 (task 025): When true, hide the in-input `[/]` slash-command button.
+   * Consumers (SprkChat) that render their own prompt-menu button in a toolbar
+   * strip above the input use this to avoid duplicating the affordance.
+   * The slash menu is still reachable by typing `/`, or by invoking
+   * `triggerSlashMode()` via the imperative handle.
+   */
+  hideSlashButton?: boolean;
+}
+
+/**
+ * Imperative handle exposed by SprkChatInput (FR-09, task 025).
+ *
+ * Allows a parent that owns the toolbar strip (SprkChat) to open the slash
+ * command menu from an external button without re-implementing the wiring.
+ */
+export interface ISprkChatInputHandle {
+  /**
+   * Open the slash command menu by writing `/` into the textarea, notifying
+   * the slash hook, and focusing the input.
+   */
+  triggerSlashMode: () => void;
 }
 
 /** Props for SprkChatContextSelector sub-component. */
@@ -914,8 +1031,15 @@ export interface IUseSseStreamResult {
     type: 'action_confirmation' | 'action_success' | 'action_error' | 'dialog_open' | 'navigate';
     data: IChatSseEventData;
   } | null;
-  /** Start a new SSE stream */
-  startStream: (url: string, body: Record<string, unknown>, token: string) => void;
+  /**
+   * Start a new SSE stream.
+   *
+   * Auth v2 (D-AUTH-7): callers pass an `AccessTokenGetter` (NOT a token string).
+   * The hook invokes the getter once, immediately before opening the stream, so the
+   * token is always fresh for THIS stream open. The token is never snapshotted in
+   * React state and never reused across stream opens.
+   */
+  startStream: (url: string, body: Record<string, unknown>, getAccessToken: AccessTokenGetter) => void;
   /** Cancel the active stream */
   cancelStream: () => void;
   /** Clear stored suggestions (called when user sends a new message) */
@@ -954,6 +1078,19 @@ export interface IUseSseStreamResult {
    * metadata. Auth tokens are NEVER included.
    */
   setOnDocumentStreamEvent: (handler: ((event: IDocumentStreamSseEvent) => void) | null) => void;
+
+  /**
+   * Register a callback for AI pane-routing SSE events (output_pane / source_pane / source_highlight).
+   *
+   * Uses the same synchronous callback ref pattern as setOnDocumentStreamEvent.
+   * Invoked from the fetch loop whenever an event whose top-level `event` field
+   * is "output_pane", "source_pane", or "source_highlight" is received from the BFF.
+   *
+   * OutputPanel and SourcePanel subscribe via StandaloneAiContext to receive these
+   * events and render the appropriate widget type with the event's payload.
+   * Pass null to unregister.
+   */
+  setOnPaneEvent: (handler: ((event: IAiPaneEvent) => void) | null) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

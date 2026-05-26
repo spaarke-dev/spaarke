@@ -2,7 +2,7 @@ Write-Host "Checking dead-letter messages in office-upload-finalization queue...
 
 # Get Service Bus connection details
 $namespace = "spaarke-servicebus-dev"
-$resourceGroup = "spe-infrastructure-westus2"
+$resourceGroup = "rg-spaarke-dev"
 $queueName = "office-upload-finalization/$deadletterqueue"
 
 # Get latest dead-letter messages from eventlog

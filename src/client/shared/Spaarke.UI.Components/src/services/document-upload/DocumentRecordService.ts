@@ -160,6 +160,10 @@ export class DocumentRecordService {
           sprk_graphdriveid: parentContext.containerId,
           sprk_filepath: file.webUrl || null,
           sprk_documentdescription: formData.description || null,
+          // Upload to SPE succeeded by the time we reach here — mark the file flag.
+          // BFF treats DriveId/ItemId as authoritative, but downstream consumers
+          // (RAG indexing filter, scheduled jobs, form ribbon visibility) read this flag.
+          sprk_hasfile: true,
         };
         this.logger.info('DocumentRecordService', `Creating unassociated Document: ${file.name}`);
         const result = await this.dataverseClient.createRecord('sprk_document', payload);
@@ -278,6 +282,11 @@ export class DocumentRecordService {
 
       // Optional description
       sprk_documentdescription: formData.description || null,
+
+      // Upload to SPE succeeded by the time we reach here — mark the file flag.
+      // BFF treats DriveId/ItemId as authoritative, but downstream consumers
+      // (RAG indexing filter, scheduled jobs, form ribbon visibility) read this flag.
+      sprk_hasfile: true,
 
       // Parent lookup using @odata.bind with single-valued navigation property
       [`${navigationPropertyName}@odata.bind`]: `/${entitySetName}(${sanitizedGuid})`,

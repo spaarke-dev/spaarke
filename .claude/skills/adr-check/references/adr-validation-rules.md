@@ -5,26 +5,41 @@
 
 ---
 
-## ADR-001: Minimal API + BackgroundService
+## ADR-001: Minimal API + BackgroundService (BFF runtime); Functions permitted for out-of-band integration
 
-**Constraint**: No Azure Functions - use Minimal API + BackgroundService instead.
+**Constraint**: BFF endpoints in Minimal API. BFF-coupled async in BackgroundService + Service Bus. Azure Functions are PERMITTED for out-of-band integration work (Dataverse → AI Search sync, scheduled indexers, webhook receivers, event-triggered extraction). Durable Functions are NOT permitted — use Service Bus + state machine.
 
 ### Check For (Violations)
 
 ```bash
-# Azure Functions packages in .csproj
-grep -r "Microsoft.Azure.WebJobs\|Microsoft.Azure.Functions\|DurableTask" --include="*.csproj"
+# DurableTask is always a violation
+grep -r "Microsoft.Azure.WebJobs.Extensions.DurableTask\|DurableTask\.Core" --include="*.csproj"
 
-# Azure Functions attributes in C#
-grep -r "\[FunctionName\]\|\[TimerTrigger\]\|\[QueueTrigger\]\|\[ServiceBusTrigger\]\|\[HttpTrigger\]" --include="*.cs"
+# [HttpTrigger] on BFF endpoints (BFF endpoints belong in Minimal API)
+grep -r "\[HttpTrigger\]" --include="*.cs"
+
+# Azure Functions attributes inside Sprk.Bff.Api (BFF should never host Functions)
+grep -r "\[FunctionName\]\|\[TimerTrigger\]\|\[QueueTrigger\]\|\[ServiceBusTrigger\]\|\[HttpTrigger\]" src/server/api/Sprk.Bff.Api/ --include="*.cs"
 ```
+
+### Check For (Acceptable — verify intent)
+
+```bash
+# Azure Functions outside the BFF project (could be legitimate out-of-band integration — review)
+grep -r "\[FunctionName\]\|\[TimerTrigger\]\|\[ServiceBusTrigger\]" --include="*.cs" | grep -v "src/server/api/Sprk.Bff.Api/"
+```
+
+For each Function found outside the BFF:
+- ✅ Confirm it's out-of-band integration work (sync, indexer, webhook receiver, extraction pipeline)
+- ✅ Confirm it's Bicep-deployable with the BFF and shares App Insights correlation
+- ❌ Reject if it duplicates BFF auth, correlation, or ProblemDetails infrastructure
+- ❌ Reject if it's hosting endpoints that belong in the BFF
 
 ### Fix
 
-Remove Azure Functions packages. Convert to:
-- **HTTP triggers** → Minimal API endpoints
-- **Queue/Timer triggers** → BackgroundService workers
-- **Durable Functions** → State machine with Service Bus
+- **Functions hosting BFF endpoints** → move to Minimal API endpoints in `Sprk.Bff.Api`
+- **Durable Functions orchestrations** → State machine with Service Bus
+- **Functions duplicating BFF cross-cutting concerns** → consolidate into BFF, share correlation/auth/ProblemDetails infrastructure
 
 ---
 
@@ -479,8 +494,14 @@ For comprehensive check, run all patterns:
 
 Write-Host "=== ADR Quick Check ==="
 
-Write-Host "`n--- ADR-001: Azure Functions ---"
-Get-ChildItem -Recurse -Include *.csproj,*.cs | Select-String -Pattern "Microsoft.Azure.WebJobs|Microsoft.Azure.Functions|\[FunctionName\]" | Select-Object -First 200
+Write-Host "`n--- ADR-001: Functions hosting BFF endpoints (violation) ---"
+Get-ChildItem -Recurse -Path src/server/api/Sprk.Bff.Api -Include *.cs | Select-String -Pattern "\[FunctionName\]|\[HttpTrigger\]|\[ServiceBusTrigger\]" | Select-Object -First 200
+
+Write-Host "`n--- ADR-001: Durable Functions (always violation) ---"
+Get-ChildItem -Recurse -Include *.csproj | Select-String -Pattern "Microsoft.Azure.WebJobs.Extensions.DurableTask|DurableTask.Core" | Select-Object -First 200
+
+Write-Host "`n--- ADR-001: Functions outside BFF (review — likely out-of-band integration, verify) ---"
+Get-ChildItem -Recurse -Include *.cs | Select-String -Pattern "\[FunctionName\]" | Where-Object { $_.Path -notmatch "Sprk\.Bff\.Api" } | Select-Object -First 200
 
 Write-Host "`n--- ADR-007: Graph Leakage (broad scan) ---"
 Get-ChildItem -Recurse -Include *.cs | Select-String -Pattern "using Microsoft.Graph" | Where-Object { $_.Path -notmatch "\\Infrastructure\\" -and $_.Path -notmatch "SpeFileStore" } | Select-Object -First 200
@@ -496,9 +517,58 @@ Write-Host "=== Check Complete ==="
 
 ---
 
-## ADR-013 and Later (Read the ADRs)
+## ADRs Without Inline Patterns (Read the ADRs)
 
-The rules above include grep/pattern checks for ADR-001–ADR-012. For ADR-013+ (and any ADR not covered by a pattern), validate by reading the current ADR index and the relevant ADR document(s):
+For any ADR not covered by an inline pattern in this file (currently ADR-013 through ADR-027), validate by reading the current ADR index and the relevant ADR document(s):
 
 - Source of truth: `docs/adr/README-ADRs.md`
-- Validate ADR-013–ADR-020 by checking the specific constraints and checklists inside each ADR.
+- Validate by checking the specific constraints and checklists inside each ADR.
+
+---
+
+## ADR-028: Spaarke Auth Architecture (v2)
+
+**Canonical**: `.claude/adr/ADR-028-spaarke-auth-architecture.md`. Function-based client contract (`useAuth()` + `authenticatedFetch` from `@spaarke/auth`); managed identity for server outbound; HMAC webhook signing; named API key auth schemes; tenant-specific MSAL authority.
+
+### Pattern checks (grep)
+
+```powershell
+# VIOLATION: Raw fetch with manual Authorization header (must use authenticatedFetch)
+Get-ChildItem -Recurse -Path src/client -Include *.ts,*.tsx -Exclude "*.test.*","*.spec.*" |
+  Select-String -Pattern 'fetch\([^)]*headers[^)]*Authorization[^)]*Bearer' | Select-Object -First 200
+
+# VIOLATION: Retired token-transport symbols
+Get-ChildItem -Recurse -Path src -Include *.ts,*.tsx,*.js |
+  Select-String -Pattern 'tokenBridge|__SPAARKE_BFF_TOKEN__|BridgeStrategy|XrmStrategy|MsalSilentStrategy|MsalRedirectStrategy|BridgeAuthStrategy|SessionStorageStrategy|__spaarke_bff_token_cache__' |
+  Select-Object -First 200
+
+# VIOLATION: PublicClientApplication instantiated outside @spaarke/auth
+Get-ChildItem -Recurse -Path src/client -Include *.ts,*.tsx |
+  Select-String -Pattern 'new PublicClientApplication\(' |
+  Where-Object { $_.Path -notmatch 'shared\\Spaarke\.Auth\\' } | Select-Object -First 200
+
+# CHECK: GraphClientFactory uses DefaultAzureCredential (canonical) when MI enabled
+Select-String -Path src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs -Pattern 'DefaultAzureCredential|ManagedIdentityCredential'
+
+# VIOLATION: ClientSecretCredential for app-only Graph (use DefaultAzureCredential when MI available)
+Get-ChildItem -Recurse -Path src/server -Include *.cs |
+  Select-String -Pattern 'new ClientSecretCredential' |
+  Where-Object { $_.Path -notmatch 'OBO|onBehalfOf' } | Select-Object -First 200
+
+# VIOLATION: MSAL authority /common or /organizations (INV-3 / INV-6)
+Get-ChildItem -Recurse -Path src/client -Include *.ts,*.tsx,*.js |
+  Select-String -Pattern 'authority.*/(common|organizations)' | Select-Object -First 200
+
+# VIOLATION: accessToken typed as string prop (function-based contract retired this)
+Get-ChildItem -Recurse -Path src/client -Include *.ts,*.tsx |
+  Select-String -Pattern 'accessToken:\s*string|token:\s*string' |
+  Where-Object { $_.Path -notmatch 'shared\\Spaarke\.Auth\\' -and $_.Path -notmatch '\.test\.|\.spec\.' } | Select-Object -First 200
+```
+
+### Expected exemptions (D-AUTH-7 sites — NOT violations if justified inline)
+- SSE / EventSource setup where token must be in URL query (browser EventSource doesn't support headers)
+- XHR upload where the SDK requires `accessToken` injection at construction
+- Dataverse-direct Xrm.WebApi calls (different auth path from BFF)
+- Third-party SDK constructors that require a token string
+
+A finding is **only** a violation if the code site is NOT in the documented D-AUTH-7 exception list AND does not have an inline justification comment explaining why.

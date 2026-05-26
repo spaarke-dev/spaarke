@@ -1,0 +1,57 @@
+{
+  "_comment": [
+    "Cosmos DB audit container immutability policy.",
+    "This file documents the required immutable container configuration for the 'audit' container.",
+    "",
+    "The 'audit' container stores ADR-015 Tier 2 compliance records for AI interactions.",
+    "Retention: 7 years (legal compliance requirement).",
+    "Immutability: container-level policy prevents updates and deletes at the data plane.",
+    "",
+    "IMPORTANT: The application code in AuditLogService.cs enforces append-only semantics",
+    "by using CreateItemAsync exclusively. This infrastructure policy provides a second,",
+    "independent enforcement layer that protects audit records even if application code",
+    "is modified or a data contributor role is used directly.",
+    "",
+    "To apply this policy, use the Azure Portal or Azure CLI (see commands below).",
+    "Note: Cosmos DB point-in-time restore immutability policies are currently preview.",
+    "Reference: https://learn.microsoft.com/en-us/azure/cosmos-db/access-control-resource-token-api"
+  ],
+
+  "container": {
+    "name": "audit",
+    "database": "spaarke-ai",
+    "partitionKey": "/tenantId",
+    "defaultTtl": -1,
+    "analyticalStorageTtl": -1,
+
+    "immutabilityPolicy": {
+      "_comment": "Cosmos DB immutability policy (Time-Based Retention). Set at provisioning time.",
+      "immutabilityPeriodSinceCreationInDays": 2555,
+      "allowProtectedAppendWrites": false,
+      "state": "Locked"
+    },
+
+    "indexingPolicy": {
+      "indexingMode": "consistent",
+      "includedPaths": [
+        { "path": "/*" }
+      ],
+      "excludedPaths": [
+        { "path": "/\"_etag\"/?" }
+      ]
+    }
+  },
+
+  "rbac": {
+    "_comment": "Only Cosmos DB Built-in Data Reader role should be assigned for audit reads.",
+    "writeRole": "Cosmos DB Built-in Data Contributor (restricted to CreateItemAsync by application code)",
+    "readRole": "Cosmos DB Built-in Data Reader (00000000-0000-0000-0000-000000000001)",
+    "noDeleteRole": "DeleteItemAsync and ReplaceItemAsync are blocked by immutability policy"
+  },
+
+  "deploymentCommands": {
+    "_comment": "CLI commands to verify immutability policy after deployment.",
+    "verifyPolicy": "az cosmosdb sql container show --account-name spaarke-cosmos-dev --database-name spaarke-ai --name audit --resource-group spe-infrastructure-westus2 --query 'resource.defaultTtl'",
+    "applyImmutabilityViaBicep": "See infrastructure/bicep/modules/cosmos-db.bicep — add immutabilityPolicy to auditContainer resource block when GA."
+  }
+}

@@ -25,9 +25,6 @@ export type {
   IAnalysisBuilderLaunchMessage,
 } from "./analysisBuilderTypes";
 
-export { BriefingDialog } from "./BriefingDialog";
-export type { IBriefingDialogProps } from "./BriefingDialog";
-
 export { GetStartedExpandDialog } from "./GetStartedExpandDialog";
 export type { IGetStartedExpandDialogProps } from "./GetStartedExpandDialog";
 

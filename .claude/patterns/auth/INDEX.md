@@ -1,24 +1,23 @@
 # Auth Patterns Index
 
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
+> **Last Reviewed**: 2026-05-19 (post-auth-v2 drift audit)
+> **Reviewed By**: doc-drift-audit (auth v2 close-out)
 > **Status**: Verified
+> **Canonical architecture**: [ADR-028 — Spaarke Auth Architecture](../../adr/ADR-028-spaarke-auth-architecture.md)
 
-> Pointer-based patterns for OAuth, OBO, MSAL, and access control.
+> Pointer-based patterns for OAuth, OBO, MSAL, and access control. Spaarke Auth v2 (ADR-028) is the canonical client-side architecture; this index lists what remains canonical and what has been retired.
 
 ## Authentication
 | Pattern | When to Load | Last Reviewed | Status |
 |---------|-------------|---------------|--------|
-| [spaarke-sso-binding.md](spaarke-sso-binding.md) | **CANONICAL** — binding requirements, 6-strategy chain, bundling reality | 2026-05-13 | Verified |
+| [spaarke-sso-binding.md](spaarke-sso-binding.md) | **CANONICAL** — MSAL binding invariants (INV-1..INV-8) + v2 token acquisition model | 2026-05-19 | Verified (v2) |
 | [oauth-scopes.md](oauth-scopes.md) | Configuring OAuth scopes | 2026-04-05 | Verified |
 | [obo-flow.md](obo-flow.md) | Graph API OBO token exchange | 2026-04-05 | Verified |
 | [dataverse-obo.md](dataverse-obo.md) | Dataverse OBO token exchange | 2026-04-05 | Verified |
-| [service-principal.md](service-principal.md) | App-only auth (no user context) | 2026-04-05 | Current |
-| [token-caching.md](token-caching.md) | Token caching (Redis server + localStorage client) | 2026-05-13 | Verified |
-| [msal-client.md](msal-client.md) | Legacy PCF MSAL singleton (superseded by `@spaarke/auth`) | 2026-04-05 | Legacy |
-| [spaarke-auth-initialization.md](spaarke-auth-initialization.md) | Code Page auth bootstrap | 2026-04-05 | Current |
+| [service-principal.md](service-principal.md) | App-only auth. Note: v2 migrated most app-only flows to `DefaultAzureCredential` (managed identity) — see ADR-028. | 2026-05-19 | Verified (v2) |
+| [token-caching.md](token-caching.md) | Token caching — Redis OBO (server) canonical; client-side cascade RETIRED in v2 | 2026-05-19 | Verified (server portion only) |
 | [xrm-webapi-vs-bff-auth.md](xrm-webapi-vs-bff-auth.md) | Decision: Xrm.WebApi vs BFF auth | 2026-04-05 | Verified |
-| [bff-url-normalization.md](bff-url-normalization.md) | **CRITICAL**: BFF URL construction via `buildBffApiUrl()` | 2026-04-05 | Verified |
+| [bff-url-normalization.md](bff-url-normalization.md) | **CRITICAL**: BFF URL construction via `buildBffApiUrl()` — unchanged in v2 | 2026-05-19 | Verified (v2) |
 
 ## Graph API
 | Pattern | When to Load | Last Reviewed | Status |

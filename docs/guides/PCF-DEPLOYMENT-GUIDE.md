@@ -91,6 +91,24 @@ This name MUST appear identically in ALL of:
 
 ---
 
+## URL Construction Convention (cross-env consistency)
+
+When PCF controls call the BFF API, they MUST use the URL construction pattern from `runtimeConfig.ts`:
+
+```typescript
+import { getBffBaseUrl } from './config/runtimeConfig';
+// getBffBaseUrl() returns HOST ONLY (no /api suffix) — normalizeUrl() in @spaarke/auth strips /api if present
+// Callers MUST include /api in path:
+const url = `${getBffBaseUrl()}/api/documents/${documentId}/content`;  // ✅ CORRECT
+const wrong = `${getBffBaseUrl()}/communications/send`;                 // ❌ MISSING /api → 404 from BFF
+```
+
+**Discovery context (2026-05-25)**: Phase 5 demo cutover surfaced 3 LegalWorkspace code sites that violated this convention (commit `2561ce37`). The bug was latent in BOTH dev and demo deployed bundles — only manifested when the Email Document feature was exercised. Prevention: code review must verify every `${getBffBaseUrl()}/{path}` includes `/api`; typed wrappers (e.g., `communicationApi.ts`) prevent the bug by design.
+
+**Dataverse env var format**: `sprk_BffApiBaseUrl` can be host-only or include `/api`; both work because `normalizeUrl()` strips the suffix. Maintain consistent format across envs for operator clarity.
+
+---
+
 ## 🚨 PCF Solution = PCF Control ONLY
 
 **A PCF deployment solution MUST contain only the PCF control.** Do NOT add:
@@ -177,7 +195,7 @@ stat -c '%y' src/components/YourChanged/YourChanged.tsx    # Than this
 
 ### Step 1.6: Compile @spaarke/auth (if imported by the control)
 
-**If the PCF control imports from `@spaarke/auth`**, the auth library's `dist/` directory must exist before the PCF build. This is a local file reference (`file:../../shared/Spaarke.Auth`) that needs compilation.
+**If the PCF control imports from `@spaarke/auth`** (canonical for v2 per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md)), the auth library's `dist/` directory must exist before the PCF build. This is a local file reference (`file:../../shared/Spaarke.Auth`) that needs compilation.
 
 ```bash
 cd src/client/shared/Spaarke.Auth
@@ -187,7 +205,11 @@ npm run build
 
 **Verify `dist/` exists** — if `dist/index.js` is missing, the PCF build will fail with module resolution errors.
 
-**Controls that import @spaarke/auth**: UniversalDatasetGrid, SpeFileViewer, SpeDocumentViewer (and potentially others — check `package.json` for `@spaarke/auth` in dependencies/devDependencies).
+**Controls that import @spaarke/auth**: UniversalDatasetGrid, SpeFileViewer, SpeDocumentViewer, SemanticSearchControl, DocumentRelationshipViewer, RelatedDocumentCount (and potentially others — check `package.json` for `@spaarke/auth`).
+
+> **Auth v2 contract (ADR-028)**: PCFs consuming `@spaarke/auth` MUST use `await initAuth({...})` once in the React `useEffect`, then consume tokens via `useAuth()` or `authenticatedFetch`. NEVER instantiate `PublicClientApplication` directly. NEVER pass `accessToken: string` as a typed prop. See [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md) for INV-1..INV-8 and [`auth-deployment-setup.md`](auth-deployment-setup.md) for env-var setup.
+>
+> **Pre-v2 holdout**: `UniversalQuickCreate` still uses its own local `MsalAuthProvider.ts` (V3 cleanup target). Do NOT copy this pattern for new PCFs.
 
 **Note**: When building individual controls (not using the root `npm run build`), you may also need to install dependencies in the control directory first:
 ```bash

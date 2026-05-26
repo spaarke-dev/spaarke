@@ -258,6 +258,15 @@ public sealed class FileIndexingService : IFileIndexingService
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
+        // Normalize documentId to lowercase. Dataverse GUIDs arrive in inconsistent case
+        // depending on the client: Xrm.Page.data.entity.getId() returns "{UPPER}", the
+        // Dataverse Web API client typically returns lowercase, and ribbon scripts strip
+        // braces but preserve case. Azure AI Search Edm.String filters are case-sensitive,
+        // so a Find Similar / chunk lookup keyed on a lowercased GUID would silently miss
+        // chunks indexed with an uppercase GUID. Normalize once on write — every downstream
+        // path can then assume lowercase.
+        documentId = documentId?.ToLowerInvariant();
+
         // Step 1: Chunk the text
         var chunks = await _chunkingService.ChunkTextAsync(text, null, cancellationToken);
 
@@ -313,18 +322,27 @@ public sealed class FileIndexingService : IFileIndexingService
         var results = await _ragService.IndexDocumentsBatchAsync(documents, cancellationToken);
 
         var successCount = results.Count(r => r.Succeeded);
-        var allSucceeded = successCount == results.Count;
 
-        // Log metrics only (no content per ADR-015)
+        // Defensive: when RagService returns an empty result set (no chunks landed), the legacy
+        // `successCount == results.Count` check evaluated 0 == 0 => true and silently reported
+        // Success with ChunksIndexed=0. Require at least one successful chunk to call this a win.
+        var allSucceeded = results.Count > 0 && successCount == results.Count;
+
+        // Log metrics only (no content per ADR-015). TenantId + SpeFileId added for traceability
+        // — without these, an "indexed N/M" line cannot be tied to the file in Azure Search.
         _logger.LogInformation(
-            "Indexed {FileName}: {SuccessCount}/{TotalCount} chunks in {Duration}ms",
-            fileName, successCount, results.Count, stopwatch.ElapsedMilliseconds);
+            "Indexed {FileName} for tenant {TenantId} speFileId={SpeFileId}: {SuccessCount}/{TotalCount} chunks in {Duration}ms",
+            fileName, tenantId, speFileId, successCount, results.Count, stopwatch.ElapsedMilliseconds);
 
         return new FileIndexingResult
         {
             Success = allSucceeded,
             ChunksIndexed = successCount,
-            ErrorMessage = allSucceeded ? null : $"Failed to index {results.Count - successCount} of {results.Count} chunks",
+            ErrorMessage = allSucceeded
+                ? null
+                : results.Count == 0
+                    ? "RagService returned no index results — pipeline produced zero chunks or all writes were silently dropped"
+                    : $"Failed to index {results.Count - successCount} of {results.Count} chunks",
             Duration = stopwatch.Elapsed,
             DocumentId = documentId,
             SpeFileId = speFileId

@@ -1,15 +1,21 @@
 ---
-description: Execute a POML task file with proper context loading and verification
-tags: [tasks, execution, context, knowledge]
+description: Execute a POML task file with proper context loading, ADR awareness, proactive checkpointing, and rigor-level decision tree — the load-bearing task-execution protocol for every project
+tags: [tasks, execution, context, knowledge, rigor-levels, protocol]
 techStack: [all]
-appliesTo: ["execute task", "run task", "start task", "work on task"]
+appliesTo: ["execute task", "run task", "start task", "work on task", "continue", "next task", "resume task", "pick up where I left off"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-17
 ---
 
 # task-execute
 
 > **Category**: Project Lifecycle
-> **Last Updated**: January 2026
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2d — `leave-alone-justified` on body length; **NOT SPLIT** per dereferencing-reliability concern; expanded `appliesTo` to include all 7 canonical trigger phrases)
+> **Exemplar rationale**: Task execution is per-task and per-project; no canonical snapshot holds. The 11-step protocol + Rigor decision tree IS the contract.
+> **Justified length** (1,084 lines): hub #1 with 1,234 inbound references (5× the next-highest). Heavy procedural body including Rigor decision tree (Step 0.5), 11 mandatory steps, handoff + recovery protocols, PCF/BFF/Deployment per-tech checklists, examples, and Failure Modes table. Splitting would have catastrophic dereferencing risk: an agent executing a task needs the full protocol visible, not gestured-at one click away. Phase 2b Wave 2d explicitly preserved this skill's procedural body inline.
+> **External API surface preserved** (anything callers depend on): 7 trigger phrases ("work on task X", "continue", "next task", "keep going", "resume task X", "pick up where I left off", "continue with task X"); FULL/STANDARD/MINIMAL Rigor Level vocabulary; Step numbers 0.3, 0.5, 8.5, 9.5, 9.7, 10.5, 10.6 (cited by other skills + root CLAUDE.md trigger map).
 
 ---
 
@@ -320,7 +326,7 @@ FOR each pattern in <knowledge><patterns>:
 |-----------|-------------------|
 | `bff-api`, `api` | `.claude/patterns/api/endpoint-definition.md`, `.claude/patterns/api/endpoint-filters.md` |
 | `pcf`, `react` | `.claude/patterns/pcf/control-initialization.md`, `.claude/patterns/pcf/theme-management.md` |
-| `auth`, `oauth` | `.claude/patterns/auth/obo-flow.md`, `.claude/patterns/auth/oauth-scopes.md` |
+| `auth`, `oauth` | `.claude/patterns/auth/spaarke-sso-binding.md` (canonical v2), `.claude/patterns/auth/obo-flow.md`, `.claude/patterns/auth/oauth-scopes.md` + ADR-028 + `docs/guides/auth-deployment-setup.md` |
 | `dataverse`, `plugin` | `.claude/patterns/dataverse/plugin-structure.md` |
 | `cache` | `.claude/patterns/caching/distributed-cache.md` |
 | `testing` | `.claude/patterns/testing/unit-test-structure.md`, `.claude/patterns/testing/mocking-patterns.md` |
@@ -1078,6 +1084,21 @@ If user says yes, invoke the `merge-to-master` skill in Single Merge mode for th
 
 - **[Context Recovery Protocol](../../../docs/procedures/context-recovery.md)**: Full recovery procedure
 - **[AIP-001: Task Execution Protocol](../../protocols/AIP-001-task-execution.md)**: Task execution and handoff rules
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Agent skipped Step 0.5 Rigor Level determination — executed wrong protocol depth | Trigger phrase fired but the rigor tree wasn't traversed | Step 0.5 is MANDATORY. The decision tree (Tags + line counts + context) selects FULL/STANDARD/MINIMAL. Output the chosen level at task start so it's visible. |
+| Agent skipped Step 4 (Load Constraints) — code violates an ADR | Step 4 elided "because the task seems simple" | NEVER skip Step 4 unless rigor level is MINIMAL. ADR constraints catch problems that tests don't — missing them is costly downstream. |
+| Agent didn't checkpoint after 3 steps — work lost after compaction | Proactive Checkpointing rule from root CLAUDE.md ignored | Checkpoint EVERY 3 steps via context-handoff skill. Background work between checkpoints is at-risk. After 5+ file modifications, checkpoint mandatory. |
+| Step 9.5 Quality Gates skipped — broken code merged | Operator pressure or "we'll catch it in CI" | Quality Gates (code-review + adr-check at Step 9.5) are NON-NEGOTIABLE for FULL rigor. CI catches mechanical issues; code-review catches judgment-layer issues CI can't. |
+| External callers (other skills, project CLAUDE.md trigger maps) silently break | Step number was renumbered during refinement | NEVER renumber Steps 0.3, 0.5, 8.5, 9.5, 9.7, 10.5, 10.6. These are external API. The audit-stamp block lists the preserved surface. |
+| Agent invoked task-execute but didn't load knowledge files | Knowledge file paths in task POML were wrong/stale | Verify `<knowledge><files>` resolve BEFORE step 1. If a path is broken, task-create generated a bad knowledge mapping — fix the POML, then re-invoke. |
+| Multiple parallel-safe tasks dispatched, but task-execute invoked sequentially | Operator missed the "single message with multiple Skill calls" pattern from root CLAUDE.md | Per root CLAUDE.md "Parallel Task Execution": independent tasks get ONE message with MULTIPLE Skill invocations. Sequential = wasted parallelism. |
+| Skill body went stale relative to root CLAUDE.md task-execution protocol | Hot-fix to root CLAUDE.md without updating skill body | Run `Find-SkillReferenceDrift.ps1` (Phase 4a) after any change to MANDATORY TASK EXECUTION PROTOCOL section in root CLAUDE.md. |
 
 ---
 

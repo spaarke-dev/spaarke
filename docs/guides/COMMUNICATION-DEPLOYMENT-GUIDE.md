@@ -238,6 +238,39 @@ az webapp config appsettings list \
   --output table
 ```
 
+### Full email subsystem settings (Phase 5 discovered)
+
+The Phase 5 demo cutover (sdap-bff-api-remediation-fix project) discovered that the BFF requires 17 settings across two option classes (`Communication` and `EmailProcessing`) to start cleanly. Missing any setting validated by `[Required]` data annotation produces `OptionsValidationException` at startup → 503 on `/healthz`.
+
+#### Communication module (9 settings)
+
+| Setting | Example / Notes |
+|---|---|
+| `Communication__DefaultMailbox` | e.g., `testuser1@spaarke.com` |
+| `Communication__ArchiveContainerId` | Key Vault reference to SPE container ID |
+| `Communication__WebhookSigningKey` | Key Vault reference to `communication-webhook-signing-key` |
+| `Communication__WebhookClientState` | Random GUID for Graph subscription validation |
+| `Communication__WebhookNotificationUrl` | e.g., `https://{app}.azurewebsites.net/api/communications/incoming-webhook` |
+| `Communication__ApprovedSenders__0__Email` | e.g., `testuser1@spaarke.com` |
+| `Communication__ApprovedSenders__0__DisplayName` | e.g., `Test User 1` |
+| `Communication__ApprovedSenders__0__IsDefault` | e.g., `true` |
+| `Communication__ApprovedSenders__1__*` (and `__2__`, ...) | Per additional sender; minimum 1 required by `[Required]` |
+
+#### EmailProcessing module (8 settings)
+
+| Setting | Example / Notes |
+|---|---|
+| `EmailProcessing__Enabled` | boolean |
+| `EmailProcessing__EnableWebhook` | boolean |
+| `EmailProcessing__EnablePolling` | boolean |
+| `EmailProcessing__PollingIntervalMinutes` | e.g., `5` |
+| `EmailProcessing__AutoEnqueueAi` | boolean; recommend `false` initially |
+| `EmailProcessing__AutoIndexToRag` | boolean; recommend `false` initially — opt-in |
+| `EmailProcessing__DefaultContainerId` | Key Vault reference to SPE container ID — typically same as `Communication__ArchiveContainerId` |
+| `EmailProcessing__WebhookSigningKey` | Key Vault reference to `Email-WebhookSigningKey` |
+
+> All 17 settings were discovered during Phase 5 demo cutover (sdap-bff-api-remediation-fix project, EXECUTION-LOG §Phase 5 step 10). The Communication module's `WebhookSigningKey` is `[Required]` by data annotation — startup fails without it even if email subsystem won't be actively exercised. The recommended approach when email isn't yet activated is to provide a generated 48-byte base64 HMAC key (still required) but leave `EmailProcessing__Enabled=false`.
+
 ---
 
 ## Step 4: Deploy Dataverse Solution and Web Resources
@@ -554,14 +587,20 @@ These phases add Graph subscription monitoring, backup polling, and email-to-doc
 The `GraphSubscriptionManager` needs to know where to direct Graph webhook notifications.
 
 ```bash
+# Auth v2 (ADR-028) Phase C: HMAC-SHA256 signing key (48-byte base64)
+SIGNING_KEY=$(openssl rand -base64 48)
+
 az webapp config appsettings set \
   --resource-group spe-infrastructure-westus2 \
   --name spe-api-dev-67e2xz \
   --settings Communication__WebhookNotificationUrl="https://spe-api-dev-67e2xz.azurewebsites.net/api/communications/incoming-webhook" \
-                Communication__WebhookSecret="{random-secret-key}"
+             Communication__WebhookSigningKey="$SIGNING_KEY" \
+             Communication__WebhookClientState="{graph-subscription-clientState-secret}"
 ```
 
-Replace `{random-secret-key}` with a random 32+ character string (used to validate webhook notifications from Graph).
+**Auth v2 contract (Phase C, ADR-028)**: the `/api/communications/incoming-webhook` endpoint validates inbound Microsoft Graph notifications using HMAC-SHA256 over the request body, with the signing key from `Communication__WebhookSigningKey` (48-byte base64; generate with `openssl rand -base64 48`). The header `X-Signature-256` is compared via `CryptographicOperations.FixedTimeEquals` (constant-time). The Graph-native `clientState` body validation runs in addition (separate secret). For production, store both in Key Vault and reference via `@Microsoft.KeyVault(...)`. See [`auth-deployment-setup.md`](auth-deployment-setup.md) §3.
+
+> **Legacy note**: pre-v2 code used `Communication__WebhookSecret` (no HMAC). That setting is no longer consumed by the v2 webhook handler.
 
 ### Step 8: Seed Communication Account Records
 
@@ -866,7 +905,7 @@ Release 2 is designed for multi-tenant deployment. When promoting to higher envi
 | `Communication__ApprovedSenders` | `mailbox-central@spaarke.com` | Environment-specific mailboxes | Sender list changes per tenant/environment |
 | `Communication__WebhookNotificationUrl` | `https://spe-api-dev-67e2xz...` | Environment-specific webhook URL | BFF API URL differs per environment |
 | `Communication__ArchiveContainerId` | Dev SPE container GUID | Production SPE container GUID | Documents archived to environment-specific container |
-| `Communication__WebhookSecret` | Dev secret value | New random secret | Different per environment for security |
+| `Communication__WebhookSigningKey` | Dev HMAC key (48-byte base64) | New HMAC key per env (`openssl rand -base64 48`) | Auth v2 Phase C — HMAC-SHA256 signing key; different per env for security. Old `Communication__WebhookSecret` setting deprecated. |
 | `sprk_BffApiBaseUrl` environment variable | Dev BFF URL | Production BFF URL | PCF controls call BFF at different URLs per environment |
 
 ### No Tenant-Specific Hardcoding

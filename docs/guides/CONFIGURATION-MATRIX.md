@@ -79,10 +79,10 @@ Options class: `GraphOptions` (`Configuration/GraphOptions.cs`)
 |---------|---------|----------|----------|-------------|
 | `Graph:TenantId` | -- | appsettings / Env Var | Yes | Azure AD Tenant ID |
 | `Graph:ClientId` | -- | appsettings / Env Var | Yes | App registration client ID |
-| `Graph:ClientSecret` | -- | Key Vault | When MI disabled | Client secret for app-only auth |
+| `Graph:ClientSecret` | -- | Key Vault | Local dev only (when MI disabled) | Client secret for app-only Graph — superseded by MI in production per ADR-028 |
 | `Graph:Scopes` | `["https://graph.microsoft.com/.default"]` | appsettings | Yes | Graph API scopes |
-| `Graph:ManagedIdentity:Enabled` | `false` | Env Var | No | Use User-Assigned Managed Identity |
-| `Graph:ManagedIdentity:ClientId` | -- | Env Var | When MI enabled | UAMI Client ID |
+| `Graph:ManagedIdentity:Enabled` | `true` (production canonical per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md)) | Env Var | **Yes (production)** | Use Managed Identity for app-only Graph (canonical per ADR-028). Default `false` in code is for local-dev convenience only. |
+| `Graph:ManagedIdentity:ClientId` | -- | Env Var | When using UAMI (system-assigned MI does not require this) | UAMI Client ID |
 
 ### Graph Resilience (`GraphResilience`)
 
@@ -125,11 +125,13 @@ Options class: `ServiceBusOptions` (`Configuration/ServiceBusOptions.cs`)
 
 Options class: `DataverseOptions` (`Configuration/DataverseOptions.cs`)
 
+> **Auth v2 (ADR-028)**: On Azure-hosted environments with `Graph__ManagedIdentity__Enabled=true`, the BFF accesses Dataverse via Managed Identity (`DefaultAzureCredential`); the App Service MI is the Dataverse Application User. `Dataverse:ClientSecret` is **only required for local-dev fallback**. See [`auth-deployment-setup.md`](auth-deployment-setup.md) §6.
+
 | Setting | Default | Location | Required | Description |
 |---------|---------|----------|----------|-------------|
 | `Dataverse:EnvironmentUrl` | -- | Key Vault / Env Var | Yes | Dataverse URL (e.g., `https://spaarkedev1.crm.dynamics.com`) |
 | `Dataverse:ClientId` | -- | Env Var | Yes | App registration client ID |
-| `Dataverse:ClientSecret` | -- | Key Vault | Yes | Client secret |
+| `Dataverse:ClientSecret` | -- | Key Vault | Local dev only (when MI disabled) | Client secret — superseded by MI in production per ADR-028 |
 | `Dataverse:TenantId` | -- | Env Var | Yes | Azure AD Tenant ID |
 
 ### Document Intelligence / AI (`DocumentIntelligence`)
@@ -241,7 +243,8 @@ Options class: `EmailProcessingOptions` (`Configuration/EmailProcessingOptions.c
 | `Email:MaxEmlFileNameLength` | `100` | appsettings | Max .eml filename length |
 | `Email:AutoEnqueueAi` | `true` | appsettings | Auto-queue for AI processing |
 | `Email:AutoIndexToRag` | `false` | appsettings | Auto-index to RAG |
-| `Email:WebhookSecret` | -- | Key Vault | Dataverse webhook secret |
+| `Email:WebhookSecret` | -- | Key Vault | ⚠️ DEPRECATED (`[Obsolete]` in `EmailProcessingOptions.cs`). Auth v2 canonical is `EmailProcessing:WebhookSigningKey` (HMAC-SHA256, 48-byte base64 — see below). |
+| `EmailProcessing:WebhookSigningKey` | -- | Key Vault | **Canonical (Auth v2 Phase C)** — HMAC-SHA256 key for Dataverse Service Endpoint webhook signature validation. Generate via `openssl rand -base64 48`. See [`auth-deployment-setup.md`](auth-deployment-setup.md) §3-§4. |
 
 ### Communication (`Communication`)
 
@@ -252,7 +255,8 @@ Options class: `CommunicationOptions` (`Configuration/CommunicationOptions.cs`)
 | `Communication:DefaultMailbox` | -- | Env Var | No | Default sender mailbox |
 | `Communication:ArchiveContainerId` | -- | Env Var | No | SPE container for .eml archives |
 | `Communication:WebhookNotificationUrl` | -- | Env Var | Yes | Public HTTPS callback URL for Graph webhooks |
-| `Communication:WebhookClientState` | -- | Key Vault | Yes | Webhook validation secret |
+| `Communication:WebhookClientState` | -- | Key Vault | Yes | Graph-native subscription validation secret (returned during Graph subscription challenge — separate from HMAC signing) |
+| `Communication:WebhookSigningKey` | -- | Key Vault | **Yes (Auth v2 Phase C)** | HMAC-SHA256 key for Graph webhook signature validation. Generate via `openssl rand -base64 48`. See [`auth-deployment-setup.md`](auth-deployment-setup.md) §3-§4. |
 | `Communication:ApprovedSenders` | `[]` | appsettings | Yes (min 1) | Approved sender configurations |
 
 ### Agent Token (`AgentToken`)
@@ -325,8 +329,10 @@ Secrets stored in Azure Key Vault and referenced via `@Microsoft.KeyVault(Secret
 | `PromptFlow-Endpoint` | `Analysis:PromptFlowEndpoint` | Prompt Flow scoring endpoint |
 | `PromptFlow-Key` | `Analysis:PromptFlowKey` | Prompt Flow API key |
 | `AppInsights-ConnectionString` | `ApplicationInsights:ConnectionString` | Application Insights |
-| `Email-WebhookSecret` | `Email:WebhookSecret` | Email webhook validation |
-| `communication-webhook-secret` | `Communication:WebhookClientState` | Graph webhook validation |
+| `Email-WebhookSecret` | `Email:WebhookSecret` | ⚠️ Deprecated (pre-v2). Use `Email-WebhookSigningKey` below for v2 HMAC validation. |
+| `Email-WebhookSigningKey` | `EmailProcessing:WebhookSigningKey` | **Canonical (Auth v2 Phase C)** — HMAC-SHA256 for Dataverse webhook signature |
+| `communication-webhook-secret` | `Communication:WebhookClientState` | Graph webhook validation secret (challenge-response) |
+| `communication-webhook-signing-key` | `Communication:WebhookSigningKey` | **Canonical (Auth v2 Phase C)** — HMAC-SHA256 for Graph webhook signature |
 | `BingSearch-ApiKey` | `BingSearch:ApiKey` | Bing Search key |
 
 ---

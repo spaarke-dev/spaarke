@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Identity.Web;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Authorization;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -11,6 +12,16 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// </summary>
 public static class AuthorizationModule
 {
+    // Idempotency guard for the JwtBearerOptions PostConfigure delegate (task 046).
+    // The DI container can invoke PostConfigure<TOptions> delegates more than once when the
+    // options instance is reconfigured (e.g. via IOptionsMonitor reload, named-vs-default
+    // resolution, or repeat module registration). Without a guard, every invocation would
+    // re-chain a new OnAuthenticationFailed handler on top of the previous one and re-merge
+    // the audience set, masking the real source of audience-list mutations.
+    // 0 = not yet configured, 1 = configured. Interlocked.CompareExchange guarantees only
+    // the first caller wins, even if PostConfigure is called concurrently during host build.
+    private static int _jwtPostConfigureApplied;
+
     /// <summary>
     /// Adds authentication (Azure AD JWT), authorization handler, and all authorization policies.
     /// </summary>
@@ -22,6 +33,33 @@ public static class AuthorizationModule
         services.AddAuthentication(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme)
             .AddMicrosoftIdentityWebApi(configuration.GetSection("AzureAd"));
 
+        // Named API key authentication schemes (task AUTHV2-045).
+        // Replaces ad-hoc header validation on /api/admin/builder-scopes/import and
+        // /api/ai/rag/enqueue-indexing. Each scheme binds to its own configuration key so
+        // the keys can be rotated independently and blast-radius is isolated per consumer.
+        //
+        // Endpoints opt-in via .RequireAuthorization(policyName); the policy below specifies
+        // the scheme so the JwtBearer default doesn't have to be unset to use these.
+        //
+        // Configuration keys (Key Vault references in production):
+        //   - BuilderAdmin:ApiKey  → admin scope import CLI/script access
+        //   - Rag:ApiKey           → RAG bulk indexing webhook access
+        services.AddAuthentication()
+            .AddScheme<ApiKeyAuthenticationOptions, ApiKeyAuthenticationHandler>(
+                AuthSchemes.BuilderAdminApiKey,
+                options =>
+                {
+                    options.ConfigKey = "BuilderAdmin:ApiKey";
+                    options.IdentityName = "builder-admin-api-key";
+                })
+            .AddScheme<ApiKeyAuthenticationOptions, ApiKeyAuthenticationHandler>(
+                AuthSchemes.RagApiKey,
+                options =>
+                {
+                    options.ConfigKey = "Rag:ApiKey";
+                    options.IdentityName = "rag-api-key";
+                });
+
         // Accept tokens from M365 Copilot API Plugin (uses a different audience URI
         // issued via the Teams Developer Portal Entra SSO registration).
         // PostConfigure runs AFTER AddMicrosoftIdentityWebApi's own configuration,
@@ -30,6 +68,14 @@ public static class AuthorizationModule
             JwtBearerDefaults.AuthenticationScheme,
             options =>
             {
+                // Idempotency guard (task 046): ensure the audience-merge + event-handler
+                // wiring runs at most once per process. CompareExchange returns the original
+                // value; if it was already 1, another caller already ran the delegate.
+                if (Interlocked.CompareExchange(ref _jwtPostConfigureApplied, 1, 0) != 0)
+                {
+                    return;
+                }
+
                 var copilotAudience = configuration["AgentToken:CopilotAudience"];
                 if (!string.IsNullOrEmpty(copilotAudience))
                 {
@@ -45,6 +91,20 @@ public static class AuthorizationModule
                     options.TokenValidationParameters.ValidAudiences = audiences;
                     // Clear singular to avoid conflicts with the plural list
                     options.TokenValidationParameters.ValidAudience = null;
+                }
+
+                // Loud warning if the audience list is empty after PostConfigure — every
+                // token validation will fail in that state, and the symptom (401 on every
+                // request) is far enough from the cause that we want a startup-time signal.
+                // ILogger isn't reliably available here (PostConfigure runs during host build
+                // before logging providers are guaranteed wired), so we emit to Console.Error
+                // which is captured by App Service / container stdout pipelines.
+                var finalAudiences = options.TokenValidationParameters.ValidAudiences?.ToList() ?? [];
+                if (finalAudiences.Count == 0 && string.IsNullOrEmpty(options.TokenValidationParameters.ValidAudience))
+                {
+                    Console.Error.WriteLine(
+                        "[CRITICAL] JWT audience list is empty after PostConfigure — all tokens will fail validation. " +
+                        "Check AzureAd:ClientId and AgentToken:CopilotAudience configuration.");
                 }
 
                 // Log auth failures with token details for diagnosing Copilot token issues
@@ -147,6 +207,35 @@ public static class AuthorizationModule
                 p.Requirements.Add(new ResourceAccessRequirement("upload_file")));
             options.AddPolicy("canmanagecontainers", p =>
                 p.Requirements.Add(new ResourceAccessRequirement("create_container")));
+
+            // Named API key policies (task AUTHV2-045).
+            // Each policy is bound to a single auth scheme so the matching ApiKey handler runs
+            // even when JwtBearer is the default. RequireAuthenticatedUser enforces a 401 when
+            // the API key is missing or invalid (instead of silently falling back to JwtBearer).
+            options.AddPolicy(AuthPolicies.BuilderAdminApiKey, p =>
+            {
+                p.AuthenticationSchemes = new[] { AuthSchemes.BuilderAdminApiKey };
+                p.RequireAuthenticatedUser();
+            });
+            options.AddPolicy(AuthPolicies.RagApiKey, p =>
+            {
+                p.AuthenticationSchemes = new[] { AuthSchemes.RagApiKey };
+                p.RequireAuthenticatedUser();
+            });
+
+            // Composite policy: BuilderAdmin endpoints accept EITHER OAuth bearer (Azure AD) OR
+            // the BuilderAdmin API key. Preserves prior dual-auth behavior while delegating the
+            // API key validation to the named scheme. Useful for endpoints that need to support
+            // both interactive (Dataverse/PCF) and automation (CLI/script) callers.
+            options.AddPolicy(AuthPolicies.BuilderAdminOrOAuth, p =>
+            {
+                p.AuthenticationSchemes = new[]
+                {
+                    JwtBearerDefaults.AuthenticationScheme,
+                    AuthSchemes.BuilderAdminApiKey,
+                };
+                p.RequireAuthenticatedUser();
+            });
 
             // Admin Policies
             options.AddPolicy("SystemAdmin", p =>

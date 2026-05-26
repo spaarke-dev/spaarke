@@ -1,12 +1,18 @@
-# jps-action-create
-
 ---
-description: Create a new JPS definition for an Analysis Action
+description: Create a new JPS (JSON Prompt Schema) definition for an AI Analysis Action — generates valid JSON with instruction, output fields, scopes, template params, and examples
 tags: [ai, jps, playbook, prompt-schema, action]
 techStack: [azure-openai, aspnet-core, dataverse]
 appliesTo: ["create JPS action", "new JPS definition", "create analysis action", "new playbook action"]
 alwaysApply: false
+exemplar: .claude/skills/jps-action-create/examples/document-profiler.json
+last-reviewed: 2026-05-17
 ---
+
+# jps-action-create
+
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2d — Option A executed: moved 23 canonical JPS examples from `projects/x-ai-json-prompt-schema-system/notes/jps-conversions/` to `.claude/skills/jps-action-create/examples/`; updated 5 path refs in this skill + 3 refs in jps-playbook-design + 3 refs in jps-validate; renumbered second duplicate Step 6 → Step 7; flipped frontmatter above H1)
+> **Exemplar rationale**: `examples/document-profiler.json` is the canonical simple-extraction reference (named throughout this skill body as "gold standard"). For complex-with-scopes pattern, see `examples/clause-analyzer.json`.
 
 ## Purpose
 
@@ -47,8 +53,8 @@ LOAD knowledge files:
 
 
 LOAD 2-3 example JPS files as patterns:
-  - projects/ai-json-prompt-schema-system/notes/jps-conversions/document-profiler.json (simple extraction)
-  - projects/ai-json-prompt-schema-system/notes/jps-conversions/clause-analyzer.json (complex with scopes)
+  - .claude/skills/jps-action-create/examples/document-profiler.json (simple extraction)
+  - .claude/skills/jps-action-create/examples/clause-analyzer.json (complex with scopes)
 
 SELECT the closest pattern match for user's requirements.
 ```
@@ -146,7 +152,7 @@ Run validation checks:
 ### Step 5: Save
 
 ```
-SAVE to: projects/ai-json-prompt-schema-system/notes/jps-conversions/{action-name}.json
+SAVE to: .claude/skills/jps-action-create/examples/{action-name}.json
 
 ACTION-NAME convention:
   - Lowercase, kebab-case
@@ -166,7 +172,7 @@ Ask user:
 ## Conventions
 
 - Field names use `sprk_` prefix for Dataverse column mapping
-- JPS files stored in `projects/ai-json-prompt-schema-system/notes/jps-conversions/`
+- JPS files stored in `.claude/skills/jps-action-create/examples/`
 - One JPS file per Analysis Action
 - Examples should be realistic but not contain actual sensitive data (ADR-015)
 - Constraints should be specific and actionable, not vague
@@ -178,7 +184,7 @@ Ask user:
 ```
 ✅ JPS Action Created
 
-📄 File: projects/ai-json-prompt-schema-system/notes/jps-conversions/{name}.json
+📄 File: .claude/skills/jps-action-create/examples/{name}.json
 📋 Fields: {N} output fields
 🔧 Features: [structured output | template params | scopes | $choices]
 ✅ Validation: All checks passed
@@ -234,7 +240,7 @@ User: "Create a JPS action for document classification that routes to different 
 
 ---
 
-### Step 6: Refresh Scope Index
+### Step 7: Refresh Scope Index
 
 After seeding a new action to Dataverse, refresh the scope catalog so Claude Code can find it in future playbook designs:
 
@@ -275,8 +281,21 @@ ELSE:
 ## Tips for AI
 
 - Always load at least 2 example JPS files before generating — match the closest pattern
-- Use the document-profiler.json as the "gold standard" for simple extraction actions
-- Use the clause-analyzer.json as the "gold standard" for complex actions with scopes
+- Use the `examples/document-profiler.json` as the "gold standard" for simple extraction actions
+- Use the `examples/clause-analyzer.json` as the "gold standard" for complex actions with scopes
 - Never skip the validation step — malformed JPS causes silent runtime failures
 - Always include at least 1 concrete example in the examples section
 - Prefer `structuredOutput: true` for any action that populates Dataverse columns
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Generated JPS doesn't render — flat-text fallback used at runtime | `IsJpsFormat()` returned false (missing `$schema` field OR malformed JSON) | Always invoke `jps-validate` (Step 4) BEFORE saving. Check 23 in jps-validate explicitly tests format detection. |
+| `$choices` reference fails at runtime | Wrong prefix (`lookup:`, `optionset:`, `multiselect:`, `boolean:`, `downstream:`) OR missing `.fieldName` separator | jps-validate Check 16 catches this. Format: `lookup:entity.field` (with exactly one `.`). |
+| Scope `$ref` resolves to non-existent record | Referenced knowledge/skill record was never seeded to Dataverse | Run `jps-scope-refresh` first to confirm scopes exist. If missing, invoke this skill (`jps-action-create`) recursively to create the needed scope. |
+| Duplicate Step 6 confusion (offer-next-steps vs refresh-scope-index) | Earlier skill version had two Steps labeled "6" | Fixed 2026-05-17: second Step 6 → Step 7. Renumbered for clarity. |
+| Examples path broken after directory move | Examples were at `projects/x-ai-json-prompt-schema-system/notes/jps-conversions/` (archived dir) | Fixed 2026-05-17 (Option A): all 23 canonical JSONs moved to `.claude/skills/jps-action-create/examples/`. Skill body + jps-playbook-design + jps-validate updated to match. |
+| Created action not findable in playbook design | Forgot Step 7 (Refresh Scope Index) — scope-model-index.json is stale | ALWAYS run Step 7 after seeding. `jps-playbook-design` reads `scope-model-index.json` — if your new action isn't there, it can't be selected. |

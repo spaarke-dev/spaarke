@@ -1,0 +1,39 @@
+# Publish Metrics (Task 017)
+
+> Captured: 2026-05-24
+> Source: `deploy/api-publish/` (post-redeploy from rollback drill, commit ba810663)
+
+## Current publish metrics
+
+uncompressed_bytes  = 222,835,032
+uncompressed_mb     = 212
+file_count          = 287
+dll_count           = 216
+recursive_loadable  = 223 (.dll, .exe, .pdb, .deps.json, .runtimeconfig.json, web.config)
+
+## Compressed (zip) metrics
+
+zip_size_mb         = 75.2 (per Deploy-BffApi.ps1 output; twice-verified 2026-05-24)
+zip_path_local      = src/server/api/Sprk.Bff.Api/publish.zip (deleted post-deploy by script; recreated each run)
+
+## Comparison vs baselines
+
+| Metric              | Current   | Baseline (constraint) | Drift point 2026-05-19 | Status            |
+|---------------------|-----------|-----------------------|------------------------|-------------------|
+| Compressed (MB)     | 75.2      | ~60                   | 75.19                  | +15.2 over baseline; matches drift |
+| Uncompressed (MB)   | 212       | n/a                   | 212                    | matches drift     |
+| File count          | 287       | ~240                  | n/a                    | +47 over baseline |
+
+## Drift since 2026-05-19
+
+NONE — current state identical to drift point (no new packages added in this 5-day window).
+Confirms the project's remediation target is well-calibrated.
+
+## Phase 4 trajectory
+
+If Outcome A SAFE candidates land (FR-A1 + FR-A2 + FR-A3):
+- Projected compressed: ~55 MB (under 60 MB baseline ✅)
+- Projected uncompressed: ~140 MB (under 150 MB target ✅)
+- Projected file count: ~245 (close to 240 baseline)
+
+(Detailed analysis in size-by-category.md)

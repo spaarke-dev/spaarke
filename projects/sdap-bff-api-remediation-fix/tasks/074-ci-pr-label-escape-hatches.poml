@@ -1,0 +1,91 @@
+<task id="074" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>CI PR-label escape hatches + PR template refresh (FR-C4 + senior-review G3)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, ci-cd, codification, outcome-c, phase-6</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 071/072/073 workflow steps existing; precedes 082 (FR-C6 escape hatch piggybacks on this infrastructure)</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Two bundled deliverables:
+
+    1. **Add PR-label escape-hatch logic** to CI guards from tasks 071/072/073 (and prepare infrastructure for task 082's FR-C6 gate). Labels `[allow-size-growth]`, `[allow-vuln]`, and `[allow-direct-ai-inject]` cause respective checks to pass WHEN PR body contains a Justification section. A separate validator step fails if any of these labels is present without justification.
+
+    2. **Refresh `.github/pull_request_template.md`** (senior review G3 / item #3, 2026-05-24): current PR template references ADRs 001–012 (with ADR-023 struck through) and is MISSING ADR-013 (refined AI Architecture), ADR-028 (Spaarke Auth v2), and ADR-029 (new — BFF Publish Hygiene). Add these to the checklist. Add a "Size & Security Justification" section that's required if any escape-hatch label is used. Add the label-driven gating instructions in the template body.
+  </prompt>
+
+  <role>CI/CD engineer + repo hygiene maintainer.</role>
+
+  <goal>
+    Two outcomes:
+    (a) Synthetic PR tests pass: `[allow-size-growth]` / `[allow-vuln]` / `[allow-direct-ai-inject]` + justification → pass; without justification → fail.
+    (b) PR template includes ADR-013/028/029, Size & Security Justification section, and label-driven gating instructions.
+  </goal>
+
+  <inputs>
+    <file purpose="workflow">.github/workflows/sdap-ci.yml</file>
+    <file purpose="pr-template">.github/pull_request_template.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-C4 revised 2026-05-24">Labels `[allow-size-growth]`, `[allow-vuln]`, `[allow-direct-ai-inject]` + required body justification</constraint>
+    <constraint source="senior review G3">PR template missing ADR-013, ADR-028, ADR-029 — add to checklist</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>.github/pull_request_template.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Explicit-acknowledgment escape is critical to avoid CI-friction-blocks-legitimate-work. The body justification ensures the override is intentional and audited. Three labels cover the three CI gate categories: size (FR-C5 deploy guard + FR-C1/C2 publish-shape guards), vuln (FR-C3 vuln transitive guard), and ai-injection (FR-C6 direct CRUD→AI gate, lands in task 082).
+
+      The PR template ADR list is repo-wide hygiene that this project incidentally fixes. Once updated, every PR going forward checks the current binding ADRs (013, 028, 029) — not just the older 001–012 set.
+    </background>
+    <dependencies>
+      <dependency task="071" status="not-started">FR-C1 check</dependency>
+      <dependency task="072" status="not-started">FR-C2 check</dependency>
+      <dependency task="073" status="not-started">FR-C3 check</dependency>
+      <dependency task="076" status="not-started">ADR-029 published (so PR template can link to it)</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Add `if: !contains(github.event.pull_request.labels.*.name, 'allow-size-growth')` conditional skips to FR-C1/C2/C5 steps</step>
+    <step order="2">Add `if: !contains(github.event.pull_request.labels.*.name, 'allow-vuln')` skip to FR-C3</step>
+    <step order="3">Prepare `if: !contains(github.event.pull_request.labels.*.name, 'allow-direct-ai-inject')` infrastructure (will be consumed by task 082)</step>
+    <step order="4">For each labeled escape: implement a separate validator step that fails if the label is present but PR body lacks "## Justification" section with non-empty content</step>
+    <step order="5">Read current `.github/pull_request_template.md`</step>
+    <step order="6">Update template ADR checklist: add ADR-013, ADR-028, ADR-029 entries (remove or strikethrough any deprecated entries per `.claude/adr/INDEX.md`)</step>
+    <step order="7">Add to template body: "## Size & Security Justification (required if using [allow-size-growth], [allow-vuln], or [allow-direct-ai-inject])" with placeholder text</step>
+    <step order="8">Add label-driven gating instructions to template body (brief: "If your PR triggers a CI gate failure that you intend, apply the matching label AND fill the Justification section")</step>
+    <step order="9">Synthetic PR tests: with each label + justification → pass; with each label + no justification → fail</step>
+    <step order="10">Commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="git">commit</tool><tool name="gh">test on synthetic PRs</tool></tools>
+
+  <outputs>
+    <output type="code">.github/workflows/sdap-ci.yml (label-conditional + justification validator for 3 labels)</output>
+    <output type="code">.github/pull_request_template.md (ADR-013/028/029 added; Justification section; label gating instructions)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 3 labels (`allow-size-growth`, `allow-vuln`, `allow-direct-ai-inject`) cause respective CI step to skip when label present + body justification</criterion>
+    <criterion testable="true">Any of 3 labels present WITHOUT body justification: validator step fails CI</criterion>
+    <criterion testable="true">PR template includes ADR-013, ADR-028, ADR-029 checkboxes</criterion>
+    <criterion testable="true">PR template includes Size & Security Justification section + label-gating instructions</criterion>
+  </acceptance-criteria>
+</task>

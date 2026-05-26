@@ -1,6 +1,6 @@
 Write-Host "=== Checking Email Body Debug Logs ===" -ForegroundColor Cyan
 
-$null = az webapp log download --name spe-api-dev-67e2xz --resource-group spe-infrastructure-westus2 --log-file body-debug-logs.zip 2>&1
+$null = az webapp log download --name spaarke-bff-dev --resource-group rg-spaarke-dev --log-file body-debug-logs.zip 2>&1
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path "body-debug-logs.zip").Path)

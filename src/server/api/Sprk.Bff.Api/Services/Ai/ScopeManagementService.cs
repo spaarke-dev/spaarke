@@ -365,22 +365,44 @@ public class ScopeManagementService : IScopeManagementService
 
     public async Task<AnalysisOutput> UpdateOutputAsync(Guid id, UpdateOutputRequest request, CancellationToken cancellationToken)
     {
-        // TRACKED: GitHub #229 - Implement when output listing available
-        _logger.LogWarning("UpdateOutputAsync not fully implemented - output listing not available");
+        var fields = new Dictionary<string, object>();
 
-        await Task.CompletedTask;
+        if (!string.IsNullOrWhiteSpace(request.Name))
+            fields["sprk_name"] = request.Name;
+        if (request.Description is not null)
+            fields["sprk_description"] = request.Description;
+        if (!string.IsNullOrWhiteSpace(request.FieldName))
+            fields["sprk_fieldname"] = request.FieldName;
+        if (!string.IsNullOrWhiteSpace(request.JsonPath))
+            fields["sprk_jsonpath"] = request.JsonPath;
 
-        throw new NotImplementedException("Output update requires output listing in ScopeResolverService");
+        if (fields.Count > 0)
+        {
+            await _dataverseService.UpdateAsync(
+                "sprk_analysisoutput", id, fields, cancellationToken);
+        }
+
+        var entity = await _dataverseService.RetrieveAsync(
+            "sprk_analysisoutput", id,
+            ["sprk_name", "sprk_description", "sprk_fieldname", "sprk_fieldtype", "sprk_jsonpath"],
+            cancellationToken);
+
+        return new AnalysisOutput
+        {
+            Id = id,
+            Name = entity.GetAttributeValue<string>("sprk_name") ?? string.Empty,
+            Description = entity.GetAttributeValue<string>("sprk_description"),
+            FieldName = entity.GetAttributeValue<string>("sprk_fieldname") ?? string.Empty,
+            JsonPath = entity.GetAttributeValue<string>("sprk_jsonpath"),
+        };
     }
 
     public async Task DeleteOutputAsync(Guid id, CancellationToken cancellationToken)
     {
-        // TRACKED: GitHub #229 - Implement when output listing available
-        _logger.LogWarning("DeleteOutputAsync not fully implemented - output listing not available");
+        await _dataverseService.DeleteAsync(
+            "sprk_analysisoutput", id, cancellationToken);
 
-        await Task.CompletedTask;
-
-        throw new NotImplementedException("Output delete requires output listing in ScopeResolverService");
+        _logger.LogInformation("Deleted output scope: {Id}", id);
     }
 
     // ========================================

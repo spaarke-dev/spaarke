@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# tsc artifacts when accidentally emitted into src/ (pre-v2 the build was misconfigured;
+# now outDir is dist/, but this guard prevents the regression from happening again)
+src/**/*.js
+src/**/*.js.map
+src/**/*.d.ts
+src/**/*.d.ts.map
+
+# Test coverage
+coverage/
+
+# IDE
+.vscode/
+.idea/

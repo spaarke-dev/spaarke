@@ -2,18 +2,19 @@
 
 > **Status**: Accepted
 > **Domain**: API/BFF Architecture
-> **Last Updated**: 2025-12-18
+> **Last Updated**: 2026-05-19
 
 ---
 
 ## Decision
 
-Run SDAP on a **single ASP.NET Core App Service** using:
+Run the **BFF on a single ASP.NET Core App Service** using:
 - **Minimal API** for synchronous HTTP endpoints
-- **BackgroundService** workers for async jobs (Service Bus)
-- **No Azure Functions** or Durable Functions
+- **BackgroundService** workers for async jobs tied to BFF business logic (Service Bus)
+- **Azure Functions PERMITTED** for narrowly-scoped out-of-band integration work (Dataverse → AI Search sync, scheduled indexers, webhook receivers, event-triggered extraction)
+- **No Durable Functions** (use Service Bus + state machine instead)
 
-**Rationale**: Single runtime eliminates duplicate cross-cutting concerns (auth, retries, correlation), simplifies debugging, and ensures predictable performance.
+**Rationale**: A single BFF runtime eliminates duplicate cross-cutting concerns (auth, retries, correlation) within the BFF, simplifies BFF debugging, and ensures predictable performance. Out-of-band integration workloads (event-driven sync, timer-driven indexing) are legitimately independent of the BFF and belong in Functions when the trigger semantics or lifecycle independence justify it.
 
 ---
 
@@ -21,18 +22,27 @@ Run SDAP on a **single ASP.NET Core App Service** using:
 
 ### ✅ MUST
 
-- **MUST** use Minimal API for all HTTP endpoints
-- **MUST** use BackgroundService + Service Bus for async work
-- **MUST** register all services in single `Program.cs` middleware pipeline
-- **MUST** return `ProblemDetails` for all API errors
+- **MUST** use Minimal API for all BFF HTTP endpoints (no Functions hosting BFF endpoints)
+- **MUST** use BackgroundService + Service Bus for BFF-coupled async work
+- **MUST** register BFF services in single `Program.cs` middleware pipeline
+- **MUST** return `ProblemDetails` for all BFF API errors
 - **MUST** expose `/healthz` endpoint for health checks
+- **MUST** (when using Functions) deploy them via Bicep alongside the BFF, share App Insights correlation, and use Managed Identity + Key Vault
 
 ### ❌ MUST NOT
 
-- **MUST NOT** introduce Azure Functions projects or packages
+- **MUST NOT** host BFF endpoints in Azure Functions
+- **MUST NOT** duplicate BFF auth, correlation, or ProblemDetails infrastructure inside a Function
 - **MUST NOT** use Durable Functions for orchestrations
-- **MUST NOT** create separate function app hosts
-- **MUST NOT** use Functions bindings or triggers
+- **MUST NOT** let Functions grow into a shadow BFF — keep them narrowly scoped to out-of-band integration work
+
+### ✅ Functions are appropriate for
+
+- Dataverse → AI Search sync (event-driven + scheduled reconciliation)
+- Closure-extraction and indexing pipelines triggered by events
+- Webhook receivers from external systems
+- Timer-driven indexers and reconciliation jobs
+- Anything where the trigger semantics (event grid, blob, webhook, timer) don't fit BackgroundService ergonomically
 
 ---
 
@@ -64,14 +74,27 @@ public class DocumentWorker : BackgroundService
 
 **See**: [Background Worker Pattern](../patterns/api/background-workers.md) for complete examples
 
-### Anti-Pattern: Azure Functions
+### Anti-Pattern: Functions hosting BFF endpoints
 
 ```csharp
-// ❌ DON'T: Create Azure Functions
-[FunctionName("Process")]
-public async Task Run([ServiceBusTrigger("queue")] string msg) { }
+// ❌ DON'T: host BFF endpoints in a Function
+[FunctionName("GetDocument")]
+public async Task<IActionResult> Run([HttpTrigger] HttpRequest req) { }
 
-// ✅ DO: Use BackgroundService (see pattern file)
+// ✅ DO: BFF endpoints in Minimal API
+app.MapGet("/api/documents/{id}", ...);
+```
+
+### Acceptable Pattern: Functions for out-of-band integration
+
+```csharp
+// ✅ OK: Dataverse change event → AI Search sync (out-of-band, event-driven)
+[FunctionName("SyncMatterToIndex")]
+public async Task Run([ServiceBusTrigger("dataverse-changes")] DataverseChangeEvent evt)
+{
+    // Independent of BFF request pipeline; deployed via same Bicep package;
+    // shares App Insights correlation; uses Managed Identity + Key Vault.
+}
 ```
 
 ---

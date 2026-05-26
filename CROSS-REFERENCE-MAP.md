@@ -90,7 +90,7 @@
 | OAuth Scopes | [.claude/patterns/auth/oauth-scopes.md](.claude/patterns/auth/oauth-scopes.md) | ADR-004, ADR-008 | `src/client/pcf/*/services/auth/msalConfig.ts` |
 | OBO Flow | [.claude/patterns/auth/obo-flow.md](.claude/patterns/auth/obo-flow.md) | ADR-004, ADR-009 | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` |
 | Token Caching | [.claude/patterns/auth/token-caching.md](.claude/patterns/auth/token-caching.md) | ADR-009 | `src/server/api/Sprk.Bff.Api/Services/GraphTokenCache.cs` |
-| MSAL Client | [.claude/patterns/auth/msal-client.md](.claude/patterns/auth/msal-client.md) | ADR-006 | `src/client/pcf/UniversalQuickCreate/control/services/auth/MsalAuthProvider.ts` |
+| Spaarke Auth v2 (client contract) | [.claude/adr/ADR-028-spaarke-auth-architecture.md](.claude/adr/ADR-028-spaarke-auth-architecture.md) + [.claude/patterns/auth/spaarke-sso-binding.md](.claude/patterns/auth/spaarke-sso-binding.md) — `useAuth()` + `authenticatedFetch` from `@spaarke/auth` (replaces pre-v2 MSAL client pattern) | ADR-028, ADR-006 | `src/client/shared/Spaarke.Auth/src/index.ts` (canonical); `src/client/pcf/UniversalQuickCreate/control/services/auth/MsalAuthProvider.ts` (pre-v2 holdout — V3 cleanup target) |
 | Service Principal | [.claude/patterns/auth/service-principal.md](.claude/patterns/auth/service-principal.md) | ADR-004, ADR-016 | `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ServiceCredentialFactory.cs` |
 
 ### Dataverse Patterns

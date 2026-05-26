@@ -83,14 +83,14 @@ Set once per Dataverse environment after solution import. No hardcoded values sh
 | `sprk_BffApiBaseUrl` | BFF API base URL |
 | `sprk_BffApiAppId` | BFF API OAuth audience (app client ID) |
 | `sprk_MsalClientId` | UI MSAL client ID for Entra ID sign-in |
-| `sprk_TenantId` | Entra ID tenant ID |
+| `sprk_TenantId` | Entra ID tenant ID. **v2 requirement (ADR-028)**: `initAuth()` reads this FIRST; Xrm frame-walk is fallback only. Missing → 401-after-refresh class of bugs. See [`auth-deployment-setup.md`](../guides/auth-deployment-setup.md) §3. |
 | `sprk_AzureOpenAiEndpoint` | Azure OpenAI endpoint |
 | `sprk_ShareLinkBaseUrl` | Base URL for document share links |
 | `sprk_SharePointEmbeddedContainerId` | SPE Container ID for this environment |
 
-**How they're read**: `resolveRuntimeConfig()` in `@spaarke/auth` queries Dataverse REST API at startup, caches in memory for session lifetime.
+**How they're read**: typed accessors in `@spaarke/auth` query Dataverse REST API at startup; consumers call `await initAuth({...})` with resolved values (per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) "consumer authInit.ts pattern").
 
-**Fail behavior**: If any required variable is missing, `resolveRuntimeConfig()` throws — no silent fallbacks to dev values.
+**Fail behavior**: If a required variable is missing, the accessor or `initAuth()` throws — no silent fallbacks to dev values.
 
 ### Server-Side: Azure App Service + Key Vault
 

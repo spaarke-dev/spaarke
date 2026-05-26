@@ -1,0 +1,76 @@
+<task id="054" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Phase 4 EXECUTION-LOG.md + gate review</title>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <assigned>Project owner (operator-only model per NFR-08 revised)</assigned>
+    <tags>bff-api, phase-4, gate</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Gate task; sequential after all Phase 4 candidates stable</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Finalize `EXECUTION-LOG.md` capturing per-candidate results from Phase 4: size deltas, vuln status, test deltas, App Insights observations. Conduct Phase 4 gate review with owner (operator-only model per NFR-08 revised 2026-05-24). Authorize Phase 5 entry (or document scope reduction if any Phase 4 candidate failed).
+  </prompt>
+
+  <role>Phase 4 lead + project owner (operator-only per NFR-08 revised).</role>
+
+  <goal>EXECUTION-LOG.md complete; gate ACK recorded; Phase 5 authorized OR scope reduction documented; CLAUDE.md updated.</goal>
+
+  <inputs>
+    <file purpose="execution-log">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md</file>
+    <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
+    <file purpose="di-baseline">projects/sdap-bff-api-remediation-fix/baseline/di-registrations.txt</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md NFR-08 revised 2026-05-24">Owner sign-off + AI-directed verification + CI guards for Phase 5 promotion; no second human approver</constraint>
+    <constraint source="ADR-010 (measurable binding)">Final DI registration count ≤ Phase 3 baseline + Outcome E expected delta (+4 to +8 from facade interfaces). Any larger delta requires written justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/BASELINE.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/CANDIDATES.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/baseline/di-registrations.txt</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Last gate before Phase 5 (demo + prod promotion). Cumulative changeset = approved Phase 4 candidates.</background>
+    <dependencies>
+      <dependency task="042" status="not-started">Outcome A SAFE candidates stable</dependency>
+      <dependency task="045" status="not-started">Outcome B vuln patches stable (or deferred)</dependency>
+      <dependency task="053" status="not-started">Outcome E acceptance grep clean</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Aggregate per-candidate entries in EXECUTION-LOG.md (size delta, vuln status, test delta, App Insights observations)</step>
+    <step order="2">**DI count delta verification** (ADR-010 measurable binding): re-run task 038's grep against current code; compute delta vs `baseline/di-registrations.txt`. Expected: +4 to +8 from Outcome E facade interfaces. Larger delta → require written justification before sign-off.</step>
+    <step order="3">**Outcome E dependency-count verification** (different metric): confirm FR-E2 grep (task 053) returned 0 in target folders — consumer-side dependencies on `IOpenAiClient`/`IPlaybookService` removed, even though registration count went up slightly.</step>
+    <step order="4">Owner review (operator-only model); adr-check + code-review verification per task-execute Step 9.5</step>
+    <step order="5">Joint ACK recorded (PR comment or commit)</step>
+    <step order="6">Update CLAUDE.md → Project Status to "Phase 5 ready" (or "Phase 6 ready" if Phase 5 deferred per UQ-02)</step>
+    <step order="7">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="git">Commit EXECUTION-LOG.md + status update</tool></tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">EXECUTION-LOG.md has entry per Phase 4 candidate (executed or deferred)</criterion>
+    <criterion testable="true">DI registration count delta computed and within expected range (+4 to +8) OR justified in writing</criterion>
+    <criterion testable="true">FR-E2 grep confirms consumer-side dependency removal in Services/{Finance,Workspace,Jobs,Dataverse}/ and Api/Filters/</criterion>
+    <criterion testable="true">Owner ACK recorded; adr-check + code-review verification pass at task-execute Step 9.5</criterion>
+    <criterion testable="true">CLAUDE.md Project Status updated</criterion>
+  </acceptance-criteria>
+</task>

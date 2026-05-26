@@ -337,11 +337,14 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
   filterText,
   onSelect,
   onDismiss,
+  anchorRef,
 }) => {
   const styles = useStyles();
 
   const [focusedIndex, setFocusedIndex] = React.useState(0);
   const listRef = React.useRef<HTMLUListElement>(null);
+  // Ref on the outer container — used by the outside-click detector below.
+  const containerRef = React.useRef<HTMLDivElement>(null);
 
   // Group commands by source category and build a flat list for keyboard nav
   const groups = React.useMemo(() => groupCommandsBySource(commands), [commands]);
@@ -364,6 +367,46 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
       focused.scrollIntoView({ block: 'nearest' });
     }
   }, [focusedIndex, visible]);
+
+  // Task 082 (UX fix #2): close on outside click.
+  // Matches the proven pattern used by SprkChatActionMenu (lines 356-376).
+  // The menu container itself + anchorRef (input wrapper) are considered "inside".
+  // Additionally, the strip-mounted prompt button (rendered by SprkChat in a
+  // separate DOM subtree from the input wrapper) is treated as "inside" — it
+  // toggles the menu via triggerSlashMode, so dismissing on its mousedown
+  // would race with the open-on-click and produce flicker.
+  React.useEffect(() => {
+    if (!visible) {
+      return;
+    }
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) {
+        return;
+      }
+      const menuEl = containerRef.current;
+      const anchorEl = anchorRef?.current ?? null;
+
+      const insideMenu = menuEl?.contains(target) ?? false;
+      const insideAnchor = anchorEl?.contains(target) ?? false;
+      // Allow clicks on the strip-mounted prompt button (SprkChat toolbar) to
+      // pass through without dismissing — the button's own onClick handler
+      // re-triggers slash mode and would otherwise fight this handler.
+      const isStripPromptButton =
+        target instanceof Element &&
+        target.closest('[data-testid="strip-prompt-menu-button"]') !== null;
+
+      if (!insideMenu && !insideAnchor && !isStripPromptButton) {
+        onDismiss();
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [visible, onDismiss, anchorRef]);
 
   // Keyboard navigation handler — uses flatCommands for cross-category navigation
   const handleKeyDown = React.useCallback(
@@ -480,6 +523,7 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
 
   return (
     <div
+      ref={containerRef}
       className={mergeClasses(styles.container, !visible && styles.hidden)}
       role="dialog"
       aria-label="Slash commands"

@@ -58,10 +58,15 @@ Load when:
 
 ### Architecture (ADR-001)
 
-- ❌ **MUST NOT** introduce Azure Functions projects or packages
-- ❌ **MUST NOT** use Durable Functions for orchestrations
-- ❌ **MUST NOT** create separate function app hosts
-- ❌ **MUST NOT** use Functions bindings or triggers
+- ❌ **MUST NOT** host BFF endpoints in Azure Functions
+- ❌ **MUST NOT** duplicate BFF cross-cutting concerns (auth, correlation, ProblemDetails) inside a Function
+- ❌ **MUST NOT** use Durable Functions for orchestrations (use Service Bus + state machine)
+- ❌ **MUST NOT** let Functions grow into a shadow BFF — they're scoped to out-of-band integration work only
+
+### When Azure Functions ARE acceptable (ADR-001)
+
+- ✅ Out-of-band integration: Dataverse → AI Search sync, scheduled indexers, webhook receivers, event-triggered extraction
+- ✅ Must be Bicep-deployable alongside the BFF, share App Insights correlation, use Managed Identity + Key Vault
 
 ### Authorization (ADR-008)
 

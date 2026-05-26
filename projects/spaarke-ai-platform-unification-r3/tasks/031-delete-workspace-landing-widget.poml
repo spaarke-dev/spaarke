@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Delete WorkspaceLandingWidget and clean up orphan imports</title>
+    <phase>Phase C — Workspace Pane</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>none</blocks>
+    <tags>react, frontend, refactoring, ui-cleanup</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deletion + import cleanup. No new code; STANDARD rigor sufficient. Verifies clean build and no orphan references after task 030 moved Home-tab logic into WorkspacePane via WorkspaceShell embed.</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Paired with task 030 — Home tab logic moves into 030, then this task removes the now-unused widget. May touch `WorkspacePane.tsx` imports.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Delete `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceLandingWidget.tsx` (no longer
+    needed — replaced by the LegalWorkspace embed completed in task 030 per FR-11). Find and remove
+    any remaining imports / references across the codebase. Verify the build is clean with zero
+    orphan import warnings. Implements FR-11 cleanup.
+  </prompt>
+
+  <role>
+    React 19 frontend developer performing a safe deletion + import cleanup. Bias toward
+    grep-first-delete-second; verify no live reference remains before removal; verify build stays
+    green afterward.
+  </role>
+
+  <goal>
+    `WorkspaceLandingWidget.tsx` is deleted. No file in the repo imports it. `npm run build` in the
+    SpaarkeAi workspace succeeds with no new TypeScript errors and no new lint warnings related to
+    missing modules or unused imports. No existing tests break.
+  </goal>
+
+  <context>
+    <background>
+      Task 030 embedded the standalone LegalWorkspace experience (via `WorkspaceShell` + default-layout
+      fetch) as the Workspace pane's Home tab. The previously-used `WorkspaceLandingWidget` is now
+      redundant and must be removed per spec.md "Affected Areas → delete (replaced by LegalWorkspace
+      embed)". This is the cleanup task that closes out FR-11.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspaceLandingWidget.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">No new shared-component changes in this task; pure removal. The shared-library boundary is unaffected.</constraint>
+    <constraint source="ADR-021">No new code is introduced — this is deletion only. Token compliance is unchanged.</constraint>
+    <constraint source="ADR-028">No new BFF calls introduced. Removal does not affect the auth contract.</constraint>
+    <constraint source="project">FR-25 backwards compatibility — verify the standalone LegalWorkspace continues to function. (LegalWorkspace does not depend on `WorkspaceLandingWidget` — confirm via grep.)</constraint>
+    <constraint source="project">Do NOT delete `WorkspaceLandingWidget.tsx` if any live import (outside the file itself) still resolves to it. Resolve all references first.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Grep codebase for WorkspaceLandingWidget references">
+      Run a project-wide grep for the symbol `WorkspaceLandingWidget` (including the `import`
+      path `workspace/WorkspaceLandingWidget`). Capture every match — file path, line, context.
+      Common offenders: `WorkspacePane.tsx`, any test fixtures, any barrel exports.
+    </step>
+    <step order="2" name="Remove imports / references">
+      For each match found in step 1, remove the import statement and any JSX usage. If a JSX usage
+      remained from before task 030, confirm that task 030 should already have replaced it with the
+      `WorkspaceShell` embed — if not, that is a bug in 030's output; fix it here (delete the JSX
+      element, since the Home tab now renders `WorkspaceShell`).
+    </step>
+    <step order="3" name="Delete WorkspaceLandingWidget.tsx">
+      Once grep returns ZERO live references (besides the file itself), delete
+      `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceLandingWidget.tsx`.
+    </step>
+    <step order="4" name="Build verification">
+      Run `npm run build` (or the project's standard build command) in the SpaarkeAi workspace.
+      Confirm zero TypeScript errors, no orphan-import warnings, no "cannot find module" errors.
+    </step>
+    <step order="5" name="Test verification">
+      Run any unit tests / snapshot tests for the SpaarkeAi solution. Confirm none reference the
+      deleted file. If a test breaks because it imported `WorkspaceLandingWidget`, delete the
+      obsolete test (it tested removed functionality).
+    </step>
+    <step order="6" name="Update TASK-INDEX and commit">
+      Update `projects/spaarke-ai-platform-unification-r3/tasks/TASK-INDEX.md`: this task's status
+      to ✅ completed. Commit changes per project conventions.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Find all references to `WorkspaceLandingWidget` across the codebase</tool>
+    <tool name="Edit">Remove imports / JSX usage from remaining files</tool>
+    <tool name="Bash">Delete the file (`rm`) and run build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/WorkspaceLandingWidget.tsx (DELETED)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx (modified if orphan imports remained)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`WorkspaceLandingWidget.tsx` no longer exists in the repository (file deleted).</criterion>
+    <criterion testable="true">Project-wide grep for `WorkspaceLandingWidget` returns zero matches (file no longer exists; no orphan imports).</criterion>
+    <criterion testable="true">`npm run build` in the SpaarkeAi workspace succeeds with zero TypeScript errors and zero new lint warnings.</criterion>
+    <criterion testable="true">Existing unit/snapshot tests for SpaarkeAi pass — any obsolete tests referencing the deleted widget are also removed.</criterion>
+    <criterion testable="true">Standalone LegalWorkspace code page continues to function identically (FR-25, NFR-10) — confirmed by separate browser tab smoke check.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="No Orphan References After Deletion">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=spaarke_spaarkeai</url>
+      <steps>
+        <step>Cold-load the SpaarkeAi code page in Power Apps host</step>
+        <step>Verify Workspace pane renders correctly (Home tab populated with LegalWorkspace via task 030)</step>
+        <step>Check browser DevTools console for any "module not found" / "undefined component" errors</step>
+        <step>Verify no visual regression in the Workspace pane vs. task 030's output</step>
+      </steps>
+      <expected>Workspace pane renders without errors. Console is clean. No orphan import warnings.</expected>
+    </test>
+
+    <test name="Dark Mode Parity (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Verify Workspace pane renders correctly in dark mode (Home tab via WorkspaceShell)</step>
+        <step>Confirm no regression vs task 030's dark-mode baseline</step>
+      </steps>
+      <expected>Workspace pane dark mode behavior unchanged from task 030. No regressions.</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    STANDARD rigor applies — deletion + import cleanup, no new code. Code-review + adr-check are
+    optional but a build verification is mandatory.
+  </execution>
+
+  <notes>
+    **Completed 2026-05-20** — STANDARD rigor.
+
+    **Files deleted**:
+    - `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceLandingWidget.tsx` (394 lines)
+
+    **Files modified**:
+    - `src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx`:
+      - Removed import of `WorkspaceLandingWidget`, `useShellStage`, and now-unused icons (`BrainCircuitRegular`, `DocumentSearchRegular`) + `Text` from Fluent components.
+      - Removed `useShellStage()` call (no longer needed — fallback branches collapsed).
+      - Replaced ~50 lines of three-way Stage-1/Stage-2/default empty-state branches with a single minimal first-paint placeholder (Spinner under `<PaneHeader>`). The Home tab effect installs the Home tab on first commit so users effectively never see this branch.
+      - Trimmed `useStyles` from 5 unused empty-state slots to a single `firstPaintPlaceholder` slot.
+    - `src/solutions/SpaarkeAi/src/components/WelcomePanel.tsx`:
+      - Removed dangling `@see WorkspaceLandingWidget` doc comment (line 25).
+
+    **Build verification**: `npm run build` in SpaarkeAi → **PASS** (3157 modules transformed, ~6.6s, no errors, no warnings).
+
+    **Grep verification**: Zero `WorkspaceLandingWidget` references in `src/` (only historical references remain in `.claude/`, `notes/`, `projects/` docs — expected and intentional).
+
+    **Acceptance criteria** (all met):
+    - ✅ `WorkspaceLandingWidget.tsx` deleted.
+    - ✅ Zero project-wide live references / orphan imports in `src/`.
+    - ✅ `npm run build` clean (zero TS errors, zero new lint warnings).
+    - ✅ No tests reference deleted widget (verified — `ContextPaneController.test.tsx` and `WorkspaceTabManager.test.ts` are unrelated).
+    - ✅ Standalone LegalWorkspace unaffected (FR-25) — `WorkspaceLandingWidget` was solution-local to SpaarkeAi; LegalWorkspace had no dependency on it (confirmed via grep).
+  </notes>
+</task>

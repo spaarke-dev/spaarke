@@ -1,0 +1,202 @@
+<task id="AUTHV2-023" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Refactor SprkChat API — drop accessToken prop; require authenticatedFetch + getAccessToken</title>
+    <phase>B — Consumer migration</phase>
+    <tags>auth, ui-components, sprkchat, react, FULL</tags>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>020</dependencies>
+    <parallel-safe>B-Parallel-1 (with 022)</parallel-safe>
+  </metadata>
+  <prompt>
+    SprkChat's `accessToken: string` prop is the largest snapshot trap in the codebase (shared with PCFs, AnalysisWorkspace, SpaarkeAi). Drop the prop entirely. Require `authenticatedFetch: AuthenticatedFetchFn` and `getAccessToken: () => Promise<string>`. Internal hooks (useChatSession, useChatPlaybooks, useChatContextMapping) drop accessToken and use the passed authenticatedFetch. useSseStream calls getAccessToken() at stream-open.
+  </prompt>
+  <role>Senior React engineer + reviewer for the shared library API change.</role>
+  <goal>
+    ISprkChatProps requires authenticatedFetch + getAccessToken; accessToken is removed. All 3 internal hooks updated. useSseStream gets fresh token per-stream.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts (ISprkChatProps)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatSession.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatPlaybooks.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatContextMapping.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Edit types.ts: ISprkChatProps — remove `accessToken: string`; add `authenticatedFetch: AuthenticatedFetchFn` and `getAccessToken: () => Promise&lt;string&gt;` as REQUIRED props. Update AuthenticatedFetchFn import from @spaarke/auth.</step>
+    <step>Edit SprkChat.tsx — destructure new props; pass to internal hooks.</step>
+    <step>Edit useChatSession.ts: remove accessToken option; require authenticatedFetch; replace all raw fetch + Bearer with authenticatedFetch.</step>
+    <step>Same for useChatPlaybooks.ts and useChatContextMapping.ts.</step>
+    <step>Edit useSseStream.ts: change signature so the caller passes getAccessToken instead of a token string. Call getAccessToken() right before opening the SSE stream (fresh token per stream).</step>
+    <step>Find every caller of SprkChat in the repo (grep) — they will need updating in tasks 024-027. List them in this task's notes.</step>
+    <step>Run tsc --noEmit on Spaarke.UI.Components — expect compile errors at SprkChat consumer sites (tracked in 024-027).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ISprkChatProps no longer has accessToken; has authenticatedFetch + getAccessToken.</criterion>
+    <criterion>All 3 SprkChat hooks no longer reference accessToken; use authenticatedFetch.</criterion>
+    <criterion>useSseStream calls getAccessToken at stream-open.</criterion>
+    <criterion>No raw `Authorization: Bearer ${...}` in SprkChat source (ESLint rule from 013 would catch this).</criterion>
+    <criterion>Spaarke.UI.Components tsc clean for files in this scope.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19 by sub-agent (task-execute FULL rigor).
+
+    ## New SprkChat prop signature (for wave 2 consumers — tasks 024-027)
+
+    ```tsx
+    import { useAuth } from '@spaarke/auth';
+    const { authenticatedFetch, getAccessToken } = useAuth();
+
+    &lt;SprkChat
+      apiBaseUrl={bffBaseUrl}
+      authenticatedFetch={authenticatedFetch}  // REQUIRED — replaces accessToken
+      getAccessToken={getAccessToken}          // REQUIRED — for SSE streams
+      // ... all other props unchanged
+    /&gt;
+    ```
+
+    Types (re-exported from SprkChat/types.ts for convenience):
+    - `AuthenticatedFetchFn = (url: string, init?: RequestInit) =&gt; Promise&lt;Response&gt;`
+    - `AccessTokenGetter   = () =&gt; Promise&lt;string&gt;`
+
+    ## Files modified (16 total)
+
+    Core SprkChat (per POML):
+    1. `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts`
+       — Added AuthenticatedFetchFn + AccessTokenGetter types. ISprkChatProps drops
+         `accessToken: string`; adds `authenticatedFetch: AuthenticatedFetchFn` +
+         `getAccessToken: AccessTokenGetter`. IUseSseStreamResult.startStream
+         signature changed: third arg is now AccessTokenGetter (not string).
+    2. `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx`
+       — Destructure new props. All raw fetch + Bearer literals replaced:
+           - useChatSession/useChatPlaybooks/useChatContextMapping/useDynamicSlashCommands
+             all now take authenticatedFetch.
+           - dispatchConfirmedAction now takes authenticatedFetch.
+           - handleSaveToMatterFiles → authenticatedFetch (JSON POST).
+           - handleSend / handleChatRefine → startStream(url, body, getAccessToken).
+           - handlePlanProceed / handleEditorRefine → raw fetch SSE; re-acquire token
+             via `await getAccessToken()` immediately before opening each stream.
+           - extractTenantIdFromToken removed; replaced by module-scope helper
+             extractTidFromToken (only used by SSE paths to derive X-Tenant-Id from
+             the fresh token).
+       — JSX: SprkChatUploadZone now takes getAccessToken; SprkChatExportWord now
+         takes authenticatedFetch.
+
+    Three internal hooks (per POML):
+    3. `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatSession.ts`
+       — Drops accessToken; takes authenticatedFetch. extractTenantId helper deleted.
+         All 4 endpoints (POST sessions / GET history / PATCH context / DELETE session)
+         now go through authenticatedFetch.
+    4. `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatPlaybooks.ts`
+       — Drops accessToken; takes authenticatedFetch. Single GET /playbooks call migrated.
+    5. `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatContextMapping.ts`
+       — Drops accessToken; takes authenticatedFetch. GET /context-mappings/analysis/{id}
+         migrated; 404 still handled silently.
+
+    useSseStream (per POML — main change):
+    6. `src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts`
+       — startStream signature: `(url, body, getAccessToken: AccessTokenGetter)`.
+         Calls `await getAccessToken()` ONCE per stream open, immediately before
+         fetch. Token never snapshotted. extractTenantId still derives X-Tenant-Id
+         from the fresh token (since SSE bypasses authenticatedFetch's header logic).
+
+    Consequential changes (in-scope as a result of dropping accessToken prop from
+    SprkChat; satisfies the acceptance criterion "no raw Authorization Bearer in
+    SprkChat source"):
+    7. `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatUploadZone.tsx`
+       — Drops accessToken; takes getAccessToken. Both XHR upload paths (initialFile
+         + drop handler) wrap their setup in async IIFE: `const token = await
+         getAccessToken();` BEFORE `xhr.setRequestHeader('Authorization', Bearer
+         ${token})`. NEVER snapshots into state.
+    8. `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatExportWord.tsx`
+       — Drops accessToken; takes authenticatedFetch. Single POST /export/word
+         migrated.
+    9. `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useDynamicSlashCommands.ts`
+       — Drops accessToken; takes authenticatedFetch. extractTenantId helper deleted.
+         GET /sessions/{id}/commands migrated. Cache logic unchanged.
+    10. `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionMenuData.ts`
+        — (Not currently wired by SprkChat — public export only.) Migrated for
+          consistency: drops accessToken, takes authenticatedFetch.
+    11. `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionHandlers.ts`
+        — Standalone dispatchConfirmedAction migrated to take authenticatedFetch.
+          ActionHandlerContext.accessToken → ActionHandlerContext.authenticatedFetch
+          (interface only; the hook itself never used the old field).
+
+    Tests:
+    12. `src/components/SprkChat/__tests__/useChatSession.test.ts`
+    13. `src/components/SprkChat/__tests__/SprkChat.test.tsx`
+    14. `src/components/SprkChat/__tests__/citationsIntegration.test.tsx`
+    15. `src/components/SprkChat/__tests__/suggestionsIntegration.test.tsx`
+        — defaultProps swapped from `{ accessToken: 'test-access-token' }` to
+          `{ authenticatedFetch: mockAuthenticatedFetch, getAccessToken: mockGetAccessToken }`.
+          The mock authenticatedFetch wraps the existing global mockFetch and
+          attaches `Authorization: Bearer test-access-token`, so existing fetch
+          assertions remain valid.
+
+    POML:
+    16. `projects/spaarke-auth-v2-and-hardening/tasks/023-refactor-sprkchat-api.poml`
+        — status: completed; this notes block.
+
+    ## Test commands run
+
+    - `npx tsc --noEmit` in Spaarke.UI.Components — clean for files in scope (one
+      pre-existing error in src/hooks/useAiSummary.ts, unrelated, present on master
+      both before and after this task — confirmed by `git stash` + tsc).
+    - `npm run build` (`tsc`) — dist/ regenerated; ISprkChatProps in
+      dist/components/SprkChat/types.d.ts confirmed to have authenticatedFetch +
+      getAccessToken (10 hits across types.d.ts), no `accessToken: string`.
+    - Jest tests NOT runnable: pre-existing test infra brokenness in
+      Spaarke.UI.Components (`react` peer dep + `@testing-library/react@14`
+      requires React 18's `react-dom/client`; the package uses React 16 peers).
+      Verified pre-existing by stashing my changes and re-running on master —
+      same failures. Type safety is enforced via tsc, which passes. This
+      infrastructure issue is out of scope for task 023 (separate work item).
+
+    ## Acceptance criteria — verified
+
+    - [x] ISprkChatProps no longer has accessToken; has authenticatedFetch + getAccessToken.
+          → confirmed in dist/components/SprkChat/types.d.ts.
+    - [x] All 3 SprkChat hooks no longer reference accessToken; use authenticatedFetch.
+          → useChatSession, useChatPlaybooks, useChatContextMapping all migrated;
+            also useDynamicSlashCommands and useActionMenuData migrated as cleanup.
+    - [x] useSseStream calls getAccessToken at stream-open.
+          → startStream invokes `await getAccessToken()` immediately before
+            issuing the fetch; token never reused across stream opens.
+    - [x] No raw `Authorization: Bearer ${...}` in SprkChat source.
+          → Eliminated from all 8 prior call sites in SprkChat hooks. The 4
+            remaining raw-Bearer literals (SprkChat.tsx handlePlanProceed +
+            handleEditorRefine; SprkChatUploadZone 2 XHR sites) are SSE/XHR
+            exception sites where the token is `await getAccessToken()`'d on
+            every call and never snapshotted. Each carries a `// Auth v2
+            (D-AUTH-7):` justification comment. (ESLint Bearer literal rule
+            from task 013 will need a path-based allowlist for these 3 files
+            — out of scope; flagged to task 013 author.)
+    - [x] Spaarke.UI.Components tsc clean for files in this scope.
+
+    ## Downstream consumers — must rebuild in tasks 024-027 (Wave 2)
+
+    Every site that renders `&lt;SprkChat&gt;` MUST be updated to pass
+    `authenticatedFetch` + `getAccessToken` (typically from `useAuth()` or the
+    AiSessionProvider's surface) instead of `accessToken={token}`.
+
+    Identified consumers via grep (`SprkChat` JSX usage):
+    1. `src/client/code-pages/AnalysisWorkspace/src/components/ChatPanel.tsx` line 116
+       — currently uses `accessToken={token ?? ''}` (broken now). Owner: task 026
+         (AnalysisWorkspace migration).
+    2. `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx`
+       line 915 — ALREADY MIGRATED by task 022 (in parallel); my new contract
+       matches its current expectation. Verified no conflict.
+
+    Other SprkChat hook consumers (useChatSession / useChatPlaybooks /
+    useChatContextMapping) — none found outside the SprkChat folder and the
+    Spaarke.AI.Context library (which has its own local copies, deleted in
+    AIPU2-082 per the useSseStream consolidation note — those redirect to
+    @spaarke/ui-components exports).
+
+    ## Did NOT commit (per user instruction). Did NOT update TASK-INDEX.md
+    (per user instruction).
+  </notes>
+</task>
