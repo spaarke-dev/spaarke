@@ -7,6 +7,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  id-token: write  # required by anthropics/claude-code-action@beta to fetch its OIDC token
 
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
