@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B-1: Add tracked build artifacts to .gitignore; rm --cached stale files</title>
+    <phase>Phase 6 — Build hygiene cluster</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>config, refactoring</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Configuration update only — no .cs/.ts/.tsx code modification, no new tests, single short procedure. MINIMAL per Step 3.5.5 (simple configuration update).</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec NFR-04 / plan B-1: add patterns to root `.gitignore` covering currently-tracked
+    build artifacts in `deploy/api-publish/` (`*.dll`, `*.pdb`, `*.exe`) and built JS/d.ts/map
+    files under `src/client/shared/Spaarke.AI.Outputs/src/`. Identify any already-tracked
+    stale files matching those patterns and remove them via `git rm --cached`. After fresh
+    build, `git status` MUST be clean.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer doing repo hygiene. Read-only on src/ code. Light touch:
+    .gitignore edit + `git rm --cached` for stale tracked files. No deploy. No refactor.
+  </role>
+
+  <goal>
+    `.gitignore` covers `deploy/api-publish/*.dll`, `*.pdb`, `*.exe` and
+    `src/client/shared/Spaarke.AI.Outputs/src/**/*.{js,d.ts,*.map}`. Any currently-tracked
+    matching files removed from index (preserved on disk) via `git rm --cached`. After a
+    fresh `dotnet publish` / `npm run build`, `git status` shows no new tracked artifacts.
+    Spec NFR-04 acceptance satisfied.
+  </goal>
+
+  <context>
+    <background>
+      Per backlog B-1: prior projects accidentally committed build outputs from
+      `deploy/api-publish/` and from `Spaarke.AI.Outputs/src/` (compiled `.js` + declaration
+      maps alongside source `.ts`). This task adds the ignore patterns and untracks the
+      stale files. Independent of all other Phase 6 items; safe to parallelize.
+    </background>
+    <relevant-files>
+      <file>.gitignore</file>
+      <file>deploy/api-publish/</file>
+      <file>src/client/shared/Spaarke.AI.Outputs/src/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Edits limited to `.gitignore` + `git rm --cached` operations. Do NOT delete files from disk; only untrack.</constraint>
+    <constraint source="project">Do NOT modify `src/` source code, BFF projects, or anything outside the ignore-patterns scope.</constraint>
+    <constraint source="project">After fresh clone + `dotnet publish src/server/api/Sprk.Bff.Api/` + `npm run build` on Spaarke.AI.Outputs, `git status` MUST be clean (no untracked or modified build artifacts).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.gitignore</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Inventory tracked stale files">Run `git ls-files deploy/api-publish/` and `git ls-files src/client/shared/Spaarke.AI.Outputs/src/` to enumerate currently-tracked files. Filter for `*.dll`, `*.pdb`, `*.exe` (BFF) and `*.js`, `*.d.ts`, `*.map` (AI.Outputs). Record the list to `projects/spaarke-ai-platform-unification-r4/notes/b1-tracked-stale-files.md` for audit trail.</step>
+    <step order="2" name="Add ignore patterns">Edit root `.gitignore`. Add a new section "# B-1 build artifacts (R4 NFR-04)" with: `deploy/api-publish/*.dll`, `deploy/api-publish/*.pdb`, `deploy/api-publish/*.exe`, `src/client/shared/Spaarke.AI.Outputs/src/**/*.js`, `src/client/shared/Spaarke.AI.Outputs/src/**/*.d.ts`, `src/client/shared/Spaarke.AI.Outputs/src/**/*.map`.</step>
+    <step order="3" name="Untrack stale files">For each file in the step-1 inventory, run `git rm --cached -- &lt;path&gt;`. Keep files on disk (no `-f`, no destructive delete).</step>
+    <step order="4" name="Verify clean state">Run a fresh `dotnet publish src/server/api/Sprk.Bff.Api/` (or rebuild Spaarke.AI.Outputs if quicker — operator choice). Run `git status`. No new files should appear under the now-ignored paths.</step>
+    <step order="5" name="Update TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 060 from 🔲 → ✅ completed.</step>
+    <step order="6" name="Document deviations">If patterns needed broadening (e.g., other extensions found during inventory) or if any untrack revealed unexpected upstream dependency, record in `projects/spaarke-ai-platform-unification-r4/notes/` for R4 lessons-learned.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">git ls-files, git rm --cached, git status</tool>
+    <tool name="Edit">Update root .gitignore</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.gitignore (modified)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/b1-tracked-stale-files.md (audit trail)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md (status flip)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the new .gitignore patterns, When `git check-ignore -v deploy/api-publish/Sprk.Bff.Api.dll` is run, Then git reports the file as ignored by a B-1 rule.</criterion>
+    <criterion testable="true">Given fresh clone + `dotnet publish src/server/api/Sprk.Bff.Api/`, When `git status` is run, Then no `deploy/api-publish/*.dll/.pdb/.exe` appear as untracked.</criterion>
+    <criterion testable="true">Given the previously-tracked stale files, When `git ls-files` is run for the ignored paths, Then the previously-listed stale files no longer appear.</criterion>
+    <criterion testable="true">Given task 060 is being executed, When this task completes, Then TASK-INDEX.md shows task 060 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Stale files are preserved on disk after `git rm --cached` — only the index entry is dropped. If any developer's working tree had local edits to these "tracked" build artifacts, those edits will be preserved but no longer tracked. Communicate via the audit note. The task is intentionally minimal: gitignore + untrack + verify. Do not expand into a sweep of other tracked binaries — that would need its own task with broader scope.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load `.gitignore` + spec.md NFR-04 + plan.original.md §6 B-1. Apply MINIMAL rigor protocol (no Step 9.5 quality gates; checkpointing optional; current-task.md tracking).</protocol>
+  </execution>
+</task>

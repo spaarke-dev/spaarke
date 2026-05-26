@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>C-1: Write DATA-ACCESS-DECISION-CRITERIA.md (Xrm.WebApi vs BFF)</title>
+    <phase>Phase 1 — Documentation round</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, standards</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New standards document creation with explicit project constraints (DR-06). Worked examples from current code make it consumed by every future Dataverse-touching task. STANDARD per Step 3.5.5 — creates a new file with constraints, no code modification.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Publish a new standards document `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` defining when to
+    use `Xrm.WebApi` (client-side Dataverse access from Code Pages / PCFs / web resources) versus the
+    BFF (`Sprk.Bff.Api`) for Dataverse reads/writes. Include worked examples pulled directly from current
+    code: at least one Xrm.WebApi case and one BFF case, with rationale tied to the decision criteria.
+    Cross-link from CLAUDE.md §16. This doc binds future tasks that touch Dataverse from either side.
+  </prompt>
+
+  <role>
+    Technical writer with full-stack SpaarkeAi knowledge — both client-side Code Page patterns and BFF
+    endpoint patterns. Bias toward concise prose with concrete from-the-repo examples; readers should be
+    able to scan the doc and reach a placement decision in &lt;3 minutes.
+  </role>
+
+  <goal>
+    `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` exists with: (1) decision criteria (when to use
+    Xrm.WebApi vs BFF — auth, complexity, cross-system, audit, AI involvement, etc.); (2) at least one
+    worked example for each direction pulled from current code; (3) anti-patterns (e.g., "do not call
+    Xrm.WebApi from server-side code", "do not double-write via both paths"); (4) cross-link from CLAUDE.md
+    §16; (5) explicit reference to CLAUDE.md §10 BFF Hygiene for the BFF-side decision.
+  </goal>
+
+  <context>
+    <background>
+      Per spec DR-06 + plan §4 Phase 1 C-1: SpaarkeAi makes Dataverse reads/writes from both client
+      (Xrm.WebApi from Code Pages / PCFs) and server (BFF from .NET). Without explicit criteria, new code
+      tends to default to whichever pattern the author saw last, leading to drift and operational
+      surprises. CLAUDE.md §10 BFF Hygiene already governs the BFF side; this doc adds the client-side
+      decision frame and reconciles the two.
+    </background>
+    <relevant-files>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>docs/standards/CODING-STANDARDS.md</file>
+      <file>docs/standards/INTEGRATION-CONTRACTS.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Doc MUST cover both directions: when to use Xrm.WebApi (client) and when to use BFF (server-mediated). Don't favor one over the other in the framing.</constraint>
+    <constraint source="project">Doc MUST include at least one worked example for each direction, pulled from current shipped code (e.g., a Code Page using Xrm.WebApi for a quick section read; a BFF endpoint mediating an AI-involved write).</constraint>
+    <constraint source="project">Decision criteria MUST address: auth model (Xrm session vs BFF auth v2), data complexity (single record vs cross-system), AI involvement (BFF if AI is in the path), audit trail requirements, error handling, retry semantics, rate limits.</constraint>
+    <constraint source="project">Doc MUST cross-link to CLAUDE.md §10 BFF Hygiene + `.claude/constraints/bff-extensions.md` — the BFF-side decision criteria already live there; this doc references rather than duplicates.</constraint>
+    <constraint source="project">Doc MUST be cross-linked from CLAUDE.md §16 — add the link in this task.</constraint>
+    <constraint source="ADR-028">Reference ADR-028 in the auth-model criterion. Client-side via `authenticatedFetch` from `@spaarke/auth`; no token snapshots.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>docs/standards/CODING-STANDARDS.md</file>
+      <file>docs/standards/INTEGRATION-CONTRACTS.md</file>
+      <file>docs/standards/ANTI-PATTERNS.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read prior art">Read existing standards docs and `bff-extensions.md`. Identify where the BFF-side criteria already live; the new doc references rather than duplicates.</step>
+    <step order="2" name="Survey real code">Find 2-3 examples of each pattern in current code (Xrm.WebApi from a Code Page / PCF; BFF endpoint mediating Dataverse). Pick the cleanest one of each to use as the worked example.</step>
+    <step order="3" name="Draft criteria">Write the decision criteria section: auth model, data complexity, AI involvement, audit, error handling, retries, rate limits. Each criterion is one paragraph.</step>
+    <step order="4" name="Draft worked examples">Write the Xrm.WebApi example (with code snippet + rationale tied to criteria) and the BFF example.</step>
+    <step order="5" name="Draft anti-patterns + cross-links">Add anti-patterns ("don't call Xrm.WebApi from server", "don't double-write via both"). Add cross-link to CLAUDE.md §10 + bff-extensions.md. Update CLAUDE.md §16 to point to this doc.</step>
+    <step order="6" name="Verify">Walk through 3 hypothetical Dataverse access scenarios and confirm the criteria reach the right choice each time.</step>
+    <step order="7" name="Update TASK-INDEX">Change task 014 status to ✅ completed in `tasks/TASK-INDEX.md`.</step>
+    <step order="8" name="Document deviations">If any deviation from spec DR-06 or plan §4, write to `projects/spaarke-ai-platform-unification-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read prior standards docs + bff-extensions</tool>
+    <tool name="Grep">Find Xrm.WebApi and BFF Dataverse access patterns in code</tool>
+    <tool name="Write">Create the new standards doc</tool>
+    <tool name="Edit">Update CLAUDE.md §16 pointer</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/standards/DATA-ACCESS-DECISION-CRITERIA.md (new)</output>
+    <output type="docs">CLAUDE.md (§16 pointer added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` exists with decision criteria covering all 7 dimensions: auth, complexity, AI, audit, error handling, retries, rate limits.</criterion>
+    <criterion testable="true">Doc includes ≥1 worked example each from current code: one Xrm.WebApi, one BFF.</criterion>
+    <criterion testable="true">Doc cross-links to CLAUDE.md §10 + `.claude/constraints/bff-extensions.md` — does not duplicate the BFF-side criteria.</criterion>
+    <criterion testable="true">CLAUDE.md §16 pointer added to the new doc.</criterion>
+    <criterion testable="true">3-scenario walk-through in verify step reaches the correct placement each time.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    STANDARD rigor — new standards document. Quality gates SKIPPED per Step 0.5.
+  </execution>
+</task>

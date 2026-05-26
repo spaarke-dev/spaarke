@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B-6: Reconcile CalendarSidePane.CalendarSection — delete local copy; import from @spaarke/events-components</title>
+    <phase>Phase 5 — Substantive code changes</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, react, refactoring, fluent-ui, e2e-test, deploy</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag 'frontend' + 'refactoring' + 'fluent-ui'; modifies .tsx code across solutions + shared lib; visual + behavioral parity required (Calendar widget — Pattern D canonical reference). Per Step 3.5.5 decision tree, FULL rigor.</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Delete the divergent local `CalendarSection.tsx` in `src/solutions/CalendarSidePane/` and import the
+    component from `@spaarke/events-components` (the same component used by SpaarkeAi's embedded Calendar
+    widget). Verify CalendarSidePane on record forms looks + behaves IDENTICALLY to SpaarkeAi's embedded
+    Calendar version. Dark-mode parity test included (ADR-021).
+  </prompt>
+
+  <role>
+    React/Fluent UI v9 developer familiar with the dual-use Pattern D (Calendar widget — R3 task 115,
+    canonical reference per `SPAARKEAI-COMPONENTIZATION-AUDIT.md` §2A). Bias toward exact parity over
+    cleanups: this is a unification, not a rewrite.
+  </role>
+
+  <goal>
+    (a) `src/solutions/CalendarSidePane/src/components/CalendarSection.tsx` (local copy) deleted; (b)
+    `src/solutions/CalendarSidePane/src/App.tsx` (or wherever it's consumed) imports `CalendarSection`
+    from `@spaarke/events-components` instead; (c) CalendarSidePane on record forms is visually +
+    behaviorally identical to SpaarkeAi's embedded Calendar widget (FR-09 acceptance); (d) dark-mode
+    parity verified (ADR-021); (e) deploy CalendarSidePane web resource and verify post-deploy.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-09 (B-6) + plan §4 Phase 5: `SPAARKEAI-COMPONENTIZATION-AUDIT.md` flagged the divergent
+      local copy. CalendarSidePane and SpaarkeAi's embedded Calendar widget should be the SAME COMPONENT
+      — they diverged because `@spaarke/events-components` was created after CalendarSidePane shipped
+      (the shared lib emerged from R10 hoist work). The hoist canonical form (`CalendarSection` in
+      `Spaarke.Events.Components/src/components/CalendarSection/CalendarSection.tsx`) is the post-hoist
+      version. The CalendarSidePane local copy is the pre-hoist version.
+
+      Risk: a subtle divergence (different prop, different default, different className) could change
+      record-form rendering. Mitigation: pre-change visual snapshot of CalendarSidePane in record-form
+      context; post-change comparison; dark-mode verified.
+    </background>
+    <relevant-files>
+      <file>src/solutions/CalendarSidePane/src/components/CalendarSection.tsx (delete)</file>
+      <file>src/solutions/CalendarSidePane/src/App.tsx (import update)</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/CalendarSection/CalendarSection.tsx (canonical)</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/index.ts (verify export)</file>
+      <file>src/solutions/LegalWorkspace/src/registrations/calendar.registration.ts (reference — Pattern D canonical shim)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Shared components are the single source of truth. CalendarSidePane MUST consume `@spaarke/events-components` — no local divergent copies allowed.</constraint>
+    <constraint source="ADR-021">Fluent v9 only — no hex, no rgba, no v8. Verify the shared `CalendarSection` already complies. Dark-mode parity test REQUIRED.</constraint>
+    <constraint source="ADR-022">React 19 (CalendarSidePane is in `src/solutions/*` which is React 19 per ADR-022 Code Pages). No React 18-only fallbacks.</constraint>
+    <constraint source="project">ZERO behavioral OR visual regression on CalendarSidePane record-form rendering. If divergence between local and shared `CalendarSection` exists (different props/defaults), the unification MUST resolve it via the shared lib's canonical form OR be documented and operator-approved.</constraint>
+    <constraint source="project">If the shared lib's `CalendarSection` has a different prop signature than the local copy, the CalendarSidePane App MUST adapt to the shared signature (not the other way — the shared lib is canonical).</constraint>
+    <constraint source="project">Verify export: `@spaarke/events-components` must already export `CalendarSection` from its public `index.ts`. If it doesn't, add the export — but verify this doesn't introduce a circular dep.</constraint>
+    <constraint source="project">Bundle-size impact (NFR-08): CalendarSidePane bundle size MAY change (the shared lib import path might bring in additional shared utilities). Measure before/after; if delta &gt; +50 KB, justify in notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Rigor declaration">Output rigor declaration: 🔒 RIGOR LEVEL: FULL — frontend + refactoring + fluent-ui tags, visual parity required, ADR-021 dark-mode check. Step 9.5 quality gates MANDATORY.</step>
+    <step order="1" name="Diff the two CalendarSection files">Read both `src/solutions/CalendarSidePane/src/components/CalendarSection.tsx` and `src/client/shared/Spaarke.Events.Components/src/components/CalendarSection/CalendarSection.tsx`. Diff prop signatures, default values, className strategy, event handling, theming. Document divergence in `notes/b6-pre-change-diff.md`.</step>
+    <step order="2" name="Pre-change visual snapshot">Open CalendarSidePane on a record form (Matter/Project/Contract) in both light and dark mode. Capture screenshots OR detailed written description. Stash in `notes/b6-pre-change-snapshot.md`.</step>
+    <step order="3" name="Verify export">Read `src/client/shared/Spaarke.Events.Components/src/index.ts` — confirm `CalendarSection` is exported. If not, add the export. Check for circular deps.</step>
+    <step order="4" name="Update App.tsx import">Edit `src/solutions/CalendarSidePane/src/App.tsx`: replace local import (`from './components/CalendarSection'`) with shared lib import (`from '@spaarke/events-components'`). Verify the imported component accepts the props CalendarSidePane currently passes; adapt prop passing if divergent (per the diff from step 1).</step>
+    <step order="5" name="Delete local copy">Delete `src/solutions/CalendarSidePane/src/components/CalendarSection.tsx`. If any other CalendarSidePane file imported the local copy, update them to import from the shared lib.</step>
+    <step order="6" name="Build verification">Run `tsc --noEmit` + `npm run build` on `Spaarke.Events.Components` and `CalendarSidePane`. Verify 0 errors. Verify `@spaarke/events-components` exports resolve correctly.</step>
+    <step order="7" name="Bundle-size measurement">Build CalendarSidePane and measure gzip bundle. Compare against pre-change baseline. Expected: similar size (the shared component may pull additional shared utilities — acceptable up to +50 KB; document if more).</step>
+    <step order="8" name="Deploy">Deploy CalendarSidePane web resource via the appropriate deploy script (likely a script in `scripts/Deploy-*.ps1` or `code-page-deploy` skill — confirm at task start; CalendarSidePane is NOT a code page, it's a Power Pages / record-form embedded web resource).</step>
+    <step order="9" name="Post-deploy visual smoke">Open CalendarSidePane on the same record forms used in step 2's snapshot. Compare against pre-change snapshot. Expected: IDENTICAL.</step>
+    <step order="9.5" name="Quality gates">Invoke `code-review` skill and `adr-check` skill. Verify ADR-012 (no local divergent copy), ADR-021 (Fluent v9 tokens, no hex/rgba).</step>
+    <step order="10" name="UI tests (parity + dark mode)">Invoke `ui-test` skill for the two tests defined below.</step>
+    <step order="11" name="Update TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 055 status 🔲 → ✅.</step>
+    <step order="12" name="Document deviations">If divergence between local and shared `CalendarSection` required a behavioral choice (e.g., different default prop value), document the resolution in `projects/spaarke-ai-platform-unification-r4/notes/b6-divergence-resolution.md` for R4 lessons-learned.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build CalendarSidePane + Spaarke.Events.Components; tsc --noEmit</tool>
+    <tool name="Read">Read both CalendarSection files + App.tsx + shared lib index</tool>
+    <tool name="Edit">Update App.tsx import; delete local copy</tool>
+    <tool name="Bash">Verify shared lib exports + measure bundle size</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/CalendarSidePane/src/App.tsx (import update)</output>
+    <output type="code">src/solutions/CalendarSidePane/src/components/CalendarSection.tsx (deleted)</output>
+    <output type="code">src/client/shared/Spaarke.Events.Components/src/index.ts (verify/add CalendarSection export)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/b6-pre-change-diff.md</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/b6-pre-change-snapshot.md</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="CalendarSidePane parity with embedded Calendar (light + dark)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;etn=sprk_matter&amp;pagetype=entityrecord</url>
+      <steps>
+        <step>Open a Matter record (with events linked to it) — CalendarSidePane should appear on the form</step>
+        <step>Verify CalendarSection renders with events visible</step>
+        <step>Compare side-by-side against SpaarkeAi embedded Calendar widget (same date range, same data) — expect visual parity</step>
+        <step>Interact: click a date, expand an event chip, scroll to a different week</step>
+        <step>Verify all interactions behave identically to the embedded Calendar widget</step>
+        <step>Switch to dark mode in D365 settings</step>
+        <step>Verify backgrounds, text colors, event chip colors adapt (no white-on-white, no black-on-black)</step>
+        <step>Verify icons use currentColor (visible in dark mode)</step>
+        <step>Verify no console errors or warnings</step>
+        <step>Compare against pre-change snapshot — expect IDENTICAL</step>
+      </steps>
+      <expected>CalendarSidePane visually + behaviorally IDENTICAL to embedded Calendar widget. Dark mode compliant per ADR-021 (Fluent UI v9 semantic tokens only). No console errors.</expected>
+    </test>
+
+    <test name="No local divergent copy remains">
+      <steps>
+        <step>Run grep for `CalendarSection` in `src/solutions/CalendarSidePane/`</step>
+        <step>Verify there is NO file `src/solutions/CalendarSidePane/src/components/CalendarSection.tsx`</step>
+        <step>Verify all references to `CalendarSection` in CalendarSidePane import from `@spaarke/events-components`</step>
+        <step>Run `tsc --noEmit` — 0 errors</step>
+        <step>Run grep across the repo for ANY other local CalendarSection.tsx copies — verify none</step>
+      </steps>
+      <expected>Single source of truth: `CalendarSection` exists ONLY in `@spaarke/events-components`. ADR-012 compliance verified.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given CalendarSidePane on a record form, When viewed alongside SpaarkeAi's embedded Calendar widget with the same data, Then they are visually + behaviorally IDENTICAL (FR-09 acceptance).</criterion>
+    <criterion testable="true">Given ADR-012 (single source of truth), When the repo is grepped, Then `CalendarSection` exists ONLY in `@spaarke/events-components` — no local copy in `src/solutions/CalendarSidePane/`.</criterion>
+    <criterion testable="true">Given ADR-021 dark mode, When CalendarSidePane is viewed in dark mode, Then all colors adapt via Fluent v9 tokens — no white/black hardcoded.</criterion>
+    <criterion testable="true">Given the import in CalendarSidePane's App.tsx, When inspected, Then `CalendarSection` is imported from `@spaarke/events-components` (not from a local relative path).</criterion>
+    <criterion testable="true">Given NFR-08 bundle-size budget, When CalendarSidePane gzip bundle is measured, Then delta vs pre-change baseline is ≤ +50 KB OR justified in notes.</criterion>
+    <criterion testable="true">Given `tsc --noEmit`, When run on CalendarSidePane and Spaarke.Events.Components, Then 0 type errors.</criterion>
+    <criterion testable="true">Given the deployed CalendarSidePane web resource, When opened on a record form post-deploy, Then it renders correctly + has 0 console errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Risk: prop-signature divergence between the local and shared CalendarSection is the most likely failure
+    mode. The pre-change diff (step 1) catches this. The shared lib's signature is canonical — adapt
+    CalendarSidePane App.tsx to it, NOT the other way around (R3 task 115's canonical Pattern D shim is
+    the reference for how shared-lib + thin shim is meant to work).
+
+    Deploy mechanism: CalendarSidePane is NOT a code page (it's an embedded web resource on record forms).
+    Confirm the exact deploy path at task start — likely `scripts/Deploy-CalendarSidePane.ps1` or similar.
+    NFR-07 (B-10 in spec) is separately about EventsPage deploy parity; this task is CalendarSidePane only.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply FULL rigor protocol: rigor declaration at Step 0; pre-change visual snapshot is MANDATORY (R-3-style mitigation); Step 9.5 quality gates MANDATORY; ADR-012 (no local copies) + ADR-021 (Fluent v9 dark mode) are LOAD-BEARING — verify both before merging.</protocol>
+  </execution>
+</task>

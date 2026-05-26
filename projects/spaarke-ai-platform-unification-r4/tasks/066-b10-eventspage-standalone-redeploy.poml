@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="066" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B-10: Build + redeploy standalone EventsPage web resource; verify parity</title>
+    <phase>Phase 6 — Build hygiene cluster</phase>
+    <status>not-started</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>deploy, frontend, react</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Deploy task — no code authoring; build + push + verify. MINIMAL per Step 3.5.5 (simple deploy + verification; no .cs/.ts/.tsx modification).</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec NFR-07 / plan B-10: build and redeploy the standalone `EventsPage` web resource
+    (de-synced since the R10 hoist). Use `scripts/Deploy-EventsPage.ps1` (existing). Verify
+    visual + behavioral parity with the embedded version (SpaarkeAi's Calendar widget
+    consumption of the same shared components).
+  </prompt>
+
+  <role>
+    SPAARKE deploy operator. Bias toward the `code-page-deploy` skill. No code changes —
+    pure deploy + smoke-verify. If the build surfaces errors, do NOT fix them here; route
+    to the appropriate Phase 6 task (B-2, B-9, B-11) or capture as a blocker.
+  </role>
+
+  <goal>
+    EventsPage standalone web resource (likely `sprk_eventspage`) deployed to
+    `spaarkedev1` Dataverse environment. Operator-confirmed visual + behavioral parity
+    with the embedded Calendar widget (same shared lib components, no drift). NFR-07
+    acceptance satisfied.
+  </goal>
+
+  <context>
+    <background>
+      Per backlog B-10: EventsPage is the standalone Code Page web resource that hoists
+      shared `@spaarke/events-components` library. Since R10 (the original hoist), the
+      standalone page was not re-deployed in step with shared-lib updates — so it currently
+      ships an older version. R4 work in Phase 6 (063 B-7, 064 B-8) modifies the same
+      shared lib; this task ensures the standalone surface picks up the updates. This
+      task should run AFTER 063 and 064 ideally, but can run in parallel with them in
+      Wave 1 if the deploy is simply re-syncing to current master. Operator pick the
+      timing — the parallel-safe metadata says "true" because the deploy script doesn't
+      touch shared lib code.
+    </background>
+    <relevant-files>
+      <file>src/solutions/EventsPage/</file>
+      <file>scripts/Deploy-EventsPage.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy MUST use `scripts/Deploy-EventsPage.ps1` (existing). Do NOT hand-roll a deploy.</constraint>
+    <constraint source="project">No code changes in this task. If `npm run build` on EventsPage surfaces errors, capture them and route to the appropriate Phase 6 task (063, 064, or 067 if type-drift).</constraint>
+    <constraint source="project">Parity verification is operator-visible — run the &lt;ui-tests&gt; below OR escalate to operator if Chrome integration is not available.</constraint>
+    <constraint source="ADR-022">React 19 only — build settings must match.</constraint>
+    <constraint source="project">Target environment is `spaarkedev1` (per CLAUDE.md). Do NOT deploy to production in this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md</file>
+      <file>scripts/Deploy-EventsPage.ps1</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Pre-deploy build">Run `npm install --legacy-peer-deps --no-audit --no-fund` in `src/solutions/EventsPage/` (per CLAUDE.md). Then `npm run build`. Confirm 0 errors. If errors, STOP — capture in handoff note, escalate to operator.</step>
+    <step order="2" name="Verify build output">Inspect `src/solutions/EventsPage/dist/` (or wherever the build artifact lands per Vite config). Confirm a single HTML bundle exists at expected path. Note bundle size for parity with prior deploys (mention in deploy note).</step>
+    <step order="3" name="Run deploy script">Invoke `scripts/Deploy-EventsPage.ps1` with `-DataverseUrl` set to `spaarkedev1` (or rely on `$env:DATAVERSE_URL`). Watch for the "Token acquired" and subsequent steps. Confirm successful publish.</step>
+    <step order="4" name="UI smoke verification">Run the &lt;ui-tests&gt; below. Operator confirms parity. If Chrome integration unavailable, document in deploy note and request operator manual verification.</step>
+    <step order="5" name="Document deploy">Write `projects/spaarke-ai-platform-unification-r4/notes/b10-eventspage-deploy.md`: deploy timestamp, environment, bundle size, parity confirmation (or operator pending). Include any anomalies.</step>
+    <step order="6" name="Update TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 066 from 🔲 → ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">npm install, npm run build</tool>
+    <tool name="powershell">Run Deploy-EventsPage.ps1</tool>
+    <tool name="Skill">code-page-deploy skill if more nuanced steps needed</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">EventsPage web resource (sprk_eventspage) in Dataverse spaarkedev1</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/b10-eventspage-deploy.md (deploy record)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md (status flip)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="EventsPage standalone loads">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=webresource&amp;webresourceName=sprk_eventspage</url>
+      <steps>
+        <step>Open EventsPage standalone web resource directly</step>
+        <step>Verify the events grid renders</step>
+        <step>Verify filter dropdowns render (AssignedTo, Status, RecordType)</step>
+        <step>Check console for JavaScript errors</step>
+      </steps>
+      <expected>Page loads cleanly; events visible; filters work; no console errors.</expected>
+    </test>
+
+    <test name="Parity vs embedded Calendar widget">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=webresource&amp;webresourceName=sprk_spaarkeai</url>
+      <steps>
+        <step>Open SpaarkeAi page; mount Calendar widget</step>
+        <step>Compare event grid visuals (column layout, filter dropdowns, action buttons) to standalone EventsPage from previous test</step>
+        <step>Verify same set of bulk actions available in both surfaces</step>
+        <step>Verify same Fluent v9 token usage (no v8 leak in either)</step>
+      </steps>
+      <expected>Visual + behavioral parity between standalone EventsPage and embedded Calendar widget.</expected>
+    </test>
+
+    <test name="Dark mode parity (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365</step>
+        <step>Re-load EventsPage standalone</step>
+        <step>Verify all surfaces adapt (no hardcoded colors)</step>
+      </steps>
+      <expected>EventsPage renders correctly in dark mode; matches embedded Calendar widget treatment.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the deploy, When `scripts/Deploy-EventsPage.ps1` runs, Then it exits 0 and the web resource publish step succeeds.</criterion>
+    <criterion testable="true">Given the UI smoke, When EventsPage is opened in the browser at `spaarkedev1`, Then the page loads with 0 console errors.</criterion>
+    <criterion testable="true">Given the parity check, When standalone EventsPage and embedded Calendar widget are visually compared, Then visual + behavioral parity is confirmed (or any drift is captured as a follow-up note).</criterion>
+    <criterion testable="true">Given the deploy record, When `notes/b10-eventspage-deploy.md` is read, Then it documents the deploy timestamp, env, bundle size, and parity status.</criterion>
+    <criterion testable="true">Given task 066 is being executed, When this task completes, Then TASK-INDEX.md shows task 066 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Order-of-operations: ideally run AFTER 063 (B-7) and 064 (B-8) so the deployed bundle
+    includes those changes — but the script and deploy mechanics are unaffected by source
+    state, so this task is parallel-safe in Wave 1. If running before 063/064, a follow-up
+    deploy is needed after they merge (could be folded into task 066 or 067 follow-up).
+    Operator pick the timing.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply MINIMAL rigor protocol (no Step 9.5 quality gates; checkpointing optional; current-task.md tracking).</protocol>
+  </execution>
+</task>

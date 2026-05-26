@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>W-4 (FR-02): Wire Assistant → Workspace mount source — first end-to-end widget_load demo (recommended: PDF upload → DocumentViewer tab)</title>
+    <phase>4: Workspace builder + mount-source wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>010, 040</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, react, fluent-ui, e2e-test, deploy</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.ts/.tsx` source; tags include `frontend`/`react`/`fluent-ui`; 10+ steps; depends on 010 (W-1 model) and 040 (wizard fix); applies multiple load-bearing ADRs (021, 022, 025, 028). FULL rigor — Step 9.5 quality gates mandatory.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>depends on 010 (W-1 model) and 040 (wizard catalog fix)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Wire the Assistant pane to dispatch `widget_load` on the `PaneEventBus.workspace`
+    channel, mounting a widget as a new workspace tab. At task start the operator selects
+    the demo scenario (per OC-R4-07); the recommended scenario is "user uploads PDF in chat
+    → DocumentViewer widget mounts as a workspace tab". Implement the Assistant-side
+    dispatcher; wire/build the receiving widget into `WorkspaceWidgetRegistry` if not
+    already registered; demonstrate the demo end-to-end on the dev environment. Use typed
+    PaneEventBus channels (ADR-025 — no `any` payloads) and `authenticatedFetch` for any
+    BFF calls (ADR-028).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer expert in PaneEventBus (`@spaarke/ai-widgets`),
+    `WorkspaceWidgetRegistry`, Assistant pane internals (`src/solutions/SpaarkeAi/src/
+    components/conversation/`), React 19 + Fluent UI v9, and ADR-028 function-based auth.
+    Bias toward the smallest end-to-end demo that proves the pattern — defer broad coverage
+    to a follow-up. Per plan.original.md §8 Risk R-7: if scope risks exceeding 8h, ship the
+    dispatch + ONE viewer widget and defer broader coverage.
+  </role>
+
+  <goal>
+    Operator-visible end-to-end demo on the dev environment: a user action in the Assistant
+    pane (recommended: PDF upload in chat) dispatches `widget_load` on the workspace
+    channel; the receiving widget mounts as a new tab in the Workspace pane; the tab is
+    selectable; the tab is closable per existing tab semantics. Code changes meet ADR-021
+    (Fluent v9 tokens), ADR-022 (React 19), ADR-025 (typed PaneEventBus channels — no
+    `any`), and ADR-028 (function-based auth — no token snapshots). FR-02 acceptance
+    criteria satisfied. Build + deploy green; UI tests pass including dark-mode.
+  </goal>
+
+  <context>
+    <background>
+      Per plan §4 Phase 4 and FR-02, the Assistant pane is one of two not-yet-implemented
+      mount sources for the Workspace pane (the other is Context, addressed by W-5 / task
+      043). Today the workspace mounts content via the user picker + workspace dropdown
+      only. R4's first end-to-end `widget_load` dispatch lands here. The receiving wrapper
+      is `WorkspaceWidgetRegistry` (Direct widget wrapper per the two-wrapper model from
+      W-1) — NOT `LegalWorkspaceApp` (Dashboard wrapper). The PaneEventBus pattern is
+      codified in ADR-025 (created by task 012, which is also a Phase 1 dep — task 010
+      depends on the dashboard+widget model doc which references ADR-025). The R3 Calendar
+      widget Pattern D (task 115) is the canonical worked example for a shared-lib widget
+      mounted via the registry — a useful reference for the receiving widget.
+
+      Per OC-R4-07 (2026-05-25): "Operator chooses at task time; recommended: PDF upload in
+      chat → DocumentViewer tab". This means: (a) the dispatcher in the Assistant pane
+      observes a user upload action; (b) it constructs a typed `widget_load` payload
+      identifying the widget type (e.g., `document-viewer`) and the data (file reference,
+      blob ID, etc.); (c) it dispatches on the workspace channel; (d) the workspace pane's
+      mount logic (existing, from R3) handles the event and resolves the widget from
+      `WorkspaceWidgetRegistry`; (e) the widget renders as a new tab.
+
+      Decision points the operator may surface at task start: (1) which exact upload type
+      to wire (PDF only, or any file?), (2) does the existing DocumentViewer widget meet
+      the demo bar, or does this task ship a minimal stub viewer? Stay scoped per Risk R-7.
+
+      ADR-028 invariants: NO token snapshots in props/state. Use `useAuth()` +
+      `authenticatedFetch` from `@spaarke/auth` for any BFF call inside the widget. ADR-025
+      invariant: PaneEventBus channels are typed — `widget_load` payload type must be
+      declared in `PaneEventTypes.ts` (extend if needed; don't widen to `any`).
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBusContext.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/useDispatchPaneEvent.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/ (existing widgets — DocumentViewer or similar)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 tokens only. NO hex, NO `rgba()`, NO Fluent v8.</constraint>
+    <constraint source="ADR-022">React 19 only for Code Pages. NO React 16 fallbacks.</constraint>
+    <constraint source="ADR-025">PaneEventBus channels MUST be typed — NO `any` payloads. Extend `PaneEventTypes.ts` for the `widget_load` payload shape (widget type ID + data) and reuse for both W-4 and W-5.</constraint>
+    <constraint source="ADR-028">Function-based auth via `@spaarke/auth` `authenticatedFetch`. NO token snapshots in props/state. NO new auth mechanisms.</constraint>
+    <constraint source="ADR-012">Shared widgets live in `@spaarke/ai-widgets` (or `@spaarke/*` lib family). Don't duplicate widget code inside SpaarkeAi solution.</constraint>
+    <constraint source="project">Scope guard per Risk R-7: ship dispatch + ONE viewer widget end-to-end. Broader widget coverage is OUT OF SCOPE for this task — defer to follow-up.</constraint>
+    <constraint source="project">Operator confirms demo scenario at task start (OC-R4-07). Record the chosen scenario in &lt;notes&gt;.</constraint>
+    <constraint source="project">If a NEW widget is created for the demo, it MUST register via `registerWorkspaceWidget()` in a clean module-load registration file, not inline in the Assistant pane.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>.claude/adr/ADR-025-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>src/solutions/LegalWorkspace/src/registrations/calendar.registration.ts</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Calendar widget Pattern D (R3 task 115)" location="src/client/shared/Spaarke.events-components/ + src/solutions/LegalWorkspace/src/registrations/calendar.registration.ts">
+        Canonical "shared-lib widget + thin LW registration shim" reference. Use this as the receiving-widget template for the demo if a new widget is built.
+      </pattern>
+      <pattern name="PaneEventBus typed channels" location="src/client/shared/Spaarke.AI.Widgets/src/events/">
+        Workspace / context / conversation / safety channels with typed payloads. ADR-025 codifies.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Confirm dependencies">
+      Verify tasks 010 (W-1 dashboard+widget model doc) and 040 (wizard catalog fix) are ✅ in TASK-INDEX.md. If either is not complete, STOP and surface the blocker per CLAUDE.md "Human Escalation Triggers".
+    </step>
+    <step order="2" name="Operator confirms demo scenario">
+      Surface OC-R4-07 to operator: confirm recommended "PDF upload in chat → DocumentViewer tab" OR substitute scenario. Record the choice in &lt;notes&gt; at task end. Without the operator's choice, do NOT proceed past Step 3.
+    </step>
+    <step order="3" name="Load context">
+      Read W-1 doc (010 output), ADR-025, ADR-028, PaneEventBus source files, ConversationPane source, WorkspaceWidgetRegistry source, and Calendar widget Pattern D reference.
+    </step>
+    <step order="4" name="Design dispatch payload">
+      Define / extend the typed payload for `widget_load` on the workspace channel in `PaneEventTypes.ts`. Required fields: widget type ID (string union from registered types), title (string), data (typed per widget). NO `any` per ADR-025. Add JSDoc.
+    </step>
+    <step order="5" name="Choose / build receiving widget">
+      If an existing DocumentViewer widget in `@spaarke/ai-widgets` meets the demo bar, use it (verify it's already registered via `registerWorkspaceWidget()`). If not, build a minimal widget in `src/client/shared/Spaarke.AI.Widgets/src/widgets/` + register it via a dedicated registration file. Follow Calendar Pattern D shape. Use `useAuth()` + `authenticatedFetch` for any BFF call inside the widget (ADR-028).
+    </step>
+    <step order="6" name="Implement dispatcher in Assistant pane">
+      Add the dispatch logic in `ConversationPane.tsx` (or a dedicated hook in the conversation/ folder). Trigger: the chosen user action (per Step 2 — recommended: PDF upload finished + file is a PDF). Construct the typed payload + call `useDispatchPaneEvent()` with channel `workspace` and event `widget_load`. Keep dispatcher logic small, testable, and isolated.
+    </step>
+    <step order="7" name="Verify Workspace pane receives + mounts">
+      Confirm the existing Workspace pane mount logic (from R3) subscribes to the workspace channel and handles `widget_load` by resolving the widget via `WorkspaceWidgetRegistry` and rendering as a new tab. If a gap is discovered, fix in place — DO NOT introduce new channel mechanics.
+    </step>
+    <step order="8" name="Build">
+      Run `npm install --legacy-peer-deps --no-audit --no-fund` (if needed) and `npm run build` for SpaarkeAi solution AND `@spaarke/ai-widgets` shared lib. Verify both succeed with 0 errors. Run `tsc --noEmit` on touched packages.
+    </step>
+    <step order="9" name="Unit tests">
+      Add focused tests: (a) dispatcher constructs the correct typed payload for the chosen scenario; (b) Workspace pane subscribes to `widget_load` and calls `resolveWorkspaceWidget()` with the right ID. Mock PaneEventBus / `useDispatchPaneEvent` per existing test patterns.
+    </step>
+    <step order="10" name="Deploy">
+      Deploy SpaarkeAi via `code-page-deploy` skill. Verify deployment to dev environment succeeds.
+    </step>
+    <step order="11" name="UI test">
+      Per &lt;ui-tests&gt; below: execute the end-to-end demo on the dev environment; verify tab appears, is selectable, is closable; verify dark-mode parity. Capture screenshots / browser console clean.
+    </step>
+    <step order="12" name="Bundle-size check">
+      Measure SpaarkeAi gzip bundle delta (NFR-08 budget: ≤+50 KB vs 918 KB R3 baseline). Record in &lt;notes&gt;. If a new widget was added, lazy-load via registry factory to keep delta near zero.
+    </step>
+    <step order="13" name="Update TASK-INDEX">
+      Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 042 from 🔲 → ✅ completed.
+    </step>
+    <step order="14" name="Document deviations + operator demo">
+      Record the chosen demo scenario, any pivots, and the bundle-size delta in `projects/spaarke-ai-platform-unification-r4/notes/`. Surface the live demo to the operator for FR-02 acceptance sign-off.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + tests for SpaarkeAi solution and @spaarke/ai-widgets shared lib</tool>
+    <tool name="terminal">Shell commands for build / install / git status / tsc --noEmit</tool>
+    <tool name="Skill">code-page-deploy for SpaarkeAi web resource deployment; ui-test for browser-based verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (or dedicated hook)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts (extended)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/ (new or extended widget)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/registry/ (registration file if new widget)</output>
+    <output type="test">src/solutions/SpaarkeAi/src/components/conversation/__tests__/ (dispatcher tests)</output>
+    <output type="test">src/client/shared/Spaarke.AI.Widgets/src/__tests__/ (registry/payload tests)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md (status flip)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Assistant → Workspace end-to-end demo (FR-02 acceptance)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Open SpaarkeAi in the dev environment; verify Assistant + Workspace + Context panes are visible</step>
+        <step>Perform the chosen demo trigger (e.g., upload a PDF in the chat input)</step>
+        <step>Observe the Workspace pane mount a new tab labeled with the widget title (e.g., file name)</step>
+        <step>Verify the new tab is selectable (click and observe activation)</step>
+        <step>Verify the widget renders content correctly (e.g., DocumentViewer shows the PDF / file preview)</step>
+        <step>Verify the tab is closable (close button works; tab disappears; existing tabs unaffected)</step>
+        <step>Check browser console: 0 JavaScript errors</step>
+      </steps>
+      <expected>End-to-end demo works as described in FR-02 acceptance; no console errors; tab semantics preserved.</expected>
+    </test>
+
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Repeat the demo trigger</step>
+        <step>Verify the new tab and its widget render correctly in dark mode (no white-on-white, no black-on-black)</step>
+        <step>Verify all colors use Fluent v9 semantic tokens (inspect Computed styles for `var(--colorNeutral*)` etc.)</step>
+      </steps>
+      <expected>Dark-mode renders cleanly; all colors via Fluent v9 semantic tokens per ADR-021.</expected>
+    </test>
+
+    <test name="PaneEventBus type safety (ADR-025)">
+      <steps>
+        <step>Inspect the dispatched event in browser devtools (PaneEventBus instrumentation or React DevTools)</step>
+        <step>Verify the payload shape matches the declared TypeScript type for `widget_load`</step>
+        <step>Confirm no `any` casts in the dispatch path (review code in the task PR)</step>
+      </steps>
+      <expected>Payload is typed end-to-end; no `any` casts.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the operator triggers the chosen demo action in the Assistant pane, When the action completes, Then a `widget_load` event is dispatched on the workspace channel with a typed payload identifying the widget + data.</criterion>
+    <criterion testable="true">Given the workspace channel receives a `widget_load` event, When the Workspace pane handles it, Then the widget resolves via `WorkspaceWidgetRegistry` and mounts as a new tab.</criterion>
+    <criterion testable="true">Given the new tab is mounted, When the user clicks the tab, Then it becomes active; When the user closes it, Then it is removed without affecting other tabs.</criterion>
+    <criterion testable="true">Given ADR-025 requires typed channels, When the code is reviewed, Then no `any` payload types appear in the dispatch path; `widget_load` payload is declared in `PaneEventTypes.ts`.</criterion>
+    <criterion testable="true">Given ADR-028 requires function-based auth, When the receiving widget calls the BFF, Then it uses `authenticatedFetch` from `@spaarke/auth`; NO token snapshots in props/state.</criterion>
+    <criterion testable="true">Given ADR-021 requires Fluent v9 tokens, When the new tab renders in light + dark mode, Then all colors use semantic tokens; no hardcoded hex/rgba.</criterion>
+    <criterion testable="true">Given the SpaarkeAi bundle has a 918 KB R3 baseline (NFR-08), When this task's deploy completes, Then bundle delta is ≤+50 KB or justified in notes.</criterion>
+    <criterion testable="true">Given task 042 is executing, When this task completes, Then TASK-INDEX.md shows task 042 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Operator MUST confirm the demo scenario at task start per OC-R4-07. Recommended: "user uploads PDF in chat → DocumentViewer widget mounts as workspace tab". Alternative scenarios include "assistant suggests opening a document → workspace tab with viewer", or "assistant returns a search result → workspace tab with result viewer". Record the operator's choice in this notes block at task close.
+
+    Per Risk R-7 in plan.original.md §8: if scope risks blowing the 8h estimate, ship dispatch + ONE viewer widget end-to-end and defer broader coverage to a follow-up. DO NOT widen the demo at the cost of incomplete delivery.
+
+    The Calendar widget Pattern D (R3 task 115) is the canonical reference for the receiving widget's shape. If a new widget is built (e.g., a minimal DocumentViewer), follow that pattern: shared-lib component + thin registration shim. DO NOT inline widget code in the Assistant pane.
+
+    `PaneEventTypes.ts` extension: the `widget_load` event type SHOULD be reusable for W-5 (task 043) — design the payload to accommodate both Assistant-initiated and Context-initiated dispatches. Task 043 will consume the same type.
+
+    This task BLOCKS nothing in Phase 4 (043 depends on 010, not on 042). Therefore 042 + 043 can run in parallel (parallel-group E) — they touch different code paths (Assistant pane vs Context wizard) but both depend on 010 (W-1 model).
+
+    AUTO-DEMOTION: this task does NOT touch `.claude/` paths, so the `.claude/` permission boundary does not apply. The `parallel-safe=false` here is because of hard task-dependency (010 + 040), not file-overlap.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply FULL rigor protocol — Step 9.5 quality gates (code-review + adr-check) MANDATORY before deploy. Checkpoint every 3 steps via context-handoff.</protocol>
+  </execution>
+</task>

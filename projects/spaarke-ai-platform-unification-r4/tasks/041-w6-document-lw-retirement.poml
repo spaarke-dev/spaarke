@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>W-6 (DR-03): Document LegalWorkspace code page retirement — publish retirement doc, audit consumers, update deploy scripts + CLAUDE.md pointers</title>
+    <phase>4: Workspace builder + mount-source wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, architecture, deploy, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Documentation + small deploy-script edits + CLAUDE.md pointer updates. New files created; explicit project constraint (OC-R4-05). No `.cs/.ts/.tsx` source code modified. STANDARD rigor applies (knowledge loading + checkpointing; Step 9.5 quality gates skipped).</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Publish `docs/architecture/LEGALWORKSPACE-RETIREMENT.md` recording the operator decision
+    (OC-R4-05) to stop deploying the standalone `sprk_corporateworkspace` web resource. BEFORE
+    retiring the deploy step, audit Dataverse consumers (Default Solution forms, ribbons,
+    navigation entries) for direct references to `corporateworkspace` (per Risk R-6). Then
+    update the relevant `scripts/Deploy-*.ps1` files to skip the LW deploy, and update root
+    `CLAUDE.md` System Entry Points / pointers to reflect the retirement (LegalWorkspace
+    components remain available as a library — only the standalone code page is retired).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with familiarity in Dataverse customizations (Default Solution
+    audit, forms, ribbons), PowerShell deploy scripts (`scripts/Deploy-*.ps1`), and the
+    SpaarkeAi-as-host-of-LegalWorkspace embedded architecture. Bias toward audit-first
+    discipline: do NOT remove the deploy step until the consumer audit is recorded clean (per
+    Risk R-6 in plan.original.md §8).
+  </role>
+
+  <goal>
+    (a) `docs/architecture/LEGALWORKSPACE-RETIREMENT.md` published, covering: decision +
+    rationale (OC-R4-05), the components-as-library continuation (LegalWorkspace lives on
+    inside SpaarkeAi), the consumer audit results, R3 FR-25 / NFR-10 supersession notice,
+    and migration guidance for any host that previously relied on the standalone code page.
+    (b) `scripts/Deploy-CorporateWorkspace.ps1` and/or `scripts/Deploy-LegalWorkspaceCustomPage.ps1`
+    updated to skip LW deploy with a clear log message (or marked deprecated with a guard).
+    (c) Root `CLAUDE.md` §12 (System Entry Points) and §16 (Pointers) updated to reflect the
+    retirement — LegalWorkspace described as a library, not a standalone surface. (d) DR-03
+    acceptance criteria satisfied: doc published, deploy scripts skip LW, no consumer
+    breakage discovered post-cutover.
+  </goal>
+
+  <context>
+    <background>
+      Per OC-R4-05 (2026-05-25 operator decision recorded in spec.md), the standalone
+      LegalWorkspace code page `sprk_corporateworkspace` is being retired. LegalWorkspace
+      components + `LegalWorkspaceApp` renderer are retained as a library, consumed by
+      SpaarkeAi via embed. R3's FR-25 / NFR-10 ("standalone LegalWorkspace must continue to
+      function identically") is therefore SUPERSEDED and no longer a forward constraint
+      (also called out as a `MUST NOT` in spec.md / CLAUDE.md). Plan.original.md §8 Risk R-6
+      flags the concrete risk: "LW retirement breaks an unanticipated consumer (e.g., a
+      Dataverse form linking directly to `sprk_corporateworkspace`)". Mitigation: audit
+      `corporateworkspace` references in `Default Solution > Forms > grep` BEFORE deleting
+      the deploy step. THIS TASK ENCAPSULATES THAT MITIGATION.
+
+      The Deploy script names in `scripts/` directly relevant to LW are
+      `Deploy-CorporateWorkspace.ps1` and `Deploy-LegalWorkspaceCustomPage.ps1` (both visible
+      in the scripts listing). Either or both will need updates depending on how they wire
+      to LW. Other scripts that bundle multiple deploys (e.g., `Deploy-AllWebResources.ps1`,
+      `Deploy-Release.ps1`, `Deploy-Platform.ps1`) may also reference LW — audit them.
+
+      Standard ADR-013 (informational only here — placement decisions for LW components-as-library
+      aren't in scope; only the deploy retirement is).
+    </background>
+    <relevant-files>
+      <file>docs/architecture/LEGALWORKSPACE-RETIREMENT.md (new — to be created)</file>
+      <file>scripts/Deploy-CorporateWorkspace.ps1</file>
+      <file>scripts/Deploy-LegalWorkspaceCustomPage.ps1</file>
+      <file>scripts/Deploy-AllWebResources.ps1</file>
+      <file>scripts/Deploy-Release.ps1</file>
+      <file>scripts/Deploy-Platform.ps1</file>
+      <file>CLAUDE.md (root — §12, §16 pointer updates)</file>
+      <file>src/solutions/LegalWorkspace/</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/lw-consumer-audit-2026-05.md (new — audit record)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST audit Dataverse consumers BEFORE retiring the deploy step (Risk R-6 mitigation). If any consumer reference is found, document it in the retirement doc + audit note BEFORE proceeding to script edits.</constraint>
+    <constraint source="project">MUST NOT deploy `sprk_corporateworkspace` going forward (spec.md §MUST NOT). After this task, scripts must reflect that — but with a clear guard / log, not silent deletion.</constraint>
+    <constraint source="project">Retirement applies ONLY to the standalone code page. LegalWorkspace components + `LegalWorkspaceApp` renderer remain available as a library (consumed by SpaarkeAi embed). The retirement doc MUST make this distinction crystal clear.</constraint>
+    <constraint source="project">R3 FR-25 / NFR-10 ("standalone LegalWorkspace continues to function identically") is SUPERSEDED. Document this in the retirement doc as a forward-going call.</constraint>
+    <constraint source="project">CLAUDE.md root edits limited to §12 (System Entry Points) and §16 (Pointers). Do NOT restructure other sections.</constraint>
+    <constraint source="ADR-013">Informational — placement decisions for LW components-as-library are not in scope here. Only deploy retirement.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>scripts/Deploy-CorporateWorkspace.ps1</file>
+      <file>scripts/Deploy-LegalWorkspaceCustomPage.ps1</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Load context">
+      Read all knowledge files. Read both LW deploy scripts to understand current behavior. Read the SPAARKEAI-WORKSPACE-ARCHITECTURE.md for current LW-as-engine framing.
+    </step>
+    <step order="2" name="Consumer audit (Risk R-6)">
+      Audit Dataverse `corporateworkspace` references BEFORE editing scripts. Methods: (a) use `dataverse-mcp` or `dataverse-deploy` skill helpers to enumerate forms / ribbons / sitemap entries referencing `corporateworkspace`; (b) grep the Default Solution export if accessible; (c) inspect any model-driven app navigation entries pointing to `sprk_corporateworkspace`. Record findings in `projects/spaarke-ai-platform-unification-r4/notes/lw-consumer-audit-2026-05.md`.
+    </step>
+    <step order="3" name="Triage audit findings">
+      For each finding: classify as (a) safe-to-retire (no live consumer), (b) needs-migration (one or more live consumers — must migrate to SpaarkeAi before retirement), or (c) needs-operator-input. If any (b) or (c) classification appears, STOP and surface to operator before proceeding. If all (a), proceed.
+    </step>
+    <step order="4" name="Draft retirement doc">
+      Create `docs/architecture/LEGALWORKSPACE-RETIREMENT.md`. Required sections: (i) Decision + rationale (cite OC-R4-05, 2026-05-25); (ii) What is being retired (the code page deploy ONLY); (iii) What is preserved (components, renderer, embedded mode); (iv) Consumer audit results (link to notes file); (v) Migration guidance for any future host that wants what the standalone page provided (point them to LegalWorkspace-embedded-mode-contract per C-2); (vi) R3 FR-25 / NFR-10 supersession notice; (vii) Cross-link to W-1 (SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md) and to root CLAUDE.md §16.
+    </step>
+    <step order="5" name="Update deploy scripts">
+      Update `Deploy-CorporateWorkspace.ps1` and `Deploy-LegalWorkspaceCustomPage.ps1` to skip LW deploy with a clear log message ("LegalWorkspace code page retirement — see docs/architecture/LEGALWORKSPACE-RETIREMENT.md"). Choose one approach: (a) early-exit guard at top of script, OR (b) rename script to `.deprecated.ps1` with stub forwarding. Audit `Deploy-AllWebResources.ps1`, `Deploy-Release.ps1`, `Deploy-Platform.ps1` for any LW references and remove or guard them. DO NOT delete any deploy script outright.
+    </step>
+    <step order="6" name="Update root CLAUDE.md">
+      Update root `CLAUDE.md` §12 (System Entry Points) — adjust any LegalWorkspace entry to note "library only; standalone code page retired per docs/architecture/LEGALWORKSPACE-RETIREMENT.md". Update §16 (Pointers) — add a row for the new retirement doc; revise any LW-as-standalone pointer language.
+    </step>
+    <step order="7" name="Cross-link from related docs">
+      Add a brief retirement notice to `SPAARKEAI-WORKSPACE-ARCHITECTURE.md` (link to retirement doc + one sentence). If the existing W-1 doc (010 task output) is published, ensure its cross-references match.
+    </step>
+    <step order="8" name="Verify no consumer breakage">
+      Confirm: (i) audit note shows no live consumers OR all live consumers migrated; (ii) deploy scripts have clear guards; (iii) root CLAUDE.md pointers updated; (iv) retirement doc cross-linked. If any step uncovered an unanticipated consumer, document in the retirement doc + notify operator per CLAUDE.md "Human Escalation Triggers".
+    </step>
+    <step order="9" name="Update TASK-INDEX">
+      Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 041 from 🔲 → ✅ completed.
+    </step>
+    <step order="10" name="Document deviations">
+      If anything deviated from the plan (e.g., audit surfaced live consumers requiring follow-up, deploy script architecture is different than expected), record in `projects/spaarke-ai-platform-unification-r4/notes/` for R4 lessons-learned harvest.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">PowerShell + git status</tool>
+    <tool name="Skill">dataverse-deploy / dataverse-mcp-usage for consumer audit</tool>
+    <tool name="Read">Read scripts + existing architecture docs</tool>
+    <tool name="Edit">Apply edits to scripts + CLAUDE.md + create new retirement doc</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/LEGALWORKSPACE-RETIREMENT.md (new)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/lw-consumer-audit-2026-05.md (new)</output>
+    <output type="code">scripts/Deploy-CorporateWorkspace.ps1 (guard added)</output>
+    <output type="code">scripts/Deploy-LegalWorkspaceCustomPage.ps1 (guard added)</output>
+    <output type="code">scripts/Deploy-AllWebResources.ps1 / Deploy-Release.ps1 / Deploy-Platform.ps1 (LW refs removed/guarded if present)</output>
+    <output type="docs">CLAUDE.md (§12 + §16 updates)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md (status flip)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given OC-R4-05 directs LW code page retirement, When this task completes, Then `docs/architecture/LEGALWORKSPACE-RETIREMENT.md` exists and contains: decision + rationale, what's retired vs preserved, consumer audit results, R3 FR-25/NFR-10 supersession, and cross-links.</criterion>
+    <criterion testable="true">Given the consumer audit must precede deploy retirement (Risk R-6), When this task completes, Then `notes/lw-consumer-audit-2026-05.md` exists, lists audit method + findings, and the retirement doc cross-references it.</criterion>
+    <criterion testable="true">Given LW deploy must be skipped going forward, When `Deploy-CorporateWorkspace.ps1` or `Deploy-LegalWorkspaceCustomPage.ps1` is invoked, Then the script exits early with a clear log message and does NOT deploy `sprk_corporateworkspace`.</criterion>
+    <criterion testable="true">Given root CLAUDE.md §12 and §16 list LegalWorkspace pointers, When this task completes, Then those entries reflect LW as a library (not a standalone surface) and §16 includes the retirement doc.</criterion>
+    <criterion testable="true">Given task 041 is executing, When this task completes, Then TASK-INDEX.md shows task 041 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Audit method preference: dataverse-mcp tools if available (`dv-solution` / `dv-metadata` skills). Failing that, use exported Default Solution XML grep or PAC CLI introspection. The audit note must be reproducible — record commands used.
+
+    Deploy script guard approach: prefer (a) early-exit with `Write-Host` log over (b) rename-to-deprecated, because (a) preserves the audit trail in script logs without breaking calling chains. If a parent script (Deploy-AllWebResources, Deploy-Release) imports the LW script, the early-exit is benign.
+
+    R3 FR-25 / NFR-10 supersession is a doc-level call — there is no code-level constraint to remove (R3 code that supported standalone LW continues to compile; it's just no longer deployed). Make this clear in the retirement doc to avoid future authors thinking they need to delete LW code.
+
+    No `.cs/.ts/.tsx` source code is modified in this task. STANDARD rigor; Step 9.5 quality gates are skipped per task-execute decision tree.
+
+    The W-1 doc (task 010) creates the new authoritative dashboard+widget model. This task's retirement doc should cross-link to it but should NOT depend on it being merged first — both can land in parallel (Phase 1 + Phase 4 overlap is permitted per plan.original.md §4).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply STANDARD rigor protocol (no Step 9.5 quality gates; checkpointing every 3 steps).</protocol>
+  </execution>
+</task>

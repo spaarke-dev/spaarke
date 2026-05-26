@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>A-2a: Author ADR-025 (PaneEventBus pattern) — concise + full forms</title>
+    <phase>Phase 1 — Documentation round</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, adr, architecture, governance</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New ADR creation in both concise (.claude/adr/) and full (docs/adr/) forms with explicit project constraints (DR-04). New file creation + governance impact. STANDARD per Step 3.5.5 — creates new files with constraints, no .cs/.ts/.tsx modification.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/adr/ — main-session-only (permission boundary per CLAUDE.md §3 Sub-Agent Write Boundary)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author **ADR-025 (PaneEventBus pattern)** in both forms: the concise AI-optimized form at
+    `.claude/adr/ADR-025-pane-event-bus.md` (~100-150 lines, MUST / MUST NOT rules) and the full
+    decision-history form at `docs/adr/ADR-025-pane-event-bus.md`. ADR-025 codifies the R2-invented
+    multi-subscriber typed-channel event bus that R3 used extensively (`workspace`, `context`,
+    `conversation`, `safety` channels with typed payloads and `widget_load` dispatch). This is a
+    documentation task that **codifies an existing pattern** — do NOT propose behavior changes.
+    Update `.claude/adr/INDEX.md` to list ADR-025.
+  </prompt>
+
+  <role>
+    Architecture documentation author with deep familiarity with the SpaarkeAi PaneEventBus implementation.
+    The ADR codifies what already ships in `PaneEventBusContext.tsx`. Source-of-truth is the code; the ADR
+    explains the constraints any future caller must obey.
+  </role>
+
+  <goal>
+    Three artifacts: (1) `.claude/adr/ADR-025-pane-event-bus.md` (concise, ~100-150 lines, MUST/MUST NOT,
+    binding constraints, code pointers); (2) `docs/adr/ADR-025-pane-event-bus.md` (full form with
+    Context / Decision / Consequences / Alternatives Considered / References); (3) updated
+    `.claude/adr/INDEX.md` with an entry pointing to both forms. The two forms MUST cross-link to each
+    other. Future tasks that touch PaneEventBus (W-4 / W-5 in R4 Phase 4) MUST be able to load the
+    concise form and apply the constraints.
+  </goal>
+
+  <context>
+    <background>
+      Per spec DR-04 + plan §4 Phase 1 A-2: ADR-025 captures the PaneEventBus pattern invented in R2 and
+      used heavily by R3 (workspace tabs, context wizards, conversation streaming, safety pane). The
+      pattern has shipped, been refined, and now needs explicit governance. Without an ADR, future widget
+      authors invent new channels / shapes / lifecycle behavior on every implementation. Style reference:
+      `.claude/adr/ADR-013-ai-architecture.md` (recent ADR with the same dual-form structure).
+    </background>
+    <relevant-files>
+      <file>.claude/adr/ADR-025-pane-event-bus.md</file>
+      <file>docs/adr/ADR-025-pane-event-bus.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBusContext.tsx</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">ADR-025 codifies an EXISTING pattern — do NOT change behavior, do NOT propose API changes. The source of truth is `PaneEventBusContext.tsx`; the ADR documents the constraints that consumers must respect.</constraint>
+    <constraint source="project">Concise form (`.claude/adr/`) MUST be ~100-150 lines, optimized for AI loading, with explicit MUST / MUST NOT bullet lists. Mirror the structure of ADR-013-ai-architecture.md.</constraint>
+    <constraint source="project">Full form (`docs/adr/`) MUST include: Context, Decision, Consequences (positive + negative), Alternatives Considered, References. Use existing R2/R3 history as the decision narrative.</constraint>
+    <constraint source="project">PaneEventBus channels MUST be typed (no `any` payloads). The ADR MUST state this as a binding rule, citing the existing TS types.</constraint>
+    <constraint source="project">Both forms MUST cross-link to each other. The `.claude/adr/INDEX.md` entry MUST point to both.</constraint>
+    <constraint source="ADR-012">Reference ADR-012 (shared components) in ADR-025's References section — PaneEventBus lives in `@spaarke/ai-widgets` per ADR-012's shared-lib placement.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBusContext.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read source code">Read `PaneEventBusContext.tsx` end-to-end. Catalog every channel name, every event type, every subscriber pattern, and every typed payload. This is your ground truth.</step>
+    <step order="2" name="Read style reference">Read `.claude/adr/ADR-013-ai-architecture.md` to mirror structure / length / tone for the concise form.</step>
+    <step order="3" name="Draft concise form">Write `.claude/adr/ADR-025-pane-event-bus.md`. Structure: Status, Context (1 paragraph), Decision (1 paragraph + bullet list of invariants), MUST / MUST NOT rules, Code pointers, References. Target ~100-150 lines.</step>
+    <step order="4" name="Draft full form">Write `docs/adr/ADR-025-pane-event-bus.md`. Structure: Status, Context, Decision (with detailed rationale), Consequences (positive: typed channels prevent invented-shape drift; negative: rigid contract for new channels), Alternatives Considered (e.g., custom DOM events, Redux, plain pub/sub), References.</step>
+    <step order="5" name="Update INDEX">Add ADR-025 entry to `.claude/adr/INDEX.md`. Add cross-links between the two forms.</step>
+    <step order="6" name="Verify">Confirm: concise form length is 100-150 lines; full form has all required sections; INDEX updated; both forms cross-link; behavior described matches `PaneEventBusContext.tsx` exactly (no invented constraints).</step>
+    <step order="7" name="Update TASK-INDEX">Change task 012 status to ✅ completed in `tasks/TASK-INDEX.md`.</step>
+    <step order="8" name="Document deviations">If any deviation from spec DR-04 or plan §4, write to `projects/spaarke-ai-platform-unification-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read source code + style reference ADR</tool>
+    <tool name="Write">Create both ADR forms</tool>
+    <tool name="Edit">Update `.claude/adr/INDEX.md`</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/adr/ADR-025-pane-event-bus.md (new, ~100-150 lines)</output>
+    <output type="docs">docs/adr/ADR-025-pane-event-bus.md (new, full form)</output>
+    <output type="docs">.claude/adr/INDEX.md (modified — ADR-025 entry added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`.claude/adr/ADR-025-pane-event-bus.md` exists, is 100-150 lines, and contains explicit MUST / MUST NOT rules including "channels MUST be typed; no `any` payloads".</criterion>
+    <criterion testable="true">`docs/adr/ADR-025-pane-event-bus.md` exists with Context / Decision / Consequences / Alternatives Considered / References sections.</criterion>
+    <criterion testable="true">`.claude/adr/INDEX.md` lists ADR-025 with links to both forms.</criterion>
+    <criterion testable="true">Both forms cross-link to each other.</criterion>
+    <criterion testable="true">Every constraint stated in the ADR is verifiable against `PaneEventBusContext.tsx` — no invented constraints that the code doesn't actually enforce.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    STANDARD rigor — new file creation in `.claude/adr/` and `docs/adr/` with explicit constraints.
+    Main-session-only per `.claude/` write boundary. Quality gates SKIPPED per Step 0.5.
+  </execution>
+</task>

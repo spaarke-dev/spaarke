@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B-9: Migrate Spaarke.UI.Components ESLint v8 → v9 (flat config)</title>
+    <phase>Phase 6 — Build hygiene cluster</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, typescript, config, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Config migration (eslintrc → flat config) + dependency bump; no .ts/.tsx code modification (lint fixes are excluded from FULL by deliberate scoping). STANDARD per Step 3.5.5 (creates new config file with explicit constraints; lint clean is the test).</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec NFR-06 / plan B-9: migrate `src/client/shared/Spaarke.UI.Components/` from
+    ESLint v8 (`.eslintrc.json`) to v9 (`eslint.config.js` flat config). NOTE: ESLint v9 is
+    already in package.json (`"eslint": "^9.17.0"`); investigation shows NO `.eslintrc.json`
+    currently exists either — so this task is likely "create the missing flat config and
+    verify lint works" rather than "migrate from v8". Confirm during step 1.
+  </prompt>
+
+  <role>
+    SPAARKE TypeScript build engineer. Familiar with ESLint v9 flat-config schema
+    (https://eslint.org/docs/latest/use/configure/configuration-files), typescript-eslint
+    v8+ flat-config conventions, and React/Fluent v9 lint plugins. Bias toward the smallest
+    config that gives meaningful coverage — TypeScript + React-hooks + accessibility, no
+    overzealous style rules.
+  </role>
+
+  <goal>
+    (1) `src/client/shared/Spaarke.UI.Components/eslint.config.js` (or `.mjs`) exists with
+    flat-config schema (default export = array of config objects). (2) Any pre-existing
+    `.eslintrc.json` is DELETED (none found currently — confirm). (3) `package.json` ESLint
+    deps are at v9-compatible versions (`@typescript-eslint/*` v8+, `eslint-plugin-react`
+    v7.35+, etc.) — investigate `--legacy-peer-deps` impact. (4) `npm run lint` runs clean
+    (0 errors). (5) Lint covers .ts + .tsx; ignores node_modules, dist, build outputs. NFR-06
+    acceptance satisfied.
+  </goal>
+
+  <context>
+    <background>
+      Per backlog B-9 + investigation: `package.json` already lists `"eslint": "^9.17.0"` but
+      no `.eslintrc.json` or `eslint.config.js` exists. The lint script
+      (`"lint": "eslint src --ext .ts,.tsx"`) uses the legacy `--ext` flag (deprecated in v9
+      flat config). So either (a) lint was silently broken / no-config, or (b) there's a
+      parent config being inherited. The migration task is: create a minimal but useful
+      flat config, ensure deps are aligned, update the lint script if needed, run clean.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+      <file>src/client/shared/Spaarke.UI.Components/eslint.config.js</file>
+      <file>src/client/shared/Spaarke.UI.Components/tsconfig.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Flat config MUST be standalone (no inheritance from a non-existent v8 `.eslintrc`). Use `defineConfig` from `eslint` or plain array export.</constraint>
+    <constraint source="project">Lint MUST cover `src/**/*.ts` + `src/**/*.tsx`. Excludes: `node_modules`, `dist`, `build`, `coverage`, `examples` (consider).</constraint>
+    <constraint source="project">Rule set MUST include at minimum: `@typescript-eslint/recommended`, `eslint-plugin-react-hooks/recommended`. Optional: `eslint-plugin-jsx-a11y` (only if maintainable — no auto-fix-only rules that hide real bugs).</constraint>
+    <constraint source="project">0 lint errors at task completion. Lint warnings are acceptable but should be enumerated in `notes/b9-lint-warnings.md` so they can be triaged in B-11 or later.</constraint>
+    <constraint source="project">If the `lint` script in package.json uses `--ext` (legacy), update to flat-config style: `"lint": "eslint src"` (extensions specified inside config via `files: ['**/*.ts', '**/*.tsx']`).</constraint>
+    <constraint source="project">Do NOT modify code to silence lint errors. If errors surface, fix the rule scope (e.g., disable noisy rules for tests/) or carry them as warnings — do NOT add `// eslint-disable-line` comments.</constraint>
+    <constraint source="ADR-022">React 19 — ensure react-hooks plugin recognizes React 19 hooks (`use`, `useFormStatus`, etc. if used).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+      <file>src/client/shared/Spaarke.UI.Components/tsconfig.json</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Audit current state">Inspect `Spaarke.UI.Components/package.json` for all ESLint-adjacent deps + scripts. Check for `.eslintrc*`, `eslint.config.*`, or `eslint:` block in package.json. Verify none exist (the file search returned nothing). Run `npm run lint` to capture the current outcome — likely an error like "no config found" or silent no-op.</step>
+    <step order="2" name="Pin dep versions">Verify `eslint@^9.17.0` plus `typescript-eslint@^8` (flat-config-aware), `eslint-plugin-react-hooks@^5`, `eslint-plugin-react@^7.35+` (if React rules wanted). If older versions present, bump in `package.json`. Note: ESLint v9 + typescript-eslint v8 require Node 18+; verify CI uses compatible Node.</step>
+    <step order="3" name="Author flat config">Create `src/client/shared/Spaarke.UI.Components/eslint.config.js`. Structure: ESM import of `typescript-eslint`, plain config object with `files`, `languageOptions` (parser, parserOptions), `plugins`, `rules`. Use `tseslint.config(...)` helper if convenient. Include react-hooks plugin. Ignore patterns for `dist`, `node_modules`, `coverage`, `**/*.spec.*` (or scope test files to a separate config block).</step>
+    <step order="4" name="Update lint script">If `package.json` lint script uses `--ext`, change to `"lint": "eslint src"` and `"lint:fix": "eslint src --fix"`. Verify the script runs.</step>
+    <step order="5" name="Install + verify">Run `npm install --legacy-peer-deps --no-audit --no-fund` (per CLAUDE.md repo conventions — no `npm ci`). Run `npm run lint`. Capture output.</step>
+    <step order="6" name="Resolve errors">If lint reports errors, prefer (a) tightening the file glob to exclude test/__mocks__ as appropriate, or (b) downgrading specific noisy rules to `warn` for now (record in `notes/b9-lint-warnings.md`). Do NOT mass-disable rules; do NOT add `// eslint-disable` lines.</step>
+    <step order="7" name="Verify build downstream">Run `npm run build` on Spaarke.UI.Components — confirm package still builds. ESLint changes shouldn't affect build, but cross-checking the toolchain is cheap insurance.</step>
+    <step order="8" name="Update TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 065 from 🔲 → ✅ completed.</step>
+    <step order="9" name="Document deviations">If flat config required unexpected refactor (e.g., test files needed a separate config block, or peer deps required broader package-lock churn), record in `projects/spaarke-ai-platform-unification-r4/notes/`. Note any carry-over warnings for B-11 or later.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">npm install (with --legacy-peer-deps), npm run lint, npm run build</tool>
+    <tool name="Read">Inspect package.json, tsconfig.json</tool>
+    <tool name="Write">Create eslint.config.js</tool>
+    <tool name="Edit">Update package.json scripts + deps</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/client/shared/Spaarke.UI.Components/eslint.config.js (new — flat config)</output>
+    <output type="config">src/client/shared/Spaarke.UI.Components/package.json (modified — deps + lint script)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/b9-lint-warnings.md (carry-over warnings, if any)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md (status flip)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the new flat config, When `npm run lint` is run from `src/client/shared/Spaarke.UI.Components/`, Then it exits 0 with 0 errors.</criterion>
+    <criterion testable="true">Given the flat config file, When inspected, Then it is a valid ESM (or CJS) config exporting an array (or `tseslint.config(...)` result) with explicit `files`, `languageOptions`, `plugins`, and `rules`.</criterion>
+    <criterion testable="true">Given the dep bump, When `package.json` is inspected, Then ESLint is `^9.x` and typescript-eslint is `^8.x` (or newer).</criterion>
+    <criterion testable="true">Given no legacy config remains, When grep'd for `.eslintrc`, Then no file exists in the package.</criterion>
+    <criterion testable="true">Given task 065 is being executed, When this task completes, Then TASK-INDEX.md shows task 065 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference: https://eslint.org/docs/latest/use/configure/configuration-files (the canonical
+    flat-config guide). typescript-eslint v8 has its own flat-config helpers; prefer the
+    helper-based approach over hand-rolling parser config. Per CLAUDE.md repo conventions,
+    use `npm install --legacy-peer-deps --no-audit --no-fund` (not `npm ci`). If the package
+    relies on a workspace-level ESLint setup (root-level `eslint.config.js`), check for it
+    in step 1 — the migration scope may be smaller than expected.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply STANDARD rigor protocol (no Step 9.5 quality gates; checkpointing every 3 steps; current-task.md tracking).</protocol>
+  </execution>
+</task>

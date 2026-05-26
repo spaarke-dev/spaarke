@@ -1,0 +1,258 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>W-5 (FR-03): Wire Context → Workspace mount source for one wizard (recommended: Create Project) — wizard completion dispatches widget_load mounting result as workspace tab</title>
+    <phase>4: Workspace builder + mount-source wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, react, fluent-ui, e2e-test, deploy</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.ts/.tsx` source; tags include `frontend`/`react`/`fluent-ui`; 10+ steps; depends on 010 (W-1 model); applies multiple load-bearing ADRs (021, 022, 025, 028). FULL rigor — Step 9.5 quality gates mandatory.</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Wire ONE Context-pane wizard (recommended: Create Project) to add an "Add result to
+    Workspace" final step. On completion of that final step, dispatch `widget_load` on the
+    `PaneEventBus.workspace` channel, mounting the result widget as a new workspace tab.
+    This establishes the Context → Workspace mount-source pattern, paralleling W-4
+    (Assistant → Workspace, task 042). The Workspace pane resolves the receiving widget
+    from `WorkspaceWidgetRegistry`. Use typed PaneEventBus channels (ADR-025 — no `any`)
+    and `authenticatedFetch` for BFF calls (ADR-028). 042 and 043 are parallel-safe — they
+    touch different code paths (Assistant pane vs Context wizard).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer expert in PaneEventBus (`@spaarke/ai-widgets`), Context-pane
+    wizards (within SpaarkeAi), `WorkspaceWidgetRegistry`, React 19 + Fluent UI v9, and
+    ADR-028 function-based auth. Bias toward establishing the pattern on ONE wizard
+    cleanly — don't wire all Context wizards at once. The chosen wizard should be the most
+    natural fit (Create Project recommended); if Create Project doesn't yet exist or isn't
+    accessible, the operator picks an alternate at task start.
+  </role>
+
+  <goal>
+    Operator-visible end-to-end demo on the dev environment: a user launches the chosen
+    Context-pane wizard, completes its steps including the new "Add result to Workspace"
+    final step, and on completion a result widget mounts as a new workspace tab via
+    `widget_load` dispatch. Code changes meet ADR-021 (Fluent v9), ADR-022 (React 19),
+    ADR-025 (typed channels — no `any`), ADR-028 (function-based auth). FR-03 acceptance
+    criteria satisfied. Pattern established for future Context wizards (extensibility
+    documented in &lt;notes&gt;).
+  </goal>
+
+  <context>
+    <background>
+      Per plan §4 Phase 4 and FR-03, the Context pane is the second of two not-yet-implemented
+      mount sources for the Workspace pane (the other is Assistant, addressed by W-4 / task
+      042). The Context pane hosts wizards that produce results (e.g., "Create Project",
+      "Add Stakeholder", "Generate Summary"). Today, wizard results are typically displayed
+      inline in the Context pane or saved to Dataverse. R4 adds the optional "Add result to
+      Workspace" final step that promotes a wizard result into a workspace tab — same
+      `widget_load` mechanism as W-4 but invoked from a different source pane.
+
+      ONE wizard is wired in this task to establish the pattern. Plan recommends "Create
+      Project" — it produces a result (the new project record) that's a natural fit for a
+      DocumentViewer / RecordSummary-style widget tab. If Create Project isn't the right
+      pick (doesn't exist; not in scope; operator prefers another), the operator picks an
+      alternate at task start.
+
+      The receiving wrapper is the same as W-4: `WorkspaceWidgetRegistry` (Direct widget
+      wrapper per the two-wrapper model). The `widget_load` event type was defined / extended
+      by task 042 — reuse it. If 042 hasn't shipped yet (043 only depends on 010, not on
+      042 — they're parallel-safe), then this task may need to define the payload type
+      itself. Coordinate via the parallel-group E execution wave.
+
+      ADR-028 invariants: NO token snapshots; use `useAuth()` + `authenticatedFetch`.
+      ADR-025 invariant: typed channels — no `any` payloads.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/ (Context pane wizard — exact path determined during Step 3)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBusContext.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/useDispatchPaneEvent.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/ContextWidgetRegistry.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/register-context-widgets.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 tokens only. NO hex, NO `rgba()`, NO Fluent v8.</constraint>
+    <constraint source="ADR-022">React 19 only for Code Pages. NO React 16 fallbacks.</constraint>
+    <constraint source="ADR-025">PaneEventBus channels MUST be typed — NO `any` payloads. Reuse the `widget_load` payload type defined in `PaneEventTypes.ts` (extended by 042 OR define here if 042 hasn't landed yet — coordinate via parallel-group E).</constraint>
+    <constraint source="ADR-028">Function-based auth via `@spaarke/auth` `authenticatedFetch`. NO token snapshots in props/state.</constraint>
+    <constraint source="ADR-012">Result widgets live in `@spaarke/ai-widgets` (or `@spaarke/*` lib family). Don't duplicate widget code inside the wizard.</constraint>
+    <constraint source="project">ONE wizard only. Wiring all Context wizards is OUT OF SCOPE — pattern-establishment, not coverage. Future wizards adopt the pattern in follow-up rounds.</constraint>
+    <constraint source="project">"Add result to Workspace" final step MUST be optional (don't force every wizard run to mount a tab). Surface as an explicit final-step user choice.</constraint>
+    <constraint source="project">Operator confirms the chosen wizard at task start. Record in &lt;notes&gt;.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>.claude/adr/ADR-025-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>src/solutions/LegalWorkspace/src/registrations/calendar.registration.ts</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Calendar widget Pattern D (R3 task 115)" location="src/client/shared/Spaarke.events-components/ + src/solutions/LegalWorkspace/src/registrations/calendar.registration.ts">
+        Canonical "shared-lib widget + thin registration shim" reference. Receiving widget mounted in workspace channel follows this pattern.
+      </pattern>
+      <pattern name="PaneEventBus typed channels (ADR-025)" location="src/client/shared/Spaarke.AI.Widgets/src/events/">
+        Workspace / context / conversation / safety channels with typed payloads. Reuse `widget_load` type from 042 OR define here if executing first.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Confirm dependencies">
+      Verify task 010 (W-1 dashboard+widget model doc) is ✅ in TASK-INDEX.md. If not complete, STOP and surface the blocker per CLAUDE.md "Human Escalation Triggers". Note: 042 is NOT a hard dependency — 043 can run in parallel.
+    </step>
+    <step order="2" name="Operator confirms wizard choice">
+      Surface the choice to operator: confirm recommended "Create Project" wizard OR substitute. Record the choice in &lt;notes&gt;. Without operator confirmation, do NOT proceed past Step 3.
+    </step>
+    <step order="3" name="Locate the chosen wizard">
+      Inspect `src/solutions/SpaarkeAi/src/` to find the Context-pane wizard component. Read its existing final-step / completion logic. Record its exact path in &lt;notes&gt; for future reference.
+    </step>
+    <step order="4" name="Load context">
+      Read W-1 doc (010 output), ADR-025, ADR-028, PaneEventBus source files, ContextWidgetRegistry + WorkspaceWidgetRegistry source, Calendar widget Pattern D reference, and the chosen wizard's component.
+    </step>
+    <step order="5" name="Coordinate widget_load payload type">
+      Check `PaneEventTypes.ts` for the `widget_load` payload type. If task 042 has landed it, REUSE the same shape. If not (043 executing before 042 in parallel-group E), DEFINE it here per ADR-025 (typed, no `any`). The type must accommodate both Assistant- and Context-initiated dispatches.
+    </step>
+    <step order="6" name="Add 'Add result to Workspace' final step">
+      Modify the chosen wizard to add the optional final step. Use Fluent v9 components for the UI (checkbox or button labeled "Add result to Workspace"). On submit/finish, IF the option is selected, dispatch `widget_load` on the workspace channel with the typed payload (widget type ID + result data). If not selected, complete the wizard normally.
+    </step>
+    <step order="7" name="Select / verify receiving widget">
+      Identify which widget renders the result (e.g., a project summary widget, a record viewer, etc.). If it already exists in `@spaarke/ai-widgets` and is registered via `registerWorkspaceWidget()`, reuse. If not, build a minimal viewer following Calendar Pattern D and register it. Use `useAuth()` + `authenticatedFetch` for any BFF call inside the widget.
+    </step>
+    <step order="8" name="Verify Workspace pane receives + mounts">
+      Confirm the Workspace pane subscribes to the workspace channel and handles `widget_load` correctly (same mechanism as 042). If 042 has fixed the receiving path, this should be a no-op verification. If not, fix in place WITHOUT introducing new channel mechanics.
+    </step>
+    <step order="9" name="Build">
+      Run `npm install --legacy-peer-deps --no-audit --no-fund` (if needed) and `npm run build` for SpaarkeAi + `@spaarke/ai-widgets`. Run `tsc --noEmit` on touched packages. 0 errors expected.
+    </step>
+    <step order="10" name="Unit tests">
+      Add focused tests: (a) wizard's final-step dispatch correctly constructs the typed payload (mocked); (b) the option being unchecked does NOT dispatch; (c) the receiving widget resolves via the registry for the dispatched type ID.
+    </step>
+    <step order="11" name="Deploy">
+      Deploy SpaarkeAi via `code-page-deploy` skill. Verify deployment to dev environment succeeds.
+    </step>
+    <step order="12" name="UI test">
+      Per &lt;ui-tests&gt; below: execute end-to-end on dev environment; verify wizard completion mounts a workspace tab; verify dark-mode parity; verify the "Add result to Workspace" option is genuinely optional (unchecked = no tab mount).
+    </step>
+    <step order="13" name="Bundle-size check">
+      Measure SpaarkeAi gzip bundle delta vs 918 KB R3 baseline (NFR-08). Record in &lt;notes&gt;. New widgets should lazy-load via registry factory.
+    </step>
+    <step order="14" name="Document pattern for future wizards">
+      Add a brief note to `projects/spaarke-ai-platform-unification-r4/notes/` (or a follow-up section in the W-1 / W-2 doc if appropriate) explaining how future Context wizards adopt the same "Add result to Workspace" pattern. Reference this task as the canonical example.
+    </step>
+    <step order="15" name="Update TASK-INDEX">
+      Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 043 from 🔲 → ✅ completed.
+    </step>
+    <step order="16" name="Document deviations + operator demo">
+      Record the chosen wizard, any pivots, and bundle-size delta. Surface the live demo to the operator for FR-03 acceptance sign-off.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + tests for SpaarkeAi solution and @spaarke/ai-widgets shared lib</tool>
+    <tool name="terminal">Shell commands for build / install / git status / tsc --noEmit</tool>
+    <tool name="Skill">code-page-deploy for SpaarkeAi web resource deployment; ui-test for browser-based verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/ (Context-pane wizard — exact path determined during Step 3)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts (coordinate with 042)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/ (result-viewer widget, new or extended)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/registry/ (registration file if new widget)</output>
+    <output type="test">src/solutions/SpaarkeAi/src/__tests__/ (wizard final-step dispatch tests)</output>
+    <output type="test">src/client/shared/Spaarke.AI.Widgets/src/__tests__/ (registry tests if extended)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/context-workspace-mount-pattern.md (new)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md (status flip)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Context → Workspace end-to-end demo (FR-03 acceptance)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Open SpaarkeAi in the dev environment; verify Context pane is accessible</step>
+        <step>Launch the chosen wizard (e.g., Create Project) from the Context pane</step>
+        <step>Complete the wizard steps with valid inputs</step>
+        <step>Reach the final step; check the "Add result to Workspace" option</step>
+        <step>Submit / finish the wizard</step>
+        <step>Observe the Workspace pane mount a new tab labeled with the result (e.g., the new project name)</step>
+        <step>Verify the new tab is selectable and shows the result widget</step>
+        <step>Verify the tab is closable per existing tab semantics</step>
+        <step>Check browser console: 0 JavaScript errors</step>
+      </steps>
+      <expected>End-to-end demo works as described in FR-03 acceptance; tab mounts only when option is checked; no console errors.</expected>
+    </test>
+
+    <test name="'Add result to Workspace' option is optional">
+      <steps>
+        <step>Repeat the wizard run from the previous test</step>
+        <step>On the final step, leave the "Add result to Workspace" option UNCHECKED</step>
+        <step>Submit / finish the wizard</step>
+        <step>Verify the wizard completes normally (result saved to Dataverse / inline display)</step>
+        <step>Verify NO new tab is mounted in the Workspace pane</step>
+      </steps>
+      <expected>Workspace mount is genuinely opt-in; default behavior (option unchecked) does NOT mount.</expected>
+    </test>
+
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Repeat the demo: launch wizard, check the option, finish</step>
+        <step>Verify the wizard final-step UI renders cleanly in dark mode</step>
+        <step>Verify the new workspace tab renders cleanly in dark mode</step>
+        <step>Verify all colors use Fluent v9 semantic tokens</step>
+      </steps>
+      <expected>Dark-mode renders cleanly; all colors via Fluent v9 semantic tokens per ADR-021.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the operator launches the chosen Context wizard and completes it with "Add result to Workspace" checked, When the wizard finishes, Then a `widget_load` event is dispatched on the workspace channel with a typed payload identifying the result widget + data.</criterion>
+    <criterion testable="true">Given the option is left unchecked, When the wizard finishes, Then NO `widget_load` event is dispatched and the workspace pane is unchanged.</criterion>
+    <criterion testable="true">Given the workspace channel receives the `widget_load` event, When the Workspace pane handles it, Then the result widget resolves via `WorkspaceWidgetRegistry` and mounts as a new tab.</criterion>
+    <criterion testable="true">Given ADR-025 requires typed channels, When the code is reviewed, Then no `any` payload types appear in the dispatch path; the `widget_load` payload type is shared with 042 (or defined here if 042 hasn't landed).</criterion>
+    <criterion testable="true">Given ADR-028 requires function-based auth, When the receiving widget calls the BFF, Then it uses `authenticatedFetch`; NO token snapshots.</criterion>
+    <criterion testable="true">Given ADR-021 requires Fluent v9 tokens, When the wizard final step and new tab render in light + dark mode, Then all colors use semantic tokens.</criterion>
+    <criterion testable="true">Given task 043 is executing, When this task completes, Then TASK-INDEX.md shows task 043 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Operator MUST confirm the chosen Context wizard at task start. Recommended: "Create Project". Alternatives: "Add Stakeholder", "Generate Summary", or whichever Context wizard makes the most natural demo pairing for the operator's planned walkthrough. Record the choice here at task close.
+
+    PARALLEL-GROUP E with task 042: both tasks depend on 010 (W-1) but NOT on each other. They touch different code paths — 042 modifies the Assistant pane (`ConversationPane.tsx`), 043 modifies a Context-pane wizard component. Both extend `PaneEventTypes.ts` for the `widget_load` payload — coordinate the type definition so it lands cleanly (whichever task ships first defines it; the other reuses).
+
+    File-overlap risk: `PaneEventTypes.ts` is touched by BOTH 042 and 043. The auto-demotion rule in task-create Step 3.8 would normally force serialization, BUT here the overlap is a single tiny union/type addition that can be coordinated trivially. Decision: keep both parallel-safe; on first PR merge to either, the second rebases and reuses. Document this in the PR description.
+
+    The Calendar widget Pattern D (R3 task 115) is the canonical reference for the receiving widget shape. Reuse a result-viewer widget if one already exists; build a minimal one if not. DO NOT inline widget code in the wizard.
+
+    PATTERN ESTABLISHMENT not COVERAGE: only ONE wizard is wired. Future Context wizards adopt the pattern in follow-up rounds. The notes/context-workspace-mount-pattern.md output is the carrier of that guidance.
+
+    AUTO-DEMOTION: this task does NOT touch `.claude/` paths, so the `.claude/` permission boundary does not apply.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply FULL rigor protocol — Step 9.5 quality gates (code-review + adr-check) MANDATORY before deploy. Checkpoint every 3 steps via context-handoff.</protocol>
+  </execution>
+</task>
