@@ -2,7 +2,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Workspace.Models;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
@@ -28,16 +30,14 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// They are available for later association when the matter record is created.
 /// Cleanup of orphaned staging files is a separate concern (background job).
 /// </remarks>
-public class MatterPreFillService
+public sealed class MatterPreFillService
 {
     private readonly SpeFileStore _speFileStore;
     private readonly ITextExtractor _textExtractor;
-    private readonly IWorkspacePrefillAi _prefillAi;
-    private readonly IConfiguration _configuration;
+    private readonly IWorkspacePrefillAi? _prefillAi;
+    private readonly WorkspaceOptions _workspaceOptions;
+    private readonly SharePointEmbeddedOptions _speOptions;
     private readonly ILogger<MatterPreFillService> _logger;
-
-    // Playbook configuration key — overridable via appsettings
-    private const string PlaybookIdConfigKey = "Workspace:PreFillPlaybookId";
 
     // Default: "Create New Matter Pre-Fill" playbook (Extract Matter Fields — ACT-008, gpt-4o)
     private static readonly Guid DefaultPreFillPlaybookId =
@@ -67,16 +67,27 @@ public class MatterPreFillService
     public MatterPreFillService(
         SpeFileStore speFileStore,
         ITextExtractor textExtractor,
-        IWorkspacePrefillAi prefillAi,
-        IConfiguration configuration,
-        ILogger<MatterPreFillService> logger)
+        IOptions<WorkspaceOptions> workspaceOptions,
+        IOptions<SharePointEmbeddedOptions> speOptions,
+        ILogger<MatterPreFillService> logger,
+        IWorkspacePrefillAi? prefillAi = null)
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
-        _prefillAi = prefillAi ?? throw new ArgumentNullException(nameof(prefillAi));
-        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _workspaceOptions = (workspaceOptions ?? throw new ArgumentNullException(nameof(workspaceOptions))).Value;
+        _speOptions = (speOptions ?? throw new ArgumentNullException(nameof(speOptions))).Value;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _prefillAi = prefillAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
     }
+
+    /// <summary>
+    /// Returns the AI facade or throws if AI features are disabled. Matter pre-fill has no
+    /// non-AI fallback — when AI is disabled, the endpoint surface should treat the throw
+    /// as the expected "feature disabled" signal (caller returns 503).
+    /// </summary>
+    private IWorkspacePrefillAi RequireAi() =>
+        _prefillAi ?? throw new InvalidOperationException(
+            "Matter pre-fill requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable.");
 
     /// <summary>
     /// Validates the uploaded files against size and type constraints.
@@ -175,7 +186,7 @@ public class MatterPreFillService
         CancellationToken cancellationToken)
     {
         var allExtractedText = new StringBuilder();
-        var stagingContainerId = _configuration["SharePointEmbedded:StagingContainerId"];
+        var stagingContainerId = _speOptions.StagingContainerId;
         var filesExtracted = 0;
         var filesFailed = 0;
         var filesSkipped = 0;
@@ -284,7 +295,7 @@ public class MatterPreFillService
         }
 
         // Resolve playbook ID from configuration (allows per-environment override)
-        var playbookIdStr = _configuration[PlaybookIdConfigKey];
+        var playbookIdStr = _workspaceOptions.PreFillPlaybookId;
         var playbookId = !string.IsNullOrEmpty(playbookIdStr) && Guid.TryParse(playbookIdStr, out var parsed)
             ? parsed
             : DefaultPreFillPlaybookId;
@@ -321,7 +332,7 @@ public class MatterPreFillService
             string? preFillJson = null;
             double confidence = 0;
 
-            await foreach (var evt in _prefillAi.ExecutePreFillPlaybookAsync(request, httpContext, timeoutCts.Token))
+            await foreach (var evt in RequireAi().ExecutePlaybookAsync(request, httpContext, timeoutCts.Token))
             {
                 // Look for the completed node output that contains pre-fill data
                 if (evt.Type == PlaybookEventType.NodeCompleted && evt.NodeOutput != null)
