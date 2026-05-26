@@ -155,7 +155,55 @@ For Model 1, customer-specific configuration is stored in a `sprk_CustomerConfig
 
 ---
 
-## 5. Model-Specific Deployment Details
+## 5. BFF API Binary Packaging
+
+The BFF API (`src/server/api/Sprk.Bff.Api/`) targets Linux App Service and uses framework-dependent publishing with several csproj-level constraints to minimize publish size and patch transitive vulnerabilities. The patterns below were established by the `sdap-bff-api-remediation-fix` project (Phase 4 Outcomes A + B, 2026-05-25).
+
+### Framework-Dependent linux-x64 Publish (FR-A1)
+
+The csproj contains:
+
+```xml
+<RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+<SelfContained>false</SelfContained>
+```
+
+This eliminates the entire `runtimes/` tree (10 RIDs → 0). The .NET runtime is supplied by the App Service Linux host. `<SelfContained>false</SelfContained>` is made explicit alongside the RID to prevent accidental self-contained publishes when a future `dotnet publish` call lacks `--no-self-contained`.
+
+### Sourcemap Exclusion (FR-A2)
+
+```xml
+<Content Update="wwwroot\**\*.js.map" CopyToPublishDirectory="Never" />
+```
+
+Keeps `.js.map` files in the source tree for dev-time debugging but excludes them from publish output. The 4 sourcemaps in `wwwroot/playbook-builder/assets/` are unchanged in source.
+
+### Transitive Vulnerability Override Pattern (FR-B1)
+
+```xml
+<PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.3" />
+```
+
+An explicit transitive override patches CVEs (GHSA-37gx-xxp4-5rgx + GHSA-w3x6-4m5h-cxqf, both HIGH) without bumping the parent identity stack (`Microsoft.IdentityModel.*` family). Pattern of last resort for surgical CVE patching when major version bumps are out of scope. Same pattern already established in csproj for `System.Text.RegularExpressions 4.3.1`.
+
+### Phase 5 Measured Baselines (Post-Outcome A)
+
+| Metric | Before (2026-05-19 drift) | After (Phase 4 close) | Delta |
+|---|---:|---:|---:|
+| Uncompressed publish | 212.5 MB | 139 MB | -35% |
+| Compressed zip | 72.9 MB | 45.65 MB | -37% |
+| `deps.json` entries | 526 | 268 | -49% |
+| File count | 287 | 279 | -8 |
+
+### References
+
+- [`.claude/constraints/azure-deployment.md`](../../.claude/constraints/azure-deployment.md) — binding rules for BFF publishing (publish location, baseline size, stdout logging)
+- [`projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md`](../../projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md) Phase 4 Outcome A — full evidence (smoke probes, deploy logs, reflection-load delta)
+- ADR-029 (forthcoming) — BFF Publish Hygiene
+
+---
+
+## 6. Model-Specific Deployment Details
 
 ### Model 2: Complete Deployment Package
 

@@ -23,12 +23,16 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [AP-1: Skill prescribes X but X is wrong (`/pcf-deploy` "NEVER use `build:prod`")](#ap-1-skill-prescribes-x-but-x-is-wrong)
 - [AP-2: Optional field in BFF contract that two clients drift apart on (orphan RAG chunks)](#ap-2-optional-field-in-bff-contract-that-two-clients-drift-apart-on)
 - [AP-3: GUID case mismatch between Xrm and Web API clients (case-sensitive AI Search filters)](#ap-3-guid-case-mismatch-between-xrm-and-web-api-clients)
+- [AP-4: Silent dev/demo deployed-bundle drift causing /api-prefix bug](#ap-4-silent-devdemo-deployed-bundle-drift-causing-api-prefix-bug)
 
 ### Gotchas
 - [G-1: Settings-file schema malformation silently disables permission rules + hooks](#g-1-settings-file-schema-malformation-silently-disables-permission-rules--hooks)
 - [G-2: Default health-check window sized for old behavior (Linux cold start)](#g-2-default-health-check-window-sized-for-old-behavior)
 - [G-3: Zero-second GitHub Actions workflow failures are startup failures, not test failures](#g-3-zero-second-github-actions-workflow-failures-are-startup-failures-not-test-failures)
 - [G-4: AI Search index field created without `filterable: true` cannot be made filterable later](#g-4-ai-search-index-field-created-without-filterable-true-cannot-be-made-filterable-later)
+- [G-5: Dataverse Application User registration missing for Managed Identity](#g-5-dataverse-application-user-registration-missing-for-managed-identity)
+- [G-6: `Connect-ExchangeOnline -UserPrincipalName` mismatch failure](#g-6-connect-exchangeonline--userprincipalname-mismatch-failure)
+- [G-7: Git Bash MSYS path mangling on Azure resource IDs](#g-7-git-bash-msys-path-mangling-on-azure-resource-ids)
 
 ---
 
@@ -234,6 +238,129 @@ Existing uppercase chunks in dev were intentionally left as-is per owner decisio
 - **For new index fields**: when adding a field to an existing index, deploy the schema change first via `PATCH /indexes/{name}` (NOT Portal UI). If a `Collection(Edm.String)` field needs `filterable: true`, that's the only chance to set it.
 
 **Evidence**: live dev index field config at 2026-05-22 confirms `filterable: false`. Existing project `projects/ai-search-indexing-fix/ISSUE.md` §2 documents the original 400 incident and the Portal-add workaround. Schema file `infrastructure/ai-search/spaarke-knowledge-index-v2.json:228` shows the canonical correct declaration that should land in new environments.
+
+---
+
+### AP-4: Silent dev/demo deployed-bundle drift causing /api-prefix bug
+
+**Title**: LegalWorkspace `FilePreviewDialog.tsx:320` constructed `${getBffBaseUrl()}/communications/send` without the `/api` segment. The bug was latent in BOTH dev and demo deployed bundles for an unknown duration; it surfaced only when the Email Document feature was first exercised on demo (returned 404).
+
+**Date**: 2026-05-25 (Phase 5 demo prep)
+
+**Classification**: Anti-pattern (codebase had a documented convention that one caller silently violated)
+
+**What happened**: `getBffBaseUrl()` (per `src/solutions/LegalWorkspace/src/config/runtimeConfig.ts:65`) returns the host-only origin (e.g., `https://spaarke-bff-demo.azurewebsites.net`). Every caller MUST append `/api/...`. `FilePreviewDialog.tsx:320` constructed `${getBffBaseUrl()}/communications/send` and hit 404 because the route table is mounted under `/api`. The bug shipped in both deployed bundles unnoticed because no automated test exercises this client → BFF path.
+
+**Root cause**:
+1. **Convention not enforced.** `getBffBaseUrl()` returns host-only; all 100+ other callers prefix `/api` correctly. One caller drifted.
+2. **No typed wrapper at the LegalWorkspace boundary for communications calls** — bare template-string URL construction allowed the typo through code review.
+3. **Latent in deployed bundles** — dev bundle had the same bug but Email Document was never invoked there, so the failure mode never produced a logged 404. Demo was the first env where the feature was exercised end-to-end.
+
+**Fix**: 3-line source fix at `FilePreviewDialog.tsx:320` → `${getBffBaseUrl()}/api/communications/send`. Commit `2561ce37`. Rebuilt LegalWorkspace bundle; redeployed to dev + demo. See `projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md` Phase 5 task 060 post-deploy testing notes.
+
+**Prevention**:
+- Code review MUST verify every `${baseUrl}/path` pattern includes the `/api` segment in TS sources.
+- Prefer the typed `src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts` wrapper for any communications endpoint — typed wrappers cannot accidentally omit `/api`.
+- Add a smoke test that exercises one end-to-end LegalWorkspace → BFF call per feature module per deploy.
+
+**Evidence**: commit `2561ce37` (source fix); `projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md` Phase 5 task 060 post-deploy section (issue discovered during user E2E testing on demo).
+
+---
+
+### G-5: Dataverse Application User registration missing for Managed Identity
+
+**Title**: Demo BFF MI UAMI (`mi-bff-api-demo`) was granted Graph app-roles + Key Vault access + Cosmos data-plane RBAC, but was NOT registered as a Dataverse Application User on `spaarke-demo.crm.dynamics.com`. First Dataverse call from BFF returned 403 `"The user is not a member of the organization"` — surfaced to the client as a 500.
+
+**Date**: 2026-05-25 (Phase 5 demo prep — discovered during user E2E testing)
+
+**Classification**: Gotcha (Dataverse requires a separate Application User registration on top of Azure AD identity; easy to miss when promoting to a new env)
+
+**What happened**: All Azure-side identity wiring was complete (UAMI created, Graph app-roles assigned, Cosmos RBAC granted, Key Vault Secrets User role granted). When the Document Upload wizard invoked `useAiSummary` → BFF `GET /api/ai/playbooks/{name}` → BFF Dataverse query, Dataverse returned:
+```
+StatusCode=Forbidden, ReasonPhrase=Forbidden
+{"error":{"code":"0x80072560","message":"The user is not a member of the organization."}}
+```
+The BFF dutifully bubbled the 403 up to the client as a 500. Dev had this configured during original cutover but demo missed it.
+
+**Root cause**: Dataverse requires every app-only principal calling its Web API to be registered as a `systemuser` with `applicationid` set to the principal's appId. This is a separate registration step from any Azure AD setup. `docs/guides/auth-deployment-setup.md` §6 documents the pattern but does so via a PowerApps UI walkthrough that's easy to skim past in an env-promotion checklist.
+
+**Fix** (applied to demo 2026-05-25 ~22:00 UTC):
+1. Create Application User via Dataverse Web API:
+   ```
+   POST /api/data/v9.2/systemusers
+   {
+     "applicationid": "<UAMI app-id>",
+     "firstname": "BFF",
+     "lastname": "<env> MI",
+     "businessunitid@odata.bind": "/businessunits(<root-bu-id>)"
+   }
+   ```
+2. Assign appropriate security role (System Administrator for demo, mirroring dev) via `systemusers({uid})/systemuserroles_association/$ref`.
+3. Restart BFF App Service to clear stale Dataverse token cache.
+
+**Prevention**:
+- Add an "env-promotion checklist" item to `auth-deployment-setup.md` §6: a parameterized Web API POST + role assignment snippet (now done in Phase 5 wrap-up doc updates).
+- BFF startup probe could verify a known-cheap Dataverse query before declaring healthy on a fresh deploy.
+
+**Evidence**: `projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md` Phase 5 task 060 Issue 1; created systemuser `61d1cce0-8458-f111-bec7-7ced8d6f9aa0`.
+
+---
+
+### G-6: `Connect-ExchangeOnline -UserPrincipalName` mismatch failure
+
+**Title**: Passing `-UserPrincipalName admin@spaarke.com` to `Connect-ExchangeOnline` while signing in with a different admin account in the interactive browser flow fails with `OperationStopped: Admin account chosen for authentication is different`. No Exchange cmdlets load; every subsequent command reports `not recognized`.
+
+**Date**: 2026-05-25 (Phase 5 email setup runbook)
+
+**Classification**: Gotcha (cmdlet validates UPN vs browser-selected account; mismatch is hard-fail, not a warning)
+
+**What happened**: Operator ran `Connect-ExchangeOnline -UserPrincipalName admin@spaarke.com -ShowProgress $true` but signed into the browser flow with a different admin account. The cmdlet reported the mismatch and terminated without loading the Exchange module. All subsequent `New-ApplicationAccessPolicy` / `Test-ApplicationAccessPolicy` calls then failed with `not recognized as the name of a cmdlet`.
+
+**Root cause**: `Connect-ExchangeOnline` cross-checks the `-UserPrincipalName` parameter against the account selected in the browser flow. If they don't match, the connection is rejected. The parameter is meant as a pre-fill hint, not an enforcement key.
+
+**Fix**: Omit `-UserPrincipalName`. The cmdlet then accepts whatever Exchange Administrator account the operator selects in the browser:
+```powershell
+Connect-ExchangeOnline -ShowProgress $true
+```
+
+**Prevention**:
+- In any runbook that invokes `Connect-ExchangeOnline`, document the omit-UPN pattern as the default. Add a note: "Do NOT pass `-UserPrincipalName` unless you're certain you'll sign in with that exact account."
+- The Phase 5 demo email runbook (`EXECUTION-LOG.md` Part A) already includes the warning text — keep it canonical.
+
+**Evidence**: `projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md` Phase 5 task 060 §Part A "Exchange Online ApplicationAccessPolicy" operator runbook.
+
+---
+
+### G-7: Git Bash MSYS path mangling on Azure resource IDs
+
+**Title**: Running `az` CLI commands from Git Bash on Windows with arguments that start with POSIX-style paths (`/subscriptions/...`, `/tenantId`, partition keys like `/tenantId`) causes MSYS path translation: e.g., `/subscriptions/abc123/...` is rewritten to `C:/Program Files/Git/subscriptions/abc123/...` before reaching `az`. Result: cryptic `LinkedInvalidPropertyId` (or similar) errors that don't mention path mangling.
+
+**Date**: 2026-05-25 (Phase 5 demo prep — multiple `az identity / az cosmosdb` invocations affected)
+
+**Classification**: Gotcha (Git Bash MSYS layer transparently rewrites path-looking arguments; behavior is documented but not obvious from the error message)
+
+**What happened**: During Phase 5 demo prep, multiple `az` commands failed:
+- `az webapp identity assign --identities <resource-id>` (resource ID starts `/subscriptions/...`)
+- `az cosmosdb sql container create --partition-key-path /tenantId` (partition key path)
+- Various role-assignment scope arguments
+
+Errors looked like `LinkedInvalidPropertyId` or "resource not found at scope `C:/Program Files/Git/subscriptions/...`" — both misleading.
+
+**Root cause**: MSYS (the POSIX layer underlying Git Bash on Windows) sees any argument starting with `/` as a potential POSIX path and rewrites it to a Windows path before exec'ing the target. `az` cannot tell the rewrite happened — it just receives the mangled string.
+
+**Fix**: Prefix `az` with `MSYS_NO_PATHCONV=1` for any command passing Azure resource IDs or partition keys:
+```bash
+MSYS_NO_PATHCONV=1 az webapp identity assign \
+  --identities /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<uami>
+MSYS_NO_PATHCONV=1 az cosmosdb sql container create --partition-key-path /tenantId ...
+```
+
+**Prevention**:
+- Default to PowerShell or WSL for `az` commands that pass Azure resource IDs — neither has MSYS path translation.
+- In Git Bash, set `MSYS_NO_PATHCONV=1` in the shell session before running a batch of `az` commands: `export MSYS_NO_PATHCONV=1`.
+- When adding `az` examples to runbooks, prefer PowerShell snippets; if Git Bash is used, include the `MSYS_NO_PATHCONV=1` prefix inline.
+
+**Evidence**: `projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md` Phase 5 task 060 "Critical lessons" §6.
 
 ---
 

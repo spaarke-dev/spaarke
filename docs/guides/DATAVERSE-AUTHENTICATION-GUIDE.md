@@ -318,6 +318,55 @@ public class OAuthMessageHandler : DelegatingHandler
 
 ---
 
+## Application User registration for Managed Identity (MANDATORY)
+
+When the BFF uses `DefaultAzureCredential` to call Dataverse Web API (`Graph__ManagedIdentity__Enabled=true`), the MI must be registered as a Dataverse **Application User** on each target env. **Skipping this step produces a silent 403 cascade**: BFF calls return 403 Forbidden ("user is not a member of the organization"), which BFF wraps as 500 to clients.
+
+### Programmatic registration (Web API)
+
+```bash
+# Get target env's root business unit
+demoToken=$(az account get-access-token --resource https://{env}.crm.dynamics.com --query accessToken -o tsv)
+BU_ID=$(curl -s -H "Authorization: Bearer $demoToken" \
+  "https://{env}.crm.dynamics.com/api/data/v9.2/businessunits?\$filter=_parentbusinessunitid_value%20eq%20null&\$select=businessunitid" |
+  grep -oE '"businessunitid":"[^"]*"' | head -1 | sed 's/"businessunitid":"//' | sed 's/"$//')
+
+# Create Application User
+curl -s -X POST -H "Authorization: Bearer $demoToken" \
+  -H "Content-Type: application/json" \
+  -d "{\"applicationid\":\"{MI-clientId}\",\"firstname\":\"BFF\",\"lastname\":\"{Env} MI\",\"businessunitid@odata.bind\":\"/businessunits($BU_ID)\"}" \
+  "https://{env}.crm.dynamics.com/api/data/v9.2/systemusers"
+
+# Find created user
+USER_ID=$(curl -s -H "Authorization: Bearer $demoToken" \
+  "https://{env}.crm.dynamics.com/api/data/v9.2/systemusers?\$filter=applicationid%20eq%20{MI-clientId}&\$select=systemuserid" |
+  grep -oE '"systemuserid":"[^"]*"' | head -1 | sed 's/"systemuserid":"//' | sed 's/"$//')
+
+# Find System Administrator role (or whichever role you need)
+ROLE_ID=$(curl -s -H "Authorization: Bearer $demoToken" \
+  "https://{env}.crm.dynamics.com/api/data/v9.2/roles?\$filter=name%20eq%20%27System%20Administrator%27%20and%20_businessunitid_value%20eq%20$BU_ID&\$select=roleid" |
+  grep -oE '"roleid":"[^"]*"' | head -1 | sed 's/"roleid":"//' | sed 's/"$//')
+
+# Assign role
+curl -s -X POST -H "Authorization: Bearer $demoToken" \
+  -H "Content-Type: application/json" \
+  -d "{\"@odata.id\":\"https://{env}.crm.dynamics.com/api/data/v9.2/roles($ROLE_ID)\"}" \
+  "https://{env}.crm.dynamics.com/api/data/v9.2/systemusers($USER_ID)/systemuserroles_association/\$ref"
+
+# Restart BFF App Service to clear stale Dataverse token cache
+az webapp restart --name {bff-app} --resource-group {rg} --subscription {sub}
+```
+
+### Alternative: Power Apps Maker portal
+
+Maker portal → Power Platform Admin → Environments → {env} → Settings → Users + Permissions → Application Users → New App User. Pick the MI from app registrations. Assign security role.
+
+### Verification
+
+Run an authenticated request through the BFF that exercises Dataverse (e.g., `/api/ai/playbooks/by-name/Document%20Profile`). If you get 200 (or 401 with valid token), App User is registered correctly. If 500 with `Failed to resolve playbook`, check BFF logs for `0x80072560` Dataverse 403 — the Application User is missing.
+
+---
+
 ## Configuration Requirements
 
 ### 1. Azure App Registration

@@ -126,6 +126,8 @@ The Phase 5 deploy to `spaarke-bff-demo` surfaced ~25 settings beyond the §3.1 
 
 When `Graph__ManagedIdentity__Enabled=true`, the BFF code looks up the UAMI's clientId through **multiple keys** to support different `DefaultAzureCredential` paths + custom options validators. **Set all 5 to the same UAMI clientId.**
 
+**Why 5 keys**: The BFF binds multiple independent option classes (`GraphOptions`, `ManagedIdentityOptions`) plus picks up DefaultAzureCredential's env-var conventions (`AZURE_CLIENT_ID`) plus a custom `UAMI_CLIENT_ID` used in script context. All must reference the same UAMI clientId to ensure consistent identity across all auth flows. Missing any one produces `OptionsValidationException` for that option class at startup.
+
 ```bash
 UAMI_CLIENT_ID={uami-client-id}   # e.g. for demo: b0ce4ca4-5360-4605-a0ef-d918140e77da
 
@@ -212,6 +214,8 @@ az webapp config appsettings set --resource-group $RG --name $APP --settings \
 ```
 
 #### Cosmos provisioning sequence (one-time per env)
+
+> **One-time per subscription**: if this is the first Cosmos deployment in the subscription, run `az provider register --namespace Microsoft.DocumentDB --wait` first and wait for `Registered` state before proceeding (~30s-5min). Subsequent envs in the same subscription skip this. Phase 5 demo deploy hit this — subscription `2ff9ee48-...` had never used Cosmos before.
 
 ```bash
 # 1. Register DocumentDB provider on the subscription (one-time)
@@ -393,6 +397,16 @@ The MI's service principal must be registered as a **Dataverse Application User*
 6. *Create*.
 
 **If the BFF needs to call multiple Dataverse environments** (e.g., a `spaarke-demo` sister env), repeat this step in each environment. Skipping environments → BFF calls return `401 Unauthorized` against the unregistered env.
+
+### Troubleshooting: silent 403 cascade
+
+**Symptom**: BFF client features fail with HTTP 500 errors referencing AI playbooks, document operations, or related Dataverse queries. Browser console shows `Failed to resolve playbook: HTTP 500` or similar.
+
+**Root cause**: BFF Dataverse Web API calls return 403 Forbidden because the MI is NOT registered as a Dataverse Application User on the target env. Dataverse responds with `0x80072560 - "The user is not a member of the organization."` BFF wraps as 500 to the client.
+
+**Verify**: `az rest --method GET --url "https://{env}.crm.dynamics.com/api/data/v9.2/systemusers?$filter=applicationid eq {MI-clientId}&$select=systemuserid,fullname" --resource https://{env}.crm.dynamics.com`. If empty result, the App User wasn't created.
+
+**Fix**: complete §6 steps for the failing env. Phase 5 demo cutover hit this — Application User was missed in initial MI prep; symptom was Document Upload wizard 500 errors. Fix took ~5 min once root cause identified.
 
 ---
 

@@ -591,7 +591,7 @@ These 7 variables are defined as part of the Spaarke Dataverse solution (in the 
 
 | Variable | Value Source |
 |----------|-------------|
-| `sprk_BffApiBaseUrl` | App Service URL from Azure deployment (`/api` suffix required) |
+| `sprk_BffApiBaseUrl` | App Service URL from Azure deployment. **Format**: host-only OR host with `/api` suffix — both work because `normalizeUrl()` in `@spaarke/auth` strips trailing `/api` if present. **Recommended**: match dev's existing format for cross-env consistency (currently `/api`-suffixed). See `docs/architecture/AUTH-AND-BFF-URL-PATTERN.md` and `auth-deployment-setup.md` §2 for canonical pattern. |
 | `sprk_BffApiAppId` | App Registration Application ID (or URI like `api://<guid>`) |
 | `sprk_MsalClientId` | App Registration Application ID for the Dataverse-hosted SPA |
 | `sprk_TenantId` | Customer's Azure AD Tenant ID |

@@ -237,6 +237,61 @@ Retrieval mode is configured per-node via `ConfigJson` (`auto`/`always`/`never`,
 
 ---
 
+## AI Public Contracts Facade Boundary (Phase 4 Outcome E, 2026-05-25)
+
+Refined **ADR-013** (2026-05-20) requires external CRUD code to consume AI capabilities through a **stable, narrow facade**, not by directly injecting AI-internal types like `IOpenAiClient` or `IPlaybookService`. Boundary intent: AI internals stay AI-internal; CRUD-tier code consumes only what it needs through purpose-built interfaces.
+
+### The 4 Facade Interfaces
+
+Located in `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/`:
+
+| Interface | Wraps |
+|---|---|
+| `IBriefingAi` | `IOpenAiClient.GetCompletionAsync` (narrative generation) |
+| `IInvoiceAi` | `IPlaybookService.GetByNameAsync` + `IOpenAiClient.GetStructuredCompletionAsync<T>` + `IOpenAiClient.GenerateEmbeddingAsync` |
+| `IRecordMatchingAi` | `IRecordSearchService.SearchAsync` |
+| `IWorkspacePrefillAi` | `IPlaybookOrchestrationService.ExecuteAsync` (matter prefill) |
+
+### DI Registration
+
+A new `AddPublicContractsFacade(services)` method in `Infrastructure/DI/AnalysisServicesModule.cs` adds +4 scoped registrations — within the ADR-010 expected +4/+8 Outcome E delta. All four interfaces are gated by the same `documentIntelligenceEnabled && analysisEnabled` flags as the wrapped internal types.
+
+### Migration Scope (Post-Facade)
+
+10 consumer files migrated across Finance (3), Workspace (4), Jobs (1), Dataverse + Filters + Endpoints (2). Net reduction: **148 → 12 occurrences across 59 → 5 files** (92% reduction in direct `IOpenAiClient` / `IPlaybookService` injection from CRUD-side code).
+
+### Documented Boundary Exceptions
+
+5 files remain on direct injection because they ARE the AI API surface, not external CRUD consumers:
+
+| File | Why direct injection is retained |
+|---|---|
+| `Api/Ai/ChatEndpoints.cs` | Chat API surface (raw AI exposure to clients) |
+| `Api/Ai/PlaybookEndpoints.cs` | Playbook CRUD API — 10 handlers that wrap `IPlaybookService` 1:1; facade-wrapping would duplicate the surface |
+| `Api/Ai/AiPlaybookBuilderEndpoints.cs` | AI-internal builder for constructing playbooks |
+| `Api/Agent/AgentEndpoints.cs` | M365 Copilot agent gateway (playbook-discovery pattern) |
+| `Api/Filters/PlaybookAuthorizationFilter.cs` | ADR-008 authorization filter using `IPlaybookService.GetPlaybookAsync(Guid)` for ownership checks |
+
+### AI-Coupled Handler Relocation (FR-E3)
+
+5 files moved from `Services/Jobs/{Handlers,}` → `Services/Ai/Jobs/`:
+
+- `AppOnlyDocumentAnalysisJobHandler`
+- `BulkRagIndexingJobHandler`
+- `EmailAnalysisJobHandler`
+- `ProfileSummaryJobHandler`
+- `EmbeddingMigrationService`
+
+Handlers with mixed AI + Dataverse coupling stay in `Services/Jobs/Handlers/` per the G1 reconciliation (AI-coupled = references `Sprk.Bff.Api.Services.Ai.*` AND does NOT require `Spaarke.Dataverse` / `Microsoft.Xrm.Sdk`).
+
+### FR-C6 CI Guard (Task 082, Deferred)
+
+A CI guard will codify the boundary by blocking any new direct `IOpenAiClient` or `IPlaybookService` injection in non-AI-internal modules. This converts Outcome E from a one-time refactor into a permanent architectural boundary.
+
+**References**: [`projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md`](../../projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md) Phase 4 Outcome E (tasks 046–053) for evidence; [ADR-013](../../.claude/adr/ADR-013-ai-architecture.md) refined 2026-05-20 for binding rule.
+
+---
+
 ## Integration Points
 
 | Direction | Subsystem | Interface | Notes |
@@ -251,6 +306,7 @@ Retrieval mode is configured per-node via `ConfigJson` (`auto`/`always`/`never`,
 | Consumed by | SprkChat | `PlaybookChatContextProvider` → `IChatContextProvider` | Resolves scopes to agent tools for conversational AI |
 | Consumed by | PCF / Code Pages | `AnalysisEndpoints` (SSE) | Frontend consumes SSE token stream |
 | Consumed by | Scope Config Editor | `HandlerEndpoints` | Handler discovery for dropdown population |
+| Consumed by | **CRUD-tier consumers** (Finance, Workspace, Jobs, Dataverse) | **`Services/Ai/PublicContracts/` facade** (`IBriefingAi`, `IInvoiceAi`, `IRecordMatchingAi`, `IWorkspacePrefillAi`) | **Refined ADR-013 boundary — CRUD code MUST NOT inject `IOpenAiClient` / `IPlaybookService` directly** |
 | Depends on | Cosmos DB | `CosmosClient` via `AiPersistenceModule` | Session, audit, feedback, memory, prompt persistence (R2) |
 | Depends on | Azure Content Safety | `PromptShieldService`, `GroundednessCheckService` | Prompt injection detection, groundedness annotation (R2) |
 | Consumed by | Capability Router | `ICapabilityRouter` via `AiCapabilitiesModule` | Three-tier intent classification for chat turns (R2) |
