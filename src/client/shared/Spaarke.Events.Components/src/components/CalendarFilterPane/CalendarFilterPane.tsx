@@ -1,8 +1,23 @@
 /**
- * CalendarSection Component for CalendarSidePane (Date Filter)
+ * CalendarFilterPane Component (R4 task 055, B-6)
  *
- * Redesigned date filter with 3-month vertical stack, From/To fields,
- * and multi-select date field dropdown.
+ * Multi-control date filter builder for the Dataverse side pane on record
+ * forms (`Xrm.App.sidePanes`). Three controls (Calendar + From/To inputs +
+ * date-field multi-select Dropdown) plus an explicit Apply button.
+ *
+ * This component was promoted from the local
+ * `src/solutions/CalendarSidePane/src/components/CalendarSection.tsx` per
+ * the R4 B-6 Option B re-scope (2026-05-26). It coexists intentionally with
+ * the workspace widget `CalendarSection` in the same package — they serve
+ * different user intents:
+ *
+ *   - `CalendarSection` — workspace widget; click a day to filter the grid.
+ *     Shift+click for a range. No date-field selector. No Apply button.
+ *   - `CalendarFilterPane` (THIS FILE) — record-form side pane filter
+ *     builder; user picks date fields + From/To, clicks Apply. Persists to
+ *     sessionStorage with auto-restore. `dateFields: string[]` is REQUIRED
+ *     in the filter output (preserves the postMessage contract with the
+ *     parent record-form JS).
  *
  * Features:
  * - 3 vertical stacked calendars (current + 2 months)
@@ -10,9 +25,20 @@
  * - From/To date fields (manual entry or click selection)
  * - Click to select: first click = From, second click = To
  * - Multi-select dropdown for date fields to filter
- * - Dark mode support via Fluent UI tokens
+ * - Dark mode support via Fluent UI v9 tokens (ADR-021)
  *
- * @see projects/events-workspace-apps-UX-r1/tasks/096-calendar-sidepane-webresource.poml
+ * Bug fix on promotion: `toIsoDateString()` now uses LOCAL date components
+ * (getFullYear/Month/Date) rather than `date.toISOString().split("T")[0]`.
+ * The latter converted to UTC and caused off-by-one day bugs for users in
+ * negative-offset timezones at evening hours and positive-offset timezones
+ * at morning hours. The fix mirrors the R3 task 120 pattern applied to the
+ * existing workspace-widget `CalendarSection` and is the only behavioral
+ * change vs the prior local copy (per the b6-pre-change-diff memo). The
+ * filter output contract (`dateFields: string[]` REQUIRED) is preserved.
+ *
+ * @see projects/spaarke-ai-platform-unification-r4/tasks/055-b6-reconcile-calendar-sidepane.poml
+ * @see projects/spaarke-ai-platform-unification-r4/notes/b6-pre-change-diff.md
+ * @see projects/spaarke-ai-platform-unification-r4/notes/b6-option-b-execution-2026-05-26.md
  */
 
 import * as React from "react";
@@ -40,29 +66,35 @@ import {
 /**
  * Calendar filter output format
  */
-export type CalendarFilterType = "single" | "range" | "clear";
+export type CalendarFilterPaneFilterType = "single" | "range" | "clear";
 
-export interface CalendarFilterSingle {
+export interface CalendarFilterPaneSingle {
   type: "single";
   date: string;
+  /**
+   * REQUIRED for the side-pane filter pane (different from the workspace
+   * widget `CalendarSection` where this field is optional). Carries the
+   * date fields selected via the Dropdown to the parent record form.
+   */
   dateFields: string[];
 }
 
-export interface CalendarFilterRange {
+export interface CalendarFilterPaneRange {
   type: "range";
   start: string;
   end: string;
+  /** REQUIRED — see note above. */
   dateFields: string[];
 }
 
-export interface CalendarFilterClear {
+export interface CalendarFilterPaneClear {
   type: "clear";
 }
 
-export type CalendarFilterOutput =
-  | CalendarFilterSingle
-  | CalendarFilterRange
-  | CalendarFilterClear;
+export type CalendarFilterPaneOutput =
+  | CalendarFilterPaneSingle
+  | CalendarFilterPaneRange
+  | CalendarFilterPaneClear;
 
 /**
  * Event date info for calendar indicators
@@ -81,13 +113,13 @@ interface DateFieldOption {
 }
 
 /**
- * Props for CalendarSection component
+ * Props for CalendarFilterPane component
  */
-export interface CalendarSectionProps {
+export interface CalendarFilterPaneProps {
   /** Event dates with counts for showing indicators */
   eventDates?: IEventDateInfo[];
   /** Callback when filter changes */
-  onFilterChange: (filter: CalendarFilterOutput | null) => void;
+  onFilterChange: (filter: CalendarFilterPaneOutput | null) => void;
   /** Initial selected date (ISO string YYYY-MM-DD) */
   initialSelectedDate?: string;
   /** Initial range start (ISO string) */
@@ -100,11 +132,12 @@ export interface CalendarSectionProps {
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const VERSION = "2.3.0"; // All Dates default, clear on page navigation
+const VERSION = "2.4.0"; // Option B promotion to shared lib + UTC bug fix (R4 task 055)
 
 const DAYS_OF_WEEK = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
-// Session storage key for filter persistence
+// Session storage key for filter persistence — kept identical to the prior
+// local copy so existing user state survives the rollout (R4 task 055).
 const FILTER_STATE_KEY = "sprk_calendar_filter_state";
 
 // Special value for "All Dates" option
@@ -342,10 +375,25 @@ const useStyles = makeStyles({
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Convert Date to ISO date string (YYYY-MM-DD)
+ * Convert Date to ISO date string (YYYY-MM-DD).
+ *
+ * R4 task 055 (B-6 Option B) fix: use LOCAL date components
+ * (getFullYear/Month/Date) rather than `date.toISOString().split("T")[0]`.
+ * The latter converts to UTC and causes off-by-one day bugs in any non-UTC
+ * timezone. Example: a midnight-local Feb 3 Date in UTC+5 serializes to
+ * `2026-02-02T19:00:00Z` via toISOString — wrong day. Using local
+ * components is correct regardless of offset and keys all day-cell
+ * membership checks (eventDateMap) symmetrically with the parent
+ * record-form's date filter logic.
+ *
+ * Mirrors the equivalent helper in the workspace-widget `CalendarSection`
+ * (R3 task 120 fix).
  */
-function toIsoDateString(date: Date): string {
-  return date.toISOString().split("T")[0];
+export function toIsoDateString(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 /**
@@ -357,19 +405,6 @@ function parseIsoDate(dateStr: string): Date | null {
   }
   const [year, month, day] = dateStr.split("-").map(Number);
   return new Date(year, month - 1, day);
-}
-
-/**
- * Format date for display (MMM D, YYYY)
- */
-function formatDateDisplay(dateStr: string): string {
-  const date = parseIsoDate(dateStr);
-  if (!date) return dateStr;
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
 }
 
 /**
@@ -444,7 +479,7 @@ function loadFilterState(): PersistedFilterState | null {
       return JSON.parse(stored) as PersistedFilterState;
     }
   } catch (e) {
-    console.warn("[CalendarSection] Failed to load filter state:", e);
+    console.warn("[CalendarFilterPane] Failed to load filter state:", e);
   }
   return null;
 }
@@ -456,7 +491,7 @@ function saveFilterState(state: PersistedFilterState): void {
   try {
     sessionStorage.setItem(FILTER_STATE_KEY, JSON.stringify(state));
   } catch (e) {
-    console.warn("[CalendarSection] Failed to save filter state:", e);
+    console.warn("[CalendarFilterPane] Failed to save filter state:", e);
   }
 }
 
@@ -467,7 +502,7 @@ function clearFilterState(): void {
   try {
     sessionStorage.removeItem(FILTER_STATE_KEY);
   } catch (e) {
-    console.warn("[CalendarSection] Failed to clear filter state:", e);
+    console.warn("[CalendarFilterPane] Failed to clear filter state:", e);
   }
 }
 
@@ -475,7 +510,7 @@ function clearFilterState(): void {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const CalendarSection: React.FC<CalendarSectionProps> = ({
+export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
   eventDates = [],
   onFilterChange,
   initialRangeStart,
@@ -560,7 +595,7 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
             dateFields,
           });
         }
-        console.log("[CalendarSection] Restored persisted filter:", persistedState);
+        console.log("[CalendarFilterPane] Restored persisted filter:", persistedState);
       }, 200);
       return () => clearTimeout(timer);
     }
@@ -709,8 +744,6 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
    */
   const getDateState = React.useCallback(
     (date: Date): "selected" | "in-range" | null => {
-      const dateStr = toIsoDateString(date);
-
       const fromParsed = parseIsoDate(fromDate);
       const toParsed = parseIsoDate(toDate);
 
@@ -922,4 +955,4 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
   );
 };
 
-export default CalendarSection;
+export default CalendarFilterPane;

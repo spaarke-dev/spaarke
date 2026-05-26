@@ -21,6 +21,19 @@ export type {
   CalendarDrawerProps,
 } from "./CalendarSection";
 
+// CalendarFilterPane — record-form side pane filter builder (R4 task 055 B-6
+// Option B). Intentionally coexists with CalendarSection (workspace widget);
+// different user intents. See CalendarFilterPane.tsx header for details.
+export { CalendarFilterPane, toIsoDateString } from "./CalendarFilterPane";
+export type {
+  CalendarFilterPaneProps,
+  CalendarFilterPaneOutput,
+  CalendarFilterPaneSingle,
+  CalendarFilterPaneRange,
+  CalendarFilterPaneClear,
+  CalendarFilterPaneFilterType,
+} from "./CalendarFilterPane";
+
 export { GridSection } from "./GridSection";
 export type { GridSectionProps, IEventRecord } from "./GridSection";
 

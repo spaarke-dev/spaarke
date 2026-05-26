@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-05-26 (Wave 5.1 + 016 complete — Phase 1 100% done; Phase 5 Wave 1 done; 17 of 32 tasks ✅)
+> **Last Updated**: 2026-05-26 (mixed wave complete — 7 tasks shipped; 24 of 33 R4 tasks ✅; 73% done; all operator gates resolved)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (Wave 5.1 + 016 just completed — 4 parallel code-change sub-agents + main session ADR-031 amendment) |
+| **Task** | none (last wave: 5 parallel sub-agents 031/044/042/054/055 + main session 062/060; 055 re-scoped mid-wave per operator → Option B CalendarFilterPane promotion via new sub-agent) |
 | **Step** | — |
-| **Status** | not-started — operator gate open on 031 (A-5b); awaiting decision on next wave |
-| **Next Action** | Operator gates all resolved (2026-05-26): 031 unblocked (Path A — chatSessionId+playbookId → localStorage); W-6 source consumer fix filed as new task 044 (inline ToDo modal); W-6 DV audit owned by operator (procedure in LW retirement doc §8.1); deploys deferred to Phase 7 wrap-up batch. Dispatching next parallel wave. |
+| **Status** | not-started — all 4 operator gates from prior round resolved; deploys still deferred to Phase 7 wrap-up batch |
+| **Next Action** | Remaining R4: 043 (W-5 Context→Workspace mount, parallel-safe with no in-flight tasks), 052 (C-4 WorkspaceRenderer interface, deps 051 ✅), Phase 6 hygiene cluster (061, 063, 064, 065, 066, 067), 090 wrap-up. Recommended next wave: 043 + 052 + 061 + 063 + 065 + 066 (6-cap mixed). |
 
 ### Files Modified This Session
 

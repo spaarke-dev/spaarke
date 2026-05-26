@@ -3,7 +3,7 @@
   <metadata>
     <title>B-6: Reconcile CalendarSidePane.CalendarSection — delete local copy; import from @spaarke/events-components</title>
     <phase>Phase 5 — Substantive code changes</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>none</blocks>

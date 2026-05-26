@@ -3,7 +3,7 @@
   <metadata>
     <title>W-6 follow-up: replace WorkspaceGrid.tsx:432 navigateTo with inline ToDo modal in SpaarkeAi</title>
     <phase>4: Workspace builder + mount sources</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>041</dependencies>
     <blocks>none</blocks>
@@ -162,6 +162,34 @@
     Per operator decision (2026-05-26): inline modal preferred over (a) removing the link, (b) compatibility shim, (c) deferring to R5.
 
     If the retired page's `?mode=todo` source can't be located (it's the retired sprk_corporateworkspace page — may no longer be in the active source tree), inspect git history for the most recent deployed version OR consult the Dataverse maker for the deployed web resource source.
+
+    --- Completion notes (2026-05-26, code+build-verify-only sub-agent run) ---
+
+    Implementation summary:
+    - New file: `src/solutions/LegalWorkspace/src/components/SmartToDo/SmartToDoDialog.tsx` — Fluent v9 `<Dialog>` (90vw × 90vh) wrapping the existing `<SmartToDo webApi userId />` component. Solution-local (not shared lib) because no `@spaarke/legal-workspace` package exists and SmartToDo + FeedTodoSyncProvider + all hooks live in LegalWorkspace solution.
+    - Updated: `src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx` — replaced the `Xrm.Navigation.navigateTo` to `sprk_corporateworkspace?mode=todo` with `setIsTodoDialogOpen(true)`. Added lazy import (`LazySmartToDoDialog`), state hooks (`isTodoDialogOpen` / `handleTodoDialogClose`), and JSX render block. Close handler still fires `todoRefetchRef.current?.()` for parity with the old `.then()` chain.
+    - Updated: `src/solutions/LegalWorkspace/src/components/SmartToDo/index.ts` — barrel export for `SmartToDoDialog`.
+    - Updated: `docs/architecture/LEGALWORKSPACE-RETIREMENT.md` — §8 follow-up #2 marked RESOLVED with code refs.
+
+    Where the retired ToDo source lives (located via search):
+    - `src/solutions/LegalWorkspace/src/App.tsx#mode==="todo"` (lines 121-131): rendered `<FeedTodoSyncProvider webApi><SmartToDo webApi userId /></FeedTodoSyncProvider>`. The `useDialogForDetail` prop in that branch is stale (not in SmartToDo's current `ISmartToDoProps`). Behavior parity = render `<SmartToDo webApi userId />` inside FeedTodoSyncProvider; the provider is already mounted at App.tsx wrapping WorkspaceGrid, so the dialog inherits the scope automatically.
+
+    Build verification:
+    - `npm run build` in `src/solutions/LegalWorkspace`: ✅ 0 errors. Bundle 2,121.93 kB / 590.70 kB gzip (~+1.7 KB gzip vs the retirement-doc baseline ~589 KB; within rounding noise).
+    - `npm run build` in `src/solutions/SpaarkeAi`: ✅ 0 errors. Bundle 3,441.20 kB / 920.48 kB gzip. SpaarkeAi delta ~0 KB — the modal lives in LegalWorkspace, not SpaarkeAi. NFR-08 preserved.
+
+    Static checks (deploy not performed per operator guardrail):
+    - "No 404": grep over `src/solutions/LegalWorkspace/src` shows 0 runtime `webresourceName: "sprk_corporateworkspace"` strings; the 6 remaining matches are all in JS comments documenting the migration. The bundled JS cannot issue a sprk_corporateworkspace request.
+    - ADR-021 (dark mode): SmartToDoDialog uses `tokens.colorNeutralBackground1` + `tokens.colorNeutralForeground1`, Fluent v9 primitives only, `DismissRegular` (currentColor). No hex / rgb / Fluent v8.
+
+    Deviations from POML steps:
+    - Step 6 (unit test for handler change): SKIPPED — LegalWorkspace solution has NO jest/vitest infrastructure (no `*.test.tsx` files in `src/`, no `jest.config.*`, no test runner in package.json). Adding test framework is out of parity scope. UI tests in `<ui-tests>` are the binding tests per task POML — those require deploy and were skipped per operator guardrail.
+    - Step 7 build verify: Only LegalWorkspace + SpaarkeAi were built. No `@spaarke/legal-workspace` shared package exists, so that build step is N/A.
+    - Step 8 (update TASK-INDEX.md): SKIPPED per operator guardrail — main session updates TASK-INDEX.md, not sub-agents.
+    - Step 9 (UI tests): Static verification only (deploy not performed). Runtime UI tests deferred to the next deployment cycle; the POML `<ui-tests>` section remains the binding test plan when deploy happens.
+
+    Placement justification (CLAUDE.md §10 N/A — no BFF changes — but documenting placement per project convention):
+    - Modal placed in `src/solutions/LegalWorkspace/src/components/SmartToDo/`, NOT in a shared `@spaarke/*` lib. Reason: SmartToDo + FeedTodoSyncProvider + 8 hooks the SmartToDo depends on all live solution-local in LegalWorkspace; moving them to a shared lib is cross-cutting work outside this parity-scope task (ADR-012 "Keep in Consumer" criteria apply). The modal is a thin Dialog wrapper (~10 LOC of substantive code), not the value-bearing UI.
   </notes>
 
   <execution>

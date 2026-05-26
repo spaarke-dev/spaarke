@@ -634,4 +634,230 @@ public class WorkspaceLayoutEndpointTests : IClassFixture<WorkspaceLayoutTestFix
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
+
+    // =========================================================================
+    // R4 task 054 (B-5 / FR-08): If-Match ETag concurrency safety on PUT
+    // =========================================================================
+
+    /// <summary>
+    /// Computes the weak ETag value the BFF produces for a given UTC DateTime.
+    /// Mirrors <c>WorkspaceLayoutService.FormatWeakETag</c>. Used by the
+    /// concurrency tests to construct matching + mismatching If-Match headers.
+    /// </summary>
+    private static string WeakETag(DateTime modifiedOnUtc) =>
+        $"W/\"{new DateTimeOffset(modifiedOnUtc, TimeSpan.Zero).UtcTicks}\"";
+
+    /// <summary>
+    /// PUT with a matching If-Match header succeeds (200 OK) and the response
+    /// includes a fresh ETag header for the next write.
+    /// </summary>
+    [Fact]
+    public async Task UpdateLayout_MatchingIfMatch_Returns200WithFreshETag()
+    {
+        // Arrange
+        var layoutId = Guid.NewGuid();
+        using var fixture = WorkspaceLayoutTestFixture.WithUpdateSuccess(layoutId);
+        using var client = fixture.CreateAuthenticatedClient();
+
+        var request = new UpdateWorkspaceLayoutRequest
+        {
+            Name = "Updated With Matching If-Match",
+            LayoutTemplateId = "2-column",
+            SectionsJson = "[]",
+            IsDefault = false
+        };
+
+        var put = new HttpRequestMessage(HttpMethod.Put, $"/api/workspace/layouts/{layoutId}")
+        {
+            Content = JsonContent.Create(request),
+        };
+        // Matches the fixture's seeded modifiedOn.
+        put.Headers.TryAddWithoutValidation("If-Match", WeakETag(WorkspaceLayoutTestFixture.FixedModifiedOnUtc));
+
+        // Act
+        var response = await client.SendAsync(put);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        // Endpoint emits an ETag response header on success so the client can
+        // use it as If-Match for the next PUT.
+        response.Headers.ETag.Should().NotBeNull();
+        response.Headers.ETag!.Tag.Should().StartWith("\"");
+        response.Headers.ETag.IsWeak.Should().BeTrue("BFF emits weak validator");
+    }
+
+    /// <summary>
+    /// PUT with a mismatched If-Match header is rejected with 412 Precondition
+    /// Failed and the response body's ProblemDetails extensions include the
+    /// server's current modifiedOn so the client can show "edit conflict".
+    /// </summary>
+    [Fact]
+    public async Task UpdateLayout_MismatchedIfMatch_Returns412PreconditionFailed()
+    {
+        // Arrange
+        var layoutId = Guid.NewGuid();
+        using var fixture = WorkspaceLayoutTestFixture.WithUpdateSuccess(layoutId);
+        using var client = fixture.CreateAuthenticatedClient();
+
+        var request = new UpdateWorkspaceLayoutRequest
+        {
+            Name = "Stale Update",
+            LayoutTemplateId = "2-column",
+            SectionsJson = "[]",
+            IsDefault = false
+        };
+
+        var put = new HttpRequestMessage(HttpMethod.Put, $"/api/workspace/layouts/{layoutId}")
+        {
+            Content = JsonContent.Create(request),
+        };
+        // Deliberately stale (1 hour earlier than the fixture's seeded value).
+        var staleModifiedOn = WorkspaceLayoutTestFixture.FixedModifiedOnUtc.AddHours(-1);
+        put.Headers.TryAddWithoutValidation("If-Match", WeakETag(staleModifiedOn));
+
+        // Act
+        var response = await client.SendAsync(put);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+
+        var body = await response.Content.ReadAsStringAsync();
+        // Extensions include the server's current modifiedOn so the client
+        // can use it as the If-Match for the next attempt.
+        body.Should().Contain("currentModifiedOn");
+
+        // Also surfaces the canonical value as an ETag response header.
+        response.Headers.ETag.Should().NotBeNull(
+            "412 response includes the current ETag so the client can retry");
+    }
+
+    /// <summary>
+    /// Soft-mode policy: PUT WITHOUT If-Match succeeds (200 OK) for backward
+    /// compatibility with clients that haven't been updated. Documented in
+    /// notes/b5-design-decision.md §5. If the operator later flips a strict-
+    /// mode toggle, this test will need to be updated to expect 428.
+    /// </summary>
+    [Fact]
+    public async Task UpdateLayout_NoIfMatchHeader_Returns200_SoftModePolicy()
+    {
+        // Arrange
+        var layoutId = Guid.NewGuid();
+        using var fixture = WorkspaceLayoutTestFixture.WithUpdateSuccess(layoutId);
+        using var client = fixture.CreateAuthenticatedClient();
+
+        var request = new UpdateWorkspaceLayoutRequest
+        {
+            Name = "No If-Match — Should Succeed",
+            LayoutTemplateId = "2-column",
+            SectionsJson = "[]",
+            IsDefault = false
+        };
+
+        // Act — note: no If-Match header.
+        var response = await client.PutAsJsonAsync($"/api/workspace/layouts/{layoutId}", request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "soft-mode policy — missing If-Match is last-write-wins for back-compat");
+        response.Headers.ETag.Should().NotBeNull(
+            "ETag is emitted on every successful PUT so any future write can use it");
+    }
+
+    /// <summary>
+    /// Simulates two concurrent edits: both clients fetch the layout, both
+    /// build a PUT with the same If-Match. The first PUT succeeds (in this
+    /// test the service is stubbed; both PUTs land on the same fixture). The
+    /// second client's PUT — with the same OLD If-Match — would be rejected
+    /// in the real world because the server's modifiedOn has advanced.
+    ///
+    /// This test simulates the "second client" by using an If-Match that
+    /// doesn't match the server's current modifiedOn (the canonical post-write
+    /// scenario).
+    /// </summary>
+    [Fact]
+    public async Task UpdateLayout_TwoConcurrentEdits_SecondRejectedWith412()
+    {
+        // Arrange
+        var layoutId = Guid.NewGuid();
+        using var fixture = WorkspaceLayoutTestFixture.WithUpdateSuccess(layoutId);
+        using var client = fixture.CreateAuthenticatedClient();
+
+        var request1 = new UpdateWorkspaceLayoutRequest
+        {
+            Name = "First Edit Wins",
+            LayoutTemplateId = "2-column",
+            SectionsJson = "[]",
+            IsDefault = false
+        };
+        var put1 = new HttpRequestMessage(HttpMethod.Put, $"/api/workspace/layouts/{layoutId}")
+        {
+            Content = JsonContent.Create(request1),
+        };
+        put1.Headers.TryAddWithoutValidation("If-Match", WeakETag(WorkspaceLayoutTestFixture.FixedModifiedOnUtc));
+
+        // Act — first client wins.
+        var response1 = await client.SendAsync(put1);
+        response1.StatusCode.Should().Be(HttpStatusCode.OK,
+            "first client's If-Match matches the seeded modifiedOn");
+
+        // Arrange — second client attempts to PUT with the SAME (now stale)
+        // If-Match. After the first PUT, the server's modifiedOn has advanced;
+        // the second client's If-Match still references the pre-first-write
+        // value, so it should fail.
+        //
+        // (In this unit-test the mocked fixture doesn't actually advance
+        // modifiedOn after the first PUT, so we simulate the "second client"
+        // by sending an explicitly stale If-Match value — which is exactly
+        // what would happen in production after the first client's write
+        // bumped modifiedOn.)
+        var request2 = new UpdateWorkspaceLayoutRequest
+        {
+            Name = "Second Edit Should Fail",
+            LayoutTemplateId = "1-column",
+            SectionsJson = "[]",
+            IsDefault = false
+        };
+        var put2 = new HttpRequestMessage(HttpMethod.Put, $"/api/workspace/layouts/{layoutId}")
+        {
+            Content = JsonContent.Create(request2),
+        };
+        // Stale (5 minutes before the fixture's seeded value — represents
+        // "the modifiedOn the second client saw BEFORE the first client's
+        // write advanced it").
+        put2.Headers.TryAddWithoutValidation("If-Match",
+            WeakETag(WorkspaceLayoutTestFixture.FixedModifiedOnUtc.AddMinutes(-5)));
+
+        // Act
+        var response2 = await client.SendAsync(put2);
+
+        // Assert
+        response2.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed,
+            "second concurrent edit rejected — first edit already advanced modifiedOn");
+    }
+
+    /// <summary>
+    /// GET single-layout emits an ETag response header derived from the
+    /// layout's modifiedOn — clients use this value as If-Match on the next
+    /// PUT.
+    /// </summary>
+    [Fact]
+    public async Task GetLayoutById_SuccessfulFetch_EmitsETagHeader()
+    {
+        // Arrange
+        var layoutId = Guid.NewGuid();
+        using var fixture = WorkspaceLayoutTestFixture.WithSingleUserLayout(layoutId, "ETag Test Layout");
+        using var client = fixture.CreateAuthenticatedClient();
+
+        // Act
+        var response = await client.GetAsync($"/api/workspace/layouts/{layoutId}");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Headers.ETag.Should().NotBeNull(
+            "GET emits ETag so client can submit it as If-Match on the next PUT");
+        response.Headers.ETag!.IsWeak.Should().BeTrue();
+        // The tag value is "<UtcTicks>" — non-empty inside quotes.
+        response.Headers.ETag.Tag.Should().NotBe("\"\"");
+    }
 }

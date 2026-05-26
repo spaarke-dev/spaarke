@@ -28,9 +28,9 @@ import {
   type IEventDateInfo,
 } from "./utils/postMessage";
 import {
-  CalendarSection,
-  type CalendarFilterOutput,
-} from "./components";
+  CalendarFilterPane,
+  type CalendarFilterPaneOutput,
+} from "@spaarke/events-components";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -58,7 +58,7 @@ export const App: React.FC = () => {
   const initialFilter = React.useMemo(() => getInitialFilterState(params), [params]);
 
   // Track current filter state (for ready message)
-  const [currentFilter, setCurrentFilter] = React.useState<CalendarFilterOutput | null>(initialFilter);
+  const [currentFilter, setCurrentFilter] = React.useState<CalendarFilterPaneOutput | null>(initialFilter);
 
   // Event dates from parent for calendar indicators
   const [eventDates, setEventDates] = React.useState<IEventDateInfo[]>([]);
@@ -89,10 +89,10 @@ export const App: React.FC = () => {
   }, []); // Only on mount
 
   /**
-   * Handle filter change from CalendarSection
-   * Sends postMessage to parent and updates local state
+   * Handle filter change from CalendarFilterPane (shared lib, R4 task 055 B-6).
+   * Sends postMessage to parent and updates local state.
    */
-  const handleFilterChange = React.useCallback((filter: CalendarFilterOutput | null) => {
+  const handleFilterChange = React.useCallback((filter: CalendarFilterPaneOutput | null) => {
     setCurrentFilter(filter);
     sendFilterChanged(filter);
   }, []);
@@ -104,7 +104,7 @@ export const App: React.FC = () => {
   return (
     <FluentProvider theme={theme}>
       <div className={styles.root}>
-        <CalendarSection
+        <CalendarFilterPane
           eventDates={eventDates}
           onFilterChange={handleFilterChange}
           initialSelectedDate={params.selectedDate ?? undefined}

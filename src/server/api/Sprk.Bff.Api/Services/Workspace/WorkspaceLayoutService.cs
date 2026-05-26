@@ -394,18 +394,86 @@ public sealed class WorkspaceLayoutService
     }
 
     /// <summary>
+    /// Outcome of an <see cref="UpdateLayoutAsync"/> call. Distinguishes the
+    /// three failure modes the endpoint needs to map to distinct HTTP status
+    /// codes (forbidden vs not-found vs concurrency-conflict vs generic 500).
+    /// R4 task 054 (B-5 / FR-08): the Conflict outcome is new — surfaces a
+    /// 412 Precondition Failed for mismatched <c>If-Match</c> ETag.
+    /// </summary>
+    public enum UpdateOutcome
+    {
+        /// <summary>Successful update — DTO is non-null.</summary>
+        Success,
+        /// <summary>Hard-coded or Dataverse system layout — 403.</summary>
+        Forbidden,
+        /// <summary>Layout not found or not owned by user — 404.</summary>
+        NotFound,
+        /// <summary>If-Match ETag mismatch (concurrency conflict) — 412.</summary>
+        Conflict,
+        /// <summary>Unspecified server error — 500.</summary>
+        ServerError
+    }
+
+    /// <summary>
+    /// Detailed result of <see cref="UpdateLayoutAsync"/>. Carries the
+    /// outcome enum, the updated DTO on success, an optional error string for
+    /// logging/diagnostics, and (on 412 Conflict) the current
+    /// <c>ModifiedOn</c> so the endpoint can echo it back to the client in
+    /// the ProblemDetails extensions ("here's the value to retry with").
+    /// </summary>
+    /// <param name="Outcome">The outcome enum.</param>
+    /// <param name="Layout">The updated DTO; null unless Outcome is Success.</param>
+    /// <param name="Error">Optional human-readable error description.</param>
+    /// <param name="CurrentModifiedOn">On Conflict: the server's current ModifiedOn.</param>
+    public sealed record UpdateLayoutResult(
+        UpdateOutcome Outcome,
+        WorkspaceLayoutDto? Layout,
+        string? Error,
+        DateTimeOffset? CurrentModifiedOn = null);
+
+    /// <summary>
     /// Updates an existing user layout. Rejects updates to system layouts.
     /// If setting as default, clears isDefault on all other user layouts.
+    /// R4 task 054 (B-5 / FR-08): optionally honors an <paramref name="expectedModifiedOn"/>
+    /// concurrency token derived from the client's <c>If-Match</c> header.
+    /// Backward-compatible overload preserved for callers that don't care
+    /// about concurrency safety (soft-mode policy — see
+    /// <c>notes/b5-design-decision.md</c> §5).
     /// </summary>
     /// <param name="id">The layout ID to update.</param>
     /// <param name="request">The update request.</param>
     /// <param name="userId">The Entra ID object ID of the authenticated user.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>The updated layout DTO, or an error message.</returns>
+    /// <returns>The updated layout DTO, or an error message (legacy shape).</returns>
     public async Task<(WorkspaceLayoutDto? Layout, string? Error)> UpdateLayoutAsync(
         Guid id,
         UpdateWorkspaceLayoutRequest request,
         string userId,
+        CancellationToken ct = default)
+    {
+        var result = await UpdateLayoutAsync(id, request, userId, expectedModifiedOn: null, ct);
+        return (result.Layout, result.Error);
+    }
+
+    /// <summary>
+    /// Concurrency-safe update overload. When <paramref name="expectedModifiedOn"/>
+    /// is non-null, the service compares it (weak-validator semantics — ticks
+    /// equality) against the current Dataverse value BEFORE writing. Mismatch
+    /// returns <see cref="UpdateOutcome.Conflict"/> with the current value so
+    /// the endpoint can map to 412 Precondition Failed (RFC 7232 §4.2).
+    ///
+    /// R4 task 054 (B-5): per the design decision in
+    /// <c>notes/b5-design-decision.md</c>, the service re-reads the entity
+    /// after a successful write so the response DTO carries the canonical
+    /// Dataverse-stamped <c>ModifiedOn</c> (not the previous
+    /// <c>DateTimeOffset.UtcNow</c> placeholder). This guarantees the client's
+    /// next PUT will match on first try.
+    /// </summary>
+    public async Task<UpdateLayoutResult> UpdateLayoutAsync(
+        Guid id,
+        UpdateWorkspaceLayoutRequest request,
+        string userId,
+        DateTimeOffset? expectedModifiedOn,
         CancellationToken ct = default)
     {
         // Reject updates to hard-coded system layouts (Corporate Workspace)
@@ -414,18 +482,20 @@ public sealed class WorkspaceLayoutService
             _logger.LogWarning(
                 "User {UserId} attempted to update hard-coded system layout {LayoutId}",
                 userId, id);
-            return (null, "System workspaces cannot be modified.");
+            return new UpdateLayoutResult(
+                UpdateOutcome.Forbidden, null, "System workspaces cannot be modified.");
         }
 
         _logger.LogInformation(
-            "Updating layout {LayoutId} for user {UserId} (isDefault={IsDefault})",
-            id, userId, request.IsDefault);
+            "Updating layout {LayoutId} for user {UserId} (isDefault={IsDefault}, ifMatch={IfMatchSupplied})",
+            id, userId, request.IsDefault, expectedModifiedOn.HasValue);
 
         // Verify the layout exists and belongs to this user (or is a system record).
         var existing = await GetLayoutByIdAsync(id, userId, ct);
         if (existing is null)
         {
-            return (null, "Workspace layout not found.");
+            return new UpdateLayoutResult(
+                UpdateOutcome.NotFound, null, "Workspace layout not found.");
         }
 
         // Wave 2b (task 109): reject updates to Dataverse system layouts too —
@@ -438,7 +508,31 @@ public sealed class WorkspaceLayoutService
             _logger.LogWarning(
                 "User {UserId} attempted to update Dataverse system layout {LayoutId}",
                 userId, id);
-            return (null, "System workspaces cannot be modified.");
+            return new UpdateLayoutResult(
+                UpdateOutcome.Forbidden, null, "System workspaces cannot be modified.");
+        }
+
+        // ──────────────────────────────────────────────────────────────────
+        // R4 task 054 (B-5 / FR-08): If-Match concurrency check.
+        //
+        // When the caller supplied an `expectedModifiedOn` (from the
+        // client's If-Match header), compare against the just-fetched
+        // `existing.ModifiedOn`. Weak-validator semantics — UTC ticks
+        // equality. Mismatch → Conflict outcome → endpoint emits 412
+        // Precondition Failed (RFC 7232 §4.2). Missing header (null
+        // expectedModifiedOn) skips the check per soft-mode policy
+        // documented in notes/b5-design-decision.md §5.
+        // ──────────────────────────────────────────────────────────────────
+        if (expectedModifiedOn.HasValue && !ModifiedOnMatches(existing.ModifiedOn, expectedModifiedOn.Value))
+        {
+            _logger.LogInformation(
+                "If-Match mismatch on layout {LayoutId} for user {UserId} (expected={Expected} actual={Actual})",
+                id, userId, expectedModifiedOn.Value.UtcTicks, existing.ModifiedOn.UtcTicks);
+            return new UpdateLayoutResult(
+                UpdateOutcome.Conflict,
+                null,
+                "Workspace layout was modified by another session. Refresh and retry.",
+                existing.ModifiedOn);
         }
 
         // If setting as default, clear existing defaults first
@@ -464,26 +558,115 @@ public sealed class WorkspaceLayoutService
                 "Updated layout {LayoutId} for user {UserId}",
                 id, userId);
 
-            return (new WorkspaceLayoutDto
+            // R4 task 054 (B-5): re-read post-write so the response DTO
+            // carries the canonical Dataverse-stamped ModifiedOn (not the
+                // DateTimeOffset.UtcNow placeholder from task 053). This
+                // guarantees the client's next PUT will match on first try.
+                // Cost: +1 RetrieveAsync per update — acceptable at user-
+                // gesture frequency. If the re-read fails (rare), fall back
+                // to UtcNow with a warning; the next GET will still return
+                // the canonical value.
+            DateTimeOffset canonicalModifiedOn;
+            try
             {
-                Id = id,
-                Name = request.Name,
-                LayoutTemplateId = request.LayoutTemplateId,
-                SectionsJson = request.SectionsJson,
-                IsDefault = request.IsDefault,
-                SortOrder = existing.SortOrder,
-                IsSystem = false,
-                // R4 task 053 (B-4 / FR-07): Dataverse stamps modifiedon at
-                // update time; reflect that here without an extra round-trip.
-                // See CreateLayoutAsync remarks; B-5 (task 054) will likely
-                // re-read post-write to obtain the exact rowversion for ETag use.
-                ModifiedOn = DateTimeOffset.UtcNow
-            }, null);
+                var refreshed = await _entityService.RetrieveAsync(EntityName, id, SelectColumns, ct);
+                var refreshedDto = MapToDto(refreshed);
+                canonicalModifiedOn = refreshedDto.ModifiedOn;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to re-read layout {LayoutId} for canonical ModifiedOn; using current UTC as fallback",
+                    id);
+                canonicalModifiedOn = DateTimeOffset.UtcNow;
+            }
+
+            return new UpdateLayoutResult(
+                UpdateOutcome.Success,
+                new WorkspaceLayoutDto
+                {
+                    Id = id,
+                    Name = request.Name,
+                    LayoutTemplateId = request.LayoutTemplateId,
+                    SectionsJson = request.SectionsJson,
+                    IsDefault = request.IsDefault,
+                    SortOrder = existing.SortOrder,
+                    IsSystem = false,
+                    ModifiedOn = canonicalModifiedOn
+                },
+                null);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to update layout {LayoutId} for user {UserId}", id, userId);
-            return (null, "Failed to update workspace layout. Please try again.");
+            return new UpdateLayoutResult(
+                UpdateOutcome.ServerError,
+                null,
+                "Failed to update workspace layout. Please try again.");
+        }
+    }
+
+    /// <summary>
+    /// Weak-validator ETag comparison for <see cref="DateTimeOffset"/> values.
+    /// Compares UtcTicks (Int64) — stable across timezone formatting variations
+    /// in the wire shape. Used by <see cref="UpdateLayoutAsync"/> to evaluate
+    /// the client's <c>If-Match</c> header. R4 task 054 (B-5).
+    /// </summary>
+    private static bool ModifiedOnMatches(DateTimeOffset current, DateTimeOffset expected) =>
+        current.UtcTicks == expected.UtcTicks;
+
+    /// <summary>
+    /// Formats a <see cref="DateTimeOffset"/> as a weak ETag value per
+    /// RFC 7232 §2.3. Returns <c>W/"&lt;UtcTicks&gt;"</c> — UTC ticks string
+    /// inside double quotes, prefixed by <c>W/</c> for weak-validator
+    /// semantics. Used by GET endpoints to emit ETag response headers.
+    /// R4 task 054 (B-5).
+    /// </summary>
+    /// <example>
+    /// For ModifiedOn = 2026-05-26T10:00:00Z → returns <c>W/"638536008000000000"</c>.
+    /// </example>
+    public static string FormatWeakETag(DateTimeOffset modifiedOn) =>
+        $"W/\"{modifiedOn.UtcTicks}\"";
+
+    /// <summary>
+    /// Parses a client-supplied <c>If-Match</c> header value (weak or strong
+    /// quoted-string per RFC 7232 §3.1) back to a <see cref="DateTimeOffset"/>.
+    /// Returns null if the header is missing, malformed, or doesn't
+    /// represent a UTC-ticks integer. Comparator must use ticks equality —
+    /// see <see cref="ModifiedOnMatches"/>. R4 task 054 (B-5).
+    /// </summary>
+    /// <param name="headerValue">Raw If-Match header value, e.g.
+    /// <c>W/"638536008000000000"</c> or <c>"638536008000000000"</c>.</param>
+    public static DateTimeOffset? TryParseIfMatchHeader(string? headerValue)
+    {
+        if (string.IsNullOrWhiteSpace(headerValue)) return null;
+
+        // Strip optional weak prefix.
+        var value = headerValue.Trim();
+        if (value.StartsWith("W/", StringComparison.Ordinal))
+        {
+            value = value[2..];
+        }
+
+        // Strip surrounding quotes if present (per RFC 7232 quoted-string).
+        if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
+        {
+            value = value[1..^1];
+        }
+
+        if (!long.TryParse(value, out var ticks))
+            return null;
+
+        // DateTimeOffset.MinValue.UtcTicks == 0 — supports sentinel ETag
+        // (W/"0") for hard-coded system layouts. Negative or absurdly large
+        // tick counts (outside DateTime range) are rejected via the catch.
+        try
+        {
+            return new DateTimeOffset(ticks, TimeSpan.Zero);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
         }
     }
 

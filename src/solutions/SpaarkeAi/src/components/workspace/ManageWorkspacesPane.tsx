@@ -644,6 +644,14 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
           setErrorMsg("This workspace can't be renamed (system layout).");
         } else if (status === 404) {
           setErrorMsg("Workspace not found — it may have been deleted.");
+        } else if (status === 412) {
+          // R4 task 054 (B-5 / FR-08): concurrency conflict — another
+          // session modified the layout. Refresh the list so the user's
+          // next attempt picks up the fresh modifiedOn.
+          setErrorMsg(
+            "This workspace was edited elsewhere — refresh and retry.",
+          );
+          refetch();
         } else {
           setErrorMsg("Rename failed. Please try again.");
         }

@@ -233,6 +233,8 @@
   </acceptance-criteria>
 
   <notes>
+    **Demo scenario chosen (2026-05-26)**: PDF upload in chat → DocumentViewerWidget mounts as workspace tab (recommended path per OC-R4-07). See `projects/spaarke-ai-platform-unification-r4/notes/w4-task-042-assistant-workspace-mount.md` for the complete task notes — files changed, build verification, bundle delta (+2.83 KB gzip), UI test definitions, deviations.
+
     Operator MUST confirm the demo scenario at task start per OC-R4-07. Recommended: "user uploads PDF in chat → DocumentViewer widget mounts as workspace tab". Alternative scenarios include "assistant suggests opening a document → workspace tab with viewer", or "assistant returns a search result → workspace tab with result viewer". Record the operator's choice in this notes block at task close.
 
     Per Risk R-7 in plan.original.md §8: if scope risks blowing the 8h estimate, ship dispatch + ONE viewer widget end-to-end and defer broader coverage to a follow-up. DO NOT widen the demo at the cost of incomplete delivery.

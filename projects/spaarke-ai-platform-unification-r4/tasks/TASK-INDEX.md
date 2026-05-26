@@ -35,21 +35,21 @@
 | 017 | F-3 Document publish-size baseline rule | 1 | ✅ | F-3 / NFR-01 | STANDARD | none | — / ❌ (`.claude/` + CLAUDE.md) |
 | 020 | F-2 BFF facade audit | 2 | ✅ | F-2 / NFR-03 | STANDARD | none | — / ✅ |
 | 030 | A-5a Verify tab persistence | 3 | ✅ | A-5a / FR-05 | STANDARD | none | — / ✅ |
-| 031 | A-5b Fix tab persistence (Path A: chatSessionId+playbookId → localStorage) | 3 | 🔲 (operator gate resolved 2026-05-26 — Path A approved) | A-5b / FR-05 | FULL | 030 ✅ | — / ❌ (deps; was operator-gated) |
+| 031 | A-5b Fix tab persistence (Path A: chatSessionId+playbookId → localStorage) | 3 | ✅ (code; 28 tests; +2.48 KB; deploy deferred) | A-5b / FR-05 | FULL | 030 ✅ | — / ❌ (deps; was operator-gated) |
 | 040 | W-3 Fix WorkspaceLayoutWizard catalog drift | 4 | ✅ | W-3 / FR-01 | FULL | none | D / ✅ |
 | 041 | W-6 Document LegalWorkspace retirement | 4 | ✅ | W-6 / DR-03 | STANDARD | none | D / ✅ |
-| 042 | W-4 Wire Assistant → Workspace mount source | 4 | 🔲 | W-4 / FR-02 | FULL | 010 ✅, 040 ✅ | — / ❌ (deps) |
+| 042 | W-4 Wire Assistant → Workspace mount source (DocumentViewerWidget) | 4 | ✅ (code; 14 widget tests; +2.83 KB; deploy deferred) | W-4 / FR-02 | FULL | 010 ✅, 040 ✅ | — / ❌ (deps) |
 | 043 | W-5 Wire Context → Workspace mount source | 4 | 🔲 | W-5 / FR-03 | FULL | 010 ✅ | E / ✅ (with 042 coord) |
-| 044 | W-6 follow-up: inline ToDo modal (operator-gated → resolved 2026-05-26) | 4 | 🔲 | (new — W-6 consumer fix) | FULL | 041 ✅ | — / ✅ (independent) |
+| 044 | W-6 follow-up: SmartToDoDialog inline modal | 4 | ✅ (code; +1.7 KB; static no-404 + dark-mode; deploy deferred) | (new — W-6 consumer fix) | FULL | 041 ✅ | — / ✅ (independent) |
 | 050 | A-4 Attachment policy + raise cap to 25 MB | 5 | ✅ (code only — deploy deferred) | A-4 / FR-04 | FULL | none | F / ✅ |
 | 051 | C-3 Consolidate dual useWorkspaceLayouts hooks | 5 | ✅ (code only — deploy deferred) | C-3 / FR-13 | FULL | none | F / ✅ |
 | 052 | C-4 WorkspaceRenderer interface | 5 | 🔲 | C-4 / FR-14 | FULL | 051 | — / ❌ (deps) |
 | 053 | B-4 WorkspaceLayoutDto.modifiedOn | 5 | ✅ (code only — deploy deferred) | B-4 / FR-07 | FULL | none | F / ✅ |
-| 054 | B-5 BFF PUT → PATCH/ETag | 5 | 🔲 | B-5 / FR-08 | FULL | 053 | — / ❌ (same files as 053) |
-| 055 | B-6 Reconcile CalendarSidePane CalendarSection | 5 | 🔲 | B-6 / FR-09 | FULL | none | G / ✅ |
-| 060 | B-1 .gitignore for tracked build artifacts | 6 | 🔲 | B-1 / NFR-04 | MINIMAL | none | H / ✅ |
+| 054 | B-5 BFF PUT + If-Match weak ETag (Option A) | 5 | ✅ (code; 5 new tests; BFF 43.88 MB; deploy deferred) | B-5 / FR-08 | FULL | 053 ✅ | — / ❌ (same files as 053) |
+| 055 | B-6 Promote local → `@spaarke/events-components` CalendarFilterPane (Option B per operator 2026-05-26; UTC bug fix included) | 5 | ✅ (code; CalendarSidePane −49 KB; deploy deferred) | B-6 / FR-09 | FULL | none | G / ✅ |
+| 060 | B-1 .gitignore for tracked build artifacts | 6 | ✅ (main session; 272 stale `deploy/api-publish/*` artifacts untracked) | B-1 / NFR-04 | MINIMAL | none | H / ✅ |
 | 061 | B-2 @spaarke/ai-widgets tsc rootDir fix | 6 | 🔲 | B-2 / NFR-05 | STANDARD | none | H / ✅ |
-| 062 | B-3 Telemetry constant rename | 6 | 🔲 | B-3 / FR-06 | STANDARD | none | H / ✅ |
+| 062 | B-3 Telemetry constant rename | 6 | ✅ (code shipped; AI workspace cutover memo at `notes/b3-app-insights-query-cutover.md`) | B-3 / FR-06 | STANDARD | none | H / ✅ |
 | 063 | B-7 Extract useEventsBulkActions hook | 6 | 🔲 | B-7 / FR-10 | FULL | none | H / ✅ |
 | 064 | B-8 CalendarDrawer.eventDates API | 6 | 🔲 | B-8 / FR-11 | FULL | 063 | — / ❌ (same lib as 063) |
 | 065 | B-9 ESLint v9 migration | 6 | 🔲 | B-9 / NFR-06 | STANDARD | none | I / ✅ |

@@ -9,6 +9,12 @@
  * @see ADR-022 - React 16 APIs only
  */
 
+// Type-only import: keeps types.ts free of runtime dependencies on the hook.
+// `ChatAttachment` is the canonical attachment-ready payload shape produced
+// by `useChatFileAttachment`. Used by `ISprkChatProps.onAttachmentReady`
+// (R4 task 042 / W-4).
+import type { ChatAttachment } from './hooks/useChatFileAttachment';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Chat Message Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -511,6 +517,35 @@ export interface ISprkChatProps {
    * delivered synchronously from the fetch loop without React state batching.
    */
   onPaneEvent?: ((event: IAiPaneEvent) => void) | null;
+
+  /**
+   * Callback fired when a chat attachment finishes client-side extraction and
+   * transitions to "ready" status (R4 task 042 / W-4).
+   *
+   * Fires ONCE per file that reaches `ready` state — files in `extracting` or
+   * `error` state do NOT fire. Hosts (e.g. ConversationPane in SpaarkeAi) use
+   * this to dispatch `widget_load` on the workspace PaneEventBus channel so
+   * the file mounts as a workspace tab while the user composes their message.
+   *
+   * The callback receives ONE `ChatAttachment` per invocation (per ready file).
+   * If multiple files are added together, the callback is called multiple
+   * times — once per file as each finishes extraction.
+   *
+   * Out of scope by design (per Risk R-7): batched delivery, cancellation,
+   * progress reporting. Hosts that need batching can debounce in their own
+   * handler.
+   *
+   * The host MUST treat this callback as a SIDE-EFFECT signal — SprkChat
+   * still owns the attachment chip lifecycle and the outbound message body
+   * carries the attachments regardless of whether the host responds. The
+   * callback fires AFTER text extraction completes so `textContent` is
+   * always populated on the delivered attachment.
+   *
+   * Auth invariant (ADR-028): no auth context flows through this callback.
+   * The host calls back into its own auth surface if it needs to make BFF
+   * requests downstream.
+   */
+  onAttachmentReady?: (attachment: ChatAttachment) => void;
 }
 
 /** Props for SprkChatMessage sub-component. */

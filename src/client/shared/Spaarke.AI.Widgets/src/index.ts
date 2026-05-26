@@ -8,6 +8,13 @@ import { registerWorkspaceWidgets } from './widgets/workspace/register-workspace
 registerWorkspaceWidgets();
 
 // ---------------------------------------------------------------------------
+// Side-effect: register DocumentViewerWidget (R4 task 042 / W-4)
+// First end-to-end Assistant → Workspace `widget_load` demo (FR-02).
+// ---------------------------------------------------------------------------
+import { registerDocumentViewerWidget } from './widgets/workspace/register-document-viewer-widget';
+registerDocumentViewerWidget();
+
+// ---------------------------------------------------------------------------
 // Side-effect: register all 6 R1 source widgets into ContextWidgetRegistry
 // (AIPU2-081 — migrate source widgets to context pane)
 // ---------------------------------------------------------------------------
@@ -75,6 +82,20 @@ export type { ContextWidgetRegistration } from './registry/ContextWidgetRegistry
 // ---------------------------------------------------------------------------
 
 export { default as GenericTextWidget } from './widgets/GenericTextWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: DocumentViewerWidget — Assistant pane mount-source demo (R4 task 042)
+//
+// First end-to-end PaneEventBus `widget_load` demo (FR-02): when the user
+// attaches a file in the Assistant chat input, ConversationPane dispatches
+// `widget_load` on the workspace channel and this widget mounts as a new
+// workspace tab showing the file's extracted text preview.
+// Registered under 'document-viewer' via register-document-viewer-widget.ts.
+// ---------------------------------------------------------------------------
+
+export { default as DocumentViewerWidget } from './widgets/workspace/DocumentViewerWidget';
+export type { DocumentViewerWidgetData } from './widgets/workspace/DocumentViewerWidget';
+export { DOCUMENT_VIEWER_WIDGET_TYPE } from './widgets/workspace/register-document-viewer-widget';
 
 // ---------------------------------------------------------------------------
 // Widgets: RedlineViewerWidget — side-by-side document comparison (AIPU2-085)
@@ -404,6 +425,7 @@ export type {
   PaneChannelEventMap,
   PaneEventHandler,
   WorkspacePaneEvent,
+  WorkspaceWidgetLoadEvent,
   ContextPaneEvent,
   ConversationPaneEvent,
   SafetyPaneEvent,

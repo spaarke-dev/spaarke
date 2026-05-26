@@ -116,6 +116,9 @@ LogFiles/
 
 # Temporary download directories
 tmp-site-download/
+# deploy/ — covers deploy/api-publish/*.dll/*.pdb/*.exe BFF artifacts (R4 task 060 / B-1 / NFR-04).
+# 2026-05-26: ran `git rm --cached -r deploy/api-publish/` to untrack 272 stale build
+# artifacts that pre-dated this rule. Future builds will not be re-tracked.
 deploy/
 
 # Stale tsc-emit cruft in source folders (Task 112, 2026-05-22)
