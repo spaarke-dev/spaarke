@@ -593,15 +593,174 @@ Output: [`baseline/demo-phase-5-deploy.json`](baseline/demo-phase-5-deploy.json)
 
 6. **Git Bash path translation breaks `az` resource IDs**. Use `MSYS_NO_PATHCONV=1` for any `az` command passing a path starting with `/subscriptions/`, `/tenantId`, or other Azure-style paths. Without this, paths get mangled to `C:/Program Files/Git/subscriptions/...` and the command fails with cryptic `LinkedInvalidPropertyId` errors.
 
-### Out of scope (operator followups)
+### Discovered post-deploy (during user E2E testing)
 
-1. **Exchange `ApplicationAccessPolicy` for demo UAMI** — requires operator EXO PowerShell + demo mailbox decision. Mail.Send/Mail.Read grants ARE in place on the UAMI; what's missing is the Exchange-side scoping. Recommended command (when ready):
-   ```powershell
-   New-ApplicationAccessPolicy -AppId b0ce4ca4-5360-4605-a0ef-d918140e77da -PolicyScopeGroupId <demo-mailbox-group> -AccessRight RestrictAccess
+**Issue 1 — Document Upload wizard returned 500 "Failed to resolve playbook"**:
+
+User invoked Document Upload wizard → `useAiSummary` hook tried to resolve "Document Profile" playbook → BFF `GET /api/ai/playbooks/{name}` returned 500. Root cause from demo logs:
+
+```
+[PLAYBOOK] Query response: StatusCode=Forbidden, ReasonPhrase=Forbidden
+[PLAYBOOK] Dataverse error response: Forbidden -
+  {"error":{"code":"0x80072560","message":"The user is not a member of the organization."}}
+```
+
+**Root cause**: Demo UAMI (`mi-bff-api-demo` / appId `b0ce4ca4-...`) was NOT registered as a Dataverse Application User on `spaarke-demo.crm.dynamics.com`. This is a mandatory step for MI mode per [`auth-deployment-setup.md`](../../docs/guides/auth-deployment-setup.md) §6. We did this for dev during the original cutover but it was missed for demo.
+
+**Fix applied 2026-05-25 (~22:00 UTC)**:
+1. Created Application User on demo Dataverse via Web API POST `/systemusers`:
+   ```json
+   {
+     "applicationid": "b0ce4ca4-5360-4605-a0ef-d918140e77da",
+     "firstname": "BFF",
+     "lastname": "Demo MI",
+     "businessunitid@odata.bind": "/businessunits(0ee11cb0-9c1b-f111-8341-000d3a5b6dba)"
+   }
    ```
-   Demo email subsystem won't function end-to-end until this + `Communication__DefaultMailbox` is set to a real mailbox.
+   Created systemuser `61d1cce0-8458-f111-bec7-7ced8d6f9aa0`.
 
-2. **Production deploy** (tasks 062 + 063) — out of scope per operator direction. When done, the prod env will need the same prep as documented in steps 1–10 above (UAMI, Graph grants, Cosmos provisioning, App Settings).
+2. Assigned "System Administrator" role (parity with dev UAMI) via POST to `systemusers({uid})/systemuserroles_association/$ref`. Demo Sys Admin role ID: `1be11cb0-9c1b-f111-8341-000d3a5b6dba`.
+
+3. Restarted demo App Service to clear stale Dataverse token cache.
+
+**Phase 6 codification target**: Add to `auth-deployment-setup.md` §6 a parameterized snippet for creating the Application User + role assignment via Web API (currently §6 only shows the PowerApps UI path).
+
+**Issue 2 — Test 2 endpoint probes showed 3 routes as 404**:
+
+When probing `/api/communications/health`, `/api/finance/aggregate/practice/test`, `/api/workspace/matters/test/briefing` unauthenticated:
+- Got 404 (not 401) — suggests routes don't exist with those paths on the current build
+- Other routes (`/api/documents/test/preview-url`, `/api/ai/chat/playbooks`) returned 401 (correct — route exists, auth required)
+
+**Likely cause**: those 3 test-fixture paths don't match the current route table. Either renamed, or the test paths I picked were wrong fixtures. This is NOT a Phase-4-introduced regression — the synthetic baseline tool (which uses the actual route enumeration) showed status distribution matching dev. The 3 specific test-fixture probes were guesses that didn't hit real registered routes. **Non-issue for demo deploy verification.**
+
+### Discovered post-deploy: Issue 3 — Demo email setup (operator request, 2026-05-25 ~23:00 UTC)
+
+**Decision** (user): use existing `testuser1@spaarke.com` as demo send/receive mailbox + add `ralph.schroeder@spaarke.com` as additional approved sender. testuser1 is already a Power Apps user AND already a member of the existing `Spaarke Email Access` security group (`spaarke-central-email@spaarke.com`) used by dev. This is significant because it means **no new mailbox provisioning + no new security group is needed** — only NEW ApplicationAccessPolicies for the demo principals scoped to the existing group.
+
+#### Email config done by Claude (Azure layer)
+
+1. **Generated 2 HMAC signing keys** (48-byte base64) and stored in `sprk-demo-kv`:
+   - `communication-webhook-signing-key` — for `Communication__WebhookSigningKey` (Graph subscription HMAC)
+   - `Email-WebhookSigningKey` — for `EmailProcessing__WebhookSigningKey` (Dataverse Service Endpoint HMAC)
+   - Storing as KV secrets (vs plaintext like dev does) is the canonical pattern per [`auth-deployment-setup.md`](../../docs/guides/auth-deployment-setup.md) §3 — "Key Vault reference (preferred) or 48-byte base64 secret. Generate per env; never commit." **This is a hardening improvement over dev's current state.**
+
+2. **Looked up demo identifiers**:
+   - Demo BFF app reg AppId: `da03fe1a-4b1d-4297-a4ce-4b83cae498a9` (from `sprk-demo-kv:BFF-API-ClientId`)
+   - Demo SPE container ID: stored in `sprk-demo-kv:SPE-DefaultContainerId`
+   - Demo MI UAMI AppId: `b0ce4ca4-5360-4605-a0ef-d918140e77da` (created Phase 5 step 1)
+
+3. **Set 17 email-related App Settings** on demo:
+
+   **Communication module (outbound + Graph webhook in):**
+   ```
+   Communication__DefaultMailbox          = testuser1@spaarke.com
+   Communication__ArchiveContainerId      = @Microsoft.KeyVault(VaultName=sprk-demo-kv;SecretName=SPE-DefaultContainerId)
+   Communication__WebhookSigningKey       = @Microsoft.KeyVault(VaultName=sprk-demo-kv;SecretName=communication-webhook-signing-key)
+   Communication__ApprovedSenders__0__Email       = testuser1@spaarke.com
+   Communication__ApprovedSenders__0__DisplayName = Test User 1
+   Communication__ApprovedSenders__0__IsDefault   = true
+   Communication__ApprovedSenders__1__Email       = ralph.schroeder@spaarke.com
+   Communication__ApprovedSenders__1__DisplayName = Ralph Schroeder
+   Communication__ApprovedSenders__1__IsDefault   = false
+   ```
+
+   **EmailProcessing module (inbound webhook + polling backup):**
+   ```
+   EmailProcessing__Enabled                   = true
+   EmailProcessing__EnableWebhook             = true
+   EmailProcessing__EnablePolling             = true
+   EmailProcessing__PollingIntervalMinutes    = 5
+   EmailProcessing__AutoEnqueueAi             = false  (start conservative; flip to true when AI processing wanted)
+   EmailProcessing__AutoIndexToRag            = false  (RAG indexing is opt-in)
+   EmailProcessing__DefaultContainerId        = @Microsoft.KeyVault(VaultName=sprk-demo-kv;SecretName=SPE-DefaultContainerId)
+   EmailProcessing__WebhookSigningKey         = @Microsoft.KeyVault(VaultName=sprk-demo-kv;SecretName=Email-WebhookSigningKey)
+   ```
+
+4. **Restart + verify**: Demo healthz=200 post-config; zero errors after the 22:04:06 startup. `InboundPollingBackupService` now active and polling cleanly (2 accounts polled per 5-min cycle, 0 errors so far).
+
+#### Why polling shows 0 errors despite no Exchange policy yet
+
+The `InboundPollingBackupService` log shows "2 accounts polled, 0 messages found, 0 errors" — no 403s like dev's original symptom. Likely explanations: (a) polled accounts may not yet have triggered an app-only Graph call (only fires when there's actually mail to fetch), (b) account configuration uses delegated/OBO path which isn't subject to ApplicationAccessPolicy, or (c) some indirect path. The first app-only Graph mailbox call (e.g., POST `/api/communications/send`) will surface a 403 if Exchange policies aren't yet created. **This is expected and not a defect** — it just means we can't verify the auth path purely from polling logs.
+
+#### Operator runbook — MUST run to complete email setup
+
+##### Part A — Exchange Online ApplicationAccessPolicy (×2)
+
+Both policies are required per `auth-deployment-setup.md` §7. Each app-only principal (app reg + MI) needs its OWN policy.
+
+```powershell
+# Connect to Exchange Online as Exchange admin (MFA-friendly device-code flow)
+Install-Module ExchangeOnlineManagement -Scope CurrentUser   # first time only
+Connect-ExchangeOnline -UserPrincipalName admin@spaarke.com -ShowProgress $true
+
+# (Optional confirmation) verify testuser1 already in existing security group
+Get-DistributionGroupMember -Identity "spaarke-central-email@spaarke.com" |
+  Where-Object { $_.PrimarySmtpAddress -eq "testuser1@spaarke.com" }
+# Expected: returns testuser1's record (already true per operator)
+
+# (Recommended) also add ralph.schroeder to the group so app-only mail-as ralph works
+Add-DistributionGroupMember -Identity "spaarke-central-email@spaarke.com" `
+  -Member "ralph.schroeder@spaarke.com" -ErrorAction SilentlyContinue
+
+# Policy 1: Demo BFF app registration
+New-ApplicationAccessPolicy `
+  -AppId "da03fe1a-4b1d-4297-a4ce-4b83cae498a9" `
+  -PolicyScopeGroupId "spaarke-central-email@spaarke.com" `
+  -AccessRight RestrictAccess `
+  -Description "Spaarke BFF DEMO app reg — restrict app-only mailbox access to Spaarke Email Access group"
+
+# Policy 2: Demo App Service managed identity
+New-ApplicationAccessPolicy `
+  -AppId "b0ce4ca4-5360-4605-a0ef-d918140e77da" `
+  -PolicyScopeGroupId "spaarke-central-email@spaarke.com" `
+  -AccessRight RestrictAccess `
+  -Description "Spaarke BFF DEMO MI — restrict app-only mailbox access to Spaarke Email Access group"
+
+# Verify (should return Granted for all four)
+Test-ApplicationAccessPolicy -Identity "testuser1@spaarke.com"        -AppId "b0ce4ca4-5360-4605-a0ef-d918140e77da"
+Test-ApplicationAccessPolicy -Identity "testuser1@spaarke.com"        -AppId "da03fe1a-4b1d-4297-a4ce-4b83cae498a9"
+Test-ApplicationAccessPolicy -Identity "ralph.schroeder@spaarke.com"  -AppId "b0ce4ca4-5360-4605-a0ef-d918140e77da"
+Test-ApplicationAccessPolicy -Identity "ralph.schroeder@spaarke.com"  -AppId "da03fe1a-4b1d-4297-a4ce-4b83cae498a9"
+```
+
+**Propagation**: Microsoft documents up to 30 min between `New-ApplicationAccessPolicy` succeeding and Graph mailbox calls succeeding. `Test-ApplicationAccessPolicy` reflects state instantly; live Graph 403s may persist for ~15–30 min after policy creation.
+
+##### Part B — Dataverse Service Endpoint (for EmailProcessing webhook trigger)
+
+The HMAC signing key in `sprk-demo-kv:Email-WebhookSigningKey` must be configured on a Dataverse Service Endpoint that POSTs to the BFF email webhook URL. In **Power Platform Maker portal** for demo org (`spaarke-demo.crm.dynamics.com`):
+
+1. **Settings** → **Customizations** → **Customize the System** → **Service Endpoints** → **New** (or use `pacx` CLI / web API)
+2. **Name**: `Spaarke BFF Email Webhook (Demo)`
+3. **Endpoint URL**: `https://spaarke-bff-demo.azurewebsites.net/api/v1/emails/webhook-trigger`
+4. **Contract**: `WebHook`
+5. **Authentication Type**: `WebhookKey` (or `HttpHeader`)
+6. **Authentication Value**: the HMAC key
+   - Retrieve: `az keyvault secret show --vault-name sprk-demo-kv --name Email-WebhookSigningKey --query value -o tsv --subscription 2ff9ee48-6f1d-4664-865c-f11868dd1b50`
+7. **Save**
+
+Then register a Plugin Step on the relevant entity (Email or sprk_communication) to POST to this endpoint on Create. See dev's equivalent setup as the canonical reference.
+
+##### Part C — Microsoft Graph subscription (optional, programmatic)
+
+If push-notification webhooks from Microsoft Graph are desired (faster than the 5-min polling backup), the BFF's `GraphSubscriptionService` provisions them at runtime. No additional operator step required; this happens when the BFF first invokes the subscription creation flow.
+
+#### End-state when operator completes Parts A + B
+
+- `/api/communications/send` will succeed for `testuser1@spaarke.com` and `ralph.schroeder@spaarke.com` (provided either is the from-mailbox)
+- Inbound Graph webhooks delivered to `/api/communications/incoming-webhook` will be HMAC-validated and processed
+- Inbound Dataverse Service Endpoint webhooks delivered to `/api/v1/emails/webhook-trigger` will be validated and processed
+- The 5-min polling backup will continue as a safety net
+
+---
+
+### Out of scope (deferred to operator)
+
+1. **EXO PowerShell** for the 2 ApplicationAccessPolicies (Part A above) — only the operator with Exchange admin rights can run.
+2. **Dataverse Service Endpoint** creation on demo org (Part B above) — only the operator with Dataverse admin rights can configure.
+3. **Production deploy** (tasks 062 + 063) — out of scope per operator direction. When prod is done later, full prep needed:
+   - All Phase 5 demo prep (UAMI, Graph grants, Cosmos provisioning, ~30 App Settings)
+   - All Phase 5 demo email setup (HMAC keys in prod KV, 17 email App Settings)
+   - **Operator runbook from §3 (Parts A + B) repeated for prod**
 
 ---
 
