@@ -23,6 +23,9 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Changed
+- **`code-review` + `adr-check` now enforce CLAUDE.md §10 BFF Hygiene + `bff-extensions.md`** — closes the gap where the binding §10 rule was loaded as context but never explicitly checked. `adr-check` Step 2's quick-reference table adds ADR-013 (refined 2026-05-20); new Step 2.5 conditionally loads `bff-extensions.md` and applies its 5-rule pre-merge checklist when changed files touch `Sprk.Bff.Api/`, `Spaarke.Core/`, or `Spaarke.Dataverse/`. `code-review` Step 6 adds ADR-013 to its CRITICAL ADRs list; new Step 6.5 runs the same §10 checklist with explicit severity assignment (missing Placement Justification → Critical; new direct CRUD→AI dep → Critical; new HIGH-severity CVE → Critical). Both edits cite `bff-extensions.md` as the single source of truth — zero duplication of rule content.
+
 ### Added
 - `.claude/AUDIT-FINDINGS-CLAUDEMD.md` — Phase 3a audit of root `CLAUDE.md` against community best practices + Phase 0 inventory (75-section sign-off table + proposed skeleton + open questions). Commit `0c11cd43`.
 - `.claude/archive/2026-05-17/CLAUDE.md` — preserved copy of the 1190-line OLD root `CLAUDE.md` before Phase 3b rewrite (reversibility per NF-1).
