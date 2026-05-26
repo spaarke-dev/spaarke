@@ -45,6 +45,9 @@ Read in this order:
 3. **`knowledge/mcp-apps/approvals-box/`** — Closest pattern to Spaarke's redline review queue (risk-triaged approval queue, bulk actions).
 4. **`knowledge/mcp-apps/agents-toolkit-screenshots/`** — Visual reference for inline vs side-by-side rendering.
 5. **`knowledge/mcp-apps/docs/plugin-mcp-apps-ui-guidelines.md`** — Microsoft UX guidelines.
+6. **`.claude/patterns/ui/fluent-v9-component-authoring.md`** — Spaarke conventions for ANY Fluent v9 component (token-only colors, `makeStyles` at module scope, `mergeClasses` ordering, slot vs hook decision).
+7. **`.claude/patterns/ui/fluent-v9-portal-gotcha.md`** — MANDATORY if widget uses `Popover` / `Tooltip` / `Toast` / `Dialog` / `Menu`. Portals escape `FluentProvider` styling — re-wrap inside the portal surface or set `applyStylesToPortals` explicitly.
+8. Drill into `knowledge/fluent-ui-v9/docs/` only if a pattern's `→` link punts there; use [`knowledge/fluent-ui-v9/docs/INDEX.md`](../../../knowledge/fluent-ui-v9/docs/INDEX.md) to navigate.
 
 ### Step 2: Choose the rendering mode
 
