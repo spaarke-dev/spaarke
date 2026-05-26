@@ -86,7 +86,27 @@ export function determineStage(state: SessionState): PaneStage {
 
 ## Amendments
 
-*Reserved for future amendments. Task R4-016 (D-2) will append a "Heavy library handling" subsection covering singlefile-vs-lazy-import incompatibility (R3 bundle-size investigation).*
+### Heavy library handling (D-2 amendment, 2026-05-26)
+
+R3's bundle-size investigation surfaced a stage-lifecycle-adjacent constraint that this amendment codifies: **`vite-plugin-singlefile` (per ADR-026) inlines all `import()` dynamic imports**, so lazy-loading heavy libraries from a stage-loaded widget does NOT yield runtime bundle savings on Code Pages. The bundle is one file; widgets cannot meaningfully lazy-load their dependencies.
+
+**Why this matters for stage lifecycle**: Stage 2 (`loading`) and Stage 3 (`active-chat`) widgets cannot defer their heavy dependencies to a later stage — the dependencies are loaded with the singlefile bundle regardless of when the widget mounts.
+
+**Option 2 reference (deferred per OC-R4-04)**: The long-term mitigation is **separate web resources for heavy libraries** (e.g., a separate `sprk_pdfjs.js` deployed independently, loaded via `<script>` tag at first use). R3 investigated; R4 codifies the pattern in this ADR; **implementation is deferred indefinitely per OC-R4-04** — no implementation work is authorized by this amendment.
+
+### ✅ MUST (heavy library handling)
+- **MUST** recognize that `import()` inside Code Page bundles is NOT a runtime lazy-load — singlefile inlines it
+- **MUST** measure SpaarkeAi bundle-size delta on every task that adds a heavy dependency (NFR-08: ≤+50 KB gzip vs 918 KB baseline)
+
+### ❌ MUST NOT (heavy library handling)
+- **MUST NOT** assume `import()` defers download cost — it does not for Code Pages built with `vite-plugin-singlefile`
+- **MUST NOT** implement Option 2 (separate web resources) without a successor ADR amendment lifting the OC-R4-04 deferral
+
+**References**:
+- R3 bundle-size verification: [`projects/spaarke-ai-platform-unification-r3/notes/bundle-size-verification.md`](../../projects/spaarke-ai-platform-unification-r3/notes/bundle-size-verification.md)
+- R3 lazy-load verification (task 024): [`projects/spaarke-ai-platform-unification-r3/notes/perf/024-bundle-lazy.md`](../../projects/spaarke-ai-platform-unification-r3/notes/perf/024-bundle-lazy.md)
+- Cross-project assessment: [`docs/assessments/code-page-bundle-size-vs-singlefile-2026-05-20.md`](../../docs/assessments/code-page-bundle-size-vs-singlefile-2026-05-20.md)
+- ADR-026 (singlefile constraint source): [`ADR-026-full-page-custom-page-standard.md`](ADR-026-full-page-custom-page-standard.md)
 
 ---
 

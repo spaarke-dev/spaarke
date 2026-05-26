@@ -169,10 +169,64 @@ public class WorkspaceLayoutEndpointTests : IClassFixture<WorkspaceLayoutTestFix
         // System layouts appear first
         layouts[0].IsSystem.Should().BeTrue("first layout should be system");
         layouts[0].Name.Should().Be("Corporate Workspace");
+        // R4 task 053 (B-4): hard-coded system layouts have the Unix-epoch
+        // sentinel ModifiedOn since they never persist in Dataverse.
+        layouts[0].ModifiedOn.Should().Be(DateTimeOffset.UnixEpoch,
+            "hard-coded system layouts emit the Unix-epoch sentinel ModifiedOn");
 
-        // User layouts follow
+        // User layouts follow — and carry the test fixture's fixed modifiedon
+        // mapped from the Dataverse mock entity (B-4 FR-07 wire shape).
         layouts[1].IsSystem.Should().BeFalse();
         layouts[2].IsSystem.Should().BeFalse();
+        var expectedUserModifiedOn = new DateTimeOffset(
+            WorkspaceLayoutTestFixture.FixedModifiedOnUtc, TimeSpan.Zero);
+        layouts[1].ModifiedOn.Should().Be(expectedUserModifiedOn);
+        layouts[2].ModifiedOn.Should().Be(expectedUserModifiedOn);
+    }
+
+    /// <summary>
+    /// R4 task 053 (B-4 / FR-07): verifies the JSON wire shape — modifiedOn
+    /// is emitted as a camelCase ISO-8601 string. Raw-JSON inspection guards
+    /// against the field being silently dropped by serialization (e.g.,
+    /// JsonIgnore added by mistake) and against case-collision with C#'s
+    /// PascalCase property name.
+    /// </summary>
+    [Fact]
+    public async Task GetLayouts_Response_IncludesModifiedOnAsCamelCaseIso8601()
+    {
+        // Arrange
+        using var fixture = WorkspaceLayoutTestFixture.WithUserLayouts(1);
+        using var client = fixture.CreateAuthenticatedClient();
+
+        // Act
+        var response = await client.GetAsync("/api/workspace/layouts");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var rawJson = await response.Content.ReadAsStringAsync();
+
+        // Wire shape: camelCase `modifiedOn` (NOT `ModifiedOn`).
+        rawJson.Should().Contain("\"modifiedOn\"",
+            "BFF emits camelCase per the API JsonOptions convention");
+        rawJson.Should().NotContain("\"ModifiedOn\"",
+            "PascalCase would indicate JsonNamingPolicy was misconfigured");
+
+        // ISO-8601: parses round-trip without exception.
+        using var doc = JsonDocument.Parse(rawJson);
+        var layouts = doc.RootElement.EnumerateArray().ToArray();
+        layouts.Should().HaveCountGreaterOrEqualTo(2,
+            "1 system + 1 user layout in this scenario");
+        foreach (var element in layouts)
+        {
+            element.TryGetProperty("modifiedOn", out var modifiedOnProp)
+                .Should().BeTrue("every layout DTO must include modifiedOn");
+            modifiedOnProp.ValueKind.Should().Be(JsonValueKind.String);
+            var asString = modifiedOnProp.GetString();
+            asString.Should().NotBeNullOrWhiteSpace();
+            DateTimeOffset.TryParse(asString, out _).Should().BeTrue(
+                $"modifiedOn must be ISO-8601 parseable; got: {asString}");
+        }
     }
 
     [Fact]

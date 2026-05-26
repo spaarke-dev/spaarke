@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-05-26 (Wave 1.2 complete — Phase 1 now 9/9 docs done + 1 amendment pending; 031 operator gate still open)
+> **Last Updated**: 2026-05-26 (Wave 5.1 + 016 complete — Phase 1 100% done; Phase 5 Wave 1 done; 17 of 32 tasks ✅)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -13,7 +13,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (Wave 1.2 just completed — 012/013/017 + ADR renumbering 025→030, 026→031) |
+| **Task** | none (Wave 5.1 + 016 just completed — 4 parallel code-change sub-agents + main session ADR-031 amendment) |
 | **Step** | — |
 | **Status** | not-started — operator gate open on 031 (A-5b); awaiting decision on next wave |
 | **Next Action** | (1) Operator reviews `notes/tab-persistence-verification-2026-05.md` and confirms desired UX → then dispatch 031. (2) Choose next wave: Wave 1.2 (012/013/017 sequential `.claude/`) or Wave 4.1 (040 W-3 code change + deploy) or Phase 5 Wave 1 (050/051/053 parallel) |

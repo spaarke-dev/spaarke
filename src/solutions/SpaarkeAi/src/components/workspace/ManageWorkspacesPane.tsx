@@ -291,6 +291,13 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     fontStyle: "italic",
   },
+  // R4 task 053 (B-4 / FR-07): "Modified ..." metadata line beneath the
+  // workspace name. Same visual hierarchy as the systemHint above so the row
+  // density stays consistent.
+  modifiedHint: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+  },
   renameInput: {
     width: "100%",
   },
@@ -357,6 +364,52 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
   },
 });
+
+// ---------------------------------------------------------------------------
+// Modified-date formatting — R4 task 053 (B-4 / FR-07)
+//
+// The BFF emits `modifiedOn` as an ISO-8601 string (camelCase). We format
+// CLIENT-SIDE with locale-aware helpers — never on the server — so users in
+// different locales see the format they expect.
+//
+// Display rules:
+//   - "1970-01-01T00:00:00+00:00" (Unix-epoch sentinel from
+//     SystemWorkspaceLayouts.cs hard-coded layouts) → returns null. The row
+//     omits the modified line entirely (system layouts already carry a
+//     "System layout — Save As to edit" hint; a second metadata line would
+//     be redundant).
+//   - Unparseable / empty string → returns null. Defensive: don't render a
+//     broken date if the wire shape ever changes unexpectedly.
+//   - <60s ago → "Modified just now" (FR-07 acceptance criterion: new layouts
+//     surface "just now" or near-equivalent relative time).
+//   - <60m ago → "Modified Nm ago"
+//   - <24h ago → "Modified Nh ago"
+//   - <7d ago → "Modified Nd ago"
+//   - older → "Modified {locale short date}" (e.g., "Modified 5/26/2026")
+//
+// Mirrors the `formatRelative` helper in HistoryOverlay.tsx for visual
+// consistency across SpaarkeAi.
+// ---------------------------------------------------------------------------
+
+const UNIX_EPOCH_SENTINEL = 0;
+
+function formatModifiedOn(iso: string): string | null {
+  if (!iso) return null;
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return null;
+  // Unix-epoch sentinel = "system layout, never modified" → no display.
+  if (ts === UNIX_EPOCH_SENTINEL) return null;
+
+  const diffMs = Date.now() - ts;
+  if (diffMs < 60_000) return "Modified just now";
+  if (diffMs < 3_600_000)
+    return `Modified ${Math.floor(diffMs / 60_000)}m ago`;
+  if (diffMs < 86_400_000)
+    return `Modified ${Math.floor(diffMs / 3_600_000)}h ago`;
+  if (diffMs < 7 * 86_400_000)
+    return `Modified ${Math.floor(diffMs / 86_400_000)}d ago`;
+  return `Modified ${new Date(ts).toLocaleDateString()}`;
+}
 
 // ---------------------------------------------------------------------------
 // Wizard launch helper — Xrm.Navigation.navigateTo
@@ -843,6 +896,23 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
               System layout — Save As to edit
             </Text>
           )}
+          {/* R4 task 053 (B-4 / FR-07): "Modified ..." metadata line.
+            * Hidden for system layouts (their modifiedOn is the Unix-epoch
+            * sentinel — see formatModifiedOn) and during inline rename
+            * (less visual noise on the row that's being edited). */}
+          {!layout.isSystem &&
+            !isRenaming &&
+            (() => {
+              const modifiedLabel = formatModifiedOn(layout.modifiedOn);
+              return modifiedLabel ? (
+                <Text
+                  className={styles.modifiedHint}
+                  data-testid={`manage-modified-${layout.id}`}
+                >
+                  {modifiedLabel}
+                </Text>
+              ) : null;
+            })()}
         </div>
 
         {/* Three-dot (⋯) action menu */}

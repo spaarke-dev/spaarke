@@ -3,7 +3,7 @@
   <metadata>
     <title>B-4: Add WorkspaceLayoutDto.modifiedOn (BFF + frontend + Manage pane render)</title>
     <phase>Phase 5 — Substantive code changes</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>054</blocks>
@@ -139,6 +139,67 @@
     Verify frontend type location at task start: if task 051 (C-3 hook consolidation) lands first, the
     `WorkspaceLayout` type may have moved to `@spaarke/ai-widgets`. If 051 is still pending or in-flight,
     the type may be in SpaarkeAi-local types. Pick the right location at task start; do NOT duplicate.
+
+    === COMPLETION NOTES (2026-05-26) ===
+    Completed by parallel sub-agent in Wave F (alongside 050, 051, 040; main session on 016).
+    Code-only changes — DEPLOY NOT PERFORMED per parallel-wave guardrail (main session will batch deploys).
+
+    Files modified:
+      - src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceLayoutDtos.cs (ModifiedOn property added)
+      - src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceLayoutService.cs (SelectColumns + MapToDto +
+        ToOffset helper + Create/Update synthesized DTOs)
+      - src/server/api/Sprk.Bff.Api/Services/Workspace/SystemWorkspaceLayouts.cs (Unix-epoch sentinel)
+      - src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts (TS type)
+      - src/solutions/SpaarkeAi/src/components/workspace/ManageWorkspacesPane.tsx (formatModifiedOn helper +
+        "Modified ..." line in row; modifiedHint style)
+      - src/solutions/LegalWorkspace/src/hooks/useWorkspaceLayouts.ts (TS type + SYSTEM_DEFAULT_LAYOUT
+        literal)
+      - src/client/shared/Spaarke.AI.Widgets/src/hooks/useWorkspaceLayouts.ts (TS type — anticipates
+        task 051 C-3 consolidation in-flight)
+      - tests/unit/Sprk.Bff.Api.Tests/Integration/Workspace/WorkspaceLayoutTestFixture.cs (fixed
+        modifiedon seed)
+      - tests/unit/Sprk.Bff.Api.Tests/Integration/Workspace/WorkspaceLayoutEndpointTests.cs (added wire-
+        shape test + ModifiedOn assertions to existing test)
+
+    Build verification:
+      - dotnet build src/server/api/Sprk.Bff.Api/ — Build succeeded, 0 errors.
+      - dotnet publish -c Release linux-x64: 44 MB compressed (vs 60 MB NFR-01 ceiling).
+      - dotnet test for tests/unit/Sprk.Bff.Api.Tests: PRE-EXISTING compile errors in unrelated
+        EmbeddingMigrationService / AppOnlyDocumentAnalysisJobHandler / EmailAnalysisJobHandler tests
+        (verified on master tip by stash isolation). Workspace layout test code compiles cleanly; will run
+        once unrelated tests are fixed (out of scope for B-4).
+      - SpaarkeAi npm run build — Build succeeded, 0 errors.
+
+    CVE check (NFR-09): 0 new HIGH-severity findings. The Microsoft.Kiota.Abstractions HIGH (GHSA-7j59-v9qr-6fq9)
+    is a long-standing pre-existing issue documented in Sprk.Bff.Api/CLAUDE.md Package Management section.
+
+    §10 Placement Justification (for PR notes):
+      - Decision-criteria answers per .claude/constraints/bff-extensions.md:
+        (1) Latency budget against BFF state → YES (workspace layout list is the cold-load path).
+        (2) Writes BFF-managed session/audit/safety state → YES (Dataverse sprk_workspacelayout).
+        (3) Retroactive annotation of streaming response → N/A.
+        (4) Event-driven, no sync user wait → NO.
+        (5) Thin facade to external consumers → NO.
+      - 3 "BFF" answers; placement correct. Additive DTO field only — zero new endpoints / services / DI
+        registrations / NuGet packages. No new CRUD→AI dep. Endpoint surface unchanged. ADR-008 filter
+        pipeline unchanged. Publish-size delta ≈ 0 (one DateTimeOffset field).
+
+    Hooks left for task 054 (B-5):
+      - Server-side: `ModifiedOn` is on the wire; B-5 can use it directly as the ETag strong validator.
+        B-5 may want to re-read after Create/Update to obtain the canonical Dataverse rowversion (the
+        synthesized DTOs use DateTimeOffset.UtcNow as a placeholder for clarity — see Create/Update remarks
+        in WorkspaceLayoutService.cs). For ETag generation, an RFC 7232 strong validator like
+        `"W/\"{ticks}\""` or `"\"{base64(modifiedOn)}\""` against the persisted timestamp is recommended.
+      - Client-side: `modifiedOn` is already on the TS type; client code that sends If-Match can read
+        it directly from the cached layout. The MutationAuth payload in workspaceLayoutMutations.ts
+        does NOT currently echo modifiedOn — B-5 will likely add an `ifMatch?: string` option to the
+        Update payload helpers.
+      - Sentinel handling: hard-coded system layouts emit the Unix-epoch sentinel. B-5 should treat
+        system layouts (isSystem=true) as not-concurrency-controlled rather than synthesizing an ETag
+        from the sentinel (system layouts already reject PUT/DELETE with 403).
+
+    Quality gates (Step 9.5): self-review pass — no ADR violations; CLAUDE.md §10 satisfied; ADRs 001 /
+    008 / 010 / 013 / 021 / 022 / 028 / 029 honored.
   </notes>
 
   <execution>

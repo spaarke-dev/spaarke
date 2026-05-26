@@ -38,7 +38,12 @@ public sealed class WorkspaceLayoutService
         "sprk_sectionsjson",
         "sprk_isdefault",
         "sprk_sortorder",
-        "sprk_issystem"
+        "sprk_issystem",
+        // R4 task 053 (B-4 / FR-07): surface Dataverse-maintained modifiedon
+        // so the Manage Workspaces pane can render "Modified ..." per layout
+        // and so the future PATCH/If-Match concurrency surface (B-5 / task 054)
+        // can use it as a strong validator / ETag value.
+        "modifiedon"
     ];
 
     private readonly IGenericEntityService _entityService;
@@ -371,7 +376,14 @@ public sealed class WorkspaceLayoutService
                 SectionsJson = request.SectionsJson,
                 IsDefault = request.IsDefault,
                 SortOrder = maxSortOrder + 1,
-                IsSystem = false
+                IsSystem = false,
+                // R4 task 053 (B-4 / FR-07): Dataverse stamps modifiedon at
+                // create time; reflect that here without an extra round-trip.
+                // The next GET will return the canonical Dataverse-stored value
+                // (which may differ by ms but is semantically equivalent for
+                // FR-07's "Modified ..." rendering). B-5 (task 054) may
+                // round-trip to get the exact rowversion for ETag use.
+                ModifiedOn = DateTimeOffset.UtcNow
             }, null);
         }
         catch (Exception ex)
@@ -460,7 +472,12 @@ public sealed class WorkspaceLayoutService
                 SectionsJson = request.SectionsJson,
                 IsDefault = request.IsDefault,
                 SortOrder = existing.SortOrder,
-                IsSystem = false
+                IsSystem = false,
+                // R4 task 053 (B-4 / FR-07): Dataverse stamps modifiedon at
+                // update time; reflect that here without an extra round-trip.
+                // See CreateLayoutAsync remarks; B-5 (task 054) will likely
+                // re-read post-write to obtain the exact rowversion for ETag use.
+                ModifiedOn = DateTimeOffset.UtcNow
             }, null);
         }
         catch (Exception ex)
@@ -669,6 +686,17 @@ public sealed class WorkspaceLayoutService
     /// lets the client distinguish Dataverse system records (seeded by Wave
     /// 2a's deploy script) from user-owned records so the UI can disable
     /// Edit/Delete and the server can reject mutating writes against them.
+    ///
+    /// R4 task 053 (B-4 / FR-07): also surfaces <c>modifiedon</c> as
+    /// <see cref="WorkspaceLayoutDto.ModifiedOn"/>. Dataverse stores
+    /// <c>modifiedon</c> as a UTC <c>DateTime</c> with <c>Kind=Utc</c>; we
+    /// normalize it to a <see cref="DateTimeOffset"/> with zero offset. If the
+    /// attribute is missing or unset (defensive — should never happen on a
+    /// persisted record because Dataverse maintains the column automatically),
+    /// we emit <see cref="DateTimeOffset.MinValue"/> so the JSON serialization
+    /// is still well-formed ISO-8601 and downstream clients can treat it as
+    /// "unknown" without breaking. A non-zero ModifiedOn is the expected case
+    /// in production.
     /// </summary>
     private static WorkspaceLayoutDto MapToDto(Entity entity) => new()
     {
@@ -678,8 +706,30 @@ public sealed class WorkspaceLayoutService
         SectionsJson = entity.GetAttributeValue<string>("sprk_sectionsjson") ?? string.Empty,
         IsDefault = entity.GetAttributeValue<bool?>("sprk_isdefault") ?? false,
         SortOrder = entity.GetAttributeValue<int?>("sprk_sortorder"),
-        IsSystem = entity.GetAttributeValue<bool?>("sprk_issystem") ?? false
+        IsSystem = entity.GetAttributeValue<bool?>("sprk_issystem") ?? false,
+        ModifiedOn = ToOffset(entity.GetAttributeValue<DateTime?>("modifiedon"))
     };
+
+    /// <summary>
+    /// Normalizes a Dataverse <c>DateTime</c> to a UTC-anchored
+    /// <see cref="DateTimeOffset"/>. Dataverse columns of type "Date and Time"
+    /// come back with <c>Kind=Utc</c> already; this helper is defensive against
+    /// the <c>Kind=Unspecified</c> case (which can happen via test fakes) and
+    /// against null. Null → <see cref="DateTimeOffset.MinValue"/> (see MapToDto
+    /// remarks above for why null is "unknown" rather than "now").
+    /// </summary>
+    private static DateTimeOffset ToOffset(DateTime? value)
+    {
+        if (!value.HasValue)
+            return DateTimeOffset.MinValue;
+        var dt = value.Value;
+        return dt.Kind switch
+        {
+            DateTimeKind.Utc => new DateTimeOffset(dt, TimeSpan.Zero),
+            DateTimeKind.Local => new DateTimeOffset(dt.ToUniversalTime(), TimeSpan.Zero),
+            _ => new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc), TimeSpan.Zero),
+        };
+    }
 
     #endregion
 }

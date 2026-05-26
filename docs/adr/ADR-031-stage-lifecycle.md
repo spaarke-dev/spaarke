@@ -164,7 +164,61 @@ Recomputed stage may differ from persisted stage if the underlying data shifted 
 
 ## Amendments
 
-*Reserved for future amendments. Task R4-016 (D-2) will append a "Heavy library handling" subsection covering singlefile-vs-lazy-import incompatibility surfaced in the R3 bundle-size investigation.*
+### Heavy library handling (D-2 amendment, 2026-05-26)
+
+**Driver**: R4 task 016 / D-2 (per spec.md DR-05). **Scope cap**: amendment only — no implementation per **OC-R4-04**.
+
+#### The incompatibility
+
+R3's bundle-size investigation (referenced below) surfaced a stage-lifecycle-adjacent constraint with ADR-026 (Code Page Build Standard / Vite + `vite-plugin-singlefile` + React 19): **the singlefile plugin inlines all `import()` dynamic imports**, so any "lazy" import inside a stage-loaded widget is inlined into the singlefile bundle at build time. There is no runtime download deferral.
+
+Practical consequence for stage lifecycle:
+
+| Stage | Widget intent | Singlefile reality |
+|-------|---------------|---------------------|
+| 2 `loading` | "Defer heavy lib to active stage" | Already loaded at Stage 1 |
+| 3 `active-chat` | "Lazy-load on first widget use" | Already loaded with bundle |
+| 4 `review` | "Different widget per tab" | All widget code in one bundle |
+
+The stage lifecycle itself remains correct — stage TRANSITIONS are cheap (state machine). What is NOT cheap is the runtime download. Heavy libraries (>~50 KB gzip — e.g., PDF.js, mammoth.js, monaco, charting libs) cost their full size at first page load regardless of which stage uses them.
+
+#### Option 2 — separate web resources (deferred)
+
+R3 evaluated and documented "Option 2": deploy heavy libraries as **separate Code Page web resources** (e.g., `sprk_pdfjs.js` deployed independently), loaded via `<script>` tag at first widget use. This restores actual lazy loading at the cost of:
+- Build pipeline complexity (per-lib build + per-lib deploy)
+- Dataverse solution surface area (more web resources, more dependencies)
+- Runtime coordination (widget must wait for `<script>` load before use)
+
+**Per OC-R4-04, R4 does NOT implement Option 2.** This amendment codifies the option for future authors but does NOT authorize implementation work. Any future implementation requires a successor ADR amendment lifting the OC-R4-04 deferral.
+
+#### Alternatives considered (R3 investigation summary)
+
+1. **Tree-shake harder** — limited returns; heavy libs (PDF.js, mammoth) cannot be meaningfully tree-shaken to <50 KB
+2. **Vite code-split** — incompatible with `vite-plugin-singlefile` by design (the plugin's purpose is to produce one file)
+3. **Monorepo build splitting** — disruptive to the established Code Page deploy flow; conflicts with ADR-026's singlefile mandate
+4. **Accept-the-overrun** (Option 1 — R3 chose this) — accept the bundle-size budget exceedance for R3 scope; revisit when forcing function materializes
+5. **Option 2 — separate web resources** (this amendment's reference pattern, deferred per OC-R4-04)
+
+#### Stage-lifecycle implications (MUST / MUST NOT)
+
+**✅ MUST**:
+- Recognize that `import()` inside Code Page bundles is NOT a runtime lazy-load — singlefile inlines it
+- Measure SpaarkeAi bundle-size delta on every task that adds a heavy dependency (NFR-08 budget: ≤+50 KB gzip vs 918 KB R3 baseline)
+- Document bundle-size impact in task notes / PR description (per NFR-01 / F-3 publish-size rule, even though that rule is BFF-focused — the principle of per-task verification extends to the client bundle)
+
+**❌ MUST NOT**:
+- Assume `import()` defers download cost on Code Pages — it does not under `vite-plugin-singlefile`
+- Implement Option 2 (separate web resources) without a successor ADR amendment lifting the OC-R4-04 deferral
+- Add heavy dependencies (>50 KB gzip) to a widget without a documented bundle-size mitigation plan
+
+#### References
+
+- **R3 bundle-size verification (formal task 061 record)**: [`projects/spaarke-ai-platform-unification-r3/notes/bundle-size-verification.md`](../../projects/spaarke-ai-platform-unification-r3/notes/bundle-size-verification.md) — captures the Option 1 acceptance, the singlefile inlining caveat, and references upstream investigations
+- **R3 lazy-load verification (task 024)**: [`projects/spaarke-ai-platform-unification-r3/notes/perf/024-bundle-lazy.md`](../../projects/spaarke-ai-platform-unification-r3/notes/perf/024-bundle-lazy.md) — source-level lazy-load verification for `useChatFileAttachment` hook
+- **R3-local detailed investigation**: `projects/spaarke-ai-platform-unification-r3/notes/perf/bundle-size-investigation.md` (referenced from bundle-size-verification.md)
+- **Cross-project assessment**: [`docs/assessments/code-page-bundle-size-vs-singlefile-2026-05-20.md`](../assessments/code-page-bundle-size-vs-singlefile-2026-05-20.md) — exhaustive Options 1–5 analysis + cross-project recommendation
+- **ADR-026 (singlefile constraint source)**: [`ADR-026-full-page-custom-page-standard.md`](ADR-026-full-page-custom-page-standard.md) — the build standard whose `vite-plugin-singlefile` requirement creates this constraint
+- **OC-R4-04** (scope cap): [`projects/spaarke-ai-platform-unification-r4/spec.md#owner-clarifications`](../../projects/spaarke-ai-platform-unification-r4/spec.md#owner-clarifications) — "D-2 ADR amendment only; no implementation"
 
 ---
 

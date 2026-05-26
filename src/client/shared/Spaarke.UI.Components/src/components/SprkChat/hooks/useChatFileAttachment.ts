@@ -26,8 +26,10 @@
  *   - NFR-12: `pdfjs-dist` and `mammoth` MUST be dynamic `import()`'d inside
  *     `addFiles`, NEVER at module top-level. Each lib is loaded at most once
  *     per hook lifetime and memoized in a ref.
- *   - NFR-04 / FR-07 validation: max 5 files, max 10 MB per file, allowlist of
- *     4 MIME types, PDF max 200 pages.
+ *   - NFR-04 / FR-07 validation: max 5 files, max 25 MB per file, allowlist of
+ *     4 MIME types, PDF max 200 pages. (R4 task 050 / A-4: raised 10 → 25 MB
+ *     to align with DocumentUploadWizard + OfficeService standards. See
+ *     `docs/standards/CHAT-ATTACHMENT-POLICY.md` for rationale and upgrade path.)
  *   - FR-24 / OC-09: extraction failures emit an `Attachment.ExtractionFailure`
  *     error event with `mimeType`, `sizeBytes`, and `errorMessage`. No
  *     happy-path events.
@@ -135,8 +137,21 @@ export interface IUseChatFileAttachmentResult {
 /** FR-07: max 5 files per chat message. */
 export const MAX_ATTACHMENTS = 5;
 
-/** NFR-04: max 10 MB per file. */
-export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+/**
+ * NFR-04: max 25 MB per file.
+ *
+ * Raised from 10 MB to 25 MB in R4 task 050 (A-4) to align with
+ * `DocumentUploadWizard` and `OfficeService` (also 25 MB) — 25 MB is the
+ * established Spaarke binary-attachment standard. See
+ * `docs/standards/CHAT-ATTACHMENT-POLICY.md` for rationale, MIME allow-list,
+ * total-text cap policy, PDF page cap, and upgrade path.
+ *
+ * Note: server-side `MaxAttachmentTextCharsPerFile` (2.5M chars) and
+ * `MaxAttachmentTextCharsTotal` (5M chars) operate on EXTRACTED TEXT, not the
+ * raw binary — a 25 MB PDF typically extracts to <1M chars. They are not
+ * scaled with this change; see the policy doc for the rationale.
+ */
+export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 /** NFR-04: PDF page cap (additional constraint beyond size). */
 export const MAX_PDF_PAGES = 200;
@@ -366,7 +381,7 @@ export function useChatFileAttachment(
           continue;
         }
 
-        // (b) too-large — 10 MB per file
+        // (b) too-large — 25 MB per file (raised from 10 MB in R4 A-4)
         if (file.size > MAX_FILE_BYTES) {
           newErrors.push({
             id: idFactoryRef.current(),

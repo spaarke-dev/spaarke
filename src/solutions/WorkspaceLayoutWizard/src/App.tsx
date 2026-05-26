@@ -20,21 +20,18 @@
 import * as React from "react";
 import { FluentProvider } from "@fluentui/react-components";
 import { tokens, Text, Button } from "@fluentui/react-components";
+import { CheckmarkCircle24Regular, DeleteRegular } from "@fluentui/react-icons";
 import {
-  CheckmarkCircle24Regular,
-  CheckmarkCircleRegular,
-  RocketRegular,
-  DataBarVerticalRegular,
-  ClockRegular,
-  DocumentRegular,
-  DeleteRegular,
-} from "@fluentui/react-icons";
-import { WizardShell, getLayoutTemplate } from "@spaarke/ui-components";
+  WizardShell,
+  getLayoutTemplate,
+  SECTION_METADATA_CATALOG,
+} from "@spaarke/ui-components";
 import type {
   IWizardStepConfig,
   IWizardShellHandle,
   IWizardSuccessConfig,
   LayoutTemplateId,
+  SectionMetadata,
 } from "@spaarke/ui-components";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { TemplateStep, SectionStep, ArrangeStep, buildInitialAssignments } from "./steps";
@@ -81,51 +78,40 @@ interface AppProps {
 }
 
 // ---------------------------------------------------------------------------
-// Section catalog — inline constant matching the 5 registered sections.
-// In a production build this would be fetched from GET /api/workspace/sections.
+// Section catalog — DERIVED from `SECTION_METADATA_CATALOG` (shared single
+// source of truth in `@spaarke/ui-components`).
+//
+// R4 W-3 (task 040, 2026-05-26): replaced a hardcoded 5-entry array that had
+// drifted from the dashboard's `SECTION_REGISTRY` (Calendar + Daily Briefing
+// were missing). The wizard now picks up new registrations automatically as
+// long as a matching metadata entry exists in `sectionMetadataCatalog.ts`.
+//
+// The shape conversion is a near-identity: `SectionMetadata` IS a strict
+// subset of `SectionCatalogItem`. Only the `category` field requires the
+// shared `SectionCategory` union to align — which it does, both shapes
+// reference the same type from `@spaarke/ui-components`.
 // ---------------------------------------------------------------------------
 
-const SECTION_CATALOG: SectionCatalogItem[] = [
-  {
-    id: "get-started",
-    label: "Get Started",
-    description: "Quick-action cards for common workflows",
-    category: "overview",
-    icon: RocketRegular,
-  },
-  {
-    id: "quick-summary",
-    label: "Quick Summary",
-    description: "Key metrics at a glance",
-    category: "overview",
-    icon: DataBarVerticalRegular,
-  },
-  {
-    id: "latest-updates",
-    label: "Latest Updates",
-    description: "Recent activity feed with flagging",
-    category: "data",
-    icon: ClockRegular,
-    defaultHeight: "325px",
-  },
-  {
-    id: "todo",
-    label: "My To Do List",
-    description: "Embedded smart to-do list with flag sync",
-    category: "productivity",
-    icon: CheckmarkCircleRegular,
-    defaultHeight: "560px",
-  },
-  {
-    id: "documents",
-    label: "My Documents",
-    description: "Recent documents with quick actions",
-    category: "data",
-    icon: DocumentRegular,
-  },
-];
+const SECTION_CATALOG: SectionCatalogItem[] = SECTION_METADATA_CATALOG.map(
+  (meta: SectionMetadata): SectionCatalogItem => ({
+    id: meta.id,
+    label: meta.label,
+    description: meta.description,
+    category: meta.category,
+    icon: meta.icon,
+    defaultHeight: meta.defaultHeight,
+  }),
+);
 
-/** Default section IDs — all 5 sections selected by default. */
+/**
+ * Default section IDs — all registered sections selected by default.
+ *
+ * NOTE: pre-R4 this set was hardcoded to 5 IDs and was used as the initial
+ * `selectedSectionIds` state for the create flow. With 7 sections now in the
+ * catalog, the wizard's small-template flows may select MORE than the
+ * available slots; the existing `selectedCount > slotCount` warning in
+ * `SectionStep` already covers that UX. No additional change needed.
+ */
 const DEFAULT_SECTION_IDS = new Set(SECTION_CATALOG.map((s) => s.id));
 
 // ---------------------------------------------------------------------------

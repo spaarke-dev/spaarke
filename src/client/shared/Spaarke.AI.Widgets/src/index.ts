@@ -314,6 +314,28 @@ registerContextWidget('findings', {
 });
 
 // ---------------------------------------------------------------------------
+// Hooks: useWorkspaceLayouts (R4 task 051 / C-3 — consolidated workspace-layouts hook)
+//
+// Single shared-lib hook replacing the two divergent copies that previously
+// lived in src/solutions/LegalWorkspace/src/hooks/useWorkspaceLayouts.ts and
+// src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts. Both consumers
+// now import from here per FR-13 + ADR-012 (shared lib) + ADR-028 (function-
+// based auth, injected deps).
+// ---------------------------------------------------------------------------
+
+export {
+  useWorkspaceLayouts,
+  invalidateLayoutCache,
+} from './hooks/useWorkspaceLayouts';
+export type {
+  WorkspaceLayoutDto,
+  WorkspaceLoadingStatus,
+  AuthenticatedFetch,
+  UseWorkspaceLayoutsOptions,
+  UseWorkspaceLayoutsResult,
+} from './hooks/useWorkspaceLayouts';
+
+// ---------------------------------------------------------------------------
 // Providers: AiSessionProvider (R2 session state + PaneEventBus routing)
 // ---------------------------------------------------------------------------
 

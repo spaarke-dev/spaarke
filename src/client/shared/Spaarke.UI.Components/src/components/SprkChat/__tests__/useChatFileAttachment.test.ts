@@ -120,7 +120,7 @@ describe('useChatFileAttachment', () => {
       expect(tooMany[0].message).toMatch(/Maximum 5/);
     });
 
-    it('rejects a >10 MB file with too-large error', async () => {
+    it('rejects a >25 MB file with too-large error (R4 A-4: raised from 10 MB)', async () => {
       const { result } = renderHook(() => useChatFileAttachment());
 
       const oversize = makeFile('huge.txt', 'text/plain', 'tiny', MAX_FILE_BYTES + 1);
@@ -133,6 +133,57 @@ describe('useChatFileAttachment', () => {
       const tooLarge = result.current.errors.filter((e) => e.reason === 'too-large');
       expect(tooLarge).toHaveLength(1);
       expect(tooLarge[0].filename).toBe('huge.txt');
+      // Error message must reference the 25 MB limit
+      expect(tooLarge[0].message).toMatch(/25 MB/);
+    });
+
+    it('locks MAX_FILE_BYTES at 25 MB (R4 A-4 acceptance criterion)', () => {
+      // Lock the constant value. A change here is a breaking change for the
+      // attachment-policy contract; the test must be updated alongside any
+      // policy doc revision.
+      expect(MAX_FILE_BYTES).toBe(25 * 1024 * 1024);
+    });
+
+    describe('R4 A-4 boundary cases (FR-04 acceptance — 1 / 10 / 24 / 25 / 26 MB)', () => {
+      const ONE_MB = 1 * 1024 * 1024;
+      const TEN_MB = 10 * 1024 * 1024;
+      const TWENTYFOUR_MB = 24 * 1024 * 1024;
+      const TWENTYFIVE_MB = 25 * 1024 * 1024;
+      const TWENTYSIX_MB = 26 * 1024 * 1024;
+
+      it.each([
+        ['1 MB', ONE_MB],
+        ['10 MB', TEN_MB],
+        ['24 MB', TWENTYFOUR_MB],
+        ['25 MB (boundary == cap)', TWENTYFIVE_MB],
+      ])('accepts a %s file (under or at cap)', async (_label, sizeBytes) => {
+        const { result } = renderHook(() => useChatFileAttachment());
+        const file = makeFile('within-cap.txt', 'text/plain', 'content', sizeBytes);
+
+        await act(async () => {
+          await result.current.addFiles([file]);
+        });
+
+        expect(
+          result.current.errors.filter((e) => e.reason === 'too-large'),
+        ).toHaveLength(0);
+        // Chip should be accepted (status ready after text extraction)
+        expect(result.current.files).toHaveLength(1);
+      });
+
+      it('rejects a 26 MB file (just over cap) with clear error', async () => {
+        const { result } = renderHook(() => useChatFileAttachment());
+        const file = makeFile('over-cap.txt', 'text/plain', 'content', TWENTYSIX_MB);
+
+        await act(async () => {
+          await result.current.addFiles([file]);
+        });
+
+        expect(result.current.files).toHaveLength(0);
+        const tooLarge = result.current.errors.filter((e) => e.reason === 'too-large');
+        expect(tooLarge).toHaveLength(1);
+        expect(tooLarge[0].message).toMatch(/25 MB/);
+      });
     });
 
     it('rejects unsupported MIME types', async () => {

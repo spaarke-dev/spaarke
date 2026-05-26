@@ -287,8 +287,18 @@ public class WorkspaceLayoutTestFixture : WorkspaceTestFixture
     // =========================================================================
 
     /// <summary>
+    /// A deterministic <c>modifiedon</c> value used by every mock layout entity
+    /// so tests can assert exact wire serialization (ISO-8601, UTC). Chosen as
+    /// "2026-05-26T10:00:00Z" — a stable, recognizable timestamp.
+    /// </summary>
+    public static readonly DateTime FixedModifiedOnUtc =
+        new(2026, 5, 26, 10, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>
     /// Creates a Dataverse Entity matching the sprk_workspacelayout schema.
     /// Includes ownerid set to the test user so ownership checks pass.
+    /// R4 task 053 (B-4): also seeds <c>modifiedon</c> so MapToDto's
+    /// <see cref="WorkspaceLayoutDto.ModifiedOn"/> mapping is exercised.
     /// </summary>
     private static Entity CreateLayoutEntity(
         Guid id,
@@ -304,6 +314,10 @@ public class WorkspaceLayoutTestFixture : WorkspaceTestFixture
         entity["sprk_sectionsjson"] = sectionsJson;
         entity["sprk_isdefault"] = isDefault;
         entity["sprk_sortorder"] = sortOrder;
+        // R4 task 053 (B-4 / FR-07): Dataverse maintains modifiedon
+        // automatically; tests inject a fixed value so wire-shape assertions
+        // are deterministic.
+        entity["modifiedon"] = FixedModifiedOnUtc;
 
         // Set ownerid to the test user so ownership verification passes.
         // WorkspaceLayoutService checks ownerid against the authenticated user's "oid" claim.
