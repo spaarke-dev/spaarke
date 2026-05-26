@@ -689,9 +689,13 @@ The `InboundPollingBackupService` log shows "2 accounts polled, 0 messages found
 Both policies are required per `auth-deployment-setup.md` §7. Each app-only principal (app reg + MI) needs its OWN policy.
 
 ```powershell
-# Connect to Exchange Online as Exchange admin (MFA-friendly device-code flow)
+# Connect to Exchange Online (sign in with any Exchange Administrator account in the browser)
 Install-Module ExchangeOnlineManagement -Scope CurrentUser   # first time only
-Connect-ExchangeOnline -UserPrincipalName admin@spaarke.com -ShowProgress $true
+Connect-ExchangeOnline -ShowProgress $true
+# NOTE: do NOT pass -UserPrincipalName unless you're certain you'll sign in with
+# that exact account; mismatch between -UserPrincipalName and the browser-selected
+# account fails with "Admin account chosen for authentication is different".
+# Without -UserPrincipalName the cmdlet accepts whatever account you sign in with.
 
 # (Optional confirmation) verify testuser1 already in existing security group
 Get-DistributionGroupMember -Identity "spaarke-central-email@spaarke.com" |

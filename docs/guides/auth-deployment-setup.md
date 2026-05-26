@@ -439,8 +439,12 @@ The recommended pattern: maintain a **mail-enabled security group** (suggested n
 # One-time install
 Install-Module ExchangeOnlineManagement -Scope CurrentUser
 
-# Connect as Exchange admin (device code flow recommended for MFA accounts)
-Connect-ExchangeOnline -UserPrincipalName admin@{customer-tenant} -ShowProgress $true
+# Connect (sign in with any Exchange Administrator account in the browser)
+Connect-ExchangeOnline -ShowProgress $true
+# WARNING: do NOT pass -UserPrincipalName unless you'll sign in with that exact
+# account in the browser. Mismatch fails with "Admin account chosen for
+# authentication is different from the one provided as parameter". Omitting it
+# accepts whatever account you sign in with — simpler and avoids that error.
 ```
 
 ### Step 7b — Create the scope group (if it doesn't exist)
