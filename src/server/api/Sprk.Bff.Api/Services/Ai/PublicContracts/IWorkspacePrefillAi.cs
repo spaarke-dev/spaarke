@@ -40,7 +40,13 @@ public interface IWorkspacePrefillAi
     /// <param name="cancellationToken">Cancellation token. Pair with a timeout — pre-fill
     /// has a 45 s upper bound in the current MatterPreFillService impl.</param>
     /// <returns>Stream of <see cref="PlaybookStreamEvent"/> events.</returns>
-    IAsyncEnumerable<PlaybookStreamEvent> ExecutePreFillPlaybookAsync(
+    /// <remarks>
+    /// Despite the facade name <c>IWorkspacePrefillAi</c>, this method is a generic playbook-execution
+    /// wrapper used by workspace-domain consumers including AI summary (<c>WorkspaceAiService</c>),
+    /// matter pre-fill, and project pre-fill. The facade name reflects its origin in the pre-fill flow;
+    /// the method itself is playbook-agnostic.
+    /// </remarks>
+    IAsyncEnumerable<PlaybookStreamEvent> ExecutePlaybookAsync(
         PlaybookRunRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken = default);

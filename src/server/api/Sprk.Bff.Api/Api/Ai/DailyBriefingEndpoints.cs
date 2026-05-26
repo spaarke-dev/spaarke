@@ -57,12 +57,21 @@ public static class DailyBriefingEndpoints
     /// </summary>
     private static async Task<IResult> Summarize(
         DailyBriefingSummaryRequest request,
-        IBriefingAi briefingAi,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IBriefingAi? briefingAi = null)
     {
         var logger = loggerFactory.CreateLogger("DailyBriefingEndpoints");
+
+        // Fail fast when AI is disabled — daily briefing has no non-AI fallback.
+        if (briefingAi is null)
+        {
+            return Results.Problem(
+                statusCode: 503,
+                title: "Service Unavailable",
+                detail: "Daily briefing requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable.");
+        }
 
         // Validate request has at least some data to summarize
         if (request.Categories.Length == 0 && request.PriorityItems.Length == 0)
@@ -170,12 +179,21 @@ public static class DailyBriefingEndpoints
     /// </summary>
     private static async Task<IResult> HandleNarrate(
         DailyBriefingNarrateRequest request,
-        IBriefingAi briefingAi,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IBriefingAi? briefingAi = null)
     {
         var logger = loggerFactory.CreateLogger("DailyBriefingEndpoints");
+
+        // Fail fast when AI is disabled — daily briefing has no non-AI fallback.
+        if (briefingAi is null)
+        {
+            return Results.Problem(
+                statusCode: 503,
+                title: "Service Unavailable",
+                detail: "Daily briefing requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable.");
+        }
 
         // Empty-payload tolerance: the frontend `useDailyBriefing` hook may send a request
         // with all collections empty when the user has no notifications, no priority items,

@@ -99,6 +99,25 @@ public static class ConfigurationModule
             .Bind(configuration.GetSection(Sprk.Bff.Api.Services.Ai.Foundry.BingGroundingOptions.SectionName))
             .ValidateDataAnnotations();
 
+        // Workspace options — pre-fill / AI summary playbook IDs used by MatterPreFillService,
+        // ProjectPreFillService, and WorkspaceAiService. All properties are nullable with code-side
+        // fallbacks to hardcoded defaults, so validation is deferred (no ValidateOnStart) and the
+        // app starts cleanly when the "Workspace" section is absent.
+        services
+            .AddOptions<WorkspaceOptions>()
+            .Bind(configuration.GetSection(WorkspaceOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // SharePoint Embedded options — StagingContainerId used by pre-fill services (matter/project)
+        // for staged file uploads. Nullable with code-side fallback (in-memory text extraction when
+        // unset), so binding succeeds even when the "SharePointEmbedded" section is absent.
+        services
+            .AddOptions<SharePointEmbeddedOptions>()
+            .Bind(configuration.GetSection(SharePointEmbeddedOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         // Custom validation for conditional requirements
         services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
         services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();

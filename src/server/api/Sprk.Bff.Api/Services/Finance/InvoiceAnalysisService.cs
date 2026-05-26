@@ -22,9 +22,9 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// Classification uses gpt-4o-mini (fast, cost-effective) for binary invoice/not-invoice decisions.
 /// Extraction uses gpt-4o (accurate) for detailed structured data extraction from invoice text.
 /// </remarks>
-public class InvoiceAnalysisService : IInvoiceAnalysisService
+public sealed class InvoiceAnalysisService : IInvoiceAnalysisService
 {
-    private readonly IInvoiceAi _invoiceAi;
+    private readonly IInvoiceAi? _invoiceAi;
     private readonly FinanceOptions _options;
     private readonly ILogger<InvoiceAnalysisService> _logger;
 
@@ -41,14 +41,23 @@ public class InvoiceAnalysisService : IInvoiceAnalysisService
     internal const string ExtractionPlaybookName = "FinanceExtraction";
 
     public InvoiceAnalysisService(
-        IInvoiceAi invoiceAi,
         IOptions<FinanceOptions> options,
-        ILogger<InvoiceAnalysisService> logger)
+        ILogger<InvoiceAnalysisService> logger,
+        IInvoiceAi? invoiceAi = null)
     {
-        _invoiceAi = invoiceAi ?? throw new ArgumentNullException(nameof(invoiceAi));
+        _invoiceAi = invoiceAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
         _options = options.Value;
         _logger = logger;
     }
+
+    /// <summary>
+    /// Returns the AI facade or throws if AI features are disabled. Invoice analysis has no
+    /// non-AI fallback — when AI is disabled, callers should treat the throw as the expected
+    /// "feature disabled" signal (the endpoint or job handler will surface a 503 / dead-letter).
+    /// </summary>
+    private IInvoiceAi RequireAi() =>
+        _invoiceAi ?? throw new InvalidOperationException(
+            "Invoice analysis requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable.");
 
     /// <inheritdoc />
     public async Task<ClassificationResult> ClassifyAttachmentAsync(
@@ -62,7 +71,7 @@ public class InvoiceAnalysisService : IInvoiceAnalysisService
             documentText.Length);
 
         // 1. Load classification playbook prompt from Dataverse (ADR-014) via IInvoiceAi facade
-        var playbook = await _invoiceAi.GetPlaybookByNameAsync(ClassificationPlaybookName, ct);
+        var playbook = await RequireAi().GetPlaybookByNameAsync(ClassificationPlaybookName, ct);
         var systemPrompt = playbook.Description
             ?? throw new InvalidOperationException(
                 $"Playbook '{ClassificationPlaybookName}' has no description (system prompt).");
@@ -88,7 +97,7 @@ public class InvoiceAnalysisService : IInvoiceAnalysisService
         };
 
         // 3. Call structured completion with classification schema via IInvoiceAi facade
-        var result = await _invoiceAi.GetStructuredCompletionAsync<ClassificationResult>(
+        var result = await RequireAi().GetStructuredCompletionAsync<ClassificationResult>(
             messages,
             FinanceJsonSchemas.ClassificationResultSchema,
             nameof(ClassificationResult),
@@ -118,7 +127,7 @@ public class InvoiceAnalysisService : IInvoiceAnalysisService
             documentText.Length, reviewerHints is not null);
 
         // 1. Load extraction playbook prompt from Dataverse (ADR-014) via IInvoiceAi facade
-        var playbook = await _invoiceAi.GetPlaybookByNameAsync(ExtractionPlaybookName, ct);
+        var playbook = await RequireAi().GetPlaybookByNameAsync(ExtractionPlaybookName, ct);
         var systemPrompt = playbook.Description
             ?? throw new InvalidOperationException(
                 $"Playbook '{ExtractionPlaybookName}' has no description (system prompt).");
@@ -158,7 +167,7 @@ public class InvoiceAnalysisService : IInvoiceAnalysisService
         };
 
         // 3. Call structured completion with extraction schema via IInvoiceAi facade
-        var result = await _invoiceAi.GetStructuredCompletionAsync<ExtractionResult>(
+        var result = await RequireAi().GetStructuredCompletionAsync<ExtractionResult>(
             messages,
             FinanceJsonSchemas.ExtractionResultSchema,
             nameof(ExtractionResult),

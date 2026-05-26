@@ -16,7 +16,7 @@ public sealed class WorkspacePrefillAi : IWorkspacePrefillAi
     }
 
     /// <inheritdoc />
-    public IAsyncEnumerable<PlaybookStreamEvent> ExecutePreFillPlaybookAsync(
+    public IAsyncEnumerable<PlaybookStreamEvent> ExecutePlaybookAsync(
         PlaybookRunRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)

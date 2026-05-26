@@ -161,12 +161,27 @@ public static class WorkspaceMatterEndpoints
 
     private static async Task HandleAiSummary(
         AiSummaryRequest request,
-        IBriefingAi briefingAi,
         HttpContext httpContext,
         ILogger<Program> logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        IBriefingAi? briefingAi = null)
     {
         var response = httpContext.Response;
+
+        // Fail fast when AI is disabled — matter AI summary has no non-AI fallback.
+        if (briefingAi is null)
+        {
+            response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            response.ContentType = "application/problem+json";
+            await response.WriteAsync(
+                JsonSerializer.Serialize(new
+                {
+                    title = "Service Unavailable",
+                    status = 503,
+                    detail = "Matter AI summary requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable."
+                }, JsonOptions), ct);
+            return;
+        }
 
         if (string.IsNullOrWhiteSpace(request?.MatterName))
         {

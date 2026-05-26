@@ -19,10 +19,10 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 /// <see cref="IInvoiceAi"/> facade per FR-E2 part 3 (task 049).
 /// Follows ADR-015: No content logging (IDs only).
 /// </summary>
-public class InvoiceIndexingJobHandler : IJobHandler
+public sealed class InvoiceIndexingJobHandler : IJobHandler
 {
     private readonly SearchIndexClient _searchIndexClient;
-    private readonly IInvoiceAi _invoiceAi;
+    private readonly IInvoiceAi? _invoiceAi;
     private readonly IDocumentDataverseService _documentService;
     private readonly TextExtractorService _textExtractorService;
     private readonly FinanceTelemetry _telemetry;
@@ -41,19 +41,28 @@ public class InvoiceIndexingJobHandler : IJobHandler
 
     public InvoiceIndexingJobHandler(
         SearchIndexClient searchIndexClient,
-        IInvoiceAi invoiceAi,
         IDocumentDataverseService documentService,
         TextExtractorService textExtractorService,
         FinanceTelemetry telemetry,
-        ILogger<InvoiceIndexingJobHandler> logger)
+        ILogger<InvoiceIndexingJobHandler> logger,
+        IInvoiceAi? invoiceAi = null)
     {
         _searchIndexClient = searchIndexClient ?? throw new ArgumentNullException(nameof(searchIndexClient));
-        _invoiceAi = invoiceAi ?? throw new ArgumentNullException(nameof(invoiceAi));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _textExtractorService = textExtractorService ?? throw new ArgumentNullException(nameof(textExtractorService));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _invoiceAi = invoiceAi; // Nullable: when AI is disabled, RequireAi() throws → job is dead-lettered → operator can re-enable AI and re-enqueue.
     }
+
+    /// <summary>
+    /// Returns the AI facade or throws if AI features are disabled. Embedding generation
+    /// for invoice indexing has no non-AI fallback — if the throw escapes, the job will be
+    /// dead-lettered (acceptable: operator can re-enable AI and retry).
+    /// </summary>
+    private IInvoiceAi RequireAi() =>
+        _invoiceAi ?? throw new InvalidOperationException(
+            "Invoice indexing requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable.");
 
     public string JobType => JobTypeName;
 
@@ -119,7 +128,7 @@ public class InvoiceIndexingJobHandler : IJobHandler
             {
                 try
                 {
-                    embedding = await _invoiceAi.GenerateEmbeddingAsync(
+                    embedding = await RequireAi().GenerateEmbeddingAsync(
                         documentText,
                         model: "text-embedding-3-large",
                         dimensions: 3072,

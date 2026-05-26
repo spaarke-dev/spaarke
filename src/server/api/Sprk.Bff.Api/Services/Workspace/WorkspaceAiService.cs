@@ -29,9 +29,9 @@ namespace Sprk.Bff.Api.Services.Workspace;
 ///
 /// TODO (future tasks): Replace mock Dataverse fetch with real IDataverseService queries.
 /// </remarks>
-public class WorkspaceAiService
+public sealed class WorkspaceAiService
 {
-    private readonly IWorkspacePrefillAi _prefillAi;
+    private readonly IWorkspacePrefillAi? _prefillAi;
     private readonly IGenericEntityService _genericEntityService;
     private readonly IDocumentDataverseService _documentService;
     private readonly ILogger<WorkspaceAiService> _logger;
@@ -56,18 +56,27 @@ public class WorkspaceAiService
     /// Initializes a new instance of <see cref="WorkspaceAiService"/>.
     /// </summary>
     public WorkspaceAiService(
-        IWorkspacePrefillAi prefillAi,
         IGenericEntityService genericEntityService,
         IDocumentDataverseService documentService,
         ILogger<WorkspaceAiService> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IWorkspacePrefillAi? prefillAi = null)
     {
-        _prefillAi = prefillAi ?? throw new ArgumentNullException(nameof(prefillAi));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _prefillAi = prefillAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
     }
+
+    /// <summary>
+    /// Returns the AI facade or throws if AI features are disabled. Workspace AI summaries
+    /// have no non-AI fallback path — when AI is disabled, the endpoint surface should treat
+    /// the throw as the expected "feature disabled" signal.
+    /// </summary>
+    private IWorkspacePrefillAi RequireAi() =>
+        _prefillAi ?? throw new InvalidOperationException(
+            "Workspace AI summaries require AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable.");
 
     /// <summary>
     /// Generates an AI summary for the specified entity using the AI Playbook platform.
@@ -330,7 +339,7 @@ public class WorkspaceAiService
 
         try
         {
-            await foreach (var evt in _prefillAi.ExecutePreFillPlaybookAsync(playbookRequest, httpContext, timeoutCts.Token))
+            await foreach (var evt in RequireAi().ExecutePlaybookAsync(playbookRequest, httpContext, timeoutCts.Token))
             {
                 if (evt.Type == PlaybookEventType.NodeCompleted && evt.NodeOutput != null)
                 {
