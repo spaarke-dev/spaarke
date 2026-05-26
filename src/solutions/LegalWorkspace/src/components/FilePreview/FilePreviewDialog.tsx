@@ -317,7 +317,7 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   const handleSendEmail = React.useCallback(async (payload: ISendEmailPayload) => {
     const emailAddress = extractEmailFromUserName(payload.to.name);
     const response = await authenticatedFetch(
-      `${getBffBaseUrl()}/communications/send`,
+      `${getBffBaseUrl()}/api/communications/send`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
