@@ -536,10 +536,10 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 **Deployment Sequence:**
 | # | Script Called | Web Resource |
 |---|-------------|--------------|
-| 1 | `Deploy-CorporateWorkspace.ps1` | `sprk_corporateworkspace` (HTML) |
+| 1 | ~~`Deploy-CorporateWorkspace.ps1`~~ | ~~`sprk_corporateworkspace` (HTML)~~ — **RETIRED 2026-05-26** (R4 task 041 / OC-R4-05; see [`docs/architecture/LEGALWORKSPACE-RETIREMENT.md`](../docs/architecture/LEGALWORKSPACE-RETIREMENT.md)) |
 | 2 | `Deploy-ExternalWorkspaceSpa.ps1` | `sprk_externalworkspace` (HTML + inline JS) |
 | 3 | `Deploy-SpeAdminApp.ps1` | `sprk_speadmin` (HTML) |
-| 4 | `Deploy-WizardCodePages.ps1` | 12 wizard/code page web resources |
+| 4 | `Deploy-WizardCodePages.ps1` | 12 wizard/code page web resources (note: `sprk_corporateworkspace` entry retired — see above) |
 | 5 | `Deploy-EventsPage.ps1` | `sprk_eventspage.html` |
 | 6 | `Deploy-PCFWebResources.ps1` | PCF bundle.js + CSS |
 | 7 | `Deploy-RibbonIcons.ps1` | 3 SVG ribbon icons |

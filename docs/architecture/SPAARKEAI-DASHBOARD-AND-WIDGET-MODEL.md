@@ -311,7 +311,7 @@ If you cannot answer these clearly, re-read §2 and §4. The two wrappers are in
 
 ### 7.2 Operational guides
 
-- [`../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md`](../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md) — step-by-step tutorial. §1 decision tree maps to this doc's §6 walk-through. **R4 W-2 rewrites the guide with terminology aligned to this doc.**
+- [`../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md`](../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md) — **operator-side companion to this doc, rewritten in R4 W-2 (2026-05-26) around the two-wrapper decision tree codified here.** §1 of the guide is the wrapper-and-archetype decision tree; §4 is the Calendar (Pattern D dual-use) worked example; §8 is the anti-patterns list ("do not invent a third wrapper", "do not duplicate section code"). Read this model doc first, then the guide for hands-on implementation.
 - [`../guides/SHARED-UI-COMPONENTS-GUIDE.md`](../guides/SHARED-UI-COMPONENTS-GUIDE.md) — `@spaarke/ui-components` consumption guide.
 
 ### 7.3 ADRs

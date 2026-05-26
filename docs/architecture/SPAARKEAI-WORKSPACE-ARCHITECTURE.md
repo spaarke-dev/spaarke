@@ -3,6 +3,8 @@
 > **Purpose**: End-to-end reference for the SpaarkeAi three-pane shell as it stands after Round 13 (Calendar widget polish + all-panes-collapsed empty state + 25/50/25 pane fracs). Documents the cold-load → widget render data flow, component boundaries, auth path, BFF surface, and storage contract.
 >
 > **Last reviewed**: 2026-05-22 (Task 123, Round 13). Refreshed from task 113 (Round 9) to cover R10–R13 deltas. Periodic review required — this file does NOT auto-update.
+>
+> **R4 update (2026-05-26)**: The standalone LegalWorkspace code page (`sprk_corporateworkspace` web resource) has been **retired** per operator decision OC-R4-05. LegalWorkspace components, `LegalWorkspaceApp`, and all shared libraries remain in active use — SpaarkeAi is now the only host. See [`LEGALWORKSPACE-RETIREMENT.md`](./LEGALWORKSPACE-RETIREMENT.md) for the retirement decision, consumer audit, and migration guidance.
 
 ---
 

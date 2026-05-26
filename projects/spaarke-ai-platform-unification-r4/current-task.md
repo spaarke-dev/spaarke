@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-05-26 (Wave 1.1 complete; handoff to user)
+> **Last Updated**: 2026-05-26 (Wave 1.5 complete; handoff to user; 031 operator gate open)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -13,23 +13,31 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (Wave 1.1 just completed) |
+| **Task** | none (Wave 1.5 just completed — 5 parallel agents) |
 | **Step** | — |
-| **Status** | not-started — awaiting operator decision on next wave |
-| **Next Action** | Choose next wave. Wave 1.2 (012/013/017 sequential — `.claude/` boundary) OR Wave 1.3 (011/015 parallel after 010 ✅) |
+| **Status** | not-started — operator gate open on 031 (A-5b); awaiting decision on next wave |
+| **Next Action** | (1) Operator reviews `notes/tab-persistence-verification-2026-05.md` and confirms desired UX → then dispatch 031. (2) Choose next wave: Wave 1.2 (012/013/017 sequential `.claude/`) or Wave 4.1 (040 W-3 code change + deploy) or Phase 5 Wave 1 (050/051/053 parallel) |
 
 ### Files Modified This Session
 
-- `projects/spaarke-ai-platform-unification-r4/` — full pipeline scaffold (spec, README, plan, CLAUDE.md, current-task, tasks/) committed in `929980d1`
-- `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` — NEW (352 lines, task 010 / W-1)
-- `docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md` — §10 cross-link + §11 changelog entry (task 010)
-- `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` — NEW (~257 lines, task 014 / C-1)
-- `CLAUDE.md` (root) — §16 pointer for DATA-ACCESS-DECISION-CRITERIA.md (task 014); §16 pointer for SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md (main session)
-- `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md` — 001, 002, 010, 014 → ✅
+- `projects/spaarke-ai-platform-unification-r4/` — pipeline scaffold committed in `929980d1`
+- Wave 1.1 (commit `cd1198a4`): W-1 dashboard model + C-1 data access criteria
+- Wave 1.5 (this commit, pending): W-2 guide rewrite + C-2 embedded contract + F-2 audit + A-5a verify + W-6 retirement
+  - `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` — rewritten (599 lines, task 011)
+  - `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` — NEW (359 lines, task 015)
+  - `docs/architecture/LEGALWORKSPACE-RETIREMENT.md` — NEW (157 lines, task 041)
+  - `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` — §7.2 reciprocal cross-link refreshed (task 011)
+  - `docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md` — retirement doc cross-link added (task 041)
+  - `projects/spaarke-ai-platform-unification-r4/notes/bff-ai-facade-audit-2026-05.md` — NEW (~155 lines, task 020)
+  - `projects/spaarke-ai-platform-unification-r4/notes/tab-persistence-verification-2026-05.md` — NEW (243 lines, task 030)
+  - `projects/spaarke-ai-platform-unification-r4/notes/lw-consumer-audit-2026-05.md` — NEW (119 lines, task 041)
+  - `scripts/Deploy-CorporateWorkspace.ps1`, `Deploy-WizardCodePages.ps1`, `Deploy-AllWebResources.ps1`, `README.md` — retirement guards added (task 041)
+  - `CLAUDE.md` (root) — §16 pointers for embedded contract, retirement doc, updated W-2 guide (main session)
+  - `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md` — 011, 015, 020, 030, 041 → ✅; 031 → ⏸ operator gate
 
 ### Critical Context
 
-R4 has 34 IN items across 8 phases. **Phase 0 done** (commit `4a877b1e` predated the pipeline; tasks 001+002 marked ✅). **Wave 1.1 done** (tasks 010 + 014). Remaining Phase 1 work: Wave 1.2 (012 ADR-025 + 013 ADR-026 + 017 publish-size — all `.claude/` boundary, MUST run sequentially in main session) and Wave 1.3 (011 W-2 + 015 C-2 — parallel, depend on 010 which is now ✅).
+R4 has 34 IN items across 8 phases. Progress: **9 of 32 tasks done** (28%) — Phase 0 (commit `4a877b1e`), Wave 1.1 (010, 014), Wave 1.5 (011, 015, 020, 030, 041). Two operator gates open: (1) **031 A-5b** awaits operator UX confirmation per 030's verification memo — recommended path is `chatSessionId` sessionStorage→localStorage promotion (~3-5h); (2) **W-6 self-reference**: `src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx:432` has `Xrm.Navigation.navigateTo` to `sprk_corporateworkspace?mode=todo` — will 404 post-retirement; migration deferred to follow-up task. Dataverse-side consumer audit (Default Solution forms/sitemap) also needs operator validation. Major win in 020: BFF facade audit found **0 direct CRUD→AI injections** (vs baseline of 20 — substantively clean under §10).
 
 ---
 

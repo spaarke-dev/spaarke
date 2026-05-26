@@ -26,18 +26,18 @@
 | 001 | E-1 R3 project wrap-up | 0 | ✅ | E-1 / PR-01 | STANDARD | none | A / ✅ |
 | 002 | F-1 BFF placement-justification retroactive memo | 0 | ✅ | F-1 / NFR-02 | STANDARD | none | A / ✅ |
 | 010 | W-1 Write SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md | 1 | ✅ | W-1 / DR-01 | STANDARD | none | B / ✅ |
-| 011 | W-2 Rewrite BUILD-A-NEW-WORKSPACE-WIDGET.md | 1 | 🔲 | W-2 / DR-02 | STANDARD | 010 ✅ | — / ❌ (deps) |
+| 011 | W-2 Rewrite BUILD-A-NEW-WORKSPACE-WIDGET.md | 1 | ✅ | W-2 / DR-02 | STANDARD | 010 ✅ | — / ❌ (deps) |
 | 012 | A-2a Author ADR-025 (PaneEventBus) | 1 | 🔲 | A-2a / DR-04 | STANDARD | none | — / ❌ (`.claude/`) |
 | 013 | A-2b Author ADR-026 (stage lifecycle) | 1 | 🔲 | A-2b / DR-04 | STANDARD | none | — / ❌ (`.claude/`) |
 | 014 | C-1 Write DATA-ACCESS-DECISION-CRITERIA.md | 1 | ✅ | C-1 / DR-06 | STANDARD | none | B / ✅ |
-| 015 | C-2 Write LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md | 1 | 🔲 | C-2 / DR-07 | STANDARD | 010 ✅ | — / ❌ (deps) |
+| 015 | C-2 Write LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md | 1 | ✅ | C-2 / DR-07 | STANDARD | 010 ✅ | — / ❌ (deps) |
 | 016 | D-2 Amend ADR-026 heavy library handling | 1 | 🔲 | D-2 / DR-05 | STANDARD | 013 | — / ❌ (`.claude/` + deps) |
 | 017 | F-3 Document publish-size baseline rule | 1 | 🔲 | F-3 / NFR-01 | STANDARD | none | — / ❌ (`.claude/` + CLAUDE.md) |
-| 020 | F-2 BFF facade audit | 2 | 🔲 | F-2 / NFR-03 | STANDARD | none | — / ✅ |
-| 030 | A-5a Verify tab persistence | 3 | 🔲 | A-5a / FR-05 | STANDARD | none | — / ✅ |
-| 031 | A-5b Fix tab persistence | 3 | 🔲 | A-5b / FR-05 | FULL | 030 | — / ❌ (deps) |
+| 020 | F-2 BFF facade audit | 2 | ✅ | F-2 / NFR-03 | STANDARD | none | — / ✅ |
+| 030 | A-5a Verify tab persistence | 3 | ✅ | A-5a / FR-05 | STANDARD | none | — / ✅ |
+| 031 | A-5b Fix tab persistence | 3 | 🔲 ⏸ operator gate | A-5b / FR-05 | FULL | 030 ✅ | — / ❌ (deps + operator gate) |
 | 040 | W-3 Fix WorkspaceLayoutWizard catalog drift | 4 | 🔲 | W-3 / FR-01 | FULL | none | D / ✅ |
-| 041 | W-6 Document LegalWorkspace retirement | 4 | 🔲 | W-6 / DR-03 | STANDARD | none | D / ✅ |
+| 041 | W-6 Document LegalWorkspace retirement | 4 | ✅ | W-6 / DR-03 | STANDARD | none | D / ✅ |
 | 042 | W-4 Wire Assistant → Workspace mount source | 4 | 🔲 | W-4 / FR-02 | FULL | 010, 040 | — / ❌ (deps) |
 | 043 | W-5 Wire Context → Workspace mount source | 4 | 🔲 | W-5 / FR-03 | FULL | 010 | E / ✅ (with 042 coord) |
 | 050 | A-4 Attachment policy + raise cap to 25 MB | 5 | 🔲 | A-4 / FR-04 | FULL | none | F / ✅ |

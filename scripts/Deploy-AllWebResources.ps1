@@ -4,7 +4,9 @@
 
 .DESCRIPTION
     Orchestrator script that calls individual deploy scripts in sequence:
-      1. Deploy-CorporateWorkspace.ps1    — sprk_corporateworkspace (HTML)
+      1. [RETIRED] Deploy-CorporateWorkspace.ps1  — sprk_corporateworkspace (HTML)
+         Retired 2026-05-26 (R4 task 041 / OC-R4-05).
+         See docs/architecture/LEGALWORKSPACE-RETIREMENT.md.
       2. Deploy-ExternalWorkspaceSpa.ps1  — sprk_externalworkspace (HTML + inline JS)
       3. Deploy-SpeAdminApp.ps1           — sprk_speadmin (HTML)
       4. Deploy-WizardCodePages.ps1       — 12 wizard/code page web resources
@@ -60,12 +62,15 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 # Component definitions — order matters (deploy sequence)
 # ---------------------------------------------------------------------------
 $components = @(
-    @{
-        Name       = 'CorporateWorkspace'
-        Script     = 'Deploy-CorporateWorkspace.ps1'
-        Desc       = 'sprk_corporateworkspace (HTML)'
-        Args       = @{ DataverseUrl = $DataverseUrl }
-    },
+    # RETIRED 2026-05-26 (R4 task 041 / OC-R4-05) — sprk_corporateworkspace web resource no longer deployed.
+    # See docs/architecture/LEGALWORKSPACE-RETIREMENT.md. Deploy-CorporateWorkspace.ps1 also has an
+    # early-exit guard as a belt-and-braces backup if this comment is reverted accidentally.
+    # @{
+    #     Name       = 'CorporateWorkspace'
+    #     Script     = 'Deploy-CorporateWorkspace.ps1'
+    #     Desc       = 'sprk_corporateworkspace (HTML) — RETIRED'
+    #     Args       = @{ DataverseUrl = $DataverseUrl }
+    # },
     @{
         Name       = 'ExternalWorkspaceSpa'
         Script     = 'Deploy-ExternalWorkspaceSpa.ps1'
