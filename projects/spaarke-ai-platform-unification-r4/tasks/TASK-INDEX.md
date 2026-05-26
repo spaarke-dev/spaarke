@@ -1,7 +1,7 @@
 # R4 Task Index
 
 > **Project**: spaarke-ai-platform-unification-r4
-> **Total tasks**: 32 (31 work tasks + 1 wrap-up)
+> **Total tasks**: 33 (32 work tasks + 1 wrap-up; task 044 added 2026-05-26 as W-6 follow-up per operator decision)
 > **Created**: 2026-05-26 via `/project-pipeline` → `/task-create`
 > **Sources**: [`spec.md`](../spec.md) (FRs/NFRs/DRs/PRs) + [`plan.md`](../plan.md) (WBS) + [`plan.original.md`](../plan.original.md) (authoritative WBS detail)
 
@@ -35,11 +35,12 @@
 | 017 | F-3 Document publish-size baseline rule | 1 | ✅ | F-3 / NFR-01 | STANDARD | none | — / ❌ (`.claude/` + CLAUDE.md) |
 | 020 | F-2 BFF facade audit | 2 | ✅ | F-2 / NFR-03 | STANDARD | none | — / ✅ |
 | 030 | A-5a Verify tab persistence | 3 | ✅ | A-5a / FR-05 | STANDARD | none | — / ✅ |
-| 031 | A-5b Fix tab persistence | 3 | 🔲 ⏸ operator gate | A-5b / FR-05 | FULL | 030 ✅ | — / ❌ (deps + operator gate) |
+| 031 | A-5b Fix tab persistence (Path A: chatSessionId+playbookId → localStorage) | 3 | 🔲 (operator gate resolved 2026-05-26 — Path A approved) | A-5b / FR-05 | FULL | 030 ✅ | — / ❌ (deps; was operator-gated) |
 | 040 | W-3 Fix WorkspaceLayoutWizard catalog drift | 4 | ✅ | W-3 / FR-01 | FULL | none | D / ✅ |
 | 041 | W-6 Document LegalWorkspace retirement | 4 | ✅ | W-6 / DR-03 | STANDARD | none | D / ✅ |
-| 042 | W-4 Wire Assistant → Workspace mount source | 4 | 🔲 | W-4 / FR-02 | FULL | 010, 040 | — / ❌ (deps) |
-| 043 | W-5 Wire Context → Workspace mount source | 4 | 🔲 | W-5 / FR-03 | FULL | 010 | E / ✅ (with 042 coord) |
+| 042 | W-4 Wire Assistant → Workspace mount source | 4 | 🔲 | W-4 / FR-02 | FULL | 010 ✅, 040 ✅ | — / ❌ (deps) |
+| 043 | W-5 Wire Context → Workspace mount source | 4 | 🔲 | W-5 / FR-03 | FULL | 010 ✅ | E / ✅ (with 042 coord) |
+| 044 | W-6 follow-up: inline ToDo modal (operator-gated → resolved 2026-05-26) | 4 | 🔲 | (new — W-6 consumer fix) | FULL | 041 ✅ | — / ✅ (independent) |
 | 050 | A-4 Attachment policy + raise cap to 25 MB | 5 | ✅ (code only — deploy deferred) | A-4 / FR-04 | FULL | none | F / ✅ |
 | 051 | C-3 Consolidate dual useWorkspaceLayouts hooks | 5 | ✅ (code only — deploy deferred) | C-3 / FR-13 | FULL | none | F / ✅ |
 | 052 | C-4 WorkspaceRenderer interface | 5 | 🔲 | C-4 / FR-14 | FULL | 051 | — / ❌ (deps) |

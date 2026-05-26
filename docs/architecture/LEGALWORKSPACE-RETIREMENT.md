@@ -140,9 +140,13 @@ The scripts were NOT deleted. The guard approach was preferred over rename-to-de
 
 ## 8. Open follow-ups (operator)
 
-1. **Dataverse-side dependency validation** in `spaarkedev1` (and any other deployed environment) — see §4 last bullet.
-2. **Migration of `WorkspaceGrid.tsx:432` navigateTo** — pick Option A/B/C/D per audit note §4.1.
-3. **Eventual `sprk_corporateworkspace` web-resource deletion** in Dataverse — currently only the deploy is retired; the deployed copy persists in the environment until operator removes it. Recommend leaving it deployed until the §8.2 migration ships, so the navigateTo doesn't 404 silently while the migration is in flight.
+1. **Dataverse-side dependency validation** in `spaarkedev1` (and any other deployed environment) — **operator-owned audit** (2026-05-26 operator decision: operator runs this in maker UI). Procedure:
+   - Log into `spaarkedev1` maker (`https://make.powerapps.com/`)
+   - Default Solution → Web Resources → `sprk_corporateworkspace` → "Show Dependencies"
+   - Export Sitemap; grep for `corporateworkspace`
+   - 0 references → retirement complete. References found → file follow-up tasks per affected component.
+2. **Migration of `WorkspaceGrid.tsx:432` navigateTo** — **RESOLVED 2026-05-26**: Option A (inline ToDo modal in SpaarkeAi shell) selected per operator decision. Filed as R4 task 044 (`044-w6-followup-inline-todo-modal.poml`). See task POML for migration plan + acceptance criteria.
+3. **Eventual `sprk_corporateworkspace` web-resource deletion** in Dataverse — currently only the deploy is retired; the deployed copy persists in the environment until operator removes it. Recommend leaving it deployed until task 044 ships (so the navigateTo doesn't 404 silently while the migration is in flight).
 4. **Bundle size budget** — once the deploy is gone, the LegalWorkspace bundle measurement at `~589 KB gzip` becomes informational only. Track it during R4 transition, then drop from the budget table in plan.original.md once stable.
 
 ## 9. Cross-references

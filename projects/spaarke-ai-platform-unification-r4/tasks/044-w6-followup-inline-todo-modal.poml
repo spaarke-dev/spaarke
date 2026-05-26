@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>W-6 follow-up: replace WorkspaceGrid.tsx:432 navigateTo with inline ToDo modal in SpaarkeAi</title>
+    <phase>4: Workspace builder + mount sources</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>041</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, react, fluent-ui, refactoring, e2e-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Replaces a runtime navigation handler with new inline modal component. Tags include 'frontend' and 'react'; modifies .tsx code; introduces a new modal component; affects user-visible behavior. FULL per Step 3.5.5 decision tree.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches WorkspaceGrid.tsx (LegalWorkspace) + new modal in SpaarkeAi. No `.claude/` paths. Independent of other Phase 4/5 work.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Filed 2026-05-26 as a W-6 follow-up after task 041's consumer audit found
+    `src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx:432`
+    still calls `Xrm.Navigation.navigateTo` to `sprk_corporateworkspace?mode=todo`
+    (the "Open To Do Dialog" handler). Per W-6 the standalone corporate
+    workspace page is retired and would 404. Operator decision 2026-05-26:
+    **replace with an inline ToDo modal rendered within the SpaarkeAi shell**
+    (consistent with the SpaarkeAi-is-host framing from W-1 / DR-01).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. UX-aware refactor: the new modal should preserve
+    the existing ToDo behavior the standalone page provided (same data shape,
+    same filters, same actions) but render inline. No new domain logic — just
+    component placement migration.
+  </role>
+
+  <goal>
+    `WorkspaceGrid.tsx:432` no longer invokes `Xrm.Navigation.navigateTo` to
+    `sprk_corporateworkspace`. Instead, opens a new SpaarkeAi modal component
+    that renders the equivalent ToDo experience. The new modal is a self-
+    contained React component in `@spaarke/legal-workspace` (or `SpaarkeAi`
+    if context-specific) using Fluent v9 Dialog/Drawer primitives. Behavior
+    parity with the retired page. No new BFF endpoint or service.
+  </goal>
+
+  <context>
+    <background>
+      W-6 retired the standalone `sprk_corporateworkspace` Code Page deploy
+      (2026-05-26 commit `b50a6b53`). The consumer audit (`notes/lw-consumer-audit-2026-05.md`)
+      found one source-code reference that would 404 post-retirement.
+      This task migrates that one consumer.
+
+      Operator decision (OC-R4 follow-up, 2026-05-26): use an inline modal in
+      the SpaarkeAi shell rather than removing the link entirely or building a
+      compatibility shim. Rationale: preserves user-visible ToDo functionality;
+      consistent with W-1's two-wrapper model (Direct widget wrapper category);
+      avoids forcing the user out of the SpaarkeAi shell.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx</file>
+      <file>src/client/shared/Spaarke.legal-workspace/src/</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/</file>
+      <file>docs/architecture/LEGALWORKSPACE-RETIREMENT.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/lw-consumer-audit-2026-05.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Modal component should be context-agnostic — place in `@spaarke/legal-workspace` or `@spaarke/ui-components` if reusable, NOT solution-local unless genuinely SpaarkeAi-specific.</constraint>
+    <constraint source="ADR-021">Use Fluent v9 Dialog/Drawer primitives + tokens only — no hex, no v8.</constraint>
+    <constraint source="ADR-022">React 19 only (Code Pages context).</constraint>
+    <constraint source="ADR-028">If the modal makes any BFF calls (likely needed for ToDo CRUD), use `authenticatedFetch` from `@spaarke/auth`.</constraint>
+    <constraint source="project">Behavior parity with retired page — same ToDo list shape, same filters, same actions. Do NOT introduce new domain logic in this task.</constraint>
+    <constraint source="project">No new BFF endpoints or services. The retired page used existing endpoints (Xrm.WebApi or BFF); the new modal calls the same endpoints.</constraint>
+    <constraint source="project">No new direct injections of `IOpenAiClient` or `IPlaybookService` (per F-2 facade rule; refined ADR-013) — if the modal uses BFF AI features, route through `PublicContracts/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/lw-consumer-audit-2026-05.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-RETIREMENT.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read current handler">Read `WorkspaceGrid.tsx:432` and surrounding context (~40 lines). Understand what data the "Open ToDo Dialog" handler currently passes via the navigate URL (e.g., `?mode=todo` params).</step>
+    <step order="2" name="Inspect what the retired page rendered">Inspect (read-only) the now-retired `sprk_corporateworkspace` page source for the `?mode=todo` branch. Capture: data fetch, filters, actions, UI surface. This is the behavior to preserve.</step>
+    <step order="3" name="Design modal component">Decide modal placement (`@spaarke/legal-workspace` if reusable; SpaarkeAi-local if context-specific). Sketch props + state surface. Use Fluent v9 `<Dialog>` or `<Drawer>` primitive.</step>
+    <step order="4" name="Implement modal">Build the modal component. Behavior parity (data fetch + filters + actions). Use existing hooks/services where possible (no new BFF endpoints).</step>
+    <step order="5" name="Wire WorkspaceGrid handler">Replace the `Xrm.Navigation.navigateTo` call at line 432 with modal-open logic. State management for modal open/close.</step>
+    <step order="6" name="Tests">Add unit test for the handler change. Add UI test (per Step 3.65) covering modal open, data render, close.</step>
+    <step order="7" name="Build verify">`npm run build` on `@spaarke/legal-workspace` (if modal lives there), LegalWorkspace solution, SpaarkeAi solution. 0 errors.</step>
+    <step order="8" name="Update task status">Update tasks/TASK-INDEX.md: task 044 → ✅ completed.</step>
+    <step order="9" name="Document">Update `docs/architecture/LEGALWORKSPACE-RETIREMENT.md` if needed — note that the one consumer audit found by 041 is now resolved. Cross-reference this task.</step>
+    <step order="10" name="Deviations">Document any deviations in `projects/spaarke-ai-platform-unification-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing handler + retired page source</tool>
+    <tool name="Edit">Modify WorkspaceGrid.tsx</tool>
+    <tool name="Write">New modal component</tool>
+    <tool name="npm">Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.legal-workspace/src/ToDoModal.tsx (or similar — new modal component)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx (handler updated)</output>
+    <output type="test">Unit test for handler change + UI test for modal</output>
+    <output type="docs">docs/architecture/LEGALWORKSPACE-RETIREMENT.md (updated — consumer resolved)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="ToDo Modal Opens">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Open SpaarkeAi → embedded LegalWorkspace</step>
+        <step>Trigger the "Open ToDo Dialog" action (was the navigate handler at WorkspaceGrid.tsx:432)</step>
+        <step>Verify modal opens inline (no navigation away from SpaarkeAi)</step>
+        <step>Verify ToDo list data renders</step>
+        <step>Verify filters work (same as retired page)</step>
+        <step>Close modal; verify SpaarkeAi shell intact</step>
+      </steps>
+      <expected>Modal opens inline; ToDo behavior matches pre-retirement page; SpaarkeAi shell preserved</expected>
+    </test>
+    <test name="Dark Mode (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Open ToDo Modal</step>
+        <step>Verify all colors adapt (no hex, no white-in-dark)</step>
+      </steps>
+      <expected>Modal uses Fluent v9 semantic tokens; dark mode parity</expected>
+    </test>
+    <test name="No 404">
+      <steps>
+        <step>Open browser DevTools Network tab</step>
+        <step>Open ToDo Modal</step>
+        <step>Verify no requests to `sprk_corporateworkspace` (would 404 post-retirement)</step>
+      </steps>
+      <expected>No legacy URL requests; W-6 retirement complete</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">`WorkspaceGrid.tsx:432` no longer contains `Xrm.Navigation.navigateTo` to `sprk_corporateworkspace`.</criterion>
+    <criterion testable="true">New modal component exists; opens from the same handler trigger; renders the same ToDo data as the retired page.</criterion>
+    <criterion testable="true">Behavior parity verified: same filters, same actions, same data shape.</criterion>
+    <criterion testable="true">Build clean: 0 errors on LegalWorkspace + SpaarkeAi + any shared lib touched.</criterion>
+    <criterion testable="true">UI tests pass (modal opens; dark mode parity; no legacy URL requests).</criterion>
+    <criterion testable="true">`docs/architecture/LEGALWORKSPACE-RETIREMENT.md` updated to note this consumer is resolved.</criterion>
+    <criterion testable="true">No new BFF endpoints, services, DI registrations, or NuGet packages introduced (per CLAUDE.md §10).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Task filed 2026-05-26 as W-6 follow-up. 041 marked retirement decision and updated deploy scripts; 044 closes the one source-code consumer that would otherwise 404.
+
+    Per operator decision (2026-05-26): inline modal preferred over (a) removing the link, (b) compatibility shim, (c) deferring to R5.
+
+    If the retired page's `?mode=todo` source can't be located (it's the retired sprk_corporateworkspace page — may no longer be in the active source tree), inspect git history for the most recent deployed version OR consult the Dataverse maker for the deployed web resource source.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor — code change + UI tests + ADR compliance gates. Apply Step 9.5 (code-review + adr-check) on modified files.</protocol>
+  </execution>
+</task>

@@ -16,7 +16,7 @@
 | **Task** | none (Wave 5.1 + 016 just completed — 4 parallel code-change sub-agents + main session ADR-031 amendment) |
 | **Step** | — |
 | **Status** | not-started — operator gate open on 031 (A-5b); awaiting decision on next wave |
-| **Next Action** | (1) Operator reviews `notes/tab-persistence-verification-2026-05.md` and confirms desired UX → then dispatch 031. (2) Choose next wave: Wave 1.2 (012/013/017 sequential `.claude/`) or Wave 4.1 (040 W-3 code change + deploy) or Phase 5 Wave 1 (050/051/053 parallel) |
+| **Next Action** | Operator gates all resolved (2026-05-26): 031 unblocked (Path A — chatSessionId+playbookId → localStorage); W-6 source consumer fix filed as new task 044 (inline ToDo modal); W-6 DV audit owned by operator (procedure in LW retirement doc §8.1); deploys deferred to Phase 7 wrap-up batch. Dispatching next parallel wave. |
 
 ### Files Modified This Session
 
@@ -75,6 +75,11 @@ R4 has 34 IN items across 8 phases. Progress: **9 of 32 tasks done** (28%) — P
 - **2026-05-26**: Step 4 (branch creation) skipped — Reason: Already on `work/spaarke-ai-platform-unification-r4` worktree branch. R3 precedent applies.
 - **2026-05-26**: Tasks 001 + 002 marked ✅ retroactively — Reason: Completed in commit `4a877b1e` (2026-05-26 morning) prior to pipeline run. Operator confirmed skipping verify-and-amend re-run.
 - **2026-05-26**: Wave 1.1 executed via 2 parallel `general-purpose` sub-agents invoking task-execute — completed cleanly. Main session reconciled TASK-INDEX + CLAUDE.md root pointer (sub-agents instructed to defer TASK-INDEX writes to avoid race condition).
+- **2026-05-26 (operator gate resolution batch)**: All 4 deferred items resolved:
+  - **Deploys**: Defer to Phase 7 wrap-up batch (avoid mid-project redeploy churn)
+  - **031 A-5b** unblocked: Path A approved (promote `chatSessionId` + `playbookId` from sessionStorage → localStorage with one-shot migration). Per 030's verification memo §7.2.
+  - **W-6 source consumer** (`WorkspaceGrid.tsx:432` navigateTo): Inline ToDo modal in SpaarkeAi shell — Filed as new task 044
+  - **W-6 DV audit**: Operator-owned (procedure documented in `docs/architecture/LEGALWORKSPACE-RETIREMENT.md` §8.1)
 
 ---
 
