@@ -1,8 +1,8 @@
 # Spaarke AI Platform Unification R3
 
-> **Last Updated**: 2026-05-20
+> **Last Updated**: 2026-05-26
 >
-> **Status**: In Progress
+> **Status**: ✅ Complete
 
 ## Overview
 
@@ -23,11 +23,13 @@ This project reshapes the welcome state of the SpaarkeAi three-pane code page (A
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Implementation |
-| **Progress** | 0% (planning artifacts complete; tasks pending generation) |
+| **Phase** | ✅ Complete |
+| **Progress** | 100% (140 tasks shipped across 13 rounds of operator polish) |
 | **Target Date** | TBD |
-| **Completed Date** | — |
+| **Completed Date** | 2026-05-26 |
 | **Owner** | spaarke-dev |
+| **Final commit (master)** | `f5015c2a` |
+| **Follow-on project** | [`spaarke-ai-platform-unification-r4`](../spaarke-ai-platform-unification-r4/) |
 
 ## Problem Statement
 
@@ -47,20 +49,20 @@ Build a unified `<PaneHeader>` primitive in `@spaarke/ui-components` and use it 
 
 The project is considered **complete** when:
 
-- [ ] **FR-01 Pane header parity**: All 3 panes use the same `<PaneHeader>` component (code grep + visual diff at 1280px / 1600px / narrow).
-- [ ] **FR-02..FR-09 Assistant pane**: Manual smoke confirms ChatRegular icon, "Assistant" title, no tab buttons, History overlay opens on click, welcome chrome trimmed (no sparkle, no heading, no 4 prompt cards, no "Open in Word"), input editable on cold load, multi-file attach (up to 5) with chip strip.
-- [ ] **FR-07 Multi-file attach end-to-end**: User attaches 5 .txt files → backend receives `attachments` array of 5 items → AI reply demonstrates knowledge of all 5 file contents.
-- [ ] **FR-10..FR-16 Workspace pane**: AppsListRegular icon visible; LegalWorkspace embedded as Home tab; WorkspacePaneMenu shows Open/Home/Switch Workspace/Edit sections with dividers; opening 9 widgets evicts oldest non-Home via FIFO; Layout Wizard launched from SpaarkeAi shows 6 templates (standalone shows 9); Daily Briefing renders content; empty state shows "Nothing to see right now — enjoy your day".
-- [ ] **FR-17..FR-22 Context pane**: Shared PaneHeader visible; 7 GetStarted cards in 2-col scrollable grid; Create Matter opens `create-matter-wizard` as a new top-tab in Workspace; Assign Work invokes `sprk_createworkassignmentwizard` via `Xrm.Navigation.navigateTo` in Power Apps host; stage label is "Get Started" on welcome.
-- [ ] **FR-23 Auth**: Zero `accessToken` props or state snapshots in new components; all fetches via `authenticatedFetch` per ADR-028.
-- [ ] **FR-24 Error telemetry**: 429 from Daily Briefing, file extraction errors, and HistoryOverlay load failures all emit App Insights custom events with expected schema (no happy-path events).
-- [ ] **FR-25 / NFR-10 Backwards compatibility**: Standalone LegalWorkspace still shows all 9 templates in its wizard; existing user layouts render identically.
-- [ ] **NFR-01..NFR-03 Performance**: Pane render <500 ms; History overlay open <200 ms + populate <300 ms p95; session restore p95 <500 ms.
-- [ ] **NFR-06 Dark mode**: No hex literals in new code (lint enforced); manual light/dark side-by-side passes.
-- [ ] **NFR-09 Persistence**: Open 3 non-Home tabs + refresh → all 3 tabs restored.
-- [ ] **NFR-12 Bundle size**: `npm run build:prod` of SpaarkeAi reports <250 KB gzip delta vs R2 baseline; PDF.js + mammoth absent from initial bundle.
-- [ ] **Deployment**: Production SpaarkeAi code page deployed via `scripts/Deploy-SpaarkeAi.ps1` and smoke-tested via `ui-test` skill.
-- [ ] **Wrap-up**: Lessons-learned recorded; README status set to Complete; project artifacts archived.
+- [x] **FR-01 Pane header parity**: ✅ Shipped via Task 010 (`<PaneHeader>` shared component) + Tasks 021/030/040 (pane integrations).
+- [x] **FR-02..FR-09 Assistant pane**: ✅ Shipped via Tasks 020-026 + polish rounds 091-099.
+- [x] **FR-07 Multi-file attach end-to-end**: ✅ Shipped via Task 001 (spike) + 024 (hook) + 050 (BFF) + 026 (wire) + 051 (tests).
+- [x] **FR-10..FR-16 Workspace pane**: ✅ Shipped via Tasks 030-035 + polish rounds. WorkspacePaneMenu, FIFO eviction, templateFilter, Daily Briefing all working.
+- [x] **FR-17..FR-22 Context pane**: ✅ Shipped via Tasks 040-045.
+- [x] **FR-23 Auth**: ✅ Verified clean — `notes/audit-auth-2026-05-20.md` (Task 060) confirms zero token snapshots across 46 R3 files.
+- [x] **FR-24 Error telemetry**: ✅ Shipped via Task 013 + 035 + helpers integrated into hooks across rounds.
+- [x] **FR-25 / NFR-10 Backwards compatibility**: ✅ Verified during R3 — Task 063 confirmed standalone LegalWorkspace identical. *Note: 2026-05-25 decision to retire standalone LW code page makes this requirement moot going forward; tracked in R4 W-6.*
+- [x] **NFR-01..NFR-03 Performance**: ✅ Verified — Task 074 confirmed pane render <500ms, History overlay <200ms + populate <300ms p95.
+- [x] **NFR-06 Dark mode**: ✅ Verified — `notes/dark-mode-audit.md` (Task 062) confirms zero hex/rgba literals in new code.
+- [x] **NFR-09 Persistence**: ✅ Task 065 shipped (`SessionPersistence` tab-list extension). *Note: operator feedback during R4 scoping suggests behavior shifted post-Task-065; tabs ARE persisting but browser-reopen lands on last tab not Home/default. R4 Phase 3 verifies + addresses the actual operator-visible issue.*
+- [x] **NFR-12 Bundle size**: ⚠️ Deviation accepted via Task 061. Final R3 bundle ~918 KB gzip (vs ~508 KB ceiling). Root cause: `vite-plugin-singlefile` inlines lazy-imports. Phase G smoke (Task 074) confirmed NFR-01/NFR-03 still met. *R4 D-2 amends ADR-026 with "heavy library handling" subsection.*
+- [x] **Deployment**: ✅ Production deployed — `sprk_spaarkeai` web resource updated continuously throughout R3, final state at master `f5015c2a`.
+- [x] **Wrap-up**: ✅ This README updated; `notes/lessons-learned.md` written; `notes/bff-placement-justification-retroactive.md` (R4 F-1) written; plan.md status updated; ready for archive.
 
 ## Scope
 
@@ -124,7 +126,9 @@ The project is considered **complete** when:
 | Date | Version | Change | Author |
 |------|---------|--------|--------|
 | 2026-05-20 | 1.0 | Initial draft — project initialized from spec via /project-pipeline | spaarke-dev |
+| 2026-05-26 | 1.1 | ✅ R3 marked Complete. 140 tasks shipped across 13 rounds. Lessons-learned recorded. Graduation criteria checked with notes for deviations (NFR-12, NFR-09). Follow-on R4 project formalized. | spaarke-dev (Phase 0 / E-1) |
 
 ---
 
 *Generated by [/project-pipeline](/.claude/skills/project-pipeline/SKILL.md) on 2026-05-20 from [spec.md](./spec.md).*
+*Wrap-up completed 2026-05-26 as Phase 0 of [spaarke-ai-platform-unification-r4](../spaarke-ai-platform-unification-r4/).*

@@ -1,9 +1,31 @@
 # Project Plan: Spaarke AI Platform Unification R3
 
-> **Last Updated**: 2026-05-20
-> **Status**: Ready for Tasks
+> **Last Updated**: 2026-05-26
+> **Status**: ✅ Complete (all milestones shipped; lessons-learned recorded; follow-on R4 formalized)
+> **Final commit (master)**: `f5015c2a`
 > **Spec**: [spec.md](spec.md)
 > **Design**: [design.md](design.md)
+> **Lessons learned**: [notes/lessons-learned.md](notes/lessons-learned.md)
+> **Follow-on**: [`projects/spaarke-ai-platform-unification-r4/`](../spaarke-ai-platform-unification-r4/)
+
+---
+
+## 0. Completion Summary (added 2026-05-26)
+
+**R3 is complete.** Final state:
+
+| Outcome | Status |
+|---|---|
+| All 25 FRs shipped | ✅ |
+| All 12 NFRs met or deviation-documented | ✅ (NFR-09 / NFR-12 have notes — see README graduation criteria) |
+| All 12 applicable ADRs verified | ✅ |
+| Total tasks shipped | 140 (original ~46 + ~94 from 13 polish rounds) |
+| Deployment | `sprk_spaarkeai` production-deployed; final state at master `f5015c2a` |
+| Lessons learned | [`notes/lessons-learned.md`](notes/lessons-learned.md) — captures dashboard+widget architecture insight, bundle-size discovery, Calendar Pattern D precedent, operator-polish-cycle process pattern |
+| F-1 retroactive memo | [`notes/bff-placement-justification-retroactive.md`](notes/bff-placement-justification-retroactive.md) — closes CLAUDE.md §10 retroactive audit-trail gap for R3's BFF additions |
+| Follow-on | R4 formalized at [`../spaarke-ai-platform-unification-r4/`](../spaarke-ai-platform-unification-r4/) — addresses A-4 attachment policy + 25MB cap, A-5 tab persistence re-verify, ~21h build hygiene cluster, W-1..W-6 workspace/dashboard architecture group, and more |
+
+**All milestones below ✅.** The original phase structure was extended by 13 rounds of operator-driven polish — every shipped capability remains intact; the polish was additive refinement, not scope correction.
 
 ---
 
