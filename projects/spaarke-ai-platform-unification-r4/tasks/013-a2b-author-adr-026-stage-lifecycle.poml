@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="013" project="spaarke-ai-platform-unification-r4">
   <metadata>
-    <title>A-2b: Author ADR-026 (stage lifecycle pattern) — concise + full forms</title>
+    <title>A-2b: Author ADR-031 (stage lifecycle pattern) — concise + full forms</title>
     <phase>Phase 1 — Documentation round</phase>
     <status>not-started</status>
     <estimated-hours>3</estimated-hours>
@@ -16,8 +16,8 @@
   </metadata>
 
   <prompt>
-    Author **ADR-026 (stage lifecycle pattern)** in both forms: concise at `.claude/adr/ADR-026-stage-lifecycle.md`
-    (~100-150 lines) and full at `docs/adr/ADR-026-stage-lifecycle.md`. ADR-026 codifies the R2-invented
+    Author **ADR-031 (stage lifecycle pattern)** in both forms: concise at `.claude/adr/ADR-031-stage-lifecycle.md`
+    (~100-150 lines) and full at `docs/adr/ADR-031-stage-lifecycle.md`. ADR-031 codifies the R2-invented
     stage lifecycle (load / hydrate / ready / refresh / error) used by widgets and Code Pages. This
     documentation task **codifies an existing pattern** — do NOT propose behavior changes. Update
     `.claude/adr/INDEX.md`. Note: this ADR is the foundation that task 016 D-2 amends with the
@@ -30,16 +30,16 @@
   </role>
 
   <goal>
-    Three artifacts: (1) `.claude/adr/ADR-026-stage-lifecycle.md` (concise, ~100-150 lines, MUST/MUST NOT,
-    stage definitions, transitions, code pointers); (2) `docs/adr/ADR-026-stage-lifecycle.md` (full form
+    Three artifacts: (1) `.claude/adr/ADR-031-stage-lifecycle.md` (concise, ~100-150 lines, MUST/MUST NOT,
+    stage definitions, transitions, code pointers); (2) `docs/adr/ADR-031-stage-lifecycle.md` (full form
     with Context / Decision / Consequences / Alternatives Considered / References); (3) updated
-    `.claude/adr/INDEX.md` with ADR-026 entry. Both forms MUST cross-link. Task 016 (D-2) appends a
+    `.claude/adr/INDEX.md` with ADR-031 entry. Both forms MUST cross-link. Task 016 (D-2) appends a
     "Heavy library handling" subsection — leave the structure amenable to that amendment.
   </goal>
 
   <context>
     <background>
-      Per spec DR-04 + plan §4 Phase 1 A-2: ADR-026 captures the stage lifecycle pattern (R2-invented) that
+      Per spec DR-04 + plan §4 Phase 1 A-2: ADR-031 captures the stage lifecycle pattern (R2-invented) that
       governs how widgets and Code Pages transition through load → hydrate → ready → refresh → error
       states. R3 used this extensively (Calendar widget, Daily Briefing, workspace tabs). Task 016 D-2
       will amend this ADR with a "Heavy library handling" subsection covering singlefile-vs-lazy-import
@@ -47,8 +47,8 @@
       separately.
     </background>
     <relevant-files>
-      <file>.claude/adr/ADR-026-stage-lifecycle.md</file>
-      <file>docs/adr/ADR-026-stage-lifecycle.md</file>
+      <file>.claude/adr/ADR-031-stage-lifecycle.md</file>
+      <file>docs/adr/ADR-031-stage-lifecycle.md</file>
       <file>.claude/adr/INDEX.md</file>
       <file>.claude/adr/ADR-013-ai-architecture.md</file>
       <file>src/client/shared/Spaarke.AI.Widgets/src/</file>
@@ -56,12 +56,12 @@
   </context>
 
   <constraints>
-    <constraint source="project">ADR-026 codifies an EXISTING pattern — do NOT propose new stages or new transition rules. Source of truth is the existing code.</constraint>
+    <constraint source="project">ADR-031 codifies an EXISTING pattern — do NOT propose new stages or new transition rules. Source of truth is the existing code.</constraint>
     <constraint source="project">Concise form (`.claude/adr/`) MUST be ~100-150 lines with explicit MUST / MUST NOT rules.</constraint>
     <constraint source="project">Full form (`docs/adr/`) MUST include Context / Decision / Consequences / Alternatives Considered / References.</constraint>
     <constraint source="project">Stage definitions MUST be enumerated: load (initial fetch), hydrate (apply persisted state), ready (interactive), refresh (re-fetch on demand), error (fault).</constraint>
     <constraint source="project">Document MUST be structured to accept the task 016 D-2 amendment cleanly — leave room for a "Heavy library handling" subsection. Do not write content that 016 will need to delete.</constraint>
-    <constraint source="project">Both forms MUST cross-link. `.claude/adr/INDEX.md` MUST include ADR-026 with links to both.</constraint>
+    <constraint source="project">Both forms MUST cross-link. `.claude/adr/INDEX.md` MUST include ADR-031 with links to both.</constraint>
   </constraints>
 
   <knowledge>
@@ -77,9 +77,9 @@
   <steps>
     <step order="1" name="Survey lifecycle in code">Read existing widget / page lifecycle code in `src/client/shared/Spaarke.AI.Widgets/` and SpaarkeAi Code Page hooks. Catalog every stage transition observed.</step>
     <step order="2" name="Read style reference">Read `.claude/adr/ADR-013-ai-architecture.md` to mirror structure / length for the concise form.</step>
-    <step order="3" name="Draft concise form">Write `.claude/adr/ADR-026-stage-lifecycle.md`: Status, Context, Decision (with stage list + transitions), MUST/MUST NOT rules, Code pointers, References. ~100-150 lines.</step>
-    <step order="4" name="Draft full form">Write `docs/adr/ADR-026-stage-lifecycle.md`: Status, Context, Decision (rationale + R2/R3 history), Consequences, Alternatives Considered (e.g., XState, plain React state, custom finite-state machine), References.</step>
-    <step order="5" name="Update INDEX">Add ADR-026 entry to `.claude/adr/INDEX.md`. Add cross-links between both forms.</step>
+    <step order="3" name="Draft concise form">Write `.claude/adr/ADR-031-stage-lifecycle.md`: Status, Context, Decision (with stage list + transitions), MUST/MUST NOT rules, Code pointers, References. ~100-150 lines.</step>
+    <step order="4" name="Draft full form">Write `docs/adr/ADR-031-stage-lifecycle.md`: Status, Context, Decision (rationale + R2/R3 history), Consequences, Alternatives Considered (e.g., XState, plain React state, custom finite-state machine), References.</step>
+    <step order="5" name="Update INDEX">Add ADR-031 entry to `.claude/adr/INDEX.md`. Add cross-links between both forms.</step>
     <step order="6" name="Verify">Confirm concise form is 100-150 lines; full form has all sections; INDEX updated; cross-links resolve; stages described match observed code transitions; structure leaves room for task 016 D-2 amendment.</step>
     <step order="7" name="Update TASK-INDEX">Change task 013 status to ✅ completed in `tasks/TASK-INDEX.md`.</step>
     <step order="8" name="Document deviations">If any deviation from spec DR-04 or plan §4, write to `projects/spaarke-ai-platform-unification-r4/notes/`.</step>
@@ -93,15 +93,15 @@
   </tools>
 
   <outputs>
-    <output type="docs">.claude/adr/ADR-026-stage-lifecycle.md (new, ~100-150 lines)</output>
-    <output type="docs">docs/adr/ADR-026-stage-lifecycle.md (new, full form)</output>
-    <output type="docs">.claude/adr/INDEX.md (modified — ADR-026 entry added)</output>
+    <output type="docs">.claude/adr/ADR-031-stage-lifecycle.md (new, ~100-150 lines)</output>
+    <output type="docs">docs/adr/ADR-031-stage-lifecycle.md (new, full form)</output>
+    <output type="docs">.claude/adr/INDEX.md (modified — ADR-031 entry added)</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">`.claude/adr/ADR-026-stage-lifecycle.md` exists, 100-150 lines, with explicit stage list (load / hydrate / ready / refresh / error) and MUST/MUST NOT rules.</criterion>
-    <criterion testable="true">`docs/adr/ADR-026-stage-lifecycle.md` exists with Context / Decision / Consequences / Alternatives Considered / References.</criterion>
-    <criterion testable="true">`.claude/adr/INDEX.md` lists ADR-026 with links to both forms.</criterion>
+    <criterion testable="true">`.claude/adr/ADR-031-stage-lifecycle.md` exists, 100-150 lines, with explicit stage list (load / hydrate / ready / refresh / error) and MUST/MUST NOT rules.</criterion>
+    <criterion testable="true">`docs/adr/ADR-031-stage-lifecycle.md` exists with Context / Decision / Consequences / Alternatives Considered / References.</criterion>
+    <criterion testable="true">`.claude/adr/INDEX.md` lists ADR-031 with links to both forms.</criterion>
     <criterion testable="true">Both forms cross-link to each other.</criterion>
     <criterion testable="true">Stage definitions match observed transitions in `src/client/shared/Spaarke.AI.Widgets/` lifecycle code — no invented stages.</criterion>
     <criterion testable="true">Document structure leaves a clean attachment point for the task 016 D-2 "Heavy library handling" subsection.</criterion>

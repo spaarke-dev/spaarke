@@ -27,12 +27,12 @@
 | 002 | F-1 BFF placement-justification retroactive memo | 0 | ✅ | F-1 / NFR-02 | STANDARD | none | A / ✅ |
 | 010 | W-1 Write SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md | 1 | ✅ | W-1 / DR-01 | STANDARD | none | B / ✅ |
 | 011 | W-2 Rewrite BUILD-A-NEW-WORKSPACE-WIDGET.md | 1 | ✅ | W-2 / DR-02 | STANDARD | 010 ✅ | — / ❌ (deps) |
-| 012 | A-2a Author ADR-025 (PaneEventBus) | 1 | 🔲 | A-2a / DR-04 | STANDARD | none | — / ❌ (`.claude/`) |
-| 013 | A-2b Author ADR-026 (stage lifecycle) | 1 | 🔲 | A-2b / DR-04 | STANDARD | none | — / ❌ (`.claude/`) |
+| 012 | A-2a Author ADR-030 (PaneEventBus, renumbered from 025) | 1 | ✅ | A-2a / DR-04 | STANDARD | none | — / ❌ (`.claude/`) |
+| 013 | A-2b Author ADR-031 (stage lifecycle, renumbered from 026) | 1 | ✅ | A-2b / DR-04 | STANDARD | none | — / ❌ (`.claude/`) |
 | 014 | C-1 Write DATA-ACCESS-DECISION-CRITERIA.md | 1 | ✅ | C-1 / DR-06 | STANDARD | none | B / ✅ |
 | 015 | C-2 Write LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md | 1 | ✅ | C-2 / DR-07 | STANDARD | 010 ✅ | — / ❌ (deps) |
-| 016 | D-2 Amend ADR-026 heavy library handling | 1 | 🔲 | D-2 / DR-05 | STANDARD | 013 | — / ❌ (`.claude/` + deps) |
-| 017 | F-3 Document publish-size baseline rule | 1 | 🔲 | F-3 / NFR-01 | STANDARD | none | — / ❌ (`.claude/` + CLAUDE.md) |
+| 016 | D-2 Amend ADR-031 heavy library handling | 1 | 🔲 | D-2 / DR-05 | STANDARD | 013 | — / ❌ (`.claude/` + deps) |
+| 017 | F-3 Document publish-size baseline rule | 1 | ✅ | F-3 / NFR-01 | STANDARD | none | — / ❌ (`.claude/` + CLAUDE.md) |
 | 020 | F-2 BFF facade audit | 2 | ✅ | F-2 / NFR-03 | STANDARD | none | — / ✅ |
 | 030 | A-5a Verify tab persistence | 3 | ✅ | A-5a / FR-05 | STANDARD | none | — / ✅ |
 | 031 | A-5b Fix tab persistence | 3 | 🔲 ⏸ operator gate | A-5b / FR-05 | FULL | 030 ✅ | — / ❌ (deps + operator gate) |
@@ -75,7 +75,7 @@ Tasks in the same group can run simultaneously once prerequisites are met. **Har
 | Wave | Tasks | Concurrency | Prerequisite |
 |---|---|---|---|
 | Wave 1.1 (Group B, parallel) | 010 ✅, 014 ✅ | Completed 2026-05-26 by parallel sub-agents | none |
-| Wave 1.2 (sequential, main session) | 012, 013, 017 | 1 at a time | none — `.claude/` boundary |
+| Wave 1.2 (sequential, main session) | 012 ✅, 013 ✅, 017 ✅ | Completed 2026-05-26 (012+013 via hybrid sub-agents writing docs/adr/ + main session writing .claude/adr/; 017 main session) | none — `.claude/` boundary |
 | Wave 1.3 (after Wave 1.1) | 011, 015 | 2 agents | 010 ✅ |
 | Wave 1.4 (sequential, main session) | 016 | 1 task | 013 ✅ + `.claude/` boundary |
 

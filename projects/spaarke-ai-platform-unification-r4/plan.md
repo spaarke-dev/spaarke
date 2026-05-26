@@ -32,8 +32,8 @@
 - **ADR-013** (AI architecture, refined 2026-05-20) — F-1, F-2 placement justification base
 - **ADR-021** (Fluent v9 + tokens only) — Load-bearing for all UI tasks (W-3, W-4, W-5, B-3, B-6, B-7, B-8)
 - **ADR-022** (React 19 for Code Pages) — Load-bearing for W-3, W-4, W-5
-- **ADR-025** (PaneEventBus pattern) — NEW per A-2; W-4 and W-5 must conform
-- **ADR-026** (Stage lifecycle + heavy library handling) — NEW per A-2 + D-2 amendment
+- **ADR-030** (PaneEventBus pattern) — NEW per A-2; W-4 and W-5 must conform
+- **ADR-031** (Stage lifecycle + heavy library handling) — NEW per A-2 + D-2 amendment
 - **ADR-028** (Spaarke auth v2) — Load-bearing for A-4, A-5, C-3
 - **ADR-029** (BFF publish hygiene) — F-3 codifies as workflow rule; NFR-01 enforces
 
@@ -156,7 +156,7 @@ Phase 7: R4 wrap-up (~2h)
 
 ### Parallelization Cap
 
-Hard cap of **6 concurrent agents per wave** (per `task-execute` skill — API overload guard). Tasks touching `.claude/` paths MUST run sequentially in the main session (per CLAUDE.md §3 Sub-Agent Write Boundary): A-2 (new ADRs in `.claude/adr/`), D-2 (ADR-026 amendment in `.claude/adr/`), F-3 (`.claude/constraints/azure-deployment.md`).
+Hard cap of **6 concurrent agents per wave** (per `task-execute` skill — API overload guard). Tasks touching `.claude/` paths MUST run sequentially in the main session (per CLAUDE.md §3 Sub-Agent Write Boundary): A-2 (new ADRs in `.claude/adr/`), D-2 (ADR-031 amendment in `.claude/adr/`), F-3 (`.claude/constraints/azure-deployment.md`).
 
 ---
 
@@ -180,10 +180,10 @@ Hard cap of **6 concurrent agents per wave** (per `task-execute` skill — API o
 **Deliverables**:
 - [ ] `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` (W-1)
 - [ ] `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` rewritten (W-2)
-- [ ] ADR-025 (PaneEventBus) + ADR-026 (stage lifecycle) — concise + full forms (A-2)
+- [ ] ADR-030 (PaneEventBus) + ADR-031 (stage lifecycle) — concise + full forms (A-2)
 - [ ] `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` (C-1)
 - [ ] `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` (C-2)
-- [ ] ADR-026 amendment for heavy library handling (D-2)
+- [ ] ADR-031 amendment for heavy library handling (D-2)
 - [ ] CLAUDE.md §10 + `.claude/constraints/azure-deployment.md` updated for publish-size rule (F-3)
 **Inputs**: spec.md; existing docs
 **Outputs**: Authoritative architecture frame before any code change

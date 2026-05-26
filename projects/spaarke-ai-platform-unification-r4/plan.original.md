@@ -167,10 +167,10 @@ Per CLAUDE.md §2: code wins over docs. R4 docs reflect the code as of `3813af32
 |---|---|---|
 | W-1 Write `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` | ~6h | New auth doc framing surfaces + sources + two-wrapper model + dual-use pattern + LegalWorkspace-as-engine. Cross-linked from CLAUDE.md and from SPAARKEAI-WORKSPACE-ARCHITECTURE.md |
 | W-2 Rewrite `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` | ~3h | Decision tree: composable section (Pattern D) vs sophisticated single-purpose widget (direct) vs dual-use vs Context-pane widget vs modal-launcher. Corrects terminology. Cross-linked from W-1 doc |
-| A-2 Write ADR-025 (PaneEventBus pattern) + ADR-026 (stage lifecycle pattern) | ~6h | `.claude/adr/ADR-025-pane-event-bus.md` (concise) + `docs/adr/ADR-025-*.md` (full). Same for ADR-026. Both codify R2-invented patterns that R3 used extensively |
+| A-2 Write ADR-030 (PaneEventBus pattern) + ADR-031 (stage lifecycle pattern) | ~6h | `.claude/adr/ADR-030-pane-event-bus.md` (concise) + `docs/adr/ADR-030-*.md` (full). Same for ADR-031. Both codify R2-invented patterns that R3 used extensively |
 | C-1 Document Xrm.WebApi vs BFF decision criteria | ~2h | `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` — when to use each, with worked examples from current code |
 | C-2 Document embedded-mode contract formally | ~3h | `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` — host requirements (config init, theme ownership, sessionStorage sentinels, webApi shim, mount semantics). Reflects LW retirement context. |
-| D-2 ADR-026 amendment (heavy library handling) | ~4h | Amend ADR-026 with "Heavy library handling" subsection — singlefile vs lazy-import incompatibility, Option 2 pattern (separate web resources) as reference, link to R3 bundle-size investigation |
+| D-2 ADR-031 amendment (heavy library handling) | ~4h | Amend ADR-031 with "Heavy library handling" subsection — singlefile vs lazy-import incompatibility, Option 2 pattern (separate web resources) as reference, link to R3 bundle-size investigation |
 | F-3 Publish-size baseline + per-task verification rule documentation | ~1h | Update `.claude/constraints/azure-deployment.md` and CLAUDE.md §10 with explicit "every BFF-touching task MUST run `dotnet publish` + diff vs ~60 MB baseline" rule |
 
 **Phase 1 acceptance**: All 7 docs published; W-1 + W-2 + C-1 + C-2 reviewed for terminology consistency.
@@ -378,8 +378,8 @@ R4 graduates when ALL of:
 - [ ] `LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` published (C-2)
 - [ ] `LEGALWORKSPACE-RETIREMENT.md` published (W-6)
 - [ ] `CHAT-ATTACHMENT-POLICY.md` published (A-4)
-- [ ] ADR-025 (PaneEventBus) + ADR-026 (stage lifecycle) published in both concise + full forms
-- [ ] ADR-026 amended with heavy library handling section (D-2)
+- [ ] ADR-030 (PaneEventBus) + ADR-031 (stage lifecycle) published in both concise + full forms
+- [ ] ADR-031 amended with heavy library handling section (D-2)
 - [ ] CLAUDE.md §10 updated with publish-size baseline rule (F-3)
 
 ### Behavior

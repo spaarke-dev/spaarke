@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-05-26 (Wave 1.5 complete; handoff to user; 031 operator gate open)
+> **Last Updated**: 2026-05-26 (Wave 1.2 complete — Phase 1 now 9/9 docs done + 1 amendment pending; 031 operator gate still open)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -13,7 +13,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (Wave 1.5 just completed — 5 parallel agents) |
+| **Task** | none (Wave 1.2 just completed — 012/013/017 + ADR renumbering 025→030, 026→031) |
 | **Step** | — |
 | **Status** | not-started — operator gate open on 031 (A-5b); awaiting decision on next wave |
 | **Next Action** | (1) Operator reviews `notes/tab-persistence-verification-2026-05.md` and confirms desired UX → then dispatch 031. (2) Choose next wave: Wave 1.2 (012/013/017 sequential `.claude/`) or Wave 4.1 (040 W-3 code change + deploy) or Phase 5 Wave 1 (050/051/053 parallel) |
@@ -86,13 +86,13 @@ R4 has 34 IN items across 8 phases. Progress: **9 of 32 tasks done** (28%) — P
 
 | Wave | Tasks | Dependencies | Parallelization |
 |---|---|---|---|
-| **Wave 1.2** | 012 A-2a ADR-025 · 013 A-2b ADR-026 · 017 F-3 publish-size rule | none | **Sequential, main session only** — all touch `.claude/` paths (permission boundary) |
+| **Wave 1.2** | 012 A-2a ADR-030 · 013 A-2b ADR-031 · 017 F-3 publish-size rule | none | **Sequential, main session only** — all touch `.claude/` paths (permission boundary) |
 | **Wave 1.3** | 011 W-2 BUILD-A-NEW-WORKSPACE-WIDGET rewrite · 015 C-2 LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT | 010 ✅ | 2 parallel sub-agents (different docs dirs) |
 | **Wave 2.1** | 020 F-2 BFF facade audit | none | 1 task (anytime — not Phase 1 dependent) |
 | **Wave 3.1** | 030 A-5a verify tab persistence | none | 1 task (verify-first; operator gates 031) |
 | **Wave 4.1** | 040 W-3 wizard catalog drift · 041 W-6 LW retirement doc | none | 2 parallel (Group D) |
 
-Wave 1.4 (016 D-2 amend ADR-026) requires 013 ✅ first.
+Wave 1.4 (016 D-2 amend ADR-031) requires 013 ✅ first.
 Wave 4.2 (042 W-4, 043 W-5) requires 010 ✅ + 040 ✅.
 
 **Pre-conditions** (current):

@@ -26,10 +26,10 @@ All 34 IN items, grouped by phase per [`plan.md`](plan.md) §4:
 **Phase 1 — Documentation round (~21h)**
 - **W-1** Write `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` (authoritative two-wrapper model)
 - **W-2** Rewrite `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` with two-wrapper decision tree
-- **A-2** Author ADR-025 (PaneEventBus) + ADR-026 (stage lifecycle) in concise + full forms
+- **A-2** Author ADR-030 (PaneEventBus) + ADR-031 (stage lifecycle) in concise + full forms
 - **C-1** Write `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` (Xrm.WebApi vs BFF)
 - **C-2** Write `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md`
-- **D-2** Amend ADR-026 with "Heavy library handling" subsection (ADR amendment only — no implementation)
+- **D-2** Amend ADR-031 with "Heavy library handling" subsection (ADR amendment only — no implementation)
 - **F-3** Document publish-size baseline + per-task verification rule in `.claude/constraints/azure-deployment.md` and CLAUDE.md §10
 
 **Phase 2 — BFF governance audit (~2h)**
@@ -98,7 +98,7 @@ All 34 IN items, grouped by phase per [`plan.md`](plan.md) §4:
 | `docs/architecture/` | W-1, C-2, W-6 | New: SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL, LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT, LEGALWORKSPACE-RETIREMENT |
 | `docs/guides/` | W-2 | Rewrite BUILD-A-NEW-WORKSPACE-WIDGET |
 | `docs/standards/` | C-1, A-4 | New: DATA-ACCESS-DECISION-CRITERIA, CHAT-ATTACHMENT-POLICY |
-| `docs/adr/` + `.claude/adr/` | A-2, D-2 | New ADR-025, ADR-026 (concise + full); ADR-026 heavy library handling amendment |
+| `docs/adr/` + `.claude/adr/` | A-2, D-2 | New ADR-030, ADR-031 (concise + full); ADR-031 heavy library handling amendment |
 | `.claude/constraints/azure-deployment.md` | F-3 | Publish-size baseline + per-task rule |
 | `CLAUDE.md` (root) | F-3 | §10 publish-size rule |
 | `scripts/Deploy-*.ps1` | W-6 | Skip standalone LegalWorkspace deploy |
@@ -148,8 +148,8 @@ Doc-only items expressed as DRs. Each lists the backlog item ID in parentheses.
 - **DR-01 (W-1)**: Publish `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`. Must frame surfaces (Assistant / Workspace / Context), the two-wrapper model (Dashboard wrapper via `LegalWorkspaceApp` + Direct widget wrapper via `WorkspaceWidgetRegistry`), mount sources (user picker / Assistant / Context / workspace dropdown), dual-use pattern (Calendar / Daily Briefing), and LegalWorkspace-as-dashboard-engine framing. Cross-linked from CLAUDE.md §16 and from `SPAARKEAI-WORKSPACE-ARCHITECTURE.md`. — Acceptance: Doc published; cross-links validated; future widget authors can determine which wrapper to use from this doc.
 - **DR-02 (W-2)**: Rewrite `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` with a two-wrapper decision tree (composable section vs sophisticated single-purpose direct widget vs dual-use vs Context-pane widget vs modal-launcher). Terminology corrected. Cross-linked from W-1 doc. — Acceptance: Decision tree present; existing Pattern D (Calendar) worked example retained and updated; new author can pick the right wrapper without back-channel.
 - **DR-03 (W-6)**: Publish `docs/architecture/LEGALWORKSPACE-RETIREMENT.md`. Must record the decision to stop deploying `sprk_corporateworkspace`, the rationale (replaced by SpaarkeAi), the components-as-library continuation, and any consumer audit (Dataverse form references etc.). Deploy scripts (`scripts/Deploy-*.ps1`) updated to skip LW deploy. CLAUDE.md System Entry Points pointer updated. — Acceptance: Doc published; deploy scripts skip LW; no consumer breakage discovered post-cutover.
-- **DR-04 (A-2)**: Author **ADR-025** (PaneEventBus pattern) and **ADR-026** (stage lifecycle pattern) in both concise (`.claude/adr/`) and full (`docs/adr/`) forms. Both codify R2-invented patterns that R3 used extensively. — Acceptance: Both ADRs published; both forms cross-linked; ADR INDEX updated.
-- **DR-05 (D-2)**: Amend ADR-026 with a "Heavy library handling" subsection covering singlefile vs lazy-import incompatibility, Option 2 (separate web resources) pattern, and a link to the R3 bundle-size investigation. — Acceptance: Amendment merged; cross-reference to ADR-026 source-of-truth maintained.
+- **DR-04 (A-2)**: Author **ADR-030** (PaneEventBus pattern) and **ADR-031** (stage lifecycle pattern) in both concise (`.claude/adr/`) and full (`docs/adr/`) forms. Both codify R2-invented patterns that R3 used extensively. — Acceptance: Both ADRs published; both forms cross-linked; ADR INDEX updated.
+- **DR-05 (D-2)**: Amend ADR-031 with a "Heavy library handling" subsection covering singlefile vs lazy-import incompatibility, Option 2 (separate web resources) pattern, and a link to the R3 bundle-size investigation. — Acceptance: Amendment merged; cross-reference to ADR-031 source-of-truth maintained.
 - **DR-06 (C-1)**: Publish `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` — when to use `Xrm.WebApi` vs BFF for Dataverse access, with worked examples from current code. — Acceptance: Doc published; covers both directions with concrete from-the-repo examples; cross-linked from CLAUDE.md §16.
 - **DR-07 (C-2)**: Publish `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` — host requirements (config init, theme ownership, sessionStorage sentinels, `webApi` shim, mount semantics). Reflects LW retirement context (the doc captures what hosts other than SpaarkeAi would need to provide; SpaarkeAi is the only host today). — Acceptance: Doc published; contract is testable; cross-linked from W-1.
 
@@ -175,8 +175,8 @@ Process / housekeeping items expressed as PRs.
 | **ADR-013** (AI architecture) | F-1, F-2 use this as the criterion for placement justification. A-4 attachment path remains in BFF in-process (no new service). |
 | **ADR-021** (Fluent design system) | Load-bearing. All UI-touching tasks (W-3, W-4, W-5, B-3, B-6, B-7, B-8) MUST use Fluent v9 tokens only — no hex/rgba/v8. |
 | **ADR-022** (React 19 for Code Pages) | Load-bearing for W-3, W-4, W-5 (SpaarkeAi + WorkspaceLayoutWizard). React 19 only. |
-| **ADR-025** (PaneEventBus) | NEW — authored by A-2. W-4 and W-5 mount-source wiring MUST conform. |
-| **ADR-026** (Stage lifecycle + heavy library handling) | NEW (A-2) + amendment (D-2). Any future heavy-library decision must reference this. |
+| **ADR-030** (PaneEventBus) | NEW — authored by A-2. W-4 and W-5 mount-source wiring MUST conform. |
+| **ADR-031** (Stage lifecycle + heavy library handling) | NEW (A-2) + amendment (D-2). Any future heavy-library decision must reference this. |
 | **ADR-028** (Spaarke auth v2) | Load-bearing. A-5 (tab persistence), A-4 (attachment auth), C-3 (consolidated hook — takes `authenticatedFetch` as injected dep) all MUST use function-based auth contract. No token snapshots. |
 | **ADR-029** (BFF publish hygiene) | F-3 codifies this as a workflow rule. NFR-01 enforces. |
 
@@ -185,7 +185,7 @@ Process / housekeeping items expressed as PRs.
 - ✅ **MUST** follow CLAUDE.md §10 Placement Justification for every BFF addition (A-4, B-4, B-5, F-1, F-2, F-3). Cite decision criteria from `.claude/constraints/bff-extensions.md`.
 - ✅ **MUST** verify publish size ≤60 MB compressed on every BFF-touching task (F-3 / NFR-01).
 - ✅ **MUST** use `authenticatedFetch` from `@spaarke/auth` for every BFF call. No token snapshotting (ADR-028 INV-1..INV-8).
-- ✅ **MUST** keep PaneEventBus channels typed — no `any` payloads (ADR-025).
+- ✅ **MUST** keep PaneEventBus channels typed — no `any` payloads (ADR-030).
 - ✅ **MUST** verify A-5 BEFORE remediating — the R3 verification finding may be wrong. Verify-then-fix protocol per plan.md §3.
 - ❌ **MUST NOT** introduce new direct injections of `IOpenAiClient` or `IPlaybookService` outside `Services/Ai/` (per F-2 facade rule; refined ADR-013).
 - ❌ **MUST NOT** regenerate hardcoded section catalogs in workspace builder code paths (W-3 fix establishes `SECTION_REGISTRY` as single source of truth).
@@ -213,7 +213,7 @@ Mirrors `plan.md` §7 Graduation Criteria.
 ### Code + deploy
 1. [ ] All 34 IN items shipped to dev environment (`sprk_spaarkeai` updated; `sprk_corporateworkspace` deprecated per W-6)
 2. [ ] BFF deploys (A-4, B-4, B-5) verified for publish-size delta; no new HIGH-severity CVEs (NFR-01, NFR-09)
-3. [ ] All new ADRs merged to master (ADR-025, ADR-026 + D-2 amendment)
+3. [ ] All new ADRs merged to master (ADR-030, ADR-031 + D-2 amendment)
 4. [ ] Build clean: 0 `tsc --noEmit` errors across packages; 0 lint errors; 0 build warnings introduced by R4
 5. [ ] No tracked build artifacts in `git status` after fresh clone + build (NFR-04 verified)
 
@@ -221,8 +221,8 @@ Mirrors `plan.md` §7 Graduation Criteria.
 6. [ ] `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` published (DR-01)
 7. [ ] `BUILD-A-NEW-WORKSPACE-WIDGET.md` rewritten with two-wrapper decision tree (DR-02)
 8. [ ] `LEGALWORKSPACE-RETIREMENT.md` published (DR-03)
-9. [ ] ADR-025 + ADR-026 published in both concise and full forms (DR-04)
-10. [ ] ADR-026 amended with heavy library handling section (DR-05)
+9. [ ] ADR-030 + ADR-031 published in both concise and full forms (DR-04)
+10. [ ] ADR-031 amended with heavy library handling section (DR-05)
 11. [ ] `DATA-ACCESS-DECISION-CRITERIA.md` published (DR-06)
 12. [ ] `LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` published (DR-07)
 13. [ ] `CHAT-ATTACHMENT-POLICY.md` published (FR-04)

@@ -45,6 +45,27 @@ Load when:
 
 > **Phase 5 demo deploy verified** the framework-dependent linux-x64 publish removes the entire `runtimes/` directory tree (10 RIDs → eliminated). See `projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md` Phase 4 Outcome A for evidence.
 
+### BFF Publish-Size Per-Task Verification Rule (NFR-01)
+
+**Binding workflow rule. Operationalizes ADR-029 (BFF publish hygiene). Added 2026-05-26 per R4 NFR-01 / F-3.**
+
+Every task that touches `src/server/api/Sprk.Bff.Api/` (or `Spaarke.Core` / `Spaarke.Dataverse` consumed by BFF) — including endpoint additions, service additions, DI registration changes, NuGet package additions/upgrades, and background-job work — **MUST**:
+
+1. **MUST** run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` AFTER changes land and BEFORE merge.
+2. **MUST** measure compressed size of `deploy/api-publish/` (or the resulting zip if packaging) and report the absolute size + diff vs the prior measured baseline in the task notes / PR description.
+3. **MUST** compare against the binding **ceiling of ≤60 MB compressed** (per spec NFR-01). The current measured baseline as of 2026-05-26 is ~45.65 MB (post-Phase 5 Outcome A). Tasks pushing toward 60 MB MUST flag the trajectory in code review.
+4. **MUST** verify no new HIGH-severity CVEs via `dotnet list package --vulnerable --include-transitive` if NuGet packages were added or upgraded.
+5. **MUST** cross-reference CLAUDE.md §10 in the task notes / PR description (e.g., "BFF Hygiene §10 + NFR-01 verified: publish size = X MB, delta = Y MB, no new HIGH CVEs").
+
+**Threshold for escalation**:
+- Diff ≥ +5 MB single-task: explicit justification required in PR description; reviewer must explicitly accept.
+- Cumulative size ≥ 55 MB: escalate to architecture review BEFORE merging the task that would tip it over.
+- Cumulative size ≥ 60 MB: HARD STOP. Roll back or extract; do not exceed the ceiling without an ADR amendment to ADR-029.
+
+**Why this rule exists**: The 2026-05-19 publish-size jump (65 → 75+ MB) and the 2026-05-20 BFF AI extraction assessment surfaced ~20 inbound CRUD→AI direct dependencies that accumulated unnoticed. Per-task verification with explicit diff reporting catches accumulation before it compounds. See [`bff-extensions.md`](bff-extensions.md) for the broader §10 pre-merge checklist and [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](../../docs/assessments/bff-ai-extraction-assessment-2026-05-20.md) for the evidence base.
+
+**Source of truth**: Spec NFR-01 in `projects/spaarke-ai-platform-unification-r4/spec.md`; root [`CLAUDE.md`](../../CLAUDE.md) §10 item 4 (strengthened in R4 F-3); ADR-029 BFF publish hygiene.
+
 ### Minimal API Endpoints
 
 - **MUST** use MapPost/MapPut/MapPatch for endpoints that accept body parameters (complex types)

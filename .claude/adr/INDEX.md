@@ -37,6 +37,8 @@ This directory contains AI-optimized versions of Architecture Decision Records. 
 | ADR-027 | Subscription Isolation & Dataverse Solution Mgmt | Managed solutions for prod; env-separated subscriptions | Accepted |
 | ADR-028 | Spaarke Auth Architecture (v2) | Function-based contract; managed identity for outbound; named API key schemes; HMAC webhooks; audit middleware | Accepted (2026-05-19) |
 | ADR-029 | BFF Publish Hygiene | Framework-dependent linux-x64, sourcemap exclusion, transitive CVE override pattern, size baseline ratchet | Accepted (2026-05-26) |
+| ADR-030 | PaneEventBus pattern | Typed multi-subscriber cross-pane bus; four channels (workspace/context/conversation/safety); no `any` payloads; one provider at shell root | Accepted (2026-05-26) |
+| ADR-031 | Stage Lifecycle Pattern | Four stages (`welcome`/`loading`/`active-chat`/`review`); `determineStage()` canonical; transitions driven by PaneEventBus (ADR-030); client-side recompute wins over persisted state | Accepted (2026-05-26) |
 
 ---
 
@@ -51,6 +53,8 @@ Load concise ADRs proactively when creating new components:
 - Working with SPE → Load ADR-007, ADR-019
 - Working with UI/UX → Load ADR-021, ADR-022
 - Working with shared components → Load ADR-012 (service architecture, portability tiers)
+- Working with cross-pane communication / widget mount sources → Load **ADR-030** (PaneEventBus)
+- Working with SpaarkeAi shell stages, widget lifecycle, or session restore → Load **ADR-031** (stage lifecycle) + ADR-030 (PaneEventBus) + ADR-028 (session restore contract)
 - Deploying to production → Load ADR-027 (subscription isolation, Dataverse solution management)
 - Working with Dataverse solutions → Load ADR-027 (managed vs unmanaged, import order)
 

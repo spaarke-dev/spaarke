@@ -22,7 +22,7 @@
     → DocumentViewer widget mounts as a workspace tab". Implement the Assistant-side
     dispatcher; wire/build the receiving widget into `WorkspaceWidgetRegistry` if not
     already registered; demonstrate the demo end-to-end on the dev environment. Use typed
-    PaneEventBus channels (ADR-025 — no `any` payloads) and `authenticatedFetch` for any
+    PaneEventBus channels (ADR-030 — no `any` payloads) and `authenticatedFetch` for any
     BFF calls (ADR-028).
   </prompt>
 
@@ -40,7 +40,7 @@
     pane (recommended: PDF upload in chat) dispatches `widget_load` on the workspace
     channel; the receiving widget mounts as a new tab in the Workspace pane; the tab is
     selectable; the tab is closable per existing tab semantics. Code changes meet ADR-021
-    (Fluent v9 tokens), ADR-022 (React 19), ADR-025 (typed PaneEventBus channels — no
+    (Fluent v9 tokens), ADR-022 (React 19), ADR-030 (typed PaneEventBus channels — no
     `any`), and ADR-028 (function-based auth — no token snapshots). FR-02 acceptance
     criteria satisfied. Build + deploy green; UI tests pass including dark-mode.
   </goal>
@@ -53,8 +53,8 @@
       only. R4's first end-to-end `widget_load` dispatch lands here. The receiving wrapper
       is `WorkspaceWidgetRegistry` (Direct widget wrapper per the two-wrapper model from
       W-1) — NOT `LegalWorkspaceApp` (Dashboard wrapper). The PaneEventBus pattern is
-      codified in ADR-025 (created by task 012, which is also a Phase 1 dep — task 010
-      depends on the dashboard+widget model doc which references ADR-025). The R3 Calendar
+      codified in ADR-030 (created by task 012, which is also a Phase 1 dep — task 010
+      depends on the dashboard+widget model doc which references ADR-030). The R3 Calendar
       widget Pattern D (task 115) is the canonical worked example for a shared-lib widget
       mounted via the registry — a useful reference for the receiving widget.
 
@@ -71,7 +71,7 @@
       the demo bar, or does this task ship a minimal stub viewer? Stay scoped per Risk R-7.
 
       ADR-028 invariants: NO token snapshots in props/state. Use `useAuth()` +
-      `authenticatedFetch` from `@spaarke/auth` for any BFF call inside the widget. ADR-025
+      `authenticatedFetch` from `@spaarke/auth` for any BFF call inside the widget. ADR-030
       invariant: PaneEventBus channels are typed — `widget_load` payload type must be
       declared in `PaneEventTypes.ts` (extend if needed; don't widen to `any`).
     </background>
@@ -90,7 +90,7 @@
   <constraints>
     <constraint source="ADR-021">Fluent v9 tokens only. NO hex, NO `rgba()`, NO Fluent v8.</constraint>
     <constraint source="ADR-022">React 19 only for Code Pages. NO React 16 fallbacks.</constraint>
-    <constraint source="ADR-025">PaneEventBus channels MUST be typed — NO `any` payloads. Extend `PaneEventTypes.ts` for the `widget_load` payload shape (widget type ID + data) and reuse for both W-4 and W-5.</constraint>
+    <constraint source="ADR-030">PaneEventBus channels MUST be typed — NO `any` payloads. Extend `PaneEventTypes.ts` for the `widget_load` payload shape (widget type ID + data) and reuse for both W-4 and W-5.</constraint>
     <constraint source="ADR-028">Function-based auth via `@spaarke/auth` `authenticatedFetch`. NO token snapshots in props/state. NO new auth mechanisms.</constraint>
     <constraint source="ADR-012">Shared widgets live in `@spaarke/ai-widgets` (or `@spaarke/*` lib family). Don't duplicate widget code inside SpaarkeAi solution.</constraint>
     <constraint source="project">Scope guard per Risk R-7: ship dispatch + ONE viewer widget end-to-end. Broader widget coverage is OUT OF SCOPE for this task — defer to follow-up.</constraint>
@@ -106,7 +106,7 @@
       <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
       <file>.claude/adr/ADR-021-fluent-design-system.md</file>
       <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
-      <file>.claude/adr/ADR-025-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
       <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
       <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
       <file>.claude/skills/code-page-deploy/SKILL.md</file>
@@ -120,7 +120,7 @@
         Canonical "shared-lib widget + thin LW registration shim" reference. Use this as the receiving-widget template for the demo if a new widget is built.
       </pattern>
       <pattern name="PaneEventBus typed channels" location="src/client/shared/Spaarke.AI.Widgets/src/events/">
-        Workspace / context / conversation / safety channels with typed payloads. ADR-025 codifies.
+        Workspace / context / conversation / safety channels with typed payloads. ADR-030 codifies.
       </pattern>
     </patterns>
   </knowledge>
@@ -133,10 +133,10 @@
       Surface OC-R4-07 to operator: confirm recommended "PDF upload in chat → DocumentViewer tab" OR substitute scenario. Record the choice in &lt;notes&gt; at task end. Without the operator's choice, do NOT proceed past Step 3.
     </step>
     <step order="3" name="Load context">
-      Read W-1 doc (010 output), ADR-025, ADR-028, PaneEventBus source files, ConversationPane source, WorkspaceWidgetRegistry source, and Calendar widget Pattern D reference.
+      Read W-1 doc (010 output), ADR-030, ADR-028, PaneEventBus source files, ConversationPane source, WorkspaceWidgetRegistry source, and Calendar widget Pattern D reference.
     </step>
     <step order="4" name="Design dispatch payload">
-      Define / extend the typed payload for `widget_load` on the workspace channel in `PaneEventTypes.ts`. Required fields: widget type ID (string union from registered types), title (string), data (typed per widget). NO `any` per ADR-025. Add JSDoc.
+      Define / extend the typed payload for `widget_load` on the workspace channel in `PaneEventTypes.ts`. Required fields: widget type ID (string union from registered types), title (string), data (typed per widget). NO `any` per ADR-030. Add JSDoc.
     </step>
     <step order="5" name="Choose / build receiving widget">
       If an existing DocumentViewer widget in `@spaarke/ai-widgets` meets the demo bar, use it (verify it's already registered via `registerWorkspaceWidget()`). If not, build a minimal widget in `src/client/shared/Spaarke.AI.Widgets/src/widgets/` + register it via a dedicated registration file. Follow Calendar Pattern D shape. Use `useAuth()` + `authenticatedFetch` for any BFF call inside the widget (ADR-028).
@@ -211,7 +211,7 @@
       <expected>Dark-mode renders cleanly; all colors via Fluent v9 semantic tokens per ADR-021.</expected>
     </test>
 
-    <test name="PaneEventBus type safety (ADR-025)">
+    <test name="PaneEventBus type safety (ADR-030)">
       <steps>
         <step>Inspect the dispatched event in browser devtools (PaneEventBus instrumentation or React DevTools)</step>
         <step>Verify the payload shape matches the declared TypeScript type for `widget_load`</step>
@@ -225,7 +225,7 @@
     <criterion testable="true">Given the operator triggers the chosen demo action in the Assistant pane, When the action completes, Then a `widget_load` event is dispatched on the workspace channel with a typed payload identifying the widget + data.</criterion>
     <criterion testable="true">Given the workspace channel receives a `widget_load` event, When the Workspace pane handles it, Then the widget resolves via `WorkspaceWidgetRegistry` and mounts as a new tab.</criterion>
     <criterion testable="true">Given the new tab is mounted, When the user clicks the tab, Then it becomes active; When the user closes it, Then it is removed without affecting other tabs.</criterion>
-    <criterion testable="true">Given ADR-025 requires typed channels, When the code is reviewed, Then no `any` payload types appear in the dispatch path; `widget_load` payload is declared in `PaneEventTypes.ts`.</criterion>
+    <criterion testable="true">Given ADR-030 requires typed channels, When the code is reviewed, Then no `any` payload types appear in the dispatch path; `widget_load` payload is declared in `PaneEventTypes.ts`.</criterion>
     <criterion testable="true">Given ADR-028 requires function-based auth, When the receiving widget calls the BFF, Then it uses `authenticatedFetch` from `@spaarke/auth`; NO token snapshots in props/state.</criterion>
     <criterion testable="true">Given ADR-021 requires Fluent v9 tokens, When the new tab renders in light + dark mode, Then all colors use semantic tokens; no hardcoded hex/rgba.</criterion>
     <criterion testable="true">Given the SpaarkeAi bundle has a 918 KB R3 baseline (NFR-08), When this task's deploy completes, Then bundle delta is ≤+50 KB or justified in notes.</criterion>

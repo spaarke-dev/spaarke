@@ -99,7 +99,7 @@ When dispatching parallel tasks:
 - Send one message with multiple Skill tool invocations (one per task)
 - Each invocation calls task-execute with a different task file
 - **Hard cap**: 6 concurrent agents per wave (skill enforced — API overload guard)
-- **`.claude/` paths MUST be sequential (main session only)**: A-2 (`.claude/adr/ADR-025`, `ADR-026`), D-2 (ADR-026 amendment), F-3 (`.claude/constraints/azure-deployment.md`)
+- **`.claude/` paths MUST be sequential (main session only)**: A-2 (`.claude/adr/ADR-030`, `ADR-031`), D-2 (ADR-031 amendment), F-3 (`.claude/constraints/azure-deployment.md`)
 - **Build verification between waves is MANDATORY**: `dotnet build src/server/api/Sprk.Bff.Api/` for BFF tasks; `npm run build` per package for client tasks
 
 See [task-execute SKILL.md](../../.claude/skills/task-execute/SKILL.md) for complete protocol.
@@ -130,15 +130,15 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 - **ADR-008** (Endpoint filters) — B-5 PATCH inherits filter pipeline
 - **ADR-010** (DI minimalism) — A-4, C-3 register in existing feature modules
 - **ADR-013** (AI architecture, refined 2026-05-20) — F-1, F-2 placement justification base
-- **ADR-025** (PaneEventBus) — NEW per A-2; W-4 and W-5 must conform
-- **ADR-026** (Stage lifecycle + heavy library handling) — NEW per A-2 + amended per D-2
+- **ADR-030** (PaneEventBus) — NEW per A-2; W-4 and W-5 must conform
+- **ADR-031** (Stage lifecycle + heavy library handling) — NEW per A-2 + amended per D-2
 - **ADR-029** (BFF publish hygiene) — F-3 codifies as workflow rule; NFR-01 enforces
 
 **Spec MUST / MUST NOT rules**:
 - ✅ **MUST** follow CLAUDE.md §10 Placement Justification for every BFF addition (A-4, B-4, B-5, F-1, F-2, F-3)
 - ✅ **MUST** verify publish size ≤60 MB compressed on every BFF-touching task (NFR-01)
 - ✅ **MUST** use `authenticatedFetch` from `@spaarke/auth` — no token snapshots (ADR-028)
-- ✅ **MUST** keep PaneEventBus channels typed — no `any` payloads (ADR-025)
+- ✅ **MUST** keep PaneEventBus channels typed — no `any` payloads (ADR-030)
 - ✅ **MUST** verify A-5 BEFORE remediating (verify-then-fix protocol)
 - ❌ **MUST NOT** introduce new direct `IOpenAiClient` / `IPlaybookService` injections outside `Services/Ai/` (F-2 facade rule)
 - ❌ **MUST NOT** regenerate hardcoded section catalogs (W-3 fix establishes `SECTION_REGISTRY` as single source of truth)
@@ -167,7 +167,7 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 ## Implementation Notes
 
 **From R3 lessons-learned that apply here**:
-- **PaneEventBus pattern**: Multi-subscriber, type-safe channels. W-4/W-5 use existing `workspace` channel + `widget_load` event — do not invent new channels. ADR-025 codifies.
+- **PaneEventBus pattern**: Multi-subscriber, type-safe channels. W-4/W-5 use existing `workspace` channel + `widget_load` event — do not invent new channels. ADR-030 codifies.
 - **Calendar widget Pattern D** (R3 task 115): Canonical "shared-lib widget + thin LW shim" reference for W-4/W-5 mount-source demos and for the dual-use docs in W-1/W-2.
 - **Data-refreshed restore (D-08, R2)**: Re-fetch fresh data on session restore vs replaying stale snapshots. Apply same logic to A-5 tab persistence remediation.
 - **Single-LLM-call invariant (D-01, R2)**: Always exactly one LLM call per user turn. A-4 must preserve this when wiring 25 MB attachments — go into the single chat message, no separate extraction calls.
@@ -193,15 +193,15 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 ### Applicable ADRs (load via adr-aware on each task)
 
 **Load-bearing (always)**: ADR-012, ADR-021, ADR-022, ADR-028
-**NEW in R4**: ADR-025 (PaneEventBus) + ADR-026 (stage lifecycle + heavy library handling) — created by A-2
+**NEW in R4**: ADR-030 (PaneEventBus) + ADR-031 (stage lifecycle + heavy library handling) — created by A-2
 
 **Task-specific (auto-loaded via tags)**:
 - BFF endpoint work → ADR-001, ADR-008, ADR-013, ADR-029
 - AI features / facade audit → ADR-013 (refined), ADR-029
 - New BFF service → ADR-010
 - React/Vite Code Page → ADR-022
-- PaneEventBus dispatch → ADR-025 (NEW)
-- Stage lifecycle / heavy lib handling → ADR-026 (NEW)
+- PaneEventBus dispatch → ADR-030 (NEW)
+- Stage lifecycle / heavy lib handling → ADR-031 (NEW)
 
 ### Related Projects
 

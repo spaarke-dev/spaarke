@@ -45,7 +45,7 @@ The project is considered **complete** when:
 ### Code + deploy
 - [ ] All 34 IN items shipped to dev environment (`sprk_spaarkeai` updated; `sprk_corporateworkspace` deprecated per W-6)
 - [ ] BFF deploys (A-4, B-4, B-5) verified for publish-size delta; no new HIGH-severity CVEs
-- [ ] All new ADRs merged (ADR-025, ADR-026 + D-2 amendment)
+- [ ] All new ADRs merged (ADR-030, ADR-031 + D-2 amendment)
 - [ ] Build clean: 0 `tsc --noEmit` errors; 0 lint errors; 0 build warnings introduced by R4
 - [ ] No tracked build artifacts in `git status` after fresh clone + build
 
@@ -53,8 +53,8 @@ The project is considered **complete** when:
 - [ ] `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` published (W-1)
 - [ ] `BUILD-A-NEW-WORKSPACE-WIDGET.md` rewritten with two-wrapper decision tree (W-2)
 - [ ] `LEGALWORKSPACE-RETIREMENT.md` published (W-6)
-- [ ] ADR-025 + ADR-026 published in both concise + full forms (A-2)
-- [ ] ADR-026 amended with heavy library handling section (D-2)
+- [ ] ADR-030 + ADR-031 published in both concise + full forms (A-2)
+- [ ] ADR-031 amended with heavy library handling section (D-2)
 - [ ] `DATA-ACCESS-DECISION-CRITERIA.md` published (C-1)
 - [ ] `LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` published (C-2)
 - [ ] `CHAT-ATTACHMENT-POLICY.md` published (A-4)

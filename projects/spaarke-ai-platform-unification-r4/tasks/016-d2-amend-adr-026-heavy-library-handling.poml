@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="016" project="spaarke-ai-platform-unification-r4">
   <metadata>
-    <title>D-2: Amend ADR-026 with "Heavy library handling" subsection (amendment only — no implementation)</title>
+    <title>D-2: Amend ADR-031 with "Heavy library handling" subsection (amendment only — no implementation)</title>
     <phase>Phase 1 — Documentation round</phase>
     <status>not-started</status>
     <estimated-hours>4</estimated-hours>
@@ -9,15 +9,15 @@
     <blocks>none</blocks>
     <tags>documentation, adr, architecture</tags>
     <rigor-hint>STANDARD</rigor-hint>
-    <rigor-reason>Amends both forms of an existing ADR (ADR-026 from task 013) with a new subsection. Governance impact; constrained by OC-R4-04 (amendment only, no implementation). STANDARD per Step 3.5.5 — modifies a new file (just created in 013) with explicit constraints, no .cs/.ts/.tsx modification.</rigor-reason>
+    <rigor-reason>Amends both forms of an existing ADR (ADR-031 from task 013) with a new subsection. Governance impact; constrained by OC-R4-04 (amendment only, no implementation). STANDARD per Step 3.5.5 — modifies a new file (just created in 013) with explicit constraints, no .cs/.ts/.tsx modification.</rigor-reason>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>touches .claude/adr/ — main-session-only (permission boundary) + depends on 013 (ADR-026 base content must exist first)</parallel-reason>
+    <parallel-reason>touches .claude/adr/ — main-session-only (permission boundary) + depends on 013 (ADR-031 base content must exist first)</parallel-reason>
   </metadata>
 
   <prompt>
-    Amend both forms of **ADR-026** (concise at `.claude/adr/ADR-026-stage-lifecycle.md` + full at
-    `docs/adr/ADR-026-stage-lifecycle.md`) with a new **"Heavy library handling"** subsection. The
+    Amend both forms of **ADR-031** (concise at `.claude/adr/ADR-031-stage-lifecycle.md` + full at
+    `docs/adr/ADR-031-stage-lifecycle.md`) with a new **"Heavy library handling"** subsection. The
     subsection MUST cover: (1) singlefile vs lazy-import incompatibility (why heavy libs can't be
     lazy-imported when the bundle is built as singlefile for Code Page deploy); (2) Option 2 pattern
     reference (separate web resources for heavy libs); (3) link to the R3 bundle-size investigation memo
@@ -31,8 +31,8 @@
   </role>
 
   <goal>
-    Two files modified: `.claude/adr/ADR-026-stage-lifecycle.md` (concise, +20-30 lines for the new
-    subsection) and `docs/adr/ADR-026-stage-lifecycle.md` (full, +40-60 lines with full rationale). The
+    Two files modified: `.claude/adr/ADR-031-stage-lifecycle.md` (concise, +20-30 lines for the new
+    subsection) and `docs/adr/ADR-031-stage-lifecycle.md` (full, +40-60 lines with full rationale). The
     new subsection covers: singlefile/lazy-import incompatibility; Option 2 (separate web resources)
     pattern as a reference; link to R3 bundle-size investigation memo; explicit note that implementation
     is deferred per OC-R4-04.
@@ -48,15 +48,15 @@
       build constraint).
     </background>
     <relevant-files>
-      <file>.claude/adr/ADR-026-stage-lifecycle.md</file>
-      <file>docs/adr/ADR-026-stage-lifecycle.md</file>
+      <file>.claude/adr/ADR-031-stage-lifecycle.md</file>
+      <file>docs/adr/ADR-031-stage-lifecycle.md</file>
       <file>projects/spaarke-ai-platform-unification-r3/notes/</file>
     </relevant-files>
   </context>
 
   <constraints>
     <constraint source="project">This is an **amendment only** per OC-R4-04. Do NOT propose, design, or commit separate-web-resources implementation. Document the pattern and stop.</constraint>
-    <constraint source="project">Both forms of ADR-026 MUST be amended consistently. The concise form gets a brief MUST/MUST NOT addition; the full form gets fuller rationale + alternatives.</constraint>
+    <constraint source="project">Both forms of ADR-031 MUST be amended consistently. The concise form gets a brief MUST/MUST NOT addition; the full form gets fuller rationale + alternatives.</constraint>
     <constraint source="project">Amendment MUST link to the R3 bundle-size investigation memo. If the memo does not exist or is hard to find, search `projects/spaarke-ai-platform-unification-r3/notes/` thoroughly before deciding it's missing; if confirmed missing, note the gap in the amendment and proceed without the link rather than blocking.</constraint>
     <constraint source="project">Amendment MUST explicitly state that implementation is deferred (cite OC-R4-04). Future authors must not interpret the amendment as a green light to implement.</constraint>
     <constraint source="project">Amendment MUST be attached at the location that task 013 left open for it (per 013's structural constraint). Do NOT rewrite or reorder the base ADR.</constraint>
@@ -67,34 +67,34 @@
       <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
       <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
       <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
-      <file>.claude/adr/ADR-026-stage-lifecycle.md</file>
-      <file>docs/adr/ADR-026-stage-lifecycle.md</file>
+      <file>.claude/adr/ADR-031-stage-lifecycle.md</file>
+      <file>docs/adr/ADR-031-stage-lifecycle.md</file>
     </files>
   </knowledge>
 
   <steps>
-    <step order="1" name="Read base ADR-026">Read both forms of ADR-026 (created by task 013). Identify the attachment point left for this amendment.</step>
+    <step order="1" name="Read base ADR-031">Read both forms of ADR-031 (created by task 013). Identify the attachment point left for this amendment.</step>
     <step order="2" name="Find R3 memo">Search `projects/spaarke-ai-platform-unification-r3/notes/` for the bundle-size investigation memo (likely under `drafts/`, `debug/`, or root). Capture the file path for the link. If not found, note the gap.</step>
-    <step order="3" name="Draft concise amendment">Add the "Heavy library handling" subsection to `.claude/adr/ADR-026-stage-lifecycle.md`. Include: singlefile/lazy-import incompatibility (1-2 sentences), Option 2 reference (1-2 sentences), R3 memo link, OC-R4-04 deferral note, 1-2 MUST/MUST NOT bullets. Target +20-30 lines.</step>
-    <step order="4" name="Draft full amendment">Add the corresponding subsection to `docs/adr/ADR-026-stage-lifecycle.md` with fuller rationale, alternatives considered (e.g., tree-shake harder, code-split via Vite, monorepo build splitting), and the same R3 memo link + OC-R4-04 deferral note. Target +40-60 lines.</step>
+    <step order="3" name="Draft concise amendment">Add the "Heavy library handling" subsection to `.claude/adr/ADR-031-stage-lifecycle.md`. Include: singlefile/lazy-import incompatibility (1-2 sentences), Option 2 reference (1-2 sentences), R3 memo link, OC-R4-04 deferral note, 1-2 MUST/MUST NOT bullets. Target +20-30 lines.</step>
+    <step order="4" name="Draft full amendment">Add the corresponding subsection to `docs/adr/ADR-031-stage-lifecycle.md` with fuller rationale, alternatives considered (e.g., tree-shake harder, code-split via Vite, monorepo build splitting), and the same R3 memo link + OC-R4-04 deferral note. Target +40-60 lines.</step>
     <step order="5" name="Verify">Re-read both amended files. Confirm: amendment is bounded to the new subsection (no other changes); both forms consistent; R3 memo link resolves or gap is noted; OC-R4-04 deferral stated.</step>
     <step order="6" name="Update TASK-INDEX">Change task 016 status to ✅ completed in `tasks/TASK-INDEX.md`.</step>
     <step order="7" name="Document deviations">If any deviation from spec DR-05, plan §4, or OC-R4-04, write to `projects/spaarke-ai-platform-unification-r4/notes/`.</step>
   </steps>
 
   <tools>
-    <tool name="Read">Read base ADR-026 + R3 notes directory</tool>
+    <tool name="Read">Read base ADR-031 + R3 notes directory</tool>
     <tool name="Grep">Search R3 notes for bundle-size investigation memo</tool>
     <tool name="Edit">Add new subsections to both ADR forms</tool>
   </tools>
 
   <outputs>
-    <output type="docs">.claude/adr/ADR-026-stage-lifecycle.md (modified — Heavy library handling subsection added)</output>
-    <output type="docs">docs/adr/ADR-026-stage-lifecycle.md (modified — Heavy library handling subsection added)</output>
+    <output type="docs">.claude/adr/ADR-031-stage-lifecycle.md (modified — Heavy library handling subsection added)</output>
+    <output type="docs">docs/adr/ADR-031-stage-lifecycle.md (modified — Heavy library handling subsection added)</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Both ADR-026 forms include a new "Heavy library handling" subsection.</criterion>
+    <criterion testable="true">Both ADR-031 forms include a new "Heavy library handling" subsection.</criterion>
     <criterion testable="true">Subsection covers singlefile/lazy-import incompatibility, Option 2 reference, and OC-R4-04 deferral.</criterion>
     <criterion testable="true">Link to R3 bundle-size investigation memo present (or gap documented if memo not findable).</criterion>
     <criterion testable="true">Amendment is bounded — base ADR content (stages, transitions, MUST/MUST NOT) is unchanged.</criterion>

@@ -20,7 +20,7 @@
     `PaneEventBus.workspace` channel, mounting the result widget as a new workspace tab.
     This establishes the Context → Workspace mount-source pattern, paralleling W-4
     (Assistant → Workspace, task 042). The Workspace pane resolves the receiving widget
-    from `WorkspaceWidgetRegistry`. Use typed PaneEventBus channels (ADR-025 — no `any`)
+    from `WorkspaceWidgetRegistry`. Use typed PaneEventBus channels (ADR-030 — no `any`)
     and `authenticatedFetch` for BFF calls (ADR-028). 042 and 043 are parallel-safe — they
     touch different code paths (Assistant pane vs Context wizard).
   </prompt>
@@ -39,7 +39,7 @@
     Context-pane wizard, completes its steps including the new "Add result to Workspace"
     final step, and on completion a result widget mounts as a new workspace tab via
     `widget_load` dispatch. Code changes meet ADR-021 (Fluent v9), ADR-022 (React 19),
-    ADR-025 (typed channels — no `any`), ADR-028 (function-based auth). FR-03 acceptance
+    ADR-030 (typed channels — no `any`), ADR-028 (function-based auth). FR-03 acceptance
     criteria satisfied. Pattern established for future Context wizards (extensibility
     documented in &lt;notes&gt;).
   </goal>
@@ -67,7 +67,7 @@
       itself. Coordinate via the parallel-group E execution wave.
 
       ADR-028 invariants: NO token snapshots; use `useAuth()` + `authenticatedFetch`.
-      ADR-025 invariant: typed channels — no `any` payloads.
+      ADR-030 invariant: typed channels — no `any` payloads.
     </background>
     <relevant-files>
       <file>src/solutions/SpaarkeAi/src/ (Context pane wizard — exact path determined during Step 3)</file>
@@ -84,7 +84,7 @@
   <constraints>
     <constraint source="ADR-021">Fluent v9 tokens only. NO hex, NO `rgba()`, NO Fluent v8.</constraint>
     <constraint source="ADR-022">React 19 only for Code Pages. NO React 16 fallbacks.</constraint>
-    <constraint source="ADR-025">PaneEventBus channels MUST be typed — NO `any` payloads. Reuse the `widget_load` payload type defined in `PaneEventTypes.ts` (extended by 042 OR define here if 042 hasn't landed yet — coordinate via parallel-group E).</constraint>
+    <constraint source="ADR-030">PaneEventBus channels MUST be typed — NO `any` payloads. Reuse the `widget_load` payload type defined in `PaneEventTypes.ts` (extended by 042 OR define here if 042 hasn't landed yet — coordinate via parallel-group E).</constraint>
     <constraint source="ADR-028">Function-based auth via `@spaarke/auth` `authenticatedFetch`. NO token snapshots in props/state.</constraint>
     <constraint source="ADR-012">Result widgets live in `@spaarke/ai-widgets` (or `@spaarke/*` lib family). Don't duplicate widget code inside the wizard.</constraint>
     <constraint source="project">ONE wizard only. Wiring all Context wizards is OUT OF SCOPE — pattern-establishment, not coverage. Future wizards adopt the pattern in follow-up rounds.</constraint>
@@ -100,7 +100,7 @@
       <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
       <file>.claude/adr/ADR-021-fluent-design-system.md</file>
       <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
-      <file>.claude/adr/ADR-025-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
       <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
       <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
       <file>.claude/skills/code-page-deploy/SKILL.md</file>
@@ -113,7 +113,7 @@
       <pattern name="Calendar widget Pattern D (R3 task 115)" location="src/client/shared/Spaarke.events-components/ + src/solutions/LegalWorkspace/src/registrations/calendar.registration.ts">
         Canonical "shared-lib widget + thin registration shim" reference. Receiving widget mounted in workspace channel follows this pattern.
       </pattern>
-      <pattern name="PaneEventBus typed channels (ADR-025)" location="src/client/shared/Spaarke.AI.Widgets/src/events/">
+      <pattern name="PaneEventBus typed channels (ADR-030)" location="src/client/shared/Spaarke.AI.Widgets/src/events/">
         Workspace / context / conversation / safety channels with typed payloads. Reuse `widget_load` type from 042 OR define here if executing first.
       </pattern>
     </patterns>
@@ -130,10 +130,10 @@
       Inspect `src/solutions/SpaarkeAi/src/` to find the Context-pane wizard component. Read its existing final-step / completion logic. Record its exact path in &lt;notes&gt; for future reference.
     </step>
     <step order="4" name="Load context">
-      Read W-1 doc (010 output), ADR-025, ADR-028, PaneEventBus source files, ContextWidgetRegistry + WorkspaceWidgetRegistry source, Calendar widget Pattern D reference, and the chosen wizard's component.
+      Read W-1 doc (010 output), ADR-030, ADR-028, PaneEventBus source files, ContextWidgetRegistry + WorkspaceWidgetRegistry source, Calendar widget Pattern D reference, and the chosen wizard's component.
     </step>
     <step order="5" name="Coordinate widget_load payload type">
-      Check `PaneEventTypes.ts` for the `widget_load` payload type. If task 042 has landed it, REUSE the same shape. If not (043 executing before 042 in parallel-group E), DEFINE it here per ADR-025 (typed, no `any`). The type must accommodate both Assistant- and Context-initiated dispatches.
+      Check `PaneEventTypes.ts` for the `widget_load` payload type. If task 042 has landed it, REUSE the same shape. If not (043 executing before 042 in parallel-group E), DEFINE it here per ADR-030 (typed, no `any`). The type must accommodate both Assistant- and Context-initiated dispatches.
     </step>
     <step order="6" name="Add 'Add result to Workspace' final step">
       Modify the chosen wizard to add the optional final step. Use Fluent v9 components for the UI (checkbox or button labeled "Add result to Workspace"). On submit/finish, IF the option is selected, dispatch `widget_load` on the workspace channel with the typed payload (widget type ID + result data). If not selected, complete the wizard normally.
@@ -231,7 +231,7 @@
     <criterion testable="true">Given the operator launches the chosen Context wizard and completes it with "Add result to Workspace" checked, When the wizard finishes, Then a `widget_load` event is dispatched on the workspace channel with a typed payload identifying the result widget + data.</criterion>
     <criterion testable="true">Given the option is left unchecked, When the wizard finishes, Then NO `widget_load` event is dispatched and the workspace pane is unchanged.</criterion>
     <criterion testable="true">Given the workspace channel receives the `widget_load` event, When the Workspace pane handles it, Then the result widget resolves via `WorkspaceWidgetRegistry` and mounts as a new tab.</criterion>
-    <criterion testable="true">Given ADR-025 requires typed channels, When the code is reviewed, Then no `any` payload types appear in the dispatch path; the `widget_load` payload type is shared with 042 (or defined here if 042 hasn't landed).</criterion>
+    <criterion testable="true">Given ADR-030 requires typed channels, When the code is reviewed, Then no `any` payload types appear in the dispatch path; the `widget_load` payload type is shared with 042 (or defined here if 042 hasn't landed).</criterion>
     <criterion testable="true">Given ADR-028 requires function-based auth, When the receiving widget calls the BFF, Then it uses `authenticatedFetch`; NO token snapshots.</criterion>
     <criterion testable="true">Given ADR-021 requires Fluent v9 tokens, When the wizard final step and new tab render in light + dark mode, Then all colors use semantic tokens.</criterion>
     <criterion testable="true">Given task 043 is executing, When this task completes, Then TASK-INDEX.md shows task 043 as ✅ completed.</criterion>
