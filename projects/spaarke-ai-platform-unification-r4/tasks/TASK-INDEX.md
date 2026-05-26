@@ -23,14 +23,14 @@
 
 | ID | Title | Phase | Status | Item | Rigor | Deps | Parallel-group / Safe |
 |---|---|---|---|---|---|---|---|
-| 001 | E-1 R3 project wrap-up | 0 | 🔲 | E-1 / PR-01 | STANDARD | none | A / ✅ |
-| 002 | F-1 BFF placement-justification retroactive memo | 0 | 🔲 | F-1 / NFR-02 | STANDARD | none | A / ✅ |
-| 010 | W-1 Write SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md | 1 | 🔲 | W-1 / DR-01 | STANDARD | none | B / ✅ |
-| 011 | W-2 Rewrite BUILD-A-NEW-WORKSPACE-WIDGET.md | 1 | 🔲 | W-2 / DR-02 | STANDARD | 010 | — / ❌ (deps) |
+| 001 | E-1 R3 project wrap-up | 0 | ✅ | E-1 / PR-01 | STANDARD | none | A / ✅ |
+| 002 | F-1 BFF placement-justification retroactive memo | 0 | ✅ | F-1 / NFR-02 | STANDARD | none | A / ✅ |
+| 010 | W-1 Write SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md | 1 | ✅ | W-1 / DR-01 | STANDARD | none | B / ✅ |
+| 011 | W-2 Rewrite BUILD-A-NEW-WORKSPACE-WIDGET.md | 1 | 🔲 | W-2 / DR-02 | STANDARD | 010 ✅ | — / ❌ (deps) |
 | 012 | A-2a Author ADR-025 (PaneEventBus) | 1 | 🔲 | A-2a / DR-04 | STANDARD | none | — / ❌ (`.claude/`) |
 | 013 | A-2b Author ADR-026 (stage lifecycle) | 1 | 🔲 | A-2b / DR-04 | STANDARD | none | — / ❌ (`.claude/`) |
-| 014 | C-1 Write DATA-ACCESS-DECISION-CRITERIA.md | 1 | 🔲 | C-1 / DR-06 | STANDARD | none | B / ✅ |
-| 015 | C-2 Write LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md | 1 | 🔲 | C-2 / DR-07 | STANDARD | 010 | — / ❌ (deps) |
+| 014 | C-1 Write DATA-ACCESS-DECISION-CRITERIA.md | 1 | ✅ | C-1 / DR-06 | STANDARD | none | B / ✅ |
+| 015 | C-2 Write LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md | 1 | 🔲 | C-2 / DR-07 | STANDARD | 010 ✅ | — / ❌ (deps) |
 | 016 | D-2 Amend ADR-026 heavy library handling | 1 | 🔲 | D-2 / DR-05 | STANDARD | 013 | — / ❌ (`.claude/` + deps) |
 | 017 | F-3 Document publish-size baseline rule | 1 | 🔲 | F-3 / NFR-01 | STANDARD | none | — / ❌ (`.claude/` + CLAUDE.md) |
 | 020 | F-2 BFF facade audit | 2 | 🔲 | F-2 / NFR-03 | STANDARD | none | — / ✅ |
@@ -64,17 +64,17 @@ Tasks in the same group can run simultaneously once prerequisites are met. **Har
 
 **Permission boundary (CLAUDE.md §3)**: Tasks touching `.claude/` paths are forced to `parallel-safe: false` and MUST run in the main session only — sub-agents cannot write to `.claude/`. These tasks (012, 013, 016, 017) run sequentially via the main session.
 
-### Phase 0 — R3 wrap-up + retroactive memo (~4h)
+### Phase 0 — R3 wrap-up + retroactive memo (~4h) ✅ DONE
 
 | Wave | Tasks | Concurrency | Prerequisite |
 |---|---|---|---|
-| Wave 0.1 (Group A, parallel) | 001, 002 | 2 agents | none |
+| Wave 0.1 (Group A, parallel) | 001, 002 | ✅ Completed in commit `4a877b1e` (2026-05-26) prior to pipeline run | none |
 
 ### Phase 1 — Documentation round (~21h)
 
 | Wave | Tasks | Concurrency | Prerequisite |
 |---|---|---|---|
-| Wave 1.1 (Group B, parallel) | 010, 014 | 2 agents | none |
+| Wave 1.1 (Group B, parallel) | 010 ✅, 014 ✅ | Completed 2026-05-26 by parallel sub-agents | none |
 | Wave 1.2 (sequential, main session) | 012, 013, 017 | 1 at a time | none — `.claude/` boundary |
 | Wave 1.3 (after Wave 1.1) | 011, 015 | 2 agents | 010 ✅ |
 | Wave 1.4 (sequential, main session) | 016 | 1 task | 013 ✅ + `.claude/` boundary |

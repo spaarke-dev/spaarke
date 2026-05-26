@@ -306,6 +306,7 @@ The overlay is contained entirely inside `ThreePaneLayout`; no SpaarkeAi-side ch
 
 ## 10. Related docs
 
+- [`SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`](./SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md) — **authoritative two-wrapper model** (R4 DR-01): three surfaces, Dashboard wrapper (`LegalWorkspaceApp`) vs Direct widget wrapper (`WorkspaceWidgetRegistry`), four mount sources, dual-use pattern, LegalWorkspace-as-dashboard-engine framing. Read this before designing a new widget.
 - [`SPAARKEAI-COMPONENT-MODEL.md`](./SPAARKEAI-COMPONENT-MODEL.md) — inventory of shared libs + solution-local components + PaneEventBus contract
 - [`SPAARKEAI-COMPONENTIZATION-AUDIT.md`](./SPAARKEAI-COMPONENTIZATION-AUDIT.md) — honest assessment of reuse + gaps
 - [`../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md`](../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md) — step-by-step tutorial (worked example: Calendar widget)
@@ -319,3 +320,4 @@ The overlay is contained entirely inside `ThreePaneLayout`; no SpaarkeAi-side ch
 
 - **2026-05-22 (task 113)**: initial publication (post-R9 state). Documented the cold-load pipeline, embedded LegalWorkspaceApp pattern, 4-stage shell lifecycle, BFF surface, Dataverse schema, 5 system layouts, and storage contract.
 - **2026-05-22 (task 123)**: refreshed through R13. Added Calendar widget (task 115) as 6th system layout + its distinct "shared-lib widget + thin LW shim" architecture, `@spaarke/events-components` shared lib (task 114), pane-width fracs precedence chain (task 117), all-panes-collapsed overlay UX + `resetToFracDefaults()` recovery (task 119), `spaarke:calendar:collapsed` localStorage key (task 116), QuickSummary 6-card expansion (task 110). Calendar widget polish history (tasks 116/118/120/121/122) is captured in the componentization audit and the build-a-widget guide; this file references the architectural surface only.
+- **2026-05-26 (R4 task 010 / W-1)**: cross-linked to new authoritative two-wrapper architecture doc `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` (R4 DR-01). This doc remains the cold-load → render pipeline reference; the new doc establishes the mental model (surfaces / wrappers / mount sources / dual-use / LegalWorkspace-as-engine) that future widget authors apply on top of this pipeline.
