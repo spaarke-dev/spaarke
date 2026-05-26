@@ -797,3 +797,59 @@ Mailbox object IDs:
 Demo deploy COMPLETE; prod intentionally skipped per operator direction. Substantial Azure resource prep documented for future env promotions. Demo running Phase 4 binary cleanly with all Outcome A/B/E changes active.
 
 **Critical signal for Phase 6**: the per-env config and infrastructure prep documented in steps 1–10 + lessons 1–6 above is the authoritative source for prod prep (and any future env). Phase 6 codification must capture this.
+
+---
+
+# Final code-review findings (post-merge, 2026-05-26)
+
+After PR #295 merged to master (commit `0bbebe73`), a focused code review was run as a wrap-up closure step. Scope: 22 files (8 facade + 1 DI module + 10 migrated consumers + 3 LegalWorkspace `/api` fix sites).
+
+**Verdict**: ✅ "Ready for consumption by downstream projects." Zero critical findings; build clean; ADR-013 boundary enforced; all 10 consumers cleanly migrated; 3 LegalWorkspace fix sites verified correct.
+
+## Important findings (documented, NOT fixed this project — all non-blocking)
+
+### Finding 1: `WorkspaceAiService.cs:333` reuses `IWorkspacePrefillAi.ExecutePreFillPlaybookAsync` for a non-prefill use case
+
+The boundary is intact (CRUD code uses facade), but the method name (`ExecutePreFillPlaybookAsync` on `IWorkspacePrefillAi`) misrepresents what the call does in this context (workspace AI summary, a different playbook). Future readers will assume the facade is prefill-specific.
+
+**Recommended future fix** (~30 min, separate PR): rename to `ExecutePlaybookAsync` on `IWorkspacePrefillAi` (since it's a generic orchestrator wrapper), OR split into a separate `IWorkspaceAiSummary` facade. Downstream consumers (Insights Engine, R3 follow-ups) are not blocked by this — interface compiles + behaves identically.
+
+### Finding 2: `AnalysisServicesModule.cs:51` feature-gating widens silent-failure surface
+
+`AddPublicContractsFacade(services)` is gated behind BOTH `Analysis:Enabled` AND `DocumentIntelligence:Enabled`. If either flag is false, the 4 facades are NOT registered, but **only `BriefingService` declares its facade nullable** (`IBriefingAi?`). The other 3 services (`InvoiceAnalysisService`, `MatterPreFillService`, `WorkspaceAiService`) all inject the facades as required → `InvalidOperationException` at request time when AI is disabled.
+
+**Pre-migration status**: Same behavior existed when those services injected the wrapped types directly (identical gating). **No regression** introduced by this work.
+
+**Recommended future improvement** (~15 min): either declare the 3 services' facade dependencies nullable (matching `BriefingService`), OR add explicit feature-disabled error messages at the consumer boundary. Either improves the operator experience when the env is intentionally AI-disabled.
+
+### Finding 3: `MatterPreFillService.cs:178` + `ProjectPreFillService.cs:178` use raw `IConfiguration` keys vs `IOptions<T>`
+
+ADR-010 prefers typed `IOptions<T>` patterns for config (`SharePointEmbedded:StagingContainerId`, `Workspace:PreFillPlaybookId`).
+
+**Pre-migration status**: pre-existed this project's work — outside its scope.
+
+**Recommended future fix**: convert both services to `IOptions<SharePointEmbeddedOptions>` + `IOptions<WorkspaceOptions>` in a separate cleanup PR.
+
+## Nits (6 small consistency items)
+
+Documented for the next iteration:
+- `BriefingAi.cs:34` vs `InvoiceSearchService.cs:72` — inconsistent `nameof()` usage in `ArgumentException.ThrowIfNullOrWhiteSpace`
+- `AnalysisServicesModule.cs:26-30` — `Console.WriteLine` for startup diagnostics with unicode escape sequences (consider `ILogger` instead)
+- `IInvoiceAi.cs` leaks `OpenAI.Chat.ChatMessage` through facade signature (justified in doc-comment but flag for future SDAP-shaped DTO)
+- `WorkspaceAiService.cs:33` not `sealed` while other 4 facade impls are
+- `DailyBriefingEndpoints.cs:226` variable `ct` shadows the conventional `CancellationToken ct` parameter name
+- `InvoiceIndexingJobHandler.cs:255-281` `LoadInvoiceRecordAsync` stub (tracked via GitHub #229)
+
+## Praise (5 specific positives the review called out)
+
+- Interface doc-strings exceptional — every public method on `IBriefingAi`, `IInvoiceAi`, `IRecordMatchingAi`, `IWorkspacePrefillAi` includes consumer inventory, rationale citing ADR-013/ADR-007, parameter semantics, and references to the canonical facade pattern
+- Facade impls minimally surface — zero behavior added beyond delegation; resilience + retry stay in wrapped types as ADR-007 requires
+- CancellationToken propagation 100% across all 4 impls + 10 consumers
+- DI lifetime uniform Scoped across all 4 facades; rationale documented in `AnalysisServicesModule.cs` doc-comment
+- LegalWorkspace `/api` fix sites verified — all 3 use `${getBffBaseUrl()}/api/...` correctly; no double-prefix bugs introduced; DI registration count change exactly +4 as expected per `plan.md` ADR-010 delta
+
+## Decision
+
+**All 3 Important findings + 6 nits documented here for future iterations.** No follow-up PR opened for this project — none are urgent enough to delay project closure. Findings are non-blocking for downstream consumption (Insights Engine, R3, future feature work).
+
+**Project closed**: 2026-05-26.
