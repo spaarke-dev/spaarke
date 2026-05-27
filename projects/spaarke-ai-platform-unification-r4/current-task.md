@@ -1,178 +1,212 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-05-26 (mixed wave complete — 7 tasks shipped; 24 of 33 R4 tasks ✅; 73% done; all operator gates resolved)
+> **Last Updated**: 2026-05-26 (comprehensive handoff for compaction — 30/37 R4 tasks ✅, 81% done)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+
+---
+
+## ⚠️ CRITICAL — READ FIRST AFTER COMPACTION
+
+**Operator instruction 2026-05-26 (Late session)**: **R4 wrap-up (task 090) MUST PAUSE for operator final review + approval before executing.** Do NOT auto-dispatch 090 even after all preceding tasks complete.
 
 ---
 
 ## Quick Recovery (READ THIS FIRST)
 
-<!-- This section is for FAST context restoration after compaction -->
-<!-- Must be readable in < 30 seconds -->
-
 | Field | Value |
 |-------|-------|
-| **Task** | none (last wave: 5 parallel sub-agents 031/044/042/054/055 + main session 062/060; 055 re-scoped mid-wave per operator → Option B CalendarFilterPane promotion via new sub-agent) |
-| **Step** | — |
-| **Status** | not-started — all 4 operator gates from prior round resolved; deploys still deferred to Phase 7 wrap-up batch |
-| **Next Action** | Remaining R4: 043 (W-5 Context→Workspace mount, parallel-safe with no in-flight tasks), 052 (C-4 WorkspaceRenderer interface, deps 051 ✅), Phase 6 hygiene cluster (061, 063, 064, 065, 066, 067), 090 wrap-up. Recommended next wave: 043 + 052 + 061 + 063 + 065 + 066 (6-cap mixed). |
-
-### Files Modified This Session
-
-- `projects/spaarke-ai-platform-unification-r4/` — pipeline scaffold committed in `929980d1`
-- Wave 1.1 (commit `cd1198a4`): W-1 dashboard model + C-1 data access criteria
-- Wave 1.5 (this commit, pending): W-2 guide rewrite + C-2 embedded contract + F-2 audit + A-5a verify + W-6 retirement
-  - `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` — rewritten (599 lines, task 011)
-  - `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` — NEW (359 lines, task 015)
-  - `docs/architecture/LEGALWORKSPACE-RETIREMENT.md` — NEW (157 lines, task 041)
-  - `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` — §7.2 reciprocal cross-link refreshed (task 011)
-  - `docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md` — retirement doc cross-link added (task 041)
-  - `projects/spaarke-ai-platform-unification-r4/notes/bff-ai-facade-audit-2026-05.md` — NEW (~155 lines, task 020)
-  - `projects/spaarke-ai-platform-unification-r4/notes/tab-persistence-verification-2026-05.md` — NEW (243 lines, task 030)
-  - `projects/spaarke-ai-platform-unification-r4/notes/lw-consumer-audit-2026-05.md` — NEW (119 lines, task 041)
-  - `scripts/Deploy-CorporateWorkspace.ps1`, `Deploy-WizardCodePages.ps1`, `Deploy-AllWebResources.ps1`, `README.md` — retirement guards added (task 041)
-  - `CLAUDE.md` (root) — §16 pointers for embedded contract, retirement doc, updated W-2 guide (main session)
-  - `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md` — 011, 015, 020, 030, 041 → ✅; 031 → ⏸ operator gate
-
-### Critical Context
-
-R4 has 34 IN items across 8 phases. Progress: **9 of 32 tasks done** (28%) — Phase 0 (commit `4a877b1e`), Wave 1.1 (010, 014), Wave 1.5 (011, 015, 020, 030, 041). Two operator gates open: (1) **031 A-5b** awaits operator UX confirmation per 030's verification memo — recommended path is `chatSessionId` sessionStorage→localStorage promotion (~3-5h); (2) **W-6 self-reference**: `src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx:432` has `Xrm.Navigation.navigateTo` to `sprk_corporateworkspace?mode=todo` — will 404 post-retirement; migration deferred to follow-up task. Dataverse-side consumer audit (Default Solution forms/sitemap) also needs operator validation. Major win in 020: BFF facade audit found **0 direct CRUD→AI injections** (vs baseline of 20 — substantively clean under §10).
+| **Project state** | R4 — 30/37 tasks ✅ (81% done) |
+| **Branch** | `work/spaarke-ai-platform-unification-r4` (worktree at `c:\code_files\spaarke-wt-spaarke-ai-platform-unification-r4`) |
+| **Last commit** | `fd75dd60` (wave with 043+052+061+063+068+069 + 070 filed) — pending: 071 commit |
+| **Next Action** | Commit + push 071 POML + r5-backlog + TASK-INDEX updates. Then dispatch next wave for remaining 7 tasks (064, 065, 067, 070, 071, **NOT 090 — operator gate**). |
+| **Deploys** | DEFERRED to Phase 7 batch (operator decision 2026-05-26) |
 
 ---
 
-## Active Task (Full Details)
+## Remaining R4 work (7 tasks)
 
-| Field | Value |
-|-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | not-started |
-| **Started** | — |
-
----
-
-## Progress
-
-### Completed Steps
-
-*No active task. See [tasks/TASK-INDEX.md](./tasks/TASK-INDEX.md) for project-wide progress.*
-
-### Current Step
-
-*No active step.*
-
-### Files Modified (All Task)
-
-*See "Files Modified This Session" above.*
-
-### Decisions Made
-
-- **2026-05-26**: R4 spec.md generated using FR/NFR/DR/PR four-category structure (vs strict R3 FR+NFR mirror) — Reason: R4 has 7 doc + 2 process items that don't fit traditional FR/NFR split. Operator confirmed.
-- **2026-05-26**: project-pipeline ran with `Full project-setup; backup existing files first` — Reason: README + plan existed but pipeline wanted to regenerate from templates. Originals preserved as `.original.md` for reference.
-- **2026-05-26**: Step 4 (branch creation) skipped — Reason: Already on `work/spaarke-ai-platform-unification-r4` worktree branch. R3 precedent applies.
-- **2026-05-26**: Tasks 001 + 002 marked ✅ retroactively — Reason: Completed in commit `4a877b1e` (2026-05-26 morning) prior to pipeline run. Operator confirmed skipping verify-and-amend re-run.
-- **2026-05-26**: Wave 1.1 executed via 2 parallel `general-purpose` sub-agents invoking task-execute — completed cleanly. Main session reconciled TASK-INDEX + CLAUDE.md root pointer (sub-agents instructed to defer TASK-INDEX writes to avoid race condition).
-- **2026-05-26 (operator gate resolution batch)**: All 4 deferred items resolved:
-  - **Deploys**: Defer to Phase 7 wrap-up batch (avoid mid-project redeploy churn)
-  - **031 A-5b** unblocked: Path A approved (promote `chatSessionId` + `playbookId` from sessionStorage → localStorage with one-shot migration). Per 030's verification memo §7.2.
-  - **W-6 source consumer** (`WorkspaceGrid.tsx:432` navigateTo): Inline ToDo modal in SpaarkeAi shell — Filed as new task 044
-  - **W-6 DV audit**: Operator-owned (procedure documented in `docs/architecture/LEGALWORKSPACE-RETIREMENT.md` §8.1)
+| ID | Task | Status | Deps | Notes |
+|---|---|---|---|---|
+| 064 | B-8 CalendarDrawer.eventDates API upgrade | 🔲 | 063 ✅ | Frontend; same lib as 063; sub-agent safe |
+| 065 | B-9 ESLint v9 migration | 🔲 | none | NOTE: needs re-framing per Phase 6 sub-agent finding (eslint@^9 already in deps; no config exists — task is "create the missing flat config", not "migrate") |
+| 066 | B-10 EventsPage standalone redeploy | 🔲 | none | **DEFER to Phase 7 deploy batch** per operator decision |
+| 067 | B-11 Type-drift casts cleanup | 🔲 | 063 ✅, 064 | **Now absorbs 13 cascading tsc errors deferred from 061** per 061's POML guidance |
+| 070 | BFF test 69 cascading errors | 🔲 | 069 ✅ | CS7036 logger drift bulk fix; production code UNTOUCHED |
+| 071 | 142 test-content failures in @spaarke/ui-components | 🔲 | 068 ✅ | Triage + bulk fix; target ≤10 failures remaining |
+| 090 | R4 Project Wrap-up | 🔲 | all preceding ✅ + **OPERATOR REVIEW** | ⚠️ DO NOT AUTO-DISPATCH |
 
 ---
 
-## Next Action
+## All operator decisions (chronological)
 
-**Next Step**: Operator selects next wave.
-
-**Available next waves**:
-
-| Wave | Tasks | Dependencies | Parallelization |
-|---|---|---|---|
-| **Wave 1.2** | 012 A-2a ADR-030 · 013 A-2b ADR-031 · 017 F-3 publish-size rule | none | **Sequential, main session only** — all touch `.claude/` paths (permission boundary) |
-| **Wave 1.3** | 011 W-2 BUILD-A-NEW-WORKSPACE-WIDGET rewrite · 015 C-2 LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT | 010 ✅ | 2 parallel sub-agents (different docs dirs) |
-| **Wave 2.1** | 020 F-2 BFF facade audit | none | 1 task (anytime — not Phase 1 dependent) |
-| **Wave 3.1** | 030 A-5a verify tab persistence | none | 1 task (verify-first; operator gates 031) |
-| **Wave 4.1** | 040 W-3 wizard catalog drift · 041 W-6 LW retirement doc | none | 2 parallel (Group D) |
-
-Wave 1.4 (016 D-2 amend ADR-031) requires 013 ✅ first.
-Wave 4.2 (042 W-4, 043 W-5) requires 010 ✅ + 040 ✅.
-
-**Pre-conditions** (current):
-- ✅ Phase 0 done (tasks 001 + 002)
-- ✅ Wave 1.1 done (tasks 010 + 014)
-- ✅ 30 remaining POML tasks ready in `tasks/`
-- ✅ TASK-INDEX.md reflects current state
-- ✅ Worktree clean after Wave 1.1 commits (pending)
+1. **2026-05-25** — R4 scope finalized: 34 IN items / 8 phases / ~116h (backlog.md)
+2. **2026-05-26 (early)** — `/design-to-spec` source selection: plan.md + backlog.md (no design.md)
+3. **2026-05-26 (early)** — spec.md format: FR/NFR/DR/PR four-category structure (vs strict R3 mirror)
+4. **2026-05-26 (early)** — `/project-pipeline` setup mode: Full project-setup; backup existing files first (originals → .original.md)
+5. **2026-05-26 (early)** — Branch creation skipped (already on work/* worktree)
+6. **2026-05-26 (early)** — Task execution: hand-off mode (operator picks waves)
+7. **2026-05-26 (Wave 0.1)** — Tasks 001+002 ✅ retroactively (commit 4a877b1e completed Phase 0 before pipeline ran)
+8. **2026-05-26 (gate batch)** — 4 operator gates resolved in single batch:
+   - **Deploys**: defer to Phase 7 wrap-up batch (avoid mid-project redeploy churn)
+   - **031 A-5b UX**: Path A approved — chatSessionId + playbookId from sessionStorage → localStorage with one-shot migration
+   - **W-6 source consumer**: inline ToDo modal in SpaarkeAi (filed as task 044)
+   - **W-6 DV audit**: operator-owned (procedure in LW retirement doc §8.1)
+9. **2026-05-26 (ADR collision)** — Renumber NEW R4 ADRs: PaneEventBus 025→030, Stage Lifecycle 026→031 (orphan ADR-025 + active ADR-026 untouched)
+10. **2026-05-26 (055 escalation)** — Option B: promote local CalendarSection → new `@spaarke/events-components/CalendarFilterPane`; UTC bug fixed as bonus
+11. **2026-05-26 (test infra mandate)** — "Must ensure these issues are resolved as part of this project (Phase 6)" → 068, 069 filed + executed; 070 filed for cascade; 071 filed for content failures
+12. **2026-05-26 (R5 backlog)** — Iframe-wizards strategy + 052 type-narrowing → R5 backlog (notes/r5-backlog-candidates.md)
+13. **2026-05-26 (late)** — **R4 wrap-up (090) MUST pause for operator final review + approval before executing**
 
 ---
 
-## Blockers
+## Files Modified This Session (commits in chronological order)
 
-**Status**: None
-
----
-
-## Session Notes
-
-### Current Session
-- Started: 2026-05-26 (after R3 master sync via `/worktree-sync` full-sync)
-- Focus: Project initialization (`/design-to-spec` → `/project-pipeline`) → Wave 1.1 execution
-
-### Key Learnings
-
-- **Pipeline collision with operator-authored artifacts**: When R4 was scoped on 2026-05-25, operator created `README.md` + `plan.md` + `backlog.md` directly. Running `/project-pipeline` later required deciding whether to overwrite. Operator chose "backup + regenerate" — both `.original.md` files preserved.
-- **Phase 0 was already shipped**: Commit `4a877b1e` (2026-05-26 morning) completed R3 wrap-up + F-1 retroactive memo before the pipeline ran. Tasks 001 + 002 marked ✅ without re-running (operator decision).
-- **Parallel sub-agent guardrail pattern (proven in Wave 1.1)**: Brief sub-agents NOT to update `tasks/TASK-INDEX.md` directly when they run in parallel — main session reconciles after all return. Prevents last-write-wins race. Works cleanly.
-- **A-5 verify-first is non-negotiable** — Original R3 UQ-03 verification claimed tabs persist; user feedback contradicts. Phase 3 budgets ~2h for the verify spike before remediation.
-
-### Handoff Notes
-
-After Wave 1.1: ready for operator to pick next wave. Wave 1.2 (`.claude/` boundary tasks 012/013/017) requires main-session execution. Wave 1.3 (011 W-2 + 015 C-2) can use parallel sub-agents.
+| Commit | Coverage |
+|---|---|
+| `929980d1` | R4 project pipeline scaffolding (spec, README, plan, CLAUDE.md, 32 POML tasks, TASK-INDEX) |
+| `cd1198a4` | Wave 1.1 — W-1 dashboard model + C-1 data access criteria (010, 014) |
+| `0c5601ff` | Wave 1.5 — W-2 + C-2 + F-2 + A-5a + W-6 (011, 015, 020, 030, 041) |
+| `b50a6b53` | Wave 1.2 — ADR 030 + ADR 031 + F-3 publish-size rule (012, 013, 017); **ADR renumbering reconciliation** |
+| `90b8a1e3` | Operator gate resolutions — 031 unblocked + 044 filed + LW retirement audit follow-up |
+| `f3f0004d` | Wave 5.1 + 016 — A-4 25 MB + C-3 hook + B-4 ModifiedOn + W-3 wizard + D-2 amendment (050, 051, 053, 040, 016) |
+| `dfabe436` | Wave 4.2/Phase 5 W2/main session — 031 + 042 + 044 + 054 + 055-OptionB + 062 + 060 (7 tasks) |
+| `fd75dd60` | Wave 6.1 + Phase 4/5 leftovers — 043 + 052 + 061 + 063 + 068 + 069 (6 tasks) + 070 filed |
+| **PENDING** | 071 POML + r5-backlog notes + TASK-INDEX 36→37 + this handoff |
 
 ---
 
-## Quick Reference
+## Documentation written this project
+
+### New top-level docs (5)
+- `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` (W-1) — authoritative two-wrapper model
+- `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` (C-2) — host contract, 21 testable MUSTs
+- `docs/architecture/LEGALWORKSPACE-RETIREMENT.md` (W-6) — retirement decision + consumer audit + DV-side procedure
+- `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` (C-1) — Xrm.WebApi vs BFF decision tree
+- `docs/standards/CHAT-ATTACHMENT-POLICY.md` (A-4) — 25 MB cap rationale + asymmetry doc
+
+### Rewritten
+- `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` (W-2) — two-wrapper decision tree; 5 archetypes; Calendar Pattern D example
+
+### New ADRs (2 + 1 amendment)
+- `.claude/adr/ADR-030-pane-event-bus.md` + `docs/adr/ADR-030-pane-event-bus.md` (A-2a)
+- `.claude/adr/ADR-031-stage-lifecycle.md` + `docs/adr/ADR-031-stage-lifecycle.md` (A-2b)
+- ADR-031 "Heavy library handling" amendment (D-2)
+
+### Governance updates
+- `CLAUDE.md` (root) — §10 publish-size verification rule strengthened (F-3); §16 pointers added for all new docs
+- `.claude/constraints/azure-deployment.md` — BFF Publish-Size Per-Task Verification Rule section (F-3)
+- `.claude/CHANGELOG.md` — F-3 entry
+
+### Project memos (in `notes/`)
+1. `bff-ai-facade-audit-2026-05.md` (F-2) — **0 direct CRUD→AI deps** (vs baseline 20)
+2. `tab-persistence-verification-2026-05.md` (A-5a) — refresh works, close/reopen broken
+3. `tab-persistence-fix-2026-05.md` (A-5b) — Path A implementation
+4. `lw-consumer-audit-2026-05.md` (W-6) — 1 source-code consumer found
+5. `adr-025-numbering-collision-2026-05-26.md` (ADR renumbering)
+6. `b3-app-insights-query-cutover.md` (B-3) — operator cutover playbook
+7. `b5-design-decision.md` (B-5) — Option A PUT + If-Match rationale
+8. `b6-pre-change-diff.md` (055 escalation #1) — structural difference analysis
+9. `b6-option-b-execution-2026-05-26.md` (055 Option B) — execution record + UTC bug fix
+10. `b2-tsc-rootdir-decision.md` (B-2) — Option C dist/.d.ts paths
+11. `b7-hook-api-sketch.md` (B-7) — hook API design
+12. `c3-pre-change-diff.md` + `c3-consolidated-hook-design.md` + `c3-divergence-resolutions.md` (C-3 trio)
+13. `c4-interface-design.md` + `c4-pre-change-snapshot.md` (C-4)
+14. `context-workspace-mount-pattern.md` (043 wizard pivot)
+15. `test-infra-jest-react19-fix-2026-05-26.md` (068)
+16. `test-infra-bff-handler-fix-2026-05-26.md` (069)
+17. `w4-task-042-assistant-workspace-mount.md` (042)
+18. **`r5-backlog-candidates.md`** — 2 deferred items for R5
+
+---
+
+## All "new" issues discovered + tracking status
+
+### ✅ Captured + resolved (15)
+ADR-025/026 collision, A-4 spec inaccuracies (server cap doesn't exist, 10MB not 5MB), B-4 file paths, B-7 reframing, B-6 structural difference, W-6 source consumer (→ task 044), 031 UX gate, 043 wizard pivot, 052 type cast (documented), Jest+React 19 env, 7 BFF handler errors, UTC off-by-one bug, R3 FR-25/NFR-10 supersession, 272 tracked artifacts, B-9 reframing (deps already present, no config)
+
+### 🔲 Captured + pending (4 tasks)
+- **070** — 69 cascading BFF test errors (CS7036 logger drift)
+- **067** — 13 cascading tsc errors (absorbed into B-11 type-drift cleanup)
+- **W-6 DV audit** — operator owns in spaarkedev1
+- **071** — 142 test-content failures in UI.Components
+
+### → R5 backlog (2 — `notes/r5-backlog-candidates.md`)
+- Iframe-wizards-as-mount-sources broader pattern
+- 052 type-narrowing wrapper
+
+---
+
+## Recommended next-session approach
+
+After `/compact` and resume:
+
+1. **Read this file first** (current-task.md Quick Recovery + Operator decisions)
+2. **Check TASK-INDEX.md** for current state (look for 🔲 rows in Phase 6/7)
+3. **Confirm last commit pushed** — should be the 071+r5-backlog commit (assuming below succeeds)
+4. **Dispatch next wave**: 064 + 065 + 067 + 070 + 071 (5 parallel sub-agents) — all in Phase 6 J/H groups, file-overlap safe
+   - 064 deps 063 ✅; 067 deps 063 ✅ (+ wait for 064 if file overlap on `@spaarke/events-components`)
+   - 065 — instruct sub-agent to re-frame as "create missing eslint.config.js"
+   - 070 — BFF test fixes only (NullLogger<T>.Instance pattern)
+   - 071 — UI.Components test triage + fix
+5. **After all 6 ✅**: STOP. **Do NOT dispatch 090.** Present R4 final review to operator.
+
+---
+
+## Final review preparation (what operator will need to see for 090 approval)
+
+When operator says "ready for final review":
+
+1. R4 complete acceptance verification — all 25 graduation criteria boxes from spec.md §Success Criteria + R5-backlog-candidates noted as carry-over
+2. Test suite state (post-068+071): expected ≤10 failures in UI.Components; post-069+070: BFF test suite running clean
+3. Build state: all packages tsc --noEmit clean (post-061+067)
+4. BFF publish size: ~44 MB compressed (well below 60 MB ceiling)
+5. Deploys NOT performed during R4 — Phase 7 batch deploy is a separate operator step
+6. R5 backlog (2 items) for hand-off
+7. R4 lessons-learned (to be written by 090 itself)
+
+---
+
+## Quick reference
 
 ### Project Context
 - **Project**: spaarke-ai-platform-unification-r4
 - **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Spec**: [`spec.md`](./spec.md)
-- **Plan**: [`plan.md`](./plan.md) (template) + [`plan.original.md`](./plan.original.md) (authoritative WBS)
+- **Spec**: [`spec.md`](./spec.md) (FR/NFR/DR/PR definitions)
+- **Plan**: [`plan.md`](./plan.md) (pipeline-generated) + [`plan.original.md`](./plan.original.md) (operator-authored authoritative WBS)
 - **Backlog**: [`backlog.md`](./backlog.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md) — 4 ✅ / 28 🔲
+- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
+- **R5 backlog candidates**: [`notes/r5-backlog-candidates.md`](./notes/r5-backlog-candidates.md)
 
-### Applicable ADRs (load-bearing — always)
-- ADR-012 — Shared components; context-agnostic
-- ADR-021 — Fluent v9 tokens only; no hex/rgba/v8
-- ADR-022 — React 19 only for Code Pages
-- ADR-028 — Function-based auth; no token snapshots
+### Worktree branch state
+- `work/spaarke-ai-platform-unification-r4` (worktree at `c:\code_files\spaarke-wt-spaarke-ai-platform-unification-r4`)
+- Master at: `0d641302` (synced 2026-05-26 morning via worktree-sync)
+- 8 R4 commits ahead of master (929980d1 → fd75dd60 + pending)
 
-### Knowledge Files (newly added by Wave 1.1)
-- `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` — authoritative two-wrapper model (load before designing widgets)
-- `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` — Xrm.WebApi vs BFF decision tree
+### Applicable ADRs (load-bearing always)
+- ADR-012 — Shared components, context-agnostic
+- ADR-021 — Fluent v9 tokens only
+- ADR-022 — React 19 for Code Pages
+- ADR-028 — Function-based auth
+- ADR-030 (NEW) — PaneEventBus pattern
+- ADR-031 (NEW + D-2 amended) — Stage lifecycle + heavy library handling
 
 ---
 
 ## Recovery Instructions
 
 **To recover context after compaction or new session:**
-
-1. **Quick Recovery**: Read the "Quick Recovery" section above (< 30 seconds)
-2. **If more context needed**: Read Active Task and Progress sections
-3. **Load task file**: `tasks/{task-id}-*.poml` for the chosen next wave
-4. **Load knowledge files**: From task's `<knowledge>` section
-5. **Resume**: From the "Next Action" section
+1. **Read Quick Recovery section above** (< 30 seconds)
+2. **Read `## ⚠️ CRITICAL` block** — operator gate on 090
+3. **Read `## All operator decisions`** — all 13 operator decisions chronologically
+4. **Check TASK-INDEX.md** for 🔲 rows
+5. **Resume** at "Recommended next-session approach"
 
 **Commands**:
-- `/project-continue` — Full project context reload + master sync
-- `/context-handoff` — Save current state before compaction
-- "where was I?" — Quick context recovery
-
-**For full protocol**: See [docs/procedures/context-recovery.md](../../docs/procedures/context-recovery.md)
+- `/project-continue` — full reload + master sync
+- `/context-handoff` — save state before next compact
+- "where was I?" — quick recovery
 
 ---
 
-*This file is the primary source of truth for active work state. Keep it updated.*
+*This file is the primary source of truth for R4 state after compaction. Updated 2026-05-26 (late session, ~22% context remaining).*

@@ -1,7 +1,11 @@
 # R4 Task Index
 
 > **Project**: spaarke-ai-platform-unification-r4
-> **Total tasks**: 36 (35 work tasks + 1 wrap-up; 044 added as W-6 follow-up; 068+069 added as Phase 6 test-infra hygiene; **070 added 2026-05-26** as follow-up to 069 — 69 cascading test errors surfaced after the original 7 were fixed)
+> **Total tasks**: 37 (36 work tasks + 1 wrap-up; 044 added as W-6 follow-up; 068+069 added Phase 6 test-infra; 070 follow-up to 069 cascading; **071 added 2026-05-26** for 142 test-content failures surfaced by 068)
+>
+> **⚠️ R4 wrap-up requires operator final review before executing task 090** (operator instruction 2026-05-26)
+>
+> **R5 backlog**: 2 deferred items captured in `notes/r5-backlog-candidates.md` (iframe-wizards strategy; WorkspaceRenderer type-narrowing wrapper)
 > **Created**: 2026-05-26 via `/project-pipeline` → `/task-create`
 > **Sources**: [`spec.md`](../spec.md) (FRs/NFRs/DRs/PRs) + [`plan.md`](../plan.md) (WBS) + [`plan.original.md`](../plan.original.md) (authoritative WBS detail)
 
@@ -58,7 +62,8 @@
 | 068 | Test infra: Jest+React 19 env fix | 6 | ✅ (RTL+jsdom bumped; 392 → 936 tests now executing) | (new — test infra hygiene) | STANDARD | none | J / ✅ |
 | 069 | Test infra: BFF handler test compile errors (3 files) | 6 | ✅ (7 fixed; 69 cascading errors surfaced → escalated to task 070) | (new — test infra hygiene) | STANDARD | none | J / ✅ |
 | 070 | Test infra: BFF handler 69 cascading errors (new — Phase 6 hygiene, follow-up to 069) | 6 | 🔲 | (new — test infra cascade) | STANDARD | 069 ✅ | J / ✅ |
-| 090 | R4 Project Wrap-up | 7 | 🔲 | PR-02 | FULL | all 34 | — / ❌ (final) |
+| 071 | Test infra: 142 test-content failures in @spaarke/ui-components (new — surfaced by 068; operator-approved for Phase 6) | 6 | 🔲 | (new — test content triage + fix) | STANDARD | 068 ✅ | J / ✅ |
+| 090 | R4 Project Wrap-up (⚠️ PAUSE FOR OPERATOR REVIEW BEFORE EXECUTING) | 7 | 🔲 | PR-02 | FULL | all 35 | — / ❌ (final + operator gate) |
 
 ---
 
