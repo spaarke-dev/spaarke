@@ -31,9 +31,9 @@ Deploy the BFF API (`Sprk.Bff.Api`) to Azure App Service.
 | Item | Value |
 |------|-------|
 | Project Path | `src/server/api/Sprk.Bff.Api/` |
-| App Service | `spe-api-dev-67e2xz` |
-| Resource Group | `spe-infrastructure-westus2` |
-| Health Check | `https://spe-api-dev-67e2xz.azurewebsites.net/healthz` |
+| App Service | `spaarke-bff-dev` |
+| Resource Group | `rg-spaarke-dev` |
+| Health Check | `https://spaarke-bff-dev.azurewebsites.net/healthz` |
 | Deploy Script | `scripts/Deploy-BffApi.ps1` |
 | Auth setup (operator runbook) | [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) — 10-section runbook incl. §7 Exchange ApplicationAccessPolicy |
 | Canonical auth ADR | [`ADR-028`](../../adr/ADR-028-spaarke-auth-architecture.md) — function-based contract, MI, HMAC webhooks, named API keys |
@@ -153,7 +153,7 @@ After deployment, verify that the specific endpoints you changed actually respon
 
 ```bash
 # Unauthenticated test — expect 401 (route found, needs auth)
-curl -s -o /dev/null -w "%{http_code}" https://spe-api-dev-67e2xz.azurewebsites.net/api/documents/test/preview-url
+curl -s -o /dev/null -w "%{http_code}" https://spaarke-bff-dev.azurewebsites.net/api/documents/test/preview-url
 # Expected: 401
 
 # If you get 404, the route is NOT registered — package is incomplete
@@ -174,7 +174,7 @@ When the user wants to deploy manually for fastest iteration:
 2. **Verify**: Check output shows `~61 MB` package and `Health check passed!`
 3. **Test endpoint**:
    ```bash
-   curl -s -o /dev/null -w "%{http_code}" https://spe-api-dev-67e2xz.azurewebsites.net/api/{your-endpoint}
+   curl -s -o /dev/null -w "%{http_code}" https://spaarke-bff-dev.azurewebsites.net/api/{your-endpoint}
    # Expect 401 (auth required) — NOT 404
    ```
 
@@ -209,7 +209,7 @@ On Windows App Service, the running .NET host process opens `Sprk.Bff.Api.dll` a
 ```powershell
 $mgmtToken = az account get-access-token --resource https://management.azure.com --query accessToken -o tsv
 $kuduHeaders = @{ Authorization = "Bearer $mgmtToken" }
-$kuduBase = "https://spe-api-dev-67e2xz.scm.azurewebsites.net/api/vfs/site/wwwroot"
+$kuduBase = "https://spaarke-bff-dev.scm.azurewebsites.net/api/vfs/site/wwwroot"
 
 foreach ($f in 'Sprk.Bff.Api.dll','Sprk.Bff.Api.deps.json','Spaarke.Core.dll','Spaarke.Dataverse.dll','web.config') {
     $local = (Get-FileHash -Algorithm SHA256 -Path "deploy/api-publish/$f").Hash
@@ -245,6 +245,8 @@ If any file shows MISMATCH, the deploy did NOT replace it. Recover with stop →
 | Package size < 40 MB after publish | Incomplete zip — missing nested DLLs because publish ran from `/tmp` or outside project tree | Always publish from `src/server/api/Sprk.Bff.Api/` (not external dirs). Verify package is 55-65 MB. |
 | Health check passes but specific endpoints return 404 | Incomplete package: route handler couldn't compile at startup due to missing DLL | Test specific endpoints behind `.RequireAuthorization()` — should return 401 (route found, auth needed), NEVER 404. If 404, deploy is incomplete. |
 | MSB3030 error during publish | Nested `publish/publish/` directory from leftover prior publish | Delete `src/server/api/Sprk.Bff.Api/publish/` before re-publishing. The script does this automatically (Step 1). |
+| `(ResourceNotFound) The Resource 'Microsoft.Web/sites/X' under resource group 'Y' was not found` | App Service was renamed/migrated since the skill or script defaults were last updated | **2026-05-27 incident**: skill + script defaults were `spe-api-dev-67e2xz` / `spe-infrastructure-westus2`; actual dev had moved to `spaarke-bff-dev` / `rg-spaarke-dev`. **Pre-flight FIX**: BEFORE running the deploy script, verify the target exists: `az webapp show -g $ResourceGroupName -n $AppServiceName --query state -o tsv`. If the resource doesn't exist, list active web apps (`az webapp list --query "[].{name:name, rg:resourceGroup}" -o table`) to find the current target. Updated skill defaults on 2026-05-27 to reflect post-migration names. |
+| `Get-FileHash : The term 'Get-FileHash' is not recognized` during hash-verify step | Script invoked with `powershell.exe` (Windows PowerShell 5.x missing module) instead of `pwsh` (PowerShell 7) | **2026-05-27 incident**: Always invoke deploy script with `pwsh -ExecutionPolicy Bypass -File scripts/Deploy-BffApi.ps1`. Windows PowerShell 5.x in certain harnesses doesn't auto-load `Microsoft.PowerShell.Utility`. PowerShell 7 (`pwsh`) loads it by default. |
 
 ---
 
