@@ -1,48 +1,60 @@
-# R5 Backlog Candidates (deferred from R4)
+# R5 Backlog Candidates — UPDATED 2026-05-27
 
-> **Date**: 2026-05-26
-> **Source**: R4 discoveries that operator decided to defer rather than file as R4 tasks
-> **Status**: Not started — capture for R5 scoping
-
-These items surfaced during R4 execution but were intentionally deferred per operator decision (2026-05-26). They are NOT R4 acceptance criteria — file them when R5 is scoped.
+> **Date**: 2026-05-26 (initial); updated 2026-05-27
+> **Source**: R4 discoveries that operator initially deferred
+> **Status**: BOTH ITEMS ABSORBED — neither remains as an R5 backlog item
 
 ---
 
-## 1. Iframe-wizards-as-mount-sources (broader pattern)
+## Resolution summary (2026-05-27)
 
-**Discovery**: R4 task 043 (W-5 Context → Workspace mount) attempted to wire CreateProjectWizard as the mount-source dispatcher but pivoted to `SemanticSearchCriteriaTool` after discovering CreateProjectWizard runs in a separate web-resource iframe **outside** the SpaarkeAi `<PaneEventBusProvider>` scope. `useDispatchPaneEvent()` would silently no-op.
+Operator review on 2026-05-27 decided to NOT defer either item:
 
-**Scope of the broader pattern problem**:
-- All iframe-based wizards in SpaarkeAi share this limitation
-- For wizards to participate in mount-source dispatch, they need EITHER:
-  - (a) postMessage bridge from iframe → parent shell, which then dispatches `widget_load`
-  - (b) iframe wizards moved to in-process React components (where they can use PaneEventBus directly)
-  - (c) Alternative dispatch mechanism (e.g., Xrm.Navigation completed events)
-
-**Why deferred from R4**: 043 worked around it via in-process SemanticSearchCriteriaTool. Designing a broader iframe-wizards strategy is **strategy-level work**, not a single-task implementation. Pattern doc captured at `projects/spaarke-ai-platform-unification-r4/notes/context-workspace-mount-pattern.md`.
-
-**R5 candidate scope**: Design + implement one iframe-bridge prototype (e.g., CreateProjectWizard postMessage → parent dispatcher). Evaluate vs the in-process migration option.
+| Original item | New disposition | Where to find |
+|---|---|---|
+| 1. Iframe-wizards-as-mount-sources broader pattern | **Promoted to its own project** | [`projects/spaarke-iframe-wizard-pattern-enhancement/`](../../spaarke-iframe-wizard-pattern-enhancement/) |
+| 2. WorkspaceRenderer type-narrowing wrapper | **Absorbed into R4 add-on scope** (task 072) — fix approach changed: tighten `WorkspaceRendererWebApi` to require methods (Path 2a), no wrapper | R4 task 072 |
 
 ---
 
-## 2. WorkspaceRenderer type-narrowing wrapper (052 cleanup)
+## 1. Iframe-wizards-as-mount-sources — MOVED TO OWN PROJECT
 
-**Discovery**: Task 052 (C-4 WorkspaceRenderer interface) required `LegalWorkspaceApp as unknown as WorkspaceRenderer` due to contravariance between `IWebApi` (LegalWorkspace's strict shape, methods REQUIRED) and `WorkspaceRendererWebApi` (shared lib's loose shape, methods OPTIONAL).
+**Project location**: [`projects/spaarke-iframe-wizard-pattern-enhancement/`](../../spaarke-iframe-wizard-pattern-enhancement/)
 
-**Why deferred from R4**: The cast is correct for today's caller (frame-walked Xrm exposes all methods). The fix is structural: introduce a type-narrowing wrapper that re-asserts `webApi` has the required methods. Not blocking; documented inline + in `notes/c4-interface-design.md`.
+**Key constraint locked in** (operator 2026-05-27): NO Power Automate, NO Dataverse plugins may participate in the solution. Allowed mechanisms limited to web platform APIs (postMessage, BroadcastChannel), BFF API (polling/SSE), Dataverse Web API (client-side), React composition.
 
-**R5 candidate scope**: Implement type-narrowing wrapper `LegalWorkspaceRendererTyped` that accepts loose `WorkspaceRendererWebApi`, narrows to strict `IWebApi`, and delegates to LegalWorkspaceApp. Eliminate the `as unknown as` cast. ~2-3h.
-
----
-
-## Notes for R5 scoping
-
-When R5 is scoped:
-1. Include these two items in initial backlog
-2. Re-evaluate priority (both Low at time of R4 close)
-3. The iframe-wizards strategy item benefits from waiting — more iframe wizards may surface as candidates after R4 deploys land in dev
-4. The type-narrowing wrapper is purely cosmetic; could remain forever as documented technical debt without harm
+The project's [`design.md`](../../spaarke-iframe-wizard-pattern-enhancement/design.md) covers:
+- 5 use case surfaces (iframe wizards, MDA forms, background jobs, external SPAs, Office Add-ins)
+- Options evaluation (postMessage, BroadcastChannel, polling, SSE, in-process migration)
+- Recommended layered architecture
+- 7-phase implementation plan
+- Security considerations
 
 ---
 
-*Maintainer note: this file is the R4-to-R5 handoff for deferred items. R4's Phase 7 wrap-up (task 090) should reference this file in lessons-learned.*
+## 2. WorkspaceRenderer cast cleanup — ABSORBED INTO R4 (TASK 072)
+
+**Decision (2026-05-27)**: the wrapper approach originally proposed was rejected as architectural debt. Instead, tighten `WorkspaceRendererWebApi` to require the methods that `IWebApi` requires — this eliminates the cast without adding a component layer.
+
+**Rationale**: per operator direction, LegalWorkspace IS the dashboard renderer; new dashboard pieces are added INSIDE that library, not as separate renderers. The "many renderers, each with different method needs" use case that motivated the loose interface doesn't exist and won't exist. The wrapper would carry that fictional flexibility forward as debt.
+
+**Implementation in task 072**:
+```typescript
+type WorkspaceRendererWebApi = Pick<IWebApi,
+  'createRecord' | 'retrieveRecord' | 'retrieveMultipleRecords' | 'updateRecord' | 'deleteRecord'
+>;
+```
+
+Drop the `LegalWorkspaceApp as unknown as WorkspaceRenderer` cast. TypeScript proves correctness statically.
+
+---
+
+## Notes
+
+- This file no longer contains pending R5 backlog items. Both originally-deferred items have been re-scoped.
+- R4's Phase 7 wrap-up (task 090) should reference this file in lessons-learned to document the 2026-05-27 decisions.
+- Future R4 add-on tasks may add items here if any new R5-candidates are discovered during the remaining work.
+
+---
+
+*Maintainer note: this file historically captured the R4-to-R5 handoff. As of 2026-05-27 the handoff is empty — both items resolved.*

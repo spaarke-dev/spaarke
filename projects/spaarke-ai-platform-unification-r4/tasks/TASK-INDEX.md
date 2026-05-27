@@ -1,11 +1,11 @@
 # R4 Task Index
 
 > **Project**: spaarke-ai-platform-unification-r4
-> **Total tasks**: 37 (36 work tasks + 1 wrap-up; 044 added as W-6 follow-up; 068+069 added Phase 6 test-infra; 070 follow-up to 069 cascading; **071 added 2026-05-26** for 142 test-content failures surfaced by 068)
+> **Total tasks**: 45 (35 original work + 8 R4 add-on cleanup [072–079] + 1 wrap-up; **scope expanded 2026-05-27** after operator review of carry-overs + deploy decisions)
 >
-> **⚠️ R4 wrap-up requires operator final review before executing task 090** (operator instruction 2026-05-26)
+> **⚠️ R4 wrap-up requires operator final review before executing task 090** (operator instruction 2026-05-26 + 2026-05-27 final review)
 >
-> **R5 backlog**: 2 deferred items captured in `notes/r5-backlog-candidates.md` (iframe-wizards strategy; WorkspaceRenderer type-narrowing wrapper)
+> **R5 backlog**: EMPTY as of 2026-05-27 — both originally-deferred items resolved (iframe-wizards strategy → own project at `projects/spaarke-iframe-wizard-pattern-enhancement/`; WorkspaceRenderer fix absorbed into R4 task 072 with Path 2a approach)
 > **Created**: 2026-05-26 via `/project-pipeline` → `/task-create`
 > **Sources**: [`spec.md`](../spec.md) (FRs/NFRs/DRs/PRs) + [`plan.md`](../plan.md) (WBS) + [`plan.original.md`](../plan.original.md) (authoritative WBS detail)
 
@@ -63,7 +63,15 @@
 | 069 | Test infra: BFF handler test compile errors (3 files) | 6 | ✅ (7 fixed; 69 cascading errors surfaced → escalated to task 070) | (new — test infra hygiene) | STANDARD | none | J / ✅ |
 | 070 | Test infra: BFF handler 69 cascading errors (new — Phase 6 hygiene, follow-up to 069) | 6 | ✅ (17 test files / 10 bulk patterns; dotnet build 0 errors; dotnet test 5217/5607 pass; R4 tests 050/053/054 running) | (new — test infra cascade) | STANDARD | 069 ✅ | J / ✅ |
 | 071 | Test infra: 142 test-content failures in @spaarke/ui-components (new — surfaced by 068; operator-approved for Phase 6) | 6 | ✅ (142 → 4 failures; target was ≤10; 19 test files; 1 obsolete file + 4 obsolete tests deleted; 0 production code touched) | (new — test content triage + fix) | STANDARD | 068 ✅ | J / ✅ |
-| 090 | R4 Project Wrap-up (⚠️ PAUSE FOR OPERATOR REVIEW BEFORE EXECUTING) | 7 | 🔲 | PR-02 | FULL | all 35 | — / ❌ (final + operator gate) |
+| 072 | A.2 Tighten WorkspaceRendererWebApi (Path 2a, no wrapper) | 6.5 | 🔲 | (new — R4 add-on) | FULL | 052 ✅ | K / ✅ |
+| 073 | B.1 Fix 10 react-hooks/rules-of-hooks violations in DatasetGrid (real bugs) | 6.5 | 🔲 | (new — R4 add-on) | FULL | 065 ✅ | K / ✅ |
+| 074 | B.2 Fix 24 pre-existing tsc errors in @spaarke/ui-components | 6.5 | 🔲 | (new — R4 add-on) | FULL | none | K / ✅ |
+| 075 | B.4 Fix 5 pre-existing tsc errors in src/solutions/SpaarkeAi | 6.5 | 🔲 | (new — R4 add-on) | STANDARD | none | K / ✅ |
+| 076 | B.5 Migrate CalendarSidePane to CalendarFilterPaneOutput shape | 6.5 | 🔲 | (new — R4 add-on) | STANDARD | 055 ✅ | K / ✅ |
+| 077 | B.7 Fix 4 jsdom timing/isolation test failures (next chat project will need) | 6.5 | 🔲 | (new — R4 add-on) | STANDARD | 071 ✅ | K / ✅ |
+| 078 | B.3 ESLint warning sweep: 161 → ≤30 in @spaarke/ui-components | 6.5 | 🔲 | (new — R4 add-on) | STANDARD | 073, 074 | — / ❌ (file overlap) |
+| 079 | Phase 7 deploy batch (BFF + 4 Code Pages) + smoke verification | 7 | 🔲 | (new — was deferred from Phase 5/6) | FULL | 072–078 | — / ❌ (main-session only) |
+| 090 | R4 Project Wrap-up (⚠️ PAUSE FOR OPERATOR REVIEW BEFORE EXECUTING) | 7 | 🔲 | PR-02 | FULL | all 35 + 072–079 | — / ❌ (final + operator gate) |
 
 ---
 
