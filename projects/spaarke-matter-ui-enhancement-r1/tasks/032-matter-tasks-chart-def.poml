@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Author Matter Tasks chart definition (FR-DV-03)</title>
+    <phase>3: Chart Definitions</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>003, 021, 022</dependencies>
+    <blocks>060</blocks>
+    <tags>dataverse, chart-definition</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Dataverse record authoring (no React, no .cs). ADR-021 token vocabulary applied via the MetricCard badge renderer; NFR-05 backward compat is renderer-layer (task 021/022/025). No FULL-rigor quality gates required.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author a new `sprk_chartdefinition` Dataverse record named `Matter Tasks` per FR-DV-03. Visual Type = `MetricCard` (100000000), Entity = `sprk_event`. Data via FetchXML aggregation: COUNT overdue + COUNT upcoming. Provide the exact `sprk_optionsjson` payload below. Configure Drill Through to `sprk_event` filtered to overdue + upcoming for current matter. Verify the chart renders `4 [overdue]` (red Fluent Badge) + `2 upcoming this month` sub-line on a Matter with mixed task data.
+  </prompt>
+
+  <role>
+    Dataverse configurator with familiarity with the Visual Host chart-definition contract, MetricCard field-pivot mode, and FetchXML aggregation. Comfortable using the Dataverse MCP (`create_record` / `read_query`) or PowerShell + Web API.
+  </role>
+
+  <goal>
+    A single `sprk_chartdefinition` record exists in Dataverse named `Matter Tasks` with the exact `sprk_optionsjson` from FR-DV-03 and a FetchXML aggregation query producing `overdue` + `upcoming` named values. Drill Through goes to `sprk_event` filtered to overdue + upcoming for the current matter. A test Visual Host instance bound to this chart def renders the overdue count with a red Fluent Badge (visible only when count &gt; 0) + sub-line `{upcoming} upcoming this month` matching the Variant H prototype.
+  </goal>
+
+  <context>
+    <background>
+      FR-DV-03 depends on three things: (1) task 003 verification of `sprk_event` schema field names (`regardingmatter`, `finalduedate`, `eventstatus` per spec.md §Assumptions — assumed `sprk_*`-prefixed); (2) task 021 (FR-VH-02: MetricCard `badge` slot with `fieldPivot.fields[].badge` per-field badge support); (3) task 022 (FR-VH-03: `descriptionColor` prop — required by the template engine that renders `{upcoming} upcoming this month` as the card description). Per §6.4.0 (binding), this MUST use the existing MetricCard visual type and the new generic Custom Options keys only — no Matter-specific paths in Visual Host.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>docs/guides/VISUALHOST-SETUP-GUIDE.md</file>
+      <file>src/client/pcf/VisualHost/control/components/MetricCard.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/ChartRenderer.tsx</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/notes/spikes/sprk_event-field-verification.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-DV-03 — visual type MetricCard (100000000); entity sprk_event; exact sprk_optionsjson payload</constraint>
+    <constraint source="spec">§6.4.0 (binding) — no new visual types; use only MetricCard + new generic Custom Options keys delivered by tasks 021 + 022</constraint>
+    <constraint source="spec">NFR-05 — existing chart defs unchanged (renderer-layer concern; verified in task 025)</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens applied via the renderer; badge tone keywords (danger/warning/success/neutral) are renderer-resolved</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>docs/guides/VISUALHOST-SETUP-GUIDE.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/notes/spikes/sprk_event-field-verification.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `projects/spaarke-matter-ui-enhancement-r1/notes/spikes/sprk_event-field-verification.md` (task 003 output) to confirm the verified schema field names for `regardingmatter`, `finalduedate`, `eventstatus` on `sprk_event`. Use those verified names in the FetchXML below (DO NOT use the assumed names from spec without verification).</step>
+    <step order="2">Verify tasks 021 (MetricCard badge slot) and 022 (descriptionColor prop) have merged so `badge` per-field via `fieldPivot.fields[].badge` and the `cardDescription` template engine are both live. If not, BLOCK and report to user.</step>
+    <step order="3">Read `docs/architecture/VISUALHOST-ARCHITECTURE.md` (MetricCard Custom Options table — confirm `badge` and `cardDescription` are documented) and `docs/guides/VISUALHOST-SETUP-GUIDE.md` (MetricCard authoring examples).</step>
+    <step order="4">Construct the FetchXML aggregation query that produces two named aggregates `overdue` and `upcoming`: COUNT where (regardingmatter = @currentMatter AND finalduedate &lt; today AND eventstatus ≠ Completed) AS overdue; COUNT where (regardingmatter = @currentMatter AND finalduedate BETWEEN today AND today+30 AND eventstatus ≠ Completed) AS upcoming. Use the verified field names from step 1. (FetchXML may need to be split into two queries depending on the existing Visual Host data-binding contract — check FieldPivotService.ts for the supported pattern.)</step>
+    <step order="5">Author the `sprk_chartdefinition` record using mcp__dataverse__create_record. Fields: `sprk_name` = "Matter Tasks", `sprk_visualtype` = 100000000, `sprk_entityname` = "sprk_event", `sprk_optionsjson` = exact JSON from `<notes>` below, `sprk_datafetchxml` (or equivalent) = the FetchXML from step 4, drill-through entity = `sprk_event`, drill-through filter = overdue + upcoming for current matter.</step>
+    <step order="6">Verify the record was created by issuing `mcp__dataverse__read_query` for the new record id; confirm `sprk_optionsjson` round-trips identically.</step>
+    <step order="7">Render verification: load a test Matter record with mixed task data (≥1 overdue, ≥1 upcoming within 30 days, ≥1 completed) in the dev environment; place a Visual Host instance bound to this chart def on a temporary form; confirm it renders the overdue COUNT as the primary value with a red Fluent Badge labeled "overdue" + sub-line `{upcoming} upcoming this month` matching the Variant H prototype.</step>
+    <step order="8">Verify badge conditional rendering: load a Matter with ZERO overdue tasks; confirm the badge is hidden (not just empty). Per FR-DV-03 Acceptance: "overdue badge appears only when count > 0".</step>
+    <step order="9">Verify Drill Through: click expand on the rendered card; confirm it opens the `sprk_event` list filtered to overdue + upcoming for the current matter.</step>
+    <step order="10">Update TASK-INDEX.md: 032 → ✅. Update current-task.md to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp__dataverse__create_record">Create the sprk_chartdefinition record</tool>
+    <tool name="mcp__dataverse__read_query">Verify round-trip of sprk_optionsjson and FetchXML</tool>
+    <tool name="mcp__dataverse__describe_table">Optional — confirm sprk_event schema if task 003 notes are ambiguous</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse-record">sprk_chartdefinition: "Matter Tasks"</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A single active sprk_chartdefinition record named "Matter Tasks" exists with sprk_visualtype = 100000000 and sprk_entityname = "sprk_event".</criterion>
+    <criterion testable="true">sprk_optionsjson round-trips byte-identically to the payload in the notes block below.</criterion>
+    <criterion testable="true">FetchXML uses the verified sprk_event field names from task 003.</criterion>
+    <criterion testable="true">Render verification (FR-DV-03 Acceptance): chart renders `4 [overdue]` + sub-line `2 upcoming this month`; overdue badge appears only when count &gt; 0; expand opens task list.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows 032 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Exact sprk_optionsjson payload per spec FR-DV-03:
+
+    ```json
+    {
+      "fieldPivot": {
+        "fields": [
+          { "field": "overdue", "label": "Overdue", "badge": { "text": "overdue", "tone": "danger", "position": "inline" } }
+        ]
+      },
+      "cardDescription": "{upcoming} upcoming this month"
+    }
+    ```
+
+    Note: spec.md FR-DV-03 lists the FetchXML aggregation in prose; this task is responsible for translating it into the exact FetchXML the Visual Host expects, using the verified field names from task 003. If task 003 finds the actual field names differ from `regardingmatter`/`finalduedate`/`eventstatus` (e.g., `sprk_regardingmatter`/`sprk_finalduedate`/`sprk_eventstatus`), update the FetchXML accordingly. Per spec.md §Assumptions, the sprk_*-prefixed forms are the most likely actual names.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      STANDARD rigor — Dataverse record authoring + render verification. Load knowledge files including task 003 output. Verify tasks 021 + 022 dependencies. Author record + FetchXML. Verify render + badge conditional + drill-through. Update task status. Skip code-review + adr-check gates.
+    </protocol>
+  </execution>
+</task>

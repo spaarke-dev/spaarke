@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Documents PCF — three-dot row menu consolidating 13 actions (FR-DOC-01)</title>
+    <phase>4: Documents PCF</phase>
+    <status>not-started</status>
+    <estimated-hours>4-6</estimated-hours>
+    <dependencies>012</dependencies>
+    <blocks>041, 042, 043, 044, 045, 046</blocks>
+    <tags>pcf, react, fluent-ui, frontend, semantic-search</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF code change in production Semantic Search control; Fluent v9 component authoring (binding `/fluent-v9-component` per design.md §6.0); ADR-021 (tokens, dark mode) + ADR-022 (React 16/17) binding; modifies `.tsx` files in production PCF</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>shared file SemanticSearchControl.tsx + ResultCard.tsx + FilePreviewDialog.tsx with other Phase 4 tasks (041-046)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per spec FR-DOC-01, replace per-row inline action icons in `ResultCard.tsx` (Preview / AI Summary / Open File / Find Similar) and dialog-toolbar icons in `FilePreviewDialog.tsx` (Open Record / Email / Copy Link / Workspace) with a single `MoreVertical20Regular` button per row, consuming the shared `DocumentRowMenu` component from `@spaarke/ui-components` (task 012). Menu opens Fluent v9 `Menu`; trigger uses `appearance="subtle"`, `size="small"`, and MUST `stopPropagation` so the row's click handler does not fire. Menu order: Preview · AI summary · Open file · Find similar · *divider* · Download · Copy link · Email (single-doc convenience) · Open record · *divider* · Toggle workspace · Pin to top · Rename · Delete. **`AiSummaryPopover` on the sparkle icon is RETAINED** (hover quick-glance) AND added to the menu (keyboard access) — both coexist. Every action previously reachable via inline card icon or `FilePreviewDialog` toolbar must be reachable via the 3-dot menu; no orphaned UI affordances.
+  </prompt>
+
+  <role>
+    Senior frontend developer expert in Fluent UI v9 `Menu` portal behavior, React 16/17 event propagation, and the Semantic Search PCF architecture (`ResultCard.tsx`, `FilePreviewDialog.tsx`, `SemanticSearchControl.tsx`). Familiar with `@spaarke/ui-components` `DocumentRowMenu` contract (`IDocumentRowMenuTarget`, `DocumentRowAction`) shipped in task 012.
+  </role>
+
+  <goal>
+    `ResultCard.tsx` and `FilePreviewDialog.tsx` consume the shared `DocumentRowMenu` from `@spaarke/ui-components`. All 13 actions wire to existing handlers in `SemanticSearchControl.tsx` (no orphaned affordances). `AiSummaryPopover` hover behavior preserved on sparkle icon. Trigger `stopPropagation` verified — clicking the menu trigger does NOT fire the row click → preview Dialog. PCF builds clean (`npm run build:prod`). Code-review + adr-check pass.
+  </goal>
+
+  <context>
+    <background>
+      FR-DOC-01 consolidates 8+ existing actions into a single 13-item menu to clean up the row UI ahead of FR-DOC-04 (list view with column-header row + selection checkbox + Modified columns) and FR-DOC-02 (bulk-action bar). The `DocumentRowMenu` shared component (task 012) already encodes the menu structure, `stopPropagation` behavior, and `disabledActions` prop for permission scoping. This task is the **first consumer** — it wires the shared menu into both row and dialog surfaces while preserving the sparkle popover for hover quick-glance.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/ResultCard.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/FilePreviewDialog.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/AiSummaryPopover.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-DOC-01 — menu order is exactly: Preview · AI summary · Open file · Find similar · *divider* · Download · Copy link · Email · Open record · *divider* · Toggle workspace · Pin to top · Rename · Delete</constraint>
+    <constraint source="spec">FR-DOC-01 — trigger button uses `appearance="subtle"`, `size="small"`, and `stopPropagation`</constraint>
+    <constraint source="spec">FR-DOC-01 — `AiSummaryPopover` on sparkle icon RETAINED in addition to menu entry; both coexist</constraint>
+    <constraint source="spec">FR-DOC-01 — every action previously reachable via inline icon or dialog toolbar reachable via 3-dot menu (no orphaned affordances)</constraint>
+    <constraint source="spec">NFR-02 — axe WCAG 2.1 AA zero violations, light AND dark themes</constraint>
+    <constraint source="spec">NFR-04 — Fluent v9 tokens only; zero hardcoded hex/rgb</constraint>
+    <constraint source="ADR-006">PCF as UI surface; form binding context preserved</constraint>
+    <constraint source="ADR-012">Consume shared `DocumentRowMenu` from `@spaarke/ui-components`; NO parallel inline implementation</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; dark mode parity required</constraint>
+    <constraint source="ADR-022">React 16/17 compatible; no React 18+ exclusive APIs</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2 `@spaarke/auth` `authenticatedFetch` preserved on any handler that calls BFF</constraint>
+    <constraint source="design.md">§6.0 binding — `/fluent-v9-component` MUST be invoked at Step 0.5 before reading/writing any Fluent v9 file</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/INDEX.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 portal + stopPropagation" location=".claude/patterns/ui/fluent-v9-portal-gotcha.md">
+        Menu in MDA portals to document.body; trigger handlers MUST stopPropagation when nested in clickable containers (row click → preview Dialog).
+      </pattern>
+      <pattern name="Fluent v9 component authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">
+        `makeStyles` + `tokens` only; typed handler callbacks; no `any`.
+      </pattern>
+      <pattern name="Dark-mode parity" location=".claude/patterns/ui/fluent-v9-theming.md">
+        Verify both `webLightTheme` and `webDarkTheme` for any new icon button surface.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. If higher, run `context-handoff` before proceeding.</step>
+    <step order="0.5" name="Invoke fluent-v9-component">Invoke `Skill fluent-v9-component` (binding per design.md §6.0). Load `fluent-v9-portal-gotcha.md`, `fluent-v9-component-authoring.md`, `fluent-v9-theming.md` before reading any Fluent v9 file.</step>
+    <step order="1" name="Load knowledge">Read ADR-006, ADR-012, ADR-021, ADR-022, ADR-028; load PCF CLAUDE.md and PCF-DEPLOYMENT-GUIDE.md. Read existing `ResultCard.tsx`, `FilePreviewDialog.tsx`, `SemanticSearchControl.tsx`, `AiSummaryPopover.tsx` to map existing handlers (Preview, AI Summary, Open File, Find Similar, Open Record, Email, Copy Link, Workspace, Download, Pin, Rename, Delete) to the 13 menu actions.</step>
+    <step order="2" name="Import shared DocumentRowMenu">In `ResultCard.tsx`, import `DocumentRowMenu`, `IDocumentRowMenuTarget`, `DocumentRowAction` from `@spaarke/ui-components`. Confirm the shared library version pulled by the PCF includes task 012's barrel export.</step>
+    <step order="3" name="Replace inline icons in ResultCard">In `ResultCard.tsx`, replace the row's inline action icons with a `MoreVertical20Regular` trigger button rendering `DocumentRowMenu`. Pass `document` as the `IDocumentRowMenuTarget`. Map `onAction` callback to a dispatch table that invokes the existing handlers (preview/openFile/findSimilar/openRecord/email/copyLink/workspace/download/pin/rename/delete) and AI Summary popover open. Trigger button MUST have `appearance="subtle"`, `size="small"`, and `onClick` handler that calls `e.stopPropagation()` BEFORE the menu opens.</step>
+    <step order="4" name="Preserve AiSummaryPopover">Confirm the sparkle icon + `AiSummaryPopover` hover affordance remains in `ResultCard.tsx`. The menu's "AI summary" item invokes the SAME popover trigger (keyboard access). Both coexist — do NOT remove the sparkle.</step>
+    <step order="5" name="Replace dialog-toolbar icons">In `FilePreviewDialog.tsx`, replace the dialog-toolbar action icons (Open Record / Email / Copy Link / Workspace) with the same `DocumentRowMenu` mounted in the dialog header. The same dispatch table is reused. Preserve dialog close/find-similar/open-file footer actions (those move under FR-DOC-03 task 044, not here).</step>
+    <step order="6" name="Wire permission scoping">If existing code computes per-document permissions (e.g., `canDelete`, `canRename`), pass them to `DocumentRowMenu` via `disabledActions` prop — do NOT hide menu items, disable them per FR-SC-02 contract.</step>
+    <step order="7" name="Verify no orphaned affordances">Grep `ResultCard.tsx` and `FilePreviewDialog.tsx` for any remaining inline icon buttons (Open File, Find Similar, Preview, Open Record, Email, Copy Link, Workspace, Download, Pin, Rename, Delete) — only the sparkle for `AiSummaryPopover` and the new `MoreVertical20Regular` trigger should remain.</step>
+    <step order="8" name="Dark-mode + a11y check">Run PCF in dev harness with `webLightTheme` and `webDarkTheme`; verify menu, trigger button, and `AiSummaryPopover` render with v9 tokens; verify keyboard navigation (Tab to trigger → Enter to open → Arrow to navigate → Enter to invoke action) works.</step>
+    <step order="9" name="Build verification">Run `npm run build:prod` from `src/client/pcf/SemanticSearchControl/SemanticSearchControl/`. Verify clean build. PCF bundle size delta &lt; 5 KB.</step>
+    <step order="9.5" name="Quality gates (FULL rigor)">Invoke `Skill code-review` then `Skill adr-check`. Resolve every finding before completion. `code-review` enforces `/fluent-v9-component` invocation — if Step 0.5 was skipped, merge is blocked.</step>
+    <step order="10" name="Checkpoint">Run `context-handoff` (silent: ✅ Checkpoint).</step>
+    <step order="11" name="Update task tracking">Update `projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md`: task 040 status 🔲 → ✅. Reset `projects/spaarke-matter-ui-enhancement-r1/current-task.md` to next pending task (likely 041).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (`npm run build:prod`)</tool>
+    <tool name="git">Version control</tool>
+    <tool name="Skill fluent-v9-component">Mandatory Fluent v9 authoring guidance at Step 0.5</tool>
+    <tool name="Skill code-review">Quality gate at Step 9.5</tool>
+    <tool name="Skill adr-check">ADR compliance gate at Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/ResultCard.tsx</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/FilePreviewDialog.tsx</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx (handler dispatch wiring)</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/current-task.md (advance pointer)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ResultCard.tsx` renders a single `MoreVertical20Regular` trigger per row (in addition to the sparkle icon for `AiSummaryPopover`); no other inline action icons remain.</criterion>
+    <criterion testable="true">Menu order matches FR-DOC-01 exactly: Preview · AI summary · Open file · Find similar · *divider* · Download · Copy link · Email · Open record · *divider* · Toggle workspace · Pin to top · Rename · Delete.</criterion>
+    <criterion testable="true">Clicking the trigger button does NOT fire the row click handler (verified via integration test — preview Dialog does not open).</criterion>
+    <criterion testable="true">All 13 actions invoke existing handlers in `SemanticSearchControl.tsx` (no orphaned actions).</criterion>
+    <criterion testable="true">`FilePreviewDialog.tsx` toolbar icons (Open Record / Email / Copy Link / Workspace) replaced with the same `DocumentRowMenu`.</criterion>
+    <criterion testable="true">`AiSummaryPopover` hover behavior preserved on sparkle icon; menu's "AI summary" item opens the same popover.</criterion>
+    <criterion testable="true">PCF builds clean (`npm run build:prod`); zero hardcoded hex/rgb in touched files (verifiable by grep).</criterion>
+    <criterion testable="true">Component renders correctly in `webLightTheme` AND `webDarkTheme`; axe scan zero violations.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` skills pass with no unresolved findings.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 040 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Three-dot menu renders with 13 actions in correct order">
+      <steps>
+        <step>Load Matter form with Documents PCF in dev harness.</step>
+        <step>Click the `MoreVertical20Regular` trigger on a result row.</step>
+        <step>Verify menu opens with 13 items in spec order (Preview · AI summary · Open file · Find similar · divider · Download · Copy link · Email · Open record · divider · Toggle workspace · Pin to top · Rename · Delete).</step>
+      </steps>
+      <expected>Menu renders all 13 items in exact spec order with 2 dividers.</expected>
+    </test>
+    <test name="Trigger stopPropagation — row click does not fire">
+      <steps>
+        <step>Wire a console.log on the row's onClick handler.</step>
+        <step>Click the `MoreVertical20Regular` trigger.</step>
+        <step>Verify console.log does NOT fire and `FilePreviewDialog` does NOT open.</step>
+      </steps>
+      <expected>Menu opens; row click handler suppressed.</expected>
+    </test>
+    <test name="AiSummaryPopover hover preserved">
+      <steps>
+        <step>Hover the sparkle icon on a result row.</step>
+        <step>Verify `AiSummaryPopover` opens with the AI summary content.</step>
+        <step>Open the 3-dot menu and click "AI summary".</step>
+        <step>Verify the same `AiSummaryPopover` opens.</step>
+      </steps>
+      <expected>Both hover and menu-item paths open the same popover.</expected>
+    </test>
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings.</step>
+        <step>Open menu; verify menu surface, items, dividers, and trigger button use Fluent v9 dark tokens (no white backgrounds, no black text).</step>
+        <step>Run axe-core in both themes.</step>
+      </steps>
+      <expected>Zero WCAG 2.1 AA violations in either theme; all colors via Fluent v9 semantic tokens.</expected>
+    </test>
+    <test name="FilePreviewDialog header menu replaces toolbar icons">
+      <steps>
+        <step>Click a row to open `FilePreviewDialog`.</step>
+        <step>Verify dialog header shows a single 3-dot menu (no Open Record / Email / Copy Link / Workspace inline icons).</step>
+        <step>Open the menu, invoke "Open record" — verify it navigates correctly.</step>
+      </steps>
+      <expected>Dialog header has single menu; all toolbar actions reachable via menu.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Dependencies: task 012 MUST be complete first (DocumentRowMenu exported from `@spaarke/ui-components` barrel). The dialog footer Find similar / Close / Open file buttons move to FR-DOC-03 (task 044, dialog restructure) — do NOT touch those here. The sparkle `AiSummaryPopover` is intentionally kept (per Owner Clarifications row 6 in spec.md: "Keep both — hover popover for quick-glance + menu item for keyboard access"). This task is the first of 7 serial Phase 4 PCF tasks (040 → 046) that all touch `SemanticSearchControl.tsx` and friends — parallel-safe is false across the group.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      🔒 RIGOR LEVEL: FULL. Invoke `Skill fluent-v9-component` at Step 0.5 (binding per design.md §6.0). Load ADR-006, ADR-012, ADR-021, ADR-022, ADR-028 and ui/pcf patterns. Implement 3-dot menu via shared `DocumentRowMenu`. Build PCF. Run code-review + adr-check at Step 9.5. Update TASK-INDEX.md and current-task.md.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Documents PCF — list/card view toggle + sortable columns + multi-select + pin (FR-DOC-04)</title>
+    <phase>4: Documents PCF</phase>
+    <status>not-started</status>
+    <estimated-hours>8-12</estimated-hours>
+    <dependencies>040, 050</dependencies>
+    <blocks>042, 045</blocks>
+    <tags>pcf, react, fluent-ui, frontend, semantic-search</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code-heavy PCF change adding new ListView + SortableColumns components, selection/sort/pin state, localStorage persistence; modifies production SemanticSearchControl; ADR-021 + ADR-022 binding; depends on FR-BFF-01 projection</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>shared file SemanticSearchControl.tsx + ResultsList.tsx with other Phase 4 tasks (040, 042-046)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per spec FR-DOC-04, add a 2-button view toggle group to the command bar (`AppsList20Regular` = list / `Grid20Regular` = card), active = `appearance="primary"`, inactive = `appearance="subtle"`. Implement **List view** as the default, with columns: Selection checkbox · Pin (icon visible only on pinned rows; click toggles) · Name (file icon + link-styled) · Modified · Modified by (avatar + name) · Match · Three-dot menu. Headers sortable (toggle asc/desc with `ArrowSortUp/Down` indicator). **Default sort: `modifiedAt DESC`** — requires FR-BFF-01 (`modifiedAt` + `modifiedBy` projection from task 050). Card view keeps the existing `ResultCard` rendering with 3-dot menu replacing inline icons (from task 040). Pinned rows always sort to top regardless of active column sort. View preference persists in localStorage keyed by `(userId, matterId)`. Selection state persists across view toggles. Pin state survives reload.
+  </prompt>
+
+  <role>
+    Senior frontend developer expert in Fluent UI v9 `DataGrid`/`Table`, React 16/17 hooks (`useState`, `useMemo`, `useEffect`), and the Semantic Search PCF state architecture. Familiar with localStorage scoping patterns and ADR-022 React platform constraints.
+  </role>
+
+  <goal>
+    `SemanticSearchControl.tsx` exposes `view`, `sortColumn`, `sortDirection`, `selection`, `pinnedIds` state. NEW `ListView.tsx` component renders the column grid with sortable headers, selection checkboxes, and pin icon. NEW `SortableColumns.tsx` component encapsulates sort-indicator + click-to-toggle header behavior. Default sort `modifiedAt DESC`. localStorage keys: `spaarke.docs.view.{userId}.{matterId}`, `spaarke.docs.pinned.{userId}.{matterId}`. PCF builds clean. Code-review + adr-check pass.
+  </goal>
+
+  <context>
+    <background>
+      FR-DOC-04 introduces the list view that holds the column-header row + selection checkboxes required by FR-DOC-02 (bulk-action bar). Default sort `modifiedAt DESC` depends on FR-BFF-01 (task 050) projecting `modifiedAt`/`modifiedBy` into `/api/ai/search` results — without those, the list cannot render the Modified column. Pin state is per-user-per-matter localStorage only (no Dataverse write, per spec) and pinned rows sort above all others regardless of active column sort. Card view continues to use the existing `ResultCard.tsx` rendering, augmented by the 3-dot menu from task 040.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/ResultsList.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/ResultCard.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/ListView.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/SortableColumns.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/types/search.ts</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SemanticSearchApiService.ts</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-DOC-04 — view toggle: `AppsList20Regular` (list) / `Grid20Regular` (card); active `appearance="primary"`, inactive `appearance="subtle"`</constraint>
+    <constraint source="spec">FR-DOC-04 — list columns: Selection checkbox · Pin · Name · Modified · Modified by · Match · Three-dot menu</constraint>
+    <constraint source="spec">FR-DOC-04 — default sort `modifiedAt DESC`</constraint>
+    <constraint source="spec">FR-DOC-04 — pinned rows always sort to top regardless of active sort</constraint>
+    <constraint source="spec">FR-DOC-04 — pin column shows icon ONLY on pinned rows</constraint>
+    <constraint source="spec">FR-DOC-04 — view preference persists in localStorage keyed by `(userId, matterId)`</constraint>
+    <constraint source="spec">FR-DOC-04 — toggling view re-renders without reloading data; sort persists within session; selection persists across view toggles; pin state survives reload</constraint>
+    <constraint source="spec">NFR-02 — axe WCAG 2.1 AA zero violations in light AND dark</constraint>
+    <constraint source="spec">NFR-04 — Fluent v9 tokens only</constraint>
+    <constraint source="ADR-006">PCF UI surface; form binding preserved</constraint>
+    <constraint source="ADR-012">If new shared utilities emerge, place in `@spaarke/ui-components`; otherwise keep PCF-local</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; dark mode parity</constraint>
+    <constraint source="ADR-022">React 16/17 compatible</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2 `@spaarke/auth` `authenticatedFetch` preserved on all BFF calls</constraint>
+    <constraint source="design.md">§6.0 binding — `/fluent-v9-component` MUST be invoked at Step 0.5</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/INDEX.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 DataGrid/Table" location=".claude/patterns/ui/fluent-v9-component-authoring.md">
+        Use Fluent v9 `DataGrid` or `Table` primitives for column-row layouts; semantic header role for sortable columns.
+      </pattern>
+      <pattern name="localStorage scoping" location="src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx">
+        Key pattern: `spaarke.docs.{feature}.{userId}.{matterId}` — both scoping dimensions required per spec.
+      </pattern>
+      <pattern name="React 16/17 hooks" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">
+        Use `useState`, `useMemo`, `useEffect`, `useCallback` — NO `use()`, no React 18-only concurrent features.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. If higher, run `context-handoff` before proceeding.</step>
+    <step order="0.5" name="Invoke fluent-v9-component">Invoke `Skill fluent-v9-component` (binding per design.md §6.0). Load `fluent-v9-component-authoring.md`, `fluent-v9-theming.md`, `fluent-v9-react-version-boundaries.md`.</step>
+    <step order="1" name="Load knowledge">Read ADR-006, ADR-012, ADR-021, ADR-022, ADR-028; load PCF CLAUDE.md. Verify task 050 (FR-BFF-01) is complete — `modifiedAt` + `modifiedBy` must be in `/api/ai/search` projection. Read existing `SemanticSearchControl.tsx`, `ResultsList.tsx`, `ResultCard.tsx`, `types/search.ts`, `services/SemanticSearchApiService.ts`.</step>
+    <step order="2" name="Extend search result type">In `types/search.ts`, add `modifiedAt: string` (ISO datetime), `modifiedBy: string` (display name) to the `SearchResult` interface. Update `SemanticSearchApiService.ts` mapping if necessary.</step>
+    <step order="3" name="Add view + sort + selection + pin state">In `SemanticSearchControl.tsx`, add state hooks: `view: 'list' | 'card'` (default 'list', hydrated from localStorage), `sortColumn: 'name' | 'modifiedAt' | 'match'` (default 'modifiedAt'), `sortDirection: 'asc' | 'desc'` (default 'desc'), `selection: Set&lt;string&gt;` (set of document IDs), `pinnedIds: Set&lt;string&gt;` (hydrated from localStorage). localStorage keys: `spaarke.docs.view.{userId}.{matterId}`, `spaarke.docs.pinned.{userId}.{matterId}`. Source `userId` from `context.userSettings.userId` and `matterId` from the parent form context.</step>
+    <step order="4" name="Implement SortableColumns component">Create `components/SortableColumns.tsx` rendering Fluent v9 `TableHeaderCell` with click handler that toggles asc/desc; sort indicator via `ArrowSortUp20Regular` / `ArrowSortDown20Regular`. Inactive columns show no indicator. Props: `{ columns: ColumnDef[], sortColumn, sortDirection, onSortChange }`.</step>
+    <step order="5" name="Implement ListView component">Create `components/ListView.tsx` rendering Fluent v9 `Table` (or `DataGrid`) with columns: Selection checkbox · Pin (icon ONLY when `pinnedIds.has(row.id)`) · Name (file icon + link-styled) · Modified (formatted from `modifiedAt`) · Modified by (avatar + name from `modifiedBy`) · Match (existing score badge) · Three-dot menu (reuses `DocumentRowMenu` from task 040). Apply sort: pinned rows always first, then sort by active column. Row click (excluding menu trigger + checkbox + pin icon) opens `FilePreviewDialog`.</step>
+    <step order="6" name="Add view toggle to command bar">In `SemanticSearchControl.tsx`, add the 2-button toggle group to the right end of the command bar. Active button = `appearance="primary"`, inactive = `appearance="subtle"`. Toggling updates state AND writes localStorage immediately.</step>
+    <step order="7" name="Wire card view">Card view keeps the existing `ResultsList.tsx` + `ResultCard.tsx` rendering (3-dot menu already wired in task 040). Apply the same sort (pinned first + active column sort) to card grid for consistency.</step>
+    <step order="8" name="Pin icon interaction">Click on the pin icon column toggles `pinnedIds.has(row.id)` and writes localStorage. Pin column header is NOT sortable. Use `Pin20Regular` icon, only rendered when pinned.</step>
+    <step order="9" name="Selection state persists across view toggles">Verify: select 3 rows in list view → toggle to card view → toggle back to list — selection retained. Selection is in-memory only (not localStorage) for v1.</step>
+    <step order="10" name="Dark-mode + a11y check">Run PCF in dev harness with `webLightTheme` and `webDarkTheme`. Verify sortable column headers, checkboxes, pin icons render with v9 tokens. Run axe scan in both themes.</step>
+    <step order="11" name="Build verification">Run `npm run build:prod` from PCF root. Verify clean build.</step>
+    <step order="9.5" name="Quality gates (FULL rigor)">Invoke `Skill code-review` then `Skill adr-check`. Resolve every finding before completion. `code-review` enforces `/fluent-v9-component` invocation.</step>
+    <step order="12" name="Checkpoint">Run `context-handoff` (silent: ✅ Checkpoint).</step>
+    <step order="13" name="Update task tracking">Update TASK-INDEX.md: task 041 status 🔲 → ✅. Reset `current-task.md` to next pending task (likely 042).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (`npm run build:prod`)</tool>
+    <tool name="git">Version control</tool>
+    <tool name="Skill fluent-v9-component">Mandatory Fluent v9 authoring guidance at Step 0.5</tool>
+    <tool name="Skill code-review">Quality gate at Step 9.5</tool>
+    <tool name="Skill adr-check">ADR compliance gate at Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/ListView.tsx (NEW)</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/SortableColumns.tsx (NEW)</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/ResultsList.tsx</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/types/search.ts</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SemanticSearchApiService.ts</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/current-task.md (advance pointer)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Command bar shows 2-button view toggle: list (`AppsList20Regular`) + card (`Grid20Regular`); active button uses `appearance="primary"`.</criterion>
+    <criterion testable="true">List view default sort is `modifiedAt DESC`; clicking a sortable column header toggles asc/desc with arrow indicator.</criterion>
+    <criterion testable="true">List view columns render in spec order: Selection · Pin · Name · Modified · Modified by · Match · Three-dot menu.</criterion>
+    <criterion testable="true">Pinned rows render at the top regardless of active column sort.</criterion>
+    <criterion testable="true">Pin icon renders ONLY on pinned rows; clicking the pin column toggles pinned state and persists to localStorage.</criterion>
+    <criterion testable="true">View preference persists across reload, keyed by `(userId, matterId)`; switching matters yields independent preference.</criterion>
+    <criterion testable="true">Toggling list ↔ card re-renders without re-fetching data; selection state retained across toggles.</criterion>
+    <criterion testable="true">PCF builds clean; zero hardcoded hex/rgb in touched files.</criterion>
+    <criterion testable="true">axe WCAG 2.1 AA zero violations in light AND dark themes.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` skills pass with no unresolved findings.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 041 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="View toggle persists per matter">
+      <steps>
+        <step>Load Matter A, switch to list view, reload — verify list view restored.</step>
+        <step>Load Matter B (new matter for this user) — verify default (list) view.</step>
+        <step>Switch Matter B to card view, reload — verify card view restored; Matter A preference unaffected.</step>
+      </steps>
+      <expected>Preference scoped per `(userId, matterId)`.</expected>
+    </test>
+    <test name="Default sort modifiedAt DESC + column sort toggles">
+      <steps>
+        <step>Open list view — verify rows ordered by `modifiedAt` newest first.</step>
+        <step>Click Name column header — verify alphabetical asc, then click again — verify desc.</step>
+        <step>Click Modified column header — verify asc, then desc.</step>
+      </steps>
+      <expected>Sort state visually indicated; rows re-ordered correctly.</expected>
+    </test>
+    <test name="Pinned rows sort to top">
+      <steps>
+        <step>In list view sorted by Name asc, pin a row that would normally appear in the middle.</step>
+        <step>Verify pinned row jumps to top; remaining rows retain Name asc.</step>
+        <step>Unpin — verify row returns to its sorted position.</step>
+        <step>Reload — verify pin state survives.</step>
+      </steps>
+      <expected>Pin state persisted via localStorage; pinned rows always at top.</expected>
+    </test>
+    <test name="Selection persists across view toggle">
+      <steps>
+        <step>In list view, select 3 rows via checkboxes.</step>
+        <step>Toggle to card view, then back to list view.</step>
+        <step>Verify the same 3 rows are still selected.</step>
+      </steps>
+      <expected>Selection state retained in memory across view changes.</expected>
+    </test>
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode.</step>
+        <step>Verify column headers, sort indicators, checkboxes, pin icons, avatar/name cell use v9 dark tokens.</step>
+        <step>Run axe-core in both themes.</step>
+      </steps>
+      <expected>Zero WCAG violations; all colors via Fluent v9 semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Depends on task 040 (3-dot menu provides the `DocumentRowMenu` consumed in the list view row) and task 050 (`modifiedAt`/`modifiedBy` projection from BFF). Selection state is in-memory only for v1 (Owner Clarifications — selection across view toggles required, but not across page reloads). The 2-column header layout consumed by FR-DOC-02 (bulk-action bar, task 045) is enabled here — the bulk bar sits above the column-header row of the list view.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      🔒 RIGOR LEVEL: FULL. Invoke `Skill fluent-v9-component` at Step 0.5 (binding per design.md §6.0). Load ADRs + patterns. Verify task 050 complete (modifiedAt projection). Implement list view + sortable columns + selection + pin state + view toggle. Build PCF. Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>

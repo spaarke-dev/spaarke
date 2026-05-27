@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Author Matter Activity chart definition (FR-DV-05)</title>
+    <phase>3: Chart Definitions</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>003, 022</dependencies>
+    <blocks>060</blocks>
+    <tags>dataverse, chart-definition</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Dataverse record authoring (no React, no .cs). ADR-021 token vocabulary applied via the MetricCard descriptionColor renderer (task 022). NFR-05 backward compat is renderer-layer. No FULL-rigor quality gates required.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author a new `sprk_chartdefinition` Dataverse record named `Matter Activity` per FR-DV-05. Visual Type = `MetricCard` (100000000), Entity = `sprk_event`. Data via FetchXML: COUNT events where `regardingmatter = @currentMatter AND (actualstart OR completeddate) ≥ today-7`. Provide the exact `sprk_optionsjson` payload below. Configure Drill Through to `sprk_event` filtered to last-7-days for current matter. Verify the chart renders `5` (count) + brand-colored sub-line `events in last 7 days` on a Matter with recent activity.
+  </prompt>
+
+  <role>
+    Dataverse configurator with familiarity with the Visual Host chart-definition contract, MetricCard with `descriptionColor`, and FetchXML aggregation. Comfortable using the Dataverse MCP (`create_record` / `read_query`) or PowerShell + Web API.
+  </role>
+
+  <goal>
+    A single `sprk_chartdefinition` record exists in Dataverse named `Matter Activity` with the exact `sprk_optionsjson` from FR-DV-05 (`descriptionColor: "brand"` + `cardDescription: "events in last 7 days"`) and a FetchXML COUNT aggregation. Drill Through goes to `sprk_event` filtered to last-7-days for current matter. A test Visual Host instance bound to this chart def renders the count + a brand-colored sub-line matching the Variant H prototype.
+  </goal>
+
+  <context>
+    <background>
+      FR-DV-05 depends on (1) task 003 (sprk_event schema verification — specifically `actualstart` and `completeddate` field names + the `regardingmatter` lookup) and (2) task 022 (FR-VH-03: MetricCard `descriptionColor` prop that maps `"brand"` / `"neutral"` / `"success"` / `"warning"` / `"danger"` → matching `tokens.color*Foreground*` value). Per §6.4.0 (binding), this MUST use the existing MetricCard visual type + the new generic `descriptionColor` key only — no Matter-specific paths in Visual Host.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>docs/guides/VISUALHOST-SETUP-GUIDE.md</file>
+      <file>src/client/pcf/VisualHost/control/components/MetricCard.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/ChartRenderer.tsx</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/notes/spikes/sprk_event-field-verification.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-DV-05 — visual type MetricCard (100000000); entity sprk_event; exact sprk_optionsjson payload</constraint>
+    <constraint source="spec">§6.4.0 (binding) — no new visual types; use only MetricCard + new generic `descriptionColor` key delivered by task 022</constraint>
+    <constraint source="spec">NFR-05 — existing chart defs unchanged (renderer-layer concern; verified in task 025)</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens applied via the renderer; `descriptionColor: "brand"` → `tokens.colorBrandForeground*` (renderer-resolved)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>docs/guides/VISUALHOST-SETUP-GUIDE.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/notes/spikes/sprk_event-field-verification.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `projects/spaarke-matter-ui-enhancement-r1/notes/spikes/sprk_event-field-verification.md` (task 003 output) to confirm the verified schema field names for `regardingmatter`, `actualstart`, `completeddate` on `sprk_event`. Use those verified names in the FetchXML below.</step>
+    <step order="2">Verify task 022 (FR-VH-03: descriptionColor) has merged so MetricCard maps `descriptionColor: "brand"` → `tokens.colorBrandForeground*`. If not, BLOCK and report to user.</step>
+    <step order="3">Read `docs/architecture/VISUALHOST-ARCHITECTURE.md` (MetricCard Custom Options table — confirm `descriptionColor` and `cardDescription` are documented) and `docs/guides/VISUALHOST-SETUP-GUIDE.md` (MetricCard authoring examples).</step>
+    <step order="4">Construct the FetchXML COUNT aggregation: COUNT where (regardingmatter = @currentMatter AND (actualstart ≥ today-7 OR completeddate ≥ today-7)). Use verified field names from step 1.</step>
+    <step order="5">Author the `sprk_chartdefinition` record using mcp__dataverse__create_record. Fields: `sprk_name` = "Matter Activity", `sprk_visualtype` = 100000000, `sprk_entityname` = "sprk_event", `sprk_optionsjson` = exact JSON from `<notes>` below, `sprk_datafetchxml` (or equivalent) = the FetchXML from step 4, drill-through entity = `sprk_event`, drill-through filter = last-7-days for current matter.</step>
+    <step order="6">Verify the record was created by issuing `mcp__dataverse__read_query` for the new record id; confirm `sprk_optionsjson` round-trips identically.</step>
+    <step order="7">Render verification: load a test Matter record with at least one recent `sprk_event` (actualstart or completeddate ≥ today-7) in the dev environment; place a Visual Host instance bound to this chart def on a temporary form; confirm it renders the count (e.g., `5`) + a brand-colored sub-line `events in last 7 days` matching the Variant H prototype.</step>
+    <step order="8">Verify sub-line color via DOM inspect: the description Text element should have `tokens.colorBrandForeground*` applied (not the default `colorNeutralForeground3`).</step>
+    <step order="9">Verify Drill Through: click expand on the rendered card; confirm it opens the `sprk_event` list filtered to last-7-days for the current matter.</step>
+    <step order="10">Update TASK-INDEX.md: 034 → ✅. Update current-task.md to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp__dataverse__create_record">Create the sprk_chartdefinition record</tool>
+    <tool name="mcp__dataverse__read_query">Verify round-trip of sprk_optionsjson and FetchXML</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse-record">sprk_chartdefinition: "Matter Activity"</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A single active sprk_chartdefinition record named "Matter Activity" exists with sprk_visualtype = 100000000 and sprk_entityname = "sprk_event".</criterion>
+    <criterion testable="true">sprk_optionsjson round-trips byte-identically to the payload in the notes block below.</criterion>
+    <criterion testable="true">FetchXML uses verified sprk_event field names from task 003.</criterion>
+    <criterion testable="true">Render verification (FR-DV-05 Acceptance): chart renders `5` (count) + brand-colored sub-line `events in last 7 days`; expand opens activity list.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows 034 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Exact sprk_optionsjson payload per spec FR-DV-05:
+
+    ```json
+    {
+      "descriptionColor": "brand",
+      "cardDescription": "events in last 7 days"
+    }
+    ```
+
+    Per Phase A.5 recon (spec.md §Assumptions), `sprk_event` fields are assumed prefixed `sprk_*` (`sprk_regardingmatter`, `sprk_actualstart`, `sprk_completeddate`). Task 003 verifies; use task 003 output.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      STANDARD rigor — Dataverse record authoring + render verification. Load knowledge files including task 003 output. Verify task 022 dependency. Author record + FetchXML. Verify render + brand color + drill-through. Update task status. Skip code-review + adr-check gates.
+    </protocol>
+  </execution>
+</task>

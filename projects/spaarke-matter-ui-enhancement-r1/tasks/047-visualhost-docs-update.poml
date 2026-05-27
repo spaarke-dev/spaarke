@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>VisualHost docs — add new Custom Options keys + chart-def authoring examples (FR-DOC-09)</title>
+    <phase>4: Documents PCF</phase>
+    <status>not-started</status>
+    <estimated-hours>3-4</estimated-hours>
+    <dependencies>020, 021, 022, 023, 030, 031, 032, 033, 034</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Documentation task — no new code. Has explicit constraints (cite every new key from FR-VH-01..04) and binding acceptance criteria (chart-def author can author without reading source). Modifies existing architecture + setup-guide docs.</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec FR-DOC-09, update [docs/architecture/VISUALHOST-ARCHITECTURE.md](docs/architecture/VISUALHOST-ARCHITECTURE.md) and [docs/guides/VISUALHOST-SETUP-GUIDE.md](docs/guides/VISUALHOST-SETUP-GUIDE.md) with all new Custom Options keys introduced by FR-VH-01..04 (tasks 020-023) and authoring examples for the 5 new chart definition patterns from FR-DV-01..05 (tasks 030-034). VISUALHOST-ARCHITECTURE.md gets per-visual-type tables for every new key with type, default, behavior, and backward-compat note. VISUALHOST-SETUP-GUIDE.md gets a worked authoring example per chart-def pattern. **Acceptance**: every new key documented in BOTH files; a chart-def author can author a new chart using only the docs (without reading source).
+  </prompt>
+
+  <role>
+    Technical writer with deep familiarity with the Visual Host renderer architecture, `sprk_chartdefinition` schema, and the existing VISUALHOST-ARCHITECTURE.md + VISUALHOST-SETUP-GUIDE.md conventions. Comfortable extracting authoring patterns from shipped chart-definition JSON.
+  </role>
+
+  <goal>
+    VISUALHOST-ARCHITECTURE.md per-visual-type tables include the new keys from FR-VH-01..04 with full descriptions. VISUALHOST-SETUP-GUIDE.md contains 5 worked authoring examples — one per shipped chart def (Matter Health, Matter Budget, Matter Tasks, Matter Next Date, Matter Activity). Both docs are self-sufficient for chart-def authoring — no source code reading required.
+  </goal>
+
+  <context>
+    <background>
+      FR-DOC-09 is the documentation-closure task for Phase 2 + 3 (Visual Host extensions + chart defs). Tasks 020-023 added new generic Custom Options keys to DonutChart, MetricCard, and HorizontalStackedBar renderers. Tasks 030-034 authored 5 production chart defs that use these keys in combination. The docs must catch up so future chart-def authors can use the new capabilities without source-diving. The spec MUST rule (design.md §6.4.0 binding) requires every new Visual Host renderer key be documented in the same PR as the code change — this task fulfills that for the bundled PR.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>docs/guides/VISUALHOST-SETUP-GUIDE.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+      <file>src/client/pcf/VisualHost/control/components/DonutChart.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/MetricCard.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/HorizontalStackedBar.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/CardChrome.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-DOC-09 — every new Custom Options key from FR-VH-01..03 documented in VISUALHOST-ARCHITECTURE.md per-visual-type table AND with authoring examples in VISUALHOST-SETUP-GUIDE.md</constraint>
+    <constraint source="spec">FR-DOC-09 — docs PR reviewer can find each new key documented</constraint>
+    <constraint source="spec">FR-DOC-09 — chart-definition author can author a chart using only the docs (without reading source)</constraint>
+    <constraint source="design.md">§6.4.0 binding — every new Visual Host renderer key MUST be documented in the same PR as the code change</constraint>
+    <constraint source="spec">MUST docs rule — "MUST document every new Custom Options key in VISUALHOST-ARCHITECTURE.md + VISUALHOST-SETUP-GUIDE.md in the same PR as the code change"</constraint>
+    <constraint source="project">Markdown only — no rendered images required; ASCII layout sketches acceptable</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>docs/guides/VISUALHOST-SETUP-GUIDE.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Per-visual-type Custom Options table" location="docs/architecture/VISUALHOST-ARCHITECTURE.md">
+        Each visual type has a table of supported `sprk_optionsjson` keys with columns: Key · Type · Default · Behavior · Backward-compat note.
+      </pattern>
+      <pattern name="Worked authoring example" location="docs/guides/VISUALHOST-SETUP-GUIDE.md">
+        Each example includes: chart-def name, entity, visual type code, full `sprk_optionsjson` JSON block, drill-through settings, and a brief explanation of what renders.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. If higher, run `context-handoff` before proceeding.</step>
+    <step order="1" name="Load knowledge">Read existing VISUALHOST-ARCHITECTURE.md (note table structure per visual type) + VISUALHOST-SETUP-GUIDE.md (note example structure). Read spec.md FR-VH-01..05 and FR-DV-01..05 sections (lines ~127-256) for the canonical key list + example JSON.</step>
+    <step order="2" name="Enumerate new keys from FR-VH-01..04">List every new `sprk_optionsjson` key + visual-type mapping:
+      • DonutChart (FR-VH-01): `donutLayout` ("standard"|"matrixRight", default "standard"), `donutCenterMode` ("total"|"meanOfFields"), `donutCenterLabel` (string), `showBreakdownRows` (boolean), `breakdownValueFormat` ("score"|"scoreOver100"|"percentage"|"ratio")
+      • MetricCard (FR-VH-02): `badge` ({ text, tone: "danger"|"warning"|"success"|"neutral", position: "inline" }) — per-field via `fieldPivot.fields[].badge` in field-pivot mode
+      • MetricCard (FR-VH-03): `descriptionColor` ("brand"|"neutral"|"success"|"warning"|"danger", default "neutral")
+      • HorizontalStackedBar (FR-VH-04): `layoutMode` ("default"|"headlineAboveBar", default "default"), `headlineFromField` (string), `subLineTemplate` (string with `{remaining}`/`{percent}`/`{total}` placeholders)
+    </step>
+    <step order="3" name="Update VISUALHOST-ARCHITECTURE.md">For each visual type (DonutChart, MetricCard, HorizontalStackedBar), locate (or create) the Custom Options table. Add rows for every new key from Step 2 with columns: Key · Type · Default · Behavior · Backward-compat note. Each backward-compat note states explicitly that omitting the key produces pre-extension behavior. Mark FR-VH-* source for traceability.</step>
+    <step order="4" name="Document CardChrome internal wrapper">Add a brief subsection on `CardChrome` (FR-VH-05) noting it's internal to Visual Host (NOT exported from `@spaarke/ui-components`), its props (`title`, `onExpand`, `onAiSummary`, `showAiSparkle`, `children`), and that it wraps every card in `VisualHostRoot.tsx`. Note `showAiSparkle: false` default (Insights Engine deferred to r2).</step>
+    <step order="5" name="Add 5 authoring examples to VISUALHOST-SETUP-GUIDE.md">For each chart def shipped in tasks 030-034, add a worked example section:
+      • Matter Health Composite (FR-DV-01) — Donut with `matrixRight` + `meanOfFields` + 3 fieldPivot fields + `colorThresholds`
+      • Matter Budget (FR-DV-02) — HorizontalStackedBar with `headlineAboveBar` + `subLineTemplate "{percent}% of {total}"` + currency formatting + colorThresholds
+      • Matter Tasks (FR-DV-03) — MetricCard with per-field badge ("overdue", tone "danger") + cardDescription with placeholder
+      • Matter Next Date (FR-DV-04) — DueDateCard (no renderer changes; just config) with TOP-1 ORDER BY FetchXML
+      • Matter Activity (FR-DV-05) — MetricCard with `descriptionColor: "brand"`
+      Each example: chart-def name, entity, visual type code (e.g., 100000004 for Donut), full `sprk_optionsjson` JSON block (copied from spec.md), Drill Through Settings, and 2-3 sentences explaining what renders.
+    </step>
+    <step order="6" name="Cross-link refs">In both docs, add cross-links: from each ARCHITECTURE table row to its SETUP-GUIDE example, and vice versa. Also link to spec.md FR-VH-* / FR-DV-* sections for full requirement context.</step>
+    <step order="7" name="Self-review">Re-read both docs end-to-end. Confirm: (a) every new key from FR-VH-01..04 has a table row, (b) every chart def from FR-DV-01..05 has a worked example, (c) backward-compat note appears on every new key, (d) no source-code reading required to author a new chart.</step>
+    <step order="8" name="Doc-drift check (optional but recommended)">Invoke `Skill doc-drift-audit` against the two updated docs to surface any stale references.</step>
+    <step order="9" name="Update task tracking">Update TASK-INDEX.md: task 047 status 🔲 → ✅. Reset `current-task.md` to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control</tool>
+    <tool name="Skill doc-drift-audit">Optional stale-reference audit at Step 8</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/VISUALHOST-ARCHITECTURE.md</output>
+    <output type="docs">docs/guides/VISUALHOST-SETUP-GUIDE.md</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">VISUALHOST-ARCHITECTURE.md DonutChart Custom Options table includes new rows: `donutLayout`, `donutCenterMode`, `donutCenterLabel`, `showBreakdownRows`, `breakdownValueFormat` — each with type, default, behavior, backward-compat note.</criterion>
+    <criterion testable="true">VISUALHOST-ARCHITECTURE.md MetricCard table includes `badge` (per-field), `descriptionColor` rows.</criterion>
+    <criterion testable="true">VISUALHOST-ARCHITECTURE.md HorizontalStackedBar table includes `layoutMode`, `headlineFromField`, `subLineTemplate` rows.</criterion>
+    <criterion testable="true">VISUALHOST-ARCHITECTURE.md documents `CardChrome` internal wrapper (FR-VH-05) — props + default behavior.</criterion>
+    <criterion testable="true">VISUALHOST-SETUP-GUIDE.md contains 5 worked authoring examples — one per FR-DV-01..05 chart def — with full `sprk_optionsjson` JSON, entity, visual type code, drill-through settings.</criterion>
+    <criterion testable="true">Cross-links exist between each ARCHITECTURE table row and its SETUP-GUIDE example.</criterion>
+    <criterion testable="true">Backward-compat note present on every new key.</criterion>
+    <criterion testable="true">A chart-def author can author a new chart using only the two docs (validated by self-review walkthrough).</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 047 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a STANDARD-rigor task — no code changes, no `/fluent-v9-component` invocation needed, no `code-review` + `adr-check` at Step 9.5. Parallel-safe: TRUE — it modifies only docs (no overlap with Phase 4 PCF tasks 040-046 which touch SemanticSearchControl.tsx and friends). Sourcing JSON examples directly from spec.md sections FR-DV-01..05 is acceptable (the spec is the canonical source). For any new key, prefer copying behavior text verbatim from spec.md FR-VH-* descriptions to ensure consistency between requirement and doc.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      🔒 RIGOR LEVEL: STANDARD. Documentation task — load spec.md FR-VH-01..04 + FR-DV-01..05. Update VISUALHOST-ARCHITECTURE.md per-visual-type tables. Update VISUALHOST-SETUP-GUIDE.md with 5 worked examples. Self-review for completeness. Optional doc-drift-audit.
+    </protocol>
+  </execution>
+</task>

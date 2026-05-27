@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Enumerate in-production sprk_chartdefinition records (NFR-05 baseline)</title>
+    <phase>0: Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>025</blocks>
+    <tags>dataverse, inventory, regression-baseline</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Inventory + documentation task — no code implementation, no constraints to validate</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Enumerate every in-production `sprk_chartdefinition` record so subsequent Phase 2 work (FR-VH-01..05) can be regression-checked against an explicit baseline. Per NFR-05 (binding), every existing chart def MUST render unchanged after Visual Host renderer extensions land — that requires knowing what "every existing" actually is.
+  </prompt>
+
+  <role>
+    SPAARKE platform investigator. Use the Dataverse MCP `read_query` tool to enumerate chart definitions and produce a compact inventory note. No code changes.
+  </role>
+
+  <goal>
+    Populate `notes/spikes/visualhost-chart-def-inventory.md` with a table of every active `sprk_chartdefinition` record: name, visual type code, owning entity, Custom Options keys present in `sprk_optionsjson`, drill-through entity (if set). The list is the NFR-05 regression baseline cited by task 025.
+  </goal>
+
+  <context>
+    <background>
+      Spec NFR-05 makes backward compatibility binding for every Phase 2 task. The current implementation has multiple production chart defs (Matter KPI Scorecard, Matter Financial Metrics Scorecard, possibly deprecated `matterMainCards.ts` configs migrated to Dataverse records, and any other team-authored defs). Phase 2 task 025 needs an explicit list to smoke-test against.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-matter-ui-enhancement-r1/notes/spikes/visualhost-chart-def-inventory.md</file>
+      <file>src/client/pcf/VisualHost/control/configurations/matterMainCards.ts</file>
+      <file>src/client/pcf/VisualHost/control/configurations/matterReportCardTrends.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">NFR-05 (binding) — every chart def listed here is non-negotiable in the regression check at task 025</constraint>
+    <constraint source="project">Use MCP Dataverse tools only (read-only). No code changes in this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>docs/guides/VISUALHOST-SETUP-GUIDE.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Use mcp__dataverse__read_query to fetch all active sprk_chartdefinition records: `SELECT sprk_chartdefinitionid, sprk_name, sprk_visualtype, sprk_entityname, sprk_optionsjson, sprk_drillthroughentity FROM sprk_chartdefinition WHERE statecode = 0`</step>
+    <step order="2">For each record, parse sprk_optionsjson and extract the Custom Options keys used (e.g., `fieldPivot`, `valueFormat`, `colorThresholds`, etc.).</step>
+    <step order="3">Cross-reference with src/client/pcf/VisualHost/control/configurations/matterMainCards.ts and matterReportCardTrends.ts — note any static config that has been (or has NOT been) migrated to Dataverse records.</step>
+    <step order="4">Write notes/spikes/visualhost-chart-def-inventory.md with: (a) one-row-per-chart-def table, (b) Custom Options keys signature column, (c) "regression risk" column flagging chart defs that use keys touched by FR-VH-01..04 (`fieldPivot`, `colorThresholds`, `valueFormat`, MetricCard, HorizontalStackedBar).</step>
+    <step order="5">Update TASK-INDEX.md: change task 001 status to ✅ completed.</step>
+    <step order="6">Update current-task.md per Step Quick Recovery — advance to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp__dataverse__read_query">Read-only FetchXML / SQL queries against Dataverse</tool>
+    <tool name="mcp__dataverse__describe_table">Optional — confirm sprk_chartdefinition schema if needed</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/visualhost-chart-def-inventory.md</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/spikes/visualhost-chart-def-inventory.md exists and lists every active sprk_chartdefinition with name, visual type, owning entity, and Custom Options keys.</criterion>
+    <criterion testable="true">Chart defs flagged with "regression risk: yes" enumerate the specific FR-VH-* changes that could affect them (e.g., "FR-VH-01 touches fieldPivot consumption — this def uses fieldPivot").</criterion>
+    <criterion testable="true">TASK-INDEX.md shows 001 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is the foundation of NFR-05 enforcement. If the inventory is incomplete, task 025 (regression smoke) cannot pass with confidence. Spec.md §Dependencies lists "Matter KPI Scorecard and Matter Financial Metrics Scorecard" as the minimum required regression targets — at least these two MUST appear in the inventory.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load knowledge files. Use MCP Dataverse tools to enumerate. Write the inventory note. Update task status. MINIMAL rigor — skip quality gates.
+    </protocol>
+  </execution>
+</task>

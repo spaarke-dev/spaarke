@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Visual Host backward-compat regression smoke (NFR-05)</title>
+    <phase>2: Visual Host Renderer Extensions</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>001, 020, 021, 022, 023, 024</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, regression-test, visualhost</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Validation task with binding NFR-05 constraint; no new code, but must verify every existing chart def renders unchanged. Constraints exist → STANDARD (not MINIMAL); no implementation → not FULL</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Must run AFTER all of 020-024 ship and are merged — this is the cumulative NFR-05 gate</parallel-reason>
+  </metadata>
+
+  <prompt>
+    For every chart def listed in `notes/spikes/visualhost-chart-def-inventory.md` (output of task 001), deploy the current VisualHost build (post-020-021-022-023-024) to dev and render each chart def at least once on a representative entity record. Compare visually + via dark-mode + axe scan against the pre-change baseline captured during task 001 (and the per-task evidence in `notes/spikes/visualhost-regression-evidence/`). If ANY chart def renders differently from baseline, STOP — that is an NFR-05 violation per spec and must be remediated before merge.
+  </prompt>
+
+  <role>
+    SPAARKE platform QA + regression analyst. No code changes — verification only. Use existing PCF dev harness + MDA dev environment.
+  </role>
+
+  <goal>
+    Every chart def in the task-001 inventory has captured regression evidence (light + dark screenshots + axe scan results) post-020-024 and matches the baseline within zero functional diff. The final report `notes/spikes/visualhost-regression-evidence/SUMMARY.md` lists each chart def with PASS/FAIL status. If any FAIL, the corresponding Phase 2 task is reopened.
+  </goal>
+
+  <context>
+    <background>
+      NFR-05 is binding: every existing in-production chart def MUST render unchanged after FR-VH-01..05 extensions land. Tasks 020-024 each captured per-renderer regression evidence (donut-baseline, metriccard-baseline-021, metriccard-baseline-022, hsbar-baseline, cardchrome-baseline). This task does the CUMULATIVE smoke across all chart defs after all five tasks have merged — catching interaction bugs that only surface when multiple extensions are active.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-matter-ui-enhancement-r1/notes/spikes/visualhost-chart-def-inventory.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/notes/spikes/visualhost-regression-evidence/SUMMARY.md (NEW — created by this task)</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/notes/spikes/visualhost-regression-evidence/post-phase2-cumulative/ (screenshots)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">NFR-05 (binding) — every in-production chart def MUST render unchanged. ANY diff = STOP and remediate before merge.</constraint>
+    <constraint source="project">NO code changes in this task — verification only.</constraint>
+    <constraint source="spec">Verification covers: light theme, dark theme, axe DevTools WCAG 2.1 AA scan.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/notes/spikes/visualhost-chart-def-inventory.md</file>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify prerequisites: tasks 020, 021, 022, 023, 024 all marked ✅ in TASK-INDEX.md AND merged into the working branch. Pull latest. Read `notes/spikes/visualhost-chart-def-inventory.md` to enumerate the chart defs requiring regression.</step>
+    <step order="2">Deploy the post-Phase-2 VisualHost build to dev via the `pcf-deploy` skill (`npm run build:prod` then deploy). Confirm the deployed control loads on a known-good record without console errors.</step>
+    <step order="3">For each chart def in the inventory: identify a representative dev record that exercises it; render the card; capture a light-mode screenshot in `notes/spikes/visualhost-regression-evidence/post-phase2-cumulative/{chart-def-name}-light.png`.</step>
+    <step order="4">Toggle MDA dark mode; capture `{chart-def-name}-dark.png`.</step>
+    <step order="5">Run axe DevTools scan on the page; save the JSON/HTML report as `{chart-def-name}-axe.json`.</step>
+    <step order="6">Compare each post-Phase-2 screenshot against the pre-change baseline (from task 001 / per-task evidence). Use visual diff (pixel-by-pixel where possible) — any non-zero diff in the chart-body region is a NFR-05 violation candidate. CardChrome (task 024) adds a header — header diff is expected and allowed; BODY diff is NOT.</step>
+    <step order="7">Write `notes/spikes/visualhost-regression-evidence/SUMMARY.md`: one row per chart def with columns: name, visual type, light-mode PASS/FAIL, dark-mode PASS/FAIL, axe PASS/FAIL, notes. PASS = body pixel-diff zero (or within accepted tolerance documented in the row); FAIL = STOP.</step>
+    <step order="8">If ANY chart def FAILS: STOP. Document the failure in `SUMMARY.md`, identify which of 020-024 introduced the regression, reopen that task. Do not proceed to project completion.</step>
+    <step order="9">If ALL PASS: mark this task complete. Update TASK-INDEX.md: 025 → ✅. Update current-task.md to next pending task. The Phase 2 NFR-05 gate has been satisfied.</step>
+  </steps>
+
+  <tools>
+    <tool name="pcf-deploy">Deploy VisualHost PCF to dev for the regression smoke</tool>
+    <tool name="ui-test">Browser-based UI test harness for capturing screenshots + DOM inspection</tool>
+    <tool name="axe DevTools">WCAG 2.1 AA scan</tool>
+    <tool name="mcp__dataverse__read_query">Resolve representative records per chart def</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/visualhost-regression-evidence/post-phase2-cumulative/ (screenshots + axe reports)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/visualhost-regression-evidence/SUMMARY.md</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SUMMARY.md lists every chart def from `visualhost-chart-def-inventory.md` with PASS/FAIL for light, dark, and axe.</criterion>
+    <criterion testable="true">Every chart def shows PASS in the body region (zero pixel diff) — CardChrome header additions are documented as the only allowed change.</criterion>
+    <criterion testable="true">Zero axe DevTools WCAG 2.1 AA violations on any chart def in light or dark.</criterion>
+    <criterion testable="true">Any FAIL has the responsible Phase 2 task documented and reopened.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows 025 → ✅ ONLY when every chart def passes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is the cumulative NFR-05 gate for Phase 2. Per-task evidence (collected in 020-024) catches single-task regressions; this task catches interaction regressions that emerge only when all five extensions are active. If a regression is found here that was not seen in the per-task evidence, the discovery is itself valuable signal — note in SUMMARY.md so future Visual Host extensions can pattern-match. STANDARD rigor: validation with constraints, but no implementation code.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load knowledge files (inventory + spec NFR-05). Deploy. Capture light + dark + axe per chart def. Diff against baseline. Write SUMMARY.md. PASS → complete; FAIL → STOP and reopen responsible task. STANDARD rigor — skip code-review + adr-check gates (no code changes).
+    </protocol>
+  </execution>
+</task>

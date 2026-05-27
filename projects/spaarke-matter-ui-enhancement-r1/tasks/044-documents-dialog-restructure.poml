@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Documents PCF — restructure FilePreviewDialog to 960 px max-width with 2-column body + new footer (FR-DOC-03)</title>
+    <phase>4: Documents PCF</phase>
+    <status>not-started</status>
+    <estimated-hours>4-6</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>045</blocks>
+    <tags>pcf, react, fluent-ui, frontend, semantic-search</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF UI structural change to FilePreviewDialog; Fluent v9 component authoring (Dialog, layout grids, sections); ADR-021 + ADR-022 binding; depends on task 040 (3-dot menu replacing dialog toolbar icons)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>shared file FilePreviewDialog.tsx with other Phase 4 tasks (040, 041-043, 045-046)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per spec FR-DOC-03, restructure `FilePreviewDialog.tsx`: max-width **960 px** (verify current 85vw and adjust). Body becomes a **2-column grid**: left ~640 px thumbnail area; right 320 px metadata pane with sections (top→bottom) — **AI summary** (sparkle icon + paragraph), **Tags** (single chip from `sprk_documenttype` value), **Details** (Created by / Created / Size / Type). Footer actions left-to-right: **Find similar** (subtle) · **Close** (secondary) · **Open file** (primary). The dialog header 3-dot menu was wired in task 040 (FR-DOC-01); do NOT change the menu. Existing iframe preview load behavior unchanged.
+  </prompt>
+
+  <role>
+    Senior frontend developer with Fluent UI v9 `Dialog` + layout-grid expertise. Familiar with `FilePreviewDialog.tsx`, the iframe preview pipeline, and the sparkle/AI summary affordance from `AiSummaryPopover.tsx`.
+  </role>
+
+  <goal>
+    `FilePreviewDialog.tsx` renders at 960 px max-width on viewports ≥1024 px. Body uses a 2-column CSS grid (640 px / 320 px) with the metadata pane sections in the specified order. Footer buttons reordered with correct appearances. Existing iframe preview pipeline unchanged. PCF builds clean. Code-review + adr-check pass.
+  </goal>
+
+  <context>
+    <background>
+      FR-DOC-03 modernizes the dialog layout: today it is a single-column ~85vw dialog with the iframe taking the full width and metadata stacked above/below. The new layout puts the iframe on the left and a structured metadata pane on the right. Task 040 already replaced the dialog-toolbar icons with the 3-dot menu — this task focuses purely on body + footer layout. The dialog's iframe preview pipeline (SPE preview URL generation, content rendering) is untouched.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/FilePreviewDialog.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/AiSummaryPopover.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SemanticSearchApiService.ts</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-DOC-03 — Dialog renders at 960 px max-width on viewports ≥1024 px</constraint>
+    <constraint source="spec">FR-DOC-03 — body 2-column: left ~640 px thumbnail; right 320 px metadata pane</constraint>
+    <constraint source="spec">FR-DOC-03 — metadata pane section order: AI summary · Tags · Details</constraint>
+    <constraint source="spec">FR-DOC-03 — Details = Created by / Created / Size / Type</constraint>
+    <constraint source="spec">FR-DOC-03 — footer left-to-right: Find similar (subtle) · Close (secondary) · Open file (primary)</constraint>
+    <constraint source="spec">FR-DOC-03 — existing iframe preview load behavior unchanged</constraint>
+    <constraint source="spec">NFR-02 — axe WCAG 2.1 AA zero violations, light AND dark</constraint>
+    <constraint source="spec">NFR-04 — Fluent v9 tokens only</constraint>
+    <constraint source="ADR-006">PCF UI surface; form binding preserved</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; dark mode parity</constraint>
+    <constraint source="ADR-022">React 16/17 compatible</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2 preserved on iframe preview URL fetch</constraint>
+    <constraint source="design.md">§6.0 binding — `/fluent-v9-component` MUST be invoked at Step 0.5</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/INDEX.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 Dialog sizing" location=".claude/patterns/ui/fluent-v9-portal-gotcha.md">
+        Dialog `surface` slot accepts inline style for max-width; ensure portal-rendered Dialog respects size at MDA viewport.
+      </pattern>
+      <pattern name="2-column grid via makeStyles" location=".claude/patterns/ui/fluent-v9-component-authoring.md">
+        Use `display: grid; gridTemplateColumns: '640px 320px'` with token-based gap; collapse below 1024 px (not required for v1).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. If higher, run `context-handoff` before proceeding.</step>
+    <step order="0.5" name="Invoke fluent-v9-component">Invoke `Skill fluent-v9-component` (binding per design.md §6.0). Load `fluent-v9-component-authoring.md`, `fluent-v9-portal-gotcha.md`, `fluent-v9-theming.md`.</step>
+    <step order="1" name="Load knowledge">Read ADR-006, ADR-021, ADR-022, ADR-028; PCF CLAUDE.md. Read existing `FilePreviewDialog.tsx` — note the current 85vw size, the iframe rendering, and the metadata layout. Read `AiSummaryPopover.tsx` to understand how AI summary content is fetched/rendered.</step>
+    <step order="2" name="Set dialog max-width to 960 px">In `FilePreviewDialog.tsx`, change the `DialogSurface` (or equivalent) max-width style to `960px`. Verify Fluent v9 Dialog respects the size at viewport ≥1024 px.</step>
+    <step order="3" name="Implement 2-column body grid">Replace the body layout with a CSS grid: `display: grid; gridTemplateColumns: '640px 320px'; gap: tokens.spacingHorizontalL`. Left cell: iframe thumbnail area (existing iframe logic preserved). Right cell: metadata pane.</step>
+    <step order="4" name="Build AI summary section">In the right cell, add the first section: sparkle icon + heading "AI summary" + paragraph containing the AI summary content (reuse the same data source as `AiSummaryPopover.tsx`). Render skeleton while loading.</step>
+    <step order="5" name="Build Tags section">Add the second section: heading "Tags" + a single Fluent v9 `Tag` chip showing the document's `documentType` (label from option set, not raw value). If `documentType` is empty, render nothing (or a subtle dash).</step>
+    <step order="6" name="Build Details section">Add the third section: heading "Details" + key-value list — Created by / Created / Size / Type. Use Fluent v9 `Text` with token-based typography. Format dates via existing date-formatting helper; format size in KB/MB.</step>
+    <step order="7" name="Reorder footer buttons">Replace existing footer with three Fluent v9 `Button` controls in order: Find similar (`appearance="subtle"`) · Close (`appearance="secondary"`) · Open file (`appearance="primary"`). Wire to existing handlers in `SemanticSearchControl.tsx`.</step>
+    <step order="8" name="Preserve iframe preview pipeline">Verify the SPE preview URL fetch + iframe `src` binding is byte-identical to pre-change. The iframe element moves into the left grid cell but the data flow is unchanged.</step>
+    <step order="9" name="Preserve 3-dot menu in header">Confirm task 040's `DocumentRowMenu` in the dialog header remains untouched.</step>
+    <step order="10" name="Dark-mode + a11y check">Run PCF in dev harness with `webLightTheme` and `webDarkTheme`. Verify all three sections + footer buttons render with v9 tokens. Run axe scan in both themes. Verify dialog max-width clamps at 960 px at viewports ≥1024 px (resize test).</step>
+    <step order="11" name="Build verification">Run `npm run build:prod` from PCF root.</step>
+    <step order="9.5" name="Quality gates (FULL rigor)">Invoke `Skill code-review` then `Skill adr-check`. Resolve all findings.</step>
+    <step order="12" name="Checkpoint">Run `context-handoff` (silent: ✅ Checkpoint).</step>
+    <step order="13" name="Update task tracking">Update TASK-INDEX.md: task 044 status 🔲 → ✅. Reset `current-task.md` to next pending task (045).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (`npm run build:prod`)</tool>
+    <tool name="git">Version control</tool>
+    <tool name="Skill fluent-v9-component">Mandatory at Step 0.5</tool>
+    <tool name="Skill code-review">Quality gate at Step 9.5</tool>
+    <tool name="Skill adr-check">ADR compliance gate at Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/FilePreviewDialog.tsx</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dialog renders at 960 px max-width on viewports ≥1024 px (verify via DOM inspect of DialogSurface).</criterion>
+    <criterion testable="true">Body uses 2-column grid: left ~640 px (iframe), right 320 px (metadata pane).</criterion>
+    <criterion testable="true">Metadata pane sections render in order: AI summary · Tags · Details (Created by / Created / Size / Type).</criterion>
+    <criterion testable="true">Footer buttons render in order Find similar (subtle) · Close (secondary) · Open file (primary).</criterion>
+    <criterion testable="true">Existing iframe preview pipeline unchanged — SPE preview URL fetch + iframe src binding byte-identical to pre-change.</criterion>
+    <criterion testable="true">Header 3-dot menu (from task 040) unchanged.</criterion>
+    <criterion testable="true">PCF builds clean; zero hardcoded hex/rgb.</criterion>
+    <criterion testable="true">axe WCAG 2.1 AA zero violations in light AND dark.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` skills pass.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 044 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Dialog renders at 960 px on ≥1024 px viewport">
+      <steps>
+        <step>Open a result row to launch FilePreviewDialog at 1280 px viewport.</step>
+        <step>DOM inspect: confirm DialogSurface max-width = 960 px.</step>
+      </steps>
+      <expected>Width clamped to 960 px regardless of viewport above 1024 px.</expected>
+    </test>
+    <test name="Metadata sections in correct order">
+      <steps>
+        <step>Open a doc with full metadata.</step>
+        <step>Verify right pane top→bottom: AI summary heading + paragraph · Tags chip · Details (Created by / Created / Size / Type).</step>
+      </steps>
+      <expected>Three sections in spec order.</expected>
+    </test>
+    <test name="Footer buttons appearance + order">
+      <steps>
+        <step>Verify footer left→right: Find similar (subtle) · Close (secondary) · Open file (primary).</step>
+        <step>Click each button — verify handler fires correctly (Find similar triggers find-similar flow; Close dismisses; Open file opens SPE file).</step>
+      </steps>
+      <expected>Order + appearances + handlers correct.</expected>
+    </test>
+    <test name="iframe preview unchanged">
+      <steps>
+        <step>Open a doc — verify iframe loads SPE preview URL identically to pre-change behavior.</step>
+        <step>Network tab: verify SPE preview URL request is unchanged.</step>
+      </steps>
+      <expected>Preview pipeline byte-identical.</expected>
+    </test>
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode; open the dialog.</step>
+        <step>Verify all three sections, footer buttons, and dialog surface use v9 dark tokens.</step>
+        <step>Run axe-core in both themes.</step>
+      </steps>
+      <expected>Zero WCAG violations; all tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Depends on task 040 (3-dot menu in dialog header already replaced toolbar icons). The iframe preview pipeline is OUT OF SCOPE — do not touch SPE preview URL generation. AI summary section uses the same data source as `AiSummaryPopover.tsx` — do NOT duplicate fetch logic; consider extracting to a hook (`useAiSummary(documentId)`) if cleaner. Single Tag chip from `documentType` — multi-tag is not in spec (only the document's primary type).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      🔒 RIGOR LEVEL: FULL. Invoke `Skill fluent-v9-component` at Step 0.5. Load ADRs + patterns. Restructure FilePreviewDialog body + footer. Preserve iframe pipeline + header 3-dot menu byte-identically. Build PCF. Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>

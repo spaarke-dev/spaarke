@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Add modifiedAt + modifiedBy to /api/ai/search projection (FR-BFF-01)</title>
+    <phase>5: BFF</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>041</blocks>
+    <tags>bff-api, api, minimal-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>.cs file modification in BFF (SearchResult model + projection in SemanticSearchEndpoints). ADR-008/010/029 binding. BFF additions governance applies (Placement Justification required per `.claude/constraints/bff-extensions.md`).</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per FR-BFF-01, extend the `SearchResult` shape and the `/api/ai/search` projection to include `modifiedAt: DateTime?` (ISO datetime) and `modifiedBy: string?` (display name). Source: standard system fields `modifiedon` and `modifiedby` on `sprk_document`. Existing fields and behavior unchanged. Existing clients unaffected. Add an integration test that asserts the projection includes both new fields. This task is consumed by task 041 (Documents PCF list-view default sort `modifiedAt DESC`).
+  </prompt>
+
+  <role>
+    Senior .NET 8 / Minimal API developer with deep familiarity with the BFF (`Sprk.Bff.Api`), the Semantic Search endpoint pipeline (`SemanticSearchEndpoints.cs`, `SearchResult.cs`, the Dataverse post-search lookup step), and BFF additions governance (`.claude/constraints/bff-extensions.md`).
+  </role>
+
+  <goal>
+    `SearchResult.cs` gains `ModifiedAt: DateTimeOffset?` ([JsonPropertyName("modifiedAt")]) and `ModifiedBy: string?` ([JsonPropertyName("modifiedBy")]) properties following the existing `CreatedAt` / `CreatedBy` shape. `SemanticSearchEndpoints.cs` (and any post-search Dataverse projection helper) populates both fields from `modifiedon` and `modifiedby` system fields on `sprk_document`. Existing field projections + behavior unchanged. Existing clients unaffected (additive shape only). Integration test asserts the projection returns both new fields. Builds clean. ADR-008 endpoint filter unchanged. ADR-010 DI minimalism preserved (no new services). ADR-029 publish hygiene preserved (no new NuGet, no publish-size delta beyond noise).
+  </goal>
+
+  <context>
+    <background>
+      Per spec.md §Owner Clarifications: "Project BOTH `created*` AND `modified*`; default sort `modifiedAt DESC`". This is the canonical Owner-Clarified decision behind FR-BFF-01. The Documents PCF list view (task 041) needs `modifiedAt` for default sort and `modifiedBy` (with avatar + name) for the Modified by column.
+
+      `SearchResult.cs` already has `CreatedAt` / `CreatedBy` shaped exactly the way we need — this task adds the mirror pair for the modify lifecycle. The Dataverse post-search lookup step (which already populates `CreatedBy` from a Dataverse fetch) is the obvious place to also fetch `modifiedon` / `modifiedby`.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchResult.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-BFF-01 — add modifiedAt + modifiedBy to SearchResult and projection; source modifiedon + modifiedby on sprk_document</constraint>
+    <constraint source="spec">FR-BFF-01 — existing fields and behavior unchanged; existing clients unaffected (additive only)</constraint>
+    <constraint source="ADR-008">Endpoint filter pattern preserved (SemanticSearchAuthorizationFilter unchanged)</constraint>
+    <constraint source="ADR-010">DI minimalism — no new service registrations; reuse existing Dataverse lookup service</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — no new NuGet packages; no transitive CVE introductions; publish-size delta within noise (NFR-06)</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BINDING — Placement Justification required in PR description even though answer is "in BFF (additive projection)"</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0">Step 0.5: This task does NOT touch Fluent v9 React components — `fluent-v9-component` skill is NOT applicable. Skip.</step>
+    <step order="1">Load knowledge: `.claude/constraints/bff-extensions.md` (binding pre-merge checklist), ADR-008/010/029, `src/server/api/Sprk.Bff.Api/CLAUDE.md`.</step>
+    <step order="2">Read `SearchResult.cs` to confirm the `CreatedAt`/`CreatedBy` property shape; mirror it for `ModifiedAt`/`ModifiedBy`. Use `DateTimeOffset?` (matching `CreatedAt`) and `string?` (matching `CreatedBy`). XML doc comments mirror the Created* docs.</step>
+    <step order="3">Add the two properties to `SearchResult.cs` with `[JsonPropertyName("modifiedAt")]` and `[JsonPropertyName("modifiedBy")]`.</step>
+    <step order="4">Locate the Dataverse post-search lookup in the Semantic Search pipeline (likely in `Services/Ai/SemanticSearch/`). It already fetches `createdby` for the `CreatedBy` field. Extend that fetch + projection to also populate `ModifiedAt` (from `modifiedon`) and `ModifiedBy` (from `modifiedby` lookup display name) on each `SearchResult`.</step>
+    <step order="5">Verify no new DI registrations are needed (ADR-010). If the change introduces any new service, push back — extension should be in the existing lookup service.</step>
+    <step order="6">Add an integration test (in the existing Sprk.Bff.Api test project — find via Glob for `*Test*.cs` near SemanticSearch) using `WebApplicationFactory` that POSTs to `/api/ai/search`, gets back a `SemanticSearchResponse`, and asserts: (a) at least one result has non-null `ModifiedAt`; (b) at least one result has non-null `ModifiedBy`; (c) all existing fields (`DocumentId`, `Name`, `CreatedAt`, `CreatedBy`, etc.) are still present.</step>
+    <step order="7">Build verification: `dotnet build src/server/api/Sprk.Bff.Api/` clean; run the new integration test; `dotnet list package --vulnerable --include-transitive` shows no new HIGH CVE.</step>
+    <step order="8">Verify publish-size impact: `dotnet publish src/server/api/Sprk.Bff.Api/ --runtime linux-x64 -c Release` and confirm output size delta &lt; 100 KB (additive property changes are noise-level; flag if delta is unexpectedly large).</step>
+    <step order="9">Document the Placement Justification in the PR description per `.claude/constraints/bff-extensions.md` §A.1: "Additive projection on existing /api/ai/search endpoint. Latency-sensitive (consumed in user-facing list view), reads BFF-managed Dataverse post-search lookup in same request — belongs in BFF. No new services, no new packages, no publish-size impact."</step>
+    <step order="10">Step 9.5 (FULL rigor): run `Skill code-review` + `Skill adr-check` — fix issues before completing.</step>
+    <step order="11">Update TASK-INDEX.md: 050 → ✅. Update current-task.md to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test BFF (`dotnet build`, `dotnet test`, `dotnet publish`)</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchResult.cs (add ModifiedAt + ModifiedBy properties)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/ (extend Dataverse post-search lookup to populate the new fields)</output>
+    <output type="code">tests/ — integration test asserting the projection includes both new fields</output>
+    <output type="docs">PR description with Placement Justification (per .claude/constraints/bff-extensions.md §A.1)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SearchResult.cs has ModifiedAt (DateTimeOffset?) + ModifiedBy (string?) with correct JsonPropertyName attributes.</criterion>
+    <criterion testable="true">/api/ai/search projection returns non-null modifiedAt + modifiedBy for documents that have them (FR-BFF-01 Acceptance).</criterion>
+    <criterion testable="true">Existing fields (DocumentId, Name, CreatedAt, CreatedBy, etc.) unchanged in the projection (FR-BFF-01 Acceptance).</criterion>
+    <criterion testable="true">Integration test passes; covers presence of new fields + presence of existing fields.</criterion>
+    <criterion testable="true">No new DI registrations (ADR-010), no new NuGet packages (ADR-029), no HIGH CVE introductions.</criterion>
+    <criterion testable="true">Publish size delta &lt; 100 KB (NFR-06).</criterion>
+    <criterion testable="true">PR description includes Placement Justification per `.claude/constraints/bff-extensions.md`.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The existing SearchResult already has CreatedAt (DateTimeOffset?) + CreatedBy (string?) — mirror that exactly. The Dataverse post-search lookup (which already populates CreatedBy from a Dataverse fetch) is the natural place to add modifiedon + modifiedby. No endpoint filter changes; no new services; no new packages. This is a textbook "additive projection" change — but per BFF governance, the Placement Justification is still required in the PR.
+
+    The integration test should use the existing test fixture pattern (find via Glob for `*WebApplicationFactory*` or similar in the test project). If no existing Semantic Search integration test exists yet, this task adds the first one.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor BFF task. Load BFF extensions governance + relevant ADRs. Implement additive projection (SearchResult + post-search lookup). Add integration test. Verify build + CVE + publish size. Document Placement Justification in PR. Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>

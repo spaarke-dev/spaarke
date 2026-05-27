@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>MetricCard descriptionColor prop (FR-VH-03)</title>
+    <phase>2: Visual Host Renderer Extensions</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>002, 021</dependencies>
+    <blocks>025</blocks>
+    <tags>pcf, react, fluent-ui, frontend, visualhost</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code in PCF renderer touching production-shipping Visual Host with ADR-021 (Fluent v9 tokens) + ADR-022 (React 16/17) + NFR-05 binding backward-compat constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shared file MetricCard.tsx with task 021 — sequential execution required</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a generic `descriptionColor` Custom Options key to `MetricCard` per FR-VH-03: `descriptionColor: "brand" | "neutral" | "success" | "warning" | "danger"` (default `"neutral"`). The Description Text element receives the matching `tokens.color*Foreground*` value. BACKWARD COMPAT (NFR-05): chart defs without `descriptionColor` MUST render with the existing `colorNeutralForeground3` exactly as today.
+  </prompt>
+
+  <role>
+    Senior React + Fluent UI v9 developer with deep familiarity with the Visual Host MetricCard renderer and Fluent v9 semantic foreground tokens.
+  </role>
+
+  <goal>
+    `MetricCard.tsx` updated to honor `descriptionColor` when present. Mapping: "brand" → `colorBrandForeground1`, "neutral" → `colorNeutralForeground3` (current default), "success" → `colorPaletteGreenForeground1` (or Fluent v9 equivalent), "warning" → `colorPaletteYellowForeground1`, "danger" → `colorPaletteRedForeground1`. All existing MetricCard chart defs render byte-identically. Builds clean. Code-review + adr-check pass.
+  </goal>
+
+  <context>
+    <background>
+      FR-VH-03 enables the Matter Activity chart (FR-DV-05) which renders `events in last 7 days` sub-line in brand color. Per design.md §6.4.0, this MUST be a generic addition (any future MetricCard chart def can use any of the 5 tone values). The mapping reuses Fluent v9 semantic foreground tokens — no hex literals introduced.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/VisualHost/control/components/MetricCard.tsx</file>
+      <file>src/client/pcf/VisualHost/control/configurations/cardConfigResolver.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-VH-03 — generic addition to MetricCard; no Matter-specific paths</constraint>
+    <constraint source="spec">§6.4.0 (binding) — no new visual types</constraint>
+    <constraint source="spec">NFR-05 (binding) — chart defs without `descriptionColor` MUST render byte-identically to today</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only — zero hex/rgb in touched files</constraint>
+    <constraint source="ADR-022">React 16/17 platform — no React 18+ APIs</constraint>
+    <constraint source="ADR-022">No `@fluentui/react` (v8) imports — v9 only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/modern-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 foreground tokens" location="@fluentui/react-components">
+        Use semantic foreground tokens: `colorBrandForeground1`, `colorNeutralForeground3`, `colorPaletteGreenForeground1`, `colorPaletteYellowForeground1`, `colorPaletteRedForeground1`. NEVER hex.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Step 0.5: Invoke `Skill fluent-v9-component` — binding per design.md §6.0.</step>
+    <step order="1">Pull the latest MetricCard.tsx (post-task-021 — includes badge slot). Read MetricCard.tsx + cardConfigResolver.ts to anchor the post-021 baseline.</step>
+    <step order="2">Update MetricCard options type in cardConfigResolver.ts with `descriptionColor?: "brand" | "neutral" | "success" | "warning" | "danger"`. Default to "neutral" via the 3-tier merge defaults layer.</step>
+    <step order="3">Add a local mapping helper `getDescriptionColorToken(descriptionColor)` returning the Fluent v9 token string. "neutral" path returns `tokens.colorNeutralForeground3` (current default) so the no-key branch is identical to today.</step>
+    <step order="4">In MetricCard.tsx, apply the mapped token via `style={{ color: getDescriptionColorToken(...) }}` or via the existing useStyles hook with a token-driven className. Do NOT alter the Description Text element's existing font tokens, line-height, or layout — only the foreground color.</step>
+    <step order="5">Backward-compat verification: re-render every MetricCard chart def from the task-001 inventory (no `descriptionColor` set). Capture screenshots in `notes/spikes/visualhost-regression-evidence/metriccard-baseline-022/`. Pixel-diff must be ZERO.</step>
+    <step order="6">Build verification: `npm run build:prod` in VisualHost. Zero TypeScript errors.</step>
+    <step order="6.5">FULL rigor quality gates: invoke `Skill code-review` then `Skill adr-check` — block until both pass.</step>
+    <step order="7">Update TASK-INDEX.md: 022 → ✅. Update current-task.md to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (`npm run build:prod`)</tool>
+    <tool name="pcf-deploy">Deploy VisualHost PCF to dev for regression smoke</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/VisualHost/control/components/MetricCard.tsx</output>
+    <output type="code">src/client/pcf/VisualHost/control/configurations/cardConfigResolver.ts (type extension)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/visualhost-regression-evidence/metriccard-baseline-022/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">MetricCard.tsx compiles and `npm run build:prod` produces a clean bundle.</criterion>
+    <criterion testable="true">A test chart def with `descriptionColor: "brand"` renders the description in brand foreground — once FR-DV-05 is authored, Matter Activity sub-line is brand-colored.</criterion>
+    <criterion testable="true">All existing MetricCard chart defs (no `descriptionColor` key) render with `colorNeutralForeground3` exactly as today (pixel-diff zero).</criterion>
+    <criterion testable="true">All 5 tone values map to Fluent v9 semantic tokens — zero hex/rgb literals introduced.</criterion>
+    <criterion testable="true">No `@fluentui/react` (v8) imports; no React 18+ APIs used.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Backward compat — existing MetricCard renders unchanged">
+      <steps>
+        <step>Deploy modified VisualHost to dev</step>
+        <step>Open records bound to existing MetricCard chart defs without `descriptionColor`</step>
+        <step>Compare DOM + screenshot against pre-change baseline</step>
+      </steps>
+      <expected>Zero visual diff in light + dark; axe scan clean</expected>
+    </test>
+    <test name="descriptionColor brand renders correctly">
+      <steps>
+        <step>Author a test chart def with `descriptionColor: "brand"` + a description</step>
+        <step>Inspect computed foreground color in DevTools</step>
+      </steps>
+      <expected>Description foreground = Fluent `colorBrandForeground1` token value (CSS var)</expected>
+    </test>
+    <test name="Dark mode + axe">
+      <steps>
+        <step>Toggle MDA dark mode; render all 5 tone values in a test harness</step>
+        <step>Run axe DevTools scan</step>
+      </steps>
+      <expected>Each tone resolves to the proper dark-mode token; zero WCAG 2.1 AA violations (contrast preserved by Fluent v9 token system)</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Sequential to 021: do not start this task until 021 ships and is merged into the working branch. Both tasks share MetricCard.tsx — concurrent edits would conflict and dilute the NFR-05 baseline diff. The task-001 inventory should be re-screenshotted after BOTH 021 and 022 are merged as the combined MetricCard baseline used by task 025.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Step 0.5 invoke fluent-v9-component (binding per design.md §6.0). Load knowledge files. Apply descriptionColor. Verify NFR-05 with regression evidence. Build. Step 9.5 invoke code-review + adr-check (FULL rigor). Update task status.
+    </protocol>
+  </execution>
+</task>

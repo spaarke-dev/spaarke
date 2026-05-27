@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>HorizontalStackedBar headlineAboveBar layout (FR-VH-04)</title>
+    <phase>2: Visual Host Renderer Extensions</phase>
+    <status>not-started</status>
+    <estimated-hours>3-4</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>025</blocks>
+    <tags>pcf, react, fluent-ui, frontend, visualhost</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code in PCF renderer touching production-shipping Visual Host with ADR-021 (Fluent v9 tokens) + ADR-022 (React 16/17) + NFR-05 binding backward-compat constraints</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Extend the existing `HorizontalStackedBar` (HSBar) renderer per FR-VH-04 with new generic Custom Options keys: `layoutMode: "default" | "headlineAboveBar"` (default `"default"`), `headlineFromField: string`, `subLineTemplate: string` (template supports `{remaining}`, `{percent}`, `{total}` placeholders). When `layoutMode: "headlineAboveBar"`: render headline (large) + sub-line (small) ABOVE the bar; suppress the existing top-right total label and bottom-right remaining label. BACKWARD COMPAT (NFR-05): chart defs without `layoutMode` MUST render in default (current) layout — byte-identical.
+  </prompt>
+
+  <role>
+    Senior React + Fluent UI v9 developer with deep familiarity with the Visual Host HorizontalStackedBar renderer and Spaarke chart-definition contract.
+  </role>
+
+  <goal>
+    `HorizontalStackedBar.tsx` updated to support the three new generic keys. `headlineAboveBar` layout renders headline + sub-line above the bar using Fluent v9 tokens; the existing labels are suppressed only in this layout. Template substitution helper interpolates `{remaining}`, `{percent}`, `{total}` from the resolved bar data. All existing HSBar chart defs render byte-identically. Builds clean. Code-review + adr-check pass.
+  </goal>
+
+  <context>
+    <background>
+      FR-VH-04 enables the Matter Budget chart (FR-DV-02) which renders `$50K` (large) + `33% of $150K` (small) above a color-thresholded progress bar. Per design.md §6.4.0, this is a generic addition — any future HSBar chart def can opt into the headline layout. Template placeholders ({remaining}, {percent}, {total}) are computed from the existing data path; the renderer must format using `valueFormat` (currency, percentage, etc.).
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/VisualHost/control/components/HorizontalStackedBar.tsx</file>
+      <file>src/client/pcf/VisualHost/control/configurations/cardConfigResolver.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-VH-04 — generic addition to HorizontalStackedBar; no Matter-specific paths</constraint>
+    <constraint source="spec">§6.4.0 (binding) — no new visual types</constraint>
+    <constraint source="spec">NFR-05 (binding) — chart defs without `layoutMode` MUST render byte-identically to today</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only — zero hex/rgb in touched files</constraint>
+    <constraint source="ADR-022">React 16/17 platform — no React 18+ APIs</constraint>
+    <constraint source="ADR-022">No `@fluentui/react` (v8) imports — v9 only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/modern-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 Text typography" location="@fluentui/react-components">
+        Use `Text` with `size="600"` (or appropriate) for headline; `size="200"` for sub-line. NEVER hex.
+      </pattern>
+      <pattern name="Template substitution" location="local helper">
+        Simple regex replace for `{remaining}`, `{percent}`, `{total}` — no template engine needed. Pre-format each value via existing `valueFormat` helper before substitution.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Step 0.5: Invoke `Skill fluent-v9-component` — binding per design.md §6.0.</step>
+    <step order="1">Read HorizontalStackedBar.tsx + cardConfigResolver.ts to anchor the existing layout/labels and identify the NFR-05 baseline.</step>
+    <step order="2">Update HSBar options type in cardConfigResolver.ts with `layoutMode?: "default" | "headlineAboveBar"`, `headlineFromField?: string`, `subLineTemplate?: string`. Default `layoutMode` = "default".</step>
+    <step order="3">Add a local `substituteTemplate(template, { remaining, percent, total })` helper that pre-formats each value per `valueFormat` (currency, percentage, etc.) then replaces `{placeholder}` tokens. Co-located in HSBar.tsx (do not export — generic + local).</step>
+    <step order="4">In HSBar.tsx, branch on `layoutMode`. "default" branch = unchanged from today (suppress nothing). "headlineAboveBar" branch = render `&lt;Text size="600"&gt;{headline}&lt;/Text&gt;` + `&lt;Text size="200"&gt;{subLine}&lt;/Text&gt;` ABOVE the bar in a vertical flex stack with `tokens.spacingVertical*` gaps; suppress the existing top-right total label and bottom-right remaining label.</step>
+    <step order="5">`headline` is resolved from `headlineFromField` (formatted via `valueFormat`). `subLine` is `substituteTemplate(subLineTemplate, ...)`. Reuse the existing data resolution path — do NOT introduce a parallel data pipeline.</step>
+    <step order="6">Backward-compat verification: re-render every HSBar chart def from the task-001 inventory. Capture screenshots in `notes/spikes/visualhost-regression-evidence/hsbar-baseline/`. Pixel-diff must be ZERO.</step>
+    <step order="7">Build verification: `npm run build:prod` in VisualHost. Zero TypeScript errors.</step>
+    <step order="7.5">FULL rigor quality gates: invoke `Skill code-review` then `Skill adr-check` — block until both pass.</step>
+    <step order="8">Update TASK-INDEX.md: 023 → ✅. Update current-task.md to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (`npm run build:prod`)</tool>
+    <tool name="pcf-deploy">Deploy VisualHost PCF to dev for regression smoke</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/VisualHost/control/components/HorizontalStackedBar.tsx</output>
+    <output type="code">src/client/pcf/VisualHost/control/configurations/cardConfigResolver.ts (type extension)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/visualhost-regression-evidence/hsbar-baseline/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">HorizontalStackedBar.tsx compiles and `npm run build:prod` produces a clean bundle.</criterion>
+    <criterion testable="true">A test chart def with `layoutMode: "headlineAboveBar"`, `headlineFromField: "sprk_totalspendtodate"`, `subLineTemplate: "{percent}% of {total}"`, `valueFormat: "currency"` renders `$50K` (large) + `33% of $150K` (small) above the color-thresholded bar — once FR-DV-02 is authored, this is Matter Budget.</criterion>
+    <criterion testable="true">All existing HSBar chart defs (per task-001 inventory) render byte-identically (pixel-diff zero).</criterion>
+    <criterion testable="true">Top-right total label and bottom-right remaining label SUPPRESSED only when `layoutMode: "headlineAboveBar"`; otherwise unchanged.</criterion>
+    <criterion testable="true">Zero hex/rgb literals introduced; Fluent v9 Text + tokens used throughout.</criterion>
+    <criterion testable="true">No `@fluentui/react` (v8) imports; no React 18+ APIs used.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Backward compat — existing HSBar renders unchanged">
+      <steps>
+        <step>Deploy modified VisualHost to dev</step>
+        <step>Open records bound to existing HSBar chart defs without `layoutMode`</step>
+        <step>Compare DOM + screenshot against pre-change baseline</step>
+      </steps>
+      <expected>Zero visual diff in light + dark; axe scan clean</expected>
+    </test>
+    <test name="headlineAboveBar layout renders correctly">
+      <steps>
+        <step>Author a test chart def with the three new keys</step>
+        <step>Render on a record with spend = 50K, total = 150K</step>
+        <step>Inspect DOM order: headline → sub-line → bar (top to bottom)</step>
+      </steps>
+      <expected>Headline reads "$50K", sub-line reads "33% of $150K", bar color is thresholded; the old top-right/bottom-right labels are absent</expected>
+    </test>
+    <test name="Dark mode + axe">
+      <steps>
+        <step>Toggle MDA dark mode; re-render the headlineAboveBar layout</step>
+        <step>Run axe DevTools scan</step>
+      </steps>
+      <expected>Headline + sub-line use Fluent v9 foreground tokens that resolve correctly in dark mode; zero WCAG 2.1 AA violations</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Parallel-group C: this task touches HorizontalStackedBar.tsx + cardConfigResolver.ts. Tasks 020 (DonutChart) and 024 (CardChrome) also live in group C — they touch different component files. The cardConfigResolver.ts type extension is the only shared edit surface across the group; coordinate type-additions in a single shared PR or stage them sequentially within the merge train.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Step 0.5 invoke fluent-v9-component (binding per design.md §6.0). Load knowledge files. Implement headlineAboveBar. Verify NFR-05 with regression evidence. Build. Step 9.5 invoke code-review + adr-check (FULL rigor). Update task status.
+    </protocol>
+  </execution>
+</task>
