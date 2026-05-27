@@ -13,10 +13,10 @@
 
 | Field | Value |
 |---|---|
-| **Wave** | Phase 2 complete (Wave 2D 025 sign-off "Proceed to Phase 3") + Phase 5 BFF complete (Wave 4 050+051 in parallel with 2D) — advancing to Wave 3 (5 chart defs parallel) |
-| **Next Tasks** | 030 Matter Health (FR-DV-01), 031 Matter Budget (FR-DV-02), 032 Matter Tasks (FR-DV-03), 033 Matter Next Date (FR-DV-04), 034 Matter Activity (FR-DV-05) — all parallel-safe, Group D |
-| **Status** | Wave 3 pending dispatch |
-| **Next Action** | Dispatch 5 chart-def agents in parallel via Agent calls. Each agent uses mcp__dataverse__create_record (or PowerShell + Web API) to author one sprk_chartdefinition record. After completion → Phase 6 (form XML, task 060) → Phase 4 PCF tasks (sequential, mostly serial). |
+| **Wave** | Phase 3 complete (5 chart defs created in Dataverse) — advancing to Phase 4 (Documents PCF — mostly serial on SemanticSearchControl.tsx) |
+| **Next Tasks** | 040 (3-dot row menu, serial) — then 041..046 in series — then 047 (docs update, parallel-safe with 040-046) |
+| **Status** | Wave 5B pending dispatch |
+| **Next Action** | Dispatch task 040 (3-dot row menu — consumes DocumentRowMenu from task 011). Phase 4 PCF tasks must serialize because they all touch SemanticSearchControl.tsx + ResultCard.tsx + FilePreviewDialog.tsx. |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
@@ -77,6 +77,11 @@ Pipeline completed Steps 1-4 + auto-started task 001 (✅ done). Task 001 produc
 - **2026-05-27 (task 020)**: Bonus refactor — `getTokenSetColors()` was duplicated in MetricCardMatrix.tsx:138; task 020 extracted it to `src/client/pcf/VisualHost/control/utils/tokenSetColors.ts` (new shared util) and updated MetricCardMatrix + DonutChart to consume it. Eliminates duplication, single source of truth. Local versions in HSBar.tsx and GaugeVisual.tsx still exist with narrower shapes — clean follow-up task for future (out-of-scope here).
 - **2026-05-27 (task 024)**: CardChrome opt-in via existing `showTitle` PCF property (default `false`). Existing chart defs (showTitle=false) render with CardChrome being a zero-padding pass-through `<div>` — NFR-05 safe. The 5 new Matter Performance cards (Phase 3) will set `showTitle=true` per-placement to get the title bar + expand icon. Bug caught during code-review where initial implementation had inconsistent gating (chromeTitle gated on opt-in but chromeOnExpand gated on enableDrillThrough → would have caused duplicate expand icons); fixed before completion.
 - **2026-05-27 (Wave 2A)**: Three parallel agents (020, 023, 024) successfully extended shared files `types/index.ts` (ICardConfig fields) and `cardConfigResolver.ts` (Custom Options key pass-through) without conflict. Integration build clean (722 KiB bundle, +8 KiB delta from baseline). Parallel-merge succeeded on shared interfaces because each task extended disjoint fields.
+- **2026-05-27 (Wave 3 permission boundary)**: `mcp__dataverse__create_record` is denied for sub-agents but works in main session. 5 chart-def sub-agents (030-034) all hit "permission denied" early-exit. Main session took over and created all 5 records directly. Sub-agent for 032 also succeeded (got the permission grant differently?) and produced a record with the CORRECT token convention — caught a duplicate to deconflict.
+- **2026-05-27 (Wave 3 token convention)**: Spec.md uses `@currentMatter` / `@today` as conceptual placeholders. Actual Visual Host token substitution (per `src/client/pcf/VisualHost/control/services/ViewDataService.ts:367-411` `substituteParameters`) uses `{contextRecordId}` and `{currentDate}` / `{currentDateTime}`. Records 033 + 034 initially created with wrong tokens; UPDATED via `update_record` to use correct ones. Record 034 also switched to native Dataverse `last-x-days` operator instead of `{currentDate}-7` arithmetic.
+- **2026-05-27 (Wave 3 duplicate)**: 2 "Matter Tasks" records created (mine main-session with wrong tokens + agent's with correct tokens). Per user approval, deleted my broken duplicate `82f5b79e-f359-f111-a825-3833c5d9bcab`. Kept agent's `c4feb098-f359-f111-a825-3833c5d9bcab` (correct token convention + `countcolumn` aggregate over `count`).
+- **2026-05-27 (Wave 3 follow-up)**: FR-DV-03 `{upcoming}` placeholder in cardDescription needs Phase 7 verification. Chart def schema carries ONE FetchXML producing ONE aggregate; v1 stores overdue COUNT. Upcoming count needs separate wire-up (extend chart def schema / Visual Host PCF property / spec amendment) — flag for task 060 + 074.
+- **2026-05-27 (Wave 3 drill-through targets)**: Existing production chart defs use HTML page routes (e.g., `sprk_eventspage.html`) for sprk_drillthroughtarget; mine use bare entity names per spec wording. Phase 7 task 074 may need to verify whether drill-through routes correctly — if not, update_record to switch to HTML page route convention.
 
 ---
 

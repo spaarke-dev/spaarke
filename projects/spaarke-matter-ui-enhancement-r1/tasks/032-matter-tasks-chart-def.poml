@@ -3,7 +3,7 @@
   <metadata>
     <title>Author Matter Tasks chart definition (FR-DV-03)</title>
     <phase>3: Chart Definitions</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1-2</estimated-hours>
     <dependencies>003, 021, 022</dependencies>
     <blocks>060</blocks>

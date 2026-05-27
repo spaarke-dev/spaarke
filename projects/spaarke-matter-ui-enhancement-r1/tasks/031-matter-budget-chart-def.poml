@@ -3,7 +3,8 @@
   <metadata>
     <title>Author Matter Budget chart definition (FR-DV-02)</title>
     <phase>3: Chart Definitions</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>1-2</estimated-hours>
     <dependencies>023</dependencies>
     <blocks>060</blocks>

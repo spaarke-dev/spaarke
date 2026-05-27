@@ -3,7 +3,8 @@
   <metadata>
     <title>Author Matter Activity chart definition (FR-DV-05)</title>
     <phase>3: Chart Definitions</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>1</estimated-hours>
     <dependencies>003, 022</dependencies>
     <blocks>060</blocks>

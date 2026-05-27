@@ -35,11 +35,11 @@
 | 023 | HorizontalStackedBar headlineAboveBar layout | 2 | FR-VH-04 | ✅ | 002 | C | FULL |
 | 024 | CardChrome internal wrapper component | 2 | FR-VH-05 | ✅ | 002 | C | FULL |
 | 025 | Visual Host backward-compat regression smoke (NFR-05) | 2 | NFR-05 | ✅ | 001, 020, 021, 022, 023, 024 | — (serial gate) | STANDARD |
-| 030 | Matter Health Composite chart def | 3 | FR-DV-01 | 🔲 | 020, 025 | D | STANDARD |
-| 031 | Matter Budget chart def | 3 | FR-DV-02 | 🔲 | 023, 025 | D | STANDARD |
-| 032 | Matter Tasks chart def | 3 | FR-DV-03 | 🔲 | 003, 021, 025 | D | STANDARD |
-| 033 | Matter Next Date chart def | 3 | FR-DV-04 | 🔲 | 003 | D | STANDARD |
-| 034 | Matter Activity chart def | 3 | FR-DV-05 | 🔲 | 003, 022, 025 | D | STANDARD |
+| 030 | Matter Health Composite chart def | 3 | FR-DV-01 | ✅ | 020, 025 | D | STANDARD |
+| 031 | Matter Budget chart def | 3 | FR-DV-02 | ✅ | 023, 025 | D | STANDARD |
+| 032 | Matter Tasks chart def | 3 | FR-DV-03 | ✅ | 003, 021, 025 | D | STANDARD |
+| 033 | Matter Next Date chart def | 3 | FR-DV-04 | ✅ | 003 | D | STANDARD |
+| 034 | Matter Activity chart def | 3 | FR-DV-05 | ✅ | 003, 022, 025 | D | STANDARD |
 | 040 | Documents three-dot row menu | 4 | FR-DOC-01 | 🔲 | 012 | — (serial w/041..046) | FULL |
 | 041 | Documents list/card toggle + sortable columns + multi-select + pin | 4 | FR-DOC-04 | 🔲 | 040, 050 | — (serial) | FULL |
 | 042 | Documents Tags filter (consumes TagFilter) | 4 | FR-DOC-05 | 🔲 | 012, 041 | — (serial) | FULL |
