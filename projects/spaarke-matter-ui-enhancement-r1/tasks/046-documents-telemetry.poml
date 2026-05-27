@@ -3,7 +3,8 @@
   <metadata>
     <title>Documents PCF — App Insights telemetry events; replace console.log (FR-DOC-07)</title>
     <phase>4: Documents PCF</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>3-4</estimated-hours>
     <dependencies>002, 040, 041, 042, 043, 044, 045</dependencies>
     <blocks>none</blocks>

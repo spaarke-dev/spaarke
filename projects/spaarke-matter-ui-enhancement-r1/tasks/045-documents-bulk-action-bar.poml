@@ -3,7 +3,8 @@
   <metadata>
     <title>Documents PCF — bulk-action bar with 6 actions (FR-DOC-02)</title>
     <phase>4: Documents PCF</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>8-12</estimated-hours>
     <dependencies>041, 051</dependencies>
     <blocks>046</blocks>

@@ -45,8 +45,8 @@
 | 042 | Documents Tags filter (consumes TagFilter) | 4 | FR-DOC-05 | ✅ | 012, 041 | — (serial) | FULL |
 | 043 | Documents filter relocation (sidebar → command bar) | 4 | FR-DOC-06 | ✅ | 042 | — (serial) | FULL |
 | 044 | FilePreviewDialog restructure (960 px, 2-col body) | 4 | FR-DOC-03 | ✅ | 040 | — (serial) | FULL |
-| 045 | Bulk-action bar (6 actions) | 4 | FR-DOC-02 | 🔲 | 041, 051 | — (serial) | FULL |
-| 046 | Documents telemetry (App Insights events) | 4 | FR-DOC-07 | 🔲 | 002, 040, 041, 042, 043, 044, 045 | — (serial) | FULL |
+| 045 | Bulk-action bar (6 actions) | 4 | FR-DOC-02 | ✅ | 041, 051 | — (serial) | FULL |
+| 046 | Documents telemetry (App Insights events) | 4 | FR-DOC-07 | ✅ | 002, 040, 041, 042, 043, 044, 045 | — (serial) | FULL |
 | 047 | VisualHost docs update (FR-DOC-09 — architecture + setup guide) | 4 | FR-DOC-09 | ✅ | 020, 021, 022, 023, 030, 031, 032, 033, 034 | F | STANDARD |
 | 050 | BFF /api/ai/search projection adds modifiedAt + modifiedBy | 5 | FR-BFF-01 | ✅ | none | E | FULL |
 | 051 | BFF POST /api/documents/bulk-download endpoint | 5 | FR-BFF-02 | ✅ | none | E | FULL |
