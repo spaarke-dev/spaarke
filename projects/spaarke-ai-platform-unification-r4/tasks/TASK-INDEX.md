@@ -1,7 +1,7 @@
 # R4 Task Index
 
 > **Project**: spaarke-ai-platform-unification-r4
-> **Total tasks**: 46 (35 original work + 9 R4 add-on cleanup [072–080] + 1 wrap-up; **scope expanded 2026-05-27** after operator review of carry-overs + deploy decisions + 079 pre-flight CVE check)
+> **Total tasks**: 47 (35 original work + 10 R4 add-on cleanup [072–081] + 1 wrap-up; **scope expanded 2026-05-27** after operator review of carry-overs + deploy decisions + 079 pre-flight CVE check + final review #3 residuals)
 >
 > **⚠️ R4 wrap-up requires operator final review before executing task 090** (operator instruction 2026-05-26 + 2026-05-27 final review)
 >
@@ -72,7 +72,8 @@
 | 078 | B.3 ESLint warning sweep: 178 → 22 in @spaarke/ui-components (target ≤30 exceeded by wide margin) | 6.5 | ✅ (2.5h vs 8h budget; 156 warnings eliminated; -90 no-explicit-any, -42 unused-vars, -11 eslint-disable directives; 1051/1051 tests pass; 22 carry-overs all intentional) | (new — R4 add-on) | STANDARD | 073 ✅, 074 ✅ | — / ❌ (file overlap) |
 | 079 | Phase 7 deploy batch (BFF + 3 Code Pages; LegalWorkspace standalone SKIPPED-retired) + smoke verification | 7 | ✅ (BFF 45.22 MB hash-verify + healthz pass; SpaarkeAi 3.38 MB; CalendarSidePane 1079 KB; EventsPage 1177 KB; all dev artifacts published; NEW Deploy-CalendarSidePane.ps1 script created) | (new — was deferred from Phase 5/6) | FULL | 072–080 | — / ❌ (main-session only) |
 | 080 | CVE patches: OpenMcdf 3.1.0→3.1.4 + OpenTelemetry.Api 1.15.0→1.15.3 (Kiota HIGH deferred to dedicated future project) | 6.5 | ✅ (2 Moderate CVEs eliminated; build 0 errors; publish 44 MB unchanged; Kiota HIGH residual documented; future project: spaarke-graph-sdk-kiota-upgrade-r1) | (new — pre-deploy gate) | STANDARD | none | — / ❌ (main-session only) |
-| 090 | R4 Project Wrap-up (⚠️ PAUSE FOR OPERATOR REVIEW BEFORE EXECUTING) | 7 | 🔲 | PR-02 | FULL | all 35 + 072–080 | — / ❌ (final + operator gate) |
+| 081 | Pre-wrap-up residuals: useKeyboardShortcuts default value (real prod bug) + untrack 272 deploy artifacts (durable master-level fix) | 7 | ✅ (test suite 1051→1074 passing — 23 CommandBar tests unblocked; 272 files untracked, .gitignore now load-bearing; BFF build clean) | (new — final review residuals) | STANDARD | none | — / ❌ (main-session only) |
+| 090 | R4 Project Wrap-up (⚠️ PAUSE FOR OPERATOR REVIEW BEFORE EXECUTING) | 7 | 🔲 | PR-02 | FULL | all 35 + 072–081 | — / ❌ (final + operator gate) |
 
 ---
 
