@@ -30,8 +30,9 @@ import {
   StarRegular,
   ClipboardRegular,
 } from '@fluentui/react-icons';
-import type { IAggregatedDataPoint, DrillInteraction, ICardConfig, ColorTokenSet, ValueFormatType } from '../types';
+import type { IAggregatedDataPoint, DrillInteraction, ICardConfig, ValueFormatType } from '../types';
 import { formatValue } from '../utils/valueFormatters';
+import { getTokenSetColors as getSharedTokenSetColors, type ITokenSetColors } from '../utils/tokenSetColors';
 
 export type MatrixJustification = 'left' | 'left-center' | 'center' | 'right-center' | 'right';
 
@@ -122,59 +123,18 @@ function getIconForDataPoint(
 // ============= Color Token Resolution =============
 
 /**
- * Resolved color tokens for a single card
+ * Resolved color tokens for a single card.
+ * Aliased to the shared `ITokenSetColors` shape (utils/tokenSetColors.ts) so
+ * the matrix and other renderers share one vocabulary. v1.2.x-FR-VH-01.
  */
-interface ICardColorTokens {
-  cardBackground?: string;
-  borderAccent?: string;
-  valueText?: string;
-  iconColor?: string;
-}
+type ICardColorTokens = ITokenSetColors;
 
 /**
- * Map a ColorTokenSet name to Fluent UI v9 semantic token values.
- * All tokens auto-adapt to light/dark mode via FluentProvider.
+ * Thin alias around the shared `getTokenSetColors` helper (extracted to
+ * `utils/tokenSetColors.ts` per FR-VH-01 / task 020 so DonutChart and others
+ * consume one vocabulary instead of duplicating the switch).
  */
-function getTokenSetColors(tokenSet: ColorTokenSet): ICardColorTokens {
-  switch (tokenSet) {
-    case 'brand':
-      return {
-        cardBackground: tokens.colorBrandBackground2,
-        borderAccent: tokens.colorBrandBackground,
-        valueText: tokens.colorBrandForeground1,
-        iconColor: tokens.colorBrandForeground2,
-      };
-    case 'warning':
-      return {
-        cardBackground: tokens.colorPaletteYellowBackground1,
-        borderAccent: tokens.colorPaletteYellowBorderActive,
-        valueText: tokens.colorPaletteYellowForeground2,
-        iconColor: tokens.colorPaletteYellowForeground2,
-      };
-    case 'danger':
-      return {
-        cardBackground: tokens.colorPaletteRedBackground1,
-        borderAccent: tokens.colorPaletteRedBorderActive,
-        valueText: tokens.colorPaletteRedForeground1,
-        iconColor: tokens.colorPaletteRedForeground1,
-      };
-    case 'success':
-      return {
-        cardBackground: tokens.colorPaletteGreenBackground1,
-        borderAccent: tokens.colorPaletteGreenBorderActive,
-        valueText: tokens.colorPaletteGreenForeground1,
-        iconColor: tokens.colorPaletteGreenForeground1,
-      };
-    case 'neutral':
-    default:
-      return {
-        cardBackground: tokens.colorNeutralBackground3,
-        borderAccent: tokens.colorNeutralStroke1,
-        valueText: tokens.colorNeutralForeground3,
-        iconColor: tokens.colorNeutralForeground3,
-      };
-  }
-}
+const getTokenSetColors = getSharedTokenSetColors;
 
 /**
  * Resolve per-card color tokens based on config and data point

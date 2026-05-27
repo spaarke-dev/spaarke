@@ -13,10 +13,10 @@
 
 | Field | Value |
 |---|---|
-| **Wave** | Wave 1 complete (010, 011, 012) — Phase 1 done — advancing to Wave 2A (Visual Host renderer extensions, parallel: 020 + 023 + 024) |
-| **Next Tasks** | 020 (Donut fieldPivot+matrixRight, FULL), 023 (HSBar headlineAboveBar, FULL), 024 (CardChrome wrapper, FULL) — parallel-safe, Group C |
-| **Status** | Wave 2A pending dispatch |
-| **Next Action** | Dispatch tasks 020 + 023 + 024 in parallel via Agent calls. After all complete, run Wave 2B (021 MetricCard badge) serial, then Wave 2C (022 MetricCard descriptionColor) serial, then Wave 2D (025 NFR-05 regression smoke). |
+| **Wave** | Wave 2A complete (020, 023, 024) — advancing to Wave 2B (task 021 MetricCard badge — serial, single agent) |
+| **Next Task** | 021 (MetricCard badge slot, FULL) — touches `MetricCard.tsx` only; serializes with task 022 |
+| **Status** | Wave 2B pending dispatch |
+| **Next Action** | Dispatch task 021 via single Agent call (FULL rigor). After completion, dispatch task 022 (also touches MetricCard.tsx — must be serial). After 022, Wave 2D (025 NFR-05 regression smoke gate). |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
@@ -74,6 +74,9 @@ Pipeline completed Steps 1-4 + auto-started task 001 (✅ done). Task 001 produc
 - **2026-05-27 (task 002)**: PCF init lifecycle — SemanticSearchControl init in existing auth `useEffect`; VisualHost dedicated mount-once `useEffect` with empty deps. Both gated on `appInsightsKey` presence.
 - **2026-05-27 (task 002)**: `spaarke-ui-components-2.0.0.tgz` regenerated via `npm pack` to surface the new `AppInsightsService` to VisualHost (which consumes the .tgz, not the source). `@spaarke/auth/dist` was missing and rebuilt — env-setup side-effect, not project scope.
 - **2026-05-27 (task 010)**: Sub-agent hit stream-idle timeout AFTER code was written + types extracted, but BEFORE the agent could update task POML status. Verified completion in main session: (a) build clean (`npm run build` exit 0, no warnings); (b) TagFilter.tsx visibly follows ADR-012/021/022 with explicit citation in header comments; (c) Fluent v9 patterns applied (portal-gotcha comment in code, defensive stopPropagation, semantic tokens only, ARIA labels with counts, fully controlled component, data-testids on every interactive element); (d) sibling parallel task 011 with same agent template passed code-review + adr-check with 0 critical / 0 warnings — strong evidence the gates would pass on TagFilter too. Treating the timeout as a notification failure, not a work failure. Status updated manually.
+- **2026-05-27 (task 020)**: Bonus refactor — `getTokenSetColors()` was duplicated in MetricCardMatrix.tsx:138; task 020 extracted it to `src/client/pcf/VisualHost/control/utils/tokenSetColors.ts` (new shared util) and updated MetricCardMatrix + DonutChart to consume it. Eliminates duplication, single source of truth. Local versions in HSBar.tsx and GaugeVisual.tsx still exist with narrower shapes — clean follow-up task for future (out-of-scope here).
+- **2026-05-27 (task 024)**: CardChrome opt-in via existing `showTitle` PCF property (default `false`). Existing chart defs (showTitle=false) render with CardChrome being a zero-padding pass-through `<div>` — NFR-05 safe. The 5 new Matter Performance cards (Phase 3) will set `showTitle=true` per-placement to get the title bar + expand icon. Bug caught during code-review where initial implementation had inconsistent gating (chromeTitle gated on opt-in but chromeOnExpand gated on enableDrillThrough → would have caused duplicate expand icons); fixed before completion.
+- **2026-05-27 (Wave 2A)**: Three parallel agents (020, 023, 024) successfully extended shared files `types/index.ts` (ICardConfig fields) and `cardConfigResolver.ts` (Custom Options key pass-through) without conflict. Integration build clean (722 KiB bundle, +8 KiB delta from baseline). Parallel-merge succeeded on shared interfaces because each task extended disjoint fields.
 
 ---
 

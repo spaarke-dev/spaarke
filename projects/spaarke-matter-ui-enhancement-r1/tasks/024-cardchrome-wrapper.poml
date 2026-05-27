@@ -3,7 +3,8 @@
   <metadata>
     <title>CardChrome internal wrapper component (FR-VH-05)</title>
     <phase>2: Visual Host Renderer Extensions</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>3-4</estimated-hours>
     <dependencies>002</dependencies>
     <blocks>025</blocks>

@@ -214,6 +214,38 @@ export function resolveCardConfig(
   // --- Invert Sign (for signBased coloring) ---
   const invertSign = (json.invertSign as boolean | undefined) ?? undefined;
 
+  // --- HorizontalStackedBar headline layout (FR-VH-04) ---
+  // Generic addition. Backward compat (NFR-05): when `layoutMode` is absent (or "default"),
+  // HSBar renders identically to today.
+  const layoutModeRaw = json.layoutMode as string | undefined;
+  const layoutMode: ICardConfig['layoutMode'] | undefined =
+    layoutModeRaw === 'headlineAboveBar' || layoutModeRaw === 'default' ? layoutModeRaw : undefined;
+  const headlineFromField = (json.headlineFromField as string | undefined) ?? undefined;
+  const subLineTemplate = (json.subLineTemplate as string | undefined) ?? undefined;
+
+  // --- DonutChart options (FR-VH-01 / task 020) ---
+  // Generic addition. Backward compat (NFR-05): when all five donut keys are absent,
+  // DonutChart renders byte-identically to today.
+  const donutLayoutRaw = json.donutLayout as string | undefined;
+  const donutLayout: ICardConfig['donutLayout'] | undefined =
+    donutLayoutRaw === 'matrixRight' || donutLayoutRaw === 'standard' ? donutLayoutRaw : undefined;
+
+  const donutCenterModeRaw = json.donutCenterMode as string | undefined;
+  const donutCenterMode: ICardConfig['donutCenterMode'] | undefined =
+    donutCenterModeRaw === 'meanOfFields' || donutCenterModeRaw === 'total' ? donutCenterModeRaw : undefined;
+
+  const donutCenterLabel = (json.donutCenterLabel as string | undefined) ?? undefined;
+  const showBreakdownRows = (json.showBreakdownRows as boolean | undefined) ?? undefined;
+
+  const breakdownValueFormatRaw = json.breakdownValueFormat as string | undefined;
+  const breakdownValueFormat: ICardConfig['breakdownValueFormat'] | undefined =
+    breakdownValueFormatRaw === 'score' ||
+    breakdownValueFormatRaw === 'scoreOver100' ||
+    breakdownValueFormatRaw === 'percentage' ||
+    breakdownValueFormatRaw === 'ratio'
+      ? breakdownValueFormatRaw
+      : undefined;
+
   return {
     valueFormat,
     colorSource,
@@ -234,5 +266,13 @@ export function resolveCardConfig(
     aspectRatio,
     dataJustification,
     invertSign,
+    layoutMode,
+    headlineFromField,
+    subLineTemplate,
+    donutLayout,
+    donutCenterMode,
+    donutCenterLabel,
+    showBreakdownRows,
+    breakdownValueFormat,
   };
 }

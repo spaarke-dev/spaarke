@@ -29,11 +29,11 @@
 | 010 | Add TagFilter shared component | 1 | FR-SC-01 | ✅ | 002 | B | FULL |
 | 011 | Add DocumentRowMenu shared component | 1 | FR-SC-02 | ✅ | 002 | B | FULL |
 | 012 | Update @spaarke/ui-components barrel (TagFilter + DocumentRowMenu exports) | 1 | FR-SC-01,02 | ✅ | 010, 011 | — (serial) | STANDARD |
-| 020 | DonutChart fieldPivot + matrixRight layout + colorThresholds + meanOfFields | 2 | FR-VH-01 | 🔲 | 002 | C | FULL |
+| 020 | DonutChart fieldPivot + matrixRight layout + colorThresholds + meanOfFields | 2 | FR-VH-01 | ✅ | 002 | C | FULL |
 | 021 | MetricCard badge slot | 2 | FR-VH-02 | 🔲 | 002 | — (serial w/022) | FULL |
 | 022 | MetricCard descriptionColor prop | 2 | FR-VH-03 | 🔲 | 021 | — (serial after 021) | FULL |
-| 023 | HorizontalStackedBar headlineAboveBar layout | 2 | FR-VH-04 | 🔲 | 002 | C | FULL |
-| 024 | CardChrome internal wrapper component | 2 | FR-VH-05 | 🔲 | 002 | C | FULL |
+| 023 | HorizontalStackedBar headlineAboveBar layout | 2 | FR-VH-04 | ✅ | 002 | C | FULL |
+| 024 | CardChrome internal wrapper component | 2 | FR-VH-05 | ✅ | 002 | C | FULL |
 | 025 | Visual Host backward-compat regression smoke (NFR-05) | 2 | NFR-05 | 🔲 | 001, 020, 021, 022, 023, 024 | — (serial gate) | STANDARD |
 | 030 | Matter Health Composite chart def | 3 | FR-DV-01 | 🔲 | 020, 025 | D | STANDARD |
 | 031 | Matter Budget chart def | 3 | FR-DV-02 | 🔲 | 023, 025 | D | STANDARD |

@@ -3,7 +3,8 @@
   <metadata>
     <title>DonutChart fieldPivot consumption + matrixRight layout + colorThresholds segments (FR-VH-01)</title>
     <phase>2: Visual Host Renderer Extensions</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>5-7</estimated-hours>
     <dependencies>002</dependencies>
     <blocks>025</blocks>

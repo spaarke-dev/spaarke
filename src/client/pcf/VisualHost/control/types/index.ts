@@ -274,6 +274,72 @@ export interface ICardConfig {
   dataJustification?: 'left' | 'left-center' | 'center' | 'right-center' | 'right';
   /** Invert sign-based coloring (negative=success, positive=danger) */
   invertSign?: boolean;
+  /**
+   * HorizontalStackedBar layout mode (FR-VH-04).
+   *  - "default" (or undefined): current layout — total label (top-right), spent (bottom-left), remaining (bottom-right).
+   *  - "headlineAboveBar": large headline + small sub-line ABOVE the bar; top-right total and bottom-right remaining labels are suppressed.
+   * Backward-compat: omit or set to "default" to preserve byte-identical rendering for existing HSBar chart defs (NFR-05).
+   */
+  layoutMode?: 'default' | 'headlineAboveBar';
+  /**
+   * HSBar `headlineAboveBar` only — Dataverse field logical name whose value becomes the headline (e.g., `sprk_totalspendtodate`).
+   * Resolved against `dataPoints[].fieldValue` (or `label`); falls back to `dataPoints[0]` (current/spent) when no match.
+   * The value is formatted via the existing `valueFormat` (e.g., currency → `$50K`).
+   */
+  headlineFromField?: string;
+  /**
+   * HSBar `headlineAboveBar` only — template for the sub-line under the headline.
+   * Supports placeholders `{remaining}`, `{percent}`, `{total}` (each pre-formatted via `valueFormat`,
+   * except `{percent}` which is always rendered as integer percent).
+   * Example: "{percent}% of {total}" → "33% of $150K".
+   */
+  subLineTemplate?: string;
+
+  // ===== DonutChart-specific options (FR-VH-01 / task 020) =====
+  // These are read by DonutChart.tsx only; other renderers ignore them.
+  // Backward-compat: when all five are absent (and no fieldPivot is configured),
+  // DonutChart renders byte-identically to the pre-FR-VH-01 behavior.
+
+  /**
+   * Donut layout variant.
+   * - "standard" (default): Donut centered with optional legend — current behavior.
+   * - "matrixRight": CSS grid with donut on the LEFT and breakdown rows on the RIGHT.
+   *   Used by Matter Health Composite (FR-DV-01) and similar scorecard-style donuts.
+   */
+  donutLayout?: 'standard' | 'matrixRight';
+
+  /**
+   * What value to render in the donut center.
+   * - "total" (default): Sum of all data point values — current behavior.
+   * - "meanOfFields": Average of `fieldPivot.fields[].value`. Used with
+   *   `valueFormat: "letterGrade"` to render a composite grade (e.g., "B+").
+   */
+  donutCenterMode?: 'total' | 'meanOfFields';
+
+  /**
+   * Optional center label override.
+   * When set, replaces the auto-formatted value text in the donut center.
+   * (Equivalent to the existing `centerLabel` config key, kept for parity.)
+   */
+  donutCenterLabel?: string;
+
+  /**
+   * When true and `donutLayout === "matrixRight"`, render a breakdown row per
+   * field-pivot field on the right side of the donut. Each row shows the
+   * uppercase small-caps label and the formatted value (per
+   * `breakdownValueFormat`). Default: false.
+   */
+  showBreakdownRows?: boolean;
+
+  /**
+   * Format used for breakdown row values (right side of `matrixRight` layout).
+   * - "score": Round to integer (e.g., 85)
+   * - "scoreOver100": "85/100" style
+   * - "percentage": "85%" (value is 0-1 decimal, multiplied by 100)
+   * - "ratio": "0.85" (two decimals)
+   * Default: "score".
+   */
+  breakdownValueFormat?: 'score' | 'scoreOver100' | 'percentage' | 'ratio';
 }
 
 /**
