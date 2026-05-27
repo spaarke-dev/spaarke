@@ -3,7 +3,7 @@
   <metadata>
     <title>B.5: Migrate CalendarSidePane App.tsx from CalendarFilterOutput to CalendarFilterPaneOutput shape (B-6 follow-up)</title>
     <phase>6.5: R4 add-on cleanup</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>0.5</estimated-hours>
     <dependencies>055</dependencies>
     <blocks>none</blocks>
@@ -88,4 +88,13 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>STANDARD rigor.</protocol>
   </execution>
+
+  <notes>
+    Completed 2026-05-27. Migrated parseParams.ts and postMessage.ts from legacy
+    CalendarFilterOutput shape to CalendarFilterPaneOutput from @spaarke/events-components.
+    Removed all legacy in-file types (no parallel option retained per constraint). Added
+    dateFields: [] to getInitialFilterState range/single returns (no behavior change — see
+    memo for analysis). tsc own-src errors: 0 (was 1). npm run build: 0 errors. Memo:
+    notes/076-calendarsidepane-shape-fix.md.
+  </notes>
 </task>

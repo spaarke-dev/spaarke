@@ -63,12 +63,12 @@
 | 069 | Test infra: BFF handler test compile errors (3 files) | 6 | ✅ (7 fixed; 69 cascading errors surfaced → escalated to task 070) | (new — test infra hygiene) | STANDARD | none | J / ✅ |
 | 070 | Test infra: BFF handler 69 cascading errors (new — Phase 6 hygiene, follow-up to 069) | 6 | ✅ (17 test files / 10 bulk patterns; dotnet build 0 errors; dotnet test 5217/5607 pass; R4 tests 050/053/054 running) | (new — test infra cascade) | STANDARD | 069 ✅ | J / ✅ |
 | 071 | Test infra: 142 test-content failures in @spaarke/ui-components (new — surfaced by 068; operator-approved for Phase 6) | 6 | ✅ (142 → 4 failures; target was ≤10; 19 test files; 1 obsolete file + 4 obsolete tests deleted; 0 production code touched) | (new — test content triage + fix) | STANDARD | 068 ✅ | J / ✅ |
-| 072 | A.2 Tighten WorkspaceRendererWebApi (Path 2a, no wrapper) | 6.5 | 🔲 | (new — R4 add-on) | FULL | 052 ✅ | K / ✅ |
-| 073 | B.1 Fix 10 react-hooks/rules-of-hooks violations in DatasetGrid (real bugs) | 6.5 | 🔲 | (new — R4 add-on) | FULL | 065 ✅ | K / ✅ |
-| 074 | B.2 Fix 24 pre-existing tsc errors in @spaarke/ui-components | 6.5 | 🔲 | (new — R4 add-on) | FULL | none | K / ✅ |
-| 075 | B.4 Fix 5 pre-existing tsc errors in src/solutions/SpaarkeAi | 6.5 | 🔲 | (new — R4 add-on) | STANDARD | none | K / ✅ |
-| 076 | B.5 Migrate CalendarSidePane to CalendarFilterPaneOutput shape | 6.5 | 🔲 | (new — R4 add-on) | STANDARD | 055 ✅ | K / ✅ |
-| 077 | B.7 Fix 4 jsdom timing/isolation test failures (next chat project will need) | 6.5 | 🔲 | (new — R4 add-on) | STANDARD | 071 ✅ | K / ✅ |
+| 072 | A.2 Tighten WorkspaceRendererWebApi (Path 2a, no wrapper) | 6.5 | ✅ (interface tightened; 1 cast removed at LegalWorkspace/index.ts:74; no wrapper; structural typing avoids circular dep with @spaarke/legal-workspace) | (new — R4 add-on) | FULL | 052 ✅ | K / ✅ |
+| 073 | B.1 Fix 10 react-hooks/rules-of-hooks violations in DatasetGrid (real bugs) | 6.5 | ✅ (10 hooks hoisted; 26/26 DatasetGrid tests pass; rule promoted warn→error; latent React bug eliminated) | (new — R4 add-on) | FULL | 065 ✅ | K / ✅ |
+| 074 | B.2 Fix 24 pre-existing tsc errors in @spaarke/ui-components | 6.5 | ✅ (12 errors → 0; UI.Components typechecks clean for first time in months; 1 residual SprkChat ref drift fixed in main session) | (new — R4 add-on) | FULL | none | K / ✅ |
+| 075 | B.4 Fix 5 pre-existing tsc errors in src/solutions/SpaarkeAi | 6.5 | ✅ (5 + 1 emergent → 0; @spaarke/legal-workspace tsconfig path added; stale d.ts regenerated) | (new — R4 add-on) | STANDARD | none | K / ✅ |
+| 076 | B.5 Migrate CalendarSidePane to CalendarFilterPaneOutput shape | 6.5 | ✅ (migration applied to parseParams.ts + postMessage.ts; tsc + build clean; no behavior change) | (new — R4 add-on) | STANDARD | 055 ✅ | K / ✅ |
+| 077 | B.7 Fix 4 jsdom timing/isolation test failures (next chat project will need) | 6.5 | ✅ (4 → 0; ALL R4 tests passing 042 6/6 + 050 3/3 + 024 20/20; root cause was missing jsdom globals + act wrapper bug, not microtask timing as hypothesized) | (new — R4 add-on) | STANDARD | 071 ✅ | K / ✅ |
 | 078 | B.3 ESLint warning sweep: 161 → ≤30 in @spaarke/ui-components | 6.5 | 🔲 | (new — R4 add-on) | STANDARD | 073, 074 | — / ❌ (file overlap) |
 | 079 | Phase 7 deploy batch (BFF + 4 Code Pages) + smoke verification | 7 | 🔲 | (new — was deferred from Phase 5/6) | FULL | 072–078 | — / ❌ (main-session only) |
 | 090 | R4 Project Wrap-up (⚠️ PAUSE FOR OPERATOR REVIEW BEFORE EXECUTING) | 7 | 🔲 | PR-02 | FULL | all 35 + 072–079 | — / ❌ (final + operator gate) |

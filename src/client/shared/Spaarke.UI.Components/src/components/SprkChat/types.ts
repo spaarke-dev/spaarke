@@ -467,7 +467,7 @@ export interface ISprkChatProps {
   /** Predefined prompt suggestions shown before conversation starts */
   predefinedPrompts?: IPredefinedPrompt[];
   /** Content element ref for highlight-refine feature (detects text selection) */
-  contentRef?: React.RefObject<HTMLElement>;
+  contentRef?: React.RefObject<HTMLElement | null>;
   /** Maximum character count for input (default 2000) */
   maxCharCount?: number;
   /** Host context describing where SprkChat is embedded (entity type, entity ID, workspace) */
@@ -689,7 +689,7 @@ export interface IRefineRequest {
 /** Props for SprkChatHighlightRefine sub-component. */
 export interface ISprkChatHighlightRefineProps {
   /** Ref to the content area where text selection is detected */
-  contentRef: React.RefObject<HTMLElement>;
+  contentRef: React.RefObject<HTMLElement | null>;
   /** Callback to initiate refinement (legacy: selectedText + instruction) */
   onRefine: (selectedText: string, instruction: string) => void;
   /** Callback emitting a structured RefineRequest (preferred over onRefine) */

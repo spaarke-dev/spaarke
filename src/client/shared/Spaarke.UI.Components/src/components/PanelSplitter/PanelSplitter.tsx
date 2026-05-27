@@ -95,7 +95,7 @@ export function PanelSplitter({
   onDoubleClick,
   isDragging,
   currentRatio,
-}: PanelSplitterProps): JSX.Element {
+}: PanelSplitterProps): React.JSX.Element {
   const styles = useStyles();
 
   // Convert ratio (0-1) to integer percentage for ARIA

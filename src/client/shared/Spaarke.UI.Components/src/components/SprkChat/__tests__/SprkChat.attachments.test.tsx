@@ -13,6 +13,30 @@
  * @see ADR-028 (auth via authenticatedFetch / getAccessToken — no token snapshots)
  */
 
+// Task 077: Polyfill TextDecoder / TextEncoder in jsdom global scope BEFORE
+// any module imports. The production `useSseStream` hook constructs
+// `new TextDecoder()` to decode the SSE stream bytes (production-correct under
+// browsers, but jsdom v30 omits both `TextDecoder` and `TextEncoder` from the
+// test global — verified via `typeof TextDecoder === 'undefined'`). Without
+// this polyfill, the SSE reader path throws "TextDecoder is not defined" and
+// the `done` event never reaches the streamDone effect → clearAttachments.
+//
+// We use Node's `util` module (always available under jest-environment-jsdom
+// running on Node) rather than installing a polyfill dependency. This is the
+// canonical pattern from the jsdom maintainers' README.
+//
+// Reusable pattern for future SprkChat tests touching SSE / streaming: place
+// these two assignments at the top of the test file, before any production
+// imports. (Putting them in jest.setup.js would be cleaner, but the R4 task
+// 077 scope is test-file-only.)
+import { TextDecoder as NodeTextDecoder, TextEncoder as NodeTextEncoder } from 'util';
+if (typeof (globalThis as { TextDecoder?: unknown }).TextDecoder === 'undefined') {
+  (globalThis as { TextDecoder: unknown }).TextDecoder = NodeTextDecoder;
+}
+if (typeof (globalThis as { TextEncoder?: unknown }).TextEncoder === 'undefined') {
+  (globalThis as { TextEncoder: unknown }).TextEncoder = NodeTextEncoder;
+}
+
 import * as React from 'react';
 import { screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -80,25 +104,68 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 /**
- * Build a Response whose body is an SSE stream that immediately closes,
+ * Build a Response whose body is an SSE "stream" that immediately closes,
  * matching what useSseStream expects from POST /messages.
+ *
+ * Task 077: previously used `new TextEncoder().encode(...)` inside
+ * `new ReadableStream({ start(controller) { ... } })`, but BOTH `TextEncoder`
+ * AND `ReadableStream` are NOT defined in the jest-environment-jsdom global
+ * scope (verified via `typeof TextEncoder === 'undefined'` and
+ * `typeof ReadableStream === 'undefined'`). The constructor error was being
+ * caught by useSseStream's fetchStream() outer try/catch and rendered as a
+ * chat error banner ("ReadableStream is not defined"), so the `done` event
+ * never reached processEvent → onDone → setIsDone(true) → streamDone effect
+ * → clearAttachments.
+ *
+ * Why the boundary tests still passed pre-077: they only assert on the
+ * outbound POST body via `mockFetch.mock.calls` (recorded BEFORE the
+ * ReadableStream is consumed). They never await the streaming completion.
+ * Only the `clearAll on successful stream completion` test exercises the
+ * streamDone effect.
+ *
+ * Fix (per task 077 POML step 4 — "mock the SSE reader output directly"):
+ * Bypass jsdom's missing `ReadableStream` entirely by hand-rolling a minimal
+ * reader that satisfies the `response.body.getReader()` contract used by
+ * useSseStream (`{ read(): Promise<{ done, value }> }`). We yield the
+ * canonical `done` event on the first `read()` call and `{ done: true }`
+ * on the second. `Uint8Array` IS defined in jsdom, so we use it directly.
+ *
+ * Reusable pattern for future SprkChat SSE tests: prefer this hand-rolled
+ * reader over `new ReadableStream(...)`. jsdom v30 lacks both
+ * `ReadableStream` and `TextEncoder` in the test global. This approach is
+ * also more deterministic — the reader resolves synchronously with each
+ * `await reader.read()` tick, so the SSE → streamDone → clearAttachments
+ * cascade completes in O(microtasks) rather than depending on jsdom's
+ * scheduling of real-stream events.
  */
 function emptySseResponse(): Response {
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    start(controller) {
-      // Task 071: parseSseEvent only consumes `data:` lines that contain a
-      // JSON payload with a `type` field. The previous `event: done\ndata: {}\n\n`
-      // form was silently skipped (no `type` → null), so streamDone never flipped
-      // to true and clearAll was never invoked. Use the canonical SSE format.
-      controller.enqueue(encoder.encode('data: {"type":"done","content":null}\n\n'));
-      controller.close();
-    },
-  });
+  // Task 071: parseSseEvent only consumes `data:` lines that contain a JSON
+  // payload with a `type` field. The previous `event: done\ndata: {}\n\n`
+  // form was silently skipped (no `type` → null), so streamDone never flipped
+  // to true and clearAll was never invoked. Use the canonical SSE format.
+  const sseBytes = Uint8Array.from(
+    Buffer.from('data: {"type":"done","content":null}\n\n', 'utf-8'),
+  );
+
+  let readCount = 0;
+  const reader = {
+    read: jest.fn(() => {
+      readCount += 1;
+      if (readCount === 1) {
+        return Promise.resolve({ done: false, value: sseBytes });
+      }
+      return Promise.resolve({ done: true, value: undefined });
+    }),
+    cancel: jest.fn().mockResolvedValue(undefined),
+    releaseLock: jest.fn(),
+  };
+
   return {
     ok: true,
     status: 200,
-    body: stream,
+    body: {
+      getReader: () => reader,
+    },
     text: jest.fn().mockResolvedValue(''),
     headers: new Headers({ 'content-type': 'text/event-stream' }),
   } as unknown as Response;
@@ -306,8 +373,15 @@ describe('SprkChat — attachments payload wiring (task 026, FR-07)', () => {
       await userEvent.click(sendButton);
     });
 
-    // Task 071: SSE stream reader is microtask-async; flush microtasks so the
+    // Task 077: SSE stream reader is microtask-async; flush microtasks so the
     // `done` event lands and streamDone flips to true before assertion.
+    // The real root cause of the prior failure was the missing TextDecoder /
+    // TextEncoder polyfills + the unmockable `new ReadableStream(...)` in jsdom
+    // v30. With both addressed (polyfill at top of file + hand-rolled reader
+    // in `emptySseResponse()`), the cascade reader.read() → setIsDone(true) →
+    // streamDone effect → clearAttachments completes within a few microtask
+    // ticks. The 10 ms flush below is conservative — empirically it completes
+    // in well under that.
     await act(async () => {
       await new Promise(r => setTimeout(r, 10));
     });

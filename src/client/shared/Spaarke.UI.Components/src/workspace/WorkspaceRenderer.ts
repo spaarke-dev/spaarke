@@ -37,22 +37,45 @@
 import type * as React from "react";
 
 // ---------------------------------------------------------------------------
-// WorkspaceRendererWebApi — loose Dataverse WebApi shape
+// WorkspaceRendererWebApi — strict Dataverse WebApi shape (R4 task 072 / A.2)
 // ---------------------------------------------------------------------------
 
 /**
- * Loose Dataverse-WebApi shape consumed by workspace renderers. Mirrors what
- * `LegalWorkspaceApp` already accepts as its `webApi` prop today.
+ * Strict Dataverse-WebApi shape consumed by workspace renderers. Structurally
+ * equivalent to `Pick<IWebApi, 'createRecord' | 'retrieveRecord' |
+ * 'retrieveMultipleRecords' | 'updateRecord' | 'deleteRecord'>` where `IWebApi`
+ * is LegalWorkspace's strict interface (see
+ * `src/solutions/LegalWorkspace/src/types/xrm.ts`).
  *
- * Concrete consumers may pass a narrower platform-specific type
- * (e.g. LegalWorkspace's `IWebApi` interface, which is a structural superset
- * of this shape). This loose definition keeps the interface portable across
- * hosts that may obtain `webApi` via different routes (PCF context, frame-walk,
- * mock service factory).
+ * # Why all methods are REQUIRED (R4 task 072 / A.2, 2026-05-27)
  *
- * Only `retrieveMultipleRecords` is required — every workspace renderer is
- * expected to read data. The other methods are optional and become typed when
- * the host passes a richer concrete object.
+ * Per the operator architectural decision 2026-05-27: LegalWorkspace IS the
+ * dashboard renderer; new dashboard pieces are added INSIDE that library, not
+ * as separate renderers. The "many renderers, each with different method
+ * needs" use case that motivated the previous loose-optional interface does
+ * not exist and will not exist. Tightening the contract removes the
+ * `as unknown as WorkspaceRenderer` cast that TypeScript's contravariance
+ * (correctly) forced when assigning `LegalWorkspaceApp` (which expects strict
+ * `IWebApi`) to a renderer slot typed against an all-optional shape.
+ *
+ * # Why this type is defined inline (not imported)
+ *
+ * `IWebApi` lives in `@spaarke/legal-workspace` (a CONSUMER of this package).
+ * Importing it here would create a circular dependency. Defining the shape
+ * structurally — methods REQUIRED, identical signatures — achieves the same
+ * type-safety guarantee without the dependency cycle. TypeScript's structural
+ * typing means `LegalWorkspace`'s `IWebApi` and `WorkspaceRendererWebApi` are
+ * mutually assignable.
+ *
+ * # No optional methods
+ *
+ * Renderers that genuinely need a narrower contract should define their own
+ * dedicated renderer interface (not be coerced through this seam). The
+ * minimum-viable seam is the strict 5-method shape that today's renderer
+ * (`LegalWorkspaceApp`) already provides.
+ *
+ * @see src/solutions/LegalWorkspace/src/types/xrm.ts (the `IWebApi` reference shape)
+ * @see projects/spaarke-ai-platform-unification-r4/notes/072-workspace-renderer-fix.md
  */
 export interface WorkspaceRendererWebApi {
   /**
@@ -66,43 +89,43 @@ export interface WorkspaceRendererWebApi {
   ) => Promise<{ entities: Record<string, unknown>[] }>;
 
   /**
-   * Optional: retrieve a single record by id.
+   * Retrieve a single record by id.
    * Return shape uses `Record<string, unknown>` so both Xrm.WebApi's
    * `WebApiEntity` (a structural alias for the same shape) and ComponentFramework
    * variants are assignable.
    */
-  retrieveRecord?: (
+  retrieveRecord: (
     entityLogicalName: string,
     id: string,
     options?: string
   ) => Promise<Record<string, unknown>>;
 
   /**
-   * Optional: create a new record.
+   * Create a new record.
    * The required-id-only return shape matches `Xrm.WebApi.createRecord`. Hosts
    * that pass a richer object (e.g. `{ id, entityType }`) remain assignable
    * because TypeScript's structural typing tolerates extra fields.
    */
-  createRecord?: (
+  createRecord: (
     entityLogicalName: string,
     data: Record<string, unknown>
   ) => Promise<{ id: string }>;
 
   /**
-   * Optional: update an existing record by id.
+   * Update an existing record by id.
    * Same id-only return contract as `createRecord` for the same reason.
    */
-  updateRecord?: (
+  updateRecord: (
     entityLogicalName: string,
     id: string,
     data: Record<string, unknown>
   ) => Promise<{ id: string }>;
 
   /**
-   * Optional: delete a record by id.
+   * Delete a record by id.
    * Same id-only return contract for parity with create/update.
    */
-  deleteRecord?: (
+  deleteRecord: (
     entityLogicalName: string,
     id: string
   ) => Promise<{ id: string }>;

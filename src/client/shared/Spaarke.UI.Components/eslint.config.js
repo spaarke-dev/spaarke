@@ -23,11 +23,13 @@
  *     tsconfig.json excludes __tests__/__mocks__/__test-harness__; typed-linting would require
  *     a separate tsconfig.lint.json. Keeping syntactic + AST-only rules avoids that churn.
  *   - ADR-022 (React 19) — react-hooks v5 recognizes React 19 hooks (`use`, `useFormStatus`).
- *   - Several rules that surface real-but-pre-existing issues (react-hooks/rules-of-hooks,
- *     @typescript-eslint/prefer-as-const, prefer-const) are demoted to `warn` so the lint
- *     gate stays green. These are enumerated in
- *     `projects/spaarke-ai-platform-unification-r4/notes/b9-lint-warnings.md` for triage
- *     in B-11 or a follow-on cleanup task. They are NOT silenced via inline comments.
+ *   - Several rules that surface real-but-pre-existing issues (@typescript-eslint/prefer-as-const,
+ *     prefer-const) are demoted to `warn` so the lint gate stays green. These are enumerated in
+ *     `projects/spaarke-ai-platform-unification-r4/notes/b9-lint-warnings.md` for triage in
+ *     B-11 or a follow-on cleanup task. They are NOT silenced via inline comments.
+ *   - `react-hooks/rules-of-hooks` was demoted to `warn` in B-9 (pre-existing DatasetGrid
+ *     violations) and PROMOTED BACK to `error` in task 073 / B.1 after the violations were
+ *     fixed by hoisting hooks above conditional returns.
  */
 
 import js from "@eslint/js";
@@ -76,10 +78,11 @@ export default tseslint.config(
       import: importPlugin
     },
     rules: {
-      // React Hooks correctness. rules-of-hooks demoted to `warn` for B-9 scope (pre-existing
-      // violations in DatasetGrid; carry-over recorded in notes/b9-lint-warnings.md).
+      // React Hooks correctness. rules-of-hooks is `error` (promoted in task 073 / B.1 after
+      // the 10 pre-existing violations in DatasetGrid GridView.tsx + ListView.tsx were fixed
+      // by hoisting all hooks above the conditional returns — see notes/073-datasetgrid-hooks-fix.md).
       ...reactHooks.configs.recommended.rules,
-      "react-hooks/rules-of-hooks": "warn",
+      "react-hooks/rules-of-hooks": "error",
 
       // Relax noisy stylistic typescript-eslint rules. These typically surface as warnings
       // on the existing codebase without indicating actual bugs; enumerated for triage in

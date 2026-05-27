@@ -359,12 +359,23 @@ describe('useChatFileAttachment', () => {
         new ArrayBuffer(1024)
       );
 
-      // Should NOT propagate the telemetry exception
-      await expect(
-        act(async () => {
-          await result.current.addFiles([docx]);
-        })
-      ).resolves.not.toThrow();
+      // Task 077: Previously wrapped this in `await expect(act(...)).resolves.not.toThrow()`
+      // — that pattern consumes the awaited promise BEFORE `act` flushes async microtasks,
+      // so the hook's catch handler never runs and `onExtractionError` is called 0 times.
+      // Additionally, the un-flushed effects leak into subsequent tests and corrupt
+      // `renderHook(...).result.current` (returns null).
+      //
+      // The plain `await act(async () => { ... })` already verifies "does not throw":
+      // if the hook propagated a telemetry exception, this await would reject and Jest
+      // would fail the test. No `expect.resolves.not.toThrow()` wrapper is needed.
+      //
+      // Reusable pattern for future SprkChat tests: when asserting "async work does not
+      // throw under jsdom + React 19 + RTL v16", prefer the bare `await act(...)` form.
+      // The `expect.resolves` wrapper has well-known interaction issues with `act`'s
+      // microtask scheduling and should be avoided for `act` results.
+      await act(async () => {
+        await result.current.addFiles([docx]);
+      });
 
       expect(onExtractionError).toHaveBeenCalledTimes(1);
       expect(result.current.errors.filter((e) => e.reason === 'extraction-failed')).toHaveLength(1);

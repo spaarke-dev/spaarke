@@ -10,33 +10,14 @@
  * - ?rangeStart={YYYY-MM-DD}&rangeEnd={YYYY-MM-DD}
  * - ?data={base64EncodedJson} (Dataverse format)
  *
+ * Filter output shape: `CalendarFilterPaneOutput` from `@spaarke/events-components`
+ * (R4 task 076 / B.5 — migrated from the legacy in-file `CalendarFilterOutput`
+ * after the B-6 promotion of `CalendarFilterPane` to the shared lib in task 055).
+ *
  * @module utils/parseParams
  */
 
-/**
- * Calendar filter output format
- */
-export type CalendarFilterType = "single" | "range" | "clear";
-
-export interface CalendarFilterSingle {
-  type: "single";
-  date: string;
-}
-
-export interface CalendarFilterRange {
-  type: "range";
-  start: string;
-  end: string;
-}
-
-export interface CalendarFilterClear {
-  type: "clear";
-}
-
-export type CalendarFilterOutput =
-  | CalendarFilterSingle
-  | CalendarFilterRange
-  | CalendarFilterClear;
+import type { CalendarFilterPaneOutput } from "@spaarke/events-components";
 
 /**
  * Parameters expected by CalendarSidePane
@@ -130,15 +111,27 @@ export function parseCalendarParams(): CalendarSidePaneParams {
 /**
  * Convert params to initial filter state
  *
+ * Shape: `CalendarFilterPaneOutput` (R4 task 076 / B.5 migration). The
+ * `dateFields: string[]` property is REQUIRED by the new shape. URL params
+ * never carry a date-field selection — the user picks fields via the dropdown
+ * in the side pane and presses Apply — so initial URL-driven state uses an
+ * empty array. This matches the "no Apply yet" pre-interaction semantics of
+ * `CalendarFilterPane` (its in-component default `[ALL_DATES_VALUE]` only
+ * applies via the Apply action). The parent record-form JS treats an empty
+ * `dateFields` array on the initial `CALENDAR_READY` notification as "no
+ * field constraint applied yet" — no behavior change vs the pre-migration
+ * postMessage payload, which carried no `dateFields` field at all.
+ *
  * @param params - Parsed URL parameters
  * @returns Initial filter state or null if no filter
  */
-export function getInitialFilterState(params: CalendarSidePaneParams): CalendarFilterOutput | null {
+export function getInitialFilterState(params: CalendarSidePaneParams): CalendarFilterPaneOutput | null {
   if (params.rangeStart && params.rangeEnd) {
     return {
       type: "range",
       start: params.rangeStart,
       end: params.rangeEnd,
+      dateFields: [],
     };
   }
 
@@ -146,6 +139,7 @@ export function getInitialFilterState(params: CalendarSidePaneParams): CalendarF
     return {
       type: "single",
       date: params.selectedDate,
+      dateFields: [],
     };
   }
 
@@ -162,7 +156,7 @@ export function getInitialFilterState(params: CalendarSidePaneParams): CalendarF
  */
 export function buildCalendarUrl(
   baseUrl: string,
-  filter: CalendarFilterOutput | null,
+  filter: CalendarFilterPaneOutput | null,
   parentOrigin?: string
 ): string {
   const url = new URL(baseUrl, window.location.origin);

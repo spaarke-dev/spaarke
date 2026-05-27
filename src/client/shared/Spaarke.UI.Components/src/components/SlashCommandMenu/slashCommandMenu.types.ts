@@ -131,7 +131,7 @@ export interface SlashCommandMenuProps {
    * Ref to the anchor element (typically the chat input container).
    * The popover positions itself above this element.
    */
-  anchorRef: React.RefObject<HTMLElement>;
+  anchorRef: React.RefObject<HTMLElement | null>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

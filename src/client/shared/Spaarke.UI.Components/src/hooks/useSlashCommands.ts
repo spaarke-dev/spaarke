@@ -76,7 +76,7 @@ export interface UseSlashCommandsOptions {
    * The hook writes the selected command trigger back into this element when
    * handleCommandSelect is called.
    */
-  inputRef: React.RefObject<HTMLTextAreaElement | HTMLInputElement>;
+  inputRef: React.RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
 
   /**
    * Static system commands to always include.

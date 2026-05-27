@@ -48,30 +48,25 @@ import type { WorkspaceRenderer } from "@spaarke/ui-components";
  * default renderer in a host bootstrap. The runtime behaviour is identical
  * to `LegalWorkspaceApp`.
  *
- * # Type assertion rationale
+ * # Type assignment (R4 task 072 / A.2, 2026-05-27)
  *
- * `ILegalWorkspaceAppProps` is a STRUCTURAL SUPERSET of `WorkspaceRendererProps`:
- * the prop shapes match name-for-name, but LegalWorkspace's `IWebApi`
- * makes `retrieveRecord`/`createRecord`/`updateRecord`/`deleteRecord`
- * REQUIRED, while `WorkspaceRendererWebApi` makes them OPTIONAL. Function-
- * parameter contravariance therefore prevents a direct type assignment.
+ * `ILegalWorkspaceAppProps` and `WorkspaceRendererProps` are now structurally
+ * equivalent name-for-name AND method-for-method on `webApi`. The previous
+ * variance mismatch (LegalWorkspace required methods; `WorkspaceRendererWebApi`
+ * made them optional) was removed in task 072 by tightening
+ * `WorkspaceRendererWebApi` so all 5 Dataverse-WebApi methods are REQUIRED.
  *
- * The double-cast (`as unknown as WorkspaceRenderer`) is safe at runtime
- * because:
- *   1. `WorkspaceLayoutWidget` (the only caller today) always passes a
- *      frame-walked `Xrm.WebApi` reference, which exposes ALL methods.
- *   2. Future hosts that supply a narrower `webApi` MUST still provide
- *      `retrieveRecord` etc. if their concrete renderer is `LegalWorkspaceApp`
- *      — this is a documented host contract, not a runtime check.
+ * Operator architectural decision 2026-05-27 (Path 2a): LegalWorkspace IS the
+ * dashboard renderer; new dashboard pieces are added INSIDE that library, not
+ * as separate renderers. The "loose-interface flexibility for many renderers"
+ * use case that motivated the previous all-optional shape was fictional. The
+ * cast `as unknown as WorkspaceRenderer` was static-type debt for that
+ * fictional flexibility and has been removed.
  *
- * Tightening `WorkspaceRendererProps.webApi.retrieveRecord` to required
- * would over-fit the interface to LegalWorkspace's needs and break the
- * "minimal-viable interface" spec constraint. Tightening
- * `IWebApi.retrieveRecord` to optional would cascade through dozens of
- * LegalWorkspace call sites that rely on its non-null contract. The
- * boundary cast is the least-invasive seam.
+ * TypeScript now accepts the assignment directly via structural typing — no
+ * cast, no wrapper component, no runtime adapter.
  */
-export const LegalWorkspaceRenderer = _LegalWorkspaceApp as unknown as WorkspaceRenderer;
+export const LegalWorkspaceRenderer: WorkspaceRenderer = _LegalWorkspaceApp;
 
 /**
  * Round 4 Fix 4.1 (2026-05-21): `setRuntimeConfig` exposed so embedding shells

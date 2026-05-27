@@ -312,7 +312,7 @@ export function ThreePaneLayout({
   centerCollapsedIcon,
   rightCollapsedIcon,
   className,
-}: ThreePaneLayoutProps): JSX.Element {
+}: ThreePaneLayoutProps): React.JSX.Element {
   const styles = useStyles();
 
   const {

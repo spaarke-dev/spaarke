@@ -40,6 +40,8 @@ import {
 import type {
   SliderOnChangeData,
   ComboboxProps,
+  OptionOnSelectData,
+  SelectionEvents,
 } from "@fluentui/react-components";
 import {
   SaveRegular,
@@ -504,10 +506,10 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     );
 
     // Debounced contact search (uses onSearchContacts callback prop)
-    const searchTimerRef = React.useRef<ReturnType<typeof setTimeout>>();
+    const searchTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     const handleContactInput: ComboboxProps["onInput"] = React.useCallback(
-      (ev: React.ChangeEvent<HTMLInputElement>) => {
-        const q = ev.target.value;
+      (ev: React.FormEvent<HTMLInputElement>) => {
+        const q = ev.currentTarget.value;
         setContactQuery(q);
         clearTimeout(searchTimerRef.current);
         if (q.length < 2) {
@@ -525,7 +527,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     );
 
     const handleContactSelect: ComboboxProps["onOptionSelect"] = React.useCallback(
-      (_ev, data) => {
+      (_ev: SelectionEvents, data: OptionOnSelectData) => {
         if (data.optionValue && data.optionText) {
           setAssignedToId(data.optionValue);
           setAssignedToName(data.optionText);
