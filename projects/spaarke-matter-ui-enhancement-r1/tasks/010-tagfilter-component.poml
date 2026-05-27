@@ -3,7 +3,8 @@
   <metadata>
     <title>Add TagFilter shared component (FR-SC-01)</title>
     <phase>1: Shared Components</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>3-4</estimated-hours>
     <dependencies>002</dependencies>
     <blocks>012, 041</blocks>
