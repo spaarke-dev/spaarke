@@ -54,7 +54,9 @@ public class VisualizationServiceTests
     {
         return new VisualizationService(
             _deploymentServiceMock.Object,
-            _dataverseServiceMock.Object,
+            _dataverseServiceMock.Object, // IDocumentDataverseService (IDataverseService satisfies it)
+            Mock.Of<ITextExtractor>(),
+            Mock.Of<IOpenAiClient>(),
             _dataverseOptions,
             _loggerMock.Object);
     }

@@ -82,6 +82,7 @@ public class ArchivalFlowTests
             senderValidator,
             dvService,
             dvService,
+            dvService, // IDocumentDataverseService (IDataverseService satisfies it)
             emlGenerationService ?? null!,
             speFileStore ?? null!,
             null!, // CommunicationAccountService — not tested here

@@ -553,6 +553,7 @@ public class SessionRestoreServiceTests
             persistenceMock.Object,
             httpClientFactoryMock.Object,
             configuration,
+            Mock.Of<Azure.Core.TokenCredential>(),
             loggerMock.Object);
 
         return (sut, persistenceMock, httpHandlerMock);

@@ -71,7 +71,16 @@ describe('renderMarkdown — XSS prevention (R2-066 security audit)', () => {
     const malicious = '[link](javascript:void(0) "title" onmouseover="alert(1)")';
     const html = renderMarkdown(malicious);
 
-    expect(html).not.toContain('onmouseover');
+    // Task 071: Parse the rendered HTML and confirm no element actually carries
+    // an `onmouseover` attribute. The malformed markdown leaves "onmouseover="
+    // as escaped TEXT inside a <p>, not as an attribute — that's safe but the
+    // raw-substring assertion was too strict. Assert via DOM parsing.
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    const allElements = container.querySelectorAll('*');
+    allElements.forEach((el) => {
+      expect(el.getAttribute('onmouseover')).toBeNull();
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────────
@@ -151,7 +160,10 @@ describe('renderMarkdown — XSS prevention (R2-066 security audit)', () => {
     const markdown = '```js\nconst x = "<script>alert(1)</script>";\n```';
     const html = renderMarkdown(markdown);
 
-    expect(html).toContain('<code>');
+    // Task 071: marked v17+ adds a language CSS class to code blocks
+    // (`<code class="language-js">`). Match the tag prefix rather than the
+    // exact `<code>` form.
+    expect(html).toMatch(/<code( |>)/);
     // Script tags inside code should be escaped, not executable
     expect(html).not.toMatch(/<script>/);
   });

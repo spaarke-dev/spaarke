@@ -76,6 +76,7 @@ public class DataverseRecordCreationTests
             senderValidator,
             _dataverseServiceMock.Object,
             _dataverseServiceMock.Object,
+            _dataverseServiceMock.Object, // IDocumentDataverseService (IDataverseService satisfies it)
             emlGenerationService,
             speFileStore,
             null!, // CommunicationAccountService — not tested here

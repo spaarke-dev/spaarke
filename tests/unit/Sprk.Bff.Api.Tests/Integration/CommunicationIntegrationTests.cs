@@ -154,6 +154,7 @@ public class CommunicationIntegrationTests
             senderValidator,
             dataverseMock.Object,
             dataverseMock.Object,
+            dataverseMock.Object, // IDocumentDataverseService (IDataverseService satisfies it)
             null!, // EmlGenerationService - not used when ArchiveToSpe=false
             null!, // SpeFileStore - not used when ArchiveToSpe=false
             null!, // CommunicationAccountService — not tested here

@@ -22,7 +22,7 @@ public class EmailWebhookEndpointTests
         _options = Options.Create(new EmailProcessingOptions
         {
             EnableWebhook = true,
-            WebhookSecret = "test-secret-12345"
+            WebhookSigningKey = "test-secret-12345" // replaces deprecated WebhookSecret (task 044)
         });
     }
 
@@ -189,26 +189,26 @@ public class EmailWebhookEndpointTests
     }
 
     [Fact]
-    public void EmailProcessingOptions_HasWebhookSecretProperty()
+    public void EmailProcessingOptions_HasWebhookSigningKeyProperty()
     {
-        // Arrange
+        // Arrange — task 044 replaced WebhookSecret with WebhookSigningKey
         var options = new EmailProcessingOptions
         {
-            WebhookSecret = "my-secret-key"
+            WebhookSigningKey = "my-signing-key"
         };
 
         // Assert
-        options.WebhookSecret.Should().Be("my-secret-key");
+        options.WebhookSigningKey.Should().Be("my-signing-key");
     }
 
     [Fact]
-    public void EmailProcessingOptions_WebhookSecretDefaultsToNull()
+    public void EmailProcessingOptions_WebhookSigningKeyDefaultsToNull()
     {
-        // Arrange
+        // Arrange — task 044 replaced WebhookSecret with WebhookSigningKey
         var options = new EmailProcessingOptions();
 
         // Assert
-        options.WebhookSecret.Should().BeNull();
+        options.WebhookSigningKey.Should().BeNull();
     }
 
     [Fact]

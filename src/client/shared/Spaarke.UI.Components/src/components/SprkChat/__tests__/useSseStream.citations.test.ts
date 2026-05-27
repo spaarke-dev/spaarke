@@ -89,7 +89,11 @@ function createSseResponse(events: Array<Record<string, unknown>>, status = 200)
   } as unknown as Response;
 }
 
-const TEST_TOKEN = `header.${btoa(JSON.stringify({ tid: 'tenant-1' }))}.signature`;
+// D-AUTH-7 / Auth v2: startStream takes an AccessTokenGetter (`() => Promise<string>`),
+// not a raw token. Task 071: wrap the test token in a getter so tests match the
+// post-Auth-v2 hook signature.
+const _TEST_TOKEN_VALUE = `header.${btoa(JSON.stringify({ tid: 'tenant-1' }))}.signature`;
+const TEST_TOKEN = (): Promise<string> => Promise.resolve(_TEST_TOKEN_VALUE);
 
 beforeEach(() => {
   jest.clearAllMocks();

@@ -1201,10 +1201,13 @@ const EventsPageContent: React.FC = () => {
   // Send event dates to Calendar side pane when they change
   React.useEffect(() => {
     if (eventDates && eventDates.length > 0) {
-      // Transform eventDates to the format expected by CalendarSidePane
-      const dateInfo = eventDates.map((date) => ({
+      // eventDates is IEventDateInfo[] ({ date: string; count: number; overdue? })
+      // from EventsPageContext. The CalendarSidePane wire format is the same
+      // shape (string date + count). B-11 (task 067): tightened transform —
+      // forward existing date/count instead of double-wrapping.
+      const dateInfo = eventDates.map(({ date, count }) => ({
         date,
-        count: 1, // Each date has at least one event
+        count,
       }));
       sendEventDatesToCalendar(dateInfo);
     }
@@ -1228,9 +1231,10 @@ const EventsPageContent: React.FC = () => {
         case CALENDAR_MESSAGE_TYPES.CALENDAR_READY: {
           console.log("[EventsPage] Calendar side pane ready, sending event dates");
           if (eventDates && eventDates.length > 0) {
-            const dateInfo = eventDates.map((date) => ({
+            // B-11: forward { date, count } from IEventDateInfo rather than wrapping date again.
+            const dateInfo = eventDates.map(({ date, count }) => ({
               date,
-              count: 1,
+              count,
             }));
             sendEventDatesToCalendar(dateInfo);
           }

@@ -87,7 +87,11 @@ function emptySseResponse(): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
-      controller.enqueue(encoder.encode('event: done\ndata: {}\n\n'));
+      // Task 071: parseSseEvent only consumes `data:` lines that contain a
+      // JSON payload with a `type` field. The previous `event: done\ndata: {}\n\n`
+      // form was silently skipped (no `type` → null), so streamDone never flipped
+      // to true and clearAll was never invoked. Use the canonical SSE format.
+      controller.enqueue(encoder.encode('data: {"type":"done","content":null}\n\n'));
       controller.close();
     },
   });
@@ -173,9 +177,11 @@ describe('SprkChat — attachments payload wiring (task 026, FR-07)', () => {
       );
     });
 
-    const textarea = screen
-      .getByTestId('chat-input-textarea')
-      .querySelector('textarea') as HTMLTextAreaElement;
+    // Task 071: Fluent v9 Textarea forwards data-testid to either the wrapper
+    // div OR (in some configurations) the textarea itself. Fall back to the
+    // matched element if `.querySelector('textarea')` returns null.
+    const textareaContainer = screen.getByTestId('chat-input-textarea') as HTMLElement;
+    const textarea = (textareaContainer.querySelector('textarea') ?? textareaContainer) as HTMLTextAreaElement;
     const sendButton = screen.getByTestId('chat-send-button');
 
     await act(async () => {
@@ -224,9 +230,11 @@ describe('SprkChat — attachments payload wiring (task 026, FR-07)', () => {
       );
     });
 
-    const textarea = screen
-      .getByTestId('chat-input-textarea')
-      .querySelector('textarea') as HTMLTextAreaElement;
+    // Task 071: Fluent v9 Textarea forwards data-testid to either the wrapper
+    // div OR (in some configurations) the textarea itself. Fall back to the
+    // matched element if `.querySelector('textarea')` returns null.
+    const textareaContainer = screen.getByTestId('chat-input-textarea') as HTMLElement;
+    const textarea = (textareaContainer.querySelector('textarea') ?? textareaContainer) as HTMLTextAreaElement;
     const sendButton = screen.getByTestId('chat-send-button');
 
     await act(async () => {
@@ -284,9 +292,11 @@ describe('SprkChat — attachments payload wiring (task 026, FR-07)', () => {
       );
     });
 
-    const textarea = screen
-      .getByTestId('chat-input-textarea')
-      .querySelector('textarea') as HTMLTextAreaElement;
+    // Task 071: Fluent v9 Textarea forwards data-testid to either the wrapper
+    // div OR (in some configurations) the textarea itself. Fall back to the
+    // matched element if `.querySelector('textarea')` returns null.
+    const textareaContainer = screen.getByTestId('chat-input-textarea') as HTMLElement;
+    const textarea = (textareaContainer.querySelector('textarea') ?? textareaContainer) as HTMLTextAreaElement;
     const sendButton = screen.getByTestId('chat-send-button');
 
     await act(async () => {
@@ -296,10 +306,19 @@ describe('SprkChat — attachments payload wiring (task 026, FR-07)', () => {
       await userEvent.click(sendButton);
     });
 
-    // The mocked SSE stream emits a single `event: done` and closes, which
-    // flips streamDone to true → the streamDone effect calls clearAll.
-    await waitFor(() => {
-      expect(mockClearAll).toHaveBeenCalled();
+    // Task 071: SSE stream reader is microtask-async; flush microtasks so the
+    // `done` event lands and streamDone flips to true before assertion.
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 10));
     });
+
+    // The mocked SSE stream emits a single `data: {"type":"done"...}` and closes,
+    // which flips streamDone to true → the streamDone effect calls clearAll.
+    await waitFor(
+      () => {
+        expect(mockClearAll).toHaveBeenCalled();
+      },
+      { timeout: 3000 },
+    );
   });
 });

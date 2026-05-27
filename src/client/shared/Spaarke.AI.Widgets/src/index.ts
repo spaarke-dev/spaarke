@@ -294,7 +294,13 @@ export type {
 
 registerContextWidget('playbook-gallery', {
   factory: () =>
-    import('./widgets/context/PlaybookGalleryWidget').then((m) => ({ default: m.default })),
+    // Type-erasure cast: registry stores ContextWidgetComponent<unknown>; the
+    // widget's default export is typed ContextWidgetComponent<PlaybookGalleryData>.
+    // The generic variance is unavoidable at the registry boundary — at render
+    // time the widget receives its typed data via the registry contract.
+    import('./widgets/context/PlaybookGalleryWidget').then((m) => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
 });
 
 // ---------------------------------------------------------------------------
@@ -354,7 +360,13 @@ export type {
 
 registerContextWidget('findings', {
   factory: () =>
-    import('./widgets/context/FindingsWidget').then((m) => ({ default: m.default })),
+    // Type-erasure cast: registry stores ContextWidgetComponent<unknown>; the
+    // widget's default export is typed ContextWidgetComponent<FindingsData>.
+    // Generic variance at the registry boundary — see PlaybookGalleryWidget
+    // registration above for the same pattern.
+    import('./widgets/context/FindingsWidget').then((m) => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
 });
 
 // ---------------------------------------------------------------------------

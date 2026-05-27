@@ -82,6 +82,15 @@ function makeFile(name: string, type: string, body: string | ArrayBuffer = '', s
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
+  // Task 071: `jest.clearAllMocks()` only clears CALL HISTORY, not mock
+  // implementations. Earlier tests' `mockExtractRawText.mockRejectedValue(...)`
+  // / `mockGetDocumentPromise.mockRejectedValue(...)` calls persisted across
+  // tests and corrupted later `addFiles` calls (rendering the hook null).
+  // Reset both implementations AND history explicitly.
+  mockGetTextContent.mockReset();
+  mockGetPage.mockReset();
+  mockGetDocumentPromise.mockReset();
+  mockExtractRawText.mockReset();
   jest.clearAllMocks();
 });
 

@@ -540,9 +540,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
       const counts = new Map<string, number>();
       const eventDateObjects: Date[] = [];
       for (const r of records) {
-        const dateStr =
-          r.sprk_duedate ||
-          (r as unknown as { createdon?: string }).createdon;
+        const dateStr = r.sprk_duedate || r.createdon;
         if (!dateStr) continue;
         const d = new Date(dateStr);
         if (Number.isNaN(d.getTime())) continue;
@@ -1077,7 +1075,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
           </Tooltip>
           <div ref={stripRef} className={styles.calendarStrip}>
             <CalendarSection
-              eventDates={eventDates as IEventDateInfo[]}
+              eventDates={eventDates}
               onFilterChange={(filter) => setCalendarFilter(filter)}
               viewDate={viewDate}
               monthsToShow={monthsToShow}

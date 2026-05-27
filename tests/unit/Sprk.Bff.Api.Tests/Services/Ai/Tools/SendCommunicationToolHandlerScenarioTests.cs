@@ -53,6 +53,7 @@ public class SendCommunicationToolHandlerScenarioTests
             senderValidator,
             Mock.Of<IDataverseService>(),
             Mock.Of<IDataverseService>(),
+            Mock.Of<IDataverseService>(), // IDocumentDataverseService (IDataverseService satisfies it)
             null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here
             null!, // CommunicationAccountService — not tested here

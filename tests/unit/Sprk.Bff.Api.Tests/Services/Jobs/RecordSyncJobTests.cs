@@ -2,10 +2,12 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Azure;
+using Azure.Core;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Models;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -50,7 +52,13 @@ public class RecordSyncJobTests
         var loggerMock  = new Mock<ILogger<RecordSyncJob>>();
         var opts        = Options.Create(options ?? DefaultOptions());
 
-        var job = new RecordSyncJob(cacheMock.Object, factoryMock.Object, opts, loggerMock.Object);
+        var job = new RecordSyncJob(
+            cacheMock.Object,
+            factoryMock.Object,
+            new ConfigurationBuilder().Build(),
+            opts,
+            Mock.Of<TokenCredential>(),
+            loggerMock.Object);
 
         return (job, cacheMock, factoryMock);
     }
@@ -529,7 +537,7 @@ internal sealed class TestableRecordSyncJob : RecordSyncJob
         IHttpClientFactory factory,
         IOptions<RecordSyncOptions> options,
         ILogger<RecordSyncJob> logger)
-        : base(cache, factory, options, logger)
+        : base(cache, factory, new ConfigurationBuilder().Build(), options, Mock.Of<TokenCredential>(), logger)
     {
     }
 

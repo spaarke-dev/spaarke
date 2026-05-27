@@ -55,14 +55,14 @@
 | 061 | B-2 @spaarke/ai-widgets tsc rootDir fix (Option C: dist/.d.ts paths) | 6 | ✅ (code; ~70 TS6059 errors → 0; CI gate added; 13 cascading errors deferred to 067) | B-2 / NFR-05 | STANDARD | none | H / ✅ |
 | 062 | B-3 Telemetry constant rename | 6 | ✅ (code shipped; AI workspace cutover memo at `notes/b3-app-insights-query-cutover.md`) | B-3 / FR-06 | STANDARD | none | H / ✅ |
 | 063 | B-7 Extract useEventsBulkActions hook | 6 | ✅ (code; ~270 LOC dedup; both consumers adapted; deploy deferred) | B-7 / FR-10 | FULL | none | H / ✅ |
-| 064 | B-8 CalendarDrawer.eventDates API | 6 | 🔲 | B-8 / FR-11 | FULL | 063 ✅ | — / ❌ (same lib as 063) |
-| 065 | B-9 ESLint v9 migration | 6 | 🔲 | B-9 / NFR-06 | STANDARD | none | I / ✅ |
+| 064 | B-8 CalendarDrawer.eventDates API | 6 | ✅ (cast removed; IEventDateInfo extended with overdue?; Fluent v9 CounterBadge + ErrorCircle12Filled rendering; 0 build errors) | B-8 / FR-11 | FULL | 063 ✅ | — / ❌ (same lib as 063) |
+| 065 | B-9 ESLint flat config (reframed: create, not migrate) | 6 | ✅ (eslint.config.js created; 0 errors / 161 warnings cataloged; 10 rules-of-hooks violations flagged for future fix) | B-9 / NFR-06 | STANDARD | none | I / ✅ |
 | 066 | B-10 Standalone EventsPage redeploy | 6 | 🔲 (defer to Phase 7 deploy batch) | B-10 / NFR-07 | MINIMAL | none | I / ✅ |
-| 067 | B-11 Type-drift casts cleanup (now also absorbs 13 cascading errors from 061) | 6 | 🔲 | B-11 / FR-12 | FULL | 063 ✅, 064 | — / ❌ (deps) |
+| 067 | B-11 Type-drift casts cleanup (now also absorbs 13 cascading errors from 061) | 6 | ✅ (2.5h vs 4h; 13/13 cascading 061 errors resolved; 4 casts removed; 4 SDK-boundary annotations; 5 carry-over categories documented) | B-11 / FR-12 | FULL | 063 ✅, 064 ✅ | — / ❌ (deps) |
 | 068 | Test infra: Jest+React 19 env fix | 6 | ✅ (RTL+jsdom bumped; 392 → 936 tests now executing) | (new — test infra hygiene) | STANDARD | none | J / ✅ |
 | 069 | Test infra: BFF handler test compile errors (3 files) | 6 | ✅ (7 fixed; 69 cascading errors surfaced → escalated to task 070) | (new — test infra hygiene) | STANDARD | none | J / ✅ |
-| 070 | Test infra: BFF handler 69 cascading errors (new — Phase 6 hygiene, follow-up to 069) | 6 | 🔲 | (new — test infra cascade) | STANDARD | 069 ✅ | J / ✅ |
-| 071 | Test infra: 142 test-content failures in @spaarke/ui-components (new — surfaced by 068; operator-approved for Phase 6) | 6 | 🔲 | (new — test content triage + fix) | STANDARD | 068 ✅ | J / ✅ |
+| 070 | Test infra: BFF handler 69 cascading errors (new — Phase 6 hygiene, follow-up to 069) | 6 | ✅ (17 test files / 10 bulk patterns; dotnet build 0 errors; dotnet test 5217/5607 pass; R4 tests 050/053/054 running) | (new — test infra cascade) | STANDARD | 069 ✅ | J / ✅ |
+| 071 | Test infra: 142 test-content failures in @spaarke/ui-components (new — surfaced by 068; operator-approved for Phase 6) | 6 | ✅ (142 → 4 failures; target was ≤10; 19 test files; 1 obsolete file + 4 obsolete tests deleted; 0 production code touched) | (new — test content triage + fix) | STANDARD | 068 ✅ | J / ✅ |
 | 090 | R4 Project Wrap-up (⚠️ PAUSE FOR OPERATOR REVIEW BEFORE EXECUTING) | 7 | 🔲 | PR-02 | FULL | all 35 | — / ❌ (final + operator gate) |
 
 ---

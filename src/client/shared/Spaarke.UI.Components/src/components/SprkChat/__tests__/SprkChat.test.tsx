@@ -139,15 +139,29 @@ describe('SprkChat', () => {
     });
 
     it('should show error banner on session creation failure', async () => {
-      mockFetch.mockResolvedValueOnce(createFetchResponse('Unauthorized', 401));
+      // Task 071: SprkChat now uses useChatPlaybooks + useChatContextMapping +
+      // useDynamicSlashCommands which all fetch on mount BEFORE createSession.
+      // The single `mockResolvedValueOnce` was being consumed by useChatPlaybooks,
+      // letting createSession hit the default 200 success. Reset and make all
+      // mounted fetches fail so we definitely exercise the session-error path.
+      mockFetch.mockReset();
+      mockFetch.mockResolvedValue(createFetchResponse('Unauthorized', 401));
 
       await act(async () => {
         renderWithProviders(<SprkChat {...defaultProps} />);
       });
 
-      await waitFor(() => {
-        expect(screen.getByTestId('chat-error-banner')).toBeInTheDocument();
+      // React 19 effects + RTL v16 batching: flush microtasks before assertion.
+      await act(async () => {
+        await new Promise(r => setTimeout(r, 0));
       });
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('chat-error-banner')).toBeInTheDocument();
+        },
+        { timeout: 3000 },
+      );
     });
   });
 
@@ -201,8 +215,11 @@ describe('SprkChat', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText('Summarize')).toBeInTheDocument();
-        expect(screen.getByText('Review')).toBeInTheDocument();
+        // Task 071: "Summarize" / "Review" labels now appear in multiple places
+        // (predefined prompt + default slash command). Assert that at least one
+        // instance exists.
+        expect(screen.getAllByText('Summarize').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('Review').length).toBeGreaterThan(0);
       });
     });
 
@@ -212,7 +229,8 @@ describe('SprkChat', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText('Summarize')).toBeInTheDocument();
+        // Task 071: see note on previous test — use getAllByText.
+        expect(screen.getAllByText('Summarize').length).toBeGreaterThan(0);
       });
 
       expect(screen.queryByText('No messages yet')).not.toBeInTheDocument();
@@ -328,17 +346,29 @@ describe('SprkChat', () => {
 
   describe('Error Handling', () => {
     it('should display error banner when session error occurs', async () => {
-      mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+      // Task 071: see "should show error banner" test — useChatPlaybooks &c
+      // consume queued mocks before createSession runs. Make every mounted
+      // fetch reject so session creation definitely hits the error path.
+      mockFetch.mockReset();
+      mockFetch.mockRejectedValue(new Error('Network failure'));
 
       await act(async () => {
         renderWithProviders(<SprkChat {...defaultProps} />);
       });
 
-      await waitFor(() => {
-        const errorBanner = screen.getByTestId('chat-error-banner');
-        expect(errorBanner).toBeInTheDocument();
-        expect(errorBanner.textContent).toContain('Network failure');
+      // React 19 effect-flush requirement.
+      await act(async () => {
+        await new Promise(r => setTimeout(r, 0));
       });
+
+      await waitFor(
+        () => {
+          const errorBanner = screen.getByTestId('chat-error-banner');
+          expect(errorBanner).toBeInTheDocument();
+          expect(errorBanner.textContent).toContain('Network failure');
+        },
+        { timeout: 3000 },
+      );
     });
   });
 });

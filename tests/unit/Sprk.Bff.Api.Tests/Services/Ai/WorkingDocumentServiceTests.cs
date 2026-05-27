@@ -31,7 +31,11 @@ public class WorkingDocumentServiceTests
         {
             MaxWorkingVersions = maxWorkingVersions
         });
-        return new WorkingDocumentService(_dataverseServiceMock.Object, options, _loggerMock.Object);
+        return new WorkingDocumentService(
+            _dataverseServiceMock.Object,
+            Mock.Of<IServiceProvider>(),
+            options,
+            _loggerMock.Object);
     }
 
     #region UpdateWorkingDocumentAsync Tests

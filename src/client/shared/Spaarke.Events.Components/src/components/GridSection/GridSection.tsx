@@ -62,6 +62,7 @@ function getXrm(): any | undefined {
   }
   // Try parent.Xrm for Custom Pages running in iframe
   try {
+    // SDK boundary: Xrm is injected by Dynamics 365 at runtime onto window/window.parent.
     if (typeof window !== "undefined" && window.parent && (window.parent as any).Xrm?.WebApi) {
       return (window.parent as any).Xrm;
     }
@@ -104,6 +105,13 @@ export interface IEventRecord {
   sprk_regardingrecordid?: string;
   /** Parent record entity logical name (text field) */
   sprk_regardingrecordtypelogicalname?: string;
+  /**
+   * Dataverse audit field — record-creation timestamp (ISO string).
+   * Used by the calendar event-day fallback (task 121) when sprk_duedate
+   * is null. Optional because not every code path retrieves it; populated
+   * automatically by Dataverse for every record.
+   */
+  createdon?: string;
 }
 
 /**
@@ -560,12 +568,16 @@ function getColumnDisplayValue(
 
   // Special handling for known fields with formatted values
   if (column.formattedValueField) {
+    // SDK boundary: Dataverse OData annotation keys (@OData.Community.Display.V1.FormattedValue)
+    // are runtime-discovered strings — cannot be expressed in IEventRecord's static field set.
     const formattedValue = (record as unknown as Record<string, unknown>)[column.formattedValueField];
     if (formattedValue) return String(formattedValue);
   }
 
   // Get the raw value using field accessor
   const accessor = getFieldAccessor(column);
+  // SDK boundary: column accessor is derived at runtime from LayoutColumn XML metadata;
+  // not expressible as a typed key on IEventRecord.
   const rawValue = (record as unknown as Record<string, unknown>)[accessor];
 
   // Handle null/undefined
@@ -592,6 +604,7 @@ function getColumnDisplayValue(
 
   // For lookups, try to get the formatted value
   if (column.isLookup) {
+    // SDK boundary: Dataverse @OData annotation key composed from runtime accessor.
     const lookupFormatted = (record as unknown as Record<string, unknown>)[
       `${accessor}@OData.Community.Display.V1.FormattedValue`
     ];
@@ -1750,8 +1763,7 @@ function getMockEvents(
       // matches the OData production path. Records without a due date
       // are matched via createdon — same semantic as the calendar
       // highlight's task-121 fallback.
-      const createdon = (event as unknown as { createdon?: string }).createdon;
-      const effectiveDate = event.sprk_duedate || createdon;
+      const effectiveDate = event.sprk_duedate || event.createdon;
       if (!effectiveDate) return false;
       const eventDate = effectiveDate.split("T")[0];
 

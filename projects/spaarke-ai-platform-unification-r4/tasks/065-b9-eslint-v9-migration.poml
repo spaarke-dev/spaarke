@@ -3,7 +3,7 @@
   <metadata>
     <title>B-9: Migrate Spaarke.UI.Components ESLint v8 → v9 (flat config)</title>
     <phase>Phase 6 — Build hygiene cluster</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>none</blocks>
@@ -117,6 +117,15 @@
     use `npm install --legacy-peer-deps --no-audit --no-fund` (not `npm ci`). If the package
     relies on a workspace-level ESLint setup (root-level `eslint.config.js`), check for it
     in step 1 — the migration scope may be smaller than expected.
+
+    --- Completion (2026-05-26) ---
+    Reframed: task was config CREATION (not migration). ESLint v9.36.0 already pinned;
+    no .eslintrc* or eslint.config.* existed; lint script used legacy --ext.
+    Outcome: `npm run lint` exits 0 — 0 errors, 161 warnings. Build (tsc) has 12 pre-existing
+    TS errors unrelated to ESLint changes (verified via git stash). All carry-over warnings
+    + 10 high-priority react-hooks/rules-of-hooks bugs in DatasetGrid GridView/ListView
+    enumerated in projects/spaarke-ai-platform-unification-r4/notes/b9-lint-warnings.md.
+    TASK-INDEX.md status flip deferred to main session (sub-agent guardrail).
   </notes>
 
   <execution>
