@@ -756,6 +756,7 @@ public class DataverseWebApiService : IDataverseService
             CreatedOn = GetDateTimeValue(data, "createdon") ?? DateTime.UtcNow,
             ModifiedOn = GetDateTimeValue(data, "modifiedon") ?? DateTime.UtcNow,
             CreatedBy = GetStringValue(data, "_createdby_value@OData.Community.Display.V1.FormattedValue"),
+            ModifiedBy = GetStringValue(data, "_modifiedby_value@OData.Community.Display.V1.FormattedValue"),
 
             // Email metadata fields
             EmailSubject = GetStringValue(data, "sprk_emailsubject"),

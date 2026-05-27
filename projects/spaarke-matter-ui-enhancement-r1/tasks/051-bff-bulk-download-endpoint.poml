@@ -3,7 +3,8 @@
   <metadata>
     <title>POST /api/documents/bulk-download endpoint (FR-BFF-02)</title>
     <phase>5: BFF</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>5-8</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>045</blocks>
@@ -127,6 +128,9 @@
     Authorization scope: spec.md §Unresolved Questions notes "Bulk-download endpoint authorization scope — same policy as preview-url assumed; confirm with architecture if a separate policy is needed for bulk operations". Default to the preview-url policy; flag in PR description if architecture wants a separate bulk-scoped policy.
 
     Filename format: `documents-{matterIdOrBulk}-{timestamp}.zip`. If all documents share one matter (resolve from doc lookup), use that matter id; otherwise use literal "bulk". Timestamp ISO 8601 compact form e.g. `20260527T143022Z`.
+
+    Placement Justification (binding per `.claude/constraints/bff-extensions.md` §10 + §A.1, owner-clarified at design layer per `spec.md §Owner Clarifications`):
+    Bulk download belongs in the BFF, not the PCF. Reasons: (1) Client-side zip would buffer all file bytes in browser memory (500 docs × multi-MB = hundreds of MB → kill the tab); server-side streaming via `SpeFileStore.DownloadFileAsync` → `ZipArchive` over `HttpResponse.Body` keeps memory bounded regardless of selection size. (2) The endpoint requires the same auth scheme + Dataverse lookup + SPE app-only access as the existing `GET /api/documents/{documentId}/download` in `FileAccessEndpoints` — extending that BFF surface reuses identical infrastructure (no parallel auth in PCF). (3) Decision criteria from `bff-extensions.md` table: Q1 latency budget (YES — user-facing download), Q2 BFF-managed session/auth state (YES — JWT bearer + tenant claim validation), Q4 event-driven (NO — synchronous user wait), Q5 external-consumer facade (NO — internal PCF consumer). Three of four criteria favor BFF; the fourth doesn't apply. No new NuGet packages (uses BCL `System.IO.Compression.ZipArchive`); no new DI registrations (reuses `IDocumentDataverseService` + `SpeFileStore`); follows `MapDocumentsBulkEndpoints` feature-module extension pattern (ADR-010); endpoint-filter authorization mirrors `SemanticSearchAuthorizationFilter` shape (ADR-008).
   </notes>
 
   <execution>

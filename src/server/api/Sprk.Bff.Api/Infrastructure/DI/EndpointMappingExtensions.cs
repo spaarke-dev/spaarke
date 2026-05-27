@@ -104,6 +104,7 @@ public static class EndpointMappingExtensions
         app.MapDataverseDocumentsEndpoints();
         app.MapFileAccessEndpoints();
         app.MapDocumentsEndpoints();
+        app.MapDocumentsBulkEndpoints();
         app.MapUploadEndpoints();
         app.MapOBOEndpoints();
         app.MapDocumentOperationsEndpoints();

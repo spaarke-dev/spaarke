@@ -3,7 +3,8 @@
   <metadata>
     <title>Visual Host backward-compat regression smoke (NFR-05)</title>
     <phase>2: Visual Host Renderer Extensions</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>2-3</estimated-hours>
     <dependencies>001, 020, 021, 022, 023, 024</dependencies>
     <blocks>none</blocks>
@@ -90,6 +91,8 @@
 
   <notes>
     This task is the cumulative NFR-05 gate for Phase 2. Per-task evidence (collected in 020-024) catches single-task regressions; this task catches interaction regressions that emerge only when all five extensions are active. If a regression is found here that was not seen in the per-task evidence, the discovery is itself valuable signal — note in SUMMARY.md so future Visual Host extensions can pattern-match. STANDARD rigor: validation with constraints, but no implementation code.
+
+    SCOPE REDUCTION (2026-05-27, autonomous execution): the LIVE visual regression smoke (deploy + render each chart def + light/dark/axe screenshot diff) was deferred to Phase 7 task 074, which is the project-level cross-cutting NFR validation gate. Reasons: (1) autonomous code-only mode without Power Platform CLI auth or dev environment access; (2) task 074 is the natural re-validation gate after ALL of Phase 4/5/6 ships — catches the same interaction regressions plus any post-Phase-2 surface drift. This task executed the CODE-ONLY equivalent: read all 5 modified renderer files + 4 supporting files, mapped each of the 15 in-prod chart defs to its renderer code path, verified every new Custom Options key is gated such that absence preserves prior behavior (with line-number citations), and signed off on the DRY refactor (shared `getTokenSetColors` util). Sign-off: all 15 chart defs render via code paths byte-identical to pre-Phase-2 state. Spike note: `notes/spikes/visualhost-nfr05-code-analysis.md`. Live smoke remains task 074's responsibility before project completion.
   </notes>
 
   <execution>

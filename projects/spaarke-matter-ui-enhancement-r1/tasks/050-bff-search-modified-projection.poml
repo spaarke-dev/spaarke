@@ -3,7 +3,8 @@
   <metadata>
     <title>Add modifiedAt + modifiedBy to /api/ai/search projection (FR-BFF-01)</title>
     <phase>5: BFF</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>2-3</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>041</blocks>

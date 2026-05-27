@@ -13,10 +13,10 @@
 
 | Field | Value |
 |---|---|
-| **Wave** | Wave 2BC complete (021 + 022 + ChartRenderer wire-up) — advancing to Wave 2D (025 NFR-05 regression analysis) |
-| **Next Task** | 025 (NFR-05 backward-compat regression gate) — code-only analysis in autonomous mode; live visual smoke deferred to Phase 7 task 074 |
-| **Status** | Wave 2D pending dispatch |
-| **Next Action** | Dispatch task 025 single Agent call. After completion: Phase 2 complete → Wave 3 (5 chart defs parallel — tasks 030, 031, 032, 033, 034). |
+| **Wave** | Phase 2 complete (Wave 2D 025 sign-off "Proceed to Phase 3") + Phase 5 BFF complete (Wave 4 050+051 in parallel with 2D) — advancing to Wave 3 (5 chart defs parallel) |
+| **Next Tasks** | 030 Matter Health (FR-DV-01), 031 Matter Budget (FR-DV-02), 032 Matter Tasks (FR-DV-03), 033 Matter Next Date (FR-DV-04), 034 Matter Activity (FR-DV-05) — all parallel-safe, Group D |
+| **Status** | Wave 3 pending dispatch |
+| **Next Action** | Dispatch 5 chart-def agents in parallel via Agent calls. Each agent uses mcp__dataverse__create_record (or PowerShell + Web API) to author one sprk_chartdefinition record. After completion → Phase 6 (form XML, task 060) → Phase 4 PCF tasks (sequential, mostly serial). |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
