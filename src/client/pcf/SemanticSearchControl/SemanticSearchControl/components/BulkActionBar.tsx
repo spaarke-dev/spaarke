@@ -1,9 +1,11 @@
 /**
  * BulkActionBar (FR-DOC-02)
  *
- * Sticky bulk-action bar rendered above the ListView column-header row (or
- * card grid) when one or more rows are selected. Encapsulates the six bulk
- * actions called out in spec FR-DOC-02:
+ * Bulk-action affordances for the Documents PCF. v1.1.45 refactored the bar
+ * to an INLINE icon-only mode so the same buttons can live in the list's
+ * top-right toolbar adjacent to the existing Reload + Add affordances
+ * (UAT request — bulk actions on the same row as the toolbar, no separate
+ * sticky bar). Six bulk actions per spec FR-DOC-02:
  *
  *   1. Email selected      — open multi-doc email composer (DocumentEmailWizard)
  *   2. Download selected   — POST /api/documents/bulk-download → zip stream
@@ -16,7 +18,11 @@
  *
  * Behavior:
  *   - Hidden when `selectedIds.size === 0`
- *   - "Clear" button resets the selection (parent-owned state)
+ *   - "Clear" affordance (Dismiss icon) resets the selection
+ *   - Each button is icon-only (Fluent v9 `*20Regular` icons matching the
+ *     existing Reload `ArrowClockwise20Regular` / Add `Add20Regular`
+ *     glyph size) wrapped in a `Tooltip relationship="label"` so screen
+ *     readers + hover both get a usable name.
  *   - Each action surfaces successes/failures via the parent-provided toaster
  *     (parent passes `dispatchToast`-friendly callbacks).
  *
@@ -34,7 +40,6 @@
 
 import * as React from 'react';
 import {
-  Badge,
   Button,
   Dialog,
   DialogActions,
@@ -49,6 +54,7 @@ import {
   MenuTrigger,
   Spinner,
   Text,
+  Tooltip,
   makeStyles,
   mergeClasses,
   shorthands,
@@ -58,12 +64,11 @@ import {
   ArrowDownload20Regular,
   Delete20Regular,
   Dismiss20Regular,
+  DocumentBulletList20Regular,
   Link20Regular,
   Mail20Regular,
   Pin20Regular,
   Share20Regular,
-  TagMultiple20Regular,
-  ChevronDownRegular,
 } from '@fluentui/react-icons';
 import type { TagFilterOption } from '@spaarke/ui-components/dist/types/TagFilter';
 
@@ -119,48 +124,37 @@ export interface IBulkActionBarProps {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  // Sticky bar — pinned to the top of the results region so it overlays the
-  // ListView column-header row when the user scrolls. The parent renders the
-  // bar OUTSIDE the scroll container so `position: sticky` resolves against
-  // the bar's own ancestor.
+  // Inline icon-only bar — composed into the list view's top-right toolbar
+  // (v1.1.45). Bare flex row, no background, no border, no sticky positioning;
+  // the parent toolbar owns the surrounding chrome. The row groups the six
+  // bulk-action icons + the selection-count text + the Clear (Dismiss) button.
   root: {
-    display: 'flex',
+    display: 'inline-flex',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: tokens.spacingHorizontalS,
-    rowGap: tokens.spacingVerticalXS,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    backgroundColor: tokens.colorNeutralBackground3,
-    ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
-    position: 'sticky',
-    top: 0,
-    zIndex: 2,
-    minHeight: '40px',
+    gap: tokens.spacingHorizontalXS,
+    minHeight: '32px',
     boxSizing: 'border-box',
   },
-  // Count badge wrapper — keeps the badge and "selected" text aligned.
-  countWrap: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-  },
+  // Selection-count label (e.g. "3 selected"). Sits before the action icons.
   countText: {
     color: tokens.colorNeutralForeground2,
+    paddingRight: tokens.spacingHorizontalXS,
   },
-  actionGroup: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-    flexWrap: 'wrap',
+  // Tight icon-button override — match the existing Reload/Add toolbar size.
+  iconButton: {
+    minWidth: 'auto',
+    ...shorthands.padding('0px'),
   },
-  spacer: {
-    flex: 1,
-    minWidth: 0,
+  // Vertical hairline separator between the bulk-action group and the toolbar's
+  // other buttons (Reload / Add). Token-driven so dark mode is automatic.
+  divider: {
+    width: '1px',
+    alignSelf: 'stretch',
+    backgroundColor: tokens.colorNeutralStroke2,
+    marginLeft: tokens.spacingHorizontalXXS,
+    marginRight: tokens.spacingHorizontalXXS,
   },
-  // Confirmation dialog body
+  // Confirmation dialog body — unchanged from v1.1.44.
   dialogBody: {
     color: tokens.colorNeutralForeground1,
   },
@@ -228,131 +222,136 @@ export const BulkActionBar: React.FC<IBulkActionBarProps> = ({
     }
   };
 
+  const pluralS = selectionCount !== 1 ? 's' : '';
+  const countLabel = `${selectionCount} selected`;
+
   return (
     <>
       <div
         className={mergeClasses(styles.root, className)}
-        role="region"
-        aria-label={`Bulk actions for ${selectionCount} selected document${selectionCount !== 1 ? 's' : ''}`}
+        role="group"
+        aria-label={`Bulk actions for ${selectionCount} selected document${pluralS}`}
       >
-        <span className={styles.countWrap}>
-          <Badge appearance="filled" color="brand" shape="rounded" size="medium">
-            {selectionCount}
-          </Badge>
-          <Text size={200} className={styles.countText}>
-            selected
-          </Text>
-        </span>
+        <Text size={200} className={styles.countText} aria-live="polite">
+          {countLabel}
+        </Text>
 
-        <Button
-          appearance="subtle"
-          size="small"
-          icon={<Dismiss20Regular aria-hidden="true" />}
-          onClick={onClear}
-          aria-label="Clear selection"
-        >
-          Clear
-        </Button>
-
-        <div className={styles.spacer} aria-hidden="true" />
-
-        <div className={styles.actionGroup}>
-          {/* 1. Email selected */}
+        {/* 1. Email selected — icon-only with Tooltip for hover label */}
+        <Tooltip content={`Email ${countLabel}`} relationship="label">
           <Button
+            className={styles.iconButton}
             appearance="subtle"
             size="small"
-            icon={<Mail20Regular aria-hidden="true" />}
+            icon={<Mail20Regular />}
             onClick={onEmail}
-            aria-label={`Email ${selectionCount} selected document${selectionCount !== 1 ? 's' : ''}`}
-          >
-            Email
-          </Button>
+            aria-label={`Email ${selectionCount} selected document${pluralS}`}
+          />
+        </Tooltip>
 
-          {/* 2. Download selected */}
+        {/* 2. Download selected */}
+        <Tooltip content={`Download ${countLabel}`} relationship="label">
           <Button
+            className={styles.iconButton}
             appearance="subtle"
             size="small"
             icon={
               downloading ? (
                 <Spinner size="tiny" aria-label="Downloading" />
               ) : (
-                <ArrowDownload20Regular aria-hidden="true" />
+                <ArrowDownload20Regular />
               )
             }
             disabled={downloading}
             onClick={() => {
               void handleDownloadClick();
             }}
-            aria-label={`Download ${selectionCount} selected document${selectionCount !== 1 ? 's' : ''}`}
-          >
-            Download
-          </Button>
+            aria-label={`Download ${selectionCount} selected document${pluralS}`}
+          />
+        </Tooltip>
 
-          {/* 3. Pin selected */}
+        {/* 3. Pin selected */}
+        <Tooltip content={`Pin ${countLabel}`} relationship="label">
           <Button
+            className={styles.iconButton}
             appearance="subtle"
             size="small"
-            icon={<Pin20Regular aria-hidden="true" />}
+            icon={<Pin20Regular />}
             onClick={onPin}
-            aria-label={`Pin ${selectionCount} selected document${selectionCount !== 1 ? 's' : ''}`}
-          >
-            Pin
-          </Button>
+            aria-label={`Pin ${selectionCount} selected document${pluralS}`}
+          />
+        </Tooltip>
 
-          {/* 4. Delete selected — confirmation Dialog gates the destructive op */}
+        {/* 4. Delete selected — confirmation Dialog gates the destructive op */}
+        <Tooltip content={`Delete ${countLabel}`} relationship="label">
           <Button
+            className={styles.iconButton}
             appearance="subtle"
             size="small"
-            icon={<Delete20Regular aria-hidden="true" />}
+            icon={<Delete20Regular />}
             onClick={() => setConfirmDeleteOpen(true)}
-            aria-label={`Delete ${selectionCount} selected document${selectionCount !== 1 ? 's' : ''}`}
-          >
-            Delete
-          </Button>
+            aria-label={`Delete ${selectionCount} selected document${pluralS}`}
+          />
+        </Tooltip>
 
-          {/* 5. Document Type → selected — sub-menu of sprk_documenttype options */}
-          <Menu>
-            <MenuTrigger disableButtonEnhancement>
+        {/* 5. Document Type → selected — sub-menu of sprk_documenttype options */}
+        <Menu>
+          <MenuTrigger disableButtonEnhancement>
+            <Tooltip
+              content={`Set document type for ${countLabel}`}
+              relationship="label"
+            >
               <Button
+                className={styles.iconButton}
                 appearance="subtle"
                 size="small"
-                icon={<TagMultiple20Regular aria-hidden="true" />}
-                iconPosition="before"
-                aria-label="Set document type for selected"
-              >
-                Document Type
-                <ChevronDownRegular aria-hidden="true" />
-              </Button>
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList className={styles.menuList}>
-                {docTypeOptions.length === 0 ? (
-                  <MenuItem disabled>(no options)</MenuItem>
-                ) : (
-                  docTypeOptions.map(opt => (
-                    <MenuItem
-                      key={opt.value}
-                      onClick={() => onDocTypeChange(opt.value)}
-                    >
-                      {opt.label}
-                    </MenuItem>
-                  ))
-                )}
-              </MenuList>
-            </MenuPopover>
-          </Menu>
+                icon={<DocumentBulletList20Regular />}
+                aria-label={`Set document type for ${selectionCount} selected document${pluralS}`}
+              />
+            </Tooltip>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList className={styles.menuList}>
+              {docTypeOptions.length === 0 ? (
+                <MenuItem disabled>(no options)</MenuItem>
+              ) : (
+                docTypeOptions.map(opt => (
+                  <MenuItem
+                    key={opt.value}
+                    onClick={() => onDocTypeChange(opt.value)}
+                  >
+                    {opt.label}
+                  </MenuItem>
+                ))
+              )}
+            </MenuList>
+          </MenuPopover>
+        </Menu>
 
-          {/* 6. Share link */}
+        {/* 6. Share link */}
+        <Tooltip content={`Share link for ${countLabel}`} relationship="label">
           <Button
+            className={styles.iconButton}
             appearance="subtle"
             size="small"
-            icon={<Share20Regular aria-hidden="true" />}
+            icon={<Share20Regular />}
             onClick={onShareLink}
-            aria-label={`Share Dataverse record links for ${selectionCount} selected document${selectionCount !== 1 ? 's' : ''}`}
-          >
-            Share link
-          </Button>
-        </div>
+            aria-label={`Share Dataverse record links for ${selectionCount} selected document${pluralS}`}
+          />
+        </Tooltip>
+
+        <span className={styles.divider} aria-hidden="true" />
+
+        {/* Clear selection — small X icon at the far end of the bulk group. */}
+        <Tooltip content="Clear selection" relationship="label">
+          <Button
+            className={styles.iconButton}
+            appearance="subtle"
+            size="small"
+            icon={<Dismiss20Regular />}
+            onClick={onClear}
+            aria-label="Clear selection"
+          />
+        </Tooltip>
       </div>
 
       {/* Delete confirmation Dialog — Fluent v9 Dialog is portal-rendered;

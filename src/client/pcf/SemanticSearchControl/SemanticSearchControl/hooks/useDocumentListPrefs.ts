@@ -28,8 +28,14 @@ const VIEW_KEY_PREFIX = 'spaarke.docs.view';
 /** localStorage key prefix for pin state */
 const PIN_KEY_PREFIX = 'spaarke.docs.pinned';
 
+/** localStorage key prefix for column widths (v1.1.45). */
+const COLWIDTHS_KEY_PREFIX = 'spaarke.docs.colwidths';
+
 /** Default view per spec FR-DOC-04 */
 const DEFAULT_VIEW: DocumentListView = 'list';
+
+/** Map of column id → pixel width. Keys must align with ListView's DataGrid column ids. */
+export type ColumnWidths = Readonly<Record<string, number>>;
 
 function buildKey(prefix: string, userId: string | null, matterId: string | null): string {
   // Both scope dimensions required per spec FR-DOC-04 — fall back to a stable
@@ -72,6 +78,16 @@ export interface UseDocumentListPrefsResult {
   togglePin: (documentId: string) => void;
   /** Whether a document is currently pinned. */
   isPinned: (documentId: string) => boolean;
+
+  /**
+   * Column-width overrides for the list view (v1.1.45) — keyed by column id.
+   * Empty object when no overrides have been persisted yet.
+   */
+  columnWidths: ColumnWidths;
+  /** Persist a single column-width override; writes-through to localStorage. */
+  setColumnWidth: (columnId: string, width: number) => void;
+  /** Clear every persisted column-width override (reset to DataGrid defaults). */
+  resetColumnWidths: () => void;
 }
 
 /**
@@ -89,6 +105,7 @@ export function useDocumentListPrefs(
 ): UseDocumentListPrefsResult {
   const viewKey = buildKey(VIEW_KEY_PREFIX, userId, matterId);
   const pinKey = buildKey(PIN_KEY_PREFIX, userId, matterId);
+  const colWidthsKey = buildKey(COLWIDTHS_KEY_PREFIX, userId, matterId);
 
   // ── View state ──────────────────────────────────────────────────────────
   const [view, setViewState] = useState<DocumentListView>(() => {
@@ -169,11 +186,83 @@ export function useDocumentListPrefs(
 
   const isPinned = useCallback((documentId: string) => pinnedIds.has(documentId), [pinnedIds]);
 
+  // ── Column widths (v1.1.45) ────────────────────────────────────────────
+  // Map of `columnId` → pixel width. Reads/writes localStorage with the same
+  // graceful-degradation pattern as view + pins. Defaults to an empty object so
+  // unknown columns fall through to the DataGrid's intrinsic sizing.
+  const [columnWidths, setColumnWidthsState] = useState<ColumnWidths>(() => {
+    const raw = safeReadLocalStorage(colWidthsKey);
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const next: Record<string, number> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          if (typeof v === 'number' && Number.isFinite(v) && v > 0) next[k] = v;
+        }
+        return next;
+      }
+    } catch {
+      // Corrupt JSON — reset
+    }
+    return {};
+  });
+
+  // Re-hydrate column widths when the scoping key changes (matter switch).
+  useEffect(() => {
+    const raw = safeReadLocalStorage(colWidthsKey);
+    if (!raw) {
+      setColumnWidthsState({});
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const next: Record<string, number> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          if (typeof v === 'number' && Number.isFinite(v) && v > 0) next[k] = v;
+        }
+        setColumnWidthsState(next);
+        return;
+      }
+    } catch {
+      // Corrupt JSON — fall through to reset
+    }
+    setColumnWidthsState({});
+  }, [colWidthsKey]);
+
+  const persistColumnWidths = useCallback(
+    (next: ColumnWidths) => {
+      safeWriteLocalStorage(colWidthsKey, JSON.stringify(next));
+    },
+    [colWidthsKey]
+  );
+
+  const setColumnWidth = useCallback(
+    (columnId: string, width: number) => {
+      if (!columnId || !Number.isFinite(width) || width <= 0) return;
+      setColumnWidthsState(prev => {
+        const next = { ...prev, [columnId]: Math.round(width) };
+        persistColumnWidths(next);
+        return next;
+      });
+    },
+    [persistColumnWidths]
+  );
+
+  const resetColumnWidths = useCallback(() => {
+    setColumnWidthsState({});
+    persistColumnWidths({});
+  }, [persistColumnWidths]);
+
   return {
     view,
     setView,
     pinnedIds,
     togglePin,
     isPinned,
+    columnWidths,
+    setColumnWidth,
+    resetColumnWidths,
   };
 }

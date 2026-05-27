@@ -1,18 +1,30 @@
 /**
  * ListView component (FR-DOC-04)
  *
- * Tabular list view for the Documents PCF. Renders a Fluent v9 `Table` with
- * the spec column order:
+ * Tabular list view for the Documents PCF. Renders a Fluent v9 `DataGrid`
+ * with the spec column order:
  *
  *   Selection checkbox | Pin | Name | Modified | Modified by | Match | Menu
+ *
+ * v1.1.45 (UAT round 2):
+ *   • Switched from `Table` → `DataGrid` so columns become user-resizable.
+ *     `columnSizingOptions` provides intrinsic widths; the parent owns the
+ *     ColumnWidths map (persisted via `useDocumentListPrefs`) so user sizes
+ *     survive reload + cross-tab opens.
+ *   • Row height raised to ~56 px via vertical token padding on cells
+ *     (`tokens.spacingVerticalM`) to improve readability and match the UAT
+ *     mockup. Visible separators between rows keep scan-ability.
+ *   • Name column truncates with ellipsis + `title={doc.name}` for hover
+ *     full-name read-out (no more bleed into the Modified column).
  *
  * Sortable columns: Name, Modified, Match. Pin is non-sortable and the icon
  * is rendered ONLY on pinned rows. Pinned rows always sort to the top
  * regardless of the active column sort.
  *
  * Selection state is owned by the parent (`SemanticSearchControl`) so it
- * persists across list/card view toggles. Pin state is also owned by the
- * parent (via `useDocumentListPrefs`) so it survives reload.
+ * persists across list/card view toggles. Pin state + column-width prefs
+ * are also owned by the parent (via `useDocumentListPrefs`) so both survive
+ * reload.
  *
  * Per FR-DOC-01 (task 040), the 3-dot menu reuses the shared
  * `DocumentRowMenu` consumed via the same deep-path import the Card view's
@@ -33,22 +45,25 @@ import {
   Avatar,
   Button,
   Checkbox,
+  DataGrid,
+  DataGridBody,
+  DataGridCell,
+  DataGridHeader,
+  DataGridHeaderCell,
+  DataGridRow,
   Link,
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableHeaderCell,
-  TableRow,
+  TableCellLayout,
+  type TableColumnDefinition,
+  type TableColumnSizingOptions,
   Text,
   Tooltip,
+  createTableColumn,
   makeStyles,
+  mergeClasses,
   shorthands,
   tokens,
 } from '@fluentui/react-components';
 import {
-  ArrowSortDown20Regular,
-  ArrowSortUp20Regular,
   DocumentRegular,
   DocumentPdfRegular,
   DocumentTextRegular,
@@ -69,6 +84,7 @@ import {
 } from '@spaarke/ui-components/dist/components/DocumentRowMenu';
 import { SearchResult, SummaryData } from '../types';
 import { FilePreviewDialog } from './FilePreviewDialog';
+import type { ColumnWidths } from '../hooks/useDocumentListPrefs';
 
 // ---------------------------------------------------------------------------
 // Sort contract
@@ -79,6 +95,36 @@ export type ListSortColumn = 'name' | 'modifiedAt' | 'combinedScore';
 
 /** Sort direction toggle. */
 export type ListSortDirection = 'asc' | 'desc';
+
+// Internal DataGrid column ids — string literals so localStorage keys are stable.
+const COL_SELECT = 'select';
+const COL_PIN = 'pin';
+const COL_NAME = 'name';
+const COL_MODIFIED = 'modifiedAt';
+const COL_MODIFIED_BY = 'modifiedBy';
+const COL_MATCH = 'combinedScore';
+const COL_MENU = 'menu';
+
+// Default intrinsic widths in pixels (used when no user override is persisted).
+const DEFAULT_WIDTHS: Record<string, number> = {
+  [COL_SELECT]: 40,
+  [COL_PIN]: 36,
+  [COL_NAME]: 360,
+  [COL_MODIFIED]: 130,
+  [COL_MODIFIED_BY]: 180,
+  [COL_MATCH]: 80,
+  [COL_MENU]: 44,
+};
+
+const MIN_WIDTHS: Record<string, number> = {
+  [COL_SELECT]: 40,
+  [COL_PIN]: 36,
+  [COL_NAME]: 140,
+  [COL_MODIFIED]: 90,
+  [COL_MODIFIED_BY]: 100,
+  [COL_MATCH]: 60,
+  [COL_MENU]: 44,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -196,76 +242,77 @@ const useStyles = makeStyles({
   container: {
     flex: 1,
     overflowY: 'auto',
-    overflowX: 'hidden',
+    overflowX: 'auto',
     backgroundColor: tokens.colorNeutralBackground1,
+  },
+  // v1.1.45 — row height bump.
+  // DataGrid cells get extra vertical padding (M token) on both top + bottom,
+  // which lands rows at ~56 px depending on the cell content. Token-only so
+  // dark mode + Spaarke brand themes still resolve correctly.
+  gridCell: {
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalM,
+    borderBottomWidth: tokens.strokeWidthThin,
+    borderBottomStyle: 'solid',
+    borderBottomColor: tokens.colorNeutralStroke2,
+  },
+  // Header gets only a single divider underline (no row separators above).
+  headerCell: {
+    fontWeight: tokens.fontWeightSemibold,
   },
   // Selection column — narrow, just enough for the checkbox.
   selectCell: {
-    width: '40px',
-    minWidth: '40px',
+    paddingLeft: tokens.spacingHorizontalXS,
+    paddingRight: tokens.spacingHorizontalXS,
   },
-  // Pin column — narrow. Icon only renders on pinned rows.
+  // Pin column cell — keep the row-level click target tight.
   pinCell: {
-    width: '32px',
-    minWidth: '32px',
+    paddingLeft: 0,
+    paddingRight: 0,
     cursor: 'pointer',
     textAlign: 'center',
   },
-  // Match column — keeps the score badge compact.
-  matchCell: {
-    width: '80px',
-    minWidth: '80px',
-  },
-  modifiedCell: {
-    width: '120px',
-    minWidth: '120px',
-  },
-  modifiedByCell: {
-    minWidth: '140px',
-  },
-  // Menu column — single icon button.
-  menuCell: {
-    width: '40px',
-    minWidth: '40px',
-  },
-  headerSortable: {
-    cursor: 'pointer',
-    userSelect: 'none',
-  },
-  headerContent: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-  },
-  iconCell: {
+  // v1.1.45 — name cell truncates with ellipsis and bleeds NO further than its
+  // column track (the user-reported regression). `minWidth: 0` is required on
+  // CSS Grid/Flex descendants for `text-overflow: ellipsis` to engage.
+  nameWrap: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     minWidth: 0,
+    width: '100%',
+    ...shorthands.overflow('hidden'),
   },
   nameLink: {
     cursor: 'pointer',
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorBrandForegroundLink,
+    minWidth: 0,
+    flex: 1,
+    // Force the link to participate in ellipsis truncation.
+    ...shorthands.overflow('hidden'),
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    display: 'block',
   },
   avatarRow: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     minWidth: 0,
+    ...shorthands.overflow('hidden'),
   },
   modifiedByName: {
-    overflow: 'hidden',
+    ...shorthands.overflow('hidden'),
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+    minWidth: 0,
   },
   scoreBadge: {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
     ...shorthands.borderRadius(tokens.borderRadiusSmall),
-    paddingTop: '1px',
-    paddingBottom: '1px',
     ...shorthands.padding('1px', tokens.spacingHorizontalXS),
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightSemibold,
@@ -283,6 +330,14 @@ const useStyles = makeStyles({
   },
   pinnedIcon: {
     color: tokens.colorBrandForeground1,
+  },
+  // Sort indicator on header — small caret rendered after the column label.
+  sortHeader: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    cursor: 'pointer',
+    userSelect: 'none',
   },
 });
 
@@ -307,6 +362,15 @@ export interface IListViewProps {
   sortColumn: ListSortColumn;
   sortDirection: ListSortDirection;
   onSortChange: (next: { column: ListSortColumn; direction: ListSortDirection }) => void;
+
+  /**
+   * Persisted column-width overrides (v1.1.45) — keyed by the column IDs
+   * exposed at the top of this file (COL_NAME, COL_MODIFIED, etc.).
+   * Empty object → use intrinsic defaults.
+   */
+  columnWidths: ColumnWidths;
+  /** Persist a single column-width override. */
+  onColumnWidthChange: (columnId: string, width: number) => void;
 
   /** Row action handlers (mirrors ResultCard.tsx — same DocumentRowMenu dispatch). */
   onOpenFile: (result: SearchResult, mode: 'web' | 'desktop') => void;
@@ -333,6 +397,8 @@ export const ListView: React.FC<IListViewProps> = ({
   sortColumn,
   sortDirection,
   onSortChange,
+  columnWidths,
+  onColumnWidthChange,
   onOpenFile,
   onOpenRecord,
   onFindSimilar,
@@ -346,7 +412,7 @@ export const ListView: React.FC<IListViewProps> = ({
   const styles = useStyles();
 
   // Preview dialog state (mirrors ResultCard's per-row dialog so we don't
-  // touch FilePreviewDialog.tsx — task 044 owns that file).
+  // touch FilePreviewDialog.tsx for the no-preview case).
   const [previewTarget, setPreviewTarget] = React.useState<SearchResult | null>(null);
 
   // Sort the results in render (cheap — caller already filtered).
@@ -402,14 +468,10 @@ export const ListView: React.FC<IListViewProps> = ({
     }
   }, [allSelected, selectedIds, sortedResults, onSelectionChange]);
 
-  // ── Sort indicator for column headers ─────────────────────────────────
-  const renderSortIndicator = (col: ListSortColumn): React.ReactNode => {
-    if (col !== sortColumn) return null;
-    return sortDirection === 'asc' ? (
-      <ArrowSortUp20Regular aria-hidden="true" />
-    ) : (
-      <ArrowSortDown20Regular aria-hidden="true" />
-    );
+  // ── Sort indicator label (▲ / ▼) appended to sortable headers ─────────
+  const renderSortCaret = (col: ListSortColumn): string => {
+    if (col !== sortColumn) return '';
+    return sortDirection === 'asc' ? ' ▲' : ' ▼';
   };
 
   // ── 3-dot menu dispatch — mirrors ResultCard's handler ────────────────
@@ -466,6 +528,232 @@ export const ListView: React.FC<IListViewProps> = ({
     [onOpenFile, onFindSimilar, onCopyLink, onEmailDocument, onOpenRecord, onToggleWorkspace, onTogglePin]
   );
 
+  // ── DataGrid column definitions ───────────────────────────────────────
+  // Build once per render (cheap — closures capture state by reference).
+  const columns = React.useMemo<TableColumnDefinition<SearchResult>[]>(() => {
+    return [
+      // Selection column.
+      createTableColumn<SearchResult>({
+        columnId: COL_SELECT,
+        renderHeaderCell: () => (
+          <Checkbox
+            aria-label={allSelected ? 'Deselect all documents' : 'Select all documents'}
+            checked={allSelected ? true : someSelected ? 'mixed' : false}
+            onChange={handleToggleAll}
+          />
+        ),
+        renderCell: (result: SearchResult) => {
+          const isSelected = selectedIds.has(result.documentId);
+          return (
+            <Checkbox
+              aria-label={`Select ${result.name}`}
+              checked={isSelected}
+              onChange={() => handleToggleRow(result.documentId)}
+              onClick={ev => ev.stopPropagation()}
+            />
+          );
+        },
+      }),
+
+      // Pin column.
+      createTableColumn<SearchResult>({
+        columnId: COL_PIN,
+        renderHeaderCell: () => <span aria-label="Pinned" />,
+        renderCell: (result: SearchResult) => {
+          const isPinned = pinnedIds.has(result.documentId);
+          if (!isPinned) return <span aria-hidden="true" />;
+          return (
+            <Tooltip content="Unpin" relationship="label">
+              <Button
+                appearance="subtle"
+                size="small"
+                className={mergeClasses(styles.iconButton, styles.pinnedIcon)}
+                icon={<Pin20Filled aria-label="Pinned" />}
+                onClick={ev => {
+                  ev.stopPropagation();
+                  onTogglePin(result.documentId);
+                }}
+                aria-label={`Unpin ${result.name}`}
+              />
+            </Tooltip>
+          );
+        },
+      }),
+
+      // Name column — sortable, ellipsis-truncates.
+      createTableColumn<SearchResult>({
+        columnId: COL_NAME,
+        renderHeaderCell: () => (
+          <span
+            className={styles.sortHeader}
+            onClick={() => handleHeaderClick('name')}
+            role="button"
+            aria-label={`Sort by name — currently ${
+              sortColumn === 'name' ? sortDirection : 'unsorted'
+            }`}
+          >
+            Name{renderSortCaret('name')}
+          </span>
+        ),
+        renderCell: (result: SearchResult) => {
+          const IconComp = getFileIcon(result.fileType);
+          return (
+            <span className={styles.nameWrap} title={result.name}>
+              <IconComp fontSize={20} aria-label={result.fileType || 'Document'} />
+              <Link
+                as="button"
+                appearance="subtle"
+                className={styles.nameLink}
+                onClick={ev => {
+                  ev.stopPropagation();
+                  setPreviewTarget(result);
+                }}
+              >
+                {result.name}
+              </Link>
+            </span>
+          );
+        },
+      }),
+
+      // Modified column — sortable.
+      createTableColumn<SearchResult>({
+        columnId: COL_MODIFIED,
+        renderHeaderCell: () => (
+          <span
+            className={styles.sortHeader}
+            onClick={() => handleHeaderClick('modifiedAt')}
+            role="button"
+            aria-label={`Sort by modified date — currently ${
+              sortColumn === 'modifiedAt' ? sortDirection : 'unsorted'
+            }`}
+          >
+            Modified{renderSortCaret('modifiedAt')}
+          </span>
+        ),
+        renderCell: (result: SearchResult) => (
+          <Text size={200}>{formatShortDate(result.modifiedAt)}</Text>
+        ),
+      }),
+
+      // Modified by column — non-sortable.
+      createTableColumn<SearchResult>({
+        columnId: COL_MODIFIED_BY,
+        renderHeaderCell: () => <span>Modified by</span>,
+        renderCell: (result: SearchResult) =>
+          result.modifiedBy ? (
+            <span className={styles.avatarRow}>
+              <Avatar name={result.modifiedBy} size={20} aria-hidden="true" />
+              <Text size={200} className={styles.modifiedByName} title={result.modifiedBy}>
+                {result.modifiedBy}
+              </Text>
+            </span>
+          ) : null,
+      }),
+
+      // Match column — sortable.
+      createTableColumn<SearchResult>({
+        columnId: COL_MATCH,
+        renderHeaderCell: () => (
+          <span
+            className={styles.sortHeader}
+            onClick={() => handleHeaderClick('combinedScore')}
+            role="button"
+            aria-label={`Sort by match score — currently ${
+              sortColumn === 'combinedScore' ? sortDirection : 'unsorted'
+            }`}
+          >
+            Match{renderSortCaret('combinedScore')}
+          </span>
+        ),
+        renderCell: (result: SearchResult) => {
+          const pct = Math.round((result.combinedScore ?? 0) * 100);
+          return (
+            <span
+              className={styles.scoreBadge}
+              role="img"
+              aria-label={`Relevance: ${pct}%`}
+            >
+              {pct}%
+            </span>
+          );
+        },
+      }),
+
+      // 3-dot menu column — non-sortable.
+      createTableColumn<SearchResult>({
+        columnId: COL_MENU,
+        renderHeaderCell: () => <span aria-label="Actions" />,
+        renderCell: (result: SearchResult) => {
+          const target: IDocumentRowMenuTarget = {
+            id: result.documentId,
+            name: result.name,
+            documentType: result.documentType,
+          };
+          return (
+            <DocumentRowMenu
+              document={target}
+              onAction={buildRowActionHandler(result)}
+            />
+          );
+        },
+      }),
+    ];
+  }, [
+    allSelected,
+    someSelected,
+    handleToggleAll,
+    selectedIds,
+    handleToggleRow,
+    pinnedIds,
+    onTogglePin,
+    sortColumn,
+    sortDirection,
+    handleHeaderClick,
+    buildRowActionHandler,
+    styles.iconButton,
+    styles.pinnedIcon,
+    styles.nameWrap,
+    styles.nameLink,
+    styles.avatarRow,
+    styles.modifiedByName,
+    styles.scoreBadge,
+    styles.sortHeader,
+  ]);
+
+  // ── Column sizing options ─────────────────────────────────────────────
+  // Merge persisted user widths with intrinsic defaults so unset columns
+  // still get a sane initial track width.
+  const columnSizingOptions: TableColumnSizingOptions = React.useMemo(() => {
+    const opts: TableColumnSizingOptions = {};
+    const columnIds = [COL_SELECT, COL_PIN, COL_NAME, COL_MODIFIED, COL_MODIFIED_BY, COL_MATCH, COL_MENU];
+    for (const id of columnIds) {
+      opts[id] = {
+        minWidth: MIN_WIDTHS[id],
+        idealWidth: columnWidths[id] ?? DEFAULT_WIDTHS[id],
+        // Mark fixed-width control columns as non-resizable to keep their
+        // intrinsic widths honest (select/pin/menu look broken if resized).
+        ...(id === COL_SELECT || id === COL_PIN || id === COL_MENU
+          ? {}
+          : {}),
+      };
+    }
+    return opts;
+  }, [columnWidths]);
+
+  // DataGrid `onColumnResize` fires on every drag tick; we persist on each
+  // event (writes-through to localStorage). Cheap enough — the volume is
+  // limited by user drag speed, not by render.
+  const handleColumnResize = React.useCallback(
+    (_ev: unknown, data: { columnId: unknown; width: number }) => {
+      const id = data.columnId;
+      if (typeof id === 'string' && typeof data.width === 'number') {
+        onColumnWidthChange(id, data.width);
+      }
+    },
+    [onColumnWidthChange]
+  );
+
   // Row click → open preview (matches Card view's row-click behavior in ResultCard).
   const handleRowClick = React.useCallback(
     (ev: React.MouseEvent, result: SearchResult) => {
@@ -480,210 +768,70 @@ export const ListView: React.FC<IListViewProps> = ({
   return (
     <>
       <div className={styles.container} role="region" aria-label="Document list">
-        <Table aria-label="Documents" size="small">
-          <TableHeader>
-            <TableRow>
-              {/* Selection column header — master checkbox */}
-              <TableHeaderCell className={styles.selectCell}>
-                <Checkbox
-                  aria-label={allSelected ? 'Deselect all documents' : 'Select all documents'}
-                  checked={allSelected ? true : someSelected ? 'mixed' : false}
-                  onChange={handleToggleAll}
-                />
-              </TableHeaderCell>
-
-              {/* Pin column — non-sortable, icon-free header */}
-              <TableHeaderCell className={styles.pinCell} aria-label="Pinned">
-                {/* Empty header — pin status is per-row only */}
-              </TableHeaderCell>
-
-              {/* Name column — sortable */}
-              <TableHeaderCell
-                className={styles.headerSortable}
-                aria-sort={
-                  sortColumn === 'name'
-                    ? sortDirection === 'asc'
-                      ? 'ascending'
-                      : 'descending'
-                    : 'none'
-                }
-                onClick={() => handleHeaderClick('name')}
-                role="columnheader button"
-              >
-                <span className={styles.headerContent}>
-                  Name
-                  {renderSortIndicator('name')}
-                </span>
-              </TableHeaderCell>
-
-              {/* Modified column — sortable */}
-              <TableHeaderCell
-                className={`${styles.modifiedCell} ${styles.headerSortable}`}
-                aria-sort={
-                  sortColumn === 'modifiedAt'
-                    ? sortDirection === 'asc'
-                      ? 'ascending'
-                      : 'descending'
-                    : 'none'
-                }
-                onClick={() => handleHeaderClick('modifiedAt')}
-                role="columnheader button"
-              >
-                <span className={styles.headerContent}>
-                  Modified
-                  {renderSortIndicator('modifiedAt')}
-                </span>
-              </TableHeaderCell>
-
-              {/* Modified by column — non-sortable */}
-              <TableHeaderCell className={styles.modifiedByCell}>Modified by</TableHeaderCell>
-
-              {/* Match column — sortable (relevance score) */}
-              <TableHeaderCell
-                className={`${styles.matchCell} ${styles.headerSortable}`}
-                aria-sort={
-                  sortColumn === 'combinedScore'
-                    ? sortDirection === 'asc'
-                      ? 'ascending'
-                      : 'descending'
-                    : 'none'
-                }
-                onClick={() => handleHeaderClick('combinedScore')}
-                role="columnheader button"
-              >
-                <span className={styles.headerContent}>
-                  Match
-                  {renderSortIndicator('combinedScore')}
-                </span>
-              </TableHeaderCell>
-
-              {/* Menu column header — empty */}
-              <TableHeaderCell className={styles.menuCell} aria-label="Actions" />
-            </TableRow>
-          </TableHeader>
-
-          <TableBody>
-            {sortedResults.map(result => {
-              const IconComp = getFileIcon(result.fileType);
-              const isSelected = selectedIds.has(result.documentId);
-              const isPinned = pinnedIds.has(result.documentId);
-              const target: IDocumentRowMenuTarget = {
-                id: result.documentId,
-                name: result.name,
-                documentType: result.documentType,
-              };
-              const pct = Math.round((result.combinedScore ?? 0) * 100);
-
-              return (
-                <TableRow
-                  key={result.documentId}
-                  className={isSelected ? styles.selectedRow : undefined}
-                  onClick={ev => handleRowClick(ev, result)}
+        <DataGrid
+          items={sortedResults}
+          columns={columns}
+          getRowId={(item: SearchResult) => item.documentId}
+          resizableColumns
+          columnSizingOptions={columnSizingOptions}
+          resizableColumnsOptions={{
+            autoFitColumns: false,
+          }}
+          onColumnResize={handleColumnResize}
+          size="medium"
+          aria-label="Documents"
+        >
+          <DataGridHeader>
+            <DataGridRow>
+              {({ renderHeaderCell }) => (
+                <DataGridHeaderCell
+                  className={mergeClasses(styles.headerCell, styles.gridCell)}
                 >
-                  {/* Selection checkbox */}
-                  <TableCell className={styles.selectCell}>
-                    <Checkbox
-                      aria-label={`Select ${result.name}`}
-                      checked={isSelected}
-                      onChange={() => handleToggleRow(result.documentId)}
-                      onClick={ev => ev.stopPropagation()}
-                    />
-                  </TableCell>
-
-                  {/* Pin icon — visible ONLY on pinned rows per spec FR-DOC-04 */}
-                  <TableCell
-                    className={styles.pinCell}
-                    onClick={ev => {
-                      ev.stopPropagation();
-                      onTogglePin(result.documentId);
-                    }}
-                  >
-                    {isPinned ? (
-                      <Tooltip content="Unpin" relationship="label">
-                        <Button
-                          appearance="subtle"
-                          size="small"
-                          className={`${styles.iconButton} ${styles.pinnedIcon}`}
-                          icon={<Pin20Filled aria-label="Pinned" />}
-                          onClick={ev => {
-                            ev.stopPropagation();
-                            onTogglePin(result.documentId);
-                          }}
-                          aria-label={`Unpin ${result.name}`}
-                        />
-                      </Tooltip>
-                    ) : (
-                      // Empty cell on unpinned rows — pin affordance discovered via the 3-dot menu's "Pin to top".
-                      <span aria-hidden="true" />
-                    )}
-                  </TableCell>
-
-                  {/* Name — file icon + link-styled name */}
-                  <TableCell>
-                    <span className={styles.iconCell}>
-                      <IconComp fontSize={20} aria-label={result.fileType || 'Document'} />
-                      <Link
-                        as="button"
-                        appearance="subtle"
-                        className={styles.nameLink}
-                        onClick={ev => {
+                  {renderHeaderCell()}
+                </DataGridHeaderCell>
+              )}
+            </DataGridRow>
+          </DataGridHeader>
+          <DataGridBody<SearchResult>>
+            {({ item, rowId }) => {
+              const isSelected = selectedIds.has(item.documentId);
+              return (
+                <DataGridRow<SearchResult>
+                  key={rowId}
+                  className={isSelected ? styles.selectedRow : undefined}
+                  onClick={(ev: React.MouseEvent) => handleRowClick(ev, item)}
+                >
+                  {({ renderCell, columnId }) => {
+                    const isSelectCell = columnId === COL_SELECT;
+                    const isPinCell = columnId === COL_PIN;
+                    const cellClass = mergeClasses(
+                      styles.gridCell,
+                      isSelectCell && styles.selectCell,
+                      isPinCell && styles.pinCell
+                    );
+                    return (
+                      <DataGridCell
+                        className={cellClass}
+                        onClick={isPinCell ? (ev: React.MouseEvent) => {
                           ev.stopPropagation();
-                          setPreviewTarget(result);
-                        }}
+                          onTogglePin(item.documentId);
+                        } : undefined}
                       >
-                        {result.name}
-                      </Link>
-                    </span>
-                  </TableCell>
-
-                  {/* Modified date */}
-                  <TableCell className={styles.modifiedCell}>
-                    <Text size={200}>{formatShortDate(result.modifiedAt)}</Text>
-                  </TableCell>
-
-                  {/* Modified by — avatar + name */}
-                  <TableCell className={styles.modifiedByCell}>
-                    {result.modifiedBy ? (
-                      <span className={styles.avatarRow}>
-                        <Avatar name={result.modifiedBy} size={20} aria-hidden="true" />
-                        <Text size={200} className={styles.modifiedByName}>
-                          {result.modifiedBy}
-                        </Text>
-                      </span>
-                    ) : null}
-                  </TableCell>
-
-                  {/* Match score */}
-                  <TableCell className={styles.matchCell}>
-                    <span
-                      className={styles.scoreBadge}
-                      role="img"
-                      aria-label={`Relevance: ${pct}%`}
-                    >
-                      {pct}%
-                    </span>
-                  </TableCell>
-
-                  {/* 3-dot menu (reuses shared DocumentRowMenu) */}
-                  <TableCell
-                    className={styles.menuCell}
-                    onClick={ev => ev.stopPropagation()}
-                  >
-                    <DocumentRowMenu
-                      document={target}
-                      onAction={buildRowActionHandler(result)}
-                    />
-                  </TableCell>
-                </TableRow>
+                        <TableCellLayout truncate={!isSelectCell && !isPinCell}>
+                          {renderCell(item)}
+                        </TableCellLayout>
+                      </DataGridCell>
+                    );
+                  }}
+                </DataGridRow>
               );
-            })}
-          </TableBody>
-        </Table>
+            }}
+          </DataGridBody>
+        </DataGrid>
       </div>
 
       {/* Preview dialog — instantiated once at the list level; opens for whichever
-          row triggered it via menu or row click. We deliberately do NOT touch
-          FilePreviewDialog.tsx (task 044 is running in parallel on that file). */}
+          row triggered it via menu or row click. */}
       {previewTarget && (
         <FilePreviewDialog
           open={!!previewTarget}

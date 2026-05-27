@@ -1,7 +1,7 @@
 /**
  * FilePreviewDialog — Modal for document preview.
  *
- * Per FR-DOC-03 (task 044), the dialog now uses a 2-column body layout
+ * Per FR-DOC-03 (task 044), the dialog uses a 2-column body layout
  * (640 px iframe · 320 px metadata pane) clamped to 960 px max-width.
  * The metadata pane renders three sections top→bottom:
  *   1. AI summary  (sparkle icon + paragraph; rendered when `onFetchSummary`
@@ -9,15 +9,25 @@
  *   2. Tags        (single Fluent v9 `Tag` chip from `documentType`)
  *   3. Details     (Created by · Created · Size · Type)
  *
+ * v1.1.45 (UAT round 2):
+ *   • The 2-column grid is now stable through both loading AND loaded states
+ *     (regression fix — the earlier rendering wrapped each cell in
+ *     `DialogContent`, whose internal padding/overflow rules collapsed the
+ *     grid when the inner content was the iframe). The metadata pane is
+ *     ALWAYS visible on the right; the iframe (or its in-cell spinner)
+ *     renders strictly inside the left cell.
+ *   • The 3-dot menu now hides `toggleWorkspace` from the dialog surface
+ *     (the dialog IS already in workspace context — the affordance was
+ *     unreachable and confused users).
+ *   • Footer simplified to a single `Close` button. The "Find similar"
+ *     and "Open file" actions remain reachable from the 3-dot menu.
+ *
  * Per FR-DOC-01 (task 040), the title-bar 3-dot menu is `DocumentRowMenu`.
  * Task 044 enables the menu actions the dialog can now service
  * (`download`, `email`, `copyLink`, plus `aiSummary` / `findSimilar` when
  * the corresponding callbacks are wired). `preview` stays hidden because
  * the dialog IS the preview surface; `pinToTop` / `rename` / `delete`
  * stay hidden because no handler exists at the PCF surface yet.
- *
- * Footer actions render left → right: Find similar (subtle) · Close
- * (secondary) · Open file (primary).
  *
  * Iframe preview pipeline is unchanged from task 040: `fetchPreviewUrl`
  * runs on open, the URL feeds the existing sandboxed iframe.
@@ -32,9 +42,7 @@ import * as React from 'react';
 import {
   Dialog,
   DialogSurface,
-  DialogBody,
   DialogTitle,
-  DialogContent,
   DialogActions,
   Button,
   Tooltip,
@@ -132,7 +140,12 @@ const DIALOG_MAX_WIDTH = '960px';
 
 const useStyles = makeStyles({
   surface: {
-    width: '100%',
+    // v1.1.45 — pin the surface to exactly DIALOG_MAX_WIDTH so the 2-col
+    // grid below always has the room it needs. Earlier `width: '100%'`
+    // allowed the surface to shrink inside narrow viewports, which in
+    // turn caused the grid to collapse (the user-reported flicker where
+    // the metadata pane briefly disappeared on iframe load).
+    width: DIALOG_MAX_WIDTH,
     maxWidth: DIALOG_MAX_WIDTH,
     height: '85vh',
     maxHeight: '85vh',
@@ -168,18 +181,34 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
   },
-  // 2-column body grid: 640 px thumbnail | 320 px metadata pane
+  // 2-column body grid: 640 px thumbnail | 320 px metadata pane.
+  // v1.1.45 — rendered as a plain <div> (no DialogBody wrapper) so the
+  // grid's column tracks never collapse, regardless of which loading state
+  // the iframe is in. DialogBody's own padding/overflow rules previously
+  // overrode the grid track widths once the iframe mounted, which is what
+  // the user observed as "metadata pane disappears after preview loads".
   body: {
     ...shorthands.padding('0px'),
     flex: 1,
     minHeight: 0,
     display: 'grid',
+    // Explicit `auto-flow: column` + `width: 100%` + `gridTemplateRows: 1fr`
+    // belt-and-braces the layout: even if a child accidentally stretches its
+    // inline-size to the surface width, the grid still allocates exactly two
+    // tracks of THUMBNAIL_COLUMN_WIDTH | METADATA_COLUMN_WIDTH respectively.
     gridTemplateColumns: `${THUMBNAIL_COLUMN_WIDTH} ${METADATA_COLUMN_WIDTH}`,
+    gridTemplateRows: '1fr',
+    gridAutoFlow: 'column' as const,
+    width: '100%',
     ...shorthands.overflow('hidden'),
   },
-  // Iframe container — fills the left column
+  // Iframe container — fills the left column.
+  // `minWidth: 0` is the Grid-collapse fix: without it, a child iframe's
+  // intrinsic size can force the cell wider than its track allocation.
   thumbnailCell: {
     position: 'relative' as const,
+    minWidth: 0,
+    height: '100%',
     ...shorthands.overflow('hidden'),
     borderRightWidth: tokens.strokeWidthThin,
     borderRightStyle: 'solid',
@@ -204,7 +233,8 @@ const useStyles = makeStyles({
     ...shorthands.padding(tokens.spacingHorizontalL),
     textAlign: 'center' as const,
   },
-  // Metadata pane — scrolls if content overflows
+  // Metadata pane — scrolls if content overflows. `minWidth: 0` again to
+  // prevent text content from forcing the cell wider than 320 px.
   metadataPane: {
     display: 'flex',
     flexDirection: 'column',
@@ -213,9 +243,12 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalL,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
+    minWidth: 0,
+    height: '100%',
     overflowY: 'auto',
     overflowX: 'hidden',
     backgroundColor: tokens.colorNeutralBackground2,
+    boxSizing: 'border-box',
   },
   // Section wrapper
   section: {
@@ -512,15 +545,25 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   // `pinToTop` / `rename` / `delete` are hidden until handlers exist at the
   // PCF surface (scoped to follow-on Phase 4 tasks per project plan).
   // `aiSummary` / `findSimilar` are hidden when no callback was provided.
-  // `toggleWorkspace` is hidden when no callback was provided (matches the
-  // task 040 honest-affordance behavior).
+  //
+  // v1.1.45 — `toggleWorkspace` is ALWAYS hidden from this dialog's menu.
+  // The dialog itself IS the workspace surface for the document (the user
+  // has already drilled into a document detail view), so the menu item was
+  // visually present but functionally a no-op, which UAT flagged as
+  // confusing. Row-context still exposes `toggleWorkspace` via
+  // ResultCard.tsx + ListView.tsx — only the dialog hides it.
   const dialogDisabledActions = React.useMemo<DocumentRowAction[]>(() => {
-    const hidden: DocumentRowAction[] = ['preview', 'pinToTop', 'rename', 'delete'];
+    const hidden: DocumentRowAction[] = [
+      'preview',
+      'pinToTop',
+      'rename',
+      'delete',
+      'toggleWorkspace',
+    ];
     if (!onFetchSummary) hidden.push('aiSummary');
     if (!onFindSimilar) hidden.push('findSimilar');
-    if (!onToggleWorkspace) hidden.push('toggleWorkspace');
     return hidden;
-  }, [onFetchSummary, onFindSimilar, onToggleWorkspace]);
+  }, [onFetchSummary, onFindSimilar]);
 
   // -------------------------------------------------------------------------
   // Render helpers
@@ -688,10 +731,14 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
           </div>
         </div>
 
-        {/* 2-column body — iframe (left) | metadata pane (right) */}
-        <DialogBody className={styles.body}>
-          <DialogContent className={styles.thumbnailCell}>{renderPreviewArea()}</DialogContent>
-          <DialogContent className={styles.metadataPane}>
+        {/* 2-column body — iframe (left) | metadata pane (right).
+            v1.1.45: rendered as a plain <div> instead of <DialogBody> +
+            <DialogContent> wrappers; the wrappers' default padding /
+            overflow were causing the grid tracks to collapse when the
+            iframe mounted (the visible flicker UAT reported). */}
+        <div className={styles.body} role="group" aria-label="Document preview body">
+          <div className={styles.thumbnailCell}>{renderPreviewArea()}</div>
+          <div className={styles.metadataPane}>
             {/* Section 1: AI summary */}
             <section className={styles.section} aria-labelledby="fpd-summary-heading">
               <Text id="fpd-summary-heading" className={styles.sectionHeader} size={300}>
@@ -716,21 +763,16 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
               </Text>
               {renderDetailsSection()}
             </section>
-          </DialogContent>
-        </DialogBody>
+          </div>
+        </div>
 
-        {/* Footer: Find similar (subtle) · Close (secondary) · Open file (primary) */}
+        {/* Footer: single Close button (v1.1.45).
+            "Find similar" and "Open file" remain reachable via the 3-dot
+            menu in the title bar — the redundant footer affordances were
+            removed per UAT feedback. */}
         <DialogActions className={styles.footer}>
-          {onFindSimilar && (
-            <Button appearance="subtle" onClick={onFindSimilar}>
-              Find similar
-            </Button>
-          )}
-          <Button appearance="secondary" onClick={onClose}>
+          <Button appearance="primary" onClick={onClose}>
             Close
-          </Button>
-          <Button appearance="primary" onClick={() => onOpenFile('desktop')}>
-            Open file
           </Button>
         </DialogActions>
       </DialogSurface>

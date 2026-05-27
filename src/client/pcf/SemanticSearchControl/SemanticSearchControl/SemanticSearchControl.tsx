@@ -154,12 +154,13 @@ const useStyles = makeStyles({
     ...shorthands.padding(tokens.spacingHorizontalL),
   },
 
-  // Toolbar above empty/initial states — mirrors ResultsList's header so the
-  // action icons (refresh / + Add Document / open viewer) stay in one place
-  // regardless of whether documents are present.
+  // Toolbar above the list/card surface — same row hosts the bulk-action
+  // group (leading edge, icon-only) and the Reload/Add buttons (trailing
+  // edge). The internal <BulkActionBar> renders null at zero selection
+  // so the row gracefully collapses to just Reload + Add when nothing is
+  // selected (UAT request — no separate sticky bulk bar).
   emptyStateToolbar: {
     display: 'flex',
-    justifyContent: 'flex-end',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
@@ -200,8 +201,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const [isAuthInitialized, setIsAuthInitialized] = useState(false);
   const [resolvedApiBaseUrl, setResolvedApiBaseUrl] = useState('');
 
-  // Get control properties from context
+  // Get control properties from context.
+  // NOTE (v1.1.45): `showFilters` is intentionally read but unused — the
+  // command bar always renders in non-compact mode (see render block below).
+  // Kept for manifest backward compatibility; treat as deprecated.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const showFilters = context.parameters.showFilters?.raw ?? true;
+  void showFilters;
   const compactMode = context.parameters.compactMode?.raw ?? false;
   const placeholder = context.parameters.placeholder?.raw ?? 'Search documents...';
   // BFF API base URL — resolved by auth useEffect below, stored in state
@@ -304,7 +310,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     (context.userSettings as unknown as { userId?: string } | undefined)?.userId ?? null;
   // `isPinned` from the hook is unused at this scope — ListView consults `pinnedIds`
   // directly. Keeping the destructure simple by omitting it.
-  const { view, setView, pinnedIds, togglePin } = useDocumentListPrefs(
+  const { view, setView, pinnedIds, togglePin, columnWidths, setColumnWidth } = useDocumentListPrefs(
     userIdForPrefs,
     pageEntityId
   );
@@ -1399,24 +1405,14 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     // Results — list view (FR-DOC-04 default) or card view based on persisted pref
     if (filteredResults.length > 0) {
       if (view === 'list' && !compactMode) {
-        // Card-view's existing toolbar surface (Reload / Add / Email / Open viewer)
-        // is folded into the renderActionsToolbar block above. For the list view
-        // we render the same toolbar slim-line + the BulkActionBar (when
-        // ≥1 row checked — FR-DOC-02) + the ListView body below.
+        // v1.1.45 — single toolbar row hosts the bulk-action icon group
+        // INLINE alongside Reload + Add. The BulkActionBar component is
+        // rendered inside renderActionsToolbar() and returns null when
+        // nothing is selected, so the row collapses to Reload + Add at
+        // zero selection.
         return (
           <>
             {renderActionsToolbar()}
-            <BulkActionBar
-              selectedIds={selectedIds}
-              docTypeOptions={tagOptions}
-              onClear={handleBulkClear}
-              onEmail={handleBulkEmail}
-              onDownload={handleBulkDownload}
-              onPin={handleBulkPin}
-              onDelete={handleBulkDelete}
-              onDocTypeChange={handleBulkDocTypeChange}
-              onShareLink={handleBulkShareLink}
-            />
             <ListView
               results={filteredResults}
               selectedIds={selectedIds}
@@ -1426,6 +1422,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
               sortColumn={sortColumn}
               sortDirection={sortDirection}
               onSortChange={handleSortChange}
+              columnWidths={columnWidths}
+              onColumnWidthChange={setColumnWidth}
               onOpenFile={handleOpenFileTelemetry}
               onOpenRecord={handleOpenRecordTelemetry}
               onFindSimilar={handleFindSimilarTelemetry}
@@ -1441,20 +1439,12 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       }
       return (
         <>
-          {/* Card view also surfaces the BulkActionBar when ≥1 row is selected
-              via the row checkbox (selection state persists across view toggles
-              per FR-DOC-04 Owner Clarification). */}
-          <BulkActionBar
-            selectedIds={selectedIds}
-            docTypeOptions={tagOptions}
-            onClear={handleBulkClear}
-            onEmail={handleBulkEmail}
-            onDownload={handleBulkDownload}
-            onPin={handleBulkPin}
-            onDelete={handleBulkDelete}
-            onDocTypeChange={handleBulkDocTypeChange}
-            onShareLink={handleBulkShareLink}
-          />
+          {/* Card view also surfaces the toolbar (which contains the
+              BulkActionBar when ≥1 row is selected). Selection state
+              persists across view toggles per FR-DOC-04 Owner
+              Clarification. ResultsList still owns the inner header on
+              the card surface for its own per-card affordances. */}
+          {renderActionsToolbar()}
           <ResultsList
             results={filteredResults}
             isLoading={isLoading}
@@ -1496,11 +1486,31 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     );
   };
 
-  // Renders the actions toolbar (refresh / + Add Document / open viewer) above
-  // empty and initial states so the icons are always reachable, matching the
-  // toolbar rendered inside ResultsList when documents are present.
+  // Renders the actions toolbar (selection · bulk actions · refresh · +)
+  // on a single row above the list/card surface. v1.1.45 folds the bulk-
+  // action affordances into this same row (UAT request — no separate
+  // sticky bulk bar). When zero rows are selected the row shows only
+  // Reload + Add Document; once any row is checked the bulk-action group
+  // appears at the leading edge of the row.
   const renderActionsToolbar = () => (
     <div className={styles.emptyStateToolbar}>
+      {/* Bulk-action group (icon-only) — renders only when ≥1 row selected.
+          Internally returns null at selectionCount === 0 so we can safely
+          mount it unconditionally; the leading-edge position is by design
+          (mockup: "[N selected] [bulk icons] ··· [refresh] [+]"). */}
+      <BulkActionBar
+        selectedIds={selectedIds}
+        docTypeOptions={tagOptions}
+        onClear={handleBulkClear}
+        onEmail={handleBulkEmail}
+        onDownload={handleBulkDownload}
+        onPin={handleBulkPin}
+        onDelete={handleBulkDelete}
+        onDocTypeChange={handleBulkDocTypeChange}
+        onShareLink={handleBulkShareLink}
+      />
+      {/* Spacer pushes Reload/Add to the trailing edge */}
+      <span style={{ flex: 1 }} aria-hidden="true" />
       <Tooltip content="Reload results" relationship="label">
         <Button
           className={styles.emptyStateToolbarButton}
@@ -1558,8 +1568,15 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           (Associated Only / File Type / Date Range / Threshold / Mode / Tags)
           plus the list/card view toggle. The auto-search useEffect on
           `filters.associatedOnly` is unchanged (the binding constraint from
-          spec FR-DOC-06). */}
-      {showFilters && !compactMode && (
+          spec FR-DOC-06).
+          v1.1.45: the `showFilters` PCF property is intentionally NOT
+          honored as a gate any more — it was a v0 legacy flag for the old
+          sidebar `FilterPanel`. UAT confirmed that the command bar must
+          always render in non-compact mode (otherwise the AssociatedOnly
+          switch and the five filter dropdowns are invisible, which is what
+          the user reported). The `showFilters` property remains in the
+          manifest for backward compat but only affects nothing here. */}
+      {!compactMode && (
         <CommandBar
           filters={filters}
           onFiltersChange={handleFiltersChange}
@@ -1601,7 +1618,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.44 • Built 2026-05-27</Text>
+        <Text size={100}>v1.1.45 • Built 2026-05-27</Text>
       </div>
 
       {/* Find Similar — shared iframe dialog */}
