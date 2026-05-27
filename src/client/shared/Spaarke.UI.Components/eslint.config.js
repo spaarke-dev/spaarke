@@ -49,7 +49,12 @@ export default tseslint.config(
       "build/**",
       "**/*.js",
       "**/*.cjs",
-      "**/*.mjs"
+      "**/*.mjs",
+      // Generated TypeScript declaration files. These are produced by `tsc` build
+      // and accidentally land in src/ when builds use rootDir overrides. They are
+      // gitignored, mirror their .ts counterparts, and shouldn't be linted. Source
+      // truth is the .ts/.tsx files. (Task 078 / B.3 — 2026-05-27.)
+      "src/**/*.d.ts"
     ]
   },
 

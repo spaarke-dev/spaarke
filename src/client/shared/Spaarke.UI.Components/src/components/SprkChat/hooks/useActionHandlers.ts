@@ -90,7 +90,7 @@ export type ActionHandlerMap = Record<string, ActionHandler>;
 // Hook Options
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface UseActionHandlersOptions extends ActionHandlerContext {}
+export type UseActionHandlersOptions = ActionHandlerContext;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Hook Result

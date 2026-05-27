@@ -38,7 +38,6 @@ jest.mock('../hooks/useChatFileAttachment', () => {
   };
 });
 
-// eslint-disable-next-line import/first
 import { SprkChat } from '../SprkChat';
 
 // ---------------------------------------------------------------------------

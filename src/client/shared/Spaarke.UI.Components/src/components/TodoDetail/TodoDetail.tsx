@@ -343,7 +343,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     onSaveTodoExtFields,
     onDeactivateTodoExt,
     onRemoveTodo,
-    onClose,
+    onClose: _onClose,
     onSearchContacts,
     onOpenRegardingRecord,
   }) => {

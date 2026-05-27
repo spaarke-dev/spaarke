@@ -131,7 +131,7 @@ export interface IDocumentEmailWizardProps {
 const ATTACHMENT_WARNING_BYTES = 25 * 1024 * 1024;
 
 /** Soft cap for inline summary preview rendering. */
-const SUMMARY_PREVIEW_CHAR_CAP = 600;
+const _SUMMARY_PREVIEW_CHAR_CAP = 600;
 
 // ---------------------------------------------------------------------------
 // Styles

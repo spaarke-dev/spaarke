@@ -49,7 +49,6 @@ import {
   FormAction,
 } from './formTypes';
 import { AiFieldTag } from './AiFieldTag';
-import { LookupField } from './LookupField';
 import { DataverseLookupField } from '../LookupField';
 import {
   searchMatterTypes,
@@ -298,7 +297,7 @@ const FieldSkeleton: React.FC<{ large?: boolean }> = ({ large }) => {
 
 export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
   dataService,
-  uploadedFileNames,
+  uploadedFileNames: _uploadedFileNames,
   uploadedFiles,
   onValidChange,
   onSubmit,
@@ -338,12 +337,11 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
 
   React.useEffect(() => {
     onSubmitRef.current(form);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form]);
 
   // -- AI Pre-fill via shared hook --
   const handlePrefillApply = React.useCallback(
-    (resolved: IResolvedPrefillFields, prefilledFieldNames: string[]) => {
+    (resolved: IResolvedPrefillFields, _prefilledFieldNames: string[]) => {
       const fields: IAiPrefillFields = {};
       for (const [key, value] of Object.entries(resolved)) {
         if (typeof value === 'string') {
@@ -416,17 +414,17 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
     [dataService]
   );
 
-  const handleSearchAttorneys = React.useCallback(
+  const _handleSearchAttorneys = React.useCallback(
     (query: string) => searchContactsAsLookup(dataService, query),
     [dataService]
   );
 
-  const handleSearchParalegals = React.useCallback(
+  const _handleSearchParalegals = React.useCallback(
     (query: string) => searchContactsAsLookup(dataService, query),
     [dataService]
   );
 
-  const handleSearchOutsideCounsel = React.useCallback(
+  const _handleSearchOutsideCounsel = React.useCallback(
     (query: string) => searchOrganizationsAsLookup(dataService, query),
     [dataService]
   );
@@ -459,7 +457,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
     []
   );
 
-  const handleAttorneyChange = React.useCallback(
+  const _handleAttorneyChange = React.useCallback(
     (item: ILookupItem | null) => {
       dispatch({
         type: 'SET_LOOKUP',
@@ -472,7 +470,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
     []
   );
 
-  const handleParalegalChange = React.useCallback(
+  const _handleParalegalChange = React.useCallback(
     (item: ILookupItem | null) => {
       dispatch({
         type: 'SET_LOOKUP',
@@ -485,7 +483,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
     []
   );
 
-  const handleOutsideCounselChange = React.useCallback(
+  const _handleOutsideCounselChange = React.useCallback(
     (item: ILookupItem | null) => {
       dispatch({
         type: 'SET_LOOKUP',
@@ -542,15 +540,15 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
     ? { id: form.practiceAreaId, name: form.practiceAreaName }
     : null;
 
-  const attorneyValue: ILookupItem | null = form.assignedAttorneyId
+  const _attorneyValue: ILookupItem | null = form.assignedAttorneyId
     ? { id: form.assignedAttorneyId, name: form.assignedAttorneyName }
     : null;
 
-  const paralegalValue: ILookupItem | null = form.assignedParalegalId
+  const _paralegalValue: ILookupItem | null = form.assignedParalegalId
     ? { id: form.assignedParalegalId, name: form.assignedParalegalName }
     : null;
 
-  const outsideCounselValue: ILookupItem | null = form.assignedOutsideCounselId
+  const _outsideCounselValue: ILookupItem | null = form.assignedOutsideCounselId
     ? { id: form.assignedOutsideCounselId, name: form.assignedOutsideCounselName }
     : null;
 

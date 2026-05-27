@@ -168,7 +168,7 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
     );
 
     /** Skip association entirely — advance wizard without selecting a record. */
-    const handleSkip = React.useCallback(() => {
+    const _handleSkip = React.useCallback(() => {
         setError(null);
         onChange?.(null);
         onSkip?.();

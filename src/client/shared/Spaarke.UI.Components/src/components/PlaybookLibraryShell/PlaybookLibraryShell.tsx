@@ -167,7 +167,7 @@ type BuilderTab = 'playbook' | 'custom';
 // ---------------------------------------------------------------------------
 
 export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
-  entityType,
+  entityType: _entityType,
   entityId,
   documentIds,
   allowedPlaybookIds,

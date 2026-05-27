@@ -129,7 +129,7 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export const SummarizeSendEmailStep: React.FC<ISummarizeSendEmailStepProps> = ({
-  emailTo,
+  emailTo: _emailTo,
   onEmailToChange,
   emailSubject,
   onEmailSubjectChange,

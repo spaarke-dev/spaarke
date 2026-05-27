@@ -88,7 +88,7 @@ export class ColumnRendererService {
   /**
    * Render plain text
    */
-  private static renderText(value: any): React.ReactElement | string {
+  private static renderText(value: unknown): React.ReactElement | string {
     if (value == null || value === '') {
       return '';
     }
@@ -98,7 +98,7 @@ export class ColumnRendererService {
   /**
    * Render email with link
    */
-  private static renderEmail(value: any): React.ReactElement | string {
+  private static renderEmail(value: unknown): React.ReactElement | string {
     if (!value) return '';
 
     return (
@@ -111,7 +111,7 @@ export class ColumnRendererService {
   /**
    * Render phone
    */
-  private static renderPhone(value: any): React.ReactElement | string {
+  private static renderPhone(value: unknown): React.ReactElement | string {
     if (!value) return '';
 
     return <Link href={`tel:${value}`}>{String(value)}</Link>;
@@ -120,11 +120,11 @@ export class ColumnRendererService {
   /**
    * Render URL with link
    */
-  private static renderUrl(value: any): React.ReactElement | string {
+  private static renderUrl(value: unknown): React.ReactElement | string {
     if (!value) return '';
 
     // Ensure URL has protocol
-    const url = String(value).startsWith('http') ? value : `https://${value}`;
+    const url = String(value).startsWith('http') ? String(value) : `https://${String(value)}`;
 
     return (
       <Link href={url} target="_blank">
@@ -136,7 +136,7 @@ export class ColumnRendererService {
   /**
    * Render number with locale formatting
    */
-  private static renderNumber(value: any): React.ReactElement | string {
+  private static renderNumber(value: unknown): React.ReactElement | string {
     if (value == null) return '';
 
     const num = Number(value);
@@ -148,7 +148,7 @@ export class ColumnRendererService {
   /**
    * Render money with currency symbol
    */
-  private static renderMoney(value: any, record: IDatasetRecord, column: IDatasetColumn): React.ReactElement | string {
+  private static renderMoney(value: unknown, record: IDatasetRecord, column: IDatasetColumn): React.ReactElement | string {
     if (value == null) return '';
 
     const num = Number(value);
@@ -156,7 +156,7 @@ export class ColumnRendererService {
 
     // Check for currency code in record (e.g., transactioncurrencyid_formatted)
     const currencyField = `${column.name}_currency`;
-    const currencyCode = record[currencyField] || 'USD';
+    const currencyCode = (record[currencyField] as string) || 'USD';
 
     const formatted = num.toLocaleString(undefined, {
       style: 'currency',
@@ -169,10 +169,10 @@ export class ColumnRendererService {
   /**
    * Render date and time
    */
-  private static renderDateTime(value: any): React.ReactElement | string {
+  private static renderDateTime(value: unknown): React.ReactElement | string {
     if (!value) return '';
 
-    const date = new Date(value);
+    const date = new Date(value as string | number | Date);
     if (isNaN(date.getTime())) return String(value);
 
     const formatted = date.toLocaleString(undefined, {
@@ -189,10 +189,10 @@ export class ColumnRendererService {
   /**
    * Render date only
    */
-  private static renderDateOnly(value: any): React.ReactElement | string {
+  private static renderDateOnly(value: unknown): React.ReactElement | string {
     if (!value) return '';
 
-    const date = new Date(value);
+    const date = new Date(value as string | number | Date);
     if (isNaN(date.getTime())) return String(value);
 
     const formatted = date.toLocaleDateString(undefined, {
@@ -207,7 +207,7 @@ export class ColumnRendererService {
   /**
    * Render two options (boolean) with icons
    */
-  private static renderTwoOptions(value: any): React.ReactElement | string {
+  private static renderTwoOptions(value: unknown): React.ReactElement | string {
     if (value == null) return '';
 
     const isTrue = value === true || value === 1 || value === '1' || value === 'true';
@@ -223,14 +223,14 @@ export class ColumnRendererService {
    * Render option set (choice) with badge
    */
   private static renderOptionSet(
-    value: any,
+    value: unknown,
     record: IDatasetRecord,
     column: IDatasetColumn
   ): React.ReactElement | string {
     if (value == null) return '';
 
     // Use formatted value if available (e.g., "columnname@OData.Community.Display.V1.FormattedValue")
-    const formattedValue = record[`${column.name}@OData.Community.Display.V1.FormattedValue`] || String(value);
+    const formattedValue = (record[`${column.name}@OData.Community.Display.V1.FormattedValue`] as string) || String(value);
 
     return (
       <Badge appearance="outline" color="informative">
@@ -243,14 +243,14 @@ export class ColumnRendererService {
    * Render multi-select option set with multiple badges
    */
   private static renderMultiSelectOptionSet(
-    value: any,
+    value: unknown,
     record: IDatasetRecord,
     column: IDatasetColumn
   ): React.ReactElement | string {
     if (value == null) return '';
 
     // Multi-select values come as comma-separated string or array
-    const formattedValue = record[`${column.name}@OData.Community.Display.V1.FormattedValue`] || String(value);
+    const formattedValue = (record[`${column.name}@OData.Community.Display.V1.FormattedValue`] as string) || String(value);
     const options = formattedValue.split(';').map((s: string) => s.trim());
 
     return (
@@ -273,14 +273,14 @@ export class ColumnRendererService {
   /**
    * Render lookup with entity reference
    */
-  private static renderLookup(value: any, record: IDatasetRecord, column: IDatasetColumn): React.ReactElement | string {
+  private static renderLookup(value: unknown, record: IDatasetRecord, column: IDatasetColumn): React.ReactElement | string {
     if (value == null) return '';
 
     // Lookup formatted value is in columnname_formatted or @OData annotation
     const lookupName =
-      record[`${column.name}_formatted`] ||
-      record[`${column.name}@OData.Community.Display.V1.FormattedValue`] ||
-      record[`_${column.name}_value@OData.Community.Display.V1.FormattedValue`] ||
+      (record[`${column.name}_formatted`] as string) ||
+      (record[`${column.name}@OData.Community.Display.V1.FormattedValue`] as string) ||
+      (record[`_${column.name}_value@OData.Community.Display.V1.FormattedValue`] as string) ||
       String(value);
 
     // Could add click handler to open related record (future enhancement)
@@ -290,7 +290,7 @@ export class ColumnRendererService {
   /**
    * Render boolean
    */
-  private static renderBoolean(value: any): React.ReactElement | string {
+  private static renderBoolean(value: unknown): React.ReactElement | string {
     return this.renderTwoOptions(value);
   }
 }

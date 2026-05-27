@@ -81,7 +81,6 @@ async function getBusinessUnitContainerId(dataService: IDataService): Promise<st
   //
   // Since this code runs inside a Dataverse Code Page iframe, Xrm is available.
   let userId: string | null = null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const frames: Window[] = [window];
   try { if (window.parent && window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
   try { if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!); } catch { /* cross-origin */ }

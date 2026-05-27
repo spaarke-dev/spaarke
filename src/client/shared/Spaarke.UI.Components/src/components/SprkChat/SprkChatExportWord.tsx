@@ -27,7 +27,7 @@ import {
   Button,
   Spinner,
   Tooltip,
-  tokens,
+  tokens as _tokens,
 } from '@fluentui/react-components';
 import { DocumentArrowUp20Regular } from '@fluentui/react-icons';
 import type { IChatMessage, AuthenticatedFetchFn } from './types';

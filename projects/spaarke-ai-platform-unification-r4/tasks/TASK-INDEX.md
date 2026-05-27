@@ -69,7 +69,7 @@
 | 075 | B.4 Fix 5 pre-existing tsc errors in src/solutions/SpaarkeAi | 6.5 | ✅ (5 + 1 emergent → 0; @spaarke/legal-workspace tsconfig path added; stale d.ts regenerated) | (new — R4 add-on) | STANDARD | none | K / ✅ |
 | 076 | B.5 Migrate CalendarSidePane to CalendarFilterPaneOutput shape | 6.5 | ✅ (migration applied to parseParams.ts + postMessage.ts; tsc + build clean; no behavior change) | (new — R4 add-on) | STANDARD | 055 ✅ | K / ✅ |
 | 077 | B.7 Fix 4 jsdom timing/isolation test failures (next chat project will need) | 6.5 | ✅ (4 → 0; ALL R4 tests passing 042 6/6 + 050 3/3 + 024 20/20; root cause was missing jsdom globals + act wrapper bug, not microtask timing as hypothesized) | (new — R4 add-on) | STANDARD | 071 ✅ | K / ✅ |
-| 078 | B.3 ESLint warning sweep: 161 → ≤30 in @spaarke/ui-components | 6.5 | 🔲 | (new — R4 add-on) | STANDARD | 073, 074 | — / ❌ (file overlap) |
+| 078 | B.3 ESLint warning sweep: 178 → 22 in @spaarke/ui-components (target ≤30 exceeded by wide margin) | 6.5 | ✅ (2.5h vs 8h budget; 156 warnings eliminated; -90 no-explicit-any, -42 unused-vars, -11 eslint-disable directives; 1051/1051 tests pass; 22 carry-overs all intentional) | (new — R4 add-on) | STANDARD | 073 ✅, 074 ✅ | — / ❌ (file overlap) |
 | 079 | Phase 7 deploy batch (BFF + 4 Code Pages) + smoke verification | 7 | 🔲 | (new — was deferred from Phase 5/6) | FULL | 072–078 | — / ❌ (main-session only) |
 | 090 | R4 Project Wrap-up (⚠️ PAUSE FOR OPERATOR REVIEW BEFORE EXECUTING) | 7 | 🔲 | PR-02 | FULL | all 35 + 072–079 | — / ❌ (final + operator gate) |
 

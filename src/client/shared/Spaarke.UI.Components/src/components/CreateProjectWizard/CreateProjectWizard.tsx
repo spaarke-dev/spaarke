@@ -117,7 +117,7 @@ async function associateProjectWithAccount(
     // Use fallback column name
   }
 
-  const orgUrl = window.location.origin;
+  const _orgUrl = window.location.origin;
   await dataService.updateRecord('sprk_project', projectId, {
     [navPropBind]: `/accounts(${accountId})`,
   });

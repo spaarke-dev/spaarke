@@ -7,6 +7,14 @@ import { ArrowUploadRegular, ArrowDownloadRegular, MailRegular, SendRegular } fr
 import { ICommand, ICommandContext } from '../types/CommandTypes';
 import { ICustomCommandConfiguration } from '../types/EntityConfigurationTypes';
 
+/**
+ * Minimal Xrm.WebApi execute() shape — `execute` is not in the PCF
+ * ComponentFramework.WebApi typing but exists at runtime in Xrm.WebApi.
+ */
+interface IXrmWebApiWithExecute {
+  execute(request: unknown): Promise<unknown>;
+}
+
 export class CustomCommandFactory {
   /**
    * Create ICommand from custom command configuration
@@ -81,7 +89,7 @@ export class CustomCommandFactory {
    */
   private static async executeCustomApi(
     apiName: string,
-    parameters: Record<string, any>,
+    parameters: Record<string, unknown>,
     context: ICommandContext
   ): Promise<void> {
     const request = {
@@ -94,7 +102,7 @@ export class CustomCommandFactory {
       }),
     };
 
-    await (context.webAPI as any).execute(request);
+    await (context.webAPI as unknown as IXrmWebApiWithExecute).execute(request);
   }
 
   /**
@@ -102,7 +110,7 @@ export class CustomCommandFactory {
    */
   private static async executeAction(
     actionName: string,
-    parameters: Record<string, any>,
+    parameters: Record<string, unknown>,
     context: ICommandContext
   ): Promise<void> {
     // If records selected, execute as bound action on each record
@@ -127,7 +135,7 @@ export class CustomCommandFactory {
           }),
         };
 
-        await (context.webAPI as any).execute(request);
+        await (context.webAPI as unknown as IXrmWebApiWithExecute).execute(request);
       }
     } else {
       // Execute as unbound action
@@ -141,7 +149,7 @@ export class CustomCommandFactory {
         }),
       };
 
-      await (context.webAPI as any).execute(request);
+      await (context.webAPI as unknown as IXrmWebApiWithExecute).execute(request);
     }
   }
 
@@ -150,7 +158,7 @@ export class CustomCommandFactory {
    */
   private static async executeFunction(
     functionName: string,
-    parameters: Record<string, any>,
+    parameters: Record<string, unknown>,
     context: ICommandContext
   ): Promise<void> {
     // Build OData function URL
@@ -168,7 +176,7 @@ export class CustomCommandFactory {
    */
   private static async executeWorkflow(
     _workflowId: string,
-    parameters: Record<string, any>,
+    parameters: Record<string, unknown>,
     context: ICommandContext
   ): Promise<void> {
     // Execute workflow via ExecuteWorkflow action
@@ -186,15 +194,15 @@ export class CustomCommandFactory {
         }),
       };
 
-      await (context.webAPI as any).execute(request);
+      await (context.webAPI as unknown as IXrmWebApiWithExecute).execute(request);
     }
   }
 
   /**
    * Interpolate parameter values with context tokens
    */
-  private static interpolateParameters(parameters: Record<string, any>, context: ICommandContext): Record<string, any> {
-    const result: Record<string, any> = {};
+  private static interpolateParameters(parameters: Record<string, unknown>, context: ICommandContext): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
 
     Object.entries(parameters).forEach(([key, value]) => {
       if (typeof value === 'string') {
@@ -215,7 +223,7 @@ export class CustomCommandFactory {
     result = result.replace(/\{selectedCount\}/g, String(context.selectedRecords.length));
     result = result.replace(/\{entityName\}/g, context.entityName);
     result = result.replace(/\{parentRecordId\}/g, context.parentRecord?.id?.guid ?? '');
-    result = result.replace(/\{parentTable\}/g, (context.parentRecord as any)?.entityType ?? '');
+    result = result.replace(/\{parentTable\}/g, (context.parentRecord as { entityType?: string } | undefined)?.entityType ?? '');
     // Add more token replacements as needed
     return result;
   }

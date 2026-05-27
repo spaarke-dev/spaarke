@@ -329,7 +329,7 @@ const useStyles = makeStyles({
 // Citation marker regex (matches [1], [2], [12], etc.)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CITATION_MARKER_REGEX = /\[(\d+)\]/g;
+const _CITATION_MARKER_REGEX = /\[(\d+)\]/g;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sub-renderers

@@ -283,7 +283,6 @@ describe('useChatFileAttachment', () => {
 
       // Ensure the pdfjs-dist `getDocument` was invoked (proves the dynamic
       // import resolved through the mock, not via a static import).
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const pdfjsMock = require('pdfjs-dist');
       expect(pdfjsMock.getDocument).toHaveBeenCalled();
       expect(mockGetPage).toHaveBeenCalledWith(1);
@@ -435,9 +434,7 @@ describe('useChatFileAttachment', () => {
       // `from 'pdfjs-dist'` or `from 'mammoth'` import line exists. This
       // is the load-bearing check for the bundle-budget constraint —
       // task 061 also verifies via bundle-analyzer output.
-      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
       const fs = require('fs');
-      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
       const path = require('path');
       const source = fs.readFileSync(
         path.resolve(__dirname, '..', 'hooks', 'useChatFileAttachment.ts'),

@@ -64,7 +64,7 @@ export class PrivilegeService {
       const functionUrl = `${entityLogicalName}(${recordId})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess()`;
 
       // Execute the function using fetch API
-      const response = await this.executeBoundFunction(webAPI, functionUrl);
+      const response = (await this.executeBoundFunction(webAPI, functionUrl)) as { AccessRights?: string | number } | null;
 
       if (response && response.AccessRights) {
         return this.parseAccessRights(response.AccessRights);
@@ -81,10 +81,11 @@ export class PrivilegeService {
    * Execute a bound function using the Web API endpoint
    * This is a workaround since PCF WebAPI doesn't expose executeFunction
    */
-  private static async executeBoundFunction(webAPI: ComponentFramework.WebApi, functionUrl: string): Promise<any> {
+  private static async executeBoundFunction(webAPI: ComponentFramework.WebApi, functionUrl: string): Promise<unknown> {
     // Since PCF WebAPI doesn't expose executeFunction, we need to use window.fetch
     // Get the organization URL from the webAPI context
-    const context = (webAPI as any)._context || (webAPI as any).context;
+    const webApiInternal = webAPI as unknown as { _context?: { page?: { getClientUrl?: () => string } }; context?: { page?: { getClientUrl?: () => string } } };
+    const context = webApiInternal._context || webApiInternal.context;
     const apiUrl = context?.page?.getClientUrl?.() || window.location.origin;
 
     const fullUrl = `${apiUrl}/api/data/v9.2/${functionUrl}`;
@@ -110,7 +111,7 @@ export class PrivilegeService {
   /**
    * Execute WhoAmI to get current user ID
    */
-  private static async executeWhoAmI(webAPI: ComponentFramework.WebApi): Promise<any> {
+  private static async executeWhoAmI(webAPI: ComponentFramework.WebApi): Promise<{ UserId: string }> {
     try {
       // WhoAmI is an unbound function
       // Since PCF WebAPI doesn't expose executeFunction directly, we use a workaround
@@ -184,8 +185,8 @@ export class PrivilegeService {
       // Step 3: Aggregate privileges across all roles
       let aggregateRights = AccessRights.None;
 
-      rolePrivileges.entities.forEach((rolePrivilege: any) => {
-        const privilege = rolePrivilege.privilegeid;
+      rolePrivileges.entities.forEach((rolePrivilege: Record<string, unknown>) => {
+        const privilege = rolePrivilege.privilegeid as { accessright?: number } | undefined;
 
         // Check if this privilege applies to our entity
         // Privilege names follow pattern: prv{Action}{EntityName}
@@ -253,14 +254,14 @@ export class PrivilegeService {
    */
   static getPrivilegesFromDataset(dataset: ComponentFramework.PropertyTypes.DataSet): IEntityPrivileges {
     // PCF Dataset has a security property with privilege information
-    const security = (dataset as any).security;
+    const security = (dataset as { security?: { editable?: boolean; readable?: boolean; createable?: boolean; deletable?: boolean } }).security;
 
     if (security) {
       return {
-        canCreate: security.editable && security.createable !== false,
+        canCreate: Boolean(security.editable) && security.createable !== false,
         canRead: security.readable !== false,
         canWrite: security.editable !== false,
-        canDelete: security.editable && security.deletable !== false,
+        canDelete: Boolean(security.editable) && security.deletable !== false,
         canAppend: security.editable !== false,
         canAppendTo: security.editable !== false,
       };
