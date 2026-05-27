@@ -51,9 +51,9 @@
 | 050 | BFF /api/ai/search projection adds modifiedAt + modifiedBy | 5 | FR-BFF-01 | ✅ | none | E | FULL |
 | 051 | BFF POST /api/documents/bulk-download endpoint | 5 | FR-BFF-02 | ✅ | none | E | FULL |
 | 060 | Matter main-form Overview tab 2-column 66/34 layout | 6 | FR-FORM-01 | 🔲 | 024, 030, 031, 032, 033, 034, 040 | — (serial gate) | FULL |
-| 070 | Deploy SemanticSearchControl PCF | 7 | — | 🔲 | 046 | G | FULL |
-| 071 | Deploy VisualHost PCF | 7 | — | 🔲 | 025, 047 | G | FULL |
-| 072 | Deploy BFF | 7 | — | 🔲 | 050, 051 | G | FULL |
+| 070 | Deploy SemanticSearchControl PCF | 7 | — | 📦 ZIP ready, user imports | 046 | G | FULL |
+| 071 | Deploy VisualHost PCF | 7 | — | 📦 ZIP ready, user imports | 025, 047 | G | FULL |
+| 072 | Deploy BFF | 7 | — | ✅ | 050, 051 | G | FULL |
 | 073 | Dataverse solution import (chart defs + form XML) | 7 | — | 🔲 | 030..034, 060, 070, 071 | — (serial after G) | FULL |
 | 074 | Cross-cutting NFR validation (NFR-01, 02, 04, 05; FR-TEL-01) | 7 | NFR-01..08 | 🔲 | 070, 071, 072, 073 | — (final gate) | FULL |
 | 090 | Project wrap-up | 8 | — | 🔲 | 074 | — (serial) | FULL |

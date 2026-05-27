@@ -13,10 +13,11 @@
 
 | Field | Value |
 |---|---|
-| **Wave** | Phase 3 complete (5 chart defs created in Dataverse) — advancing to Phase 4 (Documents PCF — mostly serial on SemanticSearchControl.tsx) |
-| **Next Tasks** | 040 (3-dot row menu, serial) — then 041..046 in series — then 047 (docs update, parallel-safe with 040-046) |
-| **Status** | Wave 5B pending dispatch |
-| **Next Action** | Dispatch task 040 (3-dot row menu — consumes DocumentRowMenu from task 011). Phase 4 PCF tasks must serialize because they all touch SemanticSearchControl.tsx + ResultCard.tsx + FilePreviewDialog.tsx. |
+| **Wave** | All code work complete (28/34 tasks). Awaiting decision on Phase 6-8 (form XML + deploys + wrap-up — touch live SPAARKE DEV 1 environment). |
+| **Code phases** | Phase 0 ✅ Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 ✅ |
+| **Live phases** | Phase 6 🔲 (form XML edit + import) · Phase 7 🔲 (pcf-deploy x2 + bff-deploy + solution import + UAT) · Phase 8 🔲 (wrap-up) |
+| **Status** | 82% complete; awaiting user direction |
+| **Next Action** | User decision: (a) authorize main-session to run Phase 6 form XML edit + Phase 7 deploys on SPAARKE DEV 1, or (b) hand off to manual deployment workflow. PAC CLI + Azure CLI are both installed and authenticated. |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
