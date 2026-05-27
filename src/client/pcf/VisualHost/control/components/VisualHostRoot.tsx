@@ -20,9 +20,11 @@ import {
   AiSummaryPopover,
   type ISummaryData,
 } from '../../../../shared/Spaarke.UI.Components/src/components/AiSummaryPopover';
+import { AppInsightsService } from '../../../../shared/Spaarke.UI.Components/src/services/AppInsightsService';
 import { IInputs } from '../generated/ManifestTypes';
 import { IChartDefinition, IChartData, DrillInteraction } from '../types';
 import { ChartRenderer } from './ChartRenderer';
+import { CardChrome } from './CardChrome';
 import type { MatrixJustification } from './MetricCardMatrix';
 import { logger } from '../utils/logger';
 import {
@@ -171,6 +173,17 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
       return { summary: null, tldr: null };
     }
   }, [aiSummaryField, chartDefinition, contextRecordId, context.webAPI]);
+
+  // FR-TEL-01: Initialize App Insights once on mount.
+  // AppInsightsService.initialize() is idempotent — second + subsequent calls are no-ops,
+  // so this is safe even if other PCF surfaces on the same page also initialize.
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const appInsightsKey = ((context.parameters as any).appInsightsKey?.raw as string | null | undefined) ?? '';
+    if (appInsightsKey) {
+      AppInsightsService.initialize(appInsightsKey);
+    }
+  }, []); // empty deps — manifest properties are stable for the control's lifetime
 
   useEffect(() => {
     if (!chartDefinitionId) {
@@ -478,7 +491,17 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
   }, [chartDefinition]);
 
   /**
-   * Render the appropriate visual based on chart definition
+   * Render the appropriate visual based on chart definition.
+   *
+   * FR-VH-05: every rendered card is wrapped in CardChrome so the per-card
+   * title bar + corner-icon slots are available. To preserve NFR-05
+   * backward compatibility, the chrome header renders ONLY when a title is
+   * supplied — gated by the existing `showTitle` PCF property (defaults to
+   * `false`). Existing chart defs that do not opt in see zero header chrome
+   * and render pixel-identical to today.
+   *
+   * AI sparkle slot is hidden in v1 (`showAiSparkle: false`) — the prop is
+   * forward-compat for r2 Insights Engine.
    */
   const renderVisual = () => {
     if (!chartDefinition) {
@@ -490,24 +513,50 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
       );
     }
 
+    // Chrome opt-in: BOTH title and expand-icon are gated on `showTitlePcf === true`.
+    // This keeps every existing chart def (default showTitle=false) chrome-free
+    // for NFR-05 zero-regression compliance — the existing toolbar (rendered
+    // above) continues to handle the expand icon for legacy chart defs. When a
+    // caller explicitly sets showTitle=true (Phase 3+ Matter cards), CardChrome
+    // takes over both the title bar AND the expand icon.
+    const chromeOptIn = showTitlePcf === true;
+    const chromeTitle: string | undefined = chromeOptIn
+      ? (chartDefinition.sprk_name || undefined)
+      : undefined;
+
+    // Wire expand to existing handleExpandClick so chart-def Drill Through
+    // Settings continue to apply (no new ClickActionHandler).
+    const chromeOnExpand: (() => void) | undefined =
+      chromeOptIn && enableDrillThrough
+        ? () => {
+            void handleExpandClick();
+          }
+        : undefined;
+
     return (
-      <ChartRenderer
-        chartDefinition={chartDefinition}
-        chartData={chartData || undefined}
-        onDrillInteraction={enableDrillThrough ? handleDrillInteraction : undefined}
-        height={height || undefined}
-        webApi={context.webAPI}
-        contextRecordId={contextRecordId || undefined}
-        onClickAction={hasClickAction(chartDefinition) ? handleClickAction : undefined}
-        onViewListClick={chartDefinition.sprk_viewlisttabname ? handleViewListClick : undefined}
-        fetchXmlOverride={fetchXmlOverride || undefined}
-        valueFormatOverride={valueFormatOverride || undefined}
-        width={width || undefined}
-        justification={justification || undefined}
-        columns={columns || undefined}
-        showTitle={showTitlePcf ?? undefined}
-        titleFontSize={titleFontSizePcf || undefined}
-      />
+      <CardChrome
+        title={chromeTitle}
+        onExpand={chromeOnExpand}
+        showAiSparkle={false}
+      >
+        <ChartRenderer
+          chartDefinition={chartDefinition}
+          chartData={chartData || undefined}
+          onDrillInteraction={enableDrillThrough ? handleDrillInteraction : undefined}
+          height={height || undefined}
+          webApi={context.webAPI}
+          contextRecordId={contextRecordId || undefined}
+          onClickAction={hasClickAction(chartDefinition) ? handleClickAction : undefined}
+          onViewListClick={chartDefinition.sprk_viewlisttabname ? handleViewListClick : undefined}
+          fetchXmlOverride={fetchXmlOverride || undefined}
+          valueFormatOverride={valueFormatOverride || undefined}
+          width={width || undefined}
+          justification={justification || undefined}
+          columns={columns || undefined}
+          showTitle={showTitlePcf ?? undefined}
+          titleFontSize={titleFontSizePcf || undefined}
+        />
+      </CardChrome>
     );
   };
 
@@ -555,7 +604,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
       )}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.0 • 2026-05-13</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.1 • 2026-05-27</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>

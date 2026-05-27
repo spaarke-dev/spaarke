@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.1.43" display-name-key="Semantic Search Control" description-key="PCF control for semantic document search with natural language queries (v1.1.43)" control-type="virtual" api-version="1.3.18">
+  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.1.44" display-name-key="Semantic Search Control" description-key="PCF control for semantic document search with natural language queries (v1.1.44)" control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="true">
       <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>
@@ -9,6 +9,7 @@
     <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID" of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="clientAppId" display-name-key="Client App ID" description-key="Azure AD application (client) ID for PCF MSAL authentication" of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF API application ID for OAuth scope construction" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="appInsightsKey" display-name-key="App Insights Key" description-key="Application Insights instrumentation key for browser telemetry (direct SDK, not BFF-proxied)" of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="searchScope" display-name-key="Search Scope" description-key="Search scope mode: all=system-wide, entity=auto-detect from form, custom=document IDs" of-type="Enum" usage="input" required="false">
       <value name="all" display-name-key="All">all</value>
       <value name="entity" display-name-key="Entity">entity</value>

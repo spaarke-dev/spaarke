@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Project wrap-up (final quality gates + repo cleanup + status update)</title>
+    <phase>8: Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>074</dependencies>
+    <blocks>none</blocks>
+    <tags>project-wrap-up, repo-cleanup</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final mandatory quality gate per task-create Step 3.7. Wraps the project, captures lessons, and finalizes status. Failure to run this leaves the project in an inconsistent state (README/plan stale, ephemeral files uncleaned).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single final task; must follow task 074 to ensure all NFRs validated.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Execute the mandatory project wrap-up per task-create Step 3.7. Run final `code-review` + `adr-check` over all project code; resolve critical issues. Run `repo-cleanup` skill against the project folder; archive handoffs, remove ephemeral directories with approval. Update `README.md` (Status → Complete, Last Updated, Phase → Complete, Progress → 100%, Completed Date, Graduation Criteria checkboxes, Changelog entry). Update `plan.md` (Status → Complete, all milestone statuses ✅). Write `notes/lessons-learned.md` if notable insights. Verify all TASK-INDEX tasks show ✅ and no critical code-review issues remain.
+  </prompt>
+
+  <role>
+    Senior engineering lead responsible for project closeout: final quality enforcement, repository hygiene, documentation closure, and knowledge capture. Familiar with the Spaarke project lifecycle (`/repo-cleanup` skill, README/plan templates, the lessons-learned format).
+  </role>
+
+  <goal>
+    The `spaarke-matter-ui-enhancement-r1` project is formally complete: README.md and plan.md reflect Complete status, all TASK-INDEX entries show ✅, all critical code-review issues are resolved, the project directory has been cleaned of ephemeral artifacts (with notes/handoffs/ archived to .archive/), and lessons-learned.md captures any notable insights for future projects.
+  </goal>
+
+  <context>
+    <background>
+      Per CLAUDE.md §4 + task-create Step 3.7, every project ends with a wrap-up task that runs final quality gates, cleans the repo, updates project status documents, and captures lessons learned. This is non-negotiable: skipping it leaves the project in a half-completed state with stale README/plan and uncleaned ephemeral files.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-matter-ui-enhancement-r1/README.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/plan.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/current-task.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/notes/ (cleanup target)</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/notes/lessons-learned.md (created if notable)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">task-create Step 3.7 — mandatory wrap-up structure (6 sub-steps + final verification)</constraint>
+    <constraint source="project">CLAUDE.md §7 — Task Completion &amp; Transition: TASK-INDEX updated, current-task.md reset</constraint>
+    <constraint source="project">/repo-cleanup skill — remove ephemeral files (notes/debug/, notes/spikes/, notes/drafts/) WITH APPROVAL; archive handoffs to .archive/</constraint>
+    <constraint source="project">code-review critical issues MUST be resolved before marking project complete</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/task-create/SKILL.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/CLAUDE.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/design.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/plan.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/README.md</file>
+    </files>
+    <patterns>
+      <pattern name="Wrap-up sub-steps" location=".claude/skills/task-create/SKILL.md (Step 3.7)">
+        (1) Final code-review + adr-check; (2) repo-cleanup with approval; (3) README updates; (4) plan.md updates; (5) lessons-learned.md if notable; (6) final verification.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Verify upstream dep shipped: task 074 shows ✅ in TASK-INDEX.md with all NFRs passing (consult `projects/spaarke-matter-ui-enhancement-r1/notes/spikes/nfr-validation-evidence/SUMMARY.md`). If any NFR failed and was not remediated, BLOCK and report.</step>
+    <step order="1">Sub-step 1 — Final quality gates: run `Skill code-review` over all project-touched code (src/client/pcf/SemanticSearchControl/, src/client/pcf/VisualHost/, src/client/shared/Spaarke.UI.Components/src/components/TagFilter.tsx, src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx, src/server/api/Sprk.Bff.Api/Api/AiSearchEndpoints.cs, src/server/api/Sprk.Bff.Api/Api/DocumentsBulkEndpoints.cs). Run `Skill adr-check` over the same set. Resolve any critical issues. Capture residual non-critical issues in lessons-learned.md if relevant.</step>
+    <step order="2">Sub-step 2 — Repo cleanup: invoke `Skill repo-cleanup projects/spaarke-matter-ui-enhancement-r1`. Review the cleanup report. With user approval, archive notes/handoffs/ entries to projects/spaarke-matter-ui-enhancement-r1/.archive/{date}/ and remove notes/debug/, notes/spikes/, notes/drafts/ directories if present. Preserve `notes/spikes/nfr-validation-evidence/` (created by task 074 — keep as project evidence).</step>
+    <step order="3">Sub-step 3 — README.md update: edit `projects/spaarke-matter-ui-enhancement-r1/README.md`: Status → "Complete"; Last Updated → today's date; Phase → "Complete"; Progress → "100%"; Completed Date → today; check ALL Graduation Criteria checkboxes (reflecting the actual evidence from task 074); add a Changelog entry under "## Changelog" with today's date and a 1-2 sentence summary.</step>
+    <step order="4">Sub-step 4 — plan.md update: edit `projects/spaarke-matter-ui-enhancement-r1/plan.md`: Status → "Complete"; update all milestone statuses to ✅. If plan.md does not have a Status field, add one at the top metadata block.</step>
+    <step order="5">Sub-step 5 — lessons-learned.md: assess whether any notable insights surfaced during the project (e.g., unexpected gotchas, anti-patterns discovered, particularly successful patterns to propagate). If yes, write `projects/spaarke-matter-ui-enhancement-r1/notes/lessons-learned.md` with sections: "What went well", "What was harder than expected", "Patterns to propagate", "Anti-patterns/gotchas discovered". If nothing notable, document that explicitly in a one-line lessons-learned.md ("No notable lessons beyond the standard playbook — project executed on plan."). Consider adding any new failure modes to `.claude/FAILURE-MODES.md` if novel.</step>
+    <step order="6">Sub-step 6 — Final verification: read TASK-INDEX.md; confirm every task (001 through 074) shows ✅; confirm task 090 is about to be marked ✅. Confirm README.md and plan.md reflect Complete status. Confirm no critical code-review issues remain. Confirm repo-cleanup completed successfully. Confirm lessons-learned.md exists (even if minimal).</step>
+    <step order="7">Step 9.5 (FULL rigor): final `Skill code-review` + `Skill adr-check` pass over the project deliverable surface. Capture clean output. If any new issues surface, resolve them before marking the task complete.</step>
+    <step order="8">Update TASK-INDEX.md: 090 → ✅. Set current-task.md to "none — project complete". Report completion to user.</step>
+  </steps>
+
+  <tools>
+    <tool name="code-review">Final quality gate</tool>
+    <tool name="adr-check">Final architecture compliance gate</tool>
+    <tool name="repo-cleanup">Repo hygiene skill — invoked with project path</tool>
+    <tool name="git">Version control — captures the wrap-up commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/README.md (Status: Complete + checked graduation criteria + changelog entry)</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/plan.md (Status: Complete + all milestones ✅)</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/notes/lessons-learned.md (notable insights or explicit none-noted)</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (090 → ✅)</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/current-task.md (reset to "none — project complete")</output>
+    <output type="cleanup">notes/handoffs/ archived to .archive/{date}/; notes/debug/, notes/spikes/ (except nfr-validation-evidence/), notes/drafts/ removed with approval</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Task 074 shows ✅ in TASK-INDEX.md with all NFRs passing per SUMMARY.md before this task starts.</criterion>
+    <criterion testable="true">Final `code-review` + `adr-check` over all project-touched code: no critical issues remaining.</criterion>
+    <criterion testable="true">`/repo-cleanup projects/spaarke-matter-ui-enhancement-r1` ran; cleanup report reviewed; ephemeral dirs removed with approval; handoffs archived; `notes/spikes/nfr-validation-evidence/` preserved.</criterion>
+    <criterion testable="true">README.md: Status = "Complete"; Phase = "Complete"; Progress = "100%"; Completed Date populated; all Graduation Criteria checked; Changelog entry added.</criterion>
+    <criterion testable="true">plan.md: Status = "Complete"; all milestone statuses = ✅.</criterion>
+    <criterion testable="true">lessons-learned.md exists (either with notable content or explicit "no notable lessons" line).</criterion>
+    <criterion testable="true">TASK-INDEX.md shows every task 001-074 as ✅, and 090 as ✅.</criterion>
+    <criterion testable="true">current-task.md reset to "none — project complete".</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is the project's formal closeout. It is non-negotiable per CLAUDE.md §4 + §7 and task-create Step 3.7.
+
+    The `repo-cleanup` skill needs explicit user approval before deleting `notes/debug/`, `notes/spikes/`, or `notes/drafts/`. The evidence directory created by task 074 (`notes/spikes/nfr-validation-evidence/`) MUST be preserved because it's the binding evidence base for project completion — flag this preservation requirement when invoking the cleanup skill.
+
+    If task 074 has a partial NFR failure that was accepted with human approval, document the exception in lessons-learned.md and link to the approval record.
+
+    If new failure modes surfaced during execution, append them to `.claude/FAILURE-MODES.md` as a separate small PR (this task does NOT touch `.claude/` per the sub-agent write boundary — that change is main-session-only).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor. Step 0.5 is NOT applicable (project wrap-up — no Fluent v9 component authoring). Load code-review + adr-check + repo-cleanup + task-create skills. Verify task 074 ✅ + NFRs passed. Execute 6 sub-steps in order. Step 9.5: final code-review + adr-check. Update TASK-INDEX. Reset current-task. Report project complete.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>DonutChart fieldPivot consumption + matrixRight layout + colorThresholds segments (FR-VH-01)</title>
+    <phase>2: Visual Host Renderer Extensions</phase>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
+    <estimated-hours>5-7</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>025</blocks>
+    <tags>pcf, react, fluent-ui, frontend, visualhost</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code in PCF renderer touching production-shipping Visual Host with ADR-021 (Fluent v9 tokens) + ADR-022 (React 16/17) + NFR-05 binding backward-compat constraints</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Extend the existing `DonutChart` renderer in Visual Host with generic Custom Options keys per FR-VH-01: `donutLayout` ("standard"|"matrixRight", default "standard"), `donutCenterMode` ("total"|"meanOfFields"), `donutCenterLabel`, `showBreakdownRows`, `breakdownValueFormat`. Enable field-pivot consumption in `ChartRenderer.tsx` for the Donut case (today it only supports aggregation). Implement the `matrixRight` layout: donut on the left + breakdown rows on the right in a grid. When `donutCenterMode: "meanOfFields"`, compute `mean(fieldPivot.fields[].value)` and render in the donut center (use `valueFormat: "letterGrade"` thresholds if applicable). Segment colors derive from `colorThresholds[].tokenSet` via the existing `getTokenSetColors()` helper in `MetricCardMatrix.tsx` (line 138). BACKWARD COMPAT (NFR-05): chart defs without `donutLayout` (or with `"standard"`) and no `fieldPivot` MUST render exactly as today.
+  </prompt>
+
+  <role>
+    Senior React + Fluent UI v9 developer with deep familiarity with the Visual Host renderer architecture (ChartRenderer, FieldPivotService, cardConfigResolver 3-tier merge) and the Spaarke chart-definition contract.
+  </role>
+
+  <goal>
+    `DonutChart.tsx` and `ChartRenderer.tsx` updated to support the five new generic Custom Options keys. `ChartRenderer.tsx` Donut case now consumes `fieldPivot` data path (in addition to aggregation). `matrixRight` layout renders donut + labeled breakdown rows grid using Fluent v9 tokens only. All existing in-production Donut chart defs render byte-identically to before. Builds clean with `npm run build:prod`. Code-review + adr-check pass.
+  </goal>
+
+  <context>
+    <background>
+      FR-VH-01 is the most NFR-05-sensitive renderer change. It enables the Matter Health Composite chart (FR-DV-01) which needs a donut surrounded by 3 labeled rows for area compliance scores + a composite letter grade in the center derived from `meanOfFields`. Per design.md §6.4.0 binding constraint, this MUST be done by extending the existing `DonutChart` (no new visual types, no Matter-specific code paths). Segment colors must reuse `getTokenSetColors()` from `MetricCardMatrix.tsx:138` so all renderers share one token-set vocabulary.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/VisualHost/control/components/DonutChart.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/ChartRenderer.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/MetricCardMatrix.tsx</file>
+      <file>src/client/pcf/VisualHost/control/services/FieldPivotService.ts</file>
+      <file>src/client/pcf/VisualHost/control/configurations/cardConfigResolver.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-VH-01 — generic addition to DonutChart only; no new visual types</constraint>
+    <constraint source="spec">§6.4.0 (binding) — NO Matter-specific code paths inside Visual Host components</constraint>
+    <constraint source="spec">NFR-05 (binding) — every existing chart def must render unchanged; task 025 will verify</constraint>
+    <constraint source="spec">FR-VH-01 — backward compat: `donutLayout` absent or `"standard"` + no `fieldPivot` ⇒ identical to today</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only — zero hex/rgb literals in touched files</constraint>
+    <constraint source="ADR-022">React 16/17 platform — no React 18+ APIs (no `useId`, no `useSyncExternalStore`, no concurrent features)</constraint>
+    <constraint source="ADR-022">No new Fluent v8 imports (`@fluentui/react`) — v9 only (`@fluentui/react-components`)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/modern-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Token-set color helper" location="src/client/pcf/VisualHost/control/components/MetricCardMatrix.tsx (line 138)">
+        `getTokenSetColors(tokenSet)` returns { fill, foreground } pairs per token set (brand / success / warning / danger / neutral). REUSE — do not duplicate.
+      </pattern>
+      <pattern name="Field-pivot service" location="src/client/pcf/VisualHost/control/services/FieldPivotService.ts">
+        Resolves `fieldPivot.fields[].field` against the record producing `{label, value, badge?}` rows. Already wired for MetricCard / MetricCardMatrix — extend Donut to consume the same shape.
+      </pattern>
+      <pattern name="Custom Options merge" location="src/client/pcf/VisualHost/control/configurations/cardConfigResolver.ts">
+        Three-tier merge (chart-def → defaults → runtime). New keys are added to the resolved options shape; provide sensible defaults so backward-compat path stays identical.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Step 0.5: Invoke `Skill fluent-v9-component` — binding per design.md §6.0 for every UI task. Load Fluent v9 patterns (portal gotcha, theming, React version boundaries).</step>
+    <step order="1">Read DonutChart.tsx, ChartRenderer.tsx, MetricCardMatrix.tsx (getTokenSetColors), FieldPivotService.ts, cardConfigResolver.ts to anchor the existing contract and identify the NFR-05 baseline behavior.</step>
+    <step order="2">Update the Donut options type in cardConfigResolver.ts (or shared types module) to add: `donutLayout?: "standard" | "matrixRight"`, `donutCenterMode?: "total" | "meanOfFields"`, `donutCenterLabel?: string`, `showBreakdownRows?: boolean`, `breakdownValueFormat?: "score" | "scoreOver100" | "percentage" | "ratio"`. Defaults: donutLayout = "standard", donutCenterMode = "total".</step>
+    <step order="3">In ChartRenderer.tsx Donut case: if `fieldPivot` is present, route through FieldPivotService (mirroring MetricCard's path). If absent, preserve the current aggregation-only path BYTE-IDENTICALLY.</step>
+    <step order="4">In DonutChart.tsx: branch on `donutLayout`. "standard" path = unchanged from today. "matrixRight" path = CSS grid (donut column + breakdown rows column) using Fluent v9 `tokens.spacingHorizontal*` for gaps.</step>
+    <step order="5">Implement center value: when `donutCenterMode: "meanOfFields"`, compute mean of `fieldPivot.fields[].value`; format via existing `valueFormat` helper (letterGrade producing "B+", scoreOver100 producing "85/100", etc.). Honor `donutCenterLabel` as the small label above the centerpiece.</step>
+    <step order="6">Implement breakdown rows when `showBreakdownRows: true`: each row = uppercase small-caps label (Fluent `tokens.fontSizeBase200`, `tokens.colorNeutralForeground2`) + formatted value (`tokens.fontSizeBase400`, `tokens.colorNeutralForeground1`). Use `breakdownValueFormat` for row value formatting.</step>
+    <step order="7">Segment colors: import or re-export `getTokenSetColors` from MetricCardMatrix.tsx (extract to a shared util if cleaner — but DO NOT duplicate the map). Map each `colorThresholds[]` entry to its segment color via `tokenSet`.</step>
+    <step order="8">Backward-compat verification: locally re-render every Donut chart def listed in `notes/spikes/visualhost-chart-def-inventory.md` (output of task 001). Capture screenshots in `notes/spikes/visualhost-regression-evidence/donut-baseline/`. Pixel-diff must be ZERO for chart defs without the new keys.</step>
+    <step order="9">Build verification: `npm run build:prod` in VisualHost. Zero TypeScript errors. Bundle size delta noted.</step>
+    <step order="9.5">FULL rigor quality gates: invoke `Skill code-review` then `Skill adr-check` — block until both pass. ADR-021 token check, ADR-022 React version check, NFR-05 backward-compat evidence.</step>
+    <step order="10">Update TASK-INDEX.md: 020 → ✅. Update current-task.md to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (`npm run build:prod`)</tool>
+    <tool name="pcf-deploy">Deploy VisualHost PCF to dev for regression smoke (task 025 runs full smoke)</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/VisualHost/control/components/DonutChart.tsx</output>
+    <output type="code">src/client/pcf/VisualHost/control/components/ChartRenderer.tsx</output>
+    <output type="code">src/client/pcf/VisualHost/control/configurations/cardConfigResolver.ts (type extensions)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/visualhost-regression-evidence/donut-baseline/ (screenshots)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">DonutChart.tsx and ChartRenderer.tsx compile and `npm run build:prod` produces a clean bundle.</criterion>
+    <criterion testable="true">A test chart def with `donutLayout: "matrixRight"`, `donutCenterMode: "meanOfFields"`, `showBreakdownRows: true`, 3 fieldPivot fields, and `valueFormat: "letterGrade"` renders donut + 3 labeled rows + center "B+" (or equivalent) with "85/100" sub-value once FR-DV-01 is authored.</criterion>
+    <criterion testable="true">ALL existing Donut chart defs from the task-001 inventory render byte-identically (pixel-diff zero in regression evidence).</criterion>
+    <criterion testable="true">Segment colors come from `getTokenSetColors()` — zero hex/rgb literals introduced.</criterion>
+    <criterion testable="true">No `@fluentui/react` (v8) imports in touched files; no React 18+ APIs used.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Backward compat — existing Donut renders unchanged">
+      <steps>
+        <step>Deploy modified VisualHost to dev</step>
+        <step>Open a record bound to an existing Donut chart def (from task-001 inventory)</step>
+        <step>Compare DOM + screenshot against pre-change baseline</step>
+      </steps>
+      <expected>Zero visual diff in light + dark; axe scan clean</expected>
+    </test>
+    <test name="matrixRight layout renders correctly">
+      <steps>
+        <step>Author a test chart def with the five new keys (matrixRight, meanOfFields, etc.)</step>
+        <step>Render on a record with 3 fieldPivot field values</step>
+        <step>Inspect grid layout, center value formatting, segment colors</step>
+      </steps>
+      <expected>Donut left + 3 breakdown rows right; center shows mean as letterGrade; segments colored per `colorThresholds[].tokenSet`</expected>
+    </test>
+    <test name="Dark mode + axe">
+      <steps>
+        <step>Toggle MDA dark mode; re-render the matrixRight donut</step>
+        <step>Run axe DevTools scan</step>
+      </steps>
+      <expected>Dark-mode colors via Fluent v9 tokens; zero WCAG 2.1 AA violations</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Parallel-group C: this task touches DonutChart.tsx + ChartRenderer.tsx + cardConfigResolver.ts. Tasks 023 (HSBar) and 024 (CardChrome + VisualHostRoot) touch different files and can ship in parallel. Tasks 021/022 touch MetricCard.tsx and are NOT in this group (different files). If cardConfigResolver.ts shared-type edits conflict with 023's same-file edits, coordinate via the parallel-group lead.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Step 0.5 invoke fluent-v9-component (binding per design.md §6.0). Load knowledge files. Implement extensions. Verify NFR-05 with regression evidence. Build. Step 9.5 invoke code-review + adr-check (FULL rigor). Update task status.
+    </protocol>
+  </execution>
+</task>

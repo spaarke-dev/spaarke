@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Deploy Semantic Search PCF to Dataverse (FR-DOC-01..07)</title>
+    <phase>7: Deploy + Validation</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>040, 041, 042, 043, 044, 045, 046</dependencies>
+    <blocks>073, 074</blocks>
+    <tags>deploy, pcf, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF deploy with version bump (AP-1 binding fix). Stale-bundle risk if version not bumped in all 4 locations. Smoke check is mandatory post-deploy. Multiple upstream task dependencies.</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy the Semantic Search PCF (`src/client/pcf/SemanticSearchControl/`) to the dev/test Dataverse environment via production-mode build and `pac pcf push`. MANDATORY: bump version in the 4 locations specified by PCF-DEPLOYMENT-GUIDE.md BEFORE building. Use `npm run build:prod` (NOT `npm run build` — AP-1 binding fix per `.claude/FAILURE-MODES.md`). Verify post-deploy smoke check (control loads, no console errors, footer version reflects bump).
+  </prompt>
+
+  <role>
+    PCF deployment engineer familiar with `pcf-scripts build --buildMode production`, `pac pcf push`, ControlManifest version semantics, and the Spaarke PCF deployment checklist. Aware of AP-1 anti-pattern (`npm run build` produces 5-10× larger dev-mode bundles).
+  </role>
+
+  <goal>
+    The Semantic Search PCF deployed to the target Dataverse environment with the bumped version visible in: (a) the ControlManifest version on the published control, (b) the rendered footer text, (c) the Solutions area control version column. A smoke check on a Matter record loads the control without console errors. The control is ready for end-to-end validation in task 074.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 040-046 ship the Semantic Search PCF behavioral changes (FR-DOC-01 3-dot menu, FR-DOC-02 bulk-action bar, FR-DOC-03 preview restructured, FR-DOC-04 list/card toggle, FR-DOC-05 Tags filter, FR-DOC-06 filter relocation, FR-DOC-07 App Insights telemetry). This task deploys those changes. Per AP-1 (2026-05-14): `npm run build:prod` is the CORRECT invocation; `npm run build` produces dev-mode 5-10× larger bundles. Per PCF-DEPLOYMENT-GUIDE.md: version must be bumped in 4 locations before deploy or the deployed bundle will be stale.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/SemanticSearchControl/package.json</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-DOC-01..07 — all Semantic Search PCF behavioral changes shipped and bundled in this deploy</constraint>
+    <constraint source="spec">§MUST Rules — `npm run build:prod` (NOT `npm run build`)</constraint>
+    <constraint source="ADR-022">React 16/17 (PCF platform-provided); no React 18+ deps</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; dark mode supported</constraint>
+    <constraint source="ADR-028">@spaarke/auth v2 wired (already in place)</constraint>
+    <constraint source="FAILURE-MODES">AP-1: NEVER use `npm run build` — produces dev-mode bundles 5-10× larger</constraint>
+    <constraint source="project">PCF-DEPLOYMENT-GUIDE.md: version MUST be bumped in 4 locations BEFORE building</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+    <patterns>
+      <pattern name="PCF version bump (4 locations)" location="docs/guides/PCF-DEPLOYMENT-GUIDE.md">
+        Version MUST be updated in: (1) `ControlManifest.Input.xml` version attribute, (2) `package.json` version field, (3) footer version display in the React component, (4) any additional location PCF-DEPLOYMENT-GUIDE.md specifies (e.g., solution.xml if PCF is bundled in a solution).
+      </pattern>
+      <pattern name="Production build" location=".claude/FAILURE-MODES.md#ap-1">
+        `npm run build:prod` is correct. Verify the underlying `pcf-scripts build --buildMode production` flag — `-- --mode production` and `--production` are silently ignored.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Verify upstream deps shipped: tasks 040, 041, 042, 043, 044, 045, 046 all show ✅ in TASK-INDEX.md. If any not ✅, BLOCK and report.</step>
+    <step order="1">Read `docs/guides/PCF-DEPLOYMENT-GUIDE.md` in full. Identify the exact 4 locations where version must be bumped. Note the current version in each.</step>
+    <step order="2">Bump version in all 4 locations using a consistent increment (typically patch: e.g., 1.0.4 → 1.0.5). Verify the increment matches the project's version cadence (check git log on `ControlManifest.Input.xml`).</step>
+    <step order="3">Verify `package.json` build:prod script invokes `pcf-scripts build --buildMode production` (not `-- --mode production` or `--production`, which are silently ignored per AP-1).</step>
+    <step order="4">Run `npm install` (if dependencies changed) then `npm run build:prod` in `src/client/pcf/SemanticSearchControl/`. Verify build succeeds. Compare bundle size with the previous deploy's size — a >2× jump indicates dev-mode regression (AP-1).</step>
+    <step order="5">Invoke `Skill pcf-deploy` (or run `pac pcf push` directly) to push the control to the target Dataverse environment. Confirm the deploy command succeeds.</step>
+    <step order="6">Post-deploy smoke check: load a Matter record with the Semantic Search PCF on the form (use the dev environment URL). Verify (a) the control renders without console errors, (b) the footer shows the bumped version, (c) at least one search returns results, (d) the 3-dot menu opens on a row.</step>
+    <step order="7">Step 9.5 (FULL rigor): run `Skill code-review` + `Skill adr-check` on any uncommitted changes in `src/client/pcf/SemanticSearchControl/`. Resolve issues.</step>
+    <step order="8">Update TASK-INDEX.md: 070 → ✅. Reset current-task.md for next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (`npm run build:prod`)</tool>
+    <tool name="pac">Push PCF to Dataverse (`pac pcf push`)</tool>
+    <tool name="pcf-deploy">Skill for the deploy workflow</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">Semantic Search PCF deployed to target Dataverse environment with bumped version</output>
+    <output type="evidence">Smoke check screenshot or notes captured in projects/spaarke-matter-ui-enhancement-r1/notes/</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Version bumped in all 4 locations specified by PCF-DEPLOYMENT-GUIDE.md before build.</criterion>
+    <criterion testable="true">`npm run build:prod` succeeds; bundle size within expected range (no >2× regression vs prior deploy).</criterion>
+    <criterion testable="true">`pac pcf push` (or pcf-deploy skill) succeeds without errors.</criterion>
+    <criterion testable="true">Post-deploy smoke check: control loads on a Matter record with no console errors; footer shows the bumped version.</criterion>
+    <criterion testable="true">3-dot menu opens on a row in the deployed control (FR-DOC-01 surface smoke).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass on any uncommitted code changes.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Semantic Search PCF post-deploy smoke">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter</url>
+      <steps>
+        <step>Navigate to a Matter record with associated documents</step>
+        <step>Verify the Semantic Search PCF renders in the Documents section (or test harness location)</step>
+        <step>Open browser DevTools; verify no console errors during render</step>
+        <step>Verify the footer text displays the bumped version number</step>
+        <step>Click the 3-dot menu on the first row; verify menu opens with the 13-action structure</step>
+        <step>Toggle list/card view; verify rendering switches without errors</step>
+      </steps>
+      <expected>Control renders cleanly; version visible; menu opens; view toggle works</expected>
+    </test>
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle to dark mode in D365 personal settings</step>
+        <step>Reload the Matter form</step>
+        <step>Verify all colors adapt: no hardcoded white backgrounds, no hardcoded black text</step>
+        <step>Verify Fluent v9 semantic tokens render correctly</step>
+      </steps>
+      <expected>All UI elements use semantic tokens; dark mode renders without theme breakage</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    This task is parallel-safe with 071 (Visual Host deploy) and 072 (BFF deploy) — different deploy targets, no shared files.
+
+    If the smoke check fails (console errors, missing version), DO NOT proceed to task 074. Roll back via re-deploying the prior version from solution history, fix the root cause, and re-deploy.
+
+    AP-1 reminder: the wrong-belief that `npm run build` is correct was caught after a 6.7 MB bundle regression. Trust empirical bundle-size comparison over received wisdom.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor. Step 0.5 is NOT applicable (deploy task — no Fluent v9 component authoring). Load PCF-DEPLOYMENT-GUIDE.md + FAILURE-MODES.md (AP-1). Verify upstream deps ✅. Bump version (4 locations). Build with `npm run build:prod`. Push via pcf-deploy skill or `pac pcf push`. Run post-deploy smoke check via ui-test skill. Step 9.5: code-review + adr-check on uncommitted code. Update TASK-INDEX.
+    </protocol>
+  </execution>
+</task>

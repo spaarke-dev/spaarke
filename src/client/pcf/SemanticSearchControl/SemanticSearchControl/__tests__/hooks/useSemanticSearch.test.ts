@@ -29,6 +29,8 @@ const createMockResponse = (results: number, total: number): SearchResponse => (
     fileUrl: `https://example.com/doc-${i}`,
     recordUrl: `https://crm.dynamics.com/doc-${i}`,
     createdBy: null,
+    modifiedAt: null,
+    modifiedBy: null,
     summary: null,
     tldr: null,
   })),

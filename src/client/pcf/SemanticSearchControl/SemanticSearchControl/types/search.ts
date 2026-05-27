@@ -94,6 +94,17 @@ export interface SearchResult {
   entityLogicalName?: string;
   recordId?: string;
   createdBy: string | null;
+  /**
+   * Document last-modified timestamp. Populated by FR-BFF-01 (task 050) post-search
+   * projection from Dataverse `modifiedon`; falls back to AI Search `updatedAt` upstream.
+   * Consumed by the Documents PCF list view for default sort (`modifiedAt DESC`).
+   */
+  modifiedAt: string | null;
+  /**
+   * Name of user who last modified the document. From FR-BFF-01 post-search enrichment
+   * of `_modifiedby_value` formatted-value. Consumed by the list view "Modified by" column.
+   */
+  modifiedBy: string | null;
   summary: string | null;
   tldr: string | null;
   /** SPE driveItem ID. Needed alongside driveId to invoke AI analysis. */

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Export TagFilter + DocumentRowMenu from @spaarke/ui-components barrel</title>
+    <phase>1: Shared Components</phase>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
+    <estimated-hours>0.5-1</estimated-hours>
+    <dependencies>010, 011</dependencies>
+    <blocks>040, 041</blocks>
+    <tags>shared-components, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>No novel code — barrel re-exports only. ADR-012 applies (shared library contract). New file existence checks + build verification are needed, but no Fluent v9 component authoring, no business logic. STANDARD per task-create §3.5.5: has constraints but no novel implementation.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>The shared barrel `src/client/shared/Spaarke.UI.Components/src/index.ts` is touched after both 010 and 011 land. Running this in parallel with either would create merge conflicts on the barrel file. Must serialize after the barrel's source components exist.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per spec FR-SC-01 and FR-SC-02, both components must be exported from the `@spaarke/ui-components` barrel `src/index.ts` so downstream consumers (Semantic Search PCF Tags filter task, Semantic Search PCF row menu task) can `import { TagFilter, DocumentRowMenu, TagFilterOption, IDocumentRowMenuTarget, DocumentRowAction } from '@spaarke/ui-components'`. This task updates the barrel only — both components must already exist (tasks 010 and 011 must be ✅ before starting). Verify the shared library builds clean and both consuming PCFs still build against the updated barrel.
+  </prompt>
+
+  <role>
+    Frontend developer comfortable with TypeScript barrel-export hygiene in `@spaarke/ui-components` and aware of the React 16/17 PCF compatibility constraint (ADR-022) for anything re-exported from this library.
+  </role>
+
+  <goal>
+    `src/client/shared/Spaarke.UI.Components/src/index.ts` re-exports `TagFilter`, `DocumentRowMenu`, plus their public types (`TagFilterOption`, `IDocumentRowMenuTarget`, `DocumentRowAction`). The shared library builds clean. Both PCFs (Semantic Search + Visual Host) still build clean against the updated barrel.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 010 and 011 intentionally deferred barrel export to this task so that the barrel file is touched exactly once after both components exist, avoiding parallel-edit conflicts. This task is the gating step that makes both components consumable by the downstream PCF tasks (FR-DOC-01 row menu integration and FR-DOC-05 Tags filter integration).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/TagFilter.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/TagFilter.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/DocumentRowMenu.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-SC-01 — `TagFilter` exported from barrel `src/index.ts`</constraint>
+    <constraint source="spec">FR-SC-02 — `DocumentRowMenu` exported from barrel `src/index.ts`</constraint>
+    <constraint source="ADR-012">Shared component library is the single source of truth; no parallel per-PCF copies</constraint>
+    <constraint source="project">Both source components (TagFilter, DocumentRowMenu) MUST exist before this task starts — verify before editing barrel</constraint>
+    <constraint source="project">Preserve existing barrel ordering convention (read the file before editing to match the established grouping)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Shared barrel export grouping" location="src/client/shared/Spaarke.UI.Components/src/index.ts">
+        Follow the existing convention: components grouped together, types/interfaces grouped together; alphabetical within each group.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%.</step>
+    <step order="1" name="Verify dependencies">Confirm task 010 (TagFilter) and task 011 (DocumentRowMenu) are both ✅ in TASK-INDEX.md. Confirm the files exist: `src/client/shared/Spaarke.UI.Components/src/components/TagFilter.tsx`, `src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx`, `src/client/shared/Spaarke.UI.Components/src/types/TagFilter.ts`, `src/client/shared/Spaarke.UI.Components/src/types/DocumentRowMenu.ts`. If any are missing, STOP and report — this task is blocked.</step>
+    <step order="2" name="Read existing barrel">Read `src/client/shared/Spaarke.UI.Components/src/index.ts` end-to-end to identify the existing export grouping convention (components vs services vs types).</step>
+    <step order="3" name="Update barrel">Add re-exports for both components and their public types in the matching groups, preserving alphabetical-within-group ordering: `export * from './components/DocumentRowMenu';`, `export * from './components/TagFilter';`, `export * from './types/DocumentRowMenu';`, `export * from './types/TagFilter';` (or the project's prevailing style — match what is already there).</step>
+    <step order="4" name="Build verification — shared library">Run `npm run build:prod` in `src/client/shared/Spaarke.UI.Components`. Must succeed with zero TypeScript errors.</step>
+    <step order="5" name="Build verification — Semantic Search PCF">Run `npm run build:prod` in `src/client/pcf/SemanticSearchControl`. Must succeed.</step>
+    <step order="6" name="Build verification — Visual Host PCF">Run `npm run build:prod` in `src/client/pcf/VisualHost`. Must succeed.</step>
+    <step order="7" name="Smoke-test consumability">Write a one-line probe (TypeScript-only, no runtime) to confirm the named imports are resolvable: `import { TagFilter, DocumentRowMenu, TagFilterOption, IDocumentRowMenuTarget, DocumentRowAction } from '@spaarke/ui-components';` — confirm with `tsc --noEmit` from a probe location (or via the existing PCF compile, which will fail if any named export is missing).</step>
+    <step order="8" name="Update task tracking">Update `projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md`: task 012 status 🔲 → ✅. Reset `projects/spaarke-matter-ui-enhancement-r1/current-task.md` to the next pending task in the Phase 2 sequence (or to "none" if Phase 1 is complete).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build verification — `npm run build:prod` in shared lib and both PCFs</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/current-task.md (advance pointer)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/client/shared/Spaarke.UI.Components/src/index.ts` exports `TagFilter` and `DocumentRowMenu` components.</criterion>
+    <criterion testable="true">The barrel also exports `TagFilterOption`, `IDocumentRowMenuTarget`, and `DocumentRowAction` types.</criterion>
+    <criterion testable="true">Existing barrel grouping/ordering convention is preserved (verified by inspecting the diff against the prior file).</criterion>
+    <criterion testable="true">`npm run build:prod` succeeds in `src/client/shared/Spaarke.UI.Components` with zero TypeScript errors.</criterion>
+    <criterion testable="true">`npm run build:prod` succeeds in `src/client/pcf/SemanticSearchControl`.</criterion>
+    <criterion testable="true">`npm run build:prod` succeeds in `src/client/pcf/VisualHost`.</criterion>
+    <criterion testable="true">A consumer can `import { TagFilter, DocumentRowMenu, TagFilterOption, IDocumentRowMenuTarget, DocumentRowAction } from '@spaarke/ui-components';` without TypeScript errors.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 012 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    STANDARD rigor — no `Skill code-review` / `Skill adr-check` gate is required for this task per the task-create rigor rules. The build verification across the shared library + both consuming PCFs is the equivalent of a smoke test and is sufficient. If task 010 or 011 is not yet ✅ when this task starts, do NOT proceed — block and report. Barrel-edit conflicts are the classic parallel-execution failure mode; this task exists specifically to serialize that edit.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      🔒 RIGOR LEVEL: STANDARD. Verify 010 and 011 are ✅. Read the existing barrel. Add re-exports preserving convention. Build shared library + both PCFs. Update TASK-INDEX.md and current-task.md. No code-review / adr-check gates required at this rigor level.
+    </protocol>
+  </execution>
+</task>

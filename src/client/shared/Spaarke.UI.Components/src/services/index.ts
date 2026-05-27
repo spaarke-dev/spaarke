@@ -1,3 +1,4 @@
+export { AppInsightsService } from './AppInsightsService';
 export { EntityCreationService } from './EntityCreationService';
 export type {
   IFileUploadResult,

@@ -117,6 +117,20 @@ public sealed record SearchResult
     public string? CreatedBy { get; init; }
 
     /// <summary>
+    /// Document last-modified timestamp (from Dataverse <c>modifiedon</c> system field via post-search lookup; falls back to AI Search <c>updatedAt</c>).
+    /// Mirrors <see cref="CreatedAt"/> for the modify lifecycle. Consumed by the Documents PCF list view for default sort (<c>modifiedAt DESC</c>) per FR-BFF-01.
+    /// </summary>
+    [JsonPropertyName("modifiedAt")]
+    public DateTimeOffset? ModifiedAt { get; init; }
+
+    /// <summary>
+    /// Name of user who last modified the document (from Dataverse <c>_modifiedby_value</c> formatted-value lookup via post-search enrichment).
+    /// Mirrors <see cref="CreatedBy"/>. Per FR-BFF-01; consumed by the Documents PCF list view "Modified by" column.
+    /// </summary>
+    [JsonPropertyName("modifiedBy")]
+    public string? ModifiedBy { get; init; }
+
+    /// <summary>
     /// AI-generated full summary (from Dataverse post-search lookup).
     /// </summary>
     [JsonPropertyName("summary")]

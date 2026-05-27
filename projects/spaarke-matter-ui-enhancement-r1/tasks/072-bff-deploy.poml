@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Deploy Sprk.Bff.Api to Azure App Service (FR-BFF-01, FR-BFF-02)</title>
+    <phase>7: Deploy + Validation</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>050, 051</dependencies>
+    <blocks>074</blocks>
+    <tags>deploy, azure, bff-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production BFF deploy — affects all client surfaces (PCFs, code pages). Publish-size hygiene gate (ADR-029) and CVE check are binding. Smoke check of two new contract behaviors (modifiedAt/modifiedBy + bulk-download) required post-deploy.</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy `src/server/api/Sprk.Bff.Api/` to the dev/test Azure App Service via the `bff-deploy` skill. MANDATORY: verify publish-size delta against the ~60 MB compressed baseline per `.claude/constraints/azure-deployment.md` (ADR-029 binding); verify no new HIGH-severity transitive CVE via `dotnet list package --vulnerable --include-transitive`. Post-deploy smoke: (a) `GET /api/ai/search` returns `modifiedAt` + `modifiedBy` on each result (FR-BFF-01); (b) `POST /api/documents/bulk-download` returns a zip stream for a small sample request (FR-BFF-02).
+  </prompt>
+
+  <role>
+    Senior .NET deployment engineer with familiarity with `dotnet publish`, Azure App Service slot/swap, the BFF binding-governance rules (`.claude/constraints/bff-extensions.md`), and ADR-029 publish hygiene. Comfortable with `dotnet list package --vulnerable` and bundle-size analysis.
+  </role>
+
+  <goal>
+    The Sprk.Bff.Api deployed to the target Azure App Service with the FR-BFF-01 projection additions and FR-BFF-02 bulk-download endpoint live. Publish-size delta is documented (no significant regression from ~60 MB compressed baseline). No new HIGH-severity transitive CVEs introduced. Two smoke checks pass: `/api/ai/search` returns `modifiedAt` + `modifiedBy`; `POST /api/documents/bulk-download` returns a valid zip for a 2-doc sample request.
+  </goal>
+
+  <context>
+    <background>
+      Task 050 ships FR-BFF-01 (projection additions to `/api/ai/search`). Task 051 ships FR-BFF-02 (new `POST /api/documents/bulk-download` endpoint). This task deploys both. Per CLAUDE.md §10 (BFF Hygiene — Binding Governance), every BFF deploy MUST verify publish-size impact and CVE status; per ADR-029, the ~60 MB compressed baseline is the threshold. The 2026-05-19 publish-size jump (65 → 75+ MB) is the canonical example of why this gate exists.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/AiSearchEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/DocumentsBulkEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-BFF-01 — `/api/ai/search` projection includes `modifiedAt` + `modifiedBy`; existing fields unchanged</constraint>
+    <constraint source="spec">FR-BFF-02 — `POST /api/documents/bulk-download` returns zip; 413 for &gt;500 ids; per-doc failures degrade gracefully</constraint>
+    <constraint source="spec">NFR-06 — no new NuGet packages; no transitive CVE introductions; publish-size impact verified</constraint>
+    <constraint source="ADR-007">SpeFileStore facade — no Graph SDK types leaked above the facade for bulk-download</constraint>
+    <constraint source="ADR-008">Endpoint filters for auth (not global middleware)</constraint>
+    <constraint source="ADR-010">DI registrations ≤15 cap not exceeded</constraint>
+    <constraint source="ADR-019">SPE access via facade for bulk-download</constraint>
+    <constraint source="ADR-028">@spaarke/auth v2 function-based contract; managed identity</constraint>
+    <constraint source="ADR-029">Publish hygiene — ~60 MB compressed baseline; document delta</constraint>
+    <constraint source="project">CLAUDE.md §10 — placement justification cited; no new AI-internal type leakage into CRUD endpoints</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-007-spe-file-store-facade.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters-auth.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-spe-access.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+    <patterns>
+      <pattern name="BFF deploy via skill" location=".claude/skills/bff-deploy/SKILL.md">
+        Invoke `Skill bff-deploy` to run the deploy script. Verify publish-size delta + CVE status before pushing.
+      </pattern>
+      <pattern name="Publish-size hygiene" location=".claude/constraints/azure-deployment.md">
+        Baseline ~60 MB compressed. Document delta in PR description. Significant regression (>10 MB) requires investigation.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Verify upstream deps shipped: tasks 050 + 051 both show ✅ in TASK-INDEX.md. If not, BLOCK and report.</step>
+    <step order="1">Read `.claude/constraints/bff-extensions.md` and `.claude/constraints/azure-deployment.md`. Re-verify placement justification: bulk-download endpoint is correctly in BFF (per §12.2 placement decision in spec.md).</step>
+    <step order="2">Run `dotnet list package --vulnerable --include-transitive` in `src/server/api/Sprk.Bff.Api/`. Verify zero new HIGH-severity CVEs vs the prior deploy. If any new HIGH, BLOCK and remediate.</step>
+    <step order="3">Run `dotnet publish src/server/api/Sprk.Bff.Api/ -c Release -o ./bff-publish` locally. Capture compressed size of `./bff-publish` (`Compress-Archive` or `tar -czf`). Compare against the ~60 MB baseline. Document delta in `projects/spaarke-matter-ui-enhancement-r1/notes/`.</step>
+    <step order="4">If publish-size delta is &gt;10 MB above baseline, investigate (new transitive dependency? bundled assets?) before deploying. Document findings in notes.</step>
+    <step order="5">Invoke `Skill bff-deploy` to deploy to the target Azure App Service. Confirm deploy command succeeds and the App Service slot is healthy (check `/healthz` or `/ping`).</step>
+    <step order="6">Smoke check FR-BFF-01: issue a `GET /api/ai/search?query=test&amp;matterId={matterId}` against the deployed BFF (via curl or browser DevTools). Verify the response JSON contains `modifiedAt` (ISO datetime) and `modifiedBy` (display name) for each result. Verify existing fields are unchanged.</step>
+    <step order="7">Smoke check FR-BFF-02: issue a `POST /api/documents/bulk-download` with `{ "documentIds": [{2 valid doc guids}] }`. Verify HTTP 200 with `Content-Type: application/zip` and a valid zip payload containing the 2 docs. Verify the zip filename matches `documents-{matterIdOrBulk}-{timestamp}.zip`.</step>
+    <step order="8">Smoke check FR-BFF-02 edge: issue a `POST /api/documents/bulk-download` with 501 ids. Verify HTTP 413.</step>
+    <step order="9">Step 9.5 (FULL rigor): run `Skill code-review` + `Skill adr-check` on any uncommitted changes in `src/server/api/Sprk.Bff.Api/`. Resolve issues.</step>
+    <step order="10">Update TASK-INDEX.md: 072 → ✅. Reset current-task.md for next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + publish + CVE scan</tool>
+    <tool name="bff-deploy">Skill for the deploy workflow</tool>
+    <tool name="curl">Smoke-check endpoints post-deploy</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">Sprk.Bff.Api deployed to target Azure App Service</output>
+    <output type="evidence">Publish-size delta documented in projects/spaarke-matter-ui-enhancement-r1/notes/bff-publish-size-{date}.md</output>
+    <output type="evidence">CVE scan output (`dotnet list package --vulnerable`) captured in notes</output>
+    <output type="evidence">Smoke-check curl outputs for FR-BFF-01 + FR-BFF-02 captured in notes</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Tasks 050 + 051 both show ✅ in TASK-INDEX.md before this task starts.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` shows zero new HIGH-severity CVEs vs prior deploy.</criterion>
+    <criterion testable="true">Publish-size delta documented and within acceptable range (no &gt;10 MB regression vs ~60 MB baseline).</criterion>
+    <criterion testable="true">Deploy via `bff-deploy` skill succeeds; `/healthz` or `/ping` returns 200 post-deploy.</criterion>
+    <criterion testable="true">FR-BFF-01 smoke: `GET /api/ai/search` returns `modifiedAt` + `modifiedBy` on each result; existing fields unchanged.</criterion>
+    <criterion testable="true">FR-BFF-02 smoke: `POST /api/documents/bulk-download` with 2 valid ids returns HTTP 200 with valid zip; with 501 ids returns HTTP 413.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass on any uncommitted code changes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with 070 (Semantic Search deploy) and 071 (Visual Host deploy) — different deploy targets, no shared files.
+
+    The PCFs deployed in 070/071 consume the FR-BFF-01 projection additions and the FR-BFF-02 bulk-download endpoint. End-to-end validation (PCF → BFF round-trip) is owned by task 074, not this task. This task ONLY verifies BFF surface contract.
+
+    Per CLAUDE.md §10 binding rule: every BFF-touching project documents publish-size impact + CVE status in the PR description. The notes/ artifacts from this task are the evidence base for that PR section.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor. Step 0.5 is NOT applicable (deploy task — no Fluent v9 component authoring). Load bff-deploy skill + bff-extensions + azure-deployment + ADR-029. Verify upstream deps ✅. Run CVE scan. Run publish-size check. Deploy via bff-deploy skill. Run FR-BFF-01 + FR-BFF-02 smoke checks. Step 9.5: code-review + adr-check on uncommitted code. Update TASK-INDEX.
+    </protocol>
+  </execution>
+</task>

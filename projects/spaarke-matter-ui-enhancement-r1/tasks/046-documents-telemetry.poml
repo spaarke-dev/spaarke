@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Documents PCF — App Insights telemetry events; replace console.log (FR-DOC-07)</title>
+    <phase>4: Documents PCF</phase>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
+    <estimated-hours>3-4</estimated-hours>
+    <dependencies>002, 040, 041, 042, 043, 044, 045</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, react, fluent-ui, frontend, semantic-search, telemetry</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF code change replacing console.log with structured AppInsightsService calls; modifies production SemanticSearchControl across all feature surfaces from tasks 040-045; ADR-022 binding (React 16/17); no PII in payloads</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>shared file SemanticSearchControl.tsx + components from tasks 040-045</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per spec FR-DOC-07, replace `console.log` calls in the Semantic Search PCF with structured App Insights events via the shared `AppInsightsService` (task 002). Event names (minimum): `view_toggled` (with `value`), `tag_filter_applied` (with `tag_count`), `three_dot_menu_action_invoked` (with `action_name`), `preview_dialog_opened`, `bulk_action_invoked` (with `action_name` + `selection_count`). **Acceptance**: events visible in App Insights Live Metrics in &lt;60s after firing; no `console.log` of telemetry remains in production code path. No PII in event payloads (no userId, no email, no document content — only event names and structured properties).
+  </prompt>
+
+  <role>
+    Senior frontend developer expert in App Insights browser SDK + structured event design. Familiar with the shared `AppInsightsService` from task 002, the new feature surfaces from tasks 040-045, and PII-aware telemetry payload conventions.
+  </role>
+
+  <goal>
+    All telemetry-related `console.log` calls in the Semantic Search PCF replaced with `AppInsightsService.trackEvent(name, props)`. Event names and properties match spec FR-DOC-07. No PII in any payload. PCF builds clean. Code-review + adr-check pass. Events verified live in App Insights Live Metrics during PCF dev harness exercise.
+  </goal>
+
+  <context>
+    <background>
+      FR-DOC-07 is the telemetry-closure task for Phase 4. Tasks 040-045 introduced new user surfaces (3-dot menu, view toggle, tags filter, filter relocation, dialog restructure, bulk action bar) — each surface needs an App Insights event so product can measure adoption. The shared `AppInsightsService` was wired in task 002; this task consumes it. Owner Clarifications row 7 set the destination as direct browser SDK (NOT BFF-proxied) and the instrumentation key flow via PCF manifest property (already wired in task 002).
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/ResultCard.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/ResultsList.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/ListView.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/FilePreviewDialog.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/BulkActionBar.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/AppInsightsService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-DOC-07 — event names minimum: `view_toggled`, `tag_filter_applied`, `three_dot_menu_action_invoked`, `preview_dialog_opened`, `bulk_action_invoked`</constraint>
+    <constraint source="spec">FR-DOC-07 — event properties: `view_toggled.value`, `tag_filter_applied.tag_count`, `three_dot_menu_action_invoked.action_name`, `bulk_action_invoked.action_name` + `selection_count`</constraint>
+    <constraint source="spec">FR-DOC-07 — events visible in App Insights Live Metrics in &lt;60s after firing</constraint>
+    <constraint source="spec">FR-DOC-07 — no `console.log` of telemetry remains in production code path</constraint>
+    <constraint source="spec">FR-TEL-01 — direct browser SDK; instrumentation key via manifest property; NO PII in payloads</constraint>
+    <constraint source="ADR-012">Consume shared `AppInsightsService`; NO duplicate per-PCF SDK initialization</constraint>
+    <constraint source="ADR-022">React 16/17 compatible</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2 preserved (no auth headers in telemetry calls — SDK direct)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Shared AppInsightsService consumption" location="src/client/shared/Spaarke.UI.Components/src/services/AppInsightsService.ts">
+        Import singleton; call `trackEvent(name, props)`. Guard: if not initialized, the service warns silently — no throw.
+      </pattern>
+      <pattern name="PII-safe property design" location=".claude/constraints/pcf.md">
+        Only event names + structured non-PII properties (counts, enum values, action names). NO userId, NO email, NO document content, NO matterId verbatim (hash if needed for grouping).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. If higher, run `context-handoff` before proceeding.</step>
+    <step order="0.5" name="Invoke fluent-v9-component">Invoke `Skill fluent-v9-component` (binding per design.md §6.0 — applies even to telemetry work in Fluent v9 React components touched).</step>
+    <step order="1" name="Load knowledge">Read ADR-012, ADR-022, ADR-028; PCF CLAUDE.md. Read `AppInsightsService.ts` to confirm API shape. Read all 6 component files modified by tasks 040-045 to identify telemetry insertion points.</step>
+    <step order="2" name="Inventory existing console.log calls">Grep `src/client/pcf/SemanticSearchControl/` for `console.log`. Categorize: (a) telemetry-intent (replace with trackEvent), (b) debug-only (remove for production), (c) error logging (keep — those go to console, not Insights).</step>
+    <step order="3" name="Wire view_toggled event">In `SemanticSearchControl.tsx` view toggle handler: `AppInsightsService.trackEvent('view_toggled', { value: newView })` where `newView` is `'list' | 'card'`.</step>
+    <step order="4" name="Wire tag_filter_applied event">In `SemanticSearchControl.tsx` (or wherever TagFilter `onChange` is wired): on each tag selection change, `AppInsightsService.trackEvent('tag_filter_applied', { tag_count: selectedTags.length })`. Debounce or fire-on-change — per spec, count is the key signal.</step>
+    <step order="5" name="Wire three_dot_menu_action_invoked event">In the menu action dispatch (`ResultCard.tsx` + `FilePreviewDialog.tsx` + `ListView.tsx`): for every action invocation, `AppInsightsService.trackEvent('three_dot_menu_action_invoked', { action_name })`. Action names from spec FR-DOC-01: 'preview', 'ai_summary', 'open_file', 'find_similar', 'download', 'copy_link', 'email', 'open_record', 'toggle_workspace', 'pin_to_top', 'rename', 'delete'.</step>
+    <step order="6" name="Wire preview_dialog_opened event">When `FilePreviewDialog` opens (row click handler in `ResultCard.tsx` or `ListView.tsx`): `AppInsightsService.trackEvent('preview_dialog_opened')`. No properties required by spec.</step>
+    <step order="7" name="Wire bulk_action_invoked event">In `BulkActionBar.tsx` action handlers: `AppInsightsService.trackEvent('bulk_action_invoked', { action_name, selection_count: selectedIds.length })`. Action names: 'email', 'download', 'pin', 'delete', 'doc_type', 'share_link'.</step>
+    <step order="8" name="Verify NO PII">Re-read all `trackEvent` call sites — confirm payload contains only enum values + counts. No userId, no email, no matterId raw, no document title, no document content.</step>
+    <step order="9" name="Remove debug console.log">Remove any `console.log` calls that were debug-only (not telemetry, not error). Keep `console.warn` / `console.error` for error logging.</step>
+    <step order="10" name="Verify no telemetry console.log remains">Grep `src/client/pcf/SemanticSearchControl/` again for `console.log` — confirm only error logging (or removed entirely). Acceptance gate: zero telemetry `console.log` in production code path.</step>
+    <step order="11" name="Verify events fire in dev harness">Build PCF, run in dev harness with instrumentation key from local config. Exercise each surface (toggle view, apply tags, open menu action, open preview, invoke bulk action). Verify events appear in App Insights Live Metrics within 60s.</step>
+    <step order="12" name="Build verification">Run `npm run build:prod` from PCF root.</step>
+    <step order="9.5" name="Quality gates (FULL rigor)">Invoke `Skill code-review` then `Skill adr-check`. Resolve all findings. `code-review` will verify no PII in payloads + `authenticatedFetch` preserved on BFF calls.</step>
+    <step order="13" name="Checkpoint">Run `context-handoff` (silent: ✅ Checkpoint).</step>
+    <step order="14" name="Update task tracking">Update TASK-INDEX.md: task 046 status 🔲 → ✅. Reset `current-task.md` to next pending task (047).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (`npm run build:prod`)</tool>
+    <tool name="git">Version control</tool>
+    <tool name="Skill fluent-v9-component">Mandatory at Step 0.5</tool>
+    <tool name="Skill code-review">Quality gate at Step 9.5</tool>
+    <tool name="Skill adr-check">ADR compliance gate at Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/ResultCard.tsx</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/ListView.tsx</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/FilePreviewDialog.tsx</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/BulkActionBar.tsx</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">5 event names fire from the correct surfaces: `view_toggled`, `tag_filter_applied`, `three_dot_menu_action_invoked`, `preview_dialog_opened`, `bulk_action_invoked`.</criterion>
+    <criterion testable="true">Event properties match spec: `view_toggled.value`, `tag_filter_applied.tag_count`, `three_dot_menu_action_invoked.action_name`, `bulk_action_invoked.action_name` + `selection_count`.</criterion>
+    <criterion testable="true">No telemetry `console.log` remains in `src/client/pcf/SemanticSearchControl/` (verifiable by grep).</criterion>
+    <criterion testable="true">No PII in any event payload (no userId, no email, no document title/content, no raw matterId).</criterion>
+    <criterion testable="true">Events visible in App Insights Live Metrics within 60s of firing (verified during dev harness exercise).</criterion>
+    <criterion testable="true">PCF builds clean.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` skills pass.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 046 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="view_toggled fires on toggle">
+      <steps>
+        <step>Open Documents PCF in dev harness (instrumentation key configured).</step>
+        <step>Toggle list → card.</step>
+        <step>Within 60s, verify `view_toggled` event with `value: 'card'` appears in App Insights Live Metrics.</step>
+      </steps>
+      <expected>Event fires and is observable.</expected>
+    </test>
+    <test name="tag_filter_applied fires with count">
+      <steps>
+        <step>Select 2 tags in the Tags filter.</step>
+        <step>Verify `tag_filter_applied` event with `tag_count: 2`.</step>
+        <step>Add a 3rd tag — verify event fires again with `tag_count: 3`.</step>
+      </steps>
+      <expected>Event fires on each change; count accurate.</expected>
+    </test>
+    <test name="three_dot_menu_action_invoked fires per action">
+      <steps>
+        <step>Open 3-dot menu on a row; click "Preview".</step>
+        <step>Verify event with `action_name: 'preview'`.</step>
+        <step>Repeat for 2-3 other actions to spot-check.</step>
+      </steps>
+      <expected>One event per invocation with correct action_name.</expected>
+    </test>
+    <test name="bulk_action_invoked fires with count + action">
+      <steps>
+        <step>Select 4 rows; click Download in bulk-action bar.</step>
+        <step>Verify event with `action_name: 'download'` + `selection_count: 4`.</step>
+      </steps>
+      <expected>Event fires with correct count.</expected>
+    </test>
+    <test name="No PII verification (grep)">
+      <steps>
+        <step>Grep for `userId`, `email`, `documentTitle` within trackEvent calls.</step>
+        <step>Expect zero matches.</step>
+      </steps>
+      <expected>No PII fields referenced in telemetry payloads.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Depends on task 002 (AppInsightsService wired + manifest key plumbed). Should ship LAST in Phase 4 so all feature surfaces from tasks 040-045 exist to instrument. Visual Host PCF telemetry (`card_rendered`, `card_expanded` events) is a separate concern handled in Phase 5 (FR-VH-* extensions). The instrumentation key itself is supplied at deploy time via manifest property — this task does NOT modify the manifest (task 002 already added it). PII-safe property design — if `matterId` is needed for grouping, hash it client-side (do not log raw guid).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      🔒 RIGOR LEVEL: FULL. Invoke `Skill fluent-v9-component` at Step 0.5. Load ADRs + patterns. Inventory console.log calls. Wire 5 events (view_toggled, tag_filter_applied, three_dot_menu_action_invoked, preview_dialog_opened, bulk_action_invoked) via shared AppInsightsService. Verify no PII. Build PCF. Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>
