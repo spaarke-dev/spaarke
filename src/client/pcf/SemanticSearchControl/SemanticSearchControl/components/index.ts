@@ -14,3 +14,5 @@ export { HighlightedSnippet } from './HighlightedSnippet';
 export { FilterDropdown } from './FilterDropdown';
 export { DateRangeFilter } from './DateRangeFilter';
 export { FilePreviewDialog } from './FilePreviewDialog';
+export { ListView, type ListSortColumn, type ListSortDirection } from './ListView';
+export { CommandBar } from './CommandBar';

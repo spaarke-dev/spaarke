@@ -3,7 +3,8 @@
   <metadata>
     <title>Documents PCF — restructure FilePreviewDialog to 960 px max-width with 2-column body + new footer (FR-DOC-03)</title>
     <phase>4: Documents PCF</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>4-6</estimated-hours>
     <dependencies>040</dependencies>
     <blocks>045</blocks>

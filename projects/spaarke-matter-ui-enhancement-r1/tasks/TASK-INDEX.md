@@ -41,10 +41,10 @@
 | 033 | Matter Next Date chart def | 3 | FR-DV-04 | ✅ | 003 | D | STANDARD |
 | 034 | Matter Activity chart def | 3 | FR-DV-05 | ✅ | 003, 022, 025 | D | STANDARD |
 | 040 | Documents three-dot row menu | 4 | FR-DOC-01 | ✅ | 012 | — (serial w/041..046) | FULL |
-| 041 | Documents list/card toggle + sortable columns + multi-select + pin | 4 | FR-DOC-04 | 🔲 | 040, 050 | — (serial) | FULL |
-| 042 | Documents Tags filter (consumes TagFilter) | 4 | FR-DOC-05 | 🔲 | 012, 041 | — (serial) | FULL |
-| 043 | Documents filter relocation (sidebar → command bar) | 4 | FR-DOC-06 | 🔲 | 042 | — (serial) | FULL |
-| 044 | FilePreviewDialog restructure (960 px, 2-col body) | 4 | FR-DOC-03 | 🔲 | 040 | — (serial) | FULL |
+| 041 | Documents list/card toggle + sortable columns + multi-select + pin | 4 | FR-DOC-04 | ✅ | 040, 050 | — (serial) | FULL |
+| 042 | Documents Tags filter (consumes TagFilter) | 4 | FR-DOC-05 | ✅ | 012, 041 | — (serial) | FULL |
+| 043 | Documents filter relocation (sidebar → command bar) | 4 | FR-DOC-06 | ✅ | 042 | — (serial) | FULL |
+| 044 | FilePreviewDialog restructure (960 px, 2-col body) | 4 | FR-DOC-03 | ✅ | 040 | — (serial) | FULL |
 | 045 | Bulk-action bar (6 actions) | 4 | FR-DOC-02 | 🔲 | 041, 051 | — (serial) | FULL |
 | 046 | Documents telemetry (App Insights events) | 4 | FR-DOC-07 | 🔲 | 002, 040, 041, 042, 043, 044, 045 | — (serial) | FULL |
 | 047 | VisualHost docs update (FR-DOC-09 — architecture + setup guide) | 4 | FR-DOC-09 | ✅ | 020, 021, 022, 023, 030, 031, 032, 033, 034 | F | STANDARD |

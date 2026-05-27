@@ -1,21 +1,31 @@
 /**
- * FilePreviewDialog — Full-screen modal for document preview.
+ * FilePreviewDialog — Modal for document preview.
  *
- * Mirrors the LegalWorkspace FilePreviewDialog but uses callbacks
- * instead of importing service modules directly, so it works within
- * the PCF control's service layer.
+ * Per FR-DOC-03 (task 044), the dialog now uses a 2-column body layout
+ * (640 px iframe · 320 px metadata pane) clamped to 960 px max-width.
+ * The metadata pane renders three sections top→bottom:
+ *   1. AI summary  (sparkle icon + paragraph; rendered when `onFetchSummary`
+ *      is provided — falls back to a friendly empty state otherwise)
+ *   2. Tags        (single Fluent v9 `Tag` chip from `documentType`)
+ *   3. Details     (Created by · Created · Size · Type)
  *
- * Per FR-DOC-01, the previous inline toolbar (Open File / Open Record /
- * Email / Copy Link / Workspace) is replaced by a single 3-dot
- * `DocumentRowMenu` shared component. Actions not reachable from the
- * dialog surface (preview/findSimilar/aiSummary/pinToTop/rename/delete/
- * download) are hidden via the menu's `disabledActions` prop until those
- * handlers are introduced by follow-on Phase 4 tasks (044 dialog
- * restructure).
+ * Per FR-DOC-01 (task 040), the title-bar 3-dot menu is `DocumentRowMenu`.
+ * Task 044 enables the menu actions the dialog can now service
+ * (`download`, `email`, `copyLink`, plus `aiSummary` / `findSimilar` when
+ * the corresponding callbacks are wired). `preview` stays hidden because
+ * the dialog IS the preview surface; `pinToTop` / `rename` / `delete`
+ * stay hidden because no handler exists at the PCF surface yet.
  *
- * @see ADR-012 - Shared component library
+ * Footer actions render left → right: Find similar (subtle) · Close
+ * (secondary) · Open file (primary).
+ *
+ * Iframe preview pipeline is unchanged from task 040: `fetchPreviewUrl`
+ * runs on open, the URL feeds the existing sandboxed iframe.
+ *
+ * @see ADR-012 - Shared component library (DocumentRowMenu, AiSummaryPopover)
  * @see ADR-021 - Fluent UI v9 (semantic tokens, dark-mode parity)
- * @see spec.md FR-DOC-01
+ * @see ADR-022 - React 16/17 compatible (no React 18-only APIs)
+ * @see spec.md FR-DOC-01, FR-DOC-03
  */
 
 import * as React from 'react';
@@ -25,16 +35,19 @@ import {
   DialogBody,
   DialogTitle,
   DialogContent,
+  DialogActions,
   Button,
   Tooltip,
   Spinner,
   Text,
+  Tag,
   makeStyles,
   shorthands,
   tokens,
 } from '@fluentui/react-components';
 import {
   Dismiss24Regular,
+  Sparkle20Filled,
 } from '@fluentui/react-icons';
 // Deep-path import (not the barrel) — the barrel pulls in RichTextEditor →
 // `@lexical/react` ESM modules that don't resolve under React 16 (PCF target
@@ -46,6 +59,20 @@ import {
 } from '@spaarke/ui-components/dist/components/DocumentRowMenu';
 
 // ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/**
+ * Shape of the AI-summary payload returned by `onFetchSummary`.
+ * Matches the shape used by `AiSummaryPopover` (`ISummaryData`) so callers
+ * can reuse the same fetch closure across surfaces.
+ */
+export interface IFilePreviewDialogSummary {
+  summary: string | null;
+  tldr: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -54,11 +81,23 @@ export interface IFilePreviewDialogProps {
   documentName: string;
   /** Stable document identifier — required for the 3-dot menu's aria-label. */
   documentId: string;
-  /** Optional document type (file extension or category) for menu context. */
+  /** Optional document type (label, e.g. "Contract"). Drives the Tag chip. */
   documentType?: string;
+  /** Optional "Created by" display name for the Details section. */
+  createdBy?: string | null;
+  /** Optional ISO date string for the Details section "Created" row. */
+  createdAt?: string | null;
+  /** Optional file size in bytes for the Details section "Size" row. */
+  fileSize?: number | null;
   onClose: () => void;
   /** Fetch the preview embed URL. Called when the dialog opens. */
   fetchPreviewUrl: () => Promise<string | null>;
+  /**
+   * Fetch the AI summary payload. When provided, the AI summary section
+   * renders the returned tldr/summary. When omitted, the section shows a
+   * friendly empty-state line ("Summary not available for this document.").
+   */
+  onFetchSummary?: () => Promise<IFilePreviewDialogSummary>;
   /** Open the file in desktop or web app. */
   onOpenFile: (mode: 'desktop' | 'web') => void;
   /** Open the Dataverse record in a new tab. */
@@ -71,7 +110,21 @@ export interface IFilePreviewDialogProps {
   onToggleWorkspace?: () => void;
   /** Whether document is currently in workspace. */
   isInWorkspace?: boolean;
+  /**
+   * Open the "Find similar" surface for this document. When provided, the
+   * Find similar footer button + `findSimilar` menu item are enabled; when
+   * omitted, both are hidden.
+   */
+  onFindSimilar?: () => void;
 }
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const THUMBNAIL_COLUMN_WIDTH = '640px';
+const METADATA_COLUMN_WIDTH = '320px';
+const DIALOG_MAX_WIDTH = '960px';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -79,8 +132,8 @@ export interface IFilePreviewDialogProps {
 
 const useStyles = makeStyles({
   surface: {
-    width: '85vw',
-    maxWidth: '880px',
+    width: '100%',
+    maxWidth: DIALOG_MAX_WIDTH,
     height: '85vh',
     maxHeight: '85vh',
     ...shorthands.padding('0px'),
@@ -97,7 +150,7 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalS,
-    borderBottomWidth: '1px',
+    borderBottomWidth: tokens.strokeWidthThin,
     borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
@@ -115,12 +168,22 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
   },
+  // 2-column body grid: 640 px thumbnail | 320 px metadata pane
   body: {
     ...shorthands.padding('0px'),
     flex: 1,
     minHeight: 0,
+    display: 'grid',
+    gridTemplateColumns: `${THUMBNAIL_COLUMN_WIDTH} ${METADATA_COLUMN_WIDTH}`,
+    ...shorthands.overflow('hidden'),
+  },
+  // Iframe container — fills the left column
+  thumbnailCell: {
     position: 'relative' as const,
     ...shorthands.overflow('hidden'),
+    borderRightWidth: tokens.strokeWidthThin,
+    borderRightStyle: 'solid',
+    borderRightColor: tokens.colorNeutralStroke2,
   },
   iframe: {
     position: 'absolute' as const,
@@ -138,8 +201,121 @@ const useStyles = makeStyles({
     width: '100%',
     height: '100%',
     gap: tokens.spacingVerticalM,
+    ...shorthands.padding(tokens.spacingHorizontalL),
+    textAlign: 'center' as const,
+  },
+  // Metadata pane — scrolls if content overflows
+  metadataPane: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
+    paddingTop: tokens.spacingVerticalL,
+    paddingBottom: tokens.spacingVerticalL,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  // Section wrapper
+  section: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  sectionHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  // AI summary content
+  summaryTldr: {
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  summaryBody: {
+    whiteSpace: 'pre-wrap' as const,
+    color: tokens.colorNeutralForeground2,
+  },
+  // Tags chip wrapper
+  tagWrap: {
+    display: 'flex',
+    flexWrap: 'wrap' as const,
+    gap: tokens.spacingHorizontalS,
+  },
+  // Details grid — labels on left, values on right
+  detailsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(80px, auto) 1fr',
+    columnGap: tokens.spacingHorizontalM,
+    rowGap: tokens.spacingVerticalXS,
+    alignItems: 'baseline',
+  },
+  detailsLabel: {
+    color: tokens.colorNeutralForeground3,
+  },
+  detailsValue: {
+    color: tokens.colorNeutralForeground1,
+    ...shorthands.overflow('hidden'),
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  // Footer action bar
+  footer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    borderTopWidth: tokens.strokeWidthThin,
+    borderTopStyle: 'solid',
+    borderTopColor: tokens.colorNeutralStroke2,
+    flexShrink: 0,
   },
 });
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return '—';
+  }
+}
+
+function formatFileSize(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined || isNaN(bytes) || bytes < 0) return '—';
+  if (bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unitIdx = 0;
+  while (value >= 1024 && unitIdx < units.length - 1) {
+    value /= 1024;
+    unitIdx += 1;
+  }
+  // 1 decimal for KB+, no decimal for B
+  const formatted = unitIdx === 0 ? value.toString() : value.toFixed(1);
+  return `${formatted} ${units[unitIdx]}`;
+}
+
+function nonEmpty(value: string | null | undefined): string {
+  return value && value.trim().length > 0 ? value : '—';
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -150,14 +326,19 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   documentName,
   documentId,
   documentType,
+  createdBy,
+  createdAt,
+  fileSize,
   onClose,
   fetchPreviewUrl,
+  onFetchSummary,
   onOpenFile,
   onOpenRecord,
   onEmailDocument,
   onCopyLink,
   onToggleWorkspace,
   isInWorkspace,
+  onFindSimilar,
 }) => {
   const styles = useStyles();
 
@@ -165,11 +346,19 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState(false);
 
-  // Fetch preview URL when dialog opens
+  // AI summary state — lazily fetched once per dialog open. Reset on close.
+  const [summary, setSummary] = React.useState<IFilePreviewDialogSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = React.useState(false);
+  const [summaryError, setSummaryError] = React.useState(false);
+
+  // Fetch preview URL when dialog opens — pipeline unchanged from task 040.
   React.useEffect(() => {
     if (!open) {
       setPreviewUrl(null);
       setError(false);
+      // Also reset summary state on close so the next open re-fetches.
+      setSummary(null);
+      setSummaryError(false);
       return;
     }
 
@@ -193,6 +382,31 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
     };
   }, [open, fetchPreviewUrl]);
 
+  // Fetch AI summary when dialog opens (only if caller provided a fetcher).
+  React.useEffect(() => {
+    if (!open || !onFetchSummary) return;
+
+    let cancelled = false;
+    setSummaryLoading(true);
+    setSummaryError(false);
+
+    void onFetchSummary()
+      .then(data => {
+        if (cancelled) return;
+        setSummary(data);
+        setSummaryLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSummaryError(true);
+        setSummaryLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, onFetchSummary]);
+
   const handleRetry = React.useCallback(() => {
     setLoading(true);
     setError(false);
@@ -209,13 +423,20 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   }, [fetchPreviewUrl]);
 
   // -------------------------------------------------------------------------
-  // 3-dot menu dispatch — replaces the previous Toolbar of inline icons.
-  //
-  // The dialog surface only owns 5 of the 12 canonical row actions
-  // (openFile, openRecord, email, copyLink, toggleWorkspace). Until task
-  // 044 (FR-DOC-03 dialog restructure) introduces handlers for the rest,
-  // we hide unsupported actions via `disabledActions`. The remaining 5
-  // are wired to the existing dialog handlers — no orphaned affordances.
+  // 3-dot menu dispatch — task 040 wired the menu; task 044 enables actions
+  // the dialog can now service:
+  //   • download  → reuses `onOpenFile('desktop')` (matches ResultCard
+  //                 convention — see ResultCard.tsx case 'download':)
+  //   • email     → existing handler
+  //   • copyLink  → existing handler
+  //   • aiSummary → already visible inline; menu item is a no-op when
+  //                 `onFetchSummary` isn't provided (hidden via
+  //                 `disabledActions` below).
+  //   • findSimilar → routed to `onFindSimilar` when provided.
+  // The following stay hidden because the dialog surface cannot service
+  // them today (no PCF-level handler exists, and `preview` would re-open
+  // the dialog the user is already inside):
+  //   • preview, pinToTop, rename, delete
   // -------------------------------------------------------------------------
 
   const target = React.useMemo<IDocumentRowMenuTarget>(
@@ -245,16 +466,29 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
         case 'toggleWorkspace':
           onToggleWorkspace?.();
           return;
-        // The following actions are not reachable from the dialog surface
-        // today; they are hidden by `disabledActions` below. Including the
-        // cases keeps the exhaustive `never` check happy.
-        case 'preview':
-        case 'aiSummary':
-        case 'findSimilar':
         case 'download':
+          // Mirrors ResultCard.tsx 'download' handling — the existing
+          // open-file pipeline already streams the SPE blob and triggers
+          // the browser download for file types without a desktop protocol.
+          onOpenFile('desktop');
+          return;
+        case 'findSimilar':
+          onFindSimilar?.();
+          return;
+        case 'aiSummary':
+          // The AI summary section is already rendered in the metadata
+          // pane (when `onFetchSummary` is provided). No popover to open
+          // from inside the dialog — the menu item is hidden via
+          // `disabledActions` when no fetcher is available. Otherwise
+          // it's still a no-op here because the section is in-view.
+          return;
+        case 'preview':
         case 'pinToTop':
         case 'rename':
         case 'delete':
+          // Not reachable from the dialog surface — hidden via
+          // `disabledActions` below. The cases keep the exhaustive
+          // `never` check happy.
           return;
         default: {
           const _never: never = action;
@@ -263,26 +497,161 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
         }
       }
     },
-    [onOpenFile, onOpenRecord, onEmailDocument, onCopyLink, onToggleWorkspace]
+    [
+      onOpenFile,
+      onOpenRecord,
+      onEmailDocument,
+      onCopyLink,
+      onToggleWorkspace,
+      onFindSimilar,
+    ]
   );
 
-  // Hide actions the dialog cannot service today. Including `toggleWorkspace`
-  // in the hidden set when no callback was provided keeps the menu honest.
+  // Hide only the actions the dialog cannot service.
+  // `preview` is always hidden (dialog IS the preview).
+  // `pinToTop` / `rename` / `delete` are hidden until handlers exist at the
+  // PCF surface (scoped to follow-on Phase 4 tasks per project plan).
+  // `aiSummary` / `findSimilar` are hidden when no callback was provided.
+  // `toggleWorkspace` is hidden when no callback was provided (matches the
+  // task 040 honest-affordance behavior).
   const dialogDisabledActions = React.useMemo<DocumentRowAction[]>(() => {
-    const hidden: DocumentRowAction[] = [
-      'preview',
-      'aiSummary',
-      'findSimilar',
-      'download',
-      'pinToTop',
-      'rename',
-      'delete',
-    ];
-    if (!onToggleWorkspace) {
-      hidden.push('toggleWorkspace');
-    }
+    const hidden: DocumentRowAction[] = ['preview', 'pinToTop', 'rename', 'delete'];
+    if (!onFetchSummary) hidden.push('aiSummary');
+    if (!onFindSimilar) hidden.push('findSimilar');
+    if (!onToggleWorkspace) hidden.push('toggleWorkspace');
     return hidden;
-  }, [onToggleWorkspace]);
+  }, [onFetchSummary, onFindSimilar, onToggleWorkspace]);
+
+  // -------------------------------------------------------------------------
+  // Render helpers
+  // -------------------------------------------------------------------------
+
+  const renderPreviewArea = (): React.ReactElement => {
+    if (loading) {
+      return (
+        <div className={styles.centerContent}>
+          <Spinner size="large" label="Loading preview..." labelPosition="below" />
+        </div>
+      );
+    }
+    if (error) {
+      return (
+        <div className={styles.centerContent}>
+          <Text size={400} weight="semibold">
+            Preview not available
+          </Text>
+          <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+            Unable to load the document preview. The file may be unsupported or temporarily unavailable.
+          </Text>
+          <Button appearance="primary" onClick={handleRetry}>
+            Retry
+          </Button>
+        </div>
+      );
+    }
+    if (previewUrl) {
+      return (
+        <iframe
+          src={previewUrl}
+          title={`Preview: ${documentName}`}
+          className={styles.iframe}
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+        />
+      );
+    }
+    return <div className={styles.centerContent} />;
+  };
+
+  const renderSummarySection = (): React.ReactElement => {
+    // No fetcher provided — render the empty state without firing any request.
+    if (!onFetchSummary) {
+      return (
+        <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+          Summary not available for this document.
+        </Text>
+      );
+    }
+    if (summaryLoading) {
+      return <Spinner size="small" label="Loading summary..." labelPosition="after" />;
+    }
+    if (summaryError) {
+      return (
+        <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+          Summary not available for this document.
+        </Text>
+      );
+    }
+    if (!summary || (!summary.tldr && !summary.summary)) {
+      return (
+        <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+          No summary available for this document.
+        </Text>
+      );
+    }
+    return (
+      <>
+        {summary.tldr && (
+          <Text className={styles.summaryTldr} size={300}>
+            {summary.tldr}
+          </Text>
+        )}
+        {summary.summary && (
+          <Text className={styles.summaryBody} size={200}>
+            {summary.summary}
+          </Text>
+        )}
+      </>
+    );
+  };
+
+  const renderTagSection = (): React.ReactElement => {
+    if (!documentType || documentType.trim().length === 0) {
+      return (
+        <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+          —
+        </Text>
+      );
+    }
+    return (
+      <div className={styles.tagWrap}>
+        <Tag appearance="filled" shape="rounded" size="small">
+          {documentType}
+        </Tag>
+      </div>
+    );
+  };
+
+  const renderDetailsSection = (): React.ReactElement => (
+    <div className={styles.detailsGrid} role="list" aria-label="Document details">
+      <Text size={200} className={styles.detailsLabel} role="listitem">
+        Created by
+      </Text>
+      <Text size={200} className={styles.detailsValue} title={nonEmpty(createdBy)}>
+        {nonEmpty(createdBy)}
+      </Text>
+
+      <Text size={200} className={styles.detailsLabel} role="listitem">
+        Created
+      </Text>
+      <Text size={200} className={styles.detailsValue}>
+        {formatDate(createdAt)}
+      </Text>
+
+      <Text size={200} className={styles.detailsLabel} role="listitem">
+        Size
+      </Text>
+      <Text size={200} className={styles.detailsValue}>
+        {formatFileSize(fileSize)}
+      </Text>
+
+      <Text size={200} className={styles.detailsLabel} role="listitem">
+        Type
+      </Text>
+      <Text size={200} className={styles.detailsValue} title={nonEmpty(documentType)}>
+        {nonEmpty(documentType)}
+      </Text>
+    </div>
+  );
 
   return (
     <Dialog
@@ -292,7 +661,7 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
       }}
     >
       <DialogSurface className={styles.surface}>
-        {/* Title bar — 3-dot menu replaces the inline action Toolbar */}
+        {/* Title bar — 3-dot menu replaces the inline action Toolbar (task 040) */}
         <div className={styles.titleBar}>
           <DialogTitle action={null} className={styles.titleText}>
             {documentName || 'Document Preview'}
@@ -319,37 +688,51 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
           </div>
         </div>
 
-        {/* Preview content */}
+        {/* 2-column body — iframe (left) | metadata pane (right) */}
         <DialogBody className={styles.body}>
-          <DialogContent className={styles.body}>
-            {loading && (
-              <div className={styles.centerContent}>
-                <Spinner size="large" label="Loading preview..." labelPosition="below" />
-              </div>
-            )}
-            {error && !loading && (
-              <div className={styles.centerContent}>
-                <Text size={400} weight="semibold">
-                  Preview not available
-                </Text>
-                <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-                  Unable to load the document preview. The file may be unsupported or temporarily unavailable.
-                </Text>
-                <Button appearance="primary" onClick={handleRetry}>
-                  Retry
-                </Button>
-              </div>
-            )}
-            {previewUrl && !loading && !error && (
-              <iframe
-                src={previewUrl}
-                title={`Preview: ${documentName}`}
-                className={styles.iframe}
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-              />
-            )}
+          <DialogContent className={styles.thumbnailCell}>{renderPreviewArea()}</DialogContent>
+          <DialogContent className={styles.metadataPane}>
+            {/* Section 1: AI summary */}
+            <section className={styles.section} aria-labelledby="fpd-summary-heading">
+              <Text id="fpd-summary-heading" className={styles.sectionHeader} size={300}>
+                <Sparkle20Filled aria-hidden="true" />
+                AI summary
+              </Text>
+              {renderSummarySection()}
+            </section>
+
+            {/* Section 2: Tags */}
+            <section className={styles.section} aria-labelledby="fpd-tags-heading">
+              <Text id="fpd-tags-heading" className={styles.sectionHeader} size={300}>
+                Tags
+              </Text>
+              {renderTagSection()}
+            </section>
+
+            {/* Section 3: Details */}
+            <section className={styles.section} aria-labelledby="fpd-details-heading">
+              <Text id="fpd-details-heading" className={styles.sectionHeader} size={300}>
+                Details
+              </Text>
+              {renderDetailsSection()}
+            </section>
           </DialogContent>
         </DialogBody>
+
+        {/* Footer: Find similar (subtle) · Close (secondary) · Open file (primary) */}
+        <DialogActions className={styles.footer}>
+          {onFindSimilar && (
+            <Button appearance="subtle" onClick={onFindSimilar}>
+              Find similar
+            </Button>
+          )}
+          <Button appearance="secondary" onClick={onClose}>
+            Close
+          </Button>
+          <Button appearance="primary" onClick={() => onOpenFile('desktop')}>
+            Open file
+          </Button>
+        </DialogActions>
       </DialogSurface>
     </Dialog>
   );

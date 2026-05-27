@@ -3,7 +3,8 @@
   <metadata>
     <title>Documents PCF — Tags filter from sprk_documenttype with OR-semantics multi-select (FR-DOC-05)</title>
     <phase>4: Documents PCF</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>4-6</estimated-hours>
     <dependencies>012, 041</dependencies>
     <blocks>043</blocks>

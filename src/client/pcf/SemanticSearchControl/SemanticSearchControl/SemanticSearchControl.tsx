@@ -1,22 +1,51 @@
 /**
  * SemanticSearchControl - Main component for semantic document search.
  *
- * Provides a three-region layout:
- * - Header: Search input with search button
- * - Sidebar: Filter panel (hidden in compact mode)
- * - Main: Search results list with infinite scroll
+ * Provides a stacked layout (FR-DOC-04/05/06):
+ * - Header: Search input + document count
+ * - Command bar: Associated Only · File Type · Date Range · Threshold · Mode ·
+ *                Tags · view toggle (list | card)
+ * - Main: Results — either ListView (default) or card ResultsList depending
+ *         on the persisted view preference.
+ *
+ * The sidebar `FilterPanel` is no longer rendered in v1 (FR-DOC-06). The file
+ * itself is kept for safe rollback should integration testing surface a
+ * regression — re-enable by re-importing + rendering it inside `<div className={styles.content}>`.
+ *
+ * BINDING (spec FR-DOC-06): the AssociatedOnly auto-search `useEffect` below
+ * MUST remain byte-identical across this refactor. Only the visible trigger
+ * (sidebar Switch → command-bar Switch) changed.
  *
  * @see ADR-021 for Fluent UI v9 and design token requirements
+ * @see ADR-022 React 16/17 platform boundary
+ * @see spec.md FR-DOC-04 / FR-DOC-05 / FR-DOC-06
  */
 
 import * as React from 'react';
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { makeStyles, tokens, shorthands, Text, Link, Button, Tooltip } from '@fluentui/react-components';
-import { ChevronRight20Regular, Add20Regular, ArrowClockwise20Regular } from '@fluentui/react-icons';
-import { ISemanticSearchControlProps, SearchFilters, SearchResult, SearchScope, SummaryData } from './types';
-import { SearchInput, FilterPanel, ResultsList, LoadingState, EmptyState, ErrorState } from './components';
-import { useSemanticSearch, useFilters } from './hooks';
-import { SemanticSearchApiService, NavigationService } from './services';
+import { Add20Regular, ArrowClockwise20Regular } from '@fluentui/react-icons';
+import {
+  ISemanticSearchControlProps,
+  SearchFilters,
+  SearchResult,
+  SearchScope,
+  SummaryData,
+} from './types';
+import {
+  SearchInput,
+  ResultsList,
+  LoadingState,
+  EmptyState,
+  ErrorState,
+  ListView,
+  CommandBar,
+  type ListSortColumn,
+  type ListSortDirection,
+} from './components';
+import { useSemanticSearch, useFilters, useFilterOptions, useDocumentListPrefs } from './hooks';
+import { SemanticSearchApiService, NavigationService, DataverseMetadataService } from './services';
+import type { TagFilterOption } from '@spaarke/ui-components/dist/types/TagFilter';
 import { authenticatedFetch, resolveTenantIdSync } from '@spaarke/auth';
 import { initializeAuth } from './authInit';
 import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
@@ -60,35 +89,12 @@ const useStyles = makeStyles({
     ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
   },
 
-  // Main content area (sidebar + results)
+  // Main content area (single column, no sidebar — FR-DOC-06)
   content: {
     display: 'flex',
     flex: 1,
+    flexDirection: 'column',
     ...shorthands.overflow('hidden'),
-  },
-
-  // Sidebar region (filters) - hidden in compact mode
-  sidebar: {
-    width: '250px',
-    flexShrink: 0,
-    boxSizing: 'border-box',
-    ...shorthands.padding(tokens.spacingHorizontalS),
-    backgroundColor: tokens.colorNeutralBackground3,
-    ...shorthands.borderRight(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
-    overflowY: 'auto',
-    overflowX: 'hidden',
-  },
-
-  // Collapsed sidebar strip
-  sidebarCollapsed: {
-    width: '36px',
-    flexShrink: 0,
-    display: 'flex',
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-    paddingTop: tokens.spacingVerticalS,
-    backgroundColor: tokens.colorNeutralBackground3,
-    ...shorthands.borderRight(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
   },
 
   // Main region (results list)
@@ -97,6 +103,22 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     ...shorthands.overflow('hidden'),
+  },
+
+  // Footer count strip — sits at the bottom of the results area to communicate
+  // total + filtered counts (FR-DOC-05 acceptance).
+  footerCount: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.borderTop(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
   },
 
   // Footer for compact mode "View all" link
@@ -262,17 +284,65 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // any docs they don't want before composing.
   const [emailWizardOpen, setEmailWizardOpen] = useState(false);
 
-  // Filter pane collapse state
-  // Sidebar expanded by default so the "Associated Only" toggle (which is now ON
-  // by default) and the threshold slider are immediately visible.
-  const [isFilterPaneCollapsed, setIsFilterPaneCollapsed] = useState(false);
-  const handleToggleFilterPane = useCallback(() => {
-    setIsFilterPaneCollapsed(prev => !prev);
-  }, []);
-
   // Initialize services (memoized to prevent recreation)
   const apiService = useMemo(() => new SemanticSearchApiService(apiBaseUrl), [apiBaseUrl]);
   const navigationService = useMemo(() => new NavigationService(), []);
+  // Dedicated metadata service for FR-DOC-05 (Tags filter). Note: useFilterOptions
+  // below also uses a singleton DataverseMetadataService — we mount a second
+  // instance here to keep the Tags fetch independently cacheable and to avoid
+  // restructuring the existing useFilterOptions return shape.
+  const metadataService = useMemo(() => new DataverseMetadataService(), []);
+
+  // ── FR-DOC-04: per-(userId, matterId)-scoped UI prefs (view + pins) ─────
+  // userId from PCF user settings; matterId from the resolved scopeId (the
+  // entity ID of the current record form). Both are nullable during the
+  // initial auth bootstrap — useDocumentListPrefs handles that gracefully.
+  const userIdForPrefs =
+    (context.userSettings as unknown as { userId?: string } | undefined)?.userId ?? null;
+  // `isPinned` from the hook is unused at this scope — ListView consults `pinnedIds`
+  // directly. Keeping the destructure simple by omitting it.
+  const { view, setView, pinnedIds, togglePin } = useDocumentListPrefs(
+    userIdForPrefs,
+    pageEntityId
+  );
+
+  // ── FR-DOC-04: list-view sort + selection state ─────────────────────────
+  // Selection persists across list↔card view toggles (in-memory only, not
+  // localStorage — per Owner Clarifications for v1).
+  const [sortColumn, setSortColumn] = useState<ListSortColumn>('modifiedAt');
+  const [sortDirection, setSortDirection] = useState<ListSortDirection>('desc');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const handleSortChange = useCallback(
+    (next: { column: ListSortColumn; direction: ListSortDirection }) => {
+      setSortColumn(next.column);
+      setSortDirection(next.direction);
+    },
+    []
+  );
+
+  // ── FR-DOC-05: Tags filter state ────────────────────────────────────────
+  const [tagOptions, setTagOptions] = useState<TagFilterOption[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  useEffect(() => {
+    // Fetch sprk_documenttype option set once on mount. DataverseMetadataService
+    // caches per (entity, attribute) so this is cheap on subsequent mounts.
+    let cancelled = false;
+    void metadataService
+      .getDocumentTypeOptions('sprk_document', 'sprk_documenttype')
+      .then(options => {
+        if (cancelled) return;
+        // Map FilterOption {key,label} → TagFilterOption {value,label}.
+        setTagOptions(options.map(o => ({ value: o.key, label: o.label })));
+      })
+      .catch(err => {
+        if (!cancelled) {
+          console.warn('[SemanticSearchControl] Tags filter option fetch failed:', err);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [metadataService]);
 
   // Auth initialization — runs once on mount inside the React component.
   // This mirrors RelatedDocumentCount's pattern: auth in useEffect with useState
@@ -790,11 +860,24 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     ? `Dear Colleague,\n\nPlease find the following document for your review:\n\nDocument: ${emailDialogResult.name}\n\n────\n\n${emailDialogResult.summary || emailDialogResult.tldr || 'No summary available.'}\n\n────\n\nKind regards`
     : '';
 
-  // The BFF now handles both associatedOnly filtering (Dataverse-direct query) and
-  // semantic-mode threshold filtering server-side. The PCF just renders what comes
-  // back. The previous client-side filter was imprecise (it inspected matterId on
-  // AI Search hits, which depended on indexing being correct).
-  const filteredResults = results;
+  // Load file type options for the command-bar File Type filter. Document type
+  // options now flow through the dedicated Tags filter (`tagOptions` state above)
+  // rather than the FilterPanel sidebar (FR-DOC-05).
+  const { fileTypeOptions, isLoading: filterOptionsLoading } = useFilterOptions();
+
+  // FR-DOC-05: apply client-side OR-filter for selected tags AFTER the backend
+  // returns. Tags drive a client-side filter (not a BFF query parameter) because
+  // the existing /api/ai/search endpoint does not yet accept a documentType OR
+  // filter list — the sidebar's documentTypes filter still flows via filters.documentTypes
+  // for server-side AND behavior. The Tags filter here is the new UI surface
+  // requested by FR-DOC-05 and intentionally implements OR semantics client-side.
+  //
+  // The BFF still handles associatedOnly + threshold server-side; tags are layered on top.
+  const filteredResults = useMemo(() => {
+    if (selectedTags.length === 0) return results;
+    return results.filter(r => selectedTags.includes(r.documentType));
+  }, [results, selectedTags]);
+  // For footer count UX: totalCount = unfiltered server-side total; filteredResults.length = post-tag-filter.
   const filteredTotalCount = totalCount;
 
   const renderMainContent = () => {
@@ -837,8 +920,37 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       );
     }
 
-    // Results list (uses component-level filteredResults)
+    // Results — list view (FR-DOC-04 default) or card view based on persisted pref
     if (filteredResults.length > 0) {
+      if (view === 'list' && !compactMode) {
+        // Card-view's existing toolbar surface (Reload / Add / Email / Open viewer)
+        // is folded into the renderActionsToolbar block above. For the list view
+        // we render the same toolbar slim-line + the ListView body below.
+        return (
+          <>
+            {renderActionsToolbar()}
+            <ListView
+              results={filteredResults}
+              selectedIds={selectedIds}
+              onSelectionChange={setSelectedIds}
+              pinnedIds={pinnedIds}
+              onTogglePin={togglePin}
+              sortColumn={sortColumn}
+              sortDirection={sortDirection}
+              onSortChange={handleSortChange}
+              onOpenFile={handleOpenFile}
+              onOpenRecord={handleOpenRecord}
+              onFindSimilar={handleFindSimilar}
+              onPreview={handlePreview}
+              onSummary={handleSummary}
+              onEmailDocument={handleEmailDocument}
+              onCopyLink={handleCopyLink}
+              onToggleWorkspace={handleToggleWorkspace}
+              isInWorkspace={isInWorkspace}
+            />
+          </>
+        );
+      }
       return (
         <ResultsList
           results={filteredResults}
@@ -937,40 +1049,44 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         )}
       </div>
 
-      {/* Content Region: Sidebar + Main */}
-      <div className={styles.content}>
-        {/* Sidebar Region: Filters (hidden in compact mode or when disabled) */}
-        {showFilters &&
-          !compactMode &&
-          (isFilterPaneCollapsed ? (
-            <div className={styles.sidebarCollapsed}>
-              <Tooltip content="Expand filters" relationship="label">
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<ChevronRight20Regular />}
-                  onClick={handleToggleFilterPane}
-                  aria-label="Expand filters"
-                />
-              </Tooltip>
-            </div>
-          ) : (
-            <div className={styles.sidebar}>
-              <FilterPanel
-                filters={filters}
-                searchScope={searchScope}
-                scopeId={scopeId}
-                onFiltersChange={handleFiltersChange}
-                onApply={handleSearch}
-                disabled={isLoading}
-                onCollapse={handleToggleFilterPane}
-              />
-            </div>
-          ))}
+      {/* Command Bar Region (FR-DOC-04 + FR-DOC-05 + FR-DOC-06) — the sidebar
+          FilterPanel is removed in v1. The command bar hosts every filter
+          (Associated Only / File Type / Date Range / Threshold / Mode / Tags)
+          plus the list/card view toggle. The auto-search useEffect on
+          `filters.associatedOnly` is unchanged (the binding constraint from
+          spec FR-DOC-06). */}
+      {showFilters && !compactMode && (
+        <CommandBar
+          filters={filters}
+          onFiltersChange={handleFiltersChange}
+          showAssociatedOnly={searchScope !== 'all' && searchScope !== 'custom'}
+          fileTypeOptions={fileTypeOptions}
+          tagOptions={tagOptions}
+          optionsLoading={filterOptionsLoading}
+          selectedTags={selectedTags}
+          onSelectedTagsChange={setSelectedTags}
+          view={view}
+          onViewChange={setView}
+          disabled={isLoading}
+        />
+      )}
 
-        {/* Main Region: Results */}
+      {/* Content Region: Main (single column now that the sidebar is gone) */}
+      <div className={styles.content}>
         <div className={styles.main}>{renderMainContent()}</div>
       </div>
+
+      {/* FR-DOC-05 footer count — appears when ≥1 tag selected, communicates
+          filtered vs total count. When no tags selected, omitted (the in-list
+          ResultsList header already shows totals). */}
+      {hasSearched && !isLoading && selectedTags.length > 0 && (
+        <div className={styles.footerCount}>
+          <Text size={200}>
+            Showing {filteredResults.length} of {filteredTotalCount} documents · filtered by{' '}
+            {selectedTags.length} tag{selectedTags.length !== 1 ? 's' : ''}
+          </Text>
+        </div>
+      )}
 
       {/* Footer: View All link (compact mode only) */}
       {compactMode && results.length > 0 && (

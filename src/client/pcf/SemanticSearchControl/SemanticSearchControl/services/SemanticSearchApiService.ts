@@ -294,6 +294,10 @@ export class SemanticSearchApiService {
         fileUrl: r.fileUrl ?? '',
         recordUrl: r.recordUrl ?? '',
         createdBy: r.createdBy ?? null,
+        // FR-BFF-01 (task 050) — modifiedAt/modifiedBy from post-search Dataverse lookup.
+        // The BFF SearchResult record always emits these fields; missing values arrive as null.
+        modifiedAt: r.modifiedAt ?? null,
+        modifiedBy: r.modifiedBy ?? null,
         summary: r.summary ?? null,
         tldr: r.tldr ?? null,
       })),

@@ -3,7 +3,8 @@
   <metadata>
     <title>Documents PCF — relocate filters from sidebar to command-bar dropdowns; preserve AssociatedOnly auto-search (FR-DOC-06)</title>
     <phase>4: Documents PCF</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>5-7</estimated-hours>
     <dependencies>042</dependencies>
     <blocks>044</blocks>

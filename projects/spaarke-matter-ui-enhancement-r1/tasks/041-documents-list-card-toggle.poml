@@ -3,7 +3,8 @@
   <metadata>
     <title>Documents PCF — list/card view toggle + sortable columns + multi-select + pin (FR-DOC-04)</title>
     <phase>4: Documents PCF</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>8-12</estimated-hours>
     <dependencies>040, 050</dependencies>
     <blocks>042, 045</blocks>
