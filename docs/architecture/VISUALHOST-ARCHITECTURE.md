@@ -221,6 +221,66 @@ Version must be updated in **5 locations** for each release: `ControlManifest.In
 
 ---
 
+## New in matter-ui-r1: Custom Options key additions
+
+The `spaarke-matter-ui-enhancement-r1` project added new generic `sprk_optionsjson` keys to three existing visual types and an internal wrapper component. **No new visual types were introduced** (binding constraint per design.md §6.4.0). Every key below is backward-compatible — omitting the key produces pre-extension behavior, preserving NFR-05 for every existing in-production chart definition. See spec §FR-VH-01..05 and the [VISUALHOST-SETUP-GUIDE.md `Use Cases: Visual Type Setup Walkthroughs`](../guides/VISUALHOST-SETUP-GUIDE.md#use-cases-visual-type-setup-walkthroughs) for worked authoring examples per shipped chart definition (FR-DV-01..05).
+
+### DonutChart — new keys (FR-VH-01)
+
+| Key | Type | Default | Behavior | Backward-compat |
+|---|---|---|---|---|
+| `donutLayout` | `"standard" \| "matrixRight"` | `"standard"` | `"matrixRight"` renders donut on the left + per-field breakdown rows on the right in a 2-column grid. `"standard"` is the existing centered-donut layout. | Omit → renders exactly as today (centered donut + legend below). |
+| `donutCenterMode` | `"total" \| "meanOfFields"` | `"total"` | `"meanOfFields"` computes the arithmetic mean of `fieldPivot.fields[].value` and renders that value in the donut center (with `valueFormat` thresholds applied — e.g. letter grade). `"total"` is the existing sum-of-segments. | Omit → existing sum-of-segments. |
+| `donutCenterLabel` | `string` | (auto from `valueFormat`) | Optional override for the small label rendered under the center value. | Omit → existing auto-derived label. |
+| `showBreakdownRows` | `boolean` | `false` | When `true` AND `donutLayout: "matrixRight"`, renders one breakdown row per pivoted field (label + formatted value). | Omit → no breakdown rows; donut only. |
+| `breakdownValueFormat` | `"score" \| "scoreOver100" \| "percentage" \| "ratio"` | (falls through to `valueFormat`) | Formatter for breakdown row values (e.g. `"scoreOver100"` renders `85/100`). Independent of donut-center `valueFormat`. | Omit → uses `valueFormat`. |
+
+Also enabled in FR-VH-01: `fieldPivot` consumption for the Donut case in `ChartRenderer.tsx` (previously aggregation-only) and `colorThresholds`-driven segment coloring (reuses `getTokenSetColors()` from `MetricCardMatrix.tsx`).
+
+**Canonical authoring example**: [`FR-DV-01 Matter Health Composite`](../guides/VISUALHOST-SETUP-GUIDE.md#matter-health-composite-donut--fr-dv-01) — production record `a8b8df8b-f359-f111-a825-3833c5d9bcab`.
+
+### MetricCard — new keys (FR-VH-02, FR-VH-03)
+
+| Key | Type | Default | Behavior | Backward-compat |
+|---|---|---|---|---|
+| `badge` | `{ text: string, tone: "danger" \| "warning" \| "success" \| "neutral", position: "inline" }` | (none) | Renders a Fluent v9 `Badge` inline next to the value in a flex row. In field-pivot mode, set per-field via `fieldPivot.fields[].badge`. | Omit → no badge; value renders as today. |
+| `descriptionColor` | `"brand" \| "neutral" \| "success" \| "warning" \| "danger"` | `"neutral"` | Maps to the corresponding Fluent v9 `tokens.colorXxxForeground*` semantic foreground token applied to the description sub-line `Text` element. | Omit → existing `colorNeutralForeground3`. |
+
+**Canonical authoring examples**:
+- `badge` (per-field, tone `"danger"`): [`FR-DV-03 Matter Tasks`](../guides/VISUALHOST-SETUP-GUIDE.md#matter-tasks-metriccard--fr-dv-03) — production record `c4feb098-f359-f111-a825-3833c5d9bcab`
+- `descriptionColor: "brand"`: [`FR-DV-05 Matter Activity`](../guides/VISUALHOST-SETUP-GUIDE.md#matter-activity-metriccard--fr-dv-05) — production record `1a4bd4a4-f359-f111-a825-3833c5d9bcab`
+
+### HorizontalStackedBar — new keys (FR-VH-04)
+
+| Key | Type | Default | Behavior | Backward-compat |
+|---|---|---|---|---|
+| `layoutMode` | `"default" \| "headlineAboveBar"` | `"default"` | `"headlineAboveBar"` renders a large headline + a small sub-line ABOVE the bar; suppresses the existing top-right total label and bottom-right remaining label. `"default"` is the existing 3-label layout (top-right total / bottom-left spent / bottom-right remaining). | Omit → existing 3-label layout. |
+| `headlineFromField` | `string` | (none) | Logical name of the `fieldPivot.fields[]` entry whose value becomes the headline (formatted via `valueFormat`). Only applies when `layoutMode: "headlineAboveBar"`. | Omit → headline auto-derived from `fields[0]`. |
+| `subLineTemplate` | `string` | (none) | Template string for the sub-line. Supports placeholders: `{remaining}`, `{percent}` (whole-number percent of total), `{total}` (formatted via `valueFormat`). Only applies when `layoutMode: "headlineAboveBar"`. | Omit → no sub-line. |
+
+**Canonical authoring example**: [`FR-DV-02 Matter Budget`](../guides/VISUALHOST-SETUP-GUIDE.md#matter-budget-horizontalstackedbar--fr-dv-02) — production record `7bf5b79e-f359-f111-a825-3833c5d9bcab`.
+
+### CardChrome — internal wrapper (FR-VH-05)
+
+**Not** a Custom Options key — an architectural addition. `CardChrome.tsx` is an internal-only wrapper component (NOT exported from `@spaarke/ui-components`) that wraps every chart renderer inside `VisualHostRoot.tsx`. It provides:
+
+- Per-card title bar (driven by the existing PCF `showTitle` property — default `false` preserves NFR-05 backward compat for all existing chart defs that did not request a title)
+- Corner-icon slots: `onExpand` (wires to existing `handleExpandClick` — no new `ClickActionHandler` code) and `onAiSummary` (slot reserved for Insights Engine r2 — `showAiSparkle: false` by default in v1)
+
+**Props**:
+
+| Prop | Type | Default | Notes |
+|---|---|---|---|
+| `title` | `string?` | (none) | Card title text. Surfaced only when PCF `showTitle` is true. |
+| `onExpand` | `() => void` | (none) | Drill-through handler. Wired by `VisualHostRoot.tsx` to `handleExpandClick` which honors the chart def's `sprk_drillthroughtarget`. |
+| `onAiSummary` | `() => Promise<ISummaryData>` | (none) | Reserved for Insights Engine r2. Not invoked in v1. |
+| `showAiSparkle` | `boolean` | `false` | When `true`, renders the AI sparkle icon. Default `false` in v1 (deferred). |
+| `children` | `ReactNode` | (required) | The wrapped chart renderer (MetricCard, DonutChart, etc.). |
+
+**Backward-compat**: Because `showTitle` defaults to `false` and `showAiSparkle` defaults to `false`, every existing chart definition renders with no chrome (title-less, no corner icons) — matching pre-FR-VH-05 behavior.
+
+---
+
 ## Future Enhancement Opportunities
 
 | Area | Current | Path |

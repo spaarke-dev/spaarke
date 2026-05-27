@@ -1756,6 +1756,173 @@ The grade field names are the same on both entities. Only the Entity Logical Nam
 
 ---
 
+### Use Case 9: Matter Performance Cards — `spaarke-matter-ui-enhancement-r1` (FR-DV-01..05)
+
+**Goal:** Author the 5 Matter Performance cards shipped by `spaarke-matter-ui-enhancement-r1` Phase 3 (tasks 030-034). Each card uses one or more of the new Custom Options keys introduced in Phase 2 (FR-VH-01..04) — documented in [`VISUALHOST-ARCHITECTURE.md` § New in matter-ui-r1](../architecture/VISUALHOST-ARCHITECTURE.md#new-in-matter-ui-r1-custom-options-key-additions). Use these as worked authoring examples for the new keys.
+
+> **CRITICAL — FetchXML token convention** (surprised us during Wave 3 authoring): Visual Host's FetchXML parameter substitution uses **`{contextRecordId}`**, **`{currentDate}`** (YYYY-MM-DD), and **`{currentDateTime}`** (ISO 8601) — NOT the conceptual `@currentMatter` / `@today` / `@me` placeholders used in spec prose. The substitution is implemented in [`src/client/pcf/VisualHost/control/services/ViewDataService.ts` lines 367-411 `substituteParameters`](../../src/client/pcf/VisualHost/control/services/ViewDataService.ts#L367). Custom params declared via `sprk_fetchxmlparams` JSON layer on top. Unresolved `{placeholder}` tokens are logged as warnings at runtime — always test in the form before deployment.
+
+#### Matter Health Composite (Donut) — FR-DV-01
+
+**Production record GUID**: `a8b8df8b-f359-f111-a825-3833c5d9bcab`
+**Renders**: Donut on the left + 3 breakdown rows on the right (Guidelines / Budget / Outcomes). Donut center shows the composite letter grade (mean of the three field values, mapped via `valueFormat: "letterGrade"`). Each breakdown row shows the per-field score formatted as `XX/100`. Expand opens the KPI assessment list filtered to the current matter.
+
+**Chart Definition Settings:**
+
+| Field | Value |
+|---|---|
+| Name | Matter Health Composite |
+| Visual Type | DonutChart (100000004) |
+| Entity Logical Name | `sprk_matter` |
+| Drill Through Target | (entity-list dialog: `sprk_kpiassessment` filtered by `_sprk_matter_value`) |
+| Options JSON (`sprk_optionsjson`) | See below |
+
+**Options JSON** (demonstrates `donutLayout: "matrixRight"`, `donutCenterMode: "meanOfFields"`, `showBreakdownRows`, `breakdownValueFormat: "scoreOver100"`, `fieldPivot` consumption on Donut):
+```json
+{
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_guidelinecompliancegrade_current", "label": "Guidelines Compliance" },
+      { "field": "sprk_budgetcompliancegrade_current", "label": "Budget Controls" },
+      { "field": "sprk_outcomecompliancegrade_current", "label": "Outcomes Success" }
+    ]
+  },
+  "valueFormat": "letterGrade",
+  "colorThresholds": [
+    { "range": [0.85, 1.00], "tokenSet": "brand" },
+    { "range": [0.70, 0.84], "tokenSet": "warning" },
+    { "range": [0.00, 0.69], "tokenSet": "danger" }
+  ],
+  "donutLayout": "matrixRight",
+  "donutCenterMode": "meanOfFields",
+  "showBreakdownRows": true,
+  "breakdownValueFormat": "scoreOver100"
+}
+```
+
+---
+
+#### Matter Budget (HorizontalStackedBar) — FR-DV-02
+
+**Production record GUID**: `7bf5b79e-f359-f111-a825-3833c5d9bcab`
+**Renders**: `$50K` headline + `33% of $150K` sub-line ABOVE a color-thresholded horizontal progress bar. The traditional top-right total / bottom-right remaining labels are suppressed by `layoutMode: "headlineAboveBar"`. Expand opens the invoice list filtered to the current matter.
+
+**Chart Definition Settings:**
+
+| Field | Value |
+|---|---|
+| Name | Matter Budget |
+| Visual Type | HorizontalStackedBar (100000012) |
+| Entity Logical Name | `sprk_matter` |
+| Drill Through Target | (entity-list dialog: `sprk_invoice` filtered by `_sprk_matter_value`) |
+| Options JSON (`sprk_optionsjson`) | See below |
+
+**Options JSON** (demonstrates `layoutMode: "headlineAboveBar"`, `headlineFromField`, `subLineTemplate` with `{percent}` + `{total}` placeholders, `colorThresholds` on the fill ratio):
+```json
+{
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_totalspendtodate", "label": "spent" },
+      { "field": "sprk_totalbudget", "label": "budget" }
+    ]
+  },
+  "valueFormat": "currency",
+  "layoutMode": "headlineAboveBar",
+  "headlineFromField": "sprk_totalspendtodate",
+  "subLineTemplate": "{percent}% of {total}",
+  "colorThresholds": [
+    { "range": [0.0, 0.6], "tokenSet": "success" },
+    { "range": [0.6, 0.85], "tokenSet": "warning" },
+    { "range": [0.85, 1.0], "tokenSet": "danger" }
+  ]
+}
+```
+
+> **Note**: `HorizontalStackedBar` still requires exactly two `fieldPivot.fields[]` entries (first = current/spent, second = total/budget). `layoutMode: "headlineAboveBar"` only changes the label layout — the data-shape contract is unchanged.
+
+---
+
+#### Matter Tasks (MetricCard) — FR-DV-03
+
+**Production record GUID**: `c4feb098-f359-f111-a825-3833c5d9bcab`
+**Renders**: `4 [overdue]` (red Fluent v9 `Badge` inline next to the value when overdue count > 0) + sub-line `2 upcoming this month` via `cardDescription`. Expand opens the task list filtered to overdue + upcoming for the current matter. Data via two FetchXML aggregation queries: COUNT overdue + COUNT upcoming (both filtered by `regardingmatter = {contextRecordId}` and date ranges relative to `{currentDate}` / `{currentDate} + 30`).
+
+**Chart Definition Settings:**
+
+| Field | Value |
+|---|---|
+| Name | Matter Tasks |
+| Visual Type | MetricCard (100000000) |
+| Entity Logical Name | `sprk_event` |
+| FetchXML | Two `<aggregate>` queries against `sprk_event`, parameterized with `{contextRecordId}` + `{currentDate}` (see token convention callout above) |
+| Drill Through Target | (entity-list dialog: `sprk_event` filtered to overdue + upcoming for current matter) |
+| Options JSON (`sprk_optionsjson`) | See below |
+
+**Options JSON** (demonstrates per-field `badge` with tone `"danger"`, `position: "inline"`, plus `cardDescription` placeholder for sub-line):
+```json
+{
+  "fieldPivot": {
+    "fields": [
+      { "field": "overdue", "label": "Overdue", "badge": { "text": "overdue", "tone": "danger", "position": "inline" } }
+    ]
+  },
+  "cardDescription": "{upcoming} upcoming this month"
+}
+```
+
+> **Behavior note**: The `badge` should be suppressed by upstream logic when the field value is `0` (an empty badge next to "0" is visually noisy). Authoring teams typically handle this by either (a) omitting the field entirely when the count is zero, or (b) using `cardDescription` templating to vary text by value. The renderer itself does NOT auto-suppress — it renders whatever `badge` is present in the JSON.
+
+---
+
+#### Matter Next Date (DueDateCard) — FR-DV-04
+
+**Production record GUID**: `154bd4a4-f359-f111-a825-3833c5d9bcab`
+**Renders**: A standard DueDateCard showing date + event title + days-from-now (e.g., `May 28 / Pre-trial hearing · in 3d`). **No renderer changes** for this card — it uses the existing `DueDateCard` (100000008) visual type. Expand opens the upcoming events list filtered to the current matter.
+
+**Chart Definition Settings:**
+
+| Field | Value |
+|---|---|
+| Name | Matter Next Date |
+| Visual Type | DueDateCard (100000008) |
+| Entity Logical Name | `sprk_event` |
+| FetchXML | TOP 1 ORDER BY `finalduedate ASC` WHERE `regardingmatter = {contextRecordId} AND finalduedate >= {currentDate}` |
+| Drill Through Target | (entity-list dialog: `sprk_event` filtered to upcoming for current matter) |
+
+**Options JSON**: Standard DueDateCard configuration — no new Custom Options keys required.
+
+> **Why this card is in the FR-DV set**: It demonstrates that the Matter Performance pane is composed of mixed visual types — not every card uses new FR-VH-* extension keys. DueDateCard is included here as the "next upcoming event" surface and ships unchanged from existing behavior.
+
+---
+
+#### Matter Activity (MetricCard) — FR-DV-05
+
+**Production record GUID**: `1a4bd4a4-f359-f111-a825-3833c5d9bcab`
+**Renders**: `5` (count of events in last 7 days) + brand-colored sub-line `events in last 7 days`. The sub-line uses Fluent v9 `tokens.colorBrandForeground1` via `descriptionColor: "brand"`. Expand opens the activity list filtered to last-7-days for the current matter. Data via FetchXML COUNT with last-7-days operator (`actualstart >= {currentDate}-7` or `completeddate >= {currentDate}-7`).
+
+**Chart Definition Settings:**
+
+| Field | Value |
+|---|---|
+| Name | Matter Activity |
+| Visual Type | MetricCard (100000000) |
+| Entity Logical Name | `sprk_event` |
+| FetchXML | COUNT against `sprk_event` WHERE `regardingmatter = {contextRecordId} AND (actualstart OR completeddate) >= {currentDate} - 7 days` (FetchXML `last-x-days` operator) |
+| Drill Through Target | (entity-list dialog: `sprk_event` filtered to last-7-days for current matter) |
+| Options JSON (`sprk_optionsjson`) | See below |
+
+**Options JSON** (demonstrates `descriptionColor: "brand"` for the sub-line):
+```json
+{
+  "descriptionColor": "brand",
+  "cardDescription": "events in last 7 days"
+}
+```
+
+> **Token mapping**: `descriptionColor: "brand"` → `tokens.colorBrandForeground1`. Other supported values: `"neutral"` (default, `colorNeutralForeground3`), `"success"` (`colorPaletteGreenForeground1`), `"warning"` (`colorPaletteYellowForeground1`), `"danger"` (`colorPaletteRedForeground1`). All values resolve through Fluent v9 semantic tokens — dark mode flips automatically.
+
+---
+
 ## Quick Reference: Common Configurations
 
 ### Bar Chart on Matter Form (Documents by Document Type — Choice Field)

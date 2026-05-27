@@ -5,8 +5,17 @@
  * instead of importing service modules directly, so it works within
  * the PCF control's service layer.
  *
- * Toolbar: icon-only, right-justified
- * Order: Open File, Open Document, Email Document, Copy Link, Add/Remove Workspace
+ * Per FR-DOC-01, the previous inline toolbar (Open File / Open Record /
+ * Email / Copy Link / Workspace) is replaced by a single 3-dot
+ * `DocumentRowMenu` shared component. Actions not reachable from the
+ * dialog surface (preview/findSimilar/aiSummary/pinToTop/rename/delete/
+ * download) are hidden via the menu's `disabledActions` prop until those
+ * handlers are introduced by follow-on Phase 4 tasks (044 dialog
+ * restructure).
+ *
+ * @see ADR-012 - Shared component library
+ * @see ADR-021 - Fluent UI v9 (semantic tokens, dark-mode parity)
+ * @see spec.md FR-DOC-01
  */
 
 import * as React from 'react';
@@ -17,8 +26,6 @@ import {
   DialogTitle,
   DialogContent,
   Button,
-  Toolbar,
-  ToolbarButton,
   Tooltip,
   Spinner,
   Text,
@@ -28,13 +35,15 @@ import {
 } from '@fluentui/react-components';
 import {
   Dismiss24Regular,
-  Open24Regular,
-  DocumentRegular,
-  MailRegular,
-  LinkRegular,
-  StarRegular,
-  StarFilled,
 } from '@fluentui/react-icons';
+// Deep-path import (not the barrel) — the barrel pulls in RichTextEditor →
+// `@lexical/react` ESM modules that don't resolve under React 16 (PCF target
+// per ADR-022). Matches the deep-path pattern used by sibling components.
+import {
+  DocumentRowMenu,
+  type DocumentRowAction,
+  type IDocumentRowMenuTarget,
+} from '@spaarke/ui-components/dist/components/DocumentRowMenu';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -43,6 +52,10 @@ import {
 export interface IFilePreviewDialogProps {
   open: boolean;
   documentName: string;
+  /** Stable document identifier — required for the 3-dot menu's aria-label. */
+  documentId: string;
+  /** Optional document type (file extension or category) for menu context. */
+  documentType?: string;
   onClose: () => void;
   /** Fetch the preview embed URL. Called when the dialog opens. */
   fetchPreviewUrl: () => Promise<string | null>;
@@ -96,19 +109,11 @@ const useStyles = makeStyles({
     flex: 1,
     minWidth: 0,
   },
-  toolbar: {
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: tokens.colorNeutralStroke2,
-    backgroundColor: tokens.colorNeutralBackground2,
+  titleActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
-    justifyContent: 'flex-end',
-    minHeight: '36px',
-    gap: tokens.spacingHorizontalS,
   },
   body: {
     ...shorthands.padding('0px'),
@@ -143,6 +148,8 @@ const useStyles = makeStyles({
 export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   open,
   documentName,
+  documentId,
+  documentType,
   onClose,
   fetchPreviewUrl,
   onOpenFile,
@@ -201,9 +208,81 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
     })();
   }, [fetchPreviewUrl]);
 
-  const handleOpenFile = React.useCallback(() => {
-    onOpenFile('desktop');
-  }, [onOpenFile]);
+  // -------------------------------------------------------------------------
+  // 3-dot menu dispatch — replaces the previous Toolbar of inline icons.
+  //
+  // The dialog surface only owns 5 of the 12 canonical row actions
+  // (openFile, openRecord, email, copyLink, toggleWorkspace). Until task
+  // 044 (FR-DOC-03 dialog restructure) introduces handlers for the rest,
+  // we hide unsupported actions via `disabledActions`. The remaining 5
+  // are wired to the existing dialog handlers — no orphaned affordances.
+  // -------------------------------------------------------------------------
+
+  const target = React.useMemo<IDocumentRowMenuTarget>(
+    () => ({
+      id: documentId,
+      name: documentName,
+      documentType,
+    }),
+    [documentId, documentName, documentType]
+  );
+
+  const handleRowAction = React.useCallback(
+    (action: DocumentRowAction) => {
+      switch (action) {
+        case 'openFile':
+          onOpenFile('desktop');
+          return;
+        case 'openRecord':
+          onOpenRecord();
+          return;
+        case 'email':
+          onEmailDocument();
+          return;
+        case 'copyLink':
+          onCopyLink();
+          return;
+        case 'toggleWorkspace':
+          onToggleWorkspace?.();
+          return;
+        // The following actions are not reachable from the dialog surface
+        // today; they are hidden by `disabledActions` below. Including the
+        // cases keeps the exhaustive `never` check happy.
+        case 'preview':
+        case 'aiSummary':
+        case 'findSimilar':
+        case 'download':
+        case 'pinToTop':
+        case 'rename':
+        case 'delete':
+          return;
+        default: {
+          const _never: never = action;
+          void _never;
+          return;
+        }
+      }
+    },
+    [onOpenFile, onOpenRecord, onEmailDocument, onCopyLink, onToggleWorkspace]
+  );
+
+  // Hide actions the dialog cannot service today. Including `toggleWorkspace`
+  // in the hidden set when no callback was provided keeps the menu honest.
+  const dialogDisabledActions = React.useMemo<DocumentRowAction[]>(() => {
+    const hidden: DocumentRowAction[] = [
+      'preview',
+      'aiSummary',
+      'findSimilar',
+      'download',
+      'pinToTop',
+      'rename',
+      'delete',
+    ];
+    if (!onToggleWorkspace) {
+      hidden.push('toggleWorkspace');
+    }
+    return hidden;
+  }, [onToggleWorkspace]);
 
   return (
     <Dialog
@@ -213,40 +292,32 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
       }}
     >
       <DialogSurface className={styles.surface}>
-        {/* Title bar */}
+        {/* Title bar — 3-dot menu replaces the inline action Toolbar */}
         <div className={styles.titleBar}>
           <DialogTitle action={null} className={styles.titleText}>
             {documentName || 'Document Preview'}
           </DialogTitle>
-          <Tooltip content="Close" relationship="label">
-            <Button appearance="subtle" icon={<Dismiss24Regular />} aria-label="Close" onClick={onClose} />
-          </Tooltip>
-        </div>
-
-        {/* Toolbar — icon-only, right-justified */}
-        <Toolbar className={styles.toolbar} size="small">
-          <Tooltip content="Open file" relationship="label">
-            <ToolbarButton icon={<Open24Regular />} aria-label="Open file" onClick={handleOpenFile} />
-          </Tooltip>
-          <Tooltip content="Open document record" relationship="label">
-            <ToolbarButton icon={<DocumentRegular />} aria-label="Open document record" onClick={onOpenRecord} />
-          </Tooltip>
-          <Tooltip content="Email document" relationship="label">
-            <ToolbarButton icon={<MailRegular />} aria-label="Email document" onClick={onEmailDocument} />
-          </Tooltip>
-          <Tooltip content="Copy link" relationship="label">
-            <ToolbarButton icon={<LinkRegular />} aria-label="Copy link" onClick={onCopyLink} />
-          </Tooltip>
-          {onToggleWorkspace && (
-            <Tooltip content={isInWorkspace ? 'Remove from workspace' : 'Add to workspace'} relationship="label">
-              <ToolbarButton
-                icon={isInWorkspace ? <StarFilled /> : <StarRegular />}
-                aria-label={isInWorkspace ? 'Remove from workspace' : 'Add to workspace'}
-                onClick={onToggleWorkspace}
+          <div
+            className={styles.titleActions}
+            aria-label={
+              isInWorkspace ? 'Document actions (in workspace)' : 'Document actions'
+            }
+          >
+            <DocumentRowMenu
+              document={target}
+              onAction={handleRowAction}
+              disabledActions={dialogDisabledActions}
+            />
+            <Tooltip content="Close" relationship="label">
+              <Button
+                appearance="subtle"
+                icon={<Dismiss24Regular />}
+                aria-label="Close"
+                onClick={onClose}
               />
             </Tooltip>
-          )}
-        </Toolbar>
+          </div>
+        </div>
 
         {/* Preview content */}
         <DialogBody className={styles.body}>

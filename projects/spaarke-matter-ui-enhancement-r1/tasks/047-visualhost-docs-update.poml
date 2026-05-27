@@ -3,7 +3,8 @@
   <metadata>
     <title>VisualHost docs — add new Custom Options keys + chart-def authoring examples (FR-DOC-09)</title>
     <phase>4: Documents PCF</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>3-4</estimated-hours>
     <dependencies>020, 021, 022, 023, 030, 031, 032, 033, 034</dependencies>
     <blocks>none</blocks>

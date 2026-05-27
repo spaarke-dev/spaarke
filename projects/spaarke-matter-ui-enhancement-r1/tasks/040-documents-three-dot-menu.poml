@@ -3,7 +3,8 @@
   <metadata>
     <title>Documents PCF — three-dot row menu consolidating 13 actions (FR-DOC-01)</title>
     <phase>4: Documents PCF</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>4-6</estimated-hours>
     <dependencies>012</dependencies>
     <blocks>041, 042, 043, 044, 045, 046</blocks>
