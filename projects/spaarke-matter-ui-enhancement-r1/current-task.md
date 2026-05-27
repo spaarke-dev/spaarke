@@ -13,10 +13,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | none — pipeline scaffolding just completed |
-| **Step** | 0 of N: Awaiting `task-execute 001` |
-| **Status** | none |
-| **Next Action** | Invoke `Skill task-execute` on `tasks/001-chart-def-regression-inventory.poml` |
+| **Task** | 002 — App Insights shared wiring (FR-TEL-01 infrastructure) |
+| **Step** | 0 of 9: Awaiting task-execute invocation |
+| **Status** | not-started |
+| **Next Action** | Invoke `Skill task-execute` on `tasks/002-app-insights-shared-wiring.poml` (FULL rigor — requires fluent-v9-component, build verification, code-review + adr-check) |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
@@ -25,11 +25,13 @@
 - `projects/spaarke-matter-ui-enhancement-r1/CLAUDE.md` — Created — AI context file with mandatory protocols
 - `projects/spaarke-matter-ui-enhancement-r1/current-task.md` — Created — This file
 - `projects/spaarke-matter-ui-enhancement-r1/tasks/*.poml` — Created — 34 task POMLs
-- `projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md` — Created — Task registry + parallel-execution graph
+- `projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md` — Created — Task registry + parallel-execution graph (001 marked ✅)
+- `projects/spaarke-matter-ui-enhancement-r1/notes/spikes/visualhost-chart-def-inventory.md` — Created — 15 active chart defs + FR-VH-* impact map (task 001 output)
+- `projects/spaarke-matter-ui-enhancement-r1/tasks/001-chart-def-regression-inventory.poml` — Modified — status → completed
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-Project pipeline (`/project-pipeline`) just completed Steps 1-4: spec validated, resources discovered, artifacts generated, tasks decomposed (34 across 9 phases), commit pending. Auto-start mode is active — next action is invoking `task-execute` on task 001 (chart-def regression inventory — Phase 0 foundation).
+Pipeline completed Steps 1-4 + auto-started task 001 (✅ done). Task 001 produced the NFR-05 regression baseline (15 active chart defs). Key findings: ZERO Donut chart defs in production (FR-VH-01 has no regression risk to in-prod defs); 3 HIGH-risk defs (Matter KPI Scorecard, Matter Financial Metrics Scorecard, Matter Financial Metrics Stacked Bar) need careful Phase 2 regression smoke; spec.md drift recorded — actual schema is `sprk_entitylogicalname` (not `sprk_entityname`) and `sprk_drillthroughtarget` (not `sprk_drillthroughentity`). Next: task 002 (FULL rigor, substantial — package.json + new service + 2 PCF manifest updates + build verification).
 
 ---
 
@@ -37,12 +39,14 @@ Project pipeline (`/project-pipeline`) just completed Steps 1-4: spec validated,
 
 | Field | Value |
 |---|---|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
+| **Task ID** | 002 (next) |
+| **Task File** | `tasks/002-app-insights-shared-wiring.poml` |
+| **Title** | App Insights shared wiring (FR-TEL-01 infrastructure) |
+| **Phase** | 0: Foundation |
+| **Status** | not-started |
 | **Started** | — |
+| **Rigor Level** | FULL |
+| **Rigor Reason** | Tags include 'pcf' and 'frontend' — code implementation in shared library + PCF integration; touches package.json/manifests/init code |
 
 ---
 

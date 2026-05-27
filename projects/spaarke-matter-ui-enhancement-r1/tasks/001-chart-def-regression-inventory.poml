@@ -3,7 +3,8 @@
   <metadata>
     <title>Enumerate in-production sprk_chartdefinition records (NFR-05 baseline)</title>
     <phase>0: Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>1-2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>025</blocks>
