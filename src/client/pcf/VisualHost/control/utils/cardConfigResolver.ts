@@ -14,6 +14,9 @@
 import {
   type IChartDefinition,
   type ICardConfig,
+  type IBadgeConfig,
+  type BadgeTone,
+  type DescriptionColorValue,
   type ValueFormatType,
   type ColorSourceType,
   type IColorThreshold,
@@ -246,6 +249,19 @@ export function resolveCardConfig(
       ? breakdownValueFormatRaw
       : undefined;
 
+  // --- MetricCard badge slot (FR-VH-02 / task 021) ---
+  // Generic addition. Backward compat (NFR-05): when `badge` is absent in
+  // sprk_optionsjson, ICardConfig.badge is undefined and MetricCard renders
+  // byte-identically to today.
+  const badge = parseBadge(json.badge);
+
+  // --- MetricCard description color (FR-VH-03 / task 022) ---
+  // Generic addition. Backward compat (NFR-05): when `descriptionColor` is
+  // absent (or invalid), the field is undefined and MetricCard falls back to
+  // `colorNeutralForeground3` — byte-identical to today. An explicit "neutral"
+  // resolves to the same token, also byte-identical.
+  const descriptionColor = parseDescriptionColor(json.descriptionColor);
+
   return {
     valueFormat,
     colorSource,
@@ -274,5 +290,40 @@ export function resolveCardConfig(
     donutCenterLabel,
     showBreakdownRows,
     breakdownValueFormat,
+    badge,
+    descriptionColor,
   };
+}
+
+/**
+ * Parse + validate an opaque badge value from `sprk_optionsjson`.
+ * Accepts `{ text, tone, position }` shape with the constrained `BadgeTone` +
+ * "inline" position; returns `undefined` for any malformed input so the card
+ * renders unchanged (NFR-05).
+ */
+function parseBadge(raw: unknown): IBadgeConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as Record<string, unknown>;
+  const text = obj.text;
+  const tone = obj.tone;
+  const position = obj.position;
+  if (typeof text !== 'string' || text.length === 0) return undefined;
+  if (tone !== 'danger' && tone !== 'warning' && tone !== 'success' && tone !== 'neutral') {
+    return undefined;
+  }
+  if (position !== 'inline') return undefined;
+  return { text, tone: tone as BadgeTone, position };
+}
+
+/**
+ * Parse + validate an opaque `descriptionColor` value from `sprk_optionsjson`
+ * (FR-VH-03). Accepts the five-value whitelist; returns `undefined` for any
+ * malformed / unknown input so MetricCard falls back to the default
+ * `colorNeutralForeground3` (NFR-05 byte-identical baseline).
+ */
+function parseDescriptionColor(raw: unknown): DescriptionColorValue | undefined {
+  if (raw !== 'brand' && raw !== 'neutral' && raw !== 'success' && raw !== 'warning' && raw !== 'danger') {
+    return undefined;
+  }
+  return raw;
 }

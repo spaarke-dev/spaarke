@@ -233,6 +233,8 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
           explicitHeight={height}
           valueFormat={cardConfig.valueFormat}
           nullDisplay={cardConfig.nullDisplay}
+          badge={cardConfig.badge}
+          descriptionColor={cardConfig.descriptionColor}
         />
       );
     }

@@ -5,9 +5,9 @@
  */
 
 import * as React from 'react';
-import { Card, CardHeader, Text, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
+import { Badge, Card, CardHeader, Text, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
 import { ArrowUpRegular, ArrowDownRegular } from '@fluentui/react-icons';
-import type { DrillInteraction, ValueFormatType } from '../types';
+import type { BadgeTone, DescriptionColorValue, DrillInteraction, IBadgeConfig, ValueFormatType } from '../types';
 import { formatValue as formatValueUtil } from '../utils/valueFormatters';
 
 export type TrendDirection = 'up' | 'down' | 'neutral';
@@ -55,6 +55,20 @@ export interface IMetricCardProps {
   cardBackground?: string;
   /** Color for the value text */
   valueColor?: string;
+  /**
+   * Optional badge slot (FR-VH-02). When provided, a Fluent v9 Badge is rendered
+   * inline next to the value (e.g., `4 [overdue]`). Tone maps to Fluent v9 Badge
+   * color via `toneToBadgeColor`. NFR-05: omitting this prop renders the card
+   * byte-identically to pre-FR-VH-02 behavior.
+   */
+  badge?: IBadgeConfig;
+  /**
+   * Optional semantic foreground tone for the description sub-line (FR-VH-03).
+   * Maps to a Fluent v9 semantic foreground token via `descriptionColorToToken`.
+   * NFR-05: omitting this prop (or passing `"neutral"`) renders the description
+   * with `colorNeutralForeground3` — byte-identical to pre-FR-VH-03 behavior.
+   */
+  descriptionColor?: DescriptionColorValue;
 }
 
 const useStyles = makeStyles({
@@ -171,6 +185,56 @@ const useStyles = makeStyles({
 });
 
 /**
+ * Map our generic `BadgeTone` to the Fluent v9 `<Badge color={...}>` prop.
+ * Kept local + not exported — co-located with the only renderer that consumes it
+ * (FR-VH-02). The Fluent v9 Badge `color` accepts more values (brand, severe,
+ * informative, etc.); we intentionally constrain to the four semantic tones in
+ * `BadgeTone` and map "neutral" → Fluent's "subtle" (closest neutral semantic).
+ */
+type FluentBadgeColor = 'danger' | 'warning' | 'success' | 'subtle';
+const toneToBadgeColor = (tone: BadgeTone): FluentBadgeColor => {
+  switch (tone) {
+    case 'danger':
+      return 'danger';
+    case 'warning':
+      return 'warning';
+    case 'success':
+      return 'success';
+    case 'neutral':
+    default:
+      return 'subtle';
+  }
+};
+
+/**
+ * Map our generic `DescriptionColorValue` to the matching Fluent v9 semantic
+ * foreground token (FR-VH-03). Kept local + not exported — co-located with the
+ * only renderer that consumes it. NFR-05: `"neutral"` (and the undefined fallback
+ * applied at the call site) returns `colorNeutralForeground3` — the exact token
+ * the description sub-line used before this feature, preserving the byte-identical
+ * baseline for every existing MetricCard chart def.
+ *
+ * Warning maps to `colorPaletteDarkOrangeForeground1` (not the yellow palette
+ * foreground) — yellow on a light background fails WCAG 2.1 AA contrast; dark
+ * orange is the Fluent v9 idiomatic warning foreground.
+ */
+const descriptionColorToToken = (descriptionColor: DescriptionColorValue): string => {
+  switch (descriptionColor) {
+    case 'brand':
+      return tokens.colorBrandForeground1;
+    case 'success':
+      return tokens.colorPaletteGreenForeground1;
+    case 'warning':
+      return tokens.colorPaletteDarkOrangeForeground1;
+    case 'danger':
+      return tokens.colorPaletteRedForeground1;
+    case 'neutral':
+    default:
+      return tokens.colorNeutralForeground3;
+  }
+};
+
+/**
  * Formats a number for display.
  * When valueFormat is provided, delegates to the centralized formatter.
  * Otherwise uses legacy K/M formatting.
@@ -210,6 +274,8 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
   iconColor,
   cardBackground,
   valueColor,
+  badge,
+  descriptionColor,
 }) => {
   const styles = useStyles();
 
@@ -320,9 +386,24 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
           >
             {formatDisplayValue(value, valueFormat, nullDisplay)}
           </Text>
+          {/* Optional badge slot (FR-VH-02). Renders inline in the existing
+              flex row next to the value. Omitted entirely when `badge` is
+              undefined — preserves NFR-05 byte-identical baseline. */}
+          {badge && (
+            <Badge appearance="filled" color={toneToBadgeColor(badge.tone)}>
+              {badge.text}
+            </Badge>
+          )}
           {renderTrendIndicator()}
         </div>
-        {description && <Text className={styles.description}>{description}</Text>}
+        {description && (
+          <Text
+            className={styles.description}
+            style={descriptionColor ? { color: descriptionColorToToken(descriptionColor) } : undefined}
+          >
+            {description}
+          </Text>
+        )}
       </div>
     </Card>
   );

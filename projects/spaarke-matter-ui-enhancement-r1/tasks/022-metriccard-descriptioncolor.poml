@@ -3,7 +3,8 @@
   <metadata>
     <title>MetricCard descriptionColor prop (FR-VH-03)</title>
     <phase>2: Visual Host Renderer Extensions</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>1-2</estimated-hours>
     <dependencies>002, 021</dependencies>
     <blocks>025</blocks>

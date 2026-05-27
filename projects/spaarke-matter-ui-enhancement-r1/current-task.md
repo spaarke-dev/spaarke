@@ -13,10 +13,10 @@
 
 | Field | Value |
 |---|---|
-| **Wave** | Wave 2A complete (020, 023, 024) — advancing to Wave 2B (task 021 MetricCard badge — serial, single agent) |
-| **Next Task** | 021 (MetricCard badge slot, FULL) — touches `MetricCard.tsx` only; serializes with task 022 |
-| **Status** | Wave 2B pending dispatch |
-| **Next Action** | Dispatch task 021 via single Agent call (FULL rigor). After completion, dispatch task 022 (also touches MetricCard.tsx — must be serial). After 022, Wave 2D (025 NFR-05 regression smoke gate). |
+| **Wave** | Wave 2BC complete (021 + 022 + ChartRenderer wire-up) — advancing to Wave 2D (025 NFR-05 regression analysis) |
+| **Next Task** | 025 (NFR-05 backward-compat regression gate) — code-only analysis in autonomous mode; live visual smoke deferred to Phase 7 task 074 |
+| **Status** | Wave 2D pending dispatch |
+| **Next Action** | Dispatch task 025 single Agent call. After completion: Phase 2 complete → Wave 3 (5 chart defs parallel — tasks 030, 031, 032, 033, 034). |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
