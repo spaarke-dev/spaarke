@@ -23,6 +23,7 @@ import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/enviro
 import { SendEmailDialog, type ISendEmailPayload } from '@spaarke/ui-components/dist/components/SendEmailDialog';
 import { FindSimilarDialog } from '@spaarke/ui-components/dist/components/FindSimilarDialog';
 import { DocumentEmailWizard, type IDocumentEmailWizardItem } from '@spaarke/ui-components/dist/components/DocumentEmailWizard';
+import { AppInsightsService } from '@spaarke/ui-components/dist/services/AppInsightsService';
 import type { IDataService } from '@spaarke/ui-components/dist/types/serviceInterfaces';
 import type { ILookupItem } from '@spaarke/ui-components/dist/types/LookupTypes';
 
@@ -286,6 +287,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     const manifestTenantId = context.parameters.tenantId?.raw ?? '';
     const manifestClientAppId = context.parameters.clientAppId?.raw ?? '';
     const manifestBffAppId = context.parameters.bffAppId?.raw ?? '';
+    // FR-TEL-01: App Insights instrumentation key (manifest-property env-var pattern).
+    // Initialize is idempotent — safe if the parent control already initialized.
+    const appInsightsKey =
+      (context.parameters as unknown as { appInsightsKey?: { raw?: string } }).appInsightsKey?.raw ?? '';
+    if (appInsightsKey) {
+      AppInsightsService.initialize(appInsightsKey);
+    }
 
     let dataverseUrl: string;
     try {

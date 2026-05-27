@@ -26,6 +26,10 @@
     <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF API application ID for OAuth scope construction"
               of-type="SingleLine.Text" usage="input" required="false" />
 
+    <!-- Input: Application Insights instrumentation key for client telemetry (FR-TEL-01) -->
+    <property name="appInsightsKey" display-name-key="App Insights Key" description-key="Application Insights instrumentation key for browser telemetry (direct SDK, not BFF-proxied)"
+              of-type="SingleLine.Text" usage="input" required="false" />
+
     <!-- Input: Search scope mode (all, entity, custom) -->
     <property name="searchScope" display-name-key="Search Scope" description-key="Search scope mode: all=system-wide, entity=auto-detect from form, custom=document IDs"
               of-type="Enum" usage="input" required="false">

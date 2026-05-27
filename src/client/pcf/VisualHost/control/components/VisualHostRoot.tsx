@@ -20,6 +20,7 @@ import {
   AiSummaryPopover,
   type ISummaryData,
 } from '../../../../shared/Spaarke.UI.Components/src/components/AiSummaryPopover';
+import { AppInsightsService } from '../../../../shared/Spaarke.UI.Components/src/services/AppInsightsService';
 import { IInputs } from '../generated/ManifestTypes';
 import { IChartDefinition, IChartData, DrillInteraction } from '../types';
 import { ChartRenderer } from './ChartRenderer';
@@ -171,6 +172,17 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
       return { summary: null, tldr: null };
     }
   }, [aiSummaryField, chartDefinition, contextRecordId, context.webAPI]);
+
+  // FR-TEL-01: Initialize App Insights once on mount.
+  // AppInsightsService.initialize() is idempotent — second + subsequent calls are no-ops,
+  // so this is safe even if other PCF surfaces on the same page also initialize.
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const appInsightsKey = ((context.parameters as any).appInsightsKey?.raw as string | null | undefined) ?? '';
+    if (appInsightsKey) {
+      AppInsightsService.initialize(appInsightsKey);
+    }
+  }, []); // empty deps — manifest properties are stable for the control's lifetime
 
   useEffect(() => {
     if (!chartDefinitionId) {

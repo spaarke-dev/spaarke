@@ -24,8 +24,8 @@
 | ID | Title | Phase | FR | Status | Dependencies | Parallel Group | Rigor |
 |---|---|---|---|---|---|---|---|
 | 001 | Enumerate in-production sprk_chartdefinition records (NFR-05 baseline) | 0 | NFR-05 | ✅ | none | A | MINIMAL |
-| 002 | App Insights shared wiring (FR-TEL-01 infrastructure) | 0 | FR-TEL-01 | 🔲 | none | A | FULL |
-| 003 | Verify sprk_event schema field names via MCP describe_table | 0 | Assumption #1 | 🔲 | none | A | MINIMAL |
+| 002 | App Insights shared wiring (FR-TEL-01 infrastructure) | 0 | FR-TEL-01 | ✅ | none | A | FULL |
+| 003 | Verify sprk_event schema field names via MCP describe_table | 0 | Assumption #1 | ✅ | none | A | MINIMAL |
 | 010 | Add TagFilter shared component | 1 | FR-SC-01 | 🔲 | 002 | B | FULL |
 | 011 | Add DocumentRowMenu shared component | 1 | FR-SC-02 | 🔲 | 002 | B | FULL |
 | 012 | Update @spaarke/ui-components barrel (TagFilter + DocumentRowMenu exports) | 1 | FR-SC-01,02 | 🔲 | 010, 011 | — (serial) | STANDARD |

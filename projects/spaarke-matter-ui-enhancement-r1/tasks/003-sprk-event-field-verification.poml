@@ -3,7 +3,8 @@
   <metadata>
     <title>Verify sprk_event schema field names via MCP describe_table</title>
     <phase>0: Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>1</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>032, 033, 034</blocks>

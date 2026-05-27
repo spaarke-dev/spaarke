@@ -3,7 +3,8 @@
   <metadata>
     <title>App Insights shared wiring (FR-TEL-01 infrastructure)</title>
     <phase>0: Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>2-3</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>046, 047, 070, 071</blocks>

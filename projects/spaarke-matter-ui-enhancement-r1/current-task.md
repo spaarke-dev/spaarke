@@ -13,10 +13,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 002 — App Insights shared wiring (FR-TEL-01 infrastructure) |
-| **Step** | 0 of 9: Awaiting task-execute invocation |
-| **Status** | not-started |
-| **Next Action** | Invoke `Skill task-execute` on `tasks/002-app-insights-shared-wiring.poml` (FULL rigor — requires fluent-v9-component, build verification, code-review + adr-check) |
+| **Wave** | Wave 0 complete — advancing to Wave 1A (parallel: 010 + 011) |
+| **Next Tasks** | 010 (TagFilter component, FULL) + 011 (DocumentRowMenu component, FULL) — parallel-safe, Group B |
+| **Status** | Wave 1A pending dispatch |
+| **Next Action** | Dispatch tasks 010 + 011 in parallel via Agent calls (sub-agents writing to `src/client/shared/Spaarke.UI.Components/`); 012 (barrel) serial after both ✅ |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
@@ -39,14 +39,13 @@ Pipeline completed Steps 1-4 + auto-started task 001 (✅ done). Task 001 produc
 
 | Field | Value |
 |---|---|
-| **Task ID** | 002 (next) |
-| **Task File** | `tasks/002-app-insights-shared-wiring.poml` |
-| **Title** | App Insights shared wiring (FR-TEL-01 infrastructure) |
-| **Phase** | 0: Foundation |
-| **Status** | not-started |
+| **Active Tasks** | 010, 011 (Wave 1A — parallel) |
+| **Task Files** | `tasks/010-tagfilter-component.poml`, `tasks/011-documentrowmenu-component.poml` |
+| **Phase** | 1: Shared Components |
+| **Status** | dispatching |
 | **Started** | — |
-| **Rigor Level** | FULL |
-| **Rigor Reason** | Tags include 'pcf' and 'frontend' — code implementation in shared library + PCF integration; touches package.json/manifests/init code |
+| **Rigor Level** | FULL (both) |
+| **Rigor Reason** | Both tasks add Fluent v9 React components to `@spaarke/ui-components`; ADR-021 binding; `/fluent-v9-component` invocation required |
 
 ---
 
@@ -69,6 +68,11 @@ Pipeline completed Steps 1-4 + auto-started task 001 (✅ done). Task 001 produc
 - **2026-05-27**: Stay on `work/spaarke-matter-ui-enhancement-r1` branch (worktree convention) — Reason: matches repo worktree pattern.
 - **2026-05-27**: Skip draft PR — Reason: artifacts are scaffolding; open real PR once implementation produces something reviewable.
 - **2026-05-27**: Autonomous execution mode — Reason: spec is comprehensive (Rev 6 + recon-validated), team has reviewed.
+- **2026-05-27 (task 001)**: Spec drift recorded for `sprk_chartdefinition` schema — actual fields are `sprk_entitylogicalname` (not `sprk_entityname`) and `sprk_drillthroughtarget` (not `sprk_drillthroughentity`). All downstream chart-def tasks (030-034) MUST use the verified names.
+- **2026-05-27 (task 003)**: `sprk_event` field-name corrections for FR-DV-05 / task 034 — spec assumed `actualstart` and `completeddate` (activity-standard names); actual fields are `sprk_actualstart` and `sprk_completeddate` (custom — `sprk_event` is NOT an Activity entity). `sprk_eventstatus` Completed = value `2`. Task 034 already correctly defers to task 003 spike note for field names; no amendment needed. Tasks 032, 033 are unaffected.
+- **2026-05-27 (task 002)**: App Insights SDK = `@microsoft/applicationinsights-web ^3.3.0`, added to `dependencies` (not devDependencies). Privacy-friendly defaults: `disableCookiesUsage`, `disableFetchTracking`, `disableAjaxTracking`, `enableAutoRouteTracking: false`. Consumers opt in.
+- **2026-05-27 (task 002)**: PCF init lifecycle — SemanticSearchControl init in existing auth `useEffect`; VisualHost dedicated mount-once `useEffect` with empty deps. Both gated on `appInsightsKey` presence.
+- **2026-05-27 (task 002)**: `spaarke-ui-components-2.0.0.tgz` regenerated via `npm pack` to surface the new `AppInsightsService` to VisualHost (which consumes the .tgz, not the source). `@spaarke/auth/dist` was missing and rebuilt — env-setup side-effect, not project scope.
 
 ---
 
