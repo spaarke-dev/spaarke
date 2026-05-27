@@ -15,6 +15,13 @@ import { registerDocumentViewerWidget } from './widgets/workspace/register-docum
 registerDocumentViewerWidget();
 
 // ---------------------------------------------------------------------------
+// Side-effect: register SearchCriteriaResultWidget (R4 task 043 / W-5)
+// First end-to-end Context → Workspace `widget_load` demo (FR-03).
+// ---------------------------------------------------------------------------
+import { registerSearchCriteriaResultWidget } from './widgets/workspace/register-search-criteria-result-widget';
+registerSearchCriteriaResultWidget();
+
+// ---------------------------------------------------------------------------
 // Side-effect: register all 6 R1 source widgets into ContextWidgetRegistry
 // (AIPU2-081 — migrate source widgets to context pane)
 // ---------------------------------------------------------------------------
@@ -96,6 +103,22 @@ export { default as GenericTextWidget } from './widgets/GenericTextWidget';
 export { default as DocumentViewerWidget } from './widgets/workspace/DocumentViewerWidget';
 export type { DocumentViewerWidgetData } from './widgets/workspace/DocumentViewerWidget';
 export { DOCUMENT_VIEWER_WIDGET_TYPE } from './widgets/workspace/register-document-viewer-widget';
+
+// ---------------------------------------------------------------------------
+// Widgets: SearchCriteriaResultWidget — Context pane mount-source demo (R4 task 043)
+//
+// First end-to-end Context → Workspace PaneEventBus `widget_load` demo (FR-03):
+// when the user checks "Also add to Workspace" in the Semantic Search criteria
+// tool and clicks Search, SemanticSearchCriteriaTool dispatches `widget_load`
+// on the workspace channel and this widget mounts as a new workspace tab
+// showing the captured search criteria summary.
+// Registered under 'search-criteria-result' via
+// register-search-criteria-result-widget.ts.
+// ---------------------------------------------------------------------------
+
+export { default as SearchCriteriaResultWidget } from './widgets/workspace/SearchCriteriaResultWidget';
+export type { SearchCriteriaResultWidgetData } from './widgets/workspace/SearchCriteriaResultWidget';
+export { SEARCH_CRITERIA_RESULT_WIDGET_TYPE } from './widgets/workspace/register-search-criteria-result-widget';
 
 // ---------------------------------------------------------------------------
 // Widgets: RedlineViewerWidget — side-by-side document comparison (AIPU2-085)

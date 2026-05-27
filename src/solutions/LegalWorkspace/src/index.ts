@@ -20,6 +20,59 @@
 export { LegalWorkspaceApp } from "./LegalWorkspaceApp";
 export type { ILegalWorkspaceAppProps } from "./LegalWorkspaceApp";
 
+// ---------------------------------------------------------------------------
+// R4 task 052 (C-4): WorkspaceRenderer interface binding
+//
+// `LegalWorkspaceApp` satisfies the `WorkspaceRenderer` contract from
+// `@spaarke/ui-components` (its prop shape `ILegalWorkspaceAppProps` mirrors
+// `WorkspaceRendererProps` exactly). This re-export provides a `WorkspaceRenderer`
+// -typed binding so host bootstraps (e.g. SpaarkeAi `main.tsx`) can register
+// it as the default renderer without import-site type assertions:
+//
+//   import { LegalWorkspaceRenderer } from "@spaarke/legal-workspace";
+//   import { setDefaultWorkspaceRenderer } from "@spaarke/ui-components";
+//   setDefaultWorkspaceRenderer(LegalWorkspaceRenderer);
+//
+// The binding is the SAME component as `LegalWorkspaceApp` (no wrapping, no
+// behavioural change — Risk R-4: zero observable diff). The named export
+// `LegalWorkspaceApp` is preserved for callers that already import it directly
+// (notably `WorkspaceLayoutWidget` until its C-4 refactor lands in parallel).
+// ---------------------------------------------------------------------------
+
+import { LegalWorkspaceApp as _LegalWorkspaceApp } from "./LegalWorkspaceApp";
+import type { WorkspaceRenderer } from "@spaarke/ui-components";
+
+/**
+ * `LegalWorkspaceApp` re-exported under its `WorkspaceRenderer` contract.
+ * Use this binding (or `LegalWorkspaceApp` directly) when registering as the
+ * default renderer in a host bootstrap. The runtime behaviour is identical
+ * to `LegalWorkspaceApp`.
+ *
+ * # Type assertion rationale
+ *
+ * `ILegalWorkspaceAppProps` is a STRUCTURAL SUPERSET of `WorkspaceRendererProps`:
+ * the prop shapes match name-for-name, but LegalWorkspace's `IWebApi`
+ * makes `retrieveRecord`/`createRecord`/`updateRecord`/`deleteRecord`
+ * REQUIRED, while `WorkspaceRendererWebApi` makes them OPTIONAL. Function-
+ * parameter contravariance therefore prevents a direct type assignment.
+ *
+ * The double-cast (`as unknown as WorkspaceRenderer`) is safe at runtime
+ * because:
+ *   1. `WorkspaceLayoutWidget` (the only caller today) always passes a
+ *      frame-walked `Xrm.WebApi` reference, which exposes ALL methods.
+ *   2. Future hosts that supply a narrower `webApi` MUST still provide
+ *      `retrieveRecord` etc. if their concrete renderer is `LegalWorkspaceApp`
+ *      — this is a documented host contract, not a runtime check.
+ *
+ * Tightening `WorkspaceRendererProps.webApi.retrieveRecord` to required
+ * would over-fit the interface to LegalWorkspace's needs and break the
+ * "minimal-viable interface" spec constraint. Tightening
+ * `IWebApi.retrieveRecord` to optional would cascade through dozens of
+ * LegalWorkspace call sites that rely on its non-null contract. The
+ * boundary cast is the least-invasive seam.
+ */
+export const LegalWorkspaceRenderer = _LegalWorkspaceApp as unknown as WorkspaceRenderer;
+
 /**
  * Round 4 Fix 4.1 (2026-05-21): `setRuntimeConfig` exposed so embedding shells
  * (SpaarkeAi) can initialize LegalWorkspace's runtime-config singleton

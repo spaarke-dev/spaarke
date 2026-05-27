@@ -1,7 +1,7 @@
 # R4 Task Index
 
 > **Project**: spaarke-ai-platform-unification-r4
-> **Total tasks**: 33 (32 work tasks + 1 wrap-up; task 044 added 2026-05-26 as W-6 follow-up per operator decision)
+> **Total tasks**: 36 (35 work tasks + 1 wrap-up; 044 added as W-6 follow-up; 068+069 added as Phase 6 test-infra hygiene; **070 added 2026-05-26** as follow-up to 069 — 69 cascading test errors surfaced after the original 7 were fixed)
 > **Created**: 2026-05-26 via `/project-pipeline` → `/task-create`
 > **Sources**: [`spec.md`](../spec.md) (FRs/NFRs/DRs/PRs) + [`plan.md`](../plan.md) (WBS) + [`plan.original.md`](../plan.original.md) (authoritative WBS detail)
 
@@ -39,23 +39,26 @@
 | 040 | W-3 Fix WorkspaceLayoutWizard catalog drift | 4 | ✅ | W-3 / FR-01 | FULL | none | D / ✅ |
 | 041 | W-6 Document LegalWorkspace retirement | 4 | ✅ | W-6 / DR-03 | STANDARD | none | D / ✅ |
 | 042 | W-4 Wire Assistant → Workspace mount source (DocumentViewerWidget) | 4 | ✅ (code; 14 widget tests; +2.83 KB; deploy deferred) | W-4 / FR-02 | FULL | 010 ✅, 040 ✅ | — / ❌ (deps) |
-| 043 | W-5 Wire Context → Workspace mount source | 4 | 🔲 | W-5 / FR-03 | FULL | 010 ✅ | E / ✅ (with 042 coord) |
+| 043 | W-5 Wire Context → Workspace mount (SemanticSearchCriteriaTool — pivot from CreateProject; iframe scope issue) | 4 | ✅ (code; 17 tests; +1.67 KB; deploy deferred) | W-5 / FR-03 | FULL | 010 ✅ | E / ✅ |
 | 044 | W-6 follow-up: SmartToDoDialog inline modal | 4 | ✅ (code; +1.7 KB; static no-404 + dark-mode; deploy deferred) | (new — W-6 consumer fix) | FULL | 041 ✅ | — / ✅ (independent) |
 | 050 | A-4 Attachment policy + raise cap to 25 MB | 5 | ✅ (code only — deploy deferred) | A-4 / FR-04 | FULL | none | F / ✅ |
 | 051 | C-3 Consolidate dual useWorkspaceLayouts hooks | 5 | ✅ (code only — deploy deferred) | C-3 / FR-13 | FULL | none | F / ✅ |
-| 052 | C-4 WorkspaceRenderer interface | 5 | 🔲 | C-4 / FR-14 | FULL | 051 | — / ❌ (deps) |
+| 052 | C-4 WorkspaceRenderer interface (zero behavioral change; type rebinding) | 5 | ✅ (code; 9 tests; +5 KB SpaarkeAi; deploy deferred) | C-4 / FR-14 | FULL | 051 ✅ | — / ❌ (deps) |
 | 053 | B-4 WorkspaceLayoutDto.modifiedOn | 5 | ✅ (code only — deploy deferred) | B-4 / FR-07 | FULL | none | F / ✅ |
 | 054 | B-5 BFF PUT + If-Match weak ETag (Option A) | 5 | ✅ (code; 5 new tests; BFF 43.88 MB; deploy deferred) | B-5 / FR-08 | FULL | 053 ✅ | — / ❌ (same files as 053) |
 | 055 | B-6 Promote local → `@spaarke/events-components` CalendarFilterPane (Option B per operator 2026-05-26; UTC bug fix included) | 5 | ✅ (code; CalendarSidePane −49 KB; deploy deferred) | B-6 / FR-09 | FULL | none | G / ✅ |
 | 060 | B-1 .gitignore for tracked build artifacts | 6 | ✅ (main session; 272 stale `deploy/api-publish/*` artifacts untracked) | B-1 / NFR-04 | MINIMAL | none | H / ✅ |
-| 061 | B-2 @spaarke/ai-widgets tsc rootDir fix | 6 | 🔲 | B-2 / NFR-05 | STANDARD | none | H / ✅ |
+| 061 | B-2 @spaarke/ai-widgets tsc rootDir fix (Option C: dist/.d.ts paths) | 6 | ✅ (code; ~70 TS6059 errors → 0; CI gate added; 13 cascading errors deferred to 067) | B-2 / NFR-05 | STANDARD | none | H / ✅ |
 | 062 | B-3 Telemetry constant rename | 6 | ✅ (code shipped; AI workspace cutover memo at `notes/b3-app-insights-query-cutover.md`) | B-3 / FR-06 | STANDARD | none | H / ✅ |
-| 063 | B-7 Extract useEventsBulkActions hook | 6 | 🔲 | B-7 / FR-10 | FULL | none | H / ✅ |
-| 064 | B-8 CalendarDrawer.eventDates API | 6 | 🔲 | B-8 / FR-11 | FULL | 063 | — / ❌ (same lib as 063) |
+| 063 | B-7 Extract useEventsBulkActions hook | 6 | ✅ (code; ~270 LOC dedup; both consumers adapted; deploy deferred) | B-7 / FR-10 | FULL | none | H / ✅ |
+| 064 | B-8 CalendarDrawer.eventDates API | 6 | 🔲 | B-8 / FR-11 | FULL | 063 ✅ | — / ❌ (same lib as 063) |
 | 065 | B-9 ESLint v9 migration | 6 | 🔲 | B-9 / NFR-06 | STANDARD | none | I / ✅ |
-| 066 | B-10 Standalone EventsPage redeploy | 6 | 🔲 | B-10 / NFR-07 | MINIMAL | none | I / ✅ |
-| 067 | B-11 Type-drift casts cleanup | 6 | 🔲 | B-11 / FR-12 | FULL | 063, 064 | — / ❌ (deps) |
-| 090 | R4 Project Wrap-up | 7 | 🔲 | PR-02 | FULL | all 31 | — / ❌ (final) |
+| 066 | B-10 Standalone EventsPage redeploy | 6 | 🔲 (defer to Phase 7 deploy batch) | B-10 / NFR-07 | MINIMAL | none | I / ✅ |
+| 067 | B-11 Type-drift casts cleanup (now also absorbs 13 cascading errors from 061) | 6 | 🔲 | B-11 / FR-12 | FULL | 063 ✅, 064 | — / ❌ (deps) |
+| 068 | Test infra: Jest+React 19 env fix | 6 | ✅ (RTL+jsdom bumped; 392 → 936 tests now executing) | (new — test infra hygiene) | STANDARD | none | J / ✅ |
+| 069 | Test infra: BFF handler test compile errors (3 files) | 6 | ✅ (7 fixed; 69 cascading errors surfaced → escalated to task 070) | (new — test infra hygiene) | STANDARD | none | J / ✅ |
+| 070 | Test infra: BFF handler 69 cascading errors (new — Phase 6 hygiene, follow-up to 069) | 6 | 🔲 | (new — test infra cascade) | STANDARD | 069 ✅ | J / ✅ |
+| 090 | R4 Project Wrap-up | 7 | 🔲 | PR-02 | FULL | all 34 | — / ❌ (final) |
 
 ---
 
@@ -111,13 +114,15 @@ Tasks in the same group can run simultaneously once prerequisites are met. **Har
 
 > **Build verification between waves is MANDATORY** per project-pipeline Step 5: after Wave 5.1, run `dotnet build src/server/api/Sprk.Bff.Api/` (because A-4 + B-4 touch BFF) and `npm run build` for each touched Vite package. STOP if either fails.
 
-### Phase 6 — Build hygiene cluster (~21h)
+### Phase 6 — Build hygiene cluster (~30h, was ~21h before adding test-infra tasks)
 
 | Wave | Tasks | Concurrency | Prerequisite |
 |---|---|---|---|
-| Wave 6.1 (Groups H+I mixed, parallel) | 060, 061, 062, 063, 065, 066 | 6 agents (cap) | none |
+| Wave 6.1 (Groups H+I+J mixed, parallel) | 060 ✅, 061, 062 ✅, 063, 065, 066, **068**, **069** | 6 agents (cap) per wave | none |
 | Wave 6.2 | 064 | 1 task | 063 ✅ |
 | Wave 6.3 | 067 | 1 task | 063 ✅ + 064 ✅ |
+
+> **068 + 069 added 2026-05-26 per operator decision** — absorbs the pre-existing test-infra issues (Jest+React 19 RTL resolve failure; 7 BFF handler test compile errors) repeatedly flagged by R4 sub-agents during tasks 050/053/054/042. Both run in parallel-group J (test-infra config, no production code overlap).
 
 ### Phase 7 — R4 wrap-up (~2h)
 

@@ -1,6 +1,6 @@
 /**
- * WorkspaceLayoutWidget — embeds the full LegalWorkspaceApp as a single
- * workspace pane tab.
+ * WorkspaceLayoutWidget — embeds the default workspace renderer
+ * (`LegalWorkspaceApp` today) as a single workspace pane tab.
  *
  * Operator's reuse principle (Round 4 Fix 4, 2026-05-21):
  *   "When we have working components, reuse them" — taken to its logical
@@ -8,42 +8,48 @@
  *   5 section factories into SpaarkeAi would drag in ~30 files / ~10K LOC
  *   plus DataverseService runtime state, FeedTodoSyncContext, and the
  *   @hello-pangea/dnd peer dependency. Rather than fight that dependency
- *   closure, this widget embeds the WHOLE working LegalWorkspaceApp inside
- *   a workspace tab. The pane-level `<WorkspacePaneMenu>` dispatches a
- *   `widget_load` event for this widget type when the user picks a workspace
- *   from the "Switch Workspace" dropdown.
+ *   closure, this widget embeds the WHOLE working renderer inside a workspace
+ *   tab. The pane-level `<WorkspacePaneMenu>` dispatches a `widget_load`
+ *   event for this widget type when the user picks a workspace from the
+ *   "Switch Workspace" dropdown.
+ *
+ * R4 task 052 (C-4) renderer seam:
+ *   This widget no longer imports `LegalWorkspaceApp` directly. It accepts an
+ *   optional injected `renderer?: WorkspaceRenderer` prop OR consults the
+ *   default-renderer slot exposed by `@spaarke/ui-components`. The host
+ *   (SpaarkeAi `main.tsx`) calls `setDefaultWorkspaceRenderer(LegalWorkspaceApp)`
+ *   at bootstrap, so default behaviour is unchanged from pre-C-4. Future
+ *   hosts can register an alternate renderer without modifying this widget.
  *
  * Embedded mode:
- *   LegalWorkspaceApp accepts an `embedded` prop (added in this round) that
- *   suppresses its internal `<PageHeader>` (which carries its own workspace
- *   dropdown), footer, outer `<FluentProvider>`, and theme-sync side effects.
- *   The SpaarkeAi shell owns all of those — the embedded tree is just the
- *   workspace grid (sections rendered via WorkspaceShell + buildDynamicWorkspaceConfig).
+ *   The renderer is mounted with `embedded={true}`. Concrete renderers MUST
+ *   suppress their own chrome when embedded (see `WorkspaceRenderer.ts` docs).
+ *   `LegalWorkspaceApp` already does this.
  *
  * Data shape:
  *   `{ layoutId: string, layoutName: string }` — comes from the WorkspacePaneMenu
  *   when the user clicks an item under "Switch Workspace". The `layoutId` is
- *   passed to LegalWorkspaceApp as `initialWorkspaceId`, which WorkspaceGrid
- *   then passes to `useWorkspaceLayouts(initialWorkspaceId)` to deep-link the
- *   chosen layout on first paint.
+ *   passed to the renderer as `initialWorkspaceId`.
  *
  * Xrm dependencies:
- *   LegalWorkspaceApp's WorkspaceGrid requires `webApi` + `userId`. We obtain
- *   these from the same xrmProvider walk pattern LegalWorkspace itself uses
- *   (window → parent → top). When running in dev (no Xrm), the widget renders
- *   an empty-state message instead of crashing.
+ *   The renderer requires `webApi` + `userId`. We obtain these from the same
+ *   xrmProvider walk pattern LegalWorkspace itself uses (window → parent → top).
+ *   When running in dev (no Xrm), the widget renders an empty-state message
+ *   instead of crashing.
  *
  * Standards:
- *   - ADR-012: SpaarkeAi-local widget that consumes from @spaarke/legal-workspace.
+ *   - ADR-012: Context-agnostic widget — no direct import of LegalWorkspace.
  *   - ADR-021: Fluent v9 tokens only.
  *   - ADR-022: React 19 functional component.
- *   - ADR-028: LegalWorkspace's existing BFF call surface (useWorkspaceLayouts)
- *              is preserved; SpaarkeAi does not need to inject auth.
+ *   - ADR-028: Renderer-owned auth — this widget never carries token snapshots.
  */
 
 import * as React from "react";
 import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import { LegalWorkspaceApp } from "@spaarke/legal-workspace";
+import {
+  getDefaultWorkspaceRenderer,
+  type WorkspaceRenderer,
+} from "@spaarke/ui-components";
 import type { WorkspaceWidgetComponent } from "../../types/widget-types";
 
 // ---------------------------------------------------------------------------
@@ -55,6 +61,27 @@ export interface WorkspaceLayoutWidgetData {
   layoutId: string;
   /** Human-readable layout name for the tab title (already set by the menu). */
   layoutName: string;
+}
+
+// ---------------------------------------------------------------------------
+// Widget extra props (R4 task 052 / C-4 renderer seam)
+// ---------------------------------------------------------------------------
+
+/**
+ * Optional props the widget accepts BEYOND the standard `WorkspaceWidgetProps`.
+ * Used primarily by tests and by future hosts that want to inject a custom
+ * renderer without registering a default. Production callers (the SpaarkeAi
+ * registry pipeline) omit these — the widget consults the default-renderer
+ * slot via `getDefaultWorkspaceRenderer()`.
+ */
+export interface WorkspaceLayoutWidgetExtraProps {
+  /**
+   * Optional injected renderer. When omitted, the widget falls back to the
+   * default registered via `setDefaultWorkspaceRenderer()` in
+   * `@spaarke/ui-components`. When neither is available, the widget renders
+   * a graceful empty state instead of crashing.
+   */
+  renderer?: WorkspaceRenderer;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,24 +167,40 @@ function getUserIdSafe(): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Renders the embedded LegalWorkspaceApp for the chosen workspace layout.
+ * Renders the embedded workspace renderer for the chosen workspace layout.
  *
  * The widget is rendered inside a tab managed by `WorkspaceTabManager`;
  * the tab's `displayName` is supplied by `WorkspacePaneMenu` (the layout
  * name) so the tab label matches the workspace.
+ *
+ * Renderer resolution (R4 task 052 / C-4):
+ *   1. Use the injected `renderer` prop if provided.
+ *   2. Otherwise, consult `getDefaultWorkspaceRenderer()` from
+ *      `@spaarke/ui-components` — the host has typically registered
+ *      `LegalWorkspaceApp` at bootstrap.
+ *   3. If neither is available, render a graceful "no renderer" empty state.
  */
-export const WorkspaceLayoutWidget: WorkspaceWidgetComponent<WorkspaceLayoutWidgetData> = ({
-  data,
-}) => {
+export const WorkspaceLayoutWidget: React.FC<
+  React.ComponentProps<WorkspaceWidgetComponent<WorkspaceLayoutWidgetData>> &
+    WorkspaceLayoutWidgetExtraProps
+> = ({ data, renderer }) => {
   const styles = useStyles();
 
-  // Resolve Xrm dependencies once on mount — LegalWorkspaceApp's
-  // WorkspaceGrid requires both.
+  // Resolve Xrm dependencies once on mount — the renderer's WorkspaceGrid
+  // requires both.
   const webApi = React.useMemo(() => getWebApiSafe(), []);
   const userId = React.useMemo(() => getUserIdSafe(), []);
 
+  // Resolve the renderer: injected prop wins; otherwise consult the default slot.
+  // The slot is populated by the host at bootstrap (e.g. SpaarkeAi `main.tsx`
+  // calls `setDefaultWorkspaceRenderer(LegalWorkspaceApp)`).
+  const Renderer: WorkspaceRenderer | null = React.useMemo(
+    () => renderer ?? getDefaultWorkspaceRenderer(),
+    [renderer]
+  );
+
   // Dev fallback: when Xrm isn't available (e.g. `npm run dev` in Vite),
-  // render an empty-state message instead of crashing inside LegalWorkspaceApp.
+  // render an empty-state message instead of crashing inside the renderer.
   if (!webApi) {
     return (
       <div className={styles.root} data-testid="workspace-layout-widget-no-xrm">
@@ -170,9 +213,27 @@ export const WorkspaceLayoutWidget: WorkspaceWidgetComponent<WorkspaceLayoutWidg
     );
   }
 
+  // R4 task 052 graceful degradation: if no renderer is registered (and none
+  // was injected), surface a developer-targeted empty state rather than crashing.
+  // Production hosts (SpaarkeAi) register the default at bootstrap so this branch
+  // should never trip outside misconfigured environments.
+  if (!Renderer) {
+    return (
+      <div className={styles.root} data-testid="workspace-layout-widget-no-renderer">
+        <div className={styles.emptyState}>
+          <Text size={300}>
+            No workspace renderer registered. The host application must call{" "}
+            <code>setDefaultWorkspaceRenderer()</code> from{" "}
+            <code>@spaarke/ui-components</code> at bootstrap.
+          </Text>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.root} data-testid="workspace-layout-widget-root">
-      <LegalWorkspaceApp
+      <Renderer
         version="embedded"
         allocatedWidth={0}
         allocatedHeight={0}

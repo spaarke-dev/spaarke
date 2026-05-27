@@ -55,6 +55,58 @@ The Spaarke widget ecosystem has **two distinct wrappers** for mounting somethin
 
 **Examples in production today**: Corporate Workspace (hard-coded GUID), Daily Briefing (single-section layout), Smart To Do List, My Work, Documents, Calendar (R3 task 115), any user-created custom layout.
 
+#### 2.1.1 `WorkspaceRenderer` interface — the host-extensibility seam (R4 task 052 / C-4)
+
+R4 task 052 (FR-14) introduced a `WorkspaceRenderer` interface in `@spaarke/ui-components` that formalises the seam between `WorkspaceLayoutWidget` (the widget registration in `@spaarke/ai-widgets`) and the concrete renderer (`LegalWorkspaceApp` in `src/solutions/LegalWorkspace/`). Before R4, `WorkspaceLayoutWidget` imported `LegalWorkspaceApp` directly from `@spaarke/legal-workspace`; after R4, it imports only the interface and resolves the concrete renderer via the default-registration slot.
+
+**Today's behaviour is unchanged** (Risk R-4 mitigation — zero observable diff). SpaarkeAi's `main.tsx` registers `LegalWorkspaceApp` as the default at bootstrap; the widget consults `getDefaultWorkspaceRenderer()` at render time and finds it. Same render output as pre-R4.
+
+**Future hosts** (a hypothetical SharePoint webpart or Power Pages portal that hosts the SpaarkeAi shell with a different workspace experience underneath) can register an alternate renderer without touching `WorkspaceLayoutWidget`:
+
+```ts
+// In an alternate host's bootstrap (NOT in the shared widget):
+import { MyAlternateWorkspaceRenderer } from "./MyAlternateRenderer";
+import { setDefaultWorkspaceRenderer } from "@spaarke/ui-components";
+
+setDefaultWorkspaceRenderer(MyAlternateWorkspaceRenderer);
+// Now WorkspaceLayoutWidget mounts MyAlternateWorkspaceRenderer instead of LegalWorkspaceApp.
+```
+
+**What this enables vs what it forbids**:
+
+| Enables | Does NOT enable |
+|---|---|
+| Replacing the Dashboard wrapper's concrete renderer per-host without forking `@spaarke/ai-widgets`. | Two different renderers active simultaneously in one host (the slot holds exactly one). |
+| Test-time substitution (each test registers a stub renderer; the widget mounts the stub). | Per-widget renderer overrides — the seam is host-wide, not per-widget. |
+| Decoupling `WorkspaceLayoutWidget` from `@spaarke/legal-workspace` (ADR-012 compliance — shared lib no longer depends on a specific solution). | Plugin-style lifecycle hooks, abstract base classes, or composition primitives (deliberately out of scope per task 052 "minimal seam" constraint). |
+
+**Interface shape** (minimal-viable; mirrors `ILegalWorkspaceAppProps` exactly):
+
+```ts
+import type * as React from "react";
+
+export interface WorkspaceRendererProps {
+  version: string;                  // bundle identifier (debug/footer)
+  allocatedWidth: number;           // layout-dimension hint (0 = unconstrained)
+  allocatedHeight: number;          // layout-dimension hint
+  webApi: WorkspaceRendererWebApi;  // Dataverse WebApi (host frame-walks; renderer never does)
+  userId: string;                   // current user GUID
+  initialWorkspaceId?: string;      // deep-link layout id
+  embedded?: boolean;               // host owns chrome (FluentProvider, theme sync)
+}
+
+export type WorkspaceRenderer = React.ComponentType<WorkspaceRendererProps>;
+```
+
+The interface is **deliberately narrow** — it accepts only what `LegalWorkspaceApp` already takes today. Future expansions (lifecycle hooks, event callbacks, etc.) are explicitly out of scope until a real second renderer demonstrates the need.
+
+**Source files**:
+- Interface: `src/client/shared/Spaarke.UI.Components/src/workspace/WorkspaceRenderer.ts`
+- Default-renderer slot: `src/client/shared/Spaarke.UI.Components/src/workspace/defaultWorkspaceRenderer.ts`
+- Renderer binding: `src/solutions/LegalWorkspace/src/index.ts` exports `LegalWorkspaceRenderer`
+- Widget consumer: `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx`
+- Default registration: `src/solutions/SpaarkeAi/src/main.tsx` calls `setDefaultWorkspaceRenderer(LegalWorkspaceRenderer)` at bootstrap
+
 ### 2.2 The Direct widget wrapper — `WorkspaceWidgetRegistry`
 
 **What it is**: The lazy-factory widget registry in `@spaarke/ai-widgets` (`registry/WorkspaceWidgetRegistry.ts`). Each registration is a `(widgetType, metadata, factory)` triple where `factory` is a `() => import(...).then(m => ({ default: m.MyWidget }))` dynamic import. The Workspace pane's `widget_load` handler resolves the registry, mounts the resulting component as a new tab, and acks via `widget_load { tabId }`.

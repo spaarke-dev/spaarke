@@ -1,0 +1,58 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`PaneHeader Snapshot matches snapshot with all three props 1`] = `
+<div
+  class="fui-FluentProvider fui-FluentProvider_r_7_ ___jdtuxv0_17k0bs4 f19n0e5 fxugw4r f1o700av fk6fouc fkhj508 figsok6 f1i3iumi"
+  dir="ltr"
+>
+  <header
+    class="___x4gtca0_19xe3a4 fi64zpg f22iagw f122n59 faqewft f1kwiid1 f5b47ha f1uw59to fw5db7e f1f09k3d fg706s2 f1aperda fxugw4r f1w5jphr"
+    data-testid="pane-header"
+  >
+    <span
+      aria-hidden="true"
+      class="___2e5qon0_0000000 f16muhyy f4ybsrx fi64zpg ftuwxu6 f122n59"
+      data-testid="pane-header-icon"
+    >
+      <span
+        data-testid="ctx-icon"
+      >
+        D
+      </span>
+    </span>
+    <span
+      class="fui-Text ___v14rwh0_1cjch5q fk6fouc fod5ikn faaz57k fl43uef fpgzoln f1w7gpdv f6juhto f1gl81tg f2jf649 f19n0e5 fqerorx"
+    >
+      Context
+    </span>
+    <span
+      class="___1hccze0_0000000 fi64zpg ftuwxu6 f122n59"
+      data-testid="pane-header-right-slot"
+    >
+      <span
+        data-testid="stage-label"
+      >
+        Stage 2
+      </span>
+    </span>
+  </header>
+</div>
+`;
+
+exports[`PaneHeader Snapshot matches snapshot with title only 1`] = `
+<div
+  class="fui-FluentProvider fui-FluentProvider_r_8_ ___jdtuxv0_17k0bs4 f19n0e5 fxugw4r f1o700av fk6fouc fkhj508 figsok6 f1i3iumi"
+  dir="ltr"
+>
+  <header
+    class="___x4gtca0_19xe3a4 fi64zpg f22iagw f122n59 faqewft f1kwiid1 f5b47ha f1uw59to fw5db7e f1f09k3d fg706s2 f1aperda fxugw4r f1w5jphr"
+    data-testid="pane-header"
+  >
+    <span
+      class="fui-Text ___v14rwh0_1cjch5q fk6fouc fod5ikn faaz57k fl43uef fpgzoln f1w7gpdv f6juhto f1gl81tg f2jf649 f19n0e5 fqerorx"
+    >
+      Context
+    </span>
+  </header>
+</div>
+`;
