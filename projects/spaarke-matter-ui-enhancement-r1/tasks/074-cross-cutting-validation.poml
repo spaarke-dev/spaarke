@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Cross-cutting NFR validation (NFR-01..05, FR-TEL-01, quality gates)</title>
+    <phase>7: Deploy + Validation</phase>
+    <status>not-started</status>
+    <estimated-hours>4-6</estimated-hours>
+    <dependencies>070, 071, 072, 073</dependencies>
+    <blocks>090</blocks>
+    <tags>testing, e2e-test, regression-test, validation</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final binding validation of every cross-cutting NFR — directly gates project completion. Evidence-based pass/fail per Success Criteria #31-36; failure here blocks wrap-up. Multiple measurement tools (App Insights, axe, grep, visual diff).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final gate after all deploys; single sequential task that produces the evidence base for wrap-up.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Run cross-cutting NFR validation per spec.md §Success Criteria #31-36 against the deployed environment. For each NFR, capture testable evidence in `projects/spaarke-matter-ui-enhancement-r1/notes/spikes/nfr-validation-evidence/`. Specifically validate: NFR-01 (cold-load p95 &lt; 2.0 s via App Insights), NFR-02 (axe DevTools zero WCAG 2.1 AA violations light + dark), NFR-04 (zero hardcoded hex/rgb in touched files via grep), NFR-05 (existing chart defs render unchanged vs task 025 baseline), FR-TEL-01 (App Insights events fire within 60s), and Success Criteria #34 (`code-review` + `adr-check` pass for every project task per TASK-INDEX.md).
+  </prompt>
+
+  <role>
+    QA + accessibility engineer comfortable with axe DevTools, Azure Application Insights query (Kusto/Log Analytics), visual diff tooling, ripgrep automation, and Spaarke's binding NFRs. Familiar with the FR-TEL-01 event schema and the task 025 visual-diff baseline.
+  </role>
+
+  <goal>
+    Every cross-cutting NFR validated against the deployed environment with documented evidence. Pass/fail status for each NFR captured in a markdown report at `projects/spaarke-matter-ui-enhancement-r1/notes/spikes/nfr-validation-evidence/SUMMARY.md`. If any NFR fails, the failure is documented with root-cause hypothesis and the project moves to remediation (not wrap-up). If all pass, the project is cleared for task 090 (wrap-up).
+  </goal>
+
+  <context>
+    <background>
+      Spec §Success Criteria #31-36 lists the cross-cutting binding NFRs. These have been deferred to a single validation task because (a) they require the full deployed environment, and (b) they intersect every prior task. NFR-05 backward compatibility was already verified at the renderer-deploy level (task 071); this task re-verifies at the form level (post-import in task 073). FR-TEL-01 events fire from PCFs deployed in 070/071 and require the App Insights instrumentation key wired during deploy.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-matter-ui-enhancement-r1/notes/spikes/nfr-validation-evidence/ (created in this task)</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/notes/ (task 025 baseline location for NFR-05)</file>
+      <file>src/client/pcf/SemanticSearchControl/ (NFR-04 grep target)</file>
+      <file>src/client/pcf/VisualHost/ (NFR-04 grep target)</file>
+      <file>src/client/shared/Spaarke.UI.Components/ (NFR-04 grep target for new shared components)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">NFR-01 — cold-load p95 &lt; 2.0 s; App Insights Page Load Time percentile, sample ≥30 loads</constraint>
+    <constraint source="spec">NFR-02 — axe DevTools zero WCAG 2.1 AA violations on Overview tab in light + dark</constraint>
+    <constraint source="spec">NFR-04 — Fluent v9 tokens only; automated grep confirms zero hardcoded hex/rgb in touched files</constraint>
+    <constraint source="spec">NFR-05 — every existing in-production chart def renders unchanged after FR-VH-* extensions</constraint>
+    <constraint source="spec">FR-TEL-01 — App Insights events fire within 60s; no PII in event payloads</constraint>
+    <constraint source="spec">Success Criteria #34 — `code-review` + `adr-check` pass for every FULL-rigor task in this project</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only (binding rule for NFR-04 grep)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design.md</file>
+    </files>
+    <patterns>
+      <pattern name="App Insights percentile query" location="(Kusto query against deployed App Insights resource)">
+        `pageViews | where timestamp > ago(7d) | where name contains "Matter" | summarize percentile(duration, 95) by name` — sample ≥30 loads; baseline 30 + 30 across light/dark mode if feasible.
+      </pattern>
+      <pattern name="NFR-04 hardcoded color grep" location="(repo-wide grep against touched files)">
+        `rg "#[0-9a-fA-F]{3,8}|rgb\(|rgba\("` against `src/client/pcf/SemanticSearchControl/`, `src/client/pcf/VisualHost/`, `src/client/shared/Spaarke.UI.Components/src/components/TagFilter.tsx`, `src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx`. Expected: zero hits in non-test files.
+      </pattern>
+      <pattern name="NFR-05 visual diff baseline" location="projects/spaarke-matter-ui-enhancement-r1/notes/ (from task 025)">
+        Compare post-deploy screenshots of Matter KPI Scorecard + Matter Financial Metrics Scorecard against the baseline from task 025. Pixel diff or visual inspection.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Verify upstream deps shipped: tasks 070, 071, 072, 073 all show ✅ in TASK-INDEX.md. If any not ✅, BLOCK and report.</step>
+    <step order="1">Create the evidence directory: `projects/spaarke-matter-ui-enhancement-r1/notes/spikes/nfr-validation-evidence/`. Initialize a `SUMMARY.md` template listing each NFR + pass/fail + evidence link.</step>
+    <step order="2">NFR-04 (automated grep): run `rg "#[0-9a-fA-F]{3,8}|rgb\(|rgba\("` against the 4 touched paths in `&lt;relevant-files&gt;`. Exclude test files. Expected: zero hits. Capture output to `nfr-validation-evidence/nfr-04-hardcoded-color-grep.txt`. Mark pass/fail in SUMMARY.md.</step>
+    <step order="3">NFR-02 (axe DevTools): load the Matter form Overview tab in the deployed environment. Run axe DevTools in light mode; capture report. Toggle dark mode; reload; run axe again; capture report. Expected: zero WCAG 2.1 AA violations in both. Capture screenshots/exports to `nfr-validation-evidence/nfr-02-axe-{light|dark}.{json|png}`. Mark pass/fail.</step>
+    <step order="4">NFR-05 (existing chart def regression): load a Matter record with the Matter KPI Scorecard chart def. Capture screenshot. Visual-diff against task 025 baseline. Repeat for Matter Financial Metrics Scorecard. Expected: byte-identical rendering. Capture diffs to `nfr-validation-evidence/nfr-05-regression-{chartdef}.png`. Mark pass/fail.</step>
+    <step order="5">FR-TEL-01 (App Insights events): exercise UI surfaces in the deployed environment: toggle view (FR-DOC-04), apply tag filter (FR-DOC-05), open 3-dot menu (FR-DOC-01), open preview Dialog (FR-DOC-03), invoke bulk action (FR-DOC-02), expand a card (FR-VH-05). Wait 60s. Query App Insights for the expected events: `view_toggled`, `tag_filter_applied`, `three_dot_menu_action_invoked`, `preview_dialog_opened`, `bulk_action_invoked`, `card_rendered`, `card_expanded`. Verify all fire within 60s. Verify no PII in payloads. Capture query results to `nfr-validation-evidence/fr-tel-01-events.{json|md}`. Mark pass/fail.</step>
+    <step order="6">NFR-01 (cold-load p95): run the App Insights Page Load Time percentile query against the deployed environment. Goal: ≥30 cold loads of the Matter Overview tab; p95 &lt; 2.0 s. If sample size is insufficient, exercise additional cold loads (close browser, reload, repeat ×30). Capture query result + percentile to `nfr-validation-evidence/nfr-01-cold-load-p95.{md|csv}`. Mark pass/fail.</step>
+    <step order="7">Success Criteria #34 (per-task quality gates): read TASK-INDEX.md. For every task marked ✅ with rigor-hint = FULL, verify the task's notes/PR shows `code-review` + `adr-check` pass at Step 9.5. If any task is missing evidence of these gates, run them retroactively on the corresponding files. Capture status table to `nfr-validation-evidence/sc-34-quality-gates.md`. Mark pass/fail.</step>
+    <step order="8">Aggregate all results into `SUMMARY.md`. For each NFR with a failure, document root-cause hypothesis + recommended remediation. If any NFR fails, escalate to human input (Section 6 CLAUDE.md) before proceeding to task 090.</step>
+    <step order="9">Step 9.5 (FULL rigor): run `Skill code-review` + `Skill adr-check` over the full set of project files touched in tasks 001-073. Capture any new issues identified. Resolve critical issues before completing.</step>
+    <step order="10">Update TASK-INDEX.md: 074 → ✅. Reset current-task.md to 090.</step>
+  </steps>
+
+  <tools>
+    <tool name="rg">ripgrep — NFR-04 hardcoded color grep</tool>
+    <tool name="axe">axe DevTools — NFR-02 accessibility scan</tool>
+    <tool name="appinsights">Azure App Insights Log Analytics — NFR-01 + FR-TEL-01 queries</tool>
+    <tool name="ui-test">Chrome integration smoke + evidence capture</tool>
+    <tool name="code-review">Final quality gate</tool>
+    <tool name="adr-check">Final architecture compliance gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="evidence">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/nfr-validation-evidence/SUMMARY.md</output>
+    <output type="evidence">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/nfr-validation-evidence/nfr-01-cold-load-p95.md</output>
+    <output type="evidence">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/nfr-validation-evidence/nfr-02-axe-light.png</output>
+    <output type="evidence">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/nfr-validation-evidence/nfr-02-axe-dark.png</output>
+    <output type="evidence">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/nfr-validation-evidence/nfr-04-hardcoded-color-grep.txt</output>
+    <output type="evidence">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/nfr-validation-evidence/nfr-05-regression-*.png</output>
+    <output type="evidence">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/nfr-validation-evidence/fr-tel-01-events.md</output>
+    <output type="evidence">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/nfr-validation-evidence/sc-34-quality-gates.md</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">NFR-01: cold-load p95 &lt; 2.0 s confirmed via App Insights query over ≥30 loads of Matter Overview tab.</criterion>
+    <criterion testable="true">NFR-02: axe DevTools reports zero WCAG 2.1 AA violations on Matter Overview tab in light AND dark mode.</criterion>
+    <criterion testable="true">NFR-04: grep across touched files (Semantic Search, Visual Host, new shared components) finds zero hardcoded hex/rgb values.</criterion>
+    <criterion testable="true">NFR-05: Matter KPI Scorecard + Matter Financial Metrics Scorecard chart defs render byte-identically to task 025 baseline.</criterion>
+    <criterion testable="true">FR-TEL-01: all expected App Insights events (view_toggled, tag_filter_applied, three_dot_menu_action_invoked, preview_dialog_opened, bulk_action_invoked, card_rendered, card_expanded) appear in App Insights within 60s of UI exercise; zero PII detected.</criterion>
+    <criterion testable="true">Success Criteria #34: every FULL-rigor task in TASK-INDEX.md has evidence of `code-review` + `adr-check` passing at Step 9.5.</criterion>
+    <criterion testable="true">SUMMARY.md aggregates all pass/fail with links to evidence files.</criterion>
+    <criterion testable="true">Final `code-review` + `adr-check` over project-touched files: pass.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="NFR-02 axe scan light mode">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter</url>
+      <steps>
+        <step>Confirm theme is set to light</step>
+        <step>Navigate to a Matter record with full data (KPI assessment + financial rollups + tasks + events)</step>
+        <step>Open axe DevTools and run scan against Overview tab</step>
+        <step>Capture screenshot of axe report</step>
+        <step>Export axe results to JSON</step>
+      </steps>
+      <expected>Zero WCAG 2.1 AA violations in axe report</expected>
+    </test>
+    <test name="NFR-02 axe scan dark mode">
+      <steps>
+        <step>Toggle dark mode in D365 personal settings</step>
+        <step>Reload the Matter record</step>
+        <step>Run axe DevTools scan</step>
+        <step>Capture screenshot + JSON export</step>
+      </steps>
+      <expected>Zero WCAG 2.1 AA violations in dark mode</expected>
+    </test>
+    <test name="FR-TEL-01 event exercise">
+      <steps>
+        <step>Toggle list/card view (fires `view_toggled`)</step>
+        <step>Apply 1 tag filter (fires `tag_filter_applied`)</step>
+        <step>Open 3-dot menu on a row, click Preview (fires `three_dot_menu_action_invoked`, `preview_dialog_opened`)</step>
+        <step>Close Dialog; select 2 rows; click Download selected (fires `bulk_action_invoked`)</step>
+        <step>Click expand on Matter Health card (fires `card_expanded`)</step>
+        <step>Wait 60s; query App Insights for all 7 expected event names</step>
+      </steps>
+      <expected>All 7 events appear in App Insights within 60s; payloads contain no PII (no userId, email, document content)</expected>
+    </test>
+    <test name="NFR-01 cold-load p95">
+      <steps>
+        <step>Close browser; clear cache</step>
+        <step>Navigate to Matter Overview tab (cold load)</step>
+        <step>Repeat ×30 (or query existing App Insights pageViews if ≥30 cold loads already exist)</step>
+        <step>Run App Insights percentile query for Page Load Time</step>
+      </steps>
+      <expected>p95 &lt; 2.0 s across ≥30 cold loads</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    This task is the project's binding quality gate. A failure here means the project is NOT complete — task 090 (wrap-up) is BLOCKED until every NFR passes (or a documented exception is approved by human).
+
+    NFR-01 cold-load measurement may need to span multiple sessions to accumulate ≥30 sample loads. If the dev environment has insufficient organic traffic, exercise loads manually.
+
+    NFR-05 final form-level visual diff at this stage doubles up with task 071 (renderer-level smoke) — if 071 passed, this is a final assertion at the integration level.
+
+    FR-TEL-01 PII check: inspect event payloads in App Insights Live Metrics. Acceptable properties: event name, structured non-identifying properties (count, action name, view mode). Unacceptable: userId, email, document content, file name (file name might contain PII — flag if present).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor. Step 0.5 is NOT applicable (validation task — no Fluent v9 component authoring). Load code-review + adr-check + ui-test skills. Verify upstream deps ✅. Create evidence directory. Run each NFR validation in sequence (NFR-04 grep first because cheapest; NFR-02 axe; NFR-05 visual diff; FR-TEL-01 event exercise; NFR-01 percentile; SC #34 quality-gate audit). Aggregate SUMMARY.md. Step 9.5: final code-review + adr-check across project. Update TASK-INDEX.
+    </protocol>
+  </execution>
+</task>

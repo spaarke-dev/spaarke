@@ -1,28 +1,73 @@
 /**
  * SemanticSearchControl - Main component for semantic document search.
  *
- * Provides a three-region layout:
- * - Header: Search input with search button
- * - Sidebar: Filter panel (hidden in compact mode)
- * - Main: Search results list with infinite scroll
+ * Provides a stacked layout (FR-DOC-04/05/06):
+ * - Header: Search input + document count
+ * - Command bar: Associated Only · File Type · Date Range · Threshold · Mode ·
+ *                Tags · view toggle (list | card)
+ * - Main: Results — either ListView (default) or card ResultsList depending
+ *         on the persisted view preference.
+ *
+ * The sidebar `FilterPanel` is no longer rendered in v1 (FR-DOC-06). The file
+ * itself is kept for safe rollback should integration testing surface a
+ * regression — re-enable by re-importing + rendering it inside `<div className={styles.content}>`.
+ *
+ * BINDING (spec FR-DOC-06): the AssociatedOnly auto-search `useEffect` below
+ * MUST remain byte-identical across this refactor. Only the visible trigger
+ * (sidebar Switch → command-bar Switch) changed.
  *
  * @see ADR-021 for Fluent UI v9 and design token requirements
+ * @see ADR-022 React 16/17 platform boundary
+ * @see spec.md FR-DOC-04 / FR-DOC-05 / FR-DOC-06
  */
 
 import * as React from 'react';
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { makeStyles, tokens, shorthands, Text, Link, Button, Tooltip } from '@fluentui/react-components';
-import { ChevronRight20Regular, Add20Regular, ArrowClockwise20Regular } from '@fluentui/react-icons';
-import { ISemanticSearchControlProps, SearchFilters, SearchResult, SearchScope, SummaryData } from './types';
-import { SearchInput, FilterPanel, ResultsList, LoadingState, EmptyState, ErrorState } from './components';
-import { useSemanticSearch, useFilters } from './hooks';
-import { SemanticSearchApiService, NavigationService } from './services';
+import {
+  makeStyles,
+  tokens,
+  shorthands,
+  Text,
+  Link,
+  Button,
+  Tooltip,
+  Toast,
+  ToastTitle,
+  ToastBody,
+  Toaster,
+  useId,
+  useToastController,
+} from '@fluentui/react-components';
+import { Add20Regular, ArrowClockwise20Regular } from '@fluentui/react-icons';
+import {
+  ISemanticSearchControlProps,
+  SearchFilters,
+  SearchResult,
+  SearchScope,
+  SummaryData,
+} from './types';
+import {
+  SearchInput,
+  ResultsList,
+  LoadingState,
+  EmptyState,
+  ErrorState,
+  ListView,
+  CommandBar,
+  BulkActionBar,
+  type ListSortColumn,
+  type ListSortDirection,
+} from './components';
+import { useSemanticSearch, useFilters, useFilterOptions, useDocumentListPrefs } from './hooks';
+import { SemanticSearchApiService, NavigationService, DataverseMetadataService } from './services';
+import type { TagFilterOption } from '@spaarke/ui-components/dist/types/TagFilter';
 import { authenticatedFetch, resolveTenantIdSync } from '@spaarke/auth';
 import { initializeAuth } from './authInit';
 import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
 import { SendEmailDialog, type ISendEmailPayload } from '@spaarke/ui-components/dist/components/SendEmailDialog';
 import { FindSimilarDialog } from '@spaarke/ui-components/dist/components/FindSimilarDialog';
 import { DocumentEmailWizard, type IDocumentEmailWizardItem } from '@spaarke/ui-components/dist/components/DocumentEmailWizard';
+import { AppInsightsService } from '@spaarke/ui-components/dist/services/AppInsightsService';
 import type { IDataService } from '@spaarke/ui-components/dist/types/serviceInterfaces';
 import type { ILookupItem } from '@spaarke/ui-components/dist/types/LookupTypes';
 
@@ -59,35 +104,12 @@ const useStyles = makeStyles({
     ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
   },
 
-  // Main content area (sidebar + results)
+  // Main content area (single column, no sidebar — FR-DOC-06)
   content: {
     display: 'flex',
     flex: 1,
+    flexDirection: 'column',
     ...shorthands.overflow('hidden'),
-  },
-
-  // Sidebar region (filters) - hidden in compact mode
-  sidebar: {
-    width: '250px',
-    flexShrink: 0,
-    boxSizing: 'border-box',
-    ...shorthands.padding(tokens.spacingHorizontalS),
-    backgroundColor: tokens.colorNeutralBackground3,
-    ...shorthands.borderRight(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
-    overflowY: 'auto',
-    overflowX: 'hidden',
-  },
-
-  // Collapsed sidebar strip
-  sidebarCollapsed: {
-    width: '36px',
-    flexShrink: 0,
-    display: 'flex',
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-    paddingTop: tokens.spacingVerticalS,
-    backgroundColor: tokens.colorNeutralBackground3,
-    ...shorthands.borderRight(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
   },
 
   // Main region (results list)
@@ -96,6 +118,22 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     ...shorthands.overflow('hidden'),
+  },
+
+  // Footer count strip — sits at the bottom of the results area to communicate
+  // total + filtered counts (FR-DOC-05 acceptance).
+  footerCount: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.borderTop(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
   },
 
   // Footer for compact mode "View all" link
@@ -180,13 +218,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const pageEntityId = pageContext?.entityId ?? null;
   const pageEntityTypeName = pageContext?.entityTypeName ?? null;
 
-  // DEBUG: Log page context detection
-  console.log('[SemanticSearchControl] Page context detection:', {
-    pageContext,
-    pageEntityId,
-    pageEntityTypeName,
-    fullContext: context,
-  });
+  // Page context detection — debug log removed per FR-DOC-07 (telemetry-only
+  // logging in production code path; structured properties only, no PII).
 
   // Map Dataverse entity logical names to API entity types
   const getEntityTypeFromLogicalName = (logicalName: string | null): string | null => {
@@ -237,14 +270,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // Use page entityId (GUID) when on a record form, otherwise use bound parameter
   const scopeId = pageEntityId ?? parameterScopeId;
 
-  // DEBUG: Log final scope determination
-  console.log('[SemanticSearchControl] Scope determination:', {
-    detectedEntityType,
-    configuredScope,
-    parameterScopeId,
-    finalSearchScope: searchScope,
-    finalScopeId: scopeId,
-  });
+  // Scope determination — debug log removed per FR-DOC-07.
 
   // Query input state
   const [queryInput, setQueryInput] = useState('');
@@ -261,17 +287,83 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // any docs they don't want before composing.
   const [emailWizardOpen, setEmailWizardOpen] = useState(false);
 
-  // Filter pane collapse state
-  // Sidebar expanded by default so the "Associated Only" toggle (which is now ON
-  // by default) and the threshold slider are immediately visible.
-  const [isFilterPaneCollapsed, setIsFilterPaneCollapsed] = useState(false);
-  const handleToggleFilterPane = useCallback(() => {
-    setIsFilterPaneCollapsed(prev => !prev);
-  }, []);
-
   // Initialize services (memoized to prevent recreation)
   const apiService = useMemo(() => new SemanticSearchApiService(apiBaseUrl), [apiBaseUrl]);
   const navigationService = useMemo(() => new NavigationService(), []);
+  // Dedicated metadata service for FR-DOC-05 (Tags filter). Note: useFilterOptions
+  // below also uses a singleton DataverseMetadataService — we mount a second
+  // instance here to keep the Tags fetch independently cacheable and to avoid
+  // restructuring the existing useFilterOptions return shape.
+  const metadataService = useMemo(() => new DataverseMetadataService(), []);
+
+  // ── FR-DOC-04: per-(userId, matterId)-scoped UI prefs (view + pins) ─────
+  // userId from PCF user settings; matterId from the resolved scopeId (the
+  // entity ID of the current record form). Both are nullable during the
+  // initial auth bootstrap — useDocumentListPrefs handles that gracefully.
+  const userIdForPrefs =
+    (context.userSettings as unknown as { userId?: string } | undefined)?.userId ?? null;
+  // `isPinned` from the hook is unused at this scope — ListView consults `pinnedIds`
+  // directly. Keeping the destructure simple by omitting it.
+  const { view, setView, pinnedIds, togglePin } = useDocumentListPrefs(
+    userIdForPrefs,
+    pageEntityId
+  );
+
+  // FR-DOC-07: wrap setView with telemetry. The CommandBar's view toggle and
+  // any other caller flow through this wrapper so we observe every change.
+  const handleViewChange = useCallback(
+    (next: 'list' | 'card') => {
+      AppInsightsService.trackEvent('view_toggled', { value: next });
+      setView(next);
+    },
+    [setView]
+  );
+
+  // ── FR-DOC-04: list-view sort + selection state ─────────────────────────
+  // Selection persists across list↔card view toggles (in-memory only, not
+  // localStorage — per Owner Clarifications for v1).
+  const [sortColumn, setSortColumn] = useState<ListSortColumn>('modifiedAt');
+  const [sortDirection, setSortDirection] = useState<ListSortDirection>('desc');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const handleSortChange = useCallback(
+    (next: { column: ListSortColumn; direction: ListSortDirection }) => {
+      setSortColumn(next.column);
+      setSortDirection(next.direction);
+    },
+    []
+  );
+
+  // ── FR-DOC-05: Tags filter state ────────────────────────────────────────
+  const [tagOptions, setTagOptions] = useState<TagFilterOption[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+
+  // FR-DOC-07: wrap setSelectedTags so we emit `tag_filter_applied` on each
+  // change. `tag_count` is the spec-required structured property (FR-DOC-07);
+  // no PII (we never log the tag VALUES themselves).
+  const handleSelectedTagsChange = useCallback((next: string[]) => {
+    AppInsightsService.trackEvent('tag_filter_applied', { tag_count: next.length });
+    setSelectedTags(next);
+  }, []);
+  useEffect(() => {
+    // Fetch sprk_documenttype option set once on mount. DataverseMetadataService
+    // caches per (entity, attribute) so this is cheap on subsequent mounts.
+    let cancelled = false;
+    void metadataService
+      .getDocumentTypeOptions('sprk_document', 'sprk_documenttype')
+      .then(options => {
+        if (cancelled) return;
+        // Map FilterOption {key,label} → TagFilterOption {value,label}.
+        setTagOptions(options.map(o => ({ value: o.key, label: o.label })));
+      })
+      .catch(err => {
+        if (!cancelled) {
+          console.warn('[SemanticSearchControl] Tags filter option fetch failed:', err);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [metadataService]);
 
   // Auth initialization — runs once on mount inside the React component.
   // This mirrors RelatedDocumentCount's pattern: auth in useEffect with useState
@@ -286,6 +378,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     const manifestTenantId = context.parameters.tenantId?.raw ?? '';
     const manifestClientAppId = context.parameters.clientAppId?.raw ?? '';
     const manifestBffAppId = context.parameters.bffAppId?.raw ?? '';
+    // FR-TEL-01: App Insights instrumentation key (manifest-property env-var pattern).
+    // Initialize is idempotent — safe if the parent control already initialized.
+    const appInsightsKey =
+      (context.parameters as unknown as { appInsightsKey?: { raw?: string } }).appInsightsKey?.raw ?? '';
+    if (appInsightsKey) {
+      AppInsightsService.initialize(appInsightsKey);
+    }
 
     let dataverseUrl: string;
     try {
@@ -358,17 +457,17 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const associatedOnlyRef = useRef<boolean | undefined>(filters.associatedOnly);
   useEffect(() => {
     if (!isAuthInitialized) {
-      console.log('[SemanticSearch] toggle effect skipped — auth not ready');
+      // Auth not ready — skip silently. Debug log removed per FR-DOC-07.
       return;
     }
     // Skip the very first render — we don't want to fire a search before the
     // user has interacted with the toggle. Only react to true value CHANGES.
     if (associatedOnlyRef.current === filters.associatedOnly) return;
-    console.log(
-      '[SemanticSearch] associatedOnly changed: %s → %s — auto-re-searching',
-      associatedOnlyRef.current,
-      filters.associatedOnly
-    );
+    // Emit telemetry for the toggle change. Behavior (auto-re-search) is
+    // unchanged; this just replaces the previous console.log line.
+    AppInsightsService.trackEvent('associated_only_toggled', {
+      value: !!filters.associatedOnly,
+    });
     associatedOnlyRef.current = filters.associatedOnly;
     setHasSearched(true);
     void search(queryInput, filters);
@@ -782,12 +881,480 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     ? `Dear Colleague,\n\nPlease find the following document for your review:\n\nDocument: ${emailDialogResult.name}\n\n────\n\n${emailDialogResult.summary || emailDialogResult.tldr || 'No summary available.'}\n\n────\n\nKind regards`
     : '';
 
-  // The BFF now handles both associatedOnly filtering (Dataverse-direct query) and
-  // semantic-mode threshold filtering server-side. The PCF just renders what comes
-  // back. The previous client-side filter was imprecise (it inspected matterId on
-  // AI Search hits, which depended on indexing being correct).
-  const filteredResults = results;
+  // Load file type options for the command-bar File Type filter. Document type
+  // options now flow through the dedicated Tags filter (`tagOptions` state above)
+  // rather than the FilterPanel sidebar (FR-DOC-05).
+  const { fileTypeOptions, isLoading: filterOptionsLoading } = useFilterOptions();
+
+  // FR-DOC-05: apply client-side OR-filter for selected tags AFTER the backend
+  // returns. Tags drive a client-side filter (not a BFF query parameter) because
+  // the existing /api/ai/search endpoint does not yet accept a documentType OR
+  // filter list — the sidebar's documentTypes filter still flows via filters.documentTypes
+  // for server-side AND behavior. The Tags filter here is the new UI surface
+  // requested by FR-DOC-05 and intentionally implements OR semantics client-side.
+  //
+  // The BFF still handles associatedOnly + threshold server-side; tags are layered on top.
+
+  // FR-DOC-02: optimistic doc-type overrides — applied on top of `results` so
+  // the bulk Document Type → selected action reflects the user's choice
+  // immediately, before the Xrm.WebApi updates complete. Cleared on Undo or
+  // when the backend confirms success (no-op clear since the optimistic value
+  // matches the eventual server state). Map of documentId → newDocumentType.
+  const [docTypeOverrides, setDocTypeOverrides] = useState<Record<string, string>>({});
+
+  const filteredResults = useMemo(() => {
+    // Apply optimistic doc-type overrides first so the tag filter (below)
+    // sees the post-edit values — otherwise an in-flight bulk doc-type change
+    // could hide rows from the user mid-update.
+    const overriddenResults = Object.keys(docTypeOverrides).length === 0
+      ? results
+      : results.map(r => {
+          const override = docTypeOverrides[r.documentId];
+          return override !== undefined ? { ...r, documentType: override } : r;
+        });
+    if (selectedTags.length === 0) return overriddenResults;
+    return overriddenResults.filter(r => selectedTags.includes(r.documentType));
+  }, [results, selectedTags, docTypeOverrides]);
+  // For footer count UX: totalCount = unfiltered server-side total; filteredResults.length = post-tag-filter.
   const filteredTotalCount = totalCount;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // FR-DOC-02: Toaster wiring + Bulk action handlers
+  // FR-DOC-07: Telemetry instrumentation for menu actions + preview dialog
+  //
+  // The Toaster is mounted at the PCF root (inside the FluentProvider in
+  // index.ts) so portal-rendered toasts inherit the surface theme correctly
+  // (`.claude/patterns/ui/fluent-v9-portal-gotcha.md`). Action handlers below
+  // call `dispatchToast` from the parent's controller.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const toasterId = useId('semantic-search-toaster');
+  const { dispatchToast } = useToastController(toasterId);
+
+  const TOAST_DEFAULT_MS = 5000;
+
+  // Telemetry-instrumented wrappers for the per-row menu actions. These are
+  // passed to ListView/ResultCard/FilePreviewDialog in place of the raw
+  // handlers — every menu invocation emits `three_dot_menu_action_invoked`.
+  const handlePreviewTelemetry = useCallback(
+    async (result: SearchResult): Promise<string | null> => {
+      AppInsightsService.trackEvent('three_dot_menu_action_invoked', { action_name: 'preview' });
+      AppInsightsService.trackEvent('preview_dialog_opened');
+      return handlePreview(result);
+    },
+    [handlePreview]
+  );
+
+  const handleOpenFileTelemetry = useCallback(
+    (result: SearchResult, mode: 'web' | 'desktop') => {
+      AppInsightsService.trackEvent('three_dot_menu_action_invoked', { action_name: 'open_file' });
+      handleOpenFile(result, mode);
+    },
+    [handleOpenFile]
+  );
+
+  const handleOpenRecordTelemetry = useCallback(
+    (result: SearchResult, inModal: boolean) => {
+      AppInsightsService.trackEvent('three_dot_menu_action_invoked', { action_name: 'open_record' });
+      handleOpenRecord(result, inModal);
+    },
+    [handleOpenRecord]
+  );
+
+  const handleFindSimilarTelemetry = useCallback(
+    (result: SearchResult) => {
+      AppInsightsService.trackEvent('three_dot_menu_action_invoked', { action_name: 'find_similar' });
+      handleFindSimilar(result);
+    },
+    [handleFindSimilar]
+  );
+
+  const handleEmailDocumentTelemetry = useCallback(
+    (result: SearchResult) => {
+      AppInsightsService.trackEvent('three_dot_menu_action_invoked', { action_name: 'email' });
+      handleEmailDocument(result);
+    },
+    [handleEmailDocument]
+  );
+
+  const handleCopyLinkTelemetry = useCallback(
+    (result: SearchResult) => {
+      AppInsightsService.trackEvent('three_dot_menu_action_invoked', { action_name: 'copy_link' });
+      handleCopyLink(result);
+    },
+    [handleCopyLink]
+  );
+
+  const handleToggleWorkspaceTelemetry = useCallback(
+    (result: SearchResult) => {
+      AppInsightsService.trackEvent('three_dot_menu_action_invoked', { action_name: 'toggle_workspace' });
+      handleToggleWorkspace(result);
+    },
+    [handleToggleWorkspace]
+  );
+
+  // ── Bulk-action helpers ────────────────────────────────────────────────
+
+  /** Single source of selected document objects (filtered to ids still in the
+   *  results — defensive against id-stale state after re-search). */
+  const selectedResults = useMemo(
+    () => filteredResults.filter(r => selectedIds.has(r.documentId)),
+    [filteredResults, selectedIds]
+  );
+
+  // Toast dispatch helpers — small wrappers so handlers below stay readable.
+  const showToast = useCallback(
+    (
+      title: string,
+      body: string,
+      intent: 'success' | 'info' | 'warning' | 'error',
+      timeout: number = TOAST_DEFAULT_MS,
+      action?: { label: string; onClick: () => void }
+    ) => {
+      dispatchToast(
+        <Toast>
+          <ToastTitle
+            action={
+              action
+                ? (
+                  <Button appearance="transparent" size="small" onClick={action.onClick}>
+                    {action.label}
+                  </Button>
+                )
+                : undefined
+            }
+          >
+            {title}
+          </ToastTitle>
+          <ToastBody>{body}</ToastBody>
+        </Toast>,
+        { intent, timeout }
+      );
+    },
+    [dispatchToast]
+  );
+
+  // 1. Email selected — open the existing multi-doc email wizard. The wizard
+  //    handles the SPE attachment / zip pipeline; we just open it scoped to
+  //    the selected subset.
+  const handleBulkEmail = useCallback(() => {
+    AppInsightsService.trackEvent('bulk_action_invoked', {
+      action_name: 'email',
+      selection_count: selectedIds.size,
+    });
+    setEmailWizardOpen(true);
+  }, [selectedIds.size]);
+
+  // 2. Download selected — POST /api/documents/bulk-download via authenticatedFetch.
+  const handleBulkDownload = useCallback(async (): Promise<void> => {
+    const ids = Array.from(selectedIds);
+    AppInsightsService.trackEvent('bulk_action_invoked', {
+      action_name: 'download',
+      selection_count: ids.length,
+    });
+    try {
+      const response = await authenticatedFetch(`${apiBaseUrl}/api/documents/bulk-download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentIds: ids }),
+      });
+
+      if (response.status === 413) {
+        showToast(
+          'Too many documents',
+          'Maximum 500 documents per bulk download.',
+          'error'
+        );
+        return;
+      }
+
+      if (!response.ok) {
+        // Surface BFF ProblemDetails 4xx (404 "no accessible documents", 403, 401).
+        const detail = response.status === 404
+          ? 'No accessible documents in the current selection.'
+          : `Download failed (${response.status}).`;
+        showToast('Download failed', detail, 'error', TOAST_DEFAULT_MS, {
+          label: 'Retry',
+          onClick: () => {
+            void handleBulkDownload();
+          },
+        });
+        return;
+      }
+
+      // Parse Content-Disposition to recover the server-generated filename
+      // (`documents-{matterIdOrBulk}-{timestamp}.zip`).
+      const cd = response.headers.get('content-disposition') ?? '';
+      const match = cd.match(/filename="?([^";]+)"?/i);
+      const filename = match ? match[1] : `documents-${Date.now()}.zip`;
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objectUrl);
+
+      showToast(
+        'Download started',
+        `${ids.length} document${ids.length !== 1 ? 's' : ''} downloaded as a zip.`,
+        'success'
+      );
+    } catch (err) {
+      // Network or other unrecoverable error — show a retry toast.
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      showToast('Download failed', message, 'error', TOAST_DEFAULT_MS, {
+        label: 'Retry',
+        onClick: () => {
+          void handleBulkDownload();
+        },
+      });
+      throw err;
+    }
+  }, [apiBaseUrl, selectedIds, showToast]);
+
+  // 3. Pin selected — for each id, call togglePin only when NOT currently pinned
+  //    (idempotent: pinning an already-pinned doc would unpin it). Writes to
+  //    localStorage per useDocumentListPrefs.
+  const handleBulkPin = useCallback(() => {
+    const ids = Array.from(selectedIds);
+    AppInsightsService.trackEvent('bulk_action_invoked', {
+      action_name: 'pin',
+      selection_count: ids.length,
+    });
+    let pinnedCount = 0;
+    for (const id of ids) {
+      if (!pinnedIds.has(id)) {
+        togglePin(id);
+        pinnedCount += 1;
+      }
+    }
+    showToast(
+      'Pinned',
+      pinnedCount > 0
+        ? `${pinnedCount} document${pinnedCount !== 1 ? 's' : ''} pinned to top.`
+        : 'Selected documents were already pinned.',
+      'success'
+    );
+  }, [pinnedIds, selectedIds, togglePin, showToast]);
+
+  // 4. Delete selected — soft-delete via Xrm.WebApi. Confirmation Dialog lives
+  //    INSIDE BulkActionBar; this handler is invoked AFTER confirmation.
+  const handleBulkDelete = useCallback(async (): Promise<void> => {
+    const ids = Array.from(selectedIds);
+    AppInsightsService.trackEvent('bulk_action_invoked', {
+      action_name: 'delete',
+      selection_count: ids.length,
+    });
+    const failures: string[] = [];
+    await Promise.all(
+      ids.map(async id => {
+        try {
+          await context.webAPI.deleteRecord('sprk_document', id);
+        } catch {
+          failures.push(id);
+        }
+      })
+    );
+
+    if (failures.length === 0) {
+      showToast(
+        'Deleted',
+        `${ids.length} document${ids.length !== 1 ? 's' : ''} deleted.`,
+        'success'
+      );
+      setSelectedIds(new Set());
+      // Refresh the result set so deleted rows disappear.
+      void search(queryInput, filters);
+    } else if (failures.length < ids.length) {
+      showToast(
+        'Partial deletion',
+        `${ids.length - failures.length} deleted; ${failures.length} could not be deleted.`,
+        'warning'
+      );
+      // Drop the successes from the selection so the user can retry the failures.
+      const stillFailing = new Set(failures);
+      setSelectedIds(stillFailing);
+      void search(queryInput, filters);
+    } else {
+      showToast(
+        'Delete failed',
+        `Could not delete ${failures.length} document${failures.length !== 1 ? 's' : ''}.`,
+        'error',
+        TOAST_DEFAULT_MS,
+        {
+          label: 'Retry',
+          onClick: () => {
+            void handleBulkDelete();
+          },
+        }
+      );
+    }
+  }, [context.webAPI, filters, queryInput, search, selectedIds, showToast]);
+
+  // 5. Document Type → selected — optimistic UI + 5s Undo toast.
+  //    On apply: stash previous types, write override map immediately, fire
+  //    Xrm.WebApi updates in parallel. On success: show Undo toast that
+  //    reverts the override map + writes the original types back to
+  //    Dataverse. On any failure: revert override map + show error toast.
+  const handleBulkDocTypeChange = useCallback(
+    (newType: string) => {
+      const ids = Array.from(selectedIds);
+      AppInsightsService.trackEvent('bulk_action_invoked', {
+        action_name: 'doc_type',
+        selection_count: ids.length,
+      });
+      // Capture originals BEFORE applying the optimistic override.
+      const originals: Record<string, string> = {};
+      for (const id of ids) {
+        const r = filteredResults.find(x => x.documentId === id);
+        originals[id] = r?.documentType ?? '';
+      }
+
+      // Apply optimistic override.
+      setDocTypeOverrides(prev => {
+        const next = { ...prev };
+        for (const id of ids) next[id] = newType;
+        return next;
+      });
+
+      // Fire Xrm.WebApi updates in parallel.
+      const updatePromise = Promise.all(
+        ids.map(id =>
+          context.webAPI.updateRecord('sprk_document', id, {
+            sprk_documenttype: newType,
+          })
+        )
+      );
+
+      void updatePromise
+        .then(() => {
+          // Success — show 5s Undo toast.
+          showToast(
+            'Document type updated',
+            `${ids.length} document${ids.length !== 1 ? 's' : ''} set to "${newType}".`,
+            'success',
+            TOAST_DEFAULT_MS,
+            {
+              label: 'Undo',
+              onClick: () => {
+                // Revert the optimistic override.
+                setDocTypeOverrides(prev => {
+                  const next = { ...prev };
+                  for (const id of ids) delete next[id];
+                  return next;
+                });
+                // Bulk update Dataverse back to original values.
+                void Promise.all(
+                  ids.map(id =>
+                    context.webAPI.updateRecord('sprk_document', id, {
+                      sprk_documenttype: originals[id] ?? null,
+                    })
+                  )
+                )
+                  .then(() => {
+                    showToast(
+                      'Undo applied',
+                      'Document types reverted.',
+                      'info'
+                    );
+                    void search(queryInput, filters);
+                  })
+                  .catch(() => {
+                    showToast(
+                      'Undo failed',
+                      'Could not revert document types — please try again.',
+                      'error'
+                    );
+                  });
+              },
+            }
+          );
+          // After the toast window, schedule a quiet refresh so the backend
+          // value re-takes over the optimistic override.
+          window.setTimeout(() => {
+            setDocTypeOverrides(prev => {
+              const next = { ...prev };
+              for (const id of ids) delete next[id];
+              return next;
+            });
+            void search(queryInput, filters);
+          }, TOAST_DEFAULT_MS + 250);
+        })
+        .catch(() => {
+          // Failure — revert override + show error toast with Retry.
+          setDocTypeOverrides(prev => {
+            const next = { ...prev };
+            for (const id of ids) delete next[id];
+            return next;
+          });
+          showToast(
+            'Update failed',
+            `Could not set document type for ${ids.length} document${ids.length !== 1 ? 's' : ''}.`,
+            'error',
+            TOAST_DEFAULT_MS,
+            {
+              label: 'Retry',
+              onClick: () => {
+                handleBulkDocTypeChange(newType);
+              },
+            }
+          );
+        });
+    },
+    [context.webAPI, filteredResults, filters, queryInput, search, selectedIds, showToast]
+  );
+
+  // 6. Share link — open mailto: composer pre-populated with one
+  //    "{DocName} → {DataverseRecordURL}" line per selected doc. NOT SPE
+  //    files — Dataverse record URLs per spec FR-DOC-02 + Owner Clarifications.
+  const handleBulkShareLink = useCallback(() => {
+    const items = selectedResults;
+    AppInsightsService.trackEvent('bulk_action_invoked', {
+      action_name: 'share_link',
+      selection_count: items.length,
+    });
+    if (items.length === 0) return;
+    let clientUrl: string;
+    try {
+      clientUrl =
+        (context as unknown as { page?: { getClientUrl?: () => string } }).page?.getClientUrl?.() ??
+        window.location.origin;
+    } catch {
+      clientUrl = window.location.origin;
+    }
+    const lines = items.map(r => {
+      const url = `${clientUrl}/main.aspx?etn=sprk_document&id=${r.documentId}&pagetype=entityrecord`;
+      return `${r.name ?? '(untitled)'} → ${url}`;
+    });
+    const body = encodeURIComponent(
+      `Sharing ${items.length} document${items.length !== 1 ? 's' : ''}:\n\n` +
+        lines.join('\n')
+    );
+    const subject = encodeURIComponent(
+      items.length === 1
+        ? `Document link: ${items[0].name ?? 'document'}`
+        : `${items.length} document links`
+    );
+    const href = `mailto:?subject=${subject}&body=${body}`;
+    try {
+      window.location.href = href;
+    } catch {
+      showToast(
+        'Share link failed',
+        'Could not open the email composer.',
+        'error'
+      );
+    }
+  }, [context, selectedResults, showToast]);
+
+  // Clear handler for the bulk-action bar.
+  const handleBulkClear = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
 
   const renderMainContent = () => {
     // Auth initializing state
@@ -829,34 +1396,91 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       );
     }
 
-    // Results list (uses component-level filteredResults)
+    // Results — list view (FR-DOC-04 default) or card view based on persisted pref
     if (filteredResults.length > 0) {
+      if (view === 'list' && !compactMode) {
+        // Card-view's existing toolbar surface (Reload / Add / Email / Open viewer)
+        // is folded into the renderActionsToolbar block above. For the list view
+        // we render the same toolbar slim-line + the BulkActionBar (when
+        // ≥1 row checked — FR-DOC-02) + the ListView body below.
+        return (
+          <>
+            {renderActionsToolbar()}
+            <BulkActionBar
+              selectedIds={selectedIds}
+              docTypeOptions={tagOptions}
+              onClear={handleBulkClear}
+              onEmail={handleBulkEmail}
+              onDownload={handleBulkDownload}
+              onPin={handleBulkPin}
+              onDelete={handleBulkDelete}
+              onDocTypeChange={handleBulkDocTypeChange}
+              onShareLink={handleBulkShareLink}
+            />
+            <ListView
+              results={filteredResults}
+              selectedIds={selectedIds}
+              onSelectionChange={setSelectedIds}
+              pinnedIds={pinnedIds}
+              onTogglePin={togglePin}
+              sortColumn={sortColumn}
+              sortDirection={sortDirection}
+              onSortChange={handleSortChange}
+              onOpenFile={handleOpenFileTelemetry}
+              onOpenRecord={handleOpenRecordTelemetry}
+              onFindSimilar={handleFindSimilarTelemetry}
+              onPreview={handlePreviewTelemetry}
+              onSummary={handleSummary}
+              onEmailDocument={handleEmailDocumentTelemetry}
+              onCopyLink={handleCopyLinkTelemetry}
+              onToggleWorkspace={handleToggleWorkspaceTelemetry}
+              isInWorkspace={isInWorkspace}
+            />
+          </>
+        );
+      }
       return (
-        <ResultsList
-          results={filteredResults}
-          isLoading={isLoading}
-          isLoadingMore={isLoadingMore}
-          hasMore={!filters.associatedOnly && hasMore}
-          totalCount={filteredTotalCount}
-          threshold={filters.threshold}
-          onLoadMore={loadMore}
-          onResultClick={handleResultClick}
-          onOpenFile={handleOpenFile}
-          onOpenRecord={handleOpenRecord}
-          onFindSimilar={handleFindSimilar}
-          onPreview={handlePreview}
-          onSummary={handleSummary}
-          onEmailDocument={handleEmailDocument}
-          onCopyLink={handleCopyLink}
-          onToggleWorkspace={handleToggleWorkspace}
-          isInWorkspace={isInWorkspace}
-          onViewAll={handleViewAll}
-          onReload={handleReload}
-          onAddDocument={handleAddDocument}
-          onOpenViewer={handleOpenViewer}
-          onEmailDocuments={emailWizardItems.length > 0 ? handleEmailDocuments : undefined}
-          compactMode={compactMode}
-        />
+        <>
+          {/* Card view also surfaces the BulkActionBar when ≥1 row is selected
+              via the row checkbox (selection state persists across view toggles
+              per FR-DOC-04 Owner Clarification). */}
+          <BulkActionBar
+            selectedIds={selectedIds}
+            docTypeOptions={tagOptions}
+            onClear={handleBulkClear}
+            onEmail={handleBulkEmail}
+            onDownload={handleBulkDownload}
+            onPin={handleBulkPin}
+            onDelete={handleBulkDelete}
+            onDocTypeChange={handleBulkDocTypeChange}
+            onShareLink={handleBulkShareLink}
+          />
+          <ResultsList
+            results={filteredResults}
+            isLoading={isLoading}
+            isLoadingMore={isLoadingMore}
+            hasMore={!filters.associatedOnly && hasMore}
+            totalCount={filteredTotalCount}
+            threshold={filters.threshold}
+            onLoadMore={loadMore}
+            onResultClick={handleResultClick}
+            onOpenFile={handleOpenFileTelemetry}
+            onOpenRecord={handleOpenRecordTelemetry}
+            onFindSimilar={handleFindSimilarTelemetry}
+            onPreview={handlePreviewTelemetry}
+            onSummary={handleSummary}
+            onEmailDocument={handleEmailDocumentTelemetry}
+            onCopyLink={handleCopyLinkTelemetry}
+            onToggleWorkspace={handleToggleWorkspaceTelemetry}
+            isInWorkspace={isInWorkspace}
+            onViewAll={handleViewAll}
+            onReload={handleReload}
+            onAddDocument={handleAddDocument}
+            onOpenViewer={handleOpenViewer}
+            onEmailDocuments={emailWizardItems.length > 0 ? handleEmailDocuments : undefined}
+            compactMode={compactMode}
+          />
+        </>
       );
     }
 
@@ -929,40 +1553,44 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         )}
       </div>
 
-      {/* Content Region: Sidebar + Main */}
-      <div className={styles.content}>
-        {/* Sidebar Region: Filters (hidden in compact mode or when disabled) */}
-        {showFilters &&
-          !compactMode &&
-          (isFilterPaneCollapsed ? (
-            <div className={styles.sidebarCollapsed}>
-              <Tooltip content="Expand filters" relationship="label">
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<ChevronRight20Regular />}
-                  onClick={handleToggleFilterPane}
-                  aria-label="Expand filters"
-                />
-              </Tooltip>
-            </div>
-          ) : (
-            <div className={styles.sidebar}>
-              <FilterPanel
-                filters={filters}
-                searchScope={searchScope}
-                scopeId={scopeId}
-                onFiltersChange={handleFiltersChange}
-                onApply={handleSearch}
-                disabled={isLoading}
-                onCollapse={handleToggleFilterPane}
-              />
-            </div>
-          ))}
+      {/* Command Bar Region (FR-DOC-04 + FR-DOC-05 + FR-DOC-06) — the sidebar
+          FilterPanel is removed in v1. The command bar hosts every filter
+          (Associated Only / File Type / Date Range / Threshold / Mode / Tags)
+          plus the list/card view toggle. The auto-search useEffect on
+          `filters.associatedOnly` is unchanged (the binding constraint from
+          spec FR-DOC-06). */}
+      {showFilters && !compactMode && (
+        <CommandBar
+          filters={filters}
+          onFiltersChange={handleFiltersChange}
+          showAssociatedOnly={searchScope !== 'all' && searchScope !== 'custom'}
+          fileTypeOptions={fileTypeOptions}
+          tagOptions={tagOptions}
+          optionsLoading={filterOptionsLoading}
+          selectedTags={selectedTags}
+          onSelectedTagsChange={handleSelectedTagsChange}
+          view={view}
+          onViewChange={handleViewChange}
+          disabled={isLoading}
+        />
+      )}
 
-        {/* Main Region: Results */}
+      {/* Content Region: Main (single column now that the sidebar is gone) */}
+      <div className={styles.content}>
         <div className={styles.main}>{renderMainContent()}</div>
       </div>
+
+      {/* FR-DOC-05 footer count — appears when ≥1 tag selected, communicates
+          filtered vs total count. When no tags selected, omitted (the in-list
+          ResultsList header already shows totals). */}
+      {hasSearched && !isLoading && selectedTags.length > 0 && (
+        <div className={styles.footerCount}>
+          <Text size={200}>
+            Showing {filteredResults.length} of {filteredTotalCount} documents · filtered by{' '}
+            {selectedTags.length} tag{selectedTags.length !== 1 ? 's' : ''}
+          </Text>
+        </div>
+      )}
 
       {/* Footer: View All link (compact mode only) */}
       {compactMode && results.length > 0 && (
@@ -973,7 +1601,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.43 • Built 2026-05-25</Text>
+        <Text size={100}>v1.1.44 • Built 2026-05-27</Text>
       </div>
 
       {/* Find Similar — shared iframe dialog */}
@@ -1004,6 +1632,12 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         bffBaseUrl={apiBaseUrl}
         dataService={dataService}
       />
+
+      {/* Toaster — single instance per PCF surface (FR-DOC-02 bulk-action
+          feedback + FR-DOC-07 success/error toasts). Portal-rendered;
+          re-wraps theming via the FluentProvider mounted by control/index.ts
+          (`.claude/patterns/ui/fluent-v9-portal-gotcha.md`). */}
+      <Toaster toasterId={toasterId} position="top-end" />
     </div>
   );
 };

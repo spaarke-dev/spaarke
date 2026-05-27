@@ -126,3 +126,9 @@ export * from './ThreePaneLayout';
 
 // PaneHeader - Canonical pane-header primitive (icon + title + rightSlot) for SpaarkeAi three-pane shell (FR-01, task 010)
 export * from './PaneHeader';
+
+// TagFilter - Generic multi-select chip filter for Fluent v9 (FR-SC-01, matter-ui-r1 task 010)
+export * from './TagFilter';
+
+// DocumentRowMenu - 3-dot row-action menu for document grids (FR-SC-02, matter-ui-r1 task 011)
+export * from './DocumentRowMenu';

@@ -33,6 +33,12 @@ Build, version-bump, pack, and deploy a PCF control to Dataverse via solution ZI
 - Deploying web resources → Use Dataverse UI directly or `dataverse-deploy`
 - Deploying plugins → Use `dataverse-deploy`
 - Deploying Azure infrastructure → Use `azure-deploy`
+- **Authoring/modifying the PCF's React component code** → Use `fluent-v9-component` FIRST. This skill is for build+pack+deploy mechanics, not component design.
+
+**Related companion patterns (read BEFORE editing the manifest or component code)**:
+- [`.claude/patterns/pcf/fluent-v9-modern-theming.md`](../../patterns/pcf/fluent-v9-modern-theming.md) — `<platform-library>` manifest declarations, the 4 theming approaches, when to use `virtual` vs bundled.
+- [`.claude/patterns/pcf/fluent-v9-canvas-vs-mda-disabled.md`](../../patterns/pcf/fluent-v9-canvas-vs-mda-disabled.md) — required if the PCF ships to both Canvas + MDA.
+- [`.claude/patterns/pcf/theme-management.md`](../../patterns/pcf/theme-management.md) — existing Spaarke dark-mode wiring.
 
 ---
 

@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Add TagFilter shared component (FR-SC-01)</title>
+    <phase>1: Shared Components</phase>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
+    <estimated-hours>3-4</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>012, 041</blocks>
+    <tags>react, fluent-ui, frontend, shared-components</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Authors a Fluent v9 React component in the shared library (`@spaarke/ui-components`); tags include `react`, `fluent-ui`, and `frontend`; ADR-021 (Fluent v9 tokens, dark mode) is binding; design.md §6.0 mandates `/fluent-v9-component` invocation for any Fluent v9 component authoring task.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec FR-SC-01, add a generic multi-select chip filter component `TagFilter` to `@spaarke/ui-components`. The component is NOT bound to document type — it is reusable for any choice field. Its first consumer (later task) is the Semantic Search PCF Tags filter (FR-DOC-05), but the component itself must be choice-field-agnostic. Props: `{ options: TagFilterOption[], selected: string[], onChange: (selected: string[]) =&gt; void, label?: string, sortAlphabetical?: boolean }`. Renders Fluent v9 `Menu` + `MenuItemCheckbox`; trigger button shows label + count badge; below-bar active-tags chip row appears when ≥1 selected; chip × removes single tag; "Clear all" empties selection. Component MUST use Fluent v9 semantic tokens only (zero hardcoded hex/rgb), render correctly in dark mode (NFR-04), and remain compatible with React 16/17 (PCF platform, ADR-022).
+  </prompt>
+
+  <role>
+    Senior frontend developer with deep Fluent UI v9 experience (Menu, MenuItemCheckbox, Tag, Badge, makeStyles + tokens) and familiarity with `@spaarke/ui-components` barrel-export conventions. Comfortable authoring generic, framework-style components that ship with TypeScript types and zero coupling to specific Dataverse entities or PCF host plumbing.
+  </role>
+
+  <goal>
+    A reusable, choice-field-agnostic Fluent v9 multi-select chip filter exported from `@spaarke/ui-components` as `TagFilter`, with companion type `TagFilterOption` exported alongside. The shared library builds clean (`npm run build:prod`). Both PCFs (Semantic Search + Visual Host) still build against the updated shared library. The component passes axe in light and dark; multi-select OR semantics work; chip × removes a single tag; "Clear all" empties selection.
+  </goal>
+
+  <context>
+    <background>
+      FR-SC-01 specifies a generic Tags filter component because the spec explicitly forbids parallel implementations and the same UX is expected to be reused beyond document types in future work. ADR-012 places the component in `@spaarke/ui-components`. ADR-021 binds Fluent v9 tokens + dark-mode parity. The Semantic Search PCF (a later task) will be the first consumer — its Tags filter is the relocated existing Document Type filter from the sidebar `FilterPanel`. Building this component first unblocks task 012 (barrel update) and downstream Semantic Search PCF work (FR-DOC-05).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/TagFilter.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/TagFilter.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-SC-01 — props are `{ options, selected, onChange, label?, sortAlphabetical? }`; component is generic (NOT bound to document type)</constraint>
+    <constraint source="spec">FR-SC-01 — multi-select OR semantics; chip × removes individual tag; "Clear all" empties selection</constraint>
+    <constraint source="spec">FR-SC-01 — exported from barrel `src/index.ts`</constraint>
+    <constraint source="spec">NFR-02 — axe DevTools WCAG 2.1 AA, zero violations, light AND dark</constraint>
+    <constraint source="spec">NFR-04 — Fluent v9 tokens only; zero hardcoded hex/rgb in touched files</constraint>
+    <constraint source="ADR-012">Single shared implementation in `@spaarke/ui-components`; no parallel per-PCF copies</constraint>
+    <constraint source="ADR-021">Fluent UI v9 design system; semantic tokens only; dark mode required</constraint>
+    <constraint source="ADR-022">Compatible with React 16/17 (PCF platform); no React 18+ exclusive APIs (no `use()`, no `useTransition` requirement, no server components)</constraint>
+    <constraint source="design.md">§6.0 binding rule — `/fluent-v9-component` MUST be invoked at task start before reading/writing any Fluent v9 file</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/INDEX.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 component authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">
+        Use `makeStyles` + `tokens` for all styling; never hardcode color/spacing values; expose typed props.
+      </pattern>
+      <pattern name="Fluent v9 theming + dark mode" location=".claude/patterns/ui/fluent-v9-theming.md">
+        Token-only rule; verify both webLightTheme and webDarkTheme during dev.
+      </pattern>
+      <pattern name="Shared barrel export" location="src/client/shared/Spaarke.UI.Components/src/index.ts">
+        Re-export both the component and its public types from the barrel; component-first ordering within the section.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. If higher, run `context-handoff` before proceeding.</step>
+    <step order="0.5" name="Invoke fluent-v9-component">Invoke `Skill fluent-v9-component` (binding per design.md §6.0). Load patterns (`fluent-v9-component-authoring.md`, `fluent-v9-theming.md`, `fluent-v9-react-version-boundaries.md`) and skill guidance before reading any Fluent v9 component file.</step>
+    <step order="1" name="Load knowledge">Read ADR-012, ADR-021, ADR-022, and the three ui patterns above. Read existing `src/client/shared/Spaarke.UI.Components/src/index.ts` to confirm barrel conventions. Confirm `@fluentui/react-components` is already a dependency.</step>
+    <step order="2" name="Define types">Create `src/client/shared/Spaarke.UI.Components/src/types/TagFilter.ts` exporting `TagFilterOption { value: string; label: string; }` and `TagFilterProps { options: TagFilterOption[]; selected: string[]; onChange: (selected: string[]) =&gt; void; label?: string; sortAlphabetical?: boolean; }`.</step>
+    <step order="3" name="Implement component">Create `src/client/shared/Spaarke.UI.Components/src/components/TagFilter.tsx` rendering: (a) Fluent v9 `Menu` trigger button with label + count badge (e.g., `Tags (2)` when 2 selected); (b) `MenuPopover` containing `MenuList` of `MenuItemCheckbox` entries, one per option, optionally alphabetically sorted by `label` when `sortAlphabetical` is true; (c) below-bar chip row using Fluent v9 `Tag` components (or `InteractionTag` with dismiss action) rendered ONLY when `selected.length &gt;= 1`; each chip's × calls `onChange(selected.filter(s =&gt; s !== chipValue))`; (d) a "Clear all" subtle button at the end of the chip row that calls `onChange([])`. Use `makeStyles` + `tokens` exclusively — verify zero hex/rgb.</step>
+    <step order="4" name="A11y + dark mode">Verify roles/labels: the trigger button has `aria-label` derived from `label` prop; the chip × buttons have `aria-label="Remove {label}"`. Render component in dev harness with both `webLightTheme` and `webDarkTheme` (FluentProvider wrap) and confirm contrast + token resolution.</step>
+    <step order="5" name="React 16/17 compatibility">Confirm no React 18+ exclusive APIs are imported (no `use()`, no `useId` from React 18 — use Fluent's `useId` from `@fluentui/react-components` if needed). Confirm `package.json` peerDependencies allow React ^16 || ^17 (it already does, but verify no new types reference React 18 features).</step>
+    <step order="6" name="Build verification">From `src/client/shared/Spaarke.UI.Components`, run `npm run build:prod`. Then from each consuming PCF (`src/client/pcf/SemanticSearchControl`, `src/client/pcf/VisualHost`), run `npm run build:prod` to confirm the shared library still compiles end-to-end. Note: barrel export of `TagFilter` itself is deferred to task 012 — this step only verifies the shared library and PCF builds succeed with the new file present but unexported.</step>
+    <step order="7" name="Self-review">Re-read the component file: confirm no hardcoded colors, no Matter-specific code paths, no document-type-specific imports, no console.log, no dead code, no `any` types.</step>
+    <step order="8" name="Checkpoint">Run `context-handoff` (silent: ✅ Checkpoint).</step>
+    <step order="9.5" name="Quality gates (FULL rigor)">Invoke `Skill code-review` then `Skill adr-check`. Resolve every finding before completion. The code-review skill specifically enforces `/fluent-v9-component` was invoked at Step 0.5 — if skipped, the merge is blocked.</step>
+    <step order="10" name="Update task tracking">Update `projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md`: task 010 status 🔲 → ✅. Reset `projects/spaarke-matter-ui-enhancement-r1/current-task.md` to the next pending task (likely 011).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build the shared library and PCFs (`npm run build:prod`)</tool>
+    <tool name="git">Version control</tool>
+    <tool name="Skill fluent-v9-component">Mandatory Fluent v9 authoring guidance at Step 0.5</tool>
+    <tool name="Skill code-review">Quality gate at Step 9.5</tool>
+    <tool name="Skill adr-check">ADR compliance gate at Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/TagFilter.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/TagFilter.tsx</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/current-task.md (advance pointer)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/client/shared/Spaarke.UI.Components/src/components/TagFilter.tsx` exists and exports a `TagFilter` React component with props matching FR-SC-01 exactly: `{ options: TagFilterOption[], selected: string[], onChange: (selected: string[]) =&gt; void, label?: string, sortAlphabetical?: boolean }`.</criterion>
+    <criterion testable="true">`TagFilterOption` and `TagFilterProps` types are exported from `src/client/shared/Spaarke.UI.Components/src/types/TagFilter.ts`.</criterion>
+    <criterion testable="true">Multi-select OR semantics work per FR-SC-01: selecting two checkbox items results in `onChange` being called with both values; the component holds no internal selection state for these (it is controlled).</criterion>
+    <criterion testable="true">When `selected.length &gt;= 1`, a chip row renders below the trigger button; clicking a chip's × invokes `onChange` with that value removed; clicking "Clear all" invokes `onChange([])`.</criterion>
+    <criterion testable="true">`sortAlphabetical: true` causes menu items to render alphabetically by `label`; default (false/undefined) preserves caller-supplied order.</criterion>
+    <criterion testable="true">Component contains zero hardcoded hex/rgb values (verifiable by grep) and uses Fluent v9 `tokens` exclusively for color/spacing.</criterion>
+    <criterion testable="true">Component renders correctly in both `webLightTheme` and `webDarkTheme` (verified in dev harness).</criterion>
+    <criterion testable="true">No React 18+ exclusive APIs imported; `npm run build:prod` succeeds in `@spaarke/ui-components` and in both PCFs.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` skills pass with no unresolved findings.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 010 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Component renders in light + dark theme">
+      <steps>
+        <step>Mount `TagFilter` inside a FluentProvider with `webLightTheme`; confirm trigger button, menu items, and chip row render with v9 tokens.</step>
+        <step>Re-mount inside FluentProvider with `webDarkTheme`; confirm contrast passes axe; no hardcoded colors visible.</step>
+      </steps>
+      <expected>Both themes render without contrast violations; same component layout; no theme-specific overrides needed.</expected>
+    </test>
+    <test name="Multi-select OR semantics + chip removal">
+      <steps>
+        <step>Mount `TagFilter` with 5 options, controlled `selected` from parent state.</step>
+        <step>Click two checkboxes — verify `onChange` called twice with cumulative arrays.</step>
+        <step>Click a chip's × — verify `onChange` called with that value removed.</step>
+        <step>Click "Clear all" — verify `onChange([])`.</step>
+      </steps>
+      <expected>All four interactions invoke `onChange` with the correct payload; chip row hides when `selected.length === 0`.</expected>
+    </test>
+    <test name="axe scan passes in both themes">
+      <steps>
+        <step>Run `axe-core` against the rendered component in `webLightTheme`.</step>
+        <step>Run `axe-core` against the rendered component in `webDarkTheme`.</step>
+      </steps>
+      <expected>Zero WCAG 2.1 AA violations in either theme.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Barrel export of `TagFilter` from `src/client/shared/Spaarke.UI.Components/src/index.ts` is intentionally deferred to task 012 to serialize the barrel update across tasks 010 and 011 and avoid merge conflicts. The first PCF consumer (Semantic Search Tags filter, FR-DOC-05) is implemented in a later Phase 2 task. Keep this component strictly generic — no `sprk_documenttype`-specific defaults; the option-set source is owned by the consumer, not by this component.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      🔒 RIGOR LEVEL: FULL. Invoke `Skill fluent-v9-component` at Step 0.5 (binding per design.md §6.0). Load ADR-012, ADR-021, ADR-022, and ui patterns. Implement types + component. Build both the shared library and both PCFs. Run code-review + adr-check at Step 9.5. Update TASK-INDEX.md and current-task.md.
+    </protocol>
+  </execution>
+</task>

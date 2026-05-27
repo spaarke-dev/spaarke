@@ -2,9 +2,9 @@
 <manifest>
   <control namespace="Spaarke.Visuals"
            constructor="VisualHost"
-           version="1.4.0"
+           version="1.4.1"
            display-name-key="Visual Host"
-           description-key="Virtual PCF: React/Fluent externalized via platform-library; configuration-driven visualization (v1.4.0)"
+           description-key="Virtual PCF: React/Fluent externalized via platform-library; configuration-driven visualization (v1.4.1)"
            control-type="virtual">
 
     <external-service-usage enabled="false" />
@@ -132,6 +132,14 @@
               usage="input"
               required="false"
               default-value="true" />
+
+    <!-- Optional: Application Insights instrumentation key for client telemetry (FR-TEL-01) -->
+    <property name="appInsightsKey"
+              display-name-key="App Insights Key"
+              description-key="Application Insights instrumentation key for browser telemetry (direct SDK, not BFF-proxied)"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
 
     <resources>
       <code path="index.ts" order="1" />

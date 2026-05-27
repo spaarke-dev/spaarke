@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Verify sprk_event schema field names via MCP describe_table</title>
+    <phase>0: Foundation</phase>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>032, 033, 034</blocks>
+    <tags>dataverse, schema-verification</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Inventory + documentation task — no code implementation</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Verify the spec.md Assumption #1 fields exist on `sprk_event` with the expected types. Specifically: `sprk_regardingmatter` (lookup), `sprk_finalduedate` (date), `sprk_eventstatus` (choice), `actualstart`, `completeddate` (date fields used by Matter Activity FetchXML). If any field name differs, document the actual name so FR-DV-03, FR-DV-04, FR-DV-05 chart-def tasks use the correct FetchXML.
+  </prompt>
+
+  <role>
+    SPAARKE platform investigator. Use Dataverse MCP `describe_table` tool to confirm actual field names. No code changes.
+  </role>
+
+  <goal>
+    `notes/spikes/sprk_event-field-verification.md` populated with: spec-assumed field name → actual field name (✅ if matches, ⚠️ with corrected name if differs), plus a "FetchXML template" snippet for each of the three queries (overdue tasks, upcoming tasks, recent activity).
+  </goal>
+
+  <context>
+    <background>
+      Spec.md Assumption #1: "`sprk_event` filter fields — assumed `sprk_regardingmatter` lookup, `sprk_finalduedate` date, `sprk_eventstatus` choice exist on `sprk_event`. Verify in Phase 2.1 during chart def authoring; adjust FetchXML if field names differ." We promote this to a Phase 0 prerequisite so Phase 3 chart-def tasks (FR-DV-03, FR-DV-04, FR-DV-05) start with verified facts.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-matter-ui-enhancement-r1/notes/spikes/sprk_event-field-verification.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Assumption #1 — must be verified before any Phase 3 chart-def task starts</constraint>
+    <constraint source="project">Read-only verification — no schema changes in this task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Call mcp__dataverse__describe_table on `sprk_event` and capture the full attribute list with types.</step>
+    <step order="2">For each spec-assumed field (`sprk_regardingmatter`, `sprk_finalduedate`, `sprk_eventstatus`, `actualstart`, `completeddate`), find the actual logical name and type. Record matches as ✅, mismatches as ⚠️ with the corrected name.</step>
+    <step order="3">If any choice values matter for the FetchXML (`eventstatus != Completed`), use mcp__dataverse__read_query on a sample row to confirm the option-set value codes.</step>
+    <step order="4">Write notes/spikes/sprk_event-field-verification.md with: (a) assumption table with ✅/⚠️ status, (b) ready-to-use FetchXML snippets for the 3 chart-def queries (overdue, upcoming, recent activity) using the verified field names.</step>
+    <step order="5">If any ⚠️ mismatch found, add a note in `current-task.md` under "Decisions Made" so Phase 3 tasks pick up the correction.</step>
+    <step order="6">Update TASK-INDEX.md: 003 → ✅. Update current-task.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp__dataverse__describe_table">Read sprk_event schema</tool>
+    <tool name="mcp__dataverse__read_query">Sample sprk_event rows for option-set value codes</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/sprk_event-field-verification.md</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/spikes/sprk_event-field-verification.md lists each assumed field with ✅ or ⚠️ status.</criterion>
+    <criterion testable="true">3 FetchXML snippets (overdue / upcoming / recent activity) compose-able into FR-DV-03..05 chart def `optionsjson` fields.</criterion>
+    <criterion testable="true">If any ⚠️ found, project Decisions Made log updated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    If `sprk_regardingmatter` does not exist, the polymorphic `regardingobjectid` lookup might be in use instead — check both. If `sprk_finalduedate` does not exist, look for `scheduledend` (activity standard field).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      MINIMAL rigor. MCP read-only. Document findings. Update task status.
+    </protocol>
+  </execution>
+</task>

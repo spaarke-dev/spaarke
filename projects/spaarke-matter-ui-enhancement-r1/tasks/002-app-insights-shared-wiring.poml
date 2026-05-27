@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>App Insights shared wiring (FR-TEL-01 infrastructure)</title>
+    <phase>0: Foundation</phase>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>046, 047, 070, 071</blocks>
+    <tags>pcf, frontend, telemetry, shared-services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'pcf' and 'frontend' — code implementation in shared library + PCF integration</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add an Application Insights shared service to `@spaarke/ui-components` that both PCFs (Semantic Search + Visual Host) will consume. Per FR-TEL-01 (binding): direct browser SDK connection (NOT BFF-proxied), instrumentation key sourced via the existing PCF manifest-property env-var pattern (same mechanism as `apiBaseUrl`, `tenantId`, `clientAppId`, `bffAppId`).
+  </prompt>
+
+  <role>
+    Senior frontend developer with expertise in `@microsoft/applicationinsights-web`, Fluent UI v9, and PCF manifest property bindings. Familiar with `@spaarke/ui-components` barrel export conventions.
+  </role>
+
+  <goal>
+    A service in `src/client/shared/Spaarke.UI.Components/src/services/AppInsightsService.ts` exposing `initialize(instrumentationKey: string)` and `trackEvent(name: string, properties?: Record&lt;string,unknown&gt;)`. Exported via barrel. Both PCFs consume the same service. Builds clean with `npm run build:prod`. No App Insights init runs more than once even if a PCF re-renders.
+  </goal>
+
+  <context>
+    <background>
+      FR-TEL-01 wires App Insights into both PCFs for telemetry events used by FR-DOC-07 (Semantic Search events) and the Visual Host `card_rendered` / `card_expanded` events. Per ADR-012 (shared component library), the SDK wiring belongs in `@spaarke/ui-components` so both PCFs share the singleton.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/AppInsightsService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</file>
+      <file>src/client/pcf/VisualHost/control/VisualHostRoot.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/VisualHost/control/ControlManifest.Input.xml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-TEL-01 — direct browser SDK, NOT BFF-proxied</constraint>
+    <constraint source="spec">FR-TEL-01 — instrumentation key via PCF manifest property (existing env-var pattern); no hardcoding</constraint>
+    <constraint source="spec">FR-TEL-01 — no PII in event payloads</constraint>
+    <constraint source="ADR-012">Add to `@spaarke/ui-components` shared library, not parallel implementations per PCF</constraint>
+    <constraint source="ADR-021">Use Fluent v9 semantic tokens for any UI helpers (none expected in this task)</constraint>
+    <constraint source="ADR-022">Compatible with React 16/17 (PCF platform) — no React 18-only APIs</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="PCF manifest env-var" location="src/client/pcf/SemanticSearchControl/SemanticSearchControl/ControlManifest.Input.xml">
+        Existing properties: apiBaseUrl, tenantId, clientAppId, bffAppId — add `appInsightsKey` following the same shape.
+      </pattern>
+      <pattern name="Shared service barrel" location="src/client/shared/Spaarke.UI.Components/src/index.ts">
+        Add `export * from './services/AppInsightsService';` keeping alphabetical-by-group convention.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Step 0.5: Invoke `Skill fluent-v9-component` — even though this is mostly a service, the binding rule applies if any React hooks/components are added.</step>
+    <step order="1">Add `@microsoft/applicationinsights-web` to `src/client/shared/Spaarke.UI.Components/package.json` dependencies (NOT devDependencies). Verify React 16/17 compatibility — the package is framework-agnostic.</step>
+    <step order="2">Create `src/client/shared/Spaarke.UI.Components/src/services/AppInsightsService.ts` exporting a singleton class with: `initialize(key: string): void` (idempotent — second call is a no-op), `trackEvent(name: string, properties?: Record&lt;string, unknown&gt;): void`, `flush(): void` (for tests).</step>
+    <step order="3">Add a small guard in `trackEvent`: if not initialized, log a `console.warn` (NOT throw) and return. This protects against pre-init event calls during cold-load.</step>
+    <step order="4">Export from `src/client/shared/Spaarke.UI.Components/src/index.ts` barrel.</step>
+    <step order="5">Add a manifest property `appInsightsKey` to both PCFs' `ControlManifest.Input.xml` (Semantic Search + Visual Host) — same shape as `apiBaseUrl`.</step>
+    <step order="6">In each PCF's init code, call `AppInsightsService.initialize(context.parameters.appInsightsKey.raw)` if the key is present.</step>
+    <step order="7">Build verification: `npm run build:prod` in `@spaarke/ui-components`, then `npm run build:prod` in each PCF — all must succeed.</step>
+    <step order="8">Step 9.5 (FULL rigor): run `Skill code-review` + `Skill adr-check` — fix issues before completing.</step>
+    <step order="9">Update TASK-INDEX.md: 002 → ✅. Update current-task.md to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test TypeScript/PCF projects (`npm run build:prod`)</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/AppInsightsService.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (barrel update)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/package.json (deps update)</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/ControlManifest.Input.xml (add manifest prop)</output>
+    <output type="code">src/client/pcf/VisualHost/control/ControlManifest.Input.xml (add manifest prop)</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx (init call)</output>
+    <output type="code">src/client/pcf/VisualHost/control/VisualHostRoot.tsx (init call)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`@spaarke/ui-components` builds clean (`npm run build:prod`) with `AppInsightsService` exported.</criterion>
+    <criterion testable="true">Both PCFs build clean and the manifest property `appInsightsKey` exists in each `ControlManifest.Input.xml`.</criterion>
+    <criterion testable="true">`AppInsightsService.initialize` is idempotent — calling it twice does not re-initialize the SDK.</criterion>
+    <criterion testable="true">`AppInsightsService.trackEvent` warns (not throws) if called before initialize.</criterion>
+    <criterion testable="true">No PII in the service (no userId, email, document content — only event names and structured properties).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Service initialization in PCF dev harness">
+      <steps>
+        <step>Build shared library + PCF</step>
+        <step>Run PCF test harness, supply appInsightsKey property</step>
+        <step>Verify in console: AppInsights SDK loaded once, no duplicate init</step>
+      </steps>
+      <expected>Single SDK init on PCF load; trackEvent calls succeed silently</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    This task ships only the wiring infrastructure. FR-DOC-07 (task 046) and Visual Host telemetry (task 047 / 071 verification) will populate event calls using this service. The instrumentation key is sourced from the host environment via PCF manifest — task 070/071 wires the actual key during deploy.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Step 0.5 invoke fluent-v9-component (binding even for services touching React hooks if any). Load knowledge. Implement. Build. Run code-review + adr-check (FULL rigor).
+    </protocol>
+  </execution>
+</task>

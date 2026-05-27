@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Deploy Visual Host PCF to Dataverse (FR-VH-01..05)</title>
+    <phase>7: Deploy + Validation</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>020, 021, 022, 023, 024, 025</dependencies>
+    <blocks>073, 074</blocks>
+    <tags>deploy, pcf, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF deploy with version bump (AP-1 binding fix). NFR-05 regression smoke (task 025) is a hard gate. Stale-bundle risk if version not bumped in all 4 locations.</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy the Visual Host PCF (`src/client/pcf/VisualHost/`) to the dev/test Dataverse environment via production-mode build and `pac pcf push`. MANDATORY: bump version in the 4 locations specified by PCF-DEPLOYMENT-GUIDE.md BEFORE building. Use `npm run build:prod` (NOT `npm run build` — AP-1 binding fix). NFR-05 regression smoke (task 025) MUST have passed before this deploy proceeds. Post-deploy smoke check: existing in-production chart defs (Matter KPI Scorecard, Matter Financial Metrics Scorecard) render unchanged, AND one new chart-def-driven card renders correctly.
+  </prompt>
+
+  <role>
+    PCF deployment engineer familiar with `pcf-scripts build --buildMode production`, `pac pcf push`, ControlManifest version semantics, and Visual Host's backward-compatibility constraint (NFR-05). Aware of AP-1 anti-pattern.
+  </role>
+
+  <goal>
+    The Visual Host PCF deployed to the target Dataverse environment with the bumped version visible in the published ControlManifest. A smoke check confirms: (a) existing in-production chart defs render byte-identically to the pre-deploy baseline captured in task 025; (b) the new Custom Options keys (`donutLayout`, `donutCenterMode`, `showBreakdownRows`, `breakdownValueFormat`, `badge`, `descriptionColor`, `layoutMode`, `headlineFromField`, `subLineTemplate`) are honored when the corresponding chart def is in scope; (c) `CardChrome` wraps each card with title + expand icon.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 020-024 ship the Visual Host renderer extensions: FR-VH-01 (Donut field-pivot + matrixRight + center via meanOfFields), FR-VH-02 (MetricCard badge slot), FR-VH-03 (MetricCard descriptionColor), FR-VH-04 (HorizontalStackedBar headlineAboveBar), FR-VH-05 (CardChrome internal wrapper). Task 025 is the NFR-05 regression baseline capture for existing in-production chart defs. This task deploys the renderer changes. Per §6.4.0 binding constraint, EVERY existing chart def must render unchanged.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/VisualHost/control/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/VisualHost/package.json</file>
+      <file>src/client/pcf/VisualHost/control/VisualHostRoot.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/CardChrome.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/DonutChart.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/MetricCard.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/HorizontalStackedBar.tsx</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-VH-01..05 — all Visual Host renderer extensions shipped and bundled in this deploy</constraint>
+    <constraint source="spec">NFR-05 (binding) — every existing in-production chart def renders unchanged after deploy; regression smoke required</constraint>
+    <constraint source="spec">§6.4.0 — no Matter-specific code paths in Visual Host; generic Custom Options only</constraint>
+    <constraint source="spec">§MUST Rules — `npm run build:prod` (NOT `npm run build`)</constraint>
+    <constraint source="ADR-022">React 16/17 (PCF platform-provided); no React 18+ deps</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; dark mode supported</constraint>
+    <constraint source="FAILURE-MODES">AP-1: NEVER use `npm run build`</constraint>
+    <constraint source="project">PCF-DEPLOYMENT-GUIDE.md: version MUST be bumped in 4 locations BEFORE building</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>docs/guides/VISUALHOST-SETUP-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="PCF version bump (4 locations)" location="docs/guides/PCF-DEPLOYMENT-GUIDE.md">
+        Same 4-location requirement as task 070; apply identically to Visual Host.
+      </pattern>
+      <pattern name="NFR-05 regression smoke baseline" location="projects/spaarke-matter-ui-enhancement-r1/notes/ (from task 025)">
+        Task 025 captured pre-deploy screenshots/render evidence for existing in-production chart defs. Compare post-deploy rendering against this baseline.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Verify upstream deps shipped: tasks 020, 021, 022, 023, 024, 025 all show ✅ in TASK-INDEX.md. Task 025 (NFR-05 regression smoke baseline) is a HARD gate — if it didn't pass for the pre-deploy state, BLOCK and report.</step>
+    <step order="1">Read `docs/guides/PCF-DEPLOYMENT-GUIDE.md` in full. Identify the 4 version-bump locations for Visual Host (may differ from Semantic Search PCF; verify per-PCF).</step>
+    <step order="2">Bump version in all 4 locations using a consistent increment. Verify the increment matches the project's version cadence (check git log on `ControlManifest.Input.xml`).</step>
+    <step order="3">Verify `package.json` build:prod script invokes `pcf-scripts build --buildMode production` (AP-1 sanity check).</step>
+    <step order="4">Run `npm install` (if dependencies changed) then `npm run build:prod` in `src/client/pcf/VisualHost/`. Verify build succeeds. Compare bundle size vs prior deploy — >2× jump = AP-1 regression, halt.</step>
+    <step order="5">Invoke `Skill pcf-deploy` (or run `pac pcf push` directly) to push the control to the target Dataverse environment.</step>
+    <step order="6">NFR-05 post-deploy regression smoke: load a Matter record with the Matter KPI Scorecard chart def. Visual-diff against the baseline captured in task 025 — must render byte-identically. Repeat for Matter Financial Metrics Scorecard. If any drift, halt and roll back.</step>
+    <step order="7">Forward-smoke check: load a test form with a Visual Host instance bound to one of the new chart defs (e.g., a Matter with the Matter Health chart def lookup populated via task 030). Confirm `CardChrome` renders title + expand icon, donut renders with `matrixRight` layout + 3 breakdown rows + composite letter center.</step>
+    <step order="8">Step 9.5 (FULL rigor): run `Skill code-review` + `Skill adr-check` on any uncommitted changes in `src/client/pcf/VisualHost/`. Resolve issues.</step>
+    <step order="9">Update TASK-INDEX.md: 071 → ✅. Reset current-task.md for next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (`npm run build:prod`)</tool>
+    <tool name="pac">Push PCF to Dataverse (`pac pcf push`)</tool>
+    <tool name="pcf-deploy">Skill for the deploy workflow</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">Visual Host PCF deployed to target Dataverse environment with bumped version</output>
+    <output type="evidence">NFR-05 regression smoke evidence (visual diff vs baseline from task 025) captured in projects/spaarke-matter-ui-enhancement-r1/notes/</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Version bumped in all 4 locations specified by PCF-DEPLOYMENT-GUIDE.md before build.</criterion>
+    <criterion testable="true">`npm run build:prod` succeeds; bundle size within expected range.</criterion>
+    <criterion testable="true">`pac pcf push` (or pcf-deploy skill) succeeds without errors.</criterion>
+    <criterion testable="true">NFR-05 regression smoke: Matter KPI Scorecard + Matter Financial Metrics Scorecard render byte-identically to baseline from task 025.</criterion>
+    <criterion testable="true">Forward-smoke: at least one new chart def (e.g., Matter Health) renders correctly via the bumped Visual Host with `CardChrome` title + expand icon.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass on any uncommitted code changes.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Visual Host PCF NFR-05 regression smoke">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter</url>
+      <steps>
+        <step>Navigate to a Matter record with the Matter KPI Scorecard chart def</step>
+        <step>Capture screenshot of the rendered card</step>
+        <step>Open the baseline screenshot from task 025</step>
+        <step>Visual-diff: pixel-level comparison should show no drift</step>
+        <step>Repeat for Matter Financial Metrics Scorecard chart def</step>
+      </steps>
+      <expected>Both existing chart defs render byte-identically; no drift attributable to FR-VH-01..05 renderer extensions</expected>
+    </test>
+    <test name="Visual Host PCF forward smoke (new chart def)">
+      <steps>
+        <step>Navigate to a Matter with the Matter Health Composite chart def bound on the form</step>
+        <step>Verify CardChrome renders title + expand icon corner slot</step>
+        <step>Verify donut renders with matrixRight layout + 3 labeled breakdown rows</step>
+        <step>Verify composite letter renders in donut center (e.g., "B+")</step>
+        <step>Open DevTools; verify no console errors</step>
+      </steps>
+      <expected>New renderer extensions honored; no console errors</expected>
+    </test>
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Verify donut segment colors adapt via tokenSet (brand/warning/danger)</step>
+        <step>Verify CardChrome title + corner icons adapt</step>
+      </steps>
+      <expected>Fluent v9 semantic tokens render correctly in dark mode</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Parallel-safe with 070 (Semantic Search deploy) and 072 (BFF deploy) — different deploy targets.
+
+    NFR-05 backward compatibility is the most important post-deploy check. Any drift on existing chart defs = halt + roll back. The §6.4.0 binding constraint exists precisely because Visual Host serves multiple in-production chart defs and a regression silently breaks unrelated dashboards.
+
+    AP-1 reminder: empirical bundle-size comparison is the primary defense against dev-mode regression.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor. Step 0.5 is NOT applicable (deploy task — no Fluent v9 component authoring). Load PCF-DEPLOYMENT-GUIDE.md + FAILURE-MODES.md (AP-1) + VISUALHOST-ARCHITECTURE.md. Verify upstream deps + task 025 baseline ✅. Bump version. Build with `npm run build:prod`. Push via pcf-deploy skill. Run NFR-05 regression smoke + forward smoke via ui-test skill. Step 9.5: code-review + adr-check. Update TASK-INDEX.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Author Matter Budget chart definition (FR-DV-02)</title>
+    <phase>3: Chart Definitions</phase>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>023</dependencies>
+    <blocks>060</blocks>
+    <tags>dataverse, chart-definition</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Dataverse record authoring (no React, no .cs). ADR-021 token vocabulary applied via the HorizontalStackedBar renderer; NFR-05 backward compat is renderer-layer (task 023/025). No FULL-rigor quality gates required.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author a new `sprk_chartdefinition` Dataverse record named `Matter Budget` per FR-DV-02. Visual Type = `HorizontalStackedBar` (100000012), Entity = `sprk_matter`. Data fields: `sprk_totalspendtodate` (current) + `sprk_totalbudget` (total). Provide the exact `sprk_optionsjson` payload below. Configure Drill Through to `sprk_invoice` filtered by `_sprk_matter_value`. Verify the chart renders correctly on a Matter record with financial data via a Visual Host instance bound to this chart def.
+  </prompt>
+
+  <role>
+    Dataverse configurator with familiarity with the Visual Host chart-definition contract and the `sprk_chartdefinition` schema. Comfortable using the Dataverse MCP (`create_record` / `read_query`) or PowerShell + Web API to author records.
+  </role>
+
+  <goal>
+    A single `sprk_chartdefinition` record exists in Dataverse named `Matter Budget` with the exact `sprk_optionsjson` from FR-DV-02, Drill Through set to `sprk_invoice` filtered by `_sprk_matter_value`. A test Visual Host instance bound to this chart def on a Matter record renders `$50K` headline + `33% of $150K` sub-line + a color-thresholded horizontal progress bar matching the Variant H prototype.
+  </goal>
+
+  <context>
+    <background>
+      FR-DV-02 depends on the renderer changes shipped in task 023 (FR-VH-04: `layoutMode: "headlineAboveBar"`, `headlineFromField`, `subLineTemplate` with `{remaining}` / `{percent}` / `{total}` placeholders, suppression of the existing top-right total + bottom-right remaining labels). Per §6.4.0 (binding), this MUST use the existing HorizontalStackedBar visual type and the new generic Custom Options keys only — no Matter-specific paths in Visual Host. NFR-05 backward compatibility is the renderer's responsibility (task 025).
+    </background>
+    <relevant-files>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>docs/guides/VISUALHOST-SETUP-GUIDE.md</file>
+      <file>src/client/pcf/VisualHost/control/components/HorizontalStackedBar.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/ChartRenderer.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-DV-02 — visual type HorizontalStackedBar (100000012); entity sprk_matter; exact sprk_optionsjson payload</constraint>
+    <constraint source="spec">§6.4.0 (binding) — no new visual types; use only HSBar + new generic Custom Options keys delivered by task 023</constraint>
+    <constraint source="spec">NFR-05 — existing chart defs unchanged (renderer-layer concern; verified in task 025)</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens applied via the renderer; token-set names (success/warning/danger) are renderer-resolved</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>docs/guides/VISUALHOST-SETUP-GUIDE.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `docs/architecture/VISUALHOST-ARCHITECTURE.md` (HorizontalStackedBar Custom Options table — confirm the new `layoutMode`, `headlineFromField`, `subLineTemplate` keys are documented) and `docs/guides/VISUALHOST-SETUP-GUIDE.md` (HSBar authoring examples).</step>
+    <step order="2">Verify task 023 (HorizontalStackedBar renderer extensions) has merged so `layoutMode: "headlineAboveBar"`, `headlineFromField`, `subLineTemplate` with `{remaining}` / `{percent}` / `{total}` placeholders are all live. If not, BLOCK and report to user.</step>
+    <step order="3">Author the `sprk_chartdefinition` record using mcp__dataverse__create_record (or PowerShell + Web API). Fields: `sprk_name` = "Matter Budget", `sprk_visualtype` = 100000012, `sprk_entityname` = "sprk_matter", `sprk_optionsjson` = exact JSON from `<notes>` below, drill-through entity = `sprk_invoice`, drill-through filter field = `_sprk_matter_value`. Also configure the data source bindings for `sprk_totalspendtodate` (current value) and `sprk_totalbudget` (total) per the existing HSBar data-binding contract (see HorizontalStackedBar.tsx for the expected field-binding shape).</step>
+    <step order="4">Verify the record was created by issuing `mcp__dataverse__read_query` for the new record id; confirm `sprk_optionsjson` round-trips identically.</step>
+    <step order="5">Render verification: load a test Matter record with non-zero `sprk_totalspendtodate` and `sprk_totalbudget` in the dev environment; place a Visual Host instance bound to this chart def on a temporary form; confirm it renders `$50K`-style headline (or whatever the current value is, currency-formatted) + `33% of $150K`-style sub-line + a color-thresholded progress bar matching the Variant H prototype.</step>
+    <step order="6">Verify the color thresholds: confirm that at low spend (&lt;60%) the bar is the success tokenSet; at 60-85% it's warning; at &gt;85% it's danger. (Either inspect three matters or temporarily mutate test data.)</step>
+    <step order="7">Verify Drill Through: click expand on the rendered card; confirm it opens the `sprk_invoice` list filtered to the current matter.</step>
+    <step order="8">Update TASK-INDEX.md: 031 → ✅. Update current-task.md to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp__dataverse__create_record">Create the sprk_chartdefinition record</tool>
+    <tool name="mcp__dataverse__read_query">Verify round-trip of sprk_optionsjson</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse-record">sprk_chartdefinition: "Matter Budget"</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A single active sprk_chartdefinition record named "Matter Budget" exists with sprk_visualtype = 100000012 and sprk_entityname = "sprk_matter".</criterion>
+    <criterion testable="true">sprk_optionsjson round-trips byte-identically to the payload in the notes block below.</criterion>
+    <criterion testable="true">Render verification (FR-DV-02 Acceptance): chart renders `$50K`-style headline + `33% of $150K`-style sub-line + colored progress bar; expand opens invoice list filtered to current matter.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows 031 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Exact sprk_optionsjson payload per spec FR-DV-02:
+
+    ```json
+    {
+      "valueFormat": "currency",
+      "layoutMode": "headlineAboveBar",
+      "headlineFromField": "sprk_totalspendtodate",
+      "subLineTemplate": "{percent}% of {total}",
+      "colorThresholds": [
+        { "range": [0.0, 0.6], "tokenSet": "success" },
+        { "range": [0.6, 0.85], "tokenSet": "warning" },
+        { "range": [0.85, 1.0], "tokenSet": "danger" }
+      ]
+    }
+    ```
+
+    Data binding: `sprk_totalspendtodate` (current) + `sprk_totalbudget` (total) — both fields are existing rollups on `sprk_matter` per Phase A.5 recon; no schema change needed.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      STANDARD rigor — Dataverse record authoring + render verification. Load knowledge files. Verify task 023 dependency. Author record. Verify render against Variant H prototype. Update task status. Skip code-review + adr-check gates.
+    </protocol>
+  </execution>
+</task>

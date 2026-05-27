@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>MetricCard badge slot (FR-VH-02)</title>
+    <phase>2: Visual Host Renderer Extensions</phase>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>022, 025</blocks>
+    <tags>pcf, react, fluent-ui, frontend, visualhost</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code in PCF renderer touching production-shipping Visual Host with ADR-021 (Fluent v9 tokens) + ADR-022 (React 16/17) + NFR-05 binding backward-compat constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shared file MetricCard.tsx with task 022 — must serialize to avoid merge conflicts</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend the existing `MetricCard` renderer with a generic `badge` slot per FR-VH-02. New Custom Options key `badge: { text: string, tone: "danger" | "warning" | "success" | "neutral", position: "inline" }`. In field-pivot mode the badge is per-field via `fieldPivot.fields[].badge`. When `badge` is present, render a Fluent v9 `Badge` next to the value in a flex row. BACKWARD COMPAT (NFR-05): chart defs without `badge` MUST render unchanged.
+  </prompt>
+
+  <role>
+    Senior React + Fluent UI v9 developer with deep familiarity with the Visual Host MetricCard renderer and FieldPivotService field-pivot row shape.
+  </role>
+
+  <goal>
+    `MetricCard.tsx` updated to render a Fluent v9 `Badge` inline with the value when `badge` (top-level or per-field) is present. Tone maps to Fluent `Badge` `appearance="filled"` + `color` semantics ("danger" → "danger", "warning" → "warning", "success" → "success", "neutral" → "subtle"). All existing MetricCard chart defs render unchanged. Builds clean. Code-review + adr-check pass.
+  </goal>
+
+  <context>
+    <background>
+      FR-VH-02 enables the Matter Tasks chart (FR-DV-03) which renders `4 [overdue]` with a red Badge when the overdue count exceeds zero. Per design.md §6.4.0, the change must be generic — no Matter-specific code paths. The badge must be reusable for any future MetricCard chart def. Per FieldPivotService row shape, `fieldPivot.fields[]` already carries an optional `badge` slot — wire MetricCard to honor it.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/VisualHost/control/components/MetricCard.tsx</file>
+      <file>src/client/pcf/VisualHost/control/services/FieldPivotService.ts</file>
+      <file>src/client/pcf/VisualHost/control/configurations/cardConfigResolver.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-VH-02 — generic addition to MetricCard only; no Matter-specific code paths</constraint>
+    <constraint source="spec">§6.4.0 (binding) — no new visual types</constraint>
+    <constraint source="spec">NFR-05 (binding) — chart defs without `badge` MUST render byte-identically to today</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only — zero hex/rgb in touched files; use Fluent v9 `Badge` component (NOT v8 `Badge`)</constraint>
+    <constraint source="ADR-022">React 16/17 platform — no React 18+ APIs</constraint>
+    <constraint source="ADR-022">No `@fluentui/react` (v8) imports — v9 only (`@fluentui/react-components`)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/modern-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 Badge" location="@fluentui/react-components">
+        Import `Badge` and use `appearance="filled"` with `color` prop for tone. Avoid manual styling.
+      </pattern>
+      <pattern name="FieldPivot row shape" location="src/client/pcf/VisualHost/control/services/FieldPivotService.ts">
+        Each resolved row is `{ label, value, badge? }`. Wire MetricCard to honor the per-field `badge` when present.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Step 0.5: Invoke `Skill fluent-v9-component` — binding per design.md §6.0. Load Fluent v9 patterns.</step>
+    <step order="1">Read MetricCard.tsx + FieldPivotService.ts + cardConfigResolver.ts to anchor the existing contract and identify the NFR-05 baseline.</step>
+    <step order="2">Update MetricCard options type in cardConfigResolver.ts (or shared types) with `badge?: { text: string, tone: "danger" | "warning" | "success" | "neutral", position: "inline" }`. Confirm `fieldPivot.fields[].badge` is already typed in FieldPivotService row shape; if not, add it there too.</step>
+    <step order="3">In MetricCard.tsx, after resolving the value, check for badge in this order: per-field `fieldPivot.fields[].badge` (field-pivot mode) → top-level `badge`. If present, render Fluent v9 `&lt;Badge appearance="filled" color={mapTone(tone)}&gt;{text}&lt;/Badge&gt;` next to the value in a flex row with `tokens.spacingHorizontalS` gap.</step>
+    <step order="4">Tone-mapping helper: "danger" → "danger", "warning" → "warning", "success" → "success", "neutral" → "subtle". Local helper in MetricCard.tsx (do not export — keep generic + co-located).</step>
+    <step order="5">Backward-compat verification: re-render every MetricCard chart def from the task-001 inventory. Capture screenshots in `notes/spikes/visualhost-regression-evidence/metriccard-baseline-021/`. Pixel-diff must be ZERO.</step>
+    <step order="6">Build verification: `npm run build:prod` in VisualHost. Zero TypeScript errors. Bundle delta noted.</step>
+    <step order="6.5">FULL rigor quality gates: invoke `Skill code-review` then `Skill adr-check` — block until both pass. Verify ADR-021 token usage and ADR-022 React/v9 boundaries.</step>
+    <step order="7">Update TASK-INDEX.md: 021 → ✅. Update current-task.md to next pending task (likely 022 — sequential because shared file).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (`npm run build:prod`)</tool>
+    <tool name="pcf-deploy">Deploy VisualHost PCF to dev for regression smoke</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/VisualHost/control/components/MetricCard.tsx</output>
+    <output type="code">src/client/pcf/VisualHost/control/configurations/cardConfigResolver.ts (type extension)</output>
+    <output type="code">src/client/pcf/VisualHost/control/services/FieldPivotService.ts (row-shape type if needed)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/visualhost-regression-evidence/metriccard-baseline-021/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">MetricCard.tsx compiles and `npm run build:prod` produces a clean bundle.</criterion>
+    <criterion testable="true">A test chart def with `fieldPivot.fields[0].badge = { text: "overdue", tone: "danger", position: "inline" }` renders the value with a red Fluent v9 Badge next to it — once FR-DV-03 is authored, Matter Tasks shows "4 [overdue]".</criterion>
+    <criterion testable="true">All existing MetricCard chart defs (per task-001 inventory) render byte-identically (pixel-diff zero).</criterion>
+    <criterion testable="true">Zero hex/rgb literals introduced; Fluent v9 Badge component used.</criterion>
+    <criterion testable="true">No `@fluentui/react` (v8) imports; no React 18+ APIs used.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Backward compat — existing MetricCard renders unchanged">
+      <steps>
+        <step>Deploy modified VisualHost to dev</step>
+        <step>Open a record bound to an existing MetricCard chart def (from task-001 inventory)</step>
+        <step>Compare DOM + screenshot against pre-change baseline</step>
+      </steps>
+      <expected>Zero visual diff in light + dark; axe scan clean</expected>
+    </test>
+    <test name="Badge renders inline next to value">
+      <steps>
+        <step>Author a test chart def with per-field badge tone "danger"</step>
+        <step>Render on a record where the value is non-zero</step>
+      </steps>
+      <expected>Badge appears immediately after the value in a flex row with proper Fluent v9 color tokens for "danger"</expected>
+    </test>
+    <test name="Dark mode + axe">
+      <steps>
+        <step>Toggle MDA dark mode; re-render the MetricCard with badge</step>
+        <step>Run axe DevTools scan</step>
+      </steps>
+      <expected>Dark-mode Badge colors via Fluent v9 tokens; zero WCAG 2.1 AA violations</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    SHARED-FILE serialization: this task and 022 both modify MetricCard.tsx. Task 022 (descriptionColor) MUST be executed AFTER 021 to avoid merge conflicts and to make the cumulative MetricCard diff reviewable. The parallel-group is "none" — coordinate with the planner before starting 022.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Step 0.5 invoke fluent-v9-component (binding per design.md §6.0). Load knowledge files. Implement badge slot. Verify NFR-05 with regression evidence. Build. Step 9.5 invoke code-review + adr-check (FULL rigor). Update task status.
+    </protocol>
+  </execution>
+</task>

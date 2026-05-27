@@ -6,6 +6,35 @@ Format per entry: `## YYYY-MM-DD — <type>` where type is `Initial setup`, `Mon
 
 ---
 
+## 2026-05-26 — New topic: `fluent-ui-v9/` (Microsoft Fluent UI v9 + Fluent 2)
+
+Added a new top-level topic for **Microsoft Fluent UI React v9** + the broader **Fluent 2 design system**. Driver: Spaarke ships Fluent v9 across 10+ PCFs, 4+ Code Pages, the external SPA, and the Office add-ins; `Spaarke.UI.Components` is on `@fluentui/react-components ^9.73.2` while several PCFs are still on `^9.46.2` (drift candidate). Curation matches existing topic conventions (`SOURCE.md` + stub `NOTES.md` + `docs/` snapshots + `samples/`).
+
+**Source repos cloned**:
+- `microsoft/fluentui` @ `0aa62de59fe5845eeba40c9028d527fd93d88f27` (2026-05-26)
+- `microsoft/PowerApps-Samples` @ `a6d30c10d17938fbeb85245e57a4a2cb435c71c8` (2026-04-02)
+
+**Curated samples** (~120 KB total):
+- `PowerApps-Samples_FluentThemingAPIControl/` — the canonical PCF + Fluent v9 + modern theming sample (four theming approaches).
+- `fluentui_react-v9/Provider/{Default, Nested, ApplyStylesToPortals}.stories.tsx` — `FluentProvider` patterns including the critical Portal styling gotcha.
+- `fluentui_react-v9/Button/{Appearance, Icon}.stories.tsx` — slot composition examples.
+- `fluentui_react-v9/Theme/{Colors, Spacing}.stories.tsx` — token reference.
+
+**Docs snapshotted (Microsoft official)**: `overview.md`, `quickstart.md`, `theming.md`, `styling-griffel.md`, `slots-architecture.md`, `react-version-support.md`, `accessibility.md`, `pcf-modern-theming.md`, `pcf-virtual-controls.md`, `modern-theming-api-control-sample.md`, `fluent2-overview.md`, `fluent2-develop.md`, `fluent2-design-principles.md`, `fluent2-whats-new.md`.
+
+**Docs snapshotted (community / MVPs)**: Diana Birkelbach × 3 (style PCFs / virtual after GA / standard-vs-custom theming), David Rivard × 2 (develop PCF with v9 / adapting PCFs for the new look), Aric Levin × 1 (virtual PCF init walkthrough), Paul Gildea × 2 (what's new in v9 / custom variants).
+
+**GAPs logged**:
+- `react.fluentui.dev/` is JS-rendered Storybook — WebFetch can't extract. Substituted with the upstream MDX files in `microsoft/fluentui/apps/public-docsite-v9/src/Concepts/` (which are the Storybook source). URLs retained in frontmatter for human reference.
+- `microsoft.com/en-us/power-platform/blog/.../virtual-code-components-...` — JS-heavy; WebFetch returned semi-summarized content. Captured as orientation; marked verification caveat in frontmatter.
+- Clavin Fernandes 2025-01-21 PCF virtual control post — coverage overlaps Birkelbach + Levin + Rivard. Skipped to avoid redundancy. Add at next refresh if it grows distinctive content.
+- Fluent 2 cross-platform design-token reference (`fluent2.microsoft.design/design-tokens/...`) — not curated; React-side covered in `theming.md`. Add at next refresh if cross-platform consumers emerge.
+
+**Phase 4 follow-ups** (senior engineer annotation):
+- `NOTES.md` is intentionally a stub with structured TODOs spanning §1 architecture map + §2 build conventions. The code review checklist starter in §2 is the most immediately-useful section once filled in.
+
+**Skills not yet wired** to this topic — opportunities surfaced for future work: a `fluent-v9-component` skill (when authoring a new component in `Spaarke.UI.Components`), and additions to `pcf-deploy` referencing the platform-libraries + modern-theming setup. Tracked as a separate task.
+
 ## 2026-05-19 — Insights Engine pre-design research (researcher subagent)
 
 Added four new reference-only topics + one supplement, ahead of `projects/ai-spaarke-insights-engine-r1/` design work:

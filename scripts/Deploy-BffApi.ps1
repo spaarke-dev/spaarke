@@ -24,11 +24,11 @@
 
 .PARAMETER ResourceGroupName
     Azure resource group containing the App Service.
-    Default: spe-infrastructure-westus2 (dev environment)
+    Default: rg-spaarke-dev (dev environment, updated 2026-05-27 from migrated spe-infrastructure-westus2)
 
 .PARAMETER AppServiceName
     Azure App Service name to deploy to.
-    Default: spe-api-dev-67e2xz (dev environment)
+    Default: spaarke-bff-dev (dev environment, updated 2026-05-27 from migrated spe-api-dev-67e2xz)
 
 .PARAMETER UseSlotDeploy
     Deploy to staging slot first, then swap after health check.
@@ -89,9 +89,9 @@ param(
     [ValidateSet("dev", "staging", "production")]
     [string]$Environment = "dev",
 
-    [string]$ResourceGroupName = "spe-infrastructure-westus2",
+    [string]$ResourceGroupName = "rg-spaarke-dev",
 
-    [string]$AppServiceName = "spe-api-dev-67e2xz",
+    [string]$AppServiceName = "spaarke-bff-dev",
 
     [switch]$UseSlotDeploy,
 

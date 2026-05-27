@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Documents PCF — relocate filters from sidebar to command-bar dropdowns; preserve AssociatedOnly auto-search (FR-DOC-06)</title>
+    <phase>4: Documents PCF</phase>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
+    <estimated-hours>5-7</estimated-hours>
+    <dependencies>042</dependencies>
+    <blocks>044</blocks>
+    <tags>pcf, react, fluent-ui, frontend, semantic-search</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Structural refactor of PCF UI removing sidebar panel and moving 5 filters into command bar; binding constraint to preserve `AssociatedOnly` auto-search behavior verbatim at SemanticSearchControl.tsx:359-375; ADR-021 + ADR-022 binding</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>shared file SemanticSearchControl.tsx + FilterPanel.tsx with other Phase 4 tasks (040-042, 044-046)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per spec FR-DOC-06, remove the always-open vertical `FilterPanel` sidebar and move existing filters into the command bar as compact dropdown buttons: Associated Only · File Type · Date Range · Threshold · Mode (Tags filter is FR-DOC-05, task 042 — already shipped). **BINDING**: preserve the `AssociatedOnly` auto-search behavior at `SemanticSearchControl.tsx` lines 359-375 VERBATIM when the toggle moves to the command bar. No "Filter Drawer" escape hatch in v1 (per §14 Q6 resolution). All 5 filters must function identically to today; AssociatedOnly toggle still auto-triggers re-search; sidebar `FilterPanel.tsx` is removed (or hidden when bound to the new layout).
+  </prompt>
+
+  <role>
+    Senior frontend developer with PCF refactoring expertise. Familiar with Semantic Search PCF filter state, the existing `FilterPanel.tsx` sidebar, the `AssociatedOnly` auto-search hook at lines 359-375 of `SemanticSearchControl.tsx`, and Fluent UI v9 command-bar/dropdown patterns.
+  </role>
+
+  <goal>
+    `SemanticSearchControl.tsx` command bar hosts 5 compact dropdown buttons (Associated Only · File Type · Date Range · Threshold · Mode) + the Tags filter from task 042 + the view toggle from task 041. `FilterPanel.tsx` either removed entirely or hidden behind a feature flag for safe rollback. AssociatedOnly auto-search behavior preserved verbatim (same `useEffect` deps, same trigger logic). All 5 filters retain identical behavior. PCF builds clean. Code-review + adr-check pass.
+  </goal>
+
+  <context>
+    <background>
+      FR-DOC-06 completes the command-bar consolidation started by FR-DOC-04 (view toggle, task 041) and FR-DOC-05 (Tags filter, task 042). The sidebar `FilterPanel.tsx` becomes obsolete once all filters move to the bar. The **CRITICAL** binding constraint is that the `AssociatedOnly` toggle currently auto-triggers a re-search via a `useEffect` (lines 359-375) — this behavior MUST be preserved bit-for-bit when the toggle moves to the bar. Owner Clarifications (row 8) ruled out a "Filter Drawer" escape hatch — command-bar dropdowns are sufficient.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/FilterPanel.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SemanticSearchApiService.ts</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-DOC-06 — remove always-open vertical `FilterPanel` sidebar</constraint>
+    <constraint source="spec">FR-DOC-06 — command-bar dropdowns: Associated Only · File Type · Date Range · Threshold · Mode (Tags is FR-DOC-05)</constraint>
+    <constraint source="spec">FR-DOC-06 BINDING — preserve `AssociatedOnly` auto-search at SemanticSearchControl.tsx lines 359-375 VERBATIM when the toggle moves to the command bar</constraint>
+    <constraint source="spec">FR-DOC-06 — no "Filter Drawer" escape hatch in v1</constraint>
+    <constraint source="spec">FR-DOC-06 — all 5 filters function identically to today</constraint>
+    <constraint source="spec">NFR-02 — axe WCAG 2.1 AA zero violations, light AND dark</constraint>
+    <constraint source="spec">NFR-04 — Fluent v9 tokens only</constraint>
+    <constraint source="ADR-006">PCF UI surface; form binding preserved</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; dark mode parity</constraint>
+    <constraint source="ADR-022">React 16/17 compatible</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2 `@spaarke/auth` `authenticatedFetch` preserved on all BFF calls</constraint>
+    <constraint source="design.md">§6.0 binding — `/fluent-v9-component` MUST be invoked at Step 0.5</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/INDEX.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 command bar dropdowns" location=".claude/patterns/ui/fluent-v9-component-authoring.md">
+        Use Fluent v9 `Menu` + `MenuButton` (or `Combobox` for File Type) for compact dropdowns; keep selection state in parent.
+      </pattern>
+      <pattern name="Preserve useEffect verbatim" location="src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx">
+        Lines 359-375 (AssociatedOnly auto-search) MUST be retained with identical deps + body — only the trigger source (sidebar checkbox → command-bar Switch) changes.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. If higher, run `context-handoff` before proceeding.</step>
+    <step order="0.5" name="Invoke fluent-v9-component">Invoke `Skill fluent-v9-component` (binding per design.md §6.0). Load `fluent-v9-component-authoring.md`, `fluent-v9-theming.md`.</step>
+    <step order="1" name="Load knowledge">Read ADR-006, ADR-021, ADR-022, ADR-028; PCF CLAUDE.md. Read `SemanticSearchControl.tsx` carefully — locate lines 359-375 (AssociatedOnly `useEffect`) and document its deps + body in a comment. Read `FilterPanel.tsx` to inventory all 5 filter controls (Associated Only / File Type / Date Range / Threshold / Mode) and their state hooks.</step>
+    <step order="2" name="Map filter controls to command bar">Plan command-bar layout (left → right): Associated Only `Switch` · File Type `Menu` · Date Range `Menu` · Threshold `Menu` · Mode `Menu` · Tags `TagFilter` (from task 042) · *spacer* · view toggle (from task 041). Verify horizontal layout fits at 1024 px minimum (NFR-03).</step>
+    <step order="3" name="Implement Associated Only Switch in command bar">Add a Fluent v9 `Switch` to the command bar bound to the existing `associatedOnly` state. CRITICAL: do NOT touch the `useEffect` at lines 359-375 — leave it bit-identical. The Switch becomes the new visible trigger; the underlying state hook is unchanged.</step>
+    <step order="4" name="Implement File Type dropdown">Add a Fluent v9 `Menu` to the command bar bound to the existing File Type state. Same options, same default, same filter semantics as the sidebar version.</step>
+    <step order="5" name="Implement Date Range dropdown">Add a Fluent v9 `Menu` to the command bar bound to the existing Date Range state. Same option set + default + filter semantics.</step>
+    <step order="6" name="Implement Threshold dropdown">Add a Fluent v9 `Menu` to the command bar bound to the existing Threshold state. Same options.</step>
+    <step order="7" name="Implement Mode dropdown">Add a Fluent v9 `Menu` to the command bar bound to the existing Mode state. Same options.</step>
+    <step order="8" name="Remove FilterPanel sidebar">In `SemanticSearchControl.tsx`, remove the `&lt;FilterPanel /&gt;` JSX rendering. Either delete `FilterPanel.tsx` entirely OR keep the file but render nothing (feature-flag for safe rollback — preferred for v1). Adjust the parent grid/flex layout so the results area expands to fill the freed width.</step>
+    <step order="9" name="Verify AssociatedOnly auto-search verbatim">Run a search, toggle the new command-bar Switch — verify the re-search auto-triggers identically to the sidebar version. Confirm `useEffect` lines 359-375 are byte-identical (diff against pre-change state).</step>
+    <step order="10" name="Verify all 5 filters behave identically">For each filter (Associated Only / File Type / Date Range / Threshold / Mode), exercise the same scenarios as the sidebar version — verify identical results.</step>
+    <step order="11" name="Dark-mode + a11y check">Run PCF in dev harness with `webLightTheme` and `webDarkTheme`. Verify all command-bar dropdowns render with v9 tokens. Run axe scan in both themes.</step>
+    <step order="12" name="1024 px viewport check">Resize browser to 1024 px width — verify command bar does NOT overflow horizontally, does NOT wrap, does NOT degrade text below 12 px (NFR-03).</step>
+    <step order="13" name="Build verification">Run `npm run build:prod` from PCF root. Verify clean build.</step>
+    <step order="9.5" name="Quality gates (FULL rigor)">Invoke `Skill code-review` then `Skill adr-check`. Resolve all findings. Verify `code-review` flags any change to the AssociatedOnly `useEffect` deps (binding constraint).</step>
+    <step order="14" name="Checkpoint">Run `context-handoff` (silent: ✅ Checkpoint).</step>
+    <step order="15" name="Update task tracking">Update TASK-INDEX.md: task 043 status 🔲 → ✅. Reset `current-task.md` to next pending task (044).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (`npm run build:prod`)</tool>
+    <tool name="git">Version control</tool>
+    <tool name="Skill fluent-v9-component">Mandatory at Step 0.5</tool>
+    <tool name="Skill code-review">Quality gate at Step 9.5</tool>
+    <tool name="Skill adr-check">ADR compliance gate at Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/FilterPanel.tsx (removed or feature-flagged)</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Sidebar `FilterPanel` no longer renders; results area expands to fill freed width.</criterion>
+    <criterion testable="true">Command bar shows 5 filter dropdowns (Associated Only · File Type · Date Range · Threshold · Mode) + Tags (from FR-DOC-05) + view toggle (from FR-DOC-04).</criterion>
+    <criterion testable="true">AssociatedOnly toggle in command bar auto-triggers re-search (verify `useEffect` at lines 359-375 is byte-identical to pre-change).</criterion>
+    <criterion testable="true">Each of the 5 filters returns identical results to the prior sidebar implementation (regression-tested).</criterion>
+    <criterion testable="true">At 1024 px viewport, command bar does NOT overflow, wrap, or degrade text below 12 px.</criterion>
+    <criterion testable="true">PCF builds clean; zero hardcoded hex/rgb.</criterion>
+    <criterion testable="true">axe WCAG 2.1 AA zero violations in light AND dark.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` skills pass; no warning about the AssociatedOnly `useEffect`.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 043 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Sidebar removed; command-bar dropdowns present">
+      <steps>
+        <step>Load Documents PCF.</step>
+        <step>Verify no sidebar `FilterPanel` renders.</step>
+        <step>Verify command bar shows all 5 filter dropdowns + Tags + view toggle.</step>
+      </steps>
+      <expected>Layout matches FR-DOC-06; sidebar gone.</expected>
+    </test>
+    <test name="AssociatedOnly auto-search preserved">
+      <steps>
+        <step>Run an initial search.</step>
+        <step>Toggle Associated Only Switch in command bar.</step>
+        <step>Verify re-search auto-triggers (network tab shows new /api/ai/search call without manual Search button click).</step>
+      </steps>
+      <expected>Auto-search behavior identical to pre-relocation.</expected>
+    </test>
+    <test name="All 5 filters function identically">
+      <steps>
+        <step>For each filter (File Type, Date Range, Threshold, Mode), exercise representative selections.</step>
+        <step>Verify results match the pre-relocation behavior.</step>
+      </steps>
+      <expected>Filter semantics preserved.</expected>
+    </test>
+    <test name="1024 px viewport — no overflow">
+      <steps>
+        <step>Resize browser to 1024 px width.</step>
+        <step>Verify command bar does NOT overflow horizontally, does NOT wrap to a second line, does NOT shrink text below 12 px.</step>
+      </steps>
+      <expected>Layout responsive at hard minimum.</expected>
+    </test>
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode.</step>
+        <step>Verify all 5 dropdowns + Switch render with v9 dark tokens.</step>
+        <step>Run axe-core.</step>
+      </steps>
+      <expected>Zero violations.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    The AssociatedOnly auto-search `useEffect` at SemanticSearchControl.tsx lines 359-375 is the highest-risk surface in this task — leaving it byte-identical is the safest path. Move only the visible trigger (Switch), NOT the hook body. Decision: keep `FilterPanel.tsx` file (feature-flag rendering off) rather than delete, to allow safe rollback if integration testing surfaces a regression. Tags filter (FR-DOC-05) was relocated in task 042 — do NOT re-implement here.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      🔒 RIGOR LEVEL: FULL. Invoke `Skill fluent-v9-component` at Step 0.5. Load ADRs + patterns. Move 5 filters to command bar, preserving AssociatedOnly auto-search `useEffect` verbatim. Remove (or hide) sidebar. Build PCF. Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>

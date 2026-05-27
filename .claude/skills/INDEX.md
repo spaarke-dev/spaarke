@@ -78,6 +78,7 @@
 | [dataverse-mcp-usage](dataverse-mcp-usage/SKILL.md) | Use Dataverse MCP — built-in tools, Business Skills authoring, App MCP custom tools (reads `knowledge/dataverse-mcp/`) | No | "Dataverse MCP", "Business Skill", "App MCP", "custom MCP tool for Dataverse" |
 | [spe-integration](spe-integration/SKILL.md) | Integrate with SharePoint Embedded — containers, permissions, agent grounding, webUrl opens (reads `knowledge/sharepoint-embedded/`) | No | "SharePoint Embedded", "SPE container", "container type", "webUrl document open" |
 | [widget-design](widget-design/SKILL.md) | Design MCP App widget — inline or side-by-side, Fluent v9, sandboxed iframe constraints (reads `knowledge/mcp-apps/`) | No | "MCP App widget", "Copilot widget", "side-by-side widget", "inline widget" |
+| [fluent-v9-component](fluent-v9-component/SKILL.md) | Author/modify any Fluent UI v9 React component across Spaarke surfaces — loads `.claude/patterns/{ui,pcf}/fluent-v9-*.md` + drills into `knowledge/fluent-ui-v9/` | No | "Fluent UI", "Fluent v9", "build component", "theming", "FluentProvider", "Griffel", "makeStyles", "Popover/Tooltip/Dialog/Menu/Toast" |
 
 ## Skill Categories
 

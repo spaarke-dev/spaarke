@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>CardChrome internal wrapper component (FR-VH-05)</title>
+    <phase>2: Visual Host Renderer Extensions</phase>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
+    <estimated-hours>3-4</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>025</blocks>
+    <tags>pcf, react, fluent-ui, frontend, visualhost</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New file + VisualHostRoot wrapper change in production-shipping Visual Host; ADR-021 + ADR-022 + NFR-05 binding constraints (existing cards must continue to render correctly via the new chrome wrapper)</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create a NEW internal `CardChrome.tsx` wrapper component inside Visual Host per FR-VH-05 (INTERNAL — NOT exported from `@spaarke/ui-components`). Props: `{ title?: string, onExpand?: () => void, onAiSummary?: () => Promise&lt;ISummaryData&gt;, showAiSparkle?: boolean (default false), children: ReactNode }`. Renders the per-card title bar + corner-icon slots. Wrap each card component in `VisualHostRoot.tsx`. `onExpand` wires to the existing `handleExpandClick` (honors chart-def Drill Through Settings) — NO new `ClickActionHandler` code. `showAiSparkle: false` by default in v1 (Insights Engine deferred); the slot exists in the contract for r2.
+  </prompt>
+
+  <role>
+    Senior React + Fluent UI v9 developer with familiarity with Visual Host root component, ClickActionHandler / handleExpandClick path, and Fluent v9 Button + Icon patterns.
+  </role>
+
+  <goal>
+    A new file `src/client/pcf/VisualHost/control/components/CardChrome.tsx` exporting an internal `CardChrome` React component. `VisualHostRoot.tsx` updated to wrap each rendered card (Donut, MetricCard, HSBar, DueDateCard, etc.) in `&lt;CardChrome title={...} onExpand={handleExpandClick} showAiSparkle={false}&gt;...&lt;/CardChrome&gt;`. The wrapper renders title bar + expand-corner-icon (top-right) using Fluent v9 tokens. AI sparkle icon slot is rendered only when `showAiSparkle` is true (off in v1). Builds clean. Code-review + adr-check pass.
+  </goal>
+
+  <context>
+    <background>
+      FR-VH-05 introduces the per-card chrome (title + corner icons) so all 5 Matter Performance cards share a consistent header. Per spec it is INTERNAL — not part of `@spaarke/ui-components` exports (this prevents external consumers from depending on the not-yet-stable contract). The `onExpand` wiring MUST reuse the existing `handleExpandClick` path that already honors `sprk_chartdefinition` Drill Through Settings — no new `ClickActionHandler` code is permitted (design.md §6.4.0 + NFR-05). The AI sparkle is contract-only for v1: the prop exists, default false, surface ready for r2 Insights Engine.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/VisualHost/control/components/CardChrome.tsx (NEW)</file>
+      <file>src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/DonutChart.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/MetricCard.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/HorizontalStackedBar.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-VH-05 — CardChrome is INTERNAL to Visual Host; MUST NOT be exported from `@spaarke/ui-components`</constraint>
+    <constraint source="spec">FR-VH-05 — `onExpand` reuses existing `handleExpandClick`; NO new `ClickActionHandler` code</constraint>
+    <constraint source="spec">FR-VH-05 — `showAiSparkle: false` default in v1; slot exists in contract for r2 (Insights Engine deferred)</constraint>
+    <constraint source="spec">§6.4.0 (binding) — no new visual types; CardChrome is a wrapper, not a visual type</constraint>
+    <constraint source="spec">NFR-05 (binding) — every existing chart def must continue to render correctly inside the CardChrome wrapper (titles + expand icon are additive)</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only — zero hex/rgb; use Fluent v9 Button + Icon</constraint>
+    <constraint source="ADR-022">React 16/17 platform — no React 18+ APIs</constraint>
+    <constraint source="ADR-022">No `@fluentui/react` (v8) imports — v9 only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/modern-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/VISUALHOST-ARCHITECTURE.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 Button + Icon" location="@fluentui/react-components + @fluentui/react-icons">
+        Use Fluent v9 `Button appearance="subtle"` + `&lt;ArrowMaximize20Regular /&gt;` (or equivalent) for the expand icon. Sparkle icon: `&lt;Sparkle20Regular /&gt;`.
+      </pattern>
+      <pattern name="Existing expand handler" location="src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx">
+        `handleExpandClick` already exists and honors `sprk_chartdefinition` Drill Through Settings. REUSE — do not duplicate.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Step 0.5: Invoke `Skill fluent-v9-component` — binding per design.md §6.0.</step>
+    <step order="1">Read VisualHostRoot.tsx + each card component (DonutChart, MetricCard, HorizontalStackedBar, DueDateCard) to understand current outer markup and confirm none currently render a per-card title bar.</step>
+    <step order="2">Create `src/client/pcf/VisualHost/control/components/CardChrome.tsx`. Props per FR-VH-05. Render a vertical flex stack: header row (title left + corner icons right) + `{children}`. Header uses `tokens.spacingHorizontal*` and `tokens.colorNeutralBackground1` style for divider/elevation as appropriate. Expand button = Fluent v9 `Button appearance="subtle"` + `ArrowMaximize20Regular`.</step>
+    <step order="3">AI sparkle slot: render only when `showAiSparkle === true`. v1 callers MUST pass `false` (or omit). Wire `onAiSummary` to the button's onClick — but in v1 the button is hidden so this is contract-only.</step>
+    <step order="4">In `VisualHostRoot.tsx`, wrap each card render in `&lt;CardChrome title={chartDef.name} onExpand={handleExpandClick} showAiSparkle={false}&gt;...&lt;/CardChrome&gt;`. Confirm `handleExpandClick` already honors per-chart-def Drill Through Settings — REUSE the existing handler (no new ClickActionHandler).</step>
+    <step order="5">Verify no card-internal component (DonutChart, MetricCard, HSBar) needs changes. If any currently renders its own title (which would now duplicate CardChrome's title), pass `title=""` or `undefined` to CardChrome for that card OR remove the inner title — choose whichever yields ZERO regression diff against existing chart defs (NFR-05). Document the choice.</step>
+    <step order="6">Backward-compat verification: re-render every chart def from the task-001 inventory inside the new CardChrome wrapper. The header is additive — confirm that for existing chart defs (which do not have a title in the wrapper), the chrome either renders with the chart-def name or remains visually neutral, and the existing card body is unchanged. Pixel-diff for the BODY region must be zero. Capture screenshots in `notes/spikes/visualhost-regression-evidence/cardchrome-baseline/`.</step>
+    <step order="7">Build verification: `npm run build:prod` in VisualHost. Zero TypeScript errors. Confirm `CardChrome` is NOT exported from `@spaarke/ui-components` (grep the shared library barrel).</step>
+    <step order="7.5">FULL rigor quality gates: invoke `Skill code-review` then `Skill adr-check` — block until both pass.</step>
+    <step order="8">Update TASK-INDEX.md: 024 → ✅. Update current-task.md to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (`npm run build:prod`)</tool>
+    <tool name="pcf-deploy">Deploy VisualHost PCF to dev for regression smoke</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/VisualHost/control/components/CardChrome.tsx (NEW)</output>
+    <output type="code">src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx (wraps each card)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-matter-ui-enhancement-r1/notes/spikes/visualhost-regression-evidence/cardchrome-baseline/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CardChrome.tsx exists at the specified path and is consumed by VisualHostRoot.tsx; `npm run build:prod` succeeds.</criterion>
+    <criterion testable="true">CardChrome is NOT exported from `src/client/shared/Spaarke.UI.Components/src/index.ts` (verified by grep).</criterion>
+    <criterion testable="true">Each of the 5 future Matter Performance cards (Phase 3 chart defs + Phase 6 form binding) will render with title bar + expand icon top-right.</criterion>
+    <criterion testable="true">Clicking the expand icon invokes `handleExpandClick` which routes through existing `sprk_chartdefinition` Drill Through Settings — no new `ClickActionHandler` code paths added.</criterion>
+    <criterion testable="true">All existing chart defs (per task-001 inventory) render with zero body-region pixel diff when wrapped by CardChrome.</criterion>
+    <criterion testable="true">AI sparkle button is NOT rendered for any v1 caller (showAiSparkle defaults to false; all VisualHostRoot calls pass false or omit).</criterion>
+    <criterion testable="true">Zero hex/rgb literals introduced; Fluent v9 Button + Icon + tokens used throughout.</criterion>
+    <criterion testable="true">No `@fluentui/react` (v8) imports; no React 18+ APIs used.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Backward compat — existing cards render correctly inside CardChrome">
+      <steps>
+        <step>Deploy modified VisualHost to dev</step>
+        <step>Open records bound to existing chart defs (Matter KPI Scorecard, Matter Financial Metrics Scorecard, others)</step>
+        <step>Inspect DOM: each card now has a CardChrome wrapper with title + expand icon top-right; the card body is unchanged</step>
+      </steps>
+      <expected>Body pixel-diff zero; chrome additions render correctly in light + dark; axe scan clean</expected>
+    </test>
+    <test name="Expand icon click triggers chart-def Drill Through">
+      <steps>
+        <step>Click the expand icon on a card whose chart def has Drill Through Settings configured</step>
+        <step>Confirm `handleExpandClick` is invoked and the configured entity list view opens with the matter filter applied</step>
+      </steps>
+      <expected>Drill-through behavior identical to today; no new code paths exercised</expected>
+    </test>
+    <test name="AI sparkle hidden in v1">
+      <steps>
+        <step>Inspect each card in DOM</step>
+        <step>Confirm no Sparkle icon, button, or container is rendered (showAiSparkle === false default)</step>
+      </steps>
+      <expected>Zero DOM presence of the sparkle slot in v1</expected>
+    </test>
+    <test name="Dark mode + axe">
+      <steps>
+        <step>Toggle MDA dark mode; re-render all cards</step>
+        <step>Run axe DevTools scan</step>
+      </steps>
+      <expected>CardChrome header colors via Fluent v9 tokens resolve correctly; zero WCAG 2.1 AA violations</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Parallel-group C: this task touches CardChrome.tsx (NEW) + VisualHostRoot.tsx. Tasks 020 (DonutChart + ChartRenderer) and 023 (HSBar) touch different files. The VisualHostRoot.tsx change is additive (wraps existing cards) and should not collide with other tasks. The "AI sparkle" slot is a forward-compat contract for the r2 Insights Engine — its handler must exist, but its UI MUST be hidden in v1.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Step 0.5 invoke fluent-v9-component (binding per design.md §6.0). Load knowledge files. Create CardChrome. Wire into VisualHostRoot. Verify NFR-05 with regression evidence. Build. Step 9.5 invoke code-review + adr-check (FULL rigor). Update task status.
+    </protocol>
+  </execution>
+</task>

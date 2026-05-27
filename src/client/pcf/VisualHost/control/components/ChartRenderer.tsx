@@ -233,6 +233,8 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
           explicitHeight={height}
           valueFormat={cardConfig.valueFormat}
           nullDisplay={cardConfig.nullDisplay}
+          badge={cardConfig.badge}
+          descriptionColor={cardConfig.descriptionColor}
         />
       );
     }
@@ -270,6 +272,22 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
     }
 
     case VT.DonutChart: {
+      // FR-VH-01 / task 020: resolve cardConfig so DonutChart can consume the
+      // generic Custom Options (donutLayout, donutCenterMode, colorThresholds,
+      // valueFormat, showBreakdownRows, breakdownValueFormat) and the existing
+      // fieldPivot data path (VisualHostRoot already routes pivot data into
+      // `chartData.dataPoints` for ANY visual type — see VisualHostRoot.tsx:230).
+      //
+      // Backward compat (NFR-05): when none of the new keys are set in the
+      // chart definition's sprk_optionsjson, resolveCardConfig returns
+      // undefined/default values, and DonutChart's `cardConfig` branch is
+      // inert — the standard rendering path is byte-identical to today.
+      const cardConfig = resolveCardConfig(chartDefinition, {
+        valueFormatOverride: valueFormatOverride || undefined,
+        showTitle: showTitlePcf ?? undefined,
+        titleFontSize: titleFontSizePcf || undefined,
+      });
+
       return (
         <DonutChart
           data={dataPoints}
@@ -281,6 +299,7 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
           onDrillInteraction={onDrillInteraction}
           drillField={drillField}
           height={height ?? 300}
+          cardConfig={cardConfig}
         />
       );
     }

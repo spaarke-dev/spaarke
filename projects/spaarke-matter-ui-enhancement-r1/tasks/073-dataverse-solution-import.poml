@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Import Spaarke solution (chart defs + Matter form XML)</title>
+    <phase>7: Deploy + Validation</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>030, 031, 032, 033, 034, 060, 070, 071</dependencies>
+    <blocks>074</blocks>
+    <tags>deploy, dataverse, solution</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Solution import to a live environment with multiple coupled artifacts (5 chart defs + updated Matter form FormXml). Rollback is non-trivial; verification of every Visual Host instance binding required post-import.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single solution import target; must follow PCF deploys (070/071) so the form's PCF references resolve; must follow form-XML task (060) and all chart def tasks (030-034).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Import the Spaarke solution containing the 5 new `sprk_chartdefinition` records (from tasks 030-034) and the updated Matter main-form FormXml (from task 060) to the target Dataverse environment. Verify post-import: (a) solution import succeeds without errors or unresolved dependencies; (b) Matter main form renders the 2-column 66/34 layout; (c) each of the 5 Visual Host instances binds to its correct chart-definition lookup; (d) the Documents section binds to the Semantic Search PCF correctly.
+  </prompt>
+
+  <role>
+    Dataverse solution-deploy engineer familiar with `pac solution import`, dependency resolution, form publishing, and Visual Host chart-definition binding. Comfortable with rollback strategies (re-import prior solution version, re-publish form).
+  </role>
+
+  <goal>
+    The target Dataverse environment has the 5 new chart definitions live and the Matter main form reconfigured per FR-FORM-01. All 5 Visual Host instances on the form correctly bind to their respective chart-definition lookups. The Documents section renders with the deployed Semantic Search PCF. The environment is ready for cross-cutting NFR validation in task 074.
+  </goal>
+
+  <context>
+    <background>
+      Task 060 staged a packed solution zip containing the Matter main-form FormXml updates. Tasks 030-034 authored the 5 chart definitions (either as Dataverse records via `dataverse-mcp-usage` or bundled in the solution — verify Step 1). Tasks 070 + 071 deployed the PCFs that the form references. This task imports the solution to bring the form + chart defs live.
+    </background>
+    <relevant-files>
+      <file>(Packed Spaarke solution zip from task 060)</file>
+      <file>src/client/pcf/VisualHost/control/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/ControlManifest.Input.xml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-FORM-01 — 2-column 66/34 layout, 5 Visual Host instances bound to chart-def lookups</constraint>
+    <constraint source="spec">FR-DV-01..05 — chart definitions deployed to the target environment</constraint>
+    <constraint source="spec">NFR-05 — existing chart defs unchanged after deploy (verified at PCF deploy step 071; reverified here at form level)</constraint>
+    <constraint source="project">Task 070 + 071 PCFs MUST be deployed before this import so the form's PCF references resolve</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/tasks/060-matter-form-overview-tab.poml</file>
+    </files>
+    <patterns>
+      <pattern name="Solution import via PAC" location=".claude/skills/dataverse-deploy/SKILL.md">
+        `pac solution import --path {solution.zip} --publish-changes` for unmanaged solution; verify with `pac solution list` post-import.
+      </pattern>
+      <pattern name="Chart def record verification" location=".claude/skills/dataverse-mcp-usage/SKILL.md">
+        Use `mcp__dataverse__read_query` to confirm the 5 chart def records exist post-import with correct `sprk_optionsjson` round-trip.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Verify upstream deps shipped: tasks 030, 031, 032, 033, 034, 060, 070, 071 all show ✅ in TASK-INDEX.md. If any not ✅, BLOCK and report.</step>
+    <step order="1">Determine which artifacts are in the packed solution vs which are direct Dataverse record inserts. Per task 030's pattern, chart defs may be authored as Dataverse records directly (via mcp__dataverse__create_record) rather than bundled in the solution — if so, verify each record already exists in the target environment via `mcp__dataverse__read_query`; only the FormXml needs to be imported via solution.</step>
+    <step order="2">Snapshot the current Matter main form in the target environment (export current solution as a rollback artifact). Store the rollback zip at a known path.</step>
+    <step order="3">Run `pac solution import --path {staged-solution.zip} --publish-changes` against the target environment. Capture import log. If import fails, halt and capture the error before any retry.</step>
+    <step order="4">If chart defs were not bundled in the solution but authored directly, verify each of the 5 records exists in the target environment with `mcp__dataverse__read_query` for sprk_name in (Matter Health Composite, Matter Budget, Matter Tasks, Matter Next Date, Matter Activity). If any missing, re-run the chart def authoring step from the relevant task (030-034) against the target env.</step>
+    <step order="5">Post-import verification: open a Matter record in the target environment. Confirm the Overview tab renders 2-column 66/34 layout. Confirm Matter Information section appears at top of left col with 5 fields in 2 sub-cols. Confirm Documents section renders the Semantic Search PCF.</step>
+    <step order="6">Verify each of the 5 Visual Host instances on the right column binds to the correct chart-definition lookup: click each card; confirm the chart-def name matches expectation; confirm the card renders (donut for Health, HSBar for Budget, MetricCard for Tasks + Activity, DueDateCard for Next Date).</step>
+    <step order="7">Verify NFR-05 (final form-level check): the form's existing sections, tabs, and any other PCFs render unchanged from pre-import.</step>
+    <step order="8">Step 9.5 (FULL rigor): run `Skill code-review` + `Skill adr-check` on any uncommitted artifacts (e.g., rollback zip path, solution version metadata). Resolve issues.</step>
+    <step order="9">Update TASK-INDEX.md: 073 → ✅. Reset current-task.md for next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">`pac solution import`, `pac solution list`</tool>
+    <tool name="dataverse-deploy">Skill for the solution import workflow</tool>
+    <tool name="mcp__dataverse__read_query">Verify chart def records in target env</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">Spaarke solution imported to target Dataverse environment</output>
+    <output type="rollback">Rollback solution zip captured at known path before import</output>
+    <output type="evidence">Post-import verification screenshots (form layout + 5 cards) in projects/spaarke-matter-ui-enhancement-r1/notes/</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Tasks 030-034, 060, 070, 071 all show ✅ in TASK-INDEX.md before this task starts.</criterion>
+    <criterion testable="true">`pac solution import` succeeds without errors or unresolved dependencies.</criterion>
+    <criterion testable="true">A rollback solution zip exists at a documented path captured before import.</criterion>
+    <criterion testable="true">Matter main form renders 2-column 66/34 layout in the target environment (FR-FORM-01 Acceptance).</criterion>
+    <criterion testable="true">Each of the 5 Visual Host instances binds to its correct chart-definition lookup and renders the expected visual type.</criterion>
+    <criterion testable="true">Documents section renders the Semantic Search PCF without error.</criterion>
+    <criterion testable="true">NFR-05 form-level check: existing sections, tabs, other PCFs unchanged from pre-import.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The exact import path depends on whether chart defs are bundled in the solution or authored as Dataverse records directly. Task 030's pattern uses `mcp__dataverse__create_record` for chart def records — so most likely scenario is: solution contains FormXml only, chart defs are Dataverse records authored separately. Step 1 confirms which path applies.
+
+    Rollback strategy: if post-import verification fails, re-import the rollback zip captured at Step 2 to restore the prior form. Chart def records can be soft-deleted (deactivated) via Web API; do not hard-delete in case end-to-end validation in task 074 needs them.
+
+    This task completes the deploy phase. Task 074 (cross-cutting NFR validation) starts after this task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor. Step 0.5 is NOT applicable (solution import — no Fluent v9 component authoring). Load dataverse-deploy + dataverse-mcp-usage skills. Verify upstream deps ✅. Snapshot rollback. Import solution. Verify chart defs in target env. Verify form layout + bindings. Step 9.5: code-review + adr-check on uncommitted artifacts. Update TASK-INDEX.
+    </protocol>
+  </execution>
+</task>

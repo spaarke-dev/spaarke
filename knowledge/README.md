@@ -38,6 +38,7 @@ Each topic folder contains:
 | [`dataverse-sync/`](./dataverse-sync/) | Dataverse → AI Search sync patterns — webhook vs Service Bus vs change-tracking, idempotent indexing |
 | [`foundry-memory-patterns/`](./foundry-memory-patterns/) | Foundry agent memory + tool patterns (reference) — for the custom BFF Insights Agent design |
 | [`github-mcp/`](./github-mcp/) | GitHub MCP server — runtime currency and long-tail API research |
+| [`fluent-ui-v9/`](./fluent-ui-v9/) | Microsoft Fluent UI React v9 + Fluent 2 design system — PCF/Code-Page UI, theming, Griffel, slots, accessibility |
 
 ## How Claude Code uses this
 

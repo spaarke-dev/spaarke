@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Documents PCF — bulk-action bar with 6 actions (FR-DOC-02)</title>
+    <phase>4: Documents PCF</phase>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
+    <estimated-hours>8-12</estimated-hours>
+    <dependencies>041, 051</dependencies>
+    <blocks>046</blocks>
+    <tags>pcf, react, fluent-ui, frontend, semantic-search</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Complex PCF change adding new BulkActionBar component + 6 bulk actions (Email/Download/Pin/Delete/Doc Type/Share); calls BFF bulk-download endpoint; optimistic UI with Undo; ADR-021 + ADR-022 + ADR-028 binding</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>shared file SemanticSearchControl.tsx with other Phase 4 tasks (040-044, 046)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per spec FR-DOC-02, add a sticky bulk-action bar above the list-view column-header row, visible when ≥1 row is checked. Bar shows: count badge ("N selected"), Clear affordance, and 6 actions: **Email selected** (SPE files as attachments; multi-doc = single email with zip attachment), **Download selected** (calls new BFF endpoint `POST /api/documents/bulk-download` from task 051; multi-doc = single zip), **Pin selected** (localStorage; no Dataverse write), **Delete selected** (soft-delete via Xrm.WebApi; confirmation `Dialog`), **Document Type → selected** (sub-menu of `sprk_documenttype` option values; optimistic UI + 5s Undo toast on success; error toast with Retry on failure), **Share link** (email composer with body containing clickable `sprk_document` record URLs format `https://{env}.crm.dynamics.com/main.aspx?etn=sprk_document&id={guid}&pagetype=entityrecord`, NOT SPE files). Bar appears at ≥1 selection, hides at 0; each action operates on the selected set; failure modes degrade gracefully (toast + Retry).
+  </prompt>
+
+  <role>
+    Senior frontend developer expert in Fluent UI v9 `Toolbar` + `MessageBar` + `Toast` patterns, optimistic UI with Undo, Xrm.WebApi calls from PCFs, and BFF `authenticatedFetch` via `@spaarke/auth`. Familiar with the existing Semantic Search PCF email pipeline.
+  </role>
+
+  <goal>
+    NEW `BulkActionBar.tsx` component encapsulating the sticky bar + 6 actions. `SemanticSearchControl.tsx` mounts the bar when `selection.size &gt;= 1`. Download path calls `POST /api/documents/bulk-download` via `authenticatedFetch`, downloads the returned zip stream as a browser file. Doc Type update uses optimistic UI with 5s Undo toast (Fluent v9 `Toast` with action). Delete shows confirmation `Dialog` before Xrm.WebApi soft-delete. PCF builds clean. Code-review + adr-check pass.
+  </goal>
+
+  <context>
+    <background>
+      FR-DOC-02 introduces bulk operations after FR-DOC-04 (task 041) gave us multi-select state. The bulk-action bar lives ABOVE the list view column-header row, sticky on scroll. The Download action depends on FR-BFF-02 (task 051) shipping the `POST /api/documents/bulk-download` endpoint. The Doc Type action uses optimistic UI per Owner Clarifications row 12 (apply immediately, 5s Undo). Share link uses Dataverse record URLs (NOT SPE files) per Owner Clarifications row 13. Pin selected writes to the same localStorage key established in task 041 (`spaarke.docs.pinned.{userId}.{matterId}`).
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/BulkActionBar.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SemanticSearchApiService.ts</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/DataverseMetadataService.ts</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-DOC-02 — bar visible when ≥1 row checked; hides at 0; sticky above column-header row</constraint>
+    <constraint source="spec">FR-DOC-02 — bar shows: count badge ("N selected"), Clear, 6 actions</constraint>
+    <constraint source="spec">FR-DOC-02 — Email selected: SPE files as attachments; multi-doc = single email with zip attachment</constraint>
+    <constraint source="spec">FR-DOC-02 — Download selected: calls `POST /api/documents/bulk-download`; multi-doc = single zip response</constraint>
+    <constraint source="spec">FR-DOC-02 — Pin selected: localStorage flag (per-user-per-matter); no Dataverse write</constraint>
+    <constraint source="spec">FR-DOC-02 — Delete selected: soft-delete via Xrm.WebApi; requires confirmation `Dialog`</constraint>
+    <constraint source="spec">FR-DOC-02 — Document Type → selected: bulk Xrm.WebApi update; OPTIMISTIC UI; 5s Undo toast on success; error toast with Retry on failure</constraint>
+    <constraint source="spec">FR-DOC-02 — Share link: email composer pre-populated with body `{DocName} → {DataverseRecordURL}` per selected doc (NOT SPE files); URL format `https://{env}.crm.dynamics.com/main.aspx?etn=sprk_document&amp;id={guid}&amp;pagetype=entityrecord`</constraint>
+    <constraint source="spec">NFR-02 — axe WCAG 2.1 AA zero violations</constraint>
+    <constraint source="spec">NFR-04 — Fluent v9 tokens only</constraint>
+    <constraint source="ADR-006">PCF UI surface; form binding preserved</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; dark mode parity</constraint>
+    <constraint source="ADR-022">React 16/17 compatible</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2 `@spaarke/auth` `authenticatedFetch` MUST be used for `POST /api/documents/bulk-download` (no manual bearer headers)</constraint>
+    <constraint source="design.md">§6.0 binding — `/fluent-v9-component` MUST be invoked at Step 0.5</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/INDEX.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 Toast with Undo action" location=".claude/patterns/ui/fluent-v9-component-authoring.md">
+        Use `Toaster` + `useToastController` + action-button slot for Undo; timeout = 5000 ms.
+      </pattern>
+      <pattern name="Authenticated BFF zip download" location=".claude/patterns/auth/spaarke-sso-binding.md">
+        Use `authenticatedFetch` from `@spaarke/auth`; response.blob() → URL.createObjectURL → anchor.click().
+      </pattern>
+      <pattern name="Optimistic UI rollback" location=".claude/patterns/ui/fluent-v9-component-authoring.md">
+        Apply state change immediately; queue server call; on success keep + show Undo toast; on failure revert + show error toast with Retry.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. If higher, run `context-handoff` before proceeding.</step>
+    <step order="0.5" name="Invoke fluent-v9-component">Invoke `Skill fluent-v9-component` (binding per design.md §6.0). Load `fluent-v9-component-authoring.md`, `fluent-v9-portal-gotcha.md`, `fluent-v9-theming.md`, `spaarke-sso-binding.md`.</step>
+    <step order="1" name="Load knowledge">Read ADR-006, ADR-021, ADR-022, ADR-028; PCF CLAUDE.md. Verify task 051 has shipped `POST /api/documents/bulk-download`. Read existing email pipeline + Xrm.WebApi usage in `SemanticSearchControl.tsx` to inventory existing patterns to reuse.</step>
+    <step order="2" name="Create BulkActionBar component">Create `components/BulkActionBar.tsx`. Props: `{ selectedIds: string[], onClear: () =&gt; void, onEmail: () =&gt; void, onDownload: () =&gt; void, onPin: () =&gt; void, onDelete: () =&gt; void, onDocTypeChange: (newType: string) =&gt; void, onShareLink: () =&gt; void, docTypeOptions: TagFilterOption[] }`. Renders a sticky Fluent v9 `Toolbar` with `Badge` showing count, Clear button, and 6 `ToolbarButton` (or `MenuButton` for Doc Type).</step>
+    <step order="3" name="Mount BulkActionBar in SemanticSearchControl">In `SemanticSearchControl.tsx`, conditionally render `&lt;BulkActionBar /&gt;` when `selection.size &gt;= 1`. Position it sticky above the list view column-header row; in card view, sticky at top of card grid. Clear handler resets `selection` state.</step>
+    <step order="4" name="Wire Email selected">For single doc: open email composer with the SPE file as attachment (reuse existing Email handler from per-row 3-dot menu). For multi-doc: invoke the existing email pipeline extended for zip-attachment case — implementer note: this may require a small server-side enhancement (out of scope here; if blocked, escalate per CLAUDE.md §6).</step>
+    <step order="5" name="Wire Download selected">Call `authenticatedFetch('/api/documents/bulk-download', { method: 'POST', body: JSON.stringify({ documentIds: [...selection] }) })`. On 200: response.blob() → URL.createObjectURL → anchor.click() with filename from `Content-Disposition`. On 413: show error toast "Maximum 500 documents per bulk download". On other failures: show error toast with Retry.</step>
+    <step order="6" name="Wire Pin selected">For each id in selection, add to `pinnedIds` (existing state from task 041) and persist to localStorage key `spaarke.docs.pinned.{userId}.{matterId}`. Show success toast "N documents pinned".</step>
+    <step order="7" name="Wire Delete selected">Open Fluent v9 confirmation `Dialog`: "Delete N selected documents?". On confirm: bulk Xrm.WebApi `delete` for each id. Show success toast on completion. On any per-doc failure: show error toast with the failed ids.</step>
+    <step order="8" name="Wire Document Type → selected with optimistic UI">Render a `MenuButton` "Document Type" with `MenuItem` per `sprk_documenttype` option (reuse `docTypeOptions` from task 042's metadata fetch). On select: (a) immediately update `documentType` in client-side `results` state for each selected id (optimistic); (b) call `Xrm.WebApi.updateRecord` for each in parallel; (c) on success: show Toast "N documents updated to {type}" with **5s Undo** action button that reverts state + calls bulk update back to original values; (d) on failure: revert client state + show error Toast with Retry button.</step>
+    <step order="9" name="Wire Share link">For each selected id, build URL `https://{env}.crm.dynamics.com/main.aspx?etn=sprk_document&amp;id={guid}&amp;pagetype=entityrecord`. Compose email body `{DocName} → {URL}\n` per doc. Open mailto: or Outlook composer with this body. Do NOT attach SPE files (per spec — Share link is for Dataverse record URLs only).</step>
+    <step order="10" name="Toaster wiring">Add `Toaster` to PCF root (or wherever the existing toast surface lives — verify). Use `useToastController` hook to dispatch toasts from action handlers.</step>
+    <step order="11" name="Dark-mode + a11y check">Run PCF in dev harness with `webLightTheme` and `webDarkTheme`. Verify bar + toolbar buttons + toasts + confirmation Dialog render with v9 tokens. Run axe scan in both themes.</step>
+    <step order="12" name="Build verification">Run `npm run build:prod` from PCF root.</step>
+    <step order="9.5" name="Quality gates (FULL rigor)">Invoke `Skill code-review` then `Skill adr-check`. Resolve all findings. `code-review` will verify `authenticatedFetch` usage on bulk-download call.</step>
+    <step order="13" name="Checkpoint">Run `context-handoff` (silent: ✅ Checkpoint).</step>
+    <step order="14" name="Update task tracking">Update TASK-INDEX.md: task 045 status 🔲 → ✅. Reset `current-task.md` to next pending task (046).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (`npm run build:prod`)</tool>
+    <tool name="git">Version control</tool>
+    <tool name="Skill fluent-v9-component">Mandatory at Step 0.5</tool>
+    <tool name="Skill code-review">Quality gate at Step 9.5</tool>
+    <tool name="Skill adr-check">ADR compliance gate at Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/BulkActionBar.tsx (NEW)</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SemanticSearchApiService.ts</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Bulk-action bar appears when `selection.size &gt;= 1`; hides at 0; sticky above column-header row in list view.</criterion>
+    <criterion testable="true">Bar shows count badge "N selected", Clear affordance, and 6 actions (Email · Download · Pin · Delete · Document Type · Share link).</criterion>
+    <criterion testable="true">Download selected: calls `POST /api/documents/bulk-download` via `authenticatedFetch`; downloads returned zip stream as browser file.</criterion>
+    <criterion testable="true">Pin selected: writes to localStorage key `spaarke.docs.pinned.{userId}.{matterId}`; pinned rows sort to top per task 041.</criterion>
+    <criterion testable="true">Delete selected: opens confirmation Dialog; on confirm, soft-deletes via Xrm.WebApi.</criterion>
+    <criterion testable="true">Document Type → selected: applies optimistic UI; on success shows 5s Undo toast; on failure reverts + shows error toast with Retry.</criterion>
+    <criterion testable="true">Share link: opens email composer with body containing Dataverse record URLs per selected doc (NOT SPE files).</criterion>
+    <criterion testable="true">Failures degrade gracefully — error toast with Retry where appropriate.</criterion>
+    <criterion testable="true">PCF builds clean; zero hardcoded hex/rgb; uses `authenticatedFetch` for bulk-download.</criterion>
+    <criterion testable="true">axe WCAG 2.1 AA zero violations in light AND dark.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` skills pass.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 045 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Bar visibility tied to selection size">
+      <steps>
+        <step>Select 0 rows — verify bar hidden.</step>
+        <step>Select 1 row — verify bar visible with "1 selected" badge.</step>
+        <step>Select 3 rows — verify "3 selected".</step>
+        <step>Click Clear — verify selection cleared + bar hidden.</step>
+      </steps>
+      <expected>Bar appears at ≥1 selection only.</expected>
+    </test>
+    <test name="Download selected returns zip">
+      <steps>
+        <step>Select 3 documents.</step>
+        <step>Click Download selected.</step>
+        <step>Network tab: confirm `POST /api/documents/bulk-download` with `documentIds` array.</step>
+        <step>Browser downloads zip file with filename matching `documents-{matterIdOrBulk}-{timestamp}.zip`.</step>
+      </steps>
+      <expected>Single zip downloaded; auth header present (via authenticatedFetch).</expected>
+    </test>
+    <test name="Doc Type optimistic UI + 5s Undo">
+      <steps>
+        <step>Select 5 documents with Doc Type = "Memo".</step>
+        <step>Change Doc Type → "Contract" via the bulk menu.</step>
+        <step>Verify rows update immediately to "Contract" (optimistic).</step>
+        <step>Verify 5s Undo toast appears.</step>
+        <step>Click Undo within 5s — verify rows revert to "Memo".</step>
+      </steps>
+      <expected>Optimistic UI works; Undo reverts.</expected>
+    </test>
+    <test name="Delete confirmation Dialog">
+      <steps>
+        <step>Select 2 documents; click Delete selected.</step>
+        <step>Verify confirmation Dialog appears with count.</step>
+        <step>Click Confirm — verify rows soft-deleted; verify success toast.</step>
+      </steps>
+      <expected>Confirmation gate present; delete operates on selection.</expected>
+    </test>
+    <test name="Share link composes Dataverse URLs">
+      <steps>
+        <step>Select 2 documents; click Share link.</step>
+        <step>Verify email composer opens with body containing 2 lines, each `{DocName} → https://{env}.crm.dynamics.com/main.aspx?etn=sprk_document&amp;id={guid}&amp;pagetype=entityrecord`.</step>
+      </steps>
+      <expected>Body format matches spec; NO SPE file attachments.</expected>
+    </test>
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode.</step>
+        <step>Select rows; verify bar, toolbar buttons, confirmation Dialog, toasts use v9 dark tokens.</step>
+        <step>Run axe-core.</step>
+      </steps>
+      <expected>Zero WCAG violations.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Depends on task 041 (multi-select state exists) and task 051 (`POST /api/documents/bulk-download` BFF endpoint). The Email-multi-doc-with-zip case may require server-side support beyond the existing email pipeline — if not yet available, escalate per CLAUDE.md §6 (human input required for scope expansion). Optimistic UI rollback for Doc Type requires careful state tracking — store the original values for the 5s window so Undo can restore them. Toaster mount may already exist; verify before adding a duplicate.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      🔒 RIGOR LEVEL: FULL. Invoke `Skill fluent-v9-component` at Step 0.5. Load ADRs + patterns. Verify task 051 complete. Implement BulkActionBar + 6 actions (Email/Download/Pin/Delete/DocType/Share). Use authenticatedFetch for bulk-download. Build PCF. Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>

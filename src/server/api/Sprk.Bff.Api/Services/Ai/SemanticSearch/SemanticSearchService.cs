@@ -491,7 +491,11 @@ public sealed class SemanticSearchService : ISemanticSearchService
             FileUrl = null, // To be populated by endpoint if needed
             RecordUrl = null, // To be populated by endpoint if needed
             CreatedAt = doc.CreatedAt,
-            UpdatedAt = doc.UpdatedAt
+            UpdatedAt = doc.UpdatedAt,
+            // FR-BFF-01: initial ModifiedAt sourced from the AI Search index's `updatedAt`
+            // field; will be overwritten by the Dataverse post-search lookup with the
+            // canonical `modifiedon` system value (Dataverse is authoritative).
+            ModifiedAt = doc.UpdatedAt
         };
     }
 
@@ -546,6 +550,12 @@ public sealed class SemanticSearchService : ISemanticSearchService
                     enriched.Add(result with
                     {
                         CreatedBy = doc.CreatedBy,
+                        // FR-BFF-01: populate ModifiedAt / ModifiedBy from Dataverse system
+                        // fields (`modifiedon`, `_modifiedby_value` formatted-value). Mirrors
+                        // the CreatedBy enrichment pattern. Dataverse is authoritative; the
+                        // earlier AI-Search-sourced ModifiedAt is overwritten here.
+                        ModifiedAt = doc.ModifiedOn,
+                        ModifiedBy = doc.ModifiedBy,
                         Summary = doc.Summary,
                         Tldr = doc.Tldr,
                         // Populate SPE drive + item IDs so the client can invoke AI
@@ -748,6 +758,11 @@ public sealed class SemanticSearchService : ISemanticSearchService
             CreatedAt = doc.CreatedOn,
             UpdatedAt = doc.ModifiedOn,
             CreatedBy = doc.CreatedBy,
+            // FR-BFF-01: associated-only direct path mirrors the AI-Search + Dataverse
+            // enrichment shape. Dataverse `modifiedon` / `_modifiedby_value` are
+            // authoritative on this code path too.
+            ModifiedAt = doc.ModifiedOn,
+            ModifiedBy = doc.ModifiedBy,
             Summary = doc.Summary,
             Tldr = doc.Tldr
         };

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.1.43"
+  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.1.44"
            display-name-key="Semantic Search Control"
-           description-key="PCF control for semantic document search with natural language queries (v1.1.43)"
+           description-key="PCF control for semantic document search with natural language queries (v1.1.44)"
            control-type="virtual">
 
     <external-service-usage enabled="true">
@@ -24,6 +24,10 @@
 
     <!-- Input: BFF Application ID for scope construction -->
     <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF API application ID for OAuth scope construction"
+              of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- Input: Application Insights instrumentation key for client telemetry (FR-TEL-01) -->
+    <property name="appInsightsKey" display-name-key="App Insights Key" description-key="Application Insights instrumentation key for browser telemetry (direct SDK, not BFF-proxied)"
               of-type="SingleLine.Text" usage="input" required="false" />
 
     <!-- Input: Search scope mode (all, entity, custom) -->

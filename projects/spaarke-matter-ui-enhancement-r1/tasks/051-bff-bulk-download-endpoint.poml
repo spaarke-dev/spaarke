@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>POST /api/documents/bulk-download endpoint (FR-BFF-02)</title>
+    <phase>5: BFF</phase>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
+    <estimated-hours>5-8</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>045</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF endpoint adding ~150 LOC of streaming/zip code. ADR-007 (SpeFileStore facade), ADR-008 (endpoint filter), ADR-010 (DI minimalism), ADR-019 (ProblemDetails), ADR-029 (publish hygiene + NFR-06) all binding. BFF additions governance (Placement Justification) required.</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per FR-BFF-02, add a new Minimal API endpoint `POST /api/documents/bulk-download` that accepts a JSON body `{ documentIds: string[] }` (max 500 — HTTP 413 above), authorizes via endpoint filter mirroring `SemanticSearchAuthorizationFilter`, streams Graph file downloads through `SpeFileStore` (ADR-007 facade) into a `System.IO.Compression.ZipArchive` and writes the zip to the HTTP response with no buffering. Per-document failures are recorded in a `_FAILED.txt` manifest inside the zip while zipping continues. Total failure (zero accessible documents) returns HTTP 4xx ProblemDetails (ADR-019). Response: HTTP 200, `Content-Type: application/zip`, `Content-Disposition: attachment; filename="documents-{matterIdOrBulk}-{timestamp}.zip"`. Add integration tests covering happy path, 413, partial failure. Verify publish-size delta &lt; 1 MB (NFR-06). No new NuGet packages (ADR-029) — use BCL `System.IO.Compression.ZipArchive` only.
+  </prompt>
+
+  <role>
+    Senior .NET 8 / Minimal API developer with deep familiarity with the BFF, `SpeFileStore` facade (ADR-007), endpoint filter authorization (ADR-008), ProblemDetails (ADR-019), streaming patterns with `ZipArchive` over an HTTP response stream, and BFF additions governance (`.claude/constraints/bff-extensions.md`).
+  </role>
+
+  <goal>
+    A new file `src/server/api/Sprk.Bff.Api/Api/DocumentsBulkEndpoints.cs` exposing a `MapDocumentsBulkEndpoints` extension method that registers `POST /api/documents/bulk-download`. Endpoint authenticates via the same auth scheme as the existing `GET /api/documents/{id}/preview-url`, applies an endpoint filter (ADR-008), validates ≤500 ids (HTTP 413 above), uses `SpeFileStore.DownloadFileAsync` (or equivalent ADR-007 facade method — NO direct Graph SDK types leak), zips downloads into the HTTP response with `ZipArchive(Stream, ZipArchiveMode.Create, leaveOpen: true)` and `CopyToAsync` per file (no buffering), records per-document failures in `_FAILED.txt` in the zip, returns ProblemDetails for total failure. Integration tests cover happy path, 413, partial failure. Build clean, no new NuGet, no HIGH CVE, publish-size delta &lt; 1 MB.
+  </goal>
+
+  <context>
+    <background>
+      FR-BFF-02 is the new endpoint that powers the Documents PCF bulk-action bar "Download selected" (FR-DOC-02, task 045). The owner-clarified design per spec.md §Owner Clarifications chose a server-side BFF endpoint over client-side zip ("New BFF endpoint `POST /api/documents/bulk-download` (justifies §12.2 placement)"). The Placement Justification therefore exists at the design layer; this task re-states it in the PR per `.claude/constraints/bff-extensions.md`.
+
+      NOTE on ADR-019: spec.md line 332 labels ADR-019 as "SPE access" — that label is a spec typo. The actual ADR-019 is ProblemDetails (RFC 7807 error responses). Both concerns apply to this task: SPE access via SpeFileStore facade (ADR-007 is the real "SPE access" ADR) AND ProblemDetails for error responses (the real ADR-019). This task cites both correctly.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/DocumentsBulkEndpoints.cs (NEW)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs (reference: endpoint pattern)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/ (reference: SemanticSearchAuthorizationFilter pattern)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/SpeFileStore.cs (or equivalent — ADR-007 facade)</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs (register Map call)</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-BFF-02 — POST /api/documents/bulk-download; body { documentIds: string[] }; max 500 (HTTP 413 above)</constraint>
+    <constraint source="spec">FR-BFF-02 — Response: HTTP 200, Content-Type: application/zip, Content-Disposition with matter id + timestamp</constraint>
+    <constraint source="spec">FR-BFF-02 — per-doc failure → _FAILED.txt in zip, continue zipping rest; total failure → 4xx ProblemDetails</constraint>
+    <constraint source="spec">FR-BFF-02 — Auth: same scheme as GET /api/documents/{id}/preview-url; endpoint filter (ADR-008)</constraint>
+    <constraint source="ADR-007">SpeFileStore facade only — NO Graph SDK types leaked above the facade; use SpeFileStore.DownloadFileAsync (or equivalent facade method)</constraint>
+    <constraint source="ADR-008">Endpoint filter for authorization (NOT global middleware) — model on SemanticSearchAuthorizationFilter</constraint>
+    <constraint source="ADR-010">DI minimalism — register via a focused `MapDocumentsBulkEndpoints` extension; no DI blob in Program.cs; reuse existing SpeFileStore registration</constraint>
+    <constraint source="ADR-019">ProblemDetails (RFC 7807) for error responses (`Results.Problem(...)`)</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — NO new NuGet packages; use `System.IO.Compression.ZipArchive` BCL; publish-size delta &lt; 1 MB (NFR-06)</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BINDING — Placement Justification required in PR description (Owner-Clarified at design layer; restate in PR)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0">Step 0.5: This task does NOT touch Fluent v9 React components — `fluent-v9-component` skill is NOT applicable. Skip.</step>
+    <step order="1">Load knowledge: `.claude/constraints/bff-extensions.md` (binding pre-merge checklist), ADR-007/008/010/019/029, `src/server/api/Sprk.Bff.Api/CLAUDE.md`. Run the pre-merge checklist in §A in your head as you design.</step>
+    <step order="2">Locate the SpeFileStore facade (Glob for `SpeFileStore*.cs`) and identify the download method (likely `DownloadFileAsync(driveId, itemId, ...)` returning a Stream). Confirm no Graph SDK types leak above the facade.</step>
+    <step order="3">Locate `SemanticSearchAuthorizationFilter` (Glob `*AuthorizationFilter.cs` or `Api/Filters/`) — model the new endpoint filter on it. Decide whether to create a new `DocumentsBulkDownloadAuthorizationFilter` or reuse an existing document-scoped filter. Authorization scope mirrors `GET /api/documents/{id}/preview-url`.</step>
+    <step order="4">Create `src/server/api/Sprk.Bff.Api/Api/DocumentsBulkEndpoints.cs` with: (a) `MapDocumentsBulkEndpoints` extension method on `IEndpointRouteBuilder`; (b) `MapPost("/api/documents/bulk-download", Handle)` with `.AddEndpointFilter<...>()`, `.RequireAuthorization()`, `.RequireRateLimiting(...)` (use an existing policy from `api.md`, e.g., `"standard"` if one exists); (c) handler signature accepting the request DTO + HttpContext + SpeFileStore (and any required services via DI).</step>
+    <step order="5">Implement the handler: (a) validate `documentIds.Length &gt; 500` → return `Results.Problem(statusCode: 413, ...)`; (b) resolve each documentId to (driveId, itemId, fileName) via existing Dataverse/SPE lookup (use the same service used by preview-url); (c) start writing to `HttpContext.Response.Body` with `Content-Type: application/zip` headers + `Content-Disposition` set; (d) wrap response body in `ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true)`; (e) for each documentId, attempt `SpeFileStore.DownloadFileAsync(...)`, create a `ZipArchiveEntry`, `CopyToAsync` the file stream into the entry stream — on per-document exception, capture (documentId, fileName, exception.Message) into a local `failedItems` list and continue; (f) after the loop, if `failedItems.Any()`, write `_FAILED.txt` entry with the manifest; (g) if `failedItems.Count == documentIds.Length` (zero successful), return `Results.Problem(statusCode: 502 or 4xx, ...)` instead of completing the zip — but note the response headers may already be flushed, so structure the handler to detect total failure BEFORE writing any zip bytes (i.e., pre-resolve all documentId → (driveId, itemId, fileName) and bail with ProblemDetails if all lookups fail).</step>
+    <step order="6">Register `MapDocumentsBulkEndpoints` in `Program.cs` via the existing pattern (find `MapSemanticSearchEndpoints` to see where extension `.Map*Endpoints()` calls live).</step>
+    <step order="7">Verify ADR-010: confirm no new DI registrations were added (reuse SpeFileStore, reuse Dataverse document lookup service). If you added any, push back and revisit.</step>
+    <step order="8">Add integration tests in the existing Sprk.Bff.Api test project using `WebApplicationFactory`:
+      <substeps>
+        <substep>Happy path: POST with 3 valid documentIds; assert HTTP 200, application/zip, valid zip content, all 3 entries present, no _FAILED.txt.</substep>
+        <substep>413: POST with 501 documentIds; assert HTTP 413 + ProblemDetails body.</substep>
+        <substep>Partial failure: POST with 3 ids where 1 is unauthorized/not-found; assert HTTP 200, 2 valid entries + _FAILED.txt listing the failed one.</substep>
+        <substep>Total failure: POST with 3 ids that all fail lookup; assert HTTP 4xx + ProblemDetails (no zip body).</substep>
+      </substeps>
+    </step>
+    <step order="9">Build verification: `dotnet build src/server/api/Sprk.Bff.Api/` clean; run all new integration tests; `dotnet list package --vulnerable --include-transitive` shows no new HIGH CVE (no packages added — should be unchanged).</step>
+    <step order="10">Verify publish-size impact (NFR-06): `dotnet publish src/server/api/Sprk.Bff.Api/ --runtime linux-x64 -c Release`. Compare output size before/after this task. Delta MUST be &lt; 1 MB. If delta exceeds, investigate (System.IO.Compression should be in the BCL with zero size delta).</step>
+    <step order="11">Document the Placement Justification in the PR description per `.claude/constraints/bff-extensions.md` §A.1: "Bulk download is latency-sensitive (user-facing action), requires same auth scheme + Dataverse + SPE access as existing single-file download endpoints, streams through BFF-managed Graph credentials and authorization — belongs in BFF. Uses BCL ZipArchive only, no new NuGet packages, no DI additions. Owner-clarified at design layer (spec.md §Owner Clarifications: 'New BFF endpoint... justifies §12.2 placement')."</step>
+    <step order="12">Step 9.5 (FULL rigor): run `Skill code-review` + `Skill adr-check` — fix issues before completing.</step>
+    <step order="13">Update TASK-INDEX.md: 051 → ✅. Update current-task.md to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification (`dotnet build`, `dotnet test`, `dotnet publish`)</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/DocumentsBulkEndpoints.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/ (new authorization filter, if needed)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (register MapDocumentsBulkEndpoints)</output>
+    <output type="code">tests/ — integration tests (happy path, 413, partial failure, total failure)</output>
+    <output type="docs">PR description with Placement Justification (per .claude/constraints/bff-extensions.md §A.1)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/documents/bulk-download accepts { documentIds: string[] }; returns HTTP 200 application/zip for valid request (FR-BFF-02 Acceptance).</criterion>
+    <criterion testable="true">HTTP 413 returned for &gt;500 ids (FR-BFF-02 Acceptance).</criterion>
+    <criterion testable="true">Per-document failures recorded in _FAILED.txt; zipping continues for remaining docs (FR-BFF-02 Acceptance).</criterion>
+    <criterion testable="true">Total failure (zero accessible) returns HTTP 4xx ProblemDetails (ADR-019, FR-BFF-02 Acceptance).</criterion>
+    <criterion testable="true">Endpoint filter authorizes mirroring SemanticSearchAuthorizationFilter (ADR-008).</criterion>
+    <criterion testable="true">SpeFileStore facade used for all SPE access; no Graph SDK types leaked (ADR-007).</criterion>
+    <criterion testable="true">No new NuGet packages; uses System.IO.Compression.ZipArchive only (ADR-029, NFR-06).</criterion>
+    <criterion testable="true">No new DI registrations beyond the endpoint extension itself (ADR-010).</criterion>
+    <criterion testable="true">Publish-size delta &lt; 1 MB (NFR-06).</criterion>
+    <criterion testable="true">All 4 integration tests pass (happy path, 413, partial failure, total failure).</criterion>
+    <criterion testable="true">PR description includes Placement Justification per `.claude/constraints/bff-extensions.md`.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec.md line 332 labels ADR-019 as "SPE access" — that's a spec-side typo. The actual ADR-019 is ProblemDetails (RFC 7807). Both apply: SPE access (ADR-007 SpeFileStore facade) AND ProblemDetails (ADR-019) for error responses. This task cites both correctly.
+
+    The streaming pattern: `ZipArchive(HttpContext.Response.Body, ZipArchiveMode.Create, leaveOpen: true)` enables true streaming — files are written to the response as they're downloaded from Graph, no full-file buffering. CRITICAL: detect total-failure BEFORE flushing response headers, because once headers are flushed you cannot return ProblemDetails. Pre-resolve all documentId → (driveId, itemId, fileName) lookups first; if all lookups fail, return ProblemDetails. If at least one resolves, begin streaming and handle per-download failures in the zip.
+
+    Authorization scope: spec.md §Unresolved Questions notes "Bulk-download endpoint authorization scope — same policy as preview-url assumed; confirm with architecture if a separate policy is needed for bulk operations". Default to the preview-url policy; flag in PR description if architecture wants a separate bulk-scoped policy.
+
+    Filename format: `documents-{matterIdOrBulk}-{timestamp}.zip`. If all documents share one matter (resolve from doc lookup), use that matter id; otherwise use literal "bulk". Timestamp ISO 8601 compact form e.g. `20260527T143022Z`.
+
+    Placement Justification (binding per `.claude/constraints/bff-extensions.md` §10 + §A.1, owner-clarified at design layer per `spec.md §Owner Clarifications`):
+    Bulk download belongs in the BFF, not the PCF. Reasons: (1) Client-side zip would buffer all file bytes in browser memory (500 docs × multi-MB = hundreds of MB → kill the tab); server-side streaming via `SpeFileStore.DownloadFileAsync` → `ZipArchive` over `HttpResponse.Body` keeps memory bounded regardless of selection size. (2) The endpoint requires the same auth scheme + Dataverse lookup + SPE app-only access as the existing `GET /api/documents/{documentId}/download` in `FileAccessEndpoints` — extending that BFF surface reuses identical infrastructure (no parallel auth in PCF). (3) Decision criteria from `bff-extensions.md` table: Q1 latency budget (YES — user-facing download), Q2 BFF-managed session/auth state (YES — JWT bearer + tenant claim validation), Q4 event-driven (NO — synchronous user wait), Q5 external-consumer facade (NO — internal PCF consumer). Three of four criteria favor BFF; the fourth doesn't apply. No new NuGet packages (uses BCL `System.IO.Compression.ZipArchive`); no new DI registrations (reuses `IDocumentDataverseService` + `SpeFileStore`); follows `MapDocumentsBulkEndpoints` feature-module extension pattern (ADR-010); endpoint-filter authorization mirrors `SemanticSearchAuthorizationFilter` shape (ADR-008).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor BFF task. Load BFF extensions governance + relevant ADRs. Design with streaming + ZipArchive over HttpResponse.Body. Implement endpoint + filter + handler with pre-resolve + per-doc error capture + _FAILED.txt. Add 4 integration tests. Verify build + CVE + publish size (&lt; 1 MB). Document Placement Justification in PR. Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>

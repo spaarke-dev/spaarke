@@ -209,6 +209,9 @@ public class DocumentEntity
     /// <summary>Created by user display name. Maps to _createdby_value@OData.Community.Display.V1.FormattedValue.</summary>
     public string? CreatedBy { get; set; }
 
+    /// <summary>Last-modified by user display name. Maps to _modifiedby_value@OData.Community.Display.V1.FormattedValue.</summary>
+    public string? ModifiedBy { get; set; }
+
     // Document Profile fields (populated by AI)
     /// <summary>TL;DR summary (1-2 sentences). Maps to sprk_filetldr.</summary>
     public string? Tldr { get; set; }

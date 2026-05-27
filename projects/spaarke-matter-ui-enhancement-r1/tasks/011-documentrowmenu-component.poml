@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-matter-ui-enhancement-r1">
+  <metadata>
+    <title>Add DocumentRowMenu shared component (FR-SC-02)</title>
+    <phase>1: Shared Components</phase>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
+    <estimated-hours>4-5</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>012, 040</blocks>
+    <tags>react, fluent-ui, frontend, shared-components</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Authors a Fluent v9 React component in the shared library with the 13-action menu structure from FR-DOC-01; tags include `react`, `fluent-ui`, and `frontend`; ADR-021 (Fluent v9 tokens, dark mode) is binding; the Fluent v9 portal gotcha applies to Menu inside MDA (load `.claude/patterns/ui/fluent-v9-portal-gotcha.md`); design.md §6.0 mandates `/fluent-v9-component` invocation.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec FR-SC-02, add a `DocumentRowMenu` component to `@spaarke/ui-components` that renders a Fluent v9 `Menu` with the 13-action structure from FR-DOC-01. The menu trigger button MUST `stopPropagation` so a row's click handler (which opens the preview Dialog) does NOT fire when the trigger is clicked. Props: `{ document: IDocumentRowMenuTarget, onAction: (action: DocumentRowAction) =&gt; void, disabledActions?: DocumentRowAction[] }`. The `disabledActions` prop enables per-document permission scoping (e.g., hide/disable Delete for users lacking delete permission). Menu items in FR-DOC-01 order: Preview · AI summary · Open file · Find similar · *divider* · Download · Copy link · Email · Open record · *divider* · Toggle workspace · Pin to top · Rename · Delete. Component MUST use Fluent v9 semantic tokens only (NFR-04), render correctly in dark mode (NFR-02), and remain compatible with React 16/17 (PCF platform, ADR-022).
+  </prompt>
+
+  <role>
+    Senior frontend developer with deep Fluent UI v9 experience (Menu, MenuTrigger, MenuList, MenuItem, MenuDivider, icons from `@fluentui/react-icons`). Familiar with the well-known Fluent v9 portal gotcha when Menu/Popover renders inside an MDA form host (Menu portal mounts to document.body, breaking z-index/scroll containment unless `mountNode` is supplied or `positioning` is configured correctly).
+  </role>
+
+  <goal>
+    A reusable Fluent v9 row-action menu exported from `@spaarke/ui-components` as `DocumentRowMenu`, with companion types `IDocumentRowMenuTarget` and `DocumentRowAction` exported alongside. Trigger button stops propagation. All 13 actions render in correct order with the two dividers. `disabledActions` correctly hides/disables specified actions. Component passes axe in light and dark. Shared library + both PCFs build clean.
+  </goal>
+
+  <context>
+    <background>
+      FR-SC-02 makes this menu shared so the Semantic Search PCF (FR-DOC-01) can replace its current per-row inline action icons + `FilePreviewDialog` toolbar icons with a single 3-dot menu. The 13 actions consolidate everything previously reachable via inline icons (Preview, AI summary, Open file, Find similar) and dialog-toolbar icons (Download, Copy link, Email, Open record, Toggle workspace, Pin to top, Rename, Delete). The Fluent v9 portal gotcha is the well-known trap: Menu's popover portal mounts to `document.body` by default, which causes z-index, scroll-containment, and theme-leakage issues inside MDA forms. The shared library must hand callers a Menu that works correctly inside the MDA host AND in any future SPA consumer.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/DocumentRowMenu.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-SC-02 — props are `{ document, onAction, disabledActions? }`</constraint>
+    <constraint source="spec">FR-SC-02 + FR-DOC-01 — trigger button MUST `stopPropagation` so row click does not fire</constraint>
+    <constraint source="spec">FR-DOC-01 — menu order: Preview · AI summary · Open file · Find similar · *divider* · Download · Copy link · Email · Open record · *divider* · Toggle workspace · Pin to top · Rename · Delete</constraint>
+    <constraint source="spec">FR-DOC-01 — trigger uses `appearance="subtle"`, `size="small"`, icon `MoreVertical20Regular`</constraint>
+    <constraint source="spec">FR-SC-02 — exported from barrel `src/index.ts` (barrel update is task 012)</constraint>
+    <constraint source="spec">NFR-02 — axe DevTools WCAG 2.1 AA, zero violations, light AND dark</constraint>
+    <constraint source="spec">NFR-04 — Fluent v9 tokens only; zero hardcoded hex/rgb in touched files</constraint>
+    <constraint source="spec">MUST NOT mix Fluent v8 imports with v9 in this file</constraint>
+    <constraint source="ADR-012">Single shared implementation; no parallel per-PCF copies</constraint>
+    <constraint source="ADR-021">Fluent v9 design system; semantic tokens; dark mode required</constraint>
+    <constraint source="ADR-022">React 16/17 compatible (PCF platform); no React 18+ exclusive APIs</constraint>
+    <constraint source="design.md">§6.0 binding rule — `/fluent-v9-component` MUST be invoked at task start before reading/writing any Fluent v9 file</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/INDEX.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>projects/spaarke-matter-ui-enhancement-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 portal gotcha" location=".claude/patterns/ui/fluent-v9-portal-gotcha.md">
+        Menu/Popover renders into a portal at `document.body` by default; this breaks inside MDA forms unless `mountNode` is configured. Apply the documented mitigation.
+      </pattern>
+      <pattern name="Fluent v9 component authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">
+        Use `makeStyles` + `tokens` for styling; expose typed props; keep components generic.
+      </pattern>
+      <pattern name="stopPropagation trigger" location="spec FR-DOC-01">
+        `onClick={(e) =&gt; e.stopPropagation()}` on the MenuTrigger button so the row's `onClick` (which opens the preview Dialog) does NOT fire.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Run `context-handoff` if higher.</step>
+    <step order="0.5" name="Invoke fluent-v9-component">Invoke `Skill fluent-v9-component` (binding per design.md §6.0). Load ALL four ui patterns (`fluent-v9-component-authoring.md`, `fluent-v9-theming.md`, `fluent-v9-portal-gotcha.md`, `fluent-v9-react-version-boundaries.md`) — portal-gotcha is especially load-bearing for this component.</step>
+    <step order="1" name="Load knowledge">Read ADR-012, ADR-021, ADR-022. Read FR-DOC-01 and FR-SC-02 sections of spec.md again to confirm the exact 13-action ordering and trigger styling. Confirm `@fluentui/react-components` and `@fluentui/react-icons` are already dependencies of `@spaarke/ui-components`.</step>
+    <step order="2" name="Define types">Create `src/client/shared/Spaarke.UI.Components/src/types/DocumentRowMenu.ts` exporting: `IDocumentRowMenuTarget { id: string; name: string; documentType?: string; [k: string]: unknown }` (minimal target shape; consumers may pass richer objects since the menu only needs identifying info), and a string-literal union `DocumentRowAction = 'preview' | 'aiSummary' | 'openFile' | 'findSimilar' | 'download' | 'copyLink' | 'email' | 'openRecord' | 'toggleWorkspace' | 'pinToTop' | 'rename' | 'delete'` (12 actions; "AI summary" is `aiSummary` — note FR-DOC-01 lists 13 menu items but two are dividers, so 11 leaf actions plus AI Summary makes 12 leaf actions — re-verify by counting FR-DOC-01 items: Preview, AI summary, Open file, Find similar, Download, Copy link, Email, Open record, Toggle workspace, Pin to top, Rename, Delete = 12 leaf actions + 2 dividers = 14 menu nodes. Use the 12-action union).</step>
+    <step order="3" name="Implement component">Create `src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx`. Use `Menu`, `MenuTrigger`, `MenuPopover`, `MenuList`, `MenuItem`, `MenuDivider` from `@fluentui/react-components`. Trigger is a Fluent v9 `Button` with `appearance="subtle"`, `size="small"`, icon `MoreVertical20Regular` (from `@fluentui/react-icons`), `aria-label="More actions for {document.name}"`. The Button's `onClick` calls `e.stopPropagation()` before the menu opens — this MUST be verified by an integration test (see ui-tests). Render the 12 leaf actions in FR-DOC-01 order with dividers between groups (after `findSimilar` and after `openRecord`). Each `MenuItem` calls `onAction('actionName')`. Filter out items whose key is in `disabledActions` (use simple Array.includes; render the divider only when its preceding group still has at least one visible action). Apply the portal-gotcha mitigation per `.claude/patterns/ui/fluent-v9-portal-gotcha.md` — pass `mountNode` if/when the caller supplies one via context, otherwise rely on the documented default-safe configuration.</step>
+    <step order="4" name="A11y + dark mode">Trigger button has accessible name including document name. Menu items have icons (use semantic Fluent icons matching the existing PCF inline icons where they overlap). Render the component inside both `webLightTheme` and `webDarkTheme` and verify token-based contrast.</step>
+    <step order="5" name="React 16/17 compatibility">Confirm no React 18+ exclusive APIs. Confirm `package.json` peerDependencies still allow React ^16 || ^17.</step>
+    <step order="6" name="Build verification">From `src/client/shared/Spaarke.UI.Components`, run `npm run build:prod`. Then from each consuming PCF (`src/client/pcf/SemanticSearchControl`, `src/client/pcf/VisualHost`), run `npm run build:prod` to confirm end-to-end compilation. (Barrel export of `DocumentRowMenu` is deferred to task 012.)</step>
+    <step order="7" name="Self-review">Re-read the file: no hardcoded colors, no Matter-specific code paths, no document-type-specific defaults, no console.log, no dead code, no `any`. Confirm the `stopPropagation` call is on the trigger button (NOT inside MenuTrigger wrapper alone — must be on the actual rendered Button).</step>
+    <step order="8" name="Checkpoint">Run `context-handoff` (silent: ✅ Checkpoint).</step>
+    <step order="9.5" name="Quality gates (FULL rigor)">Invoke `Skill code-review` then `Skill adr-check`. Resolve every finding before completion. code-review enforces `/fluent-v9-component` was invoked at Step 0.5 — if skipped, merge blocked.</step>
+    <step order="10" name="Update task tracking">Update `projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md`: task 011 status 🔲 → ✅. Reset `projects/spaarke-matter-ui-enhancement-r1/current-task.md` to the next pending task (likely 012).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build the shared library and PCFs (`npm run build:prod`)</tool>
+    <tool name="git">Version control</tool>
+    <tool name="Skill fluent-v9-component">Mandatory at Step 0.5</tool>
+    <tool name="Skill code-review">Quality gate at Step 9.5</tool>
+    <tool name="Skill adr-check">ADR compliance gate at Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/DocumentRowMenu.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/spaarke-matter-ui-enhancement-r1/current-task.md (advance pointer)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx` exists and exports a `DocumentRowMenu` React component with props `{ document: IDocumentRowMenuTarget, onAction: (action: DocumentRowAction) =&gt; void, disabledActions?: DocumentRowAction[] }`.</criterion>
+    <criterion testable="true">`IDocumentRowMenuTarget` and `DocumentRowAction` types are exported from `src/client/shared/Spaarke.UI.Components/src/types/DocumentRowMenu.ts`.</criterion>
+    <criterion testable="true">All 12 leaf actions render in FR-DOC-01 order with 2 dividers (after `findSimilar` and after `openRecord`); clicking each menu item invokes `onAction` with the matching action key.</criterion>
+    <criterion testable="true">Trigger button uses `appearance="subtle"`, `size="small"`, and icon `MoreVertical20Regular`.</criterion>
+    <criterion testable="true">Trigger button's `onClick` calls `stopPropagation` BEFORE the menu opens — verified by mounting the component inside a parent `div` with its own `onClick` spy and confirming the parent spy is NOT called when the trigger is clicked.</criterion>
+    <criterion testable="true">`disabledActions` removes the specified actions from the rendered menu; dividers are still placed correctly between remaining groups.</criterion>
+    <criterion testable="true">Zero hardcoded hex/rgb (grep verifiable); Fluent v9 tokens used throughout.</criterion>
+    <criterion testable="true">Component renders correctly in both `webLightTheme` and `webDarkTheme`.</criterion>
+    <criterion testable="true">No React 18+ exclusive APIs; `npm run build:prod` succeeds in `@spaarke/ui-components` and in both PCFs.</criterion>
+    <criterion testable="true">Portal gotcha mitigation per `.claude/patterns/ui/fluent-v9-portal-gotcha.md` is applied.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` skills pass with no unresolved findings.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 011 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Trigger stopPropagation — row click does not fire">
+      <steps>
+        <step>Mount `&lt;div onClick={parentSpy}&gt;&lt;DocumentRowMenu ... /&gt;&lt;/div&gt;` in a test harness.</step>
+        <step>Click the menu trigger button (the 3-dot button).</step>
+        <step>Assert `parentSpy` was NOT called.</step>
+        <step>Assert the menu opens correctly.</step>
+      </steps>
+      <expected>Trigger swallows propagation; parent onClick does not fire; menu opens.</expected>
+    </test>
+    <test name="13-item structure renders in exact FR-DOC-01 order">
+      <steps>
+        <step>Mount `DocumentRowMenu` with no `disabledActions`.</step>
+        <step>Open the menu.</step>
+        <step>Walk the rendered menu nodes in DOM order; assert the sequence: Preview, AI summary, Open file, Find similar, divider, Download, Copy link, Email, Open record, divider, Toggle workspace, Pin to top, Rename, Delete.</step>
+      </steps>
+      <expected>All 12 leaf items in correct order, 2 dividers placed exactly after `findSimilar` and after `openRecord`.</expected>
+    </test>
+    <test name="disabledActions hides items + preserves divider placement">
+      <steps>
+        <step>Mount `DocumentRowMenu` with `disabledActions={['delete', 'rename']}`.</step>
+        <step>Open menu; assert Delete and Rename are NOT in DOM.</step>
+        <step>Mount again with `disabledActions={['download', 'copyLink', 'email', 'openRecord']}` (entire middle group).</step>
+        <step>Assert the first divider remains (between group 1 and group 3) and no empty group is rendered.</step>
+      </steps>
+      <expected>Hidden items disappear; remaining menu structure is still well-formed (no orphaned dividers, no empty groups).</expected>
+    </test>
+    <test name="Dark mode rendering + axe pass">
+      <steps>
+        <step>Mount inside FluentProvider with `webDarkTheme`; open menu.</step>
+        <step>Run axe-core scan on the entire menu tree.</step>
+      </steps>
+      <expected>Zero WCAG 2.1 AA violations; tokens resolve correctly; no hardcoded colors visible.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Action key naming uses camelCase (`aiSummary`, `openFile`, `copyLink`, `openRecord`, `toggleWorkspace`, `pinToTop`) for TypeScript-friendly switch statements in consumer code. The first consumer is the Semantic Search PCF (FR-DOC-01) implemented in a later Phase 2 task; that task will provide the actual `onAction` switch that dispatches each action to its existing handler. Keep this component generic — no Semantic Search-specific behavior here. The portal gotcha is critical because MDA hosts often wrap the form in CSS that breaks default Menu portal mounting; the pattern document specifies the project-canonical mitigation.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      🔒 RIGOR LEVEL: FULL. Invoke `Skill fluent-v9-component` at Step 0.5 — load ALL four ui patterns including portal-gotcha. Load ADR-012, ADR-021, ADR-022. Implement types + component. Build the shared library + both PCFs. Run code-review + adr-check at Step 9.5. Update TASK-INDEX.md and current-task.md.
+    </protocol>
+  </execution>
+</task>
