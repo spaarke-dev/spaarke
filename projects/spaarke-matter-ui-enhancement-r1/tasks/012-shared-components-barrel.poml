@@ -3,7 +3,8 @@
   <metadata>
     <title>Export TagFilter + DocumentRowMenu from @spaarke/ui-components barrel</title>
     <phase>1: Shared Components</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-05-27</completed>
     <estimated-hours>0.5-1</estimated-hours>
     <dependencies>010, 011</dependencies>
     <blocks>040, 041</blocks>

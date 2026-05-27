@@ -13,10 +13,10 @@
 
 | Field | Value |
 |---|---|
-| **Wave** | Wave 0 complete — advancing to Wave 1A (parallel: 010 + 011) |
-| **Next Tasks** | 010 (TagFilter component, FULL) + 011 (DocumentRowMenu component, FULL) — parallel-safe, Group B |
-| **Status** | Wave 1A pending dispatch |
-| **Next Action** | Dispatch tasks 010 + 011 in parallel via Agent calls (sub-agents writing to `src/client/shared/Spaarke.UI.Components/`); 012 (barrel) serial after both ✅ |
+| **Wave** | Wave 1 complete (010, 011, 012) — Phase 1 done — advancing to Wave 2A (Visual Host renderer extensions, parallel: 020 + 023 + 024) |
+| **Next Tasks** | 020 (Donut fieldPivot+matrixRight, FULL), 023 (HSBar headlineAboveBar, FULL), 024 (CardChrome wrapper, FULL) — parallel-safe, Group C |
+| **Status** | Wave 2A pending dispatch |
+| **Next Action** | Dispatch tasks 020 + 023 + 024 in parallel via Agent calls. After all complete, run Wave 2B (021 MetricCard badge) serial, then Wave 2C (022 MetricCard descriptionColor) serial, then Wave 2D (025 NFR-05 regression smoke). |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
