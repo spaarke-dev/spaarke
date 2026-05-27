@@ -7,10 +7,15 @@
 
 ## Project Status
 
-- **Phase**: **Phase 4 BLOCKED on 48h gate + G4 agreement** (Phase 0/1/2/3 + task 019 + task 023 done; BASELINE.md committed 2026-05-25; old Windows dev decommissioned)
-- **Last Updated**: 2026-05-25
-- **Current Task**: none — Phase 3 closed (8 of 9 tasks done; task 033 calendar gate runs to 2026-05-27 UTC); awaiting operator G4 facade adoption agreement with Insights Engine owner before Phase 4 task 046
-- **Next Action**: WAIT for (a) 48h App Insights window closure (2026-05-27 UTC) → capture per `baseline/app-insights-baseline-start.md`, then (b) G4 agreement. When both clear, resume with `/task-execute projects/sdap-bff-api-remediation-fix/tasks/040-publish-linux-x64.poml`. See [`current-task.md`](current-task.md) Action 1/2/4 for full sequence.
+- **Phase**: ✅ **Complete** — all in-scope phases (0–6 partial) delivered; project formally closed 2026-05-26
+- **Last Updated**: 2026-05-26
+- **Current Task**: none — project closed
+- **Final commit on master**: `0212bcf7` (PR #298 — 3 code-review findings fixed)
+- **Reference**: see [`README.md`](README.md) Current Status table for outcome roll-up; [`EXECUTION-LOG.md`](EXECUTION-LOG.md) for authoritative per-task evidence
+
+### Why this file is preserved post-close
+
+This CLAUDE.md remains as historical project context for downstream work (Insights Engine, future BFF iterations) — captures the Decisions Made, Phase 1 inventory findings, applicable ADRs, and pattern references that downstream projects benefit from. The Task Execution Protocol guidance below is no longer load-bearing (project has no open tasks) but the decision history is.
 
 ---
 
@@ -278,7 +283,7 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 | [ADR-027 (a)](../../.claude/adr/ADR-027-subscription-isolation-managed-solutions.md) | Subscription Isolation | **Real, operational**: Phase 1–4 hits dev subscription only; demo/prod target their own subscriptions |
 | [ADR-027 (b)](../../.claude/adr/ADR-027-subscription-isolation-managed-solutions.md) | Managed Solutions | **Conditionally applicable**: applies to Power Platform components (not this BFF App Service deploy directly); relevant only if canonical Phase 5 prod process bundles related Power Platform updates |
 | [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) | Spaarke Auth v2 | **Preserved by no-change** |
-| ADR-029 (forthcoming) | BFF Publish Hygiene | **Becomes binding when Phase 6 lands** (tasks 076/077) |
+| [ADR-029](../../.claude/adr/ADR-029-bff-publish-hygiene.md) | BFF Publish Hygiene | **Accepted 2026-05-26** — codifies the linux-x64 RID + sourcemap exclusion + transitive CVE override pattern + size-baseline ratchet enacted in Phase 4 |
 
 ### Applicable Constraints
 
