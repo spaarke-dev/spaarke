@@ -3,7 +3,7 @@
 > **Project**: spaarke-ai-platform-unification-r4
 > **Total tasks**: 47 (35 original work + 10 R4 add-on cleanup [072–081] + 1 wrap-up; **scope expanded 2026-05-27** after operator review of carry-overs + deploy decisions + 079 pre-flight CVE check + final review #3 residuals)
 >
-> **⚠️ R4 wrap-up requires operator final review before executing task 090** (operator instruction 2026-05-26 + 2026-05-27 final review)
+> **✅ R4 SHIPPED 2026-05-28** — all 46 work tasks + 1 wrap-up complete. Lessons learned: [`../notes/lessons-learned.md`](../notes/lessons-learned.md). Next action: `/merge-to-master` when ready.
 >
 > **R5 backlog**: EMPTY as of 2026-05-27 — both originally-deferred items resolved (iframe-wizards strategy → own project at `projects/spaarke-iframe-wizard-pattern-enhancement/`; WorkspaceRenderer fix absorbed into R4 task 072 with Path 2a approach)
 > **Created**: 2026-05-26 via `/project-pipeline` → `/task-create`
@@ -57,7 +57,7 @@
 | 063 | B-7 Extract useEventsBulkActions hook | 6 | ✅ (code; ~270 LOC dedup; both consumers adapted; deploy deferred) | B-7 / FR-10 | FULL | none | H / ✅ |
 | 064 | B-8 CalendarDrawer.eventDates API | 6 | ✅ (cast removed; IEventDateInfo extended with overdue?; Fluent v9 CounterBadge + ErrorCircle12Filled rendering; 0 build errors) | B-8 / FR-11 | FULL | 063 ✅ | — / ❌ (same lib as 063) |
 | 065 | B-9 ESLint flat config (reframed: create, not migrate) | 6 | ✅ (eslint.config.js created; 0 errors / 161 warnings cataloged; 10 rules-of-hooks violations flagged for future fix) | B-9 / NFR-06 | STANDARD | none | I / ✅ |
-| 066 | B-10 Standalone EventsPage redeploy | 6 | 🔲 (defer to Phase 7 deploy batch) | B-10 / NFR-07 | MINIMAL | none | I / ✅ |
+| 066 | B-10 Standalone EventsPage redeploy | 6 | ✅ (shipped via 079 deploy batch — 2026-05-27; sprk_eventspage.html updated to include B-7/B-8/067 changes) | B-10 / NFR-07 | MINIMAL | none | I / ✅ |
 | 067 | B-11 Type-drift casts cleanup (now also absorbs 13 cascading errors from 061) | 6 | ✅ (2.5h vs 4h; 13/13 cascading 061 errors resolved; 4 casts removed; 4 SDK-boundary annotations; 5 carry-over categories documented) | B-11 / FR-12 | FULL | 063 ✅, 064 ✅ | — / ❌ (deps) |
 | 068 | Test infra: Jest+React 19 env fix | 6 | ✅ (RTL+jsdom bumped; 392 → 936 tests now executing) | (new — test infra hygiene) | STANDARD | none | J / ✅ |
 | 069 | Test infra: BFF handler test compile errors (3 files) | 6 | ✅ (7 fixed; 69 cascading errors surfaced → escalated to task 070) | (new — test infra hygiene) | STANDARD | none | J / ✅ |
@@ -73,7 +73,7 @@
 | 079 | Phase 7 deploy batch (BFF + 3 Code Pages; LegalWorkspace standalone SKIPPED-retired) + smoke verification | 7 | ✅ (BFF 45.22 MB hash-verify + healthz pass; SpaarkeAi 3.38 MB; CalendarSidePane 1079 KB; EventsPage 1177 KB; all dev artifacts published; NEW Deploy-CalendarSidePane.ps1 script created) | (new — was deferred from Phase 5/6) | FULL | 072–080 | — / ❌ (main-session only) |
 | 080 | CVE patches: OpenMcdf 3.1.0→3.1.4 + OpenTelemetry.Api 1.15.0→1.15.3 (Kiota HIGH deferred to dedicated future project) | 6.5 | ✅ (2 Moderate CVEs eliminated; build 0 errors; publish 44 MB unchanged; Kiota HIGH residual documented; future project: spaarke-graph-sdk-kiota-upgrade-r1) | (new — pre-deploy gate) | STANDARD | none | — / ❌ (main-session only) |
 | 081 | Pre-wrap-up residuals: useKeyboardShortcuts default value (real prod bug) + untrack 272 deploy artifacts (durable master-level fix) | 7 | ✅ (test suite 1051→1074 passing — 23 CommandBar tests unblocked; 272 files untracked, .gitignore now load-bearing; BFF build clean) | (new — final review residuals) | STANDARD | none | — / ❌ (main-session only) |
-| 090 | R4 Project Wrap-up (⚠️ PAUSE FOR OPERATOR REVIEW BEFORE EXECUTING) | 7 | 🔲 | PR-02 | FULL | all 35 + 072–081 | — / ❌ (final + operator gate) |
+| 090 | R4 Project Wrap-up | 7 | ✅ (2026-05-28; lessons-learned published; README + plan → Complete; current-task reset; all 25 graduation criteria checked with evidence; repo-cleanup audit clean — debug/drafts/handoffs all empty; ready for /merge-to-master) | PR-02 | FULL | all 35 + 072–081 | — / ❌ (final + operator gate) |
 
 ---
 

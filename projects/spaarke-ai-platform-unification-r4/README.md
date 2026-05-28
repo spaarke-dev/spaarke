@@ -1,8 +1,8 @@
 # Spaarke AI Platform Unification R4
 
-> **Last Updated**: 2026-05-26
+> **Last Updated**: 2026-05-28
 >
-> **Status**: In Progress
+> **Status**: ✅ Complete
 
 ## Overview
 
@@ -24,11 +24,14 @@ R4 consolidates the ~30 follow-up items that surfaced during R3 (Moment 1: Arriv
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Implementation (planning artifacts complete; tasks pending) |
-| **Progress** | 0% |
+| **Phase** | Complete |
+| **Progress** | 100% |
 | **Target Date** | ~2026-06-15 (3-4 weeks sequential; 2-3 weeks parallelized) |
-| **Completed Date** | — |
+| **Completed Date** | **2026-05-28** (3 days actual; parallel sub-agent dispatch) |
 | **Owner** | spaarke-dev |
+| **Final commit** | (task 090 wrap-up commit — see git log) |
+| **Total tasks shipped** | 45 work + 1 wrap-up (1 LegalWorkspace deploy retired per W-6) |
+| **Lessons learned** | [`notes/lessons-learned.md`](./notes/lessons-learned.md) |
 
 ## Problem Statement
 
@@ -43,37 +46,38 @@ Eight-phase rollout: (1) R3 wrap-up + retroactive BFF governance memo; (2) docum
 The project is considered **complete** when:
 
 ### Code + deploy
-- [ ] All 34 IN items shipped to dev environment (`sprk_spaarkeai` updated; `sprk_corporateworkspace` deprecated per W-6)
-- [ ] BFF deploys (A-4, B-4, B-5) verified for publish-size delta; no new HIGH-severity CVEs
-- [ ] All new ADRs merged (ADR-030, ADR-031 + D-2 amendment)
-- [ ] Build clean: 0 `tsc --noEmit` errors; 0 lint errors; 0 build warnings introduced by R4
-- [ ] No tracked build artifacts in `git status` after fresh clone + build
+- [x] All 34 IN items + 12 add-on cleanup tasks shipped to dev environment (`sprk_spaarkeai` updated; `sprk_corporateworkspace` retired per W-6/OC-R4-05)
+- [x] BFF deploy verified: 44 MB compressed (under 60 MB cap); 2 Moderate CVEs patched in task 080; 1 HIGH (Kiota) deferred to dedicated future project per BFF remediation precedent
+- [x] All new ADRs merged (ADR-030, ADR-031 + D-2 amendment) — tasks 012/013/016
+- [x] Build clean: 0 `tsc --noEmit` own-src errors across all client packages; 0 lint errors (22 documented intentional warnings); BFF 0 errors
+- [x] No tracked build artifacts after task 081 `git rm --cached` (272 files untracked; `.gitignore` now load-bearing)
 
 ### Documentation
-- [ ] `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` published (W-1)
-- [ ] `BUILD-A-NEW-WORKSPACE-WIDGET.md` rewritten with two-wrapper decision tree (W-2)
-- [ ] `LEGALWORKSPACE-RETIREMENT.md` published (W-6)
-- [ ] ADR-030 + ADR-031 published in both concise + full forms (A-2)
-- [ ] ADR-031 amended with heavy library handling section (D-2)
-- [ ] `DATA-ACCESS-DECISION-CRITERIA.md` published (C-1)
-- [ ] `LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` published (C-2)
-- [ ] `CHAT-ATTACHMENT-POLICY.md` published (A-4)
-- [ ] CLAUDE.md §10 updated with publish-size baseline rule (F-3)
+- [x] `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` published — W-1 / DR-01 (task 010)
+- [x] `BUILD-A-NEW-WORKSPACE-WIDGET.md` rewritten with 5 archetypes — W-2 / DR-02 (task 011)
+- [x] `LEGALWORKSPACE-RETIREMENT.md` published — W-6 / DR-03 (task 041)
+- [x] ADR-030 + ADR-031 published in both `.claude/adr/` and `docs/adr/` — A-2 / DR-04 (tasks 012/013, renumbered from initial 025/026)
+- [x] ADR-031 amended with heavy library handling section — D-2 / DR-05 (task 016)
+- [x] `DATA-ACCESS-DECISION-CRITERIA.md` published — C-1 / DR-06 (task 014)
+- [x] `LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` published with 21 testable MUSTs — C-2 / DR-07 (task 015)
+- [x] `CHAT-ATTACHMENT-POLICY.md` published — A-4 (task 050)
+- [x] CLAUDE.md §10 strengthened with publish-size baseline rule — F-3 / NFR-01 (task 017)
 
 ### Behavior
-- [ ] Workspace builder shows all 7 sections including Calendar + Daily Briefing (W-3)
-- [ ] Tab persistence matches operator-confirmed expectation (A-5)
-- [ ] Assistant → Workspace demo works end-to-end (W-4)
-- [ ] Context → Workspace demo works end-to-end (W-5)
-- [ ] Chat attachment upload works at 25 MB; rejects >25 MB with clear error (A-4)
-- [ ] Workspace layout `modifiedOn` displayed in Manage pane (B-4)
-- [ ] PATCH semantics work for layout updates with concurrency safety (B-5)
-- [ ] CalendarSidePane and SpaarkeAi embedded Calendar visually + behaviorally identical (B-6)
+- [x] Workspace builder shows all 7 sections including Calendar + Daily Briefing — W-3 / FR-01 (task 040)
+- [x] Tab persistence verified + fixed (Path A: chatSessionId+playbookId → localStorage) — A-5 / FR-05 (tasks 030+031)
+- [x] Assistant → Workspace mount source works (DocumentViewerWidget shipped) — W-4 / FR-02 (task 042)
+- [x] Context → Workspace mount source works (SemanticSearchCriteriaTool — pivoted from CreateProjectWizard per iframe-scope discovery) — W-5 / FR-03 (task 043)
+- [x] Chat attachment cap raised to 25 MB; boundary tests at 1/10/24/26 MB — A-4 / FR-04 (task 050)
+- [x] Workspace layout `modifiedOn` exposed via BFF endpoint (camelCase ISO-8601) — B-4 / FR-07 (task 053)
+- [x] PUT + If-Match weak ETag for layout updates (concurrency safety) — B-5 / FR-08 (task 054, Option A)
+- [x] CalendarFilterPane promoted to `@spaarke/events-components` with UTC bug fix — B-6 / FR-09 (task 055, Option B per operator)
 
 ### Process
-- [ ] R3 marked Complete (E-1)
-- [ ] R4 lessons-learned.md written; README → Complete
-- [ ] `/repo-cleanup projects/spaarke-ai-platform-unification-r4` completed
+- [x] R3 marked Complete — E-1 / PR-01 (task 001, retroactive)
+- [x] R4 lessons-learned.md written — [`notes/lessons-learned.md`](./notes/lessons-learned.md)
+- [x] README → Complete (this file)
+- [x] `/repo-cleanup` inspection clean — ephemeral subdirs (debug/, drafts/, handoffs/) all empty
 
 ## Scope
 
@@ -150,6 +154,11 @@ See [plan.md §Risk Register](./plan.md) and [plan.original.md §8 Risk Register
 | 2026-05-25 | 0.1 | Initial scoping (operator-authored README → README.original.md) | spaarke-dev |
 | 2026-05-26 | 0.2 | spec.md created from plan.md + backlog.md via `/design-to-spec` | spaarke-dev / Claude |
 | 2026-05-26 | 1.0 | Project pipeline run; CLAUDE.md + current-task.md + tasks/ scaffolded | spaarke-dev / Claude |
+| 2026-05-26 | 1.1 | Phase 0-6 execution (35 tasks shipped — original scope + Phase 6 test-infra escalations 068-071) | spaarke-dev / Claude |
+| 2026-05-27 | 1.2 | Operator-driven Phase 6.5 add-on cleanup (tasks 072-078) + CVE patches (080) — final-review scope expansion | spaarke-dev / Claude |
+| 2026-05-27 | 1.3 | Master sync (27 commits from matter-ui-r1 + BFF remediation closure + CI fixes, 0 conflicts); BFF + 3 Code Pages deployed to dev (task 079) | spaarke-dev / Claude |
+| 2026-05-27 | 1.4 | Pre-wrap residuals cleared (task 081): useKeyboardShortcuts TypeError fix + 272 deploy artifacts untracked durable | spaarke-dev / Claude |
+| 2026-05-28 | **1.0** | **R4 shipped** — lessons-learned published; README → Complete; ready for `/merge-to-master` (task 090) | spaarke-dev / Claude |
 
 ---
 

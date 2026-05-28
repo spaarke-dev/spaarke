@@ -1,9 +1,10 @@
 # Project Plan: Spaarke AI Platform Unification R4
 
-> **Last Updated**: 2026-05-26
-> **Status**: Ready for Tasks
+> **Last Updated**: 2026-05-28
+> **Status**: ✅ **Complete** (shipped 2026-05-28 — see [`README.md`](README.md) and [`notes/lessons-learned.md`](notes/lessons-learned.md))
 > **Spec**: [spec.md](./spec.md)
 > **Authoritative source preserved**: [plan.original.md](./plan.original.md) (465-line operator-authored plan with full WBS, dependencies, risk register, acceptance criteria)
+> **Lessons applied**: [`notes/lessons-learned.md`](notes/lessons-learned.md) — captures parallel sub-agent dispatch pattern, verify-then-fix protocol, operator-as-judgment-gate decisions, two-wrapper framing, master-sync-before-deploys discipline, and 5 patterns recommended for future project adoption
 
 ---
 
