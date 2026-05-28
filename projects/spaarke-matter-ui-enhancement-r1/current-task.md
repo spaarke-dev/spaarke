@@ -13,11 +13,11 @@
 
 | Field | Value |
 |---|---|
-| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.55** packaged, awaiting user UAT |
-| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `ff6e8094` (v1.1.55); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.55 NOT yet merged |
-| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.55.zip` (213 KB) — user imports via `pac solution delete` then `pac solution import` |
-| **Pending user actions** | (1) UAT v1.1.55; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
-| **Next Action** | Awaiting user UAT feedback on v1.1.55. v1.1.55 addressed 4 UAT items: (1) SendEmailDialog maxWidth bumped 640→1280px (matches FilePreview); (2) email from row menu uses same sizing (preview-hide is a no-op when no preview is open); (3) BulkActionBar icon gap widened XS→M; (4) leading vertical hairline separator added between count text and first action icon (trailing divider removed). FilePreview promotion (Option A, 3-5h) still deferred to v1.1.56. |
+| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.56** packaged, awaiting user UAT |
+| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `82133964` (v1.1.56); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.56 NOT yet merged |
+| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.56.zip` (213 KB) — user imports via `pac solution delete` then `pac solution import` |
+| **Pending user actions** | (1) UAT v1.1.56; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
+| **Next Action** | Awaiting user UAT feedback on v1.1.56. v1.1.56 fixed the email modal sizing — diagnosed two root causes: (a) shared SendEmailDialog surface had `width: '90vw'` which capped width below maxWidth on 1366px laptops; (b) surface had no height constraint at all. Fixed via `width: '90vw'` → `'100%'` (matches FilePreview pattern) + new `height?` prop default 'auto' + flex-grow on form/message field so the Textarea fills tall surfaces. SemanticSearchControl passes height="85vh" maxWidth="1280px" — same footprint as FilePreview. FilePreview promotion (Option A, 3-5h) still deferred to v1.1.57. |
 | **Compaction handoff** | See [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) — full session state for resuming in a fresh context |
 
 ### Files Modified This Session
