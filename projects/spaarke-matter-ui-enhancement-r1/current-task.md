@@ -13,11 +13,11 @@
 
 | Field | Value |
 |---|---|
-| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.62** packaged, awaiting user UAT |
-| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `9d24ee9e` (v1.1.62); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.62 NOT yet merged |
-| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.62.zip` (207 KB) — user imports via `pac solution delete` then `pac solution import` |
-| **Pending user actions** | (1) UAT v1.1.62; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
-| **Next Action** | Awaiting user UAT feedback on v1.1.62. v1.1.62 is a pure cache-override version bump per the /pcf-deploy skill protocol (same code as v1.1.61 — wizard unification + Document column width 480). All 5 version-bump locations updated. ZIP contents verified via Expand-Archive: solution.xml `<Version>1.1.62</Version>`, ControlManifest.xml `version="1.1.62"`, bundle.js contains `v1.1.62 • Built 2026-05-28` footer. FilePreview promotion (Option A, 3-5h) still deferred. |
+| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.63** packaged, awaiting user UAT |
+| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `31375c01` (v1.1.63); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.63 NOT yet merged |
+| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.63.zip` (212 KB) — user imports via `pac solution delete` then `pac solution import` |
+| **Pending user actions** | (1) UAT v1.1.63; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
+| **Next Action** | Awaiting user UAT feedback on v1.1.63. v1.1.63 addresses 5 items: (1) Row menu always at right edge via `marginInlineStart: 'auto'` on menu cell (Fluent v9 DataGrid rows are flexbox not grid — verified by reading react-table source); (2) Preview stays open behind wizard for BOTH single-doc paths (removed `setHostPreviewDocId(null)`) — wizard renders modal-over-modal, returns user to preview at same docId; (3) Wizard sized to match FilePreview — added backward-compatible `maxWidth?`/`height?` props on WizardShell + DocumentEmailWizard; host passes 1280px/85vh; (4) Bulk Email loads SELECTED docs only — new `emailWizardItemsSelected` memo + `selectedIds.size > 0` gate; (5) 25 MB warning logic exists in wizard but `fileSizeBytes` is undefined (PCF SearchResult has no size field) — deferred to v1.1.64 with BFF redeploy to add `fileSize` to projection. Shared lib `dist/` rebuilt. FilePreview promotion (Option A, 3-5h) still deferred. |
 | **Compaction handoff** | See [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) — full session state for resuming in a fresh context |
 
 ### Files Modified This Session
