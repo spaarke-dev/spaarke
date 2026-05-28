@@ -13,11 +13,12 @@
 
 | Field | Value |
 |---|---|
-| **Wave** | All code work complete (28/34 tasks). Awaiting decision on Phase 6-8 (form XML + deploys + wrap-up — touch live SPAARKE DEV 1 environment). |
-| **Code phases** | Phase 0 ✅ Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 ✅ |
-| **Live phases** | Phase 6 🔲 (form XML edit + import) · Phase 7 🔲 (pcf-deploy x2 + bff-deploy + solution import + UAT) · Phase 8 🔲 (wrap-up) |
-| **Status** | 82% complete; awaiting user direction |
-| **Next Action** | User decision: (a) authorize main-session to run Phase 6 form XML edit + Phase 7 deploys on SPAARKE DEV 1, or (b) hand off to manual deployment workflow. PAC CLI + Azure CLI are both installed and authenticated. |
+| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.50** packaged, awaiting user UAT |
+| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `b921bc63` (v1.1.50); v1.1.45..v1.1.49 merged to master; v1.1.50 NOT yet merged |
+| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.50.zip` (213 KB) — user imports via `pac solution delete` then `pac solution import` |
+| **Pending user actions** | (1) UAT v1.1.50; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
+| **Next Action** | Awaiting user UAT feedback on v1.1.50. Next polish round will be v1.1.51 with the queued FilePreview promotion (Option A) + 4 smaller follow-ups documented in [handoff-2026-05-28-pre-compact.md](notes/handoffs/handoff-2026-05-28-pre-compact.md) |
+| **Compaction handoff** | See [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) — full session state for resuming in a fresh context |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
@@ -32,7 +33,7 @@
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-Pipeline completed Steps 1-4 + auto-started task 001 (✅ done). Task 001 produced the NFR-05 regression baseline (15 active chart defs). Key findings: ZERO Donut chart defs in production (FR-VH-01 has no regression risk to in-prod defs); 3 HIGH-risk defs (Matter KPI Scorecard, Matter Financial Metrics Scorecard, Matter Financial Metrics Stacked Bar) need careful Phase 2 regression smoke; spec.md drift recorded — actual schema is `sprk_entitylogicalname` (not `sprk_entityname`) and `sprk_drillthroughtarget` (not `sprk_drillthroughentity`). Next: task 002 (FULL rigor, substantial — package.json + new service + 2 PCF manifest updates + build verification).
+**Project core complete; in UAT polish loop on SemanticSearchControl PCF.** 31 of 34 tasks merged to master (v1.1.45..v1.1.49 ALL in master via merge commit `b451bbe1`; v1.1.50 pushed to origin but not yet merged). The session ran 5 polish rounds (v1.1.45 through v1.1.50) addressing iterative UAT feedback on the Documents PCF. Latest pending action is user UAT on v1.1.50 (ZIP at `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.50.zip`). v1.1.51 follow-ups are queued (most important: promote PCF FilePreviewDialog into shared `@spaarke/ui-components` so Document Viewer Code Page + Office Add-ins inherit the 1280px / 2-col / Prev-Next surface — multi-paragraph rationale in `FilePreviewDialog.tsx` lines 1-39). **Pre-compaction handoff: [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) is the source of truth for everything.**
 
 ---
 
