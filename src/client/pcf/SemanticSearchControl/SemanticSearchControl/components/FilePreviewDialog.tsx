@@ -2,12 +2,34 @@
  * FilePreviewDialog — Modal for document preview.
  *
  * Per FR-DOC-03 (task 044), the dialog uses a 2-column body layout
- * (640 px iframe · 320 px metadata pane) clamped to 960 px max-width.
+ * (left iframe · 320 px metadata pane) clamped to a max-width.
  * The metadata pane renders three sections top→bottom:
  *   1. AI summary  (sparkle icon + paragraph; rendered when `onFetchSummary`
  *      is provided — falls back to a friendly empty state otherwise)
  *   2. Tags        (single Fluent v9 `Tag` chip from `documentType`)
  *   3. Details     (Created by · Created · Size · Type)
+ *
+ * v1.1.46 (UAT polish round 2):
+ *   • Surface widened to 1280 px max-width with a fluid (`1fr 320px`)
+ *     iframe column so a US-Letter PDF + PDF viewer chrome fits without a
+ *     horizontal scrollbar at the iframe edge.
+ *   • Left iframe cell hides its visible vertical scrollbar (mouse-wheel /
+ *     keyboard / touch scroll still works) — the iframe content is itself
+ *     scrollable; the outer cell's chrome added a redundant gutter scrollbar
+ *     that UAT flagged as distracting.
+ *   • Right metadata pane uses `spacingVerticalXXL` between its three
+ *     sections so AI summary · Tags · Details are visually distinct
+ *     (round 1 used `spacingVerticalL` which read as one stacked block).
+ *   • Title-bar `X` close icon removed — the dialog already has a Close
+ *     button in the footer and the in-title-bar `X` was duplicative.
+ *     The 3-dot DocumentRowMenu in the upper-right corner is preserved.
+ *   • Footer adds Previous / Next navigation when the caller supplies a
+ *     `documents` + `currentIndex` + `onNavigate` triplet. ListView
+ *     computes the navigation set from `selectedIds` (selection wins) or
+ *     the full sorted+filtered results; the dialog displays "N of M" and
+ *     drives navigation via arrow buttons + keyboard (←/→). When the
+ *     triplet is omitted, the footer renders Close only (back-compat
+ *     used by ResultCard's per-card preview).
  *
  * v1.1.45 (UAT round 2):
  *   • The 2-column grid is now stable through both loading AND loaded states
@@ -54,8 +76,9 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import {
-  Dismiss24Regular,
   Sparkle20Filled,
+  ChevronLeft20Regular,
+  ChevronRight20Regular,
 } from '@fluentui/react-icons';
 // Deep-path import (not the barrel) — the barrel pulls in RichTextEditor →
 // `@lexical/react` ESM modules that don't resolve under React 16 (PCF target
@@ -124,15 +147,47 @@ export interface IFilePreviewDialogProps {
    * omitted, both are hidden.
    */
   onFindSimilar?: () => void;
+  /**
+   * Navigation set total (v1.1.46). When provided alongside `currentIndex`
+   * + `onNavigate`, the footer renders Prev / Next + "N of M". When
+   * omitted, the footer renders Close only (back-compat — ResultCard's
+   * per-card preview uses this code path).
+   *
+   * The dialog itself never inspects the documents — only `navigationTotal`
+   * matters for the position indicator + disabled-state logic. The parent
+   * (ListView in v1.1.46) owns the SearchResult[] navigation set and is
+   * the one that needs to recompute it when `selectedIds` changes.
+   */
+  navigationTotal?: number;
+  /**
+   * 0-based position of the currently-shown document inside the parent's
+   * navigation set. Drives the "N of M" position indicator + Prev/Next
+   * disabled state. Required when `navigationTotal` is supplied; ignored
+   * otherwise.
+   */
+  currentIndex?: number;
+  /**
+   * Navigate to a different document inside the parent's navigation set.
+   * Receives the 0-based target index. The parent is responsible for
+   * swapping the dialog's content (documentName / documentId / fetchPreviewUrl /
+   * etc.) to reflect the new active document. The dialog resets its
+   * iframe-load state automatically when `documentId` changes.
+   */
+  onNavigate?: (nextIndex: number) => void;
 }
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const THUMBNAIL_COLUMN_WIDTH = '640px';
+// v1.1.46 — surface widened to 1280 px so a US-Letter PDF (~816 px content
+// width) + PDF viewer chrome fits in the left iframe cell without a
+// horizontal scrollbar. The metadata pane is unchanged at 320 px; the
+// iframe column is now fluid (`1fr`) rather than a hard-coded width, so
+// the layout collapses gracefully on narrower viewports (Fluent v9's
+// DialogSurface clamps to `width: 100%` below the max-width).
 const METADATA_COLUMN_WIDTH = '320px';
-const DIALOG_MAX_WIDTH = '960px';
+const DIALOG_MAX_WIDTH = '1280px';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -140,12 +195,12 @@ const DIALOG_MAX_WIDTH = '960px';
 
 const useStyles = makeStyles({
   surface: {
-    // v1.1.45 — pin the surface to exactly DIALOG_MAX_WIDTH so the 2-col
-    // grid below always has the room it needs. Earlier `width: '100%'`
-    // allowed the surface to shrink inside narrow viewports, which in
-    // turn caused the grid to collapse (the user-reported flicker where
-    // the metadata pane briefly disappeared on iframe load).
-    width: DIALOG_MAX_WIDTH,
+    // v1.1.46 — surface is no longer pinned to an exact width: it uses
+    // `width: 100%` + `maxWidth: 1280px` so it clamps gracefully on smaller
+    // viewports (laptops below 1280 px wide) without horizontal overflow.
+    // The 2-col grid below uses `1fr 320px` so the iframe cell always
+    // consumes the remaining horizontal space regardless of surface width.
+    width: '100%',
     maxWidth: DIALOG_MAX_WIDTH,
     height: '85vh',
     maxHeight: '85vh',
@@ -181,7 +236,12 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
   },
-  // 2-column body grid: 640 px thumbnail | 320 px metadata pane.
+  // 2-column body grid: fluid iframe column | 320 px metadata pane.
+  // v1.1.46 — iframe column is now `1fr` so it expands to fill the wider
+  // 1280 px surface (previously a hard 640 px, which left a wide gap at
+  // the right edge once the surface widened). The metadata column stays
+  // at 320 px — its intrinsic content (AI summary text, Tag chip, key/value
+  // grid) doesn't benefit from extra width.
   // v1.1.45 — rendered as a plain <div> (no DialogBody wrapper) so the
   // grid's column tracks never collapse, regardless of which loading state
   // the iframe is in. DialogBody's own padding/overflow rules previously
@@ -195,8 +255,8 @@ const useStyles = makeStyles({
     // Explicit `auto-flow: column` + `width: 100%` + `gridTemplateRows: 1fr`
     // belt-and-braces the layout: even if a child accidentally stretches its
     // inline-size to the surface width, the grid still allocates exactly two
-    // tracks of THUMBNAIL_COLUMN_WIDTH | METADATA_COLUMN_WIDTH respectively.
-    gridTemplateColumns: `${THUMBNAIL_COLUMN_WIDTH} ${METADATA_COLUMN_WIDTH}`,
+    // tracks of `1fr | METADATA_COLUMN_WIDTH` respectively.
+    gridTemplateColumns: `1fr ${METADATA_COLUMN_WIDTH}`,
     gridTemplateRows: '1fr',
     gridAutoFlow: 'column' as const,
     width: '100%',
@@ -205,11 +265,26 @@ const useStyles = makeStyles({
   // Iframe container — fills the left column.
   // `minWidth: 0` is the Grid-collapse fix: without it, a child iframe's
   // intrinsic size can force the cell wider than its track allocation.
+  //
+  // v1.1.46 — visible vertical scrollbar HIDDEN. The iframe content
+  // (PDF viewer, Word web view, etc.) renders its OWN scrollbar inside
+  // the iframe, so the outer cell's scrollbar was redundant chrome that
+  // UAT flagged. Scroll BEHAVIOR is preserved — mouse wheel, keyboard
+  // (arrow + Page keys), touch swipe all still scroll the cell if the
+  // iframe ever overflows it. CSS pattern: `scrollbarWidth: 'none'`
+  // (Firefox standard) + `msOverflowStyle: 'none'` (legacy IE/Edge) +
+  // `::-webkit-scrollbar { display: none }` (Chromium/Safari/Edge).
   thumbnailCell: {
     position: 'relative' as const,
     minWidth: 0,
     height: '100%',
-    ...shorthands.overflow('hidden'),
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    scrollbarWidth: 'none',
+    msOverflowStyle: 'none',
+    '::-webkit-scrollbar': {
+      display: 'none',
+    },
     borderRightWidth: tokens.strokeWidthThin,
     borderRightStyle: 'solid',
     borderRightColor: tokens.colorNeutralStroke2,
@@ -235,10 +310,14 @@ const useStyles = makeStyles({
   },
   // Metadata pane — scrolls if content overflows. `minWidth: 0` again to
   // prevent text content from forcing the cell wider than 320 px.
+  // v1.1.46 — `gap` bumped from `spacingVerticalL` to `spacingVerticalXXL`
+  // so AI summary · Tags · Details are visually distinct sections. UAT
+  // round 1 felt the three sections "ran together"; the larger inter-
+  // section breathing room fixes that without crowding the dialog.
   metadataPane: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
+    gap: tokens.spacingVerticalXXL,
     paddingTop: tokens.spacingVerticalL,
     paddingBottom: tokens.spacingVerticalL,
     paddingLeft: tokens.spacingHorizontalL,
@@ -295,11 +374,16 @@ const useStyles = makeStyles({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  // Footer action bar
+  // Footer action bar.
+  // v1.1.46 — uses `space-between` so the optional Prev/Next nav group
+  // sits at the leading edge (left) and the Close button stays at the
+  // trailing edge (right). The Close-only path uses the same container
+  // (Prev/Next group is conditionally rendered) so the footer chrome
+  // is identical regardless of whether navigation is enabled.
   footer: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
@@ -309,6 +393,21 @@ const useStyles = makeStyles({
     borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
+  },
+  // Leading-edge nav cluster: [Prev] [N of M] [Next]. Centered counter
+  // uses neutral foreground so it reads as auxiliary metadata, not an
+  // interactive control.
+  footerNav: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  footerCounter: {
+    color: tokens.colorNeutralForeground3,
+    // Minimum width keeps the counter from flickering when the index
+    // changes single-digit → double-digit (e.g., "9 of 12" → "10 of 12").
+    minWidth: '64px',
+    textAlign: 'center' as const,
   },
 });
 
@@ -372,6 +471,9 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   onToggleWorkspace,
   isInWorkspace,
   onFindSimilar,
+  navigationTotal,
+  currentIndex,
+  onNavigate,
 }) => {
   const styles = useStyles();
 
@@ -385,6 +487,13 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   const [summaryError, setSummaryError] = React.useState(false);
 
   // Fetch preview URL when dialog opens — pipeline unchanged from task 040.
+  // v1.1.46 — when the parent navigates (Prev/Next) and swaps `documentId` +
+  // `fetchPreviewUrl`, this effect re-fires. We also reset `previewUrl` and
+  // `summary` to null at the top so the old iframe + old summary text don't
+  // briefly flash while the new ones are fetching. Adding `documentId` to
+  // deps is belt-and-braces: parent SHOULD also pass a fresh fetchPreviewUrl
+  // closure on navigation, but if any caller forgets, the documentId change
+  // alone still triggers the refresh.
   React.useEffect(() => {
     if (!open) {
       setPreviewUrl(null);
@@ -398,6 +507,7 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
     let cancelled = false;
     setLoading(true);
     setError(false);
+    setPreviewUrl(null);
 
     void (async () => {
       const url = await fetchPreviewUrl();
@@ -413,13 +523,16 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [open, fetchPreviewUrl]);
+  }, [open, documentId, fetchPreviewUrl]);
 
   // Fetch AI summary when dialog opens (only if caller provided a fetcher).
+  // v1.1.46 — also re-fires when `documentId` changes so Prev/Next swaps
+  // the summary text alongside the preview iframe.
   React.useEffect(() => {
     if (!open || !onFetchSummary) return;
 
     let cancelled = false;
+    setSummary(null);
     setSummaryLoading(true);
     setSummaryError(false);
 
@@ -438,7 +551,7 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [open, onFetchSummary]);
+  }, [open, documentId, onFetchSummary]);
 
   const handleRetry = React.useCallback(() => {
     setLoading(true);
@@ -454,6 +567,82 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
       setLoading(false);
     })();
   }, [fetchPreviewUrl]);
+
+  // -------------------------------------------------------------------------
+  // Prev/Next navigation (v1.1.46)
+  //
+  // Whether the footer renders Prev/Next is gated on `navigationTotal > 1` —
+  // a single-doc navigation set is meaningless (no Prev, no Next). When the
+  // caller omits `navigationTotal` entirely, the footer renders Close only,
+  // matching the pre-v1.1.46 behavior used by ResultCard's per-card dialog.
+  // -------------------------------------------------------------------------
+
+  const navigationEnabled =
+    typeof navigationTotal === 'number' &&
+    navigationTotal > 1 &&
+    typeof currentIndex === 'number' &&
+    typeof onNavigate === 'function';
+
+  const prevDisabled = !navigationEnabled || currentIndex === 0;
+  const nextDisabled =
+    !navigationEnabled ||
+    currentIndex === undefined ||
+    navigationTotal === undefined ||
+    currentIndex >= navigationTotal - 1;
+
+  const handlePrev = React.useCallback(() => {
+    if (!navigationEnabled || currentIndex === undefined || currentIndex <= 0) return;
+    onNavigate?.(currentIndex - 1);
+  }, [navigationEnabled, currentIndex, onNavigate]);
+
+  const handleNext = React.useCallback(() => {
+    if (
+      !navigationEnabled ||
+      currentIndex === undefined ||
+      navigationTotal === undefined ||
+      currentIndex >= navigationTotal - 1
+    ) {
+      return;
+    }
+    onNavigate?.(currentIndex + 1);
+  }, [navigationEnabled, currentIndex, navigationTotal, onNavigate]);
+
+  // Keyboard shortcuts — ←/→ navigate when nav is enabled and focus is NOT
+  // in a text input / textarea / contenteditable surface (avoids hijacking
+  // text-edit caret navigation inside the metadata pane or iframe overlays).
+  // Listener is attached at the document level so it works whether focus is
+  // on the dialog chrome OR an inner control.
+  React.useEffect(() => {
+    if (!open || !navigationEnabled) return;
+
+    const handler = (ev: KeyboardEvent): void => {
+      if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+
+      const target = ev.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          target.isContentEditable
+        ) {
+          return;
+        }
+      }
+
+      if (ev.key === 'ArrowLeft') {
+        handlePrev();
+      } else {
+        handleNext();
+      }
+    };
+
+    document.addEventListener('keydown', handler);
+    return () => {
+      document.removeEventListener('keydown', handler);
+    };
+  }, [open, navigationEnabled, handlePrev, handleNext]);
 
   // -------------------------------------------------------------------------
   // 3-dot menu dispatch — task 040 wired the menu; task 044 enables actions
@@ -704,7 +893,13 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
       }}
     >
       <DialogSurface className={styles.surface}>
-        {/* Title bar — 3-dot menu replaces the inline action Toolbar (task 040) */}
+        {/* Title bar — 3-dot menu replaces the inline action Toolbar (task 040).
+            v1.1.46: the title-bar `X` close icon is removed. The Close button
+            in the footer is the single close affordance for this dialog —
+            keeping both was duplicative chrome (UAT round 2). The 3-dot
+            DocumentRowMenu remains in place. The Esc-to-close DialogTitle
+            default + the explicit onOpenChange handler on the Dialog still
+            keep keyboard close working. */}
         <div className={styles.titleBar}>
           <DialogTitle action={null} className={styles.titleText}>
             {documentName || 'Document Preview'}
@@ -720,14 +915,6 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
               onAction={handleRowAction}
               disabledActions={dialogDisabledActions}
             />
-            <Tooltip content="Close" relationship="label">
-              <Button
-                appearance="subtle"
-                icon={<Dismiss24Regular />}
-                aria-label="Close"
-                onClick={onClose}
-              />
-            </Tooltip>
           </div>
         </div>
 
@@ -766,11 +953,43 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
           </div>
         </div>
 
-        {/* Footer: single Close button (v1.1.45).
+        {/* Footer (v1.1.46): leading-edge Prev/Next nav cluster (when the
+            parent supplies navigationTotal+currentIndex+onNavigate),
+            trailing-edge Close. When nav is NOT enabled, the leading edge
+            renders a zero-width spacer so the footer chrome (border-top,
+            padding, justify-content: space-between) stays consistent and
+            the Close button stays right-aligned.
             "Find similar" and "Open file" remain reachable via the 3-dot
             menu in the title bar — the redundant footer affordances were
-            removed per UAT feedback. */}
+            removed per UAT round 1 feedback. */}
         <DialogActions className={styles.footer}>
+          {navigationEnabled ? (
+            <div className={styles.footerNav} role="group" aria-label="Document navigation">
+              <Tooltip content="Previous document" relationship="label">
+                <Button
+                  appearance="subtle"
+                  icon={<ChevronLeft20Regular />}
+                  aria-label="Previous document"
+                  disabled={prevDisabled}
+                  onClick={handlePrev}
+                />
+              </Tooltip>
+              <Text size={200} className={styles.footerCounter} aria-live="polite">
+                {(currentIndex ?? 0) + 1} of {navigationTotal}
+              </Text>
+              <Tooltip content="Next document" relationship="label">
+                <Button
+                  appearance="subtle"
+                  icon={<ChevronRight20Regular />}
+                  aria-label="Next document"
+                  disabled={nextDisabled}
+                  onClick={handleNext}
+                />
+              </Tooltip>
+            </div>
+          ) : (
+            <span aria-hidden="true" />
+          )}
           <Button appearance="primary" onClick={onClose}>
             Close
           </Button>

@@ -411,14 +411,62 @@ export const ListView: React.FC<IListViewProps> = ({
 }) => {
   const styles = useStyles();
 
-  // Preview dialog state (mirrors ResultCard's per-row dialog so we don't
-  // touch FilePreviewDialog.tsx for the no-preview case).
-  const [previewTarget, setPreviewTarget] = React.useState<SearchResult | null>(null);
+  // Preview dialog state. We store the target's documentId (not the full
+  // SearchResult) so the active doc tracks any in-place results updates
+  // (e.g., docType override applied while the dialog is open).
+  const [previewDocId, setPreviewDocId] = React.useState<string | null>(null);
 
   // Sort the results in render (cheap — caller already filtered).
   const sortedResults = React.useMemo(
     () => sortResults(results, sortColumn, sortDirection, pinnedIds),
     [results, sortColumn, sortDirection, pinnedIds]
+  );
+
+  // ── Preview navigation set (v1.1.46) ───────────────────────────────────
+  // When ≥1 row is selected, the navigation set = the selected docs in the
+  // current sort order. Otherwise it's the full sorted result set. This
+  // matches the user's mental model: "I selected these 5 docs, Next/Prev
+  // walks through the 5" vs "no selection, Next/Prev walks through all".
+  //
+  // We filter sortedResults (not selectedResults directly) so the nav set
+  // honors the current sort/pin order. The fallback to sortedResults is
+  // unselected → "browse all" mode.
+  const previewNavigationSet = React.useMemo<SearchResult[]>(() => {
+    if (selectedIds.size > 0) {
+      return sortedResults.filter(r => selectedIds.has(r.documentId));
+    }
+    return sortedResults;
+  }, [selectedIds, sortedResults]);
+
+  // Resolve the currently-shown document from the navigation set. If the
+  // active doc was filtered out (e.g., user toggled selection off after
+  // opening), fall back to looking it up in the full sortedResults — the
+  // dialog stays open on the same doc but loses Prev/Next nav until the
+  // user re-selects it (graceful, no jarring re-open on a different doc).
+  const previewTarget = React.useMemo<SearchResult | null>(() => {
+    if (!previewDocId) return null;
+    return (
+      previewNavigationSet.find(r => r.documentId === previewDocId) ??
+      sortedResults.find(r => r.documentId === previewDocId) ??
+      null
+    );
+  }, [previewDocId, previewNavigationSet, sortedResults]);
+
+  const previewCurrentIndex = React.useMemo<number>(() => {
+    if (!previewDocId) return -1;
+    return previewNavigationSet.findIndex(r => r.documentId === previewDocId);
+  }, [previewDocId, previewNavigationSet]);
+
+  // Navigate the preview dialog. The dialog passes the next 0-based index;
+  // we resolve it to a documentId via the nav set and swap state. The
+  // dialog's internal effects (preview-url fetch + summary fetch) refire
+  // when `documentId` changes.
+  const handlePreviewNavigate = React.useCallback(
+    (nextIndex: number) => {
+      if (nextIndex < 0 || nextIndex >= previewNavigationSet.length) return;
+      setPreviewDocId(previewNavigationSet[nextIndex].documentId);
+    },
+    [previewNavigationSet]
   );
 
   // ── Header click — toggle direction or switch column ──────────────────
@@ -479,13 +527,13 @@ export const ListView: React.FC<IListViewProps> = ({
     (result: SearchResult) => (action: DocumentRowAction) => {
       switch (action) {
         case 'preview':
-          setPreviewTarget(result);
+          setPreviewDocId(result.documentId);
           return;
         case 'aiSummary':
           // AI summary in the list view = open the preview dialog where the
           // summary section is integrated. Mirrors the design of ResultCard's
           // sparkle popover but without a separate inline popover surface.
-          setPreviewTarget(result);
+          setPreviewDocId(result.documentId);
           return;
         case 'openFile':
           onOpenFile(result, 'desktop');
@@ -606,7 +654,7 @@ export const ListView: React.FC<IListViewProps> = ({
                 className={styles.nameLink}
                 onClick={ev => {
                   ev.stopPropagation();
-                  setPreviewTarget(result);
+                  setPreviewDocId(result.documentId);
                 }}
               >
                 {result.name}
@@ -760,7 +808,7 @@ export const ListView: React.FC<IListViewProps> = ({
       // Don't fire on buttons, checkboxes, links, or the menu trigger.
       const target = ev.target as HTMLElement;
       if (target.closest('button') || target.closest('input') || target.closest('a')) return;
-      setPreviewTarget(result);
+      setPreviewDocId(result.documentId);
     },
     []
   );
@@ -831,7 +879,15 @@ export const ListView: React.FC<IListViewProps> = ({
       </div>
 
       {/* Preview dialog — instantiated once at the list level; opens for whichever
-          row triggered it via menu or row click. */}
+          row triggered it via menu or row click.
+          v1.1.46 — receives navigationTotal/currentIndex/onNavigate so the
+          footer can render Prev/Next when the navigation set has >1 item.
+          The navigation set is `previewNavigationSet` (selected docs when
+          ≥1 selected; full sortedResults otherwise). All callbacks close
+          over `previewTarget` so they always act on the CURRENT active
+          doc — when the user clicks Next, previewTarget updates via the
+          previewDocId state change, and all closures rebind on the next
+          render. */}
       {previewTarget && (
         <FilePreviewDialog
           open={!!previewTarget}
@@ -840,7 +896,7 @@ export const ListView: React.FC<IListViewProps> = ({
           documentType={previewTarget.documentType}
           createdAt={previewTarget.createdAt}
           createdBy={previewTarget.createdBy}
-          onClose={() => setPreviewTarget(null)}
+          onClose={() => setPreviewDocId(null)}
           fetchPreviewUrl={() => onPreview(previewTarget)}
           onFetchSummary={() => onSummary(previewTarget)}
           onOpenFile={mode => onOpenFile(previewTarget, mode)}
@@ -850,6 +906,9 @@ export const ListView: React.FC<IListViewProps> = ({
           onToggleWorkspace={() => onToggleWorkspace(previewTarget)}
           isInWorkspace={isInWorkspace(previewTarget)}
           onFindSimilar={() => onFindSimilar(previewTarget)}
+          navigationTotal={previewNavigationSet.length}
+          currentIndex={previewCurrentIndex >= 0 ? previewCurrentIndex : undefined}
+          onNavigate={handlePreviewNavigate}
         />
       )}
     </>
