@@ -1,20 +1,27 @@
 ---
-source: https://learn.microsoft.com/en-us/power-apps/maker/canvas-apps/controls/modern-controls/modern-theming
+source:
+  - https://learn.microsoft.com/en-us/power-apps/maker/canvas-apps/controls/modern-controls/overview-modern-controls
+  - https://learn.microsoft.com/en-us/power-apps/maker/canvas-apps/controls/modern-controls/modern-theming
 fetched: 2026-05-28
-upstream_commit: 8391e6edc1f4310e685c41192d036ac73b09ffcb
+upstream_commits:
+  overview: 997adebe81eda0f80a30b493d9ae52a687479cbe
+  theming:  8391e6edc1f4310e685c41192d036ac73b09ffcb
 last_updated_upstream: 2026-01-21
-summary: Canvas Apps modern themes — 16-slot brand ramp from seed color, HueTorsion + Vibrancy, ColorOverrides, YAML format, App.Theme Power Fx binding.
+summary: Canvas Apps modern controls + modern themes — opt-in toggle, control catalog, 16-slot brand ramp from seed color, HueTorsion + Vibrancy, ColorOverrides, YAML format, App.Theme Power Fx binding.
 loadWhen: designing a Spaarke brand theme that must work cross-surface OR understanding how Canvas Apps generate themes from a single seed color (relevant pattern for PCFs that need to generate their own brand variant matching maker intent).
 ---
 
-# Use modern themes in canvas apps
+# Canvas Apps — Modern Controls and Themes
 
-Modern themes are **preestablished style sets** based on Microsoft's Fluent design language that modify color, typography, borders, and shadows.
+Canvas apps support **modern controls and theming based on the [Microsoft Fluent 2 design system](https://fluent2.microsoft.design)**. Modern controls offer improved accessibility, performance, and usability compared to classic controls. The accompanying theming system lets makers customize the app's appearance from a central location.
 
-## Prerequisites
+## Enable modern controls and themes
 
-1. Open or create an app.
-2. **Settings** → **Updates** → **New** → **Modern controls and themes** → **On**
+With your canvas app open for editing:
+
+1. On the command bar: **Settings** → **Updates**
+2. **New** tab → turn on **Modern controls and themes**
+3. The app refreshes — modern controls join existing categories; **Classic** + **Classic icons** become additional categories for legacy.
 
 > When modern controls + themes are enabled, classic themes are unavailable unless you toggle **Retired** → **Keep classic themes** → **On**.
 
@@ -101,10 +108,6 @@ Button.Fill = App.Theme.Colors.Primary
 - **Minimal overrides** — let `BasePaletteColor` + `HueTorsion` + `Vibrancy` do the work; override only what must differ.
 - **Test accessibility** — WCAG 2.1 AA minimum on both desktop + mobile.
 
-## Spaarke implications
+---
 
-| Concern | Action |
-|---|---|
-| **Brand consistency cross-surface** | If Spaarke has a brand palette, the same `BasePaletteColor` should feed the Canvas YAML AND the Fluent v9 `createLightTheme(brandVariants)` factory in `Spaarke.UI.Components`. The 16-slot Canvas ramp ≠ Fluent v9 `BrandVariants` (16 slots vs. 16 brand variants) but the seed color is shared — produce both from one source of truth. |
-| **`tinycolor2` brand-variant generation pattern** (per Birkelbach) | Canvas does this for makers automatically; Spaarke PCFs replicate the same generation when authoring custom themes. See [`community/birkelbach-standard-custom-theming.md`](./community/birkelbach-standard-custom-theming.md). |
-| **Font choice** | Match the maker's Canvas theme `Font` value if Spaarke ships custom CSS that overrides fonts — otherwise the Spaarke control looks "off" inside a maker's themed Canvas app. Default: leave font to inherit. |
+> Spaarke-specific implications (brand-palette seeding cross-surface, `tinycolor2` generation, font-inherit default) live in [`../../../.claude/patterns/ui/fluent-v9-host-visual-fit.md`](../../../.claude/patterns/ui/fluent-v9-host-visual-fit.md).

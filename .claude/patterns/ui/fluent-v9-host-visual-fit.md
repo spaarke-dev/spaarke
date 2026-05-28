@@ -10,8 +10,7 @@ Any UI work that needs to look "native" inside the host (MDA, Canvas, Code Page,
 ## Read These Files
 
 1. [`../../../knowledge/fluent-ui-v9/docs/host-mda-modern-look.md`](../../../knowledge/fluent-ui-v9/docs/host-mda-modern-look.md) — the visual standard MDA UI must match
-2. [`../../../knowledge/fluent-ui-v9/docs/host-canvas-modern-theming.md`](../../../knowledge/fluent-ui-v9/docs/host-canvas-modern-theming.md) — Canvas Apps maker-side theming
-3. [`../../../knowledge/fluent-ui-v9/docs/host-code-pages-styling.md`](../../../knowledge/fluent-ui-v9/docs/host-code-pages-styling.md) — Spaarke Code Page convention (no auto-inheritance)
+2. [`../../../knowledge/fluent-ui-v9/docs/host-canvas-modern-theming.md`](../../../knowledge/fluent-ui-v9/docs/host-canvas-modern-theming.md) — Canvas Apps maker-side theming (controls + themes)
 
 ## Constraints
 
@@ -44,6 +43,30 @@ These apply universally — PCF, Code Page, anything rendering inside MDA must l
 - **Command bar**: rounded corners, elevation, consistent spacing (Microsoft 365 style)
 - **Icons**: SVG only (PNG sitemap icons are ignored)
 - **Density**: match field section vertical rhythm — avoid custom padding/margin overrides that drift from `tokens.spacingVertical*`
+
+## Code Page setup (Spaarke convention)
+
+Code Pages don't get the PCF context — `FluentProvider` MUST be mounted explicitly at the SPA root:
+
+```tsx
+// src/client/code-pages/{PageName}/src/main.tsx
+import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
+import { createRoot } from 'react-dom/client';
+
+const isDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
+// Browser-preference detection only matters outside MDA. MDA doesn't currently
+// support dark mode → Code Pages rendering inside MDA should default to webLightTheme.
+
+createRoot(document.getElementById('root')!).render(
+  <FluentProvider theme={isDarkMode ? webDarkTheme : webLightTheme}>
+    <App />
+  </FluentProvider>
+);
+```
+
+If a Spaarke brand theme exists in `@spaarke/ui-components`, substitute it for `webLightTheme`/`webDarkTheme` above.
+
+> Note: Power Apps **custom pages** (canvas-style Power Fx pages embedded in MDA) have the same "no auto-theme" constraint, but those are maker-built — not our concern. The two concepts (Spaarke Code Pages vs Power Apps custom pages) are distinct despite shared limitation.
 
 ## Decision Tree — picking the theme source
 

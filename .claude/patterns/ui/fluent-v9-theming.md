@@ -20,13 +20,7 @@ Choosing between platform-provided theme vs custom theme; designing a Spaarke br
 
 ## Decision Table
 
-| Surface | Theme source | Fallback |
-|---|---|---|
-| PCF (Canvas or MDA, virtual or non-virtual) | `context.fluentDesignLanguage?.tokenTheme` | `webLightTheme` if undefined (older MDA) |
-| Code Page | `webLightTheme` / `webDarkTheme` via Spaarke shared provider | n/a — Code Pages have no platform theme |
-| Office Add-in | Office host theme bridge → mapped to `webLightTheme` / `webDarkTheme` | `webLightTheme` |
-| External SPA | Spaarke brand theme (custom `createLightTheme(brandRamp)`) | n/a |
-| MCP App widget | `useThemeColors` host-bridge resolution | see `knowledge/mcp-apps/trey-research/` reference |
+→ For the full surface-by-surface theme-source matrix, see [`fluent-v9-host-visual-fit.md`](./fluent-v9-host-visual-fit.md). That is the single source of truth; this pattern covers theme construction (tokens, brand ramps, custom themes) — `host-visual-fit.md` covers WHICH theme each surface should consume.
 
 ## Key Rules
 
