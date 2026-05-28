@@ -13,11 +13,11 @@
 
 | Field | Value |
 |---|---|
-| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.54** packaged, awaiting user UAT |
-| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `c9faeaec` (v1.1.54); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.54 NOT yet merged |
-| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.54.zip` (213 KB) — user imports via `pac solution delete` then `pac solution import` |
-| **Pending user actions** | (1) UAT v1.1.54; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
-| **Next Action** | Awaiting user UAT feedback on v1.1.54. v1.1.54 addressed 6 UAT items: (1) Card top-LEFT % pill removed; (2) 'associated' shows 100% in green chip (not blank); (3) pill row anchored to bottom of info area via flex 1 + marginTop auto; (4) grid mirrors 100% green chip; (5) **email preview-hide pattern** — close preview when email opens, re-open after (single-modal UX, replaces failed width-only fixes from v1.1.52/53); (6) menu standardization across row/card/preview — hide AI Summary + Toggle workspace + Rename; show Preview/Open File/Find Similar/Download/Copy link/Email/Open Record/Pin to top/Delete. AI sparkle column + card overlay removed. FilePreview promotion (Option A, 3-5h) still deferred to v1.1.55. |
+| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.55** packaged, awaiting user UAT |
+| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `ff6e8094` (v1.1.55); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.55 NOT yet merged |
+| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.55.zip` (213 KB) — user imports via `pac solution delete` then `pac solution import` |
+| **Pending user actions** | (1) UAT v1.1.55; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
+| **Next Action** | Awaiting user UAT feedback on v1.1.55. v1.1.55 addressed 4 UAT items: (1) SendEmailDialog maxWidth bumped 640→1280px (matches FilePreview); (2) email from row menu uses same sizing (preview-hide is a no-op when no preview is open); (3) BulkActionBar icon gap widened XS→M; (4) leading vertical hairline separator added between count text and first action icon (trailing divider removed). FilePreview promotion (Option A, 3-5h) still deferred to v1.1.56. |
 | **Compaction handoff** | See [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) — full session state for resuming in a fresh context |
 
 ### Files Modified This Session
@@ -33,7 +33,7 @@
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-**Project core complete; in UAT polish loop on SemanticSearchControl PCF.** 31 of 34 tasks merged to master (v1.1.45..v1.1.49 ALL in master via merge commit `b451bbe1`; v1.1.50..v1.1.54 pushed to origin but not yet merged). The session ran 9 polish rounds (v1.1.45 through v1.1.54) addressing iterative UAT feedback. Latest pending action: user UAT on v1.1.54 (ZIP at `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.54.zip`). v1.1.54 highlights: (a) Card top-% pill removed (only shows alongside Relationship at bottom), (b) 'associated' → "100%" in green chip across card+grid, (c) pill row bottom-anchored via flex 1 + marginTop auto, (d) **email preview-hide pattern replaces width-only fixes** — preview closes when email opens, re-opens after (eliminates nested Dialog backdrop issues), (e) menu standardization — both row+card+preview menus show the user's preferred 9 actions and hide AI Summary/Toggle workspace/Rename. Card sparkle + grid AI column also removed. FilePreview promotion (Option A, 3-5 hours) still deferred to v1.1.55. **Pre-compaction handoff: [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) is the historical source of truth.**
+**Project core complete; in UAT polish loop on SemanticSearchControl PCF.** 31 of 34 tasks merged to master (v1.1.45..v1.1.49 ALL in master via merge commit `b451bbe1`; v1.1.50..v1.1.55 pushed to origin but not yet merged). The session ran 10 polish rounds (v1.1.45 through v1.1.55) addressing iterative UAT feedback. Latest pending action: user UAT on v1.1.55 (ZIP at `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.55.zip`). v1.1.55 highlights: (a) email modal at 1280px (FilePreview-sized) so users have more room to compose, (b) consistent sizing whether email is invoked from preview or row menu, (c) bulk action bar icons spaced more comfortably (gap XS→M), (d) leading hairline separator between "N selected" and the action icons. FilePreview promotion (Option A, 3-5 hours) still deferred to v1.1.56. **Pre-compaction handoff: [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) is the historical source of truth.**
 
 ---
 
