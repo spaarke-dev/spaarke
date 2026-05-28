@@ -49,10 +49,15 @@ const useStyles = makeStyles({
     overflowY: 'auto',
     padding: tokens.spacingHorizontalM,
   },
+  // v1.1.47 — Card grid (replaces vertical stack to match prototype).
+  // `auto-fill` lets the grid pack as many ~200 px columns as the container
+  // width permits; min width keeps cards from squashing on narrow surfaces.
+  // Compact-mode form-section hosts naturally end up at 1-2 columns, full-
+  // page hosts at 5-6 — matches the prototype reference.
   resultsList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+    gap: tokens.spacingHorizontalM,
   },
   sentinel: {
     height: '1px',

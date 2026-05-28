@@ -210,6 +210,19 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   void showFilters;
   const compactMode = context.parameters.compactMode?.raw ?? false;
   const placeholder = context.parameters.placeholder?.raw ?? 'Search documents...';
+
+  // v1.1.47 — Host-level view-mode config.
+  // - `showViewToggle` (TwoOptions, default true): when false, the CommandBar
+  //    hides the list/card tab group AND we lock `view` to `defaultView`
+  //    (ignoring the per-(user, matter) localStorage pref so the lock is
+  //    actually enforced rather than just visually hidden).
+  // - `defaultView` (Enum 'list'|'card', default 'list'): initial view when
+  //    no localStorage pref exists, AND the locked view when the toggle is
+  //    hidden.
+  // Defaults preserve v1.1.46 behavior (toggle visible, list-first initial).
+  const showViewToggle = context.parameters.showViewToggle?.raw ?? true;
+  const rawDefaultView = (context.parameters as unknown as { defaultView?: { raw?: string | null } }).defaultView?.raw;
+  const defaultView: 'list' | 'card' = rawDefaultView === 'card' ? 'card' : 'list';
   // BFF API base URL — resolved by auth useEffect below, stored in state
   const apiBaseUrl = resolvedApiBaseUrl;
 
@@ -315,14 +328,36 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     pageEntityId
   );
 
+  // v1.1.47 — Effective view: when the host hides the view-toggle group via
+  // `showViewToggle === false`, lock the view to `defaultView` (ignore the
+  // per-(user, matter) localStorage pref). Otherwise, use the persisted pref
+  // as-is — the hook already falls back to its internal default when storage
+  // is empty, but we override the hook's default with the manifest default
+  // when the user has no persisted pref yet (initial mount path).
+  //
+  // We detect "no persisted pref" by comparing the hook's view to its own
+  // internal default ('list'). When that matches AND the host has chosen
+  // `defaultView='card'`, we honor the host preference. This keeps the hook
+  // signature stable (back-compat for the unchanged FR-DOC-04 contract).
+  const HOOK_DEFAULT_VIEW: 'list' | 'card' = 'list';
+  const effectiveView: 'list' | 'card' = !showViewToggle
+    ? defaultView
+    : (view === HOOK_DEFAULT_VIEW && defaultView !== HOOK_DEFAULT_VIEW
+        ? defaultView
+        : view);
+
   // FR-DOC-07: wrap setView with telemetry. The CommandBar's view toggle and
   // any other caller flow through this wrapper so we observe every change.
+  // v1.1.47 — when the toggle is hidden the host has locked the view; ignore
+  // writes silently (the CommandBar also doesn't render the toggle, so this is
+  // defense-in-depth against any other caller).
   const handleViewChange = useCallback(
     (next: 'list' | 'card') => {
+      if (!showViewToggle) return;
       AppInsightsService.trackEvent('view_toggled', { value: next });
       setView(next);
     },
-    [setView]
+    [setView, showViewToggle]
   );
 
   // ── FR-DOC-04: list-view sort + selection state ─────────────────────────
@@ -1402,9 +1437,11 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       );
     }
 
-    // Results — list view (FR-DOC-04 default) or card view based on persisted pref
+    // Results — list view (FR-DOC-04 default) or card view based on persisted pref.
+    // v1.1.47 — `effectiveView` honors the host's `showViewToggle` + `defaultView`
+    // settings (locks the surface to a single view when the toggle is hidden).
     if (filteredResults.length > 0) {
-      if (view === 'list' && !compactMode) {
+      if (effectiveView === 'list' && !compactMode) {
         // v1.1.45 — single toolbar row hosts the bulk-action icon group
         // INLINE alongside Reload + Add. The BulkActionBar component is
         // rendered inside renderActionsToolbar() and returns null when
@@ -1586,8 +1623,9 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           optionsLoading={filterOptionsLoading}
           selectedTags={selectedTags}
           onSelectedTagsChange={handleSelectedTagsChange}
-          view={view}
+          view={effectiveView}
           onViewChange={handleViewChange}
+          showViewToggle={showViewToggle}
           disabled={isLoading}
         />
       )}
@@ -1618,7 +1656,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.46 • Built 2026-05-27</Text>
+        <Text size={100}>v1.1.47 • Built 2026-05-27</Text>
       </div>
 
       {/* Find Similar — shared iframe dialog */}

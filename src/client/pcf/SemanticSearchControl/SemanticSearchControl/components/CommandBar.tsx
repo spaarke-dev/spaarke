@@ -142,6 +142,14 @@ export interface ICommandBarProps {
   view: DocumentListView;
   onViewChange: (next: DocumentListView) => void;
 
+  /**
+   * Whether to render the list/card view toggle group (v1.1.47).
+   * When `false`, the trailing tab group is hidden and the view is treated
+   * as locked at the parent level (the parent forces `view` to `defaultView`).
+   * Defaults to `true` at the parent (back-compat with v1.1.46 behavior).
+   */
+  showViewToggle?: boolean;
+
   /** Disable all interactive controls (during loading). */
   disabled?: boolean;
 }
@@ -189,6 +197,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
   onSelectedTagsChange,
   view,
   onViewChange,
+  showViewToggle = true,
   disabled,
 }) => {
   const styles = useStyles();
@@ -407,22 +416,27 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
 
       <div className={styles.spacer} aria-hidden="true" />
 
-      {/* View toggle — list (AppsList20Regular) / card (Grid20Regular) */}
-      <TabList
-        className={styles.viewToggle}
-        selectedValue={view}
-        onTabSelect={handleViewTabSelect}
-        appearance="subtle"
-        size="small"
-        aria-label="View toggle"
-      >
-        <Tab value="list" icon={<AppsList20Regular />} aria-label="List view">
-          <Text size={100}>List</Text>
-        </Tab>
-        <Tab value="card" icon={<Grid20Regular />} aria-label="Card view">
-          <Text size={100}>Card</Text>
-        </Tab>
-      </TabList>
+      {/* View toggle — list (AppsList20Regular) / card (Grid20Regular).
+          v1.1.47: hidden when `showViewToggle === false` so a host form
+          can lock the surface to a single view (the parent simultaneously
+          forces `view` to `defaultView` so this also enforces the lock). */}
+      {showViewToggle && (
+        <TabList
+          className={styles.viewToggle}
+          selectedValue={view}
+          onTabSelect={handleViewTabSelect}
+          appearance="subtle"
+          size="small"
+          aria-label="View toggle"
+        >
+          <Tab value="list" icon={<AppsList20Regular />} aria-label="List view">
+            <Text size={100}>List</Text>
+          </Tab>
+          <Tab value="card" icon={<Grid20Regular />} aria-label="Card view">
+            <Text size={100}>Card</Text>
+          </Tab>
+        </TabList>
+      )}
     </div>
   );
 };

@@ -106,10 +106,13 @@ const COL_MATCH = 'combinedScore';
 const COL_MENU = 'menu';
 
 // Default intrinsic widths in pixels (used when no user override is persisted).
+// v1.1.47 — Name default widened 360 → 480 px to give long file names room
+// to breathe at typical viewport widths (UAT round 3). User-resized widths
+// still persist via useDocumentListPrefs.columnWidths and win over this default.
 const DEFAULT_WIDTHS: Record<string, number> = {
   [COL_SELECT]: 40,
   [COL_PIN]: 36,
-  [COL_NAME]: 360,
+  [COL_NAME]: 480,
   [COL_MODIFIED]: 130,
   [COL_MODIFIED_BY]: 180,
   [COL_MATCH]: 80,
@@ -271,6 +274,19 @@ const useStyles = makeStyles({
     paddingRight: 0,
     cursor: 'pointer',
     textAlign: 'center',
+  },
+  // v1.1.47 — Menu column cell. Flush the 3-dot icon button against the right
+  // edge of the cell (with a small XS breathing-room pad) so the menu trigger
+  // never appears stranded mid-cell. The DataGrid's TableCellLayout inside
+  // wraps a flex container around renderCell output; this rule applies to
+  // the outer DataGridCell to guarantee right-alignment regardless of inner
+  // layout. Tokens-only (ADR-021).
+  menuCell: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingLeft: 0,
+    paddingRight: tokens.spacingHorizontalXS,
   },
   // v1.1.45 — name cell truncates with ellipsis and bleeds NO further than its
   // column track (the user-reported regression). `minWidth: 0` is required on
@@ -767,6 +783,8 @@ export const ListView: React.FC<IListViewProps> = ({
     styles.modifiedByName,
     styles.scoreBadge,
     styles.sortHeader,
+    // styles.menuCell is read via mergeClasses in the row render below, not in
+    // the columns memo — keeping it out of this dep list is correct.
   ]);
 
   // ── Column sizing options ─────────────────────────────────────────────
@@ -852,10 +870,13 @@ export const ListView: React.FC<IListViewProps> = ({
                   {({ renderCell, columnId }) => {
                     const isSelectCell = columnId === COL_SELECT;
                     const isPinCell = columnId === COL_PIN;
+                    const isMenuCell = columnId === COL_MENU;
                     const cellClass = mergeClasses(
                       styles.gridCell,
                       isSelectCell && styles.selectCell,
-                      isPinCell && styles.pinCell
+                      isPinCell && styles.pinCell,
+                      // v1.1.47 — flush the menu icon to the right edge.
+                      isMenuCell && styles.menuCell
                     );
                     return (
                       <DataGridCell
@@ -865,7 +886,7 @@ export const ListView: React.FC<IListViewProps> = ({
                           onTogglePin(item.documentId);
                         } : undefined}
                       >
-                        <TableCellLayout truncate={!isSelectCell && !isPinCell}>
+                        <TableCellLayout truncate={!isSelectCell && !isPinCell && !isMenuCell}>
                           {renderCell(item)}
                         </TableCellLayout>
                       </DataGridCell>
