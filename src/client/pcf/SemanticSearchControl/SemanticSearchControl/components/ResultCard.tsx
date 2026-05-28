@@ -286,9 +286,11 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // Bottom "info" half — white surface with name+date row + bottom pill row.
-  // v1.1.51 (Items 5 + 6) — minHeight raised slightly to accommodate the
-  // new bottom relationship-pill row beneath the date+title row.
+  // Bottom "info" half — white surface with name row + meta (date) row +
+  // bottom pill row.
+  // v1.1.52 (Item 1) — Reverts v1.1.51 Item 6 (inline date in title row).
+  // Date moves back to its own `meta` row below the name; the v1.1.51
+  // Item 5 bottom Relationship pill row is preserved.
   info: {
     display: 'flex',
     flexDirection: 'column',
@@ -296,10 +298,8 @@ const useStyles = makeStyles({
     minHeight: '96px',
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
   },
-  // v1.1.51 (Item 6) — `nameRow` now holds: file icon + 2-line name
-  // (flex: 1) + date (right-aligned, no-wrap, top-aligned). The date
-  // moves UP from its old standalone `meta` row so the user can read it
-  // at a glance without scanning to a second line.
+  // v1.1.52 (Item 1) — `nameRow` reverted to: file icon + 2-line name.
+  // No inline date here; the date lives in its own `meta` row below.
   nameRow: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -327,17 +327,17 @@ const useStyles = makeStyles({
     lineHeight: tokens.lineHeightBase300,
     wordBreak: 'break-word',
   },
-  // v1.1.51 (Item 6) — inline date that lives in the title row.
-  // No-wrap so it never breaks; pushed to the right edge of the row by
-  // the flex: 1 on the name. Top-aligned so it lines up with the first
-  // line of a multi-line filename.
-  dateInline: {
-    flexShrink: 0,
+  // v1.1.52 (Item 1) — Restored standalone date row (was removed in
+  // v1.1.51 Item 6 when date was inlined into title row). Mirrors the
+  // pre-v1.1.51 `meta` style: neutral-3 foreground, base-200 font/line,
+  // ellipsised on overflow, no wrap.
+  meta: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
-    lineHeight: tokens.lineHeightBase300,
+    lineHeight: tokens.lineHeightBase200,
     whiteSpace: 'nowrap',
-    paddingTop: '2px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
   // v1.1.51 (Item 5) — bottom row of the info area: Relationship pill +
   // optional Similarity badge. Sits flush below the title+date row.
@@ -676,15 +676,12 @@ export const ResultCard: React.FC<IResultCardProps> = ({
         </div>
 
         {/* ─── Bottom info area ────────────────────────────────────────── */}
-        {/* v1.1.51 (Items 5 + 6 + 7):
-              - Date moved INTO the title row (right-aligned, no-wrap) so the
-                user sees the name + date on a single horizontal axis.
-              - The old standalone `meta` row is removed (date was its only
-                content).
-              - New bottom row: Relationship pill + optional similarity %.
-                Mirrors ListView's COL_RELATIONSHIP + COL_SIMILARITY
-                renderers — same `tint` Badge variants (Item 7) so card and
-                list views read identically. */}
+        {/* v1.1.52 (Item 1) — Reverts v1.1.51 Item 6 (inline date).
+              Layout now: nameRow → meta (date) → pillRow.
+              - Date back on its own row beneath the name.
+              - v1.1.51 Item 5 bottom Relationship pill row is preserved.
+              - v1.1.51 Item 7 `tint` Badge variants for Relationship +
+                Marigold similarity chip stay exactly as-is. */}
         <div className={styles.info}>
           <div className={styles.nameRow}>
             <RowIcon
@@ -694,12 +691,12 @@ export const ResultCard: React.FC<IResultCardProps> = ({
             <Text as="span" size={300} className={styles.name} title={result.name}>
               {result.name}
             </Text>
-            {formattedDate && (
-              <Text as="span" size={200} className={styles.dateInline}>
-                {formattedDate}
-              </Text>
-            )}
           </div>
+          {formattedDate && (
+            <Text as="span" size={200} className={styles.meta}>
+              {formattedDate}
+            </Text>
+          )}
           {showRelationshipPill && (
             <div className={styles.pillRow} aria-hidden="false">
               {rel === 'associated' || rel === 'both' ? (

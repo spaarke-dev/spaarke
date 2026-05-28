@@ -1797,7 +1797,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.51 • Built 2026-05-28</Text>
+        <Text size={100}>v1.1.52 • Built 2026-05-28</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so
@@ -1850,11 +1850,12 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           The Subject and Body are pre-populated from the active doc via
           `emailDefaultSubject` / `emailDefaultBody`.
 
-          Sizing follow-up (v1.1.51 candidate): the shared SendEmailDialog
-          currently caps at 520px; users may want a larger surface to
-          match the 1280px preview. Promoting the override into shared
-          would impact other consumers (Code Pages, Office Add-ins) so
-          this stays scoped here for now. */}
+          v1.1.52 (Item 3): the shared SendEmailDialog now accepts a
+          `maxWidth` override prop. Default 520px is preserved for
+          existing consumers (LegalWorkspace FilePreviewDialog,
+          SpeDocumentViewer); this PCF passes 720px so the modal feels
+          positioned over its 1280px FilePreviewDialog backdrop rather
+          than tiny by comparison. */}
       <SendEmailDialog
         open={!!emailDialogResult}
         onClose={() => setEmailDialogResult(null)}
@@ -1862,6 +1863,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         defaultBody={emailDefaultBody}
         onSearchUsers={handleSearchUsers}
         onSend={handleSendEmail}
+        maxWidth="720px"
       />
 
       {/* Document Email Wizard (multi-document, new) — opens from the toolbar

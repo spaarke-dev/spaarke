@@ -73,6 +73,17 @@ export interface ISendEmailDialogProps {
   onSearchUsers: (query: string) => Promise<ILookupItem[]>;
   /** Called when user clicks Send. Consumer handles the BFF call. */
   onSend: (payload: ISendEmailPayload) => Promise<void>;
+  /**
+   * Override the dialog surface maxWidth. Defaults to `'520px'`.
+   *
+   * Pass a larger value (e.g. `'720px'`) when launching from inside a
+   * wide host dialog so the email composer has visual presence over the
+   * host. Backward-compatible: omitting the prop preserves the original
+   * 520px sizing used by existing consumers.
+   *
+   * @since v1.1.52 (SemanticSearchControl UAT polish round 7)
+   */
+  maxWidth?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +131,7 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
   defaultBody,
   onSearchUsers,
   onSend,
+  maxWidth = '520px',
 }) => {
   const styles = useStyles();
 
@@ -181,7 +193,12 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
         if (!data.open) onClose();
       }}
     >
-      <DialogSurface className={styles.surface}>
+      {/* v1.1.52 — Inline `style={{ maxWidth }}` overrides the makeStyles
+          `surface.maxWidth` default. Defaults to '520px' so existing
+          consumers (LegalWorkspace FilePreviewDialog, SpeDocumentViewer)
+          render identically; the SemanticSearchControl PCF passes
+          '720px' to feel positioned over its 1280px FilePreviewDialog. */}
+      <DialogSurface className={styles.surface} style={{ maxWidth }}>
         <DialogTitle
           action={<Button appearance="subtle" icon={<Dismiss24Regular />} aria-label="Close" onClick={onClose} />}
         >

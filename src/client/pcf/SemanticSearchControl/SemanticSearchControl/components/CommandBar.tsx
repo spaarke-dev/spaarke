@@ -82,7 +82,14 @@ const useStyles = makeStyles({
   root: {
     display: 'flex',
     alignItems: 'center',
-    flexWrap: 'wrap',
+    // v1.1.52 (Item 2) — Disable wrap so the trailing view toggle is
+    // always pinned to row 1, even when long filter labels (e.g.
+    // "File Type (3)", "Date Range (active)", multi-tag selection) make
+    // the natural width exceed the viewport. Horizontal-scroll fallback
+    // keeps the bar usable on sub-1920 widths without re-flowing the
+    // toolbar to a second line.
+    flexWrap: 'nowrap',
+    overflowX: 'auto',
     gap: tokens.spacingHorizontalS,
     rowGap: tokens.spacingVerticalXS,
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
@@ -104,6 +111,11 @@ const useStyles = makeStyles({
   scopeToggleGroup: {
     display: 'inline-flex',
     alignItems: 'stretch',
+    // v1.1.52 (Item 2) — Don't allow the scope toggle to shrink. The
+    // labels ("All Documents" / "Associated Only") need full visibility;
+    // truncating them silently changes their meaning. Under overflow the
+    // toolbar scrolls horizontally instead.
+    flexShrink: 0,
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
     ...shorthands.border(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
     ...shorthands.overflow('hidden'),
@@ -141,7 +153,15 @@ const useStyles = makeStyles({
     },
   },
   filterButton: {
-    // Subtle button with the filter label + selection summary.
+    // v1.1.52 (Item 2) — Cap filter-button width so a long selection
+    // summary (e.g. "File Type: Engagement Letter, Witness Statement"
+    // or a multi-tag pill) doesn't push the view toggle out of view on
+    // 1920×1080. Fluent v9 Button truncates its label child via the
+    // inner span's overflow rules; setting maxWidth on the button +
+    // letting it shrink (minWidth: 0) is the safe primitive.
+    maxWidth: '200px',
+    minWidth: 0,
+    flexShrink: 1,
   },
   menuList: {
     minWidth: '200px',
@@ -150,6 +170,10 @@ const useStyles = makeStyles({
   },
   viewToggle: {
     // TabList sized to fit two icon-only tabs.
+    // v1.1.52 (Item 2) — Pin to row 1 even under overflow; the spacer
+    // pushes it to the far right but flexShrink: 0 prevents the toggle
+    // itself from being squeezed.
+    flexShrink: 0,
   },
   // Popover surface for the Date Range picker — gives the inline-stacked
   // DateRangeFilter a roomy panel so the From/To inputs are usable.
