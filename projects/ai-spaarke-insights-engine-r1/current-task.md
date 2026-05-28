@@ -1,18 +1,56 @@
 # Current Task — Spaarke Insights Engine, Phase 1
 
-> **Status**: 🔄 active — Wave 5 fully complete (040 + 041 + 042); Wave 6 (050 + 051 + 052) ready for parallel dispatch
-> **Last Updated**: 2026-05-28 (post task 040)
-> **Project state**: Waves 1-5 complete (14 of 17 D-P + scaffold tasks — 82%)
+> **Status**: 🔄 active — Wave 6 in progress (task 050 ✅ complete; 051 + 052 may run next)
+> **Last Updated**: 2026-05-28 (post task 050)
+> **Project state**: Waves 1-5 complete + task 050 (D-P8) complete (15 of 17 D-P + scaffold tasks — 88%)
 
 ---
 
 ## Active task
 
-None — Wave 5 fully complete. Next: dispatch Wave 6 tasks 050 (D-P8 SPE-upload consumer) + 051 (D-P11 mirror sync — swaps NoOpObservationMirror → DataverseObservationMirror) + 052 (D-P11 review surface) in parallel; or proceed to Wave 7 (060 D-P14 synthesis + 061 D-P15 endpoint) since the facade + ingest are both shipped.
+None — task 050 complete. Next: dispatch Wave 6 remaining tasks 051 (D-P11 mirror sync — swap `NoOpObservationMirror` → `DataverseObservationMirror`) + 052 (D-P11 review surface) in parallel; or proceed to Wave 7 (060 D-P14 synthesis + 061 D-P15 endpoint).
 
 ---
 
 ## Last completed task
+
+**Task 050 — D-P8 SPE-upload event consumer (`InsightsIngestJobHandler`)** ✅ (2026-05-28)
+- Rigor: FULL (bff-api code, modifies production upload path `UploadFinalizationWorker`, opt-in dispatch boundary)
+- Approach: NO new BackgroundService and NO new Function (per ADR-001 — BFF-coupled async stays on existing infra). Implemented as `IJobHandler` registered into existing `JobProcessingModule`, dispatched by existing `ServiceBusJobProcessor` on the existing `sdap-jobs` queue. Opt-in via new `AiProcessingOptions.InsightsIngest` flag (default `false` Phase 1; D-P16 smoke (task 070) flips on for fixtures).
+- Files NEW (3 production + 1 test + 1 docs):
+  - `src/server/api/Sprk.Bff.Api/Services/Jobs/Insights/InsightsIngestJobHandler.cs` (220 lines) — Zone B IJobHandler with JobType="InsightsUniversalIngest". Injects only `IInsightsAi` from Zone A (the §3.5 facade). Idempotency via `IIdempotencyService` (key = `insights-ingest-{documentId}-{matterId}`). Failure mapping: `OperationCanceledException` → Failure (host shutdown), `ArgumentException` → Poisoned (unrecoverable), HttpRequestException/TaskCanceledException/Throttling/Timeout/RequestFailed → Failure (retry), unknown → Poisoned. Lock release in `finally` even on failure. Six structured-log event names (`insights_ingest_invoked|skipped|succeeded|failed|canceled|payload_parse_failed`).
+  - `src/server/api/Sprk.Bff.Api/Services/Jobs/Insights/InsightsIngestPayload.cs` (~60 lines) — Zone B DTO carrying `DocumentId` + `MatterId` + `TenantId` + `Source` + `EnqueuedAt`. Pure primitives, no AI imports.
+  - `tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/Insights/InsightsIngestJobHandlerTests.cs` (~340 lines) — 27 xUnit/FluentAssertions/Moq tests: 3 constructor null-guards, 1 JobType constant, happy path (request shape captured + asserted), idempotency-key-override, zero-observations-success, 2 idempotency short-circuits (already-processed + lock-held), 1 null-payload poison, 1 Theory with 7 inline cases for missing-required-field poison, 1 null-job throws, 4 failure-semantic mapping tests, lock-release-on-failure, mark-not-called-on-failure.
+  - `projects/ai-spaarke-insights-engine-r1/notes/cost-projection-d-p8.md` (~180 lines) — User-authoritative resolution of both POML first-step blockers: (1) event source = existing `sdap-jobs` IJobHandler pipeline with detailed `IJobHandler` vs new-BackgroundService vs Function comparison + ADR-001 rationale; (2) per-document $0.10 hard cap = Phase 1 observability-only (warn + AI metric `insights.ingest.cost.cap_exceeded`); per-tenant monthly cap deferred to Phase 1.5. Includes cost-projection math (Layer 1 ~$0.001, Layer 2 ~$0.05, embeddings ~$0.0001 each), 7-item sign-off table.
+- Files MODIFIED (3):
+  - `src/server/api/Sprk.Bff.Api/Workers/Office/Messages/OfficeJobMessage.cs` (+24 lines) — added `bool InsightsIngest { get; init; }` to `AiProcessingOptions` with rich XML docs explaining opt-in default-off semantics + downstream queueing behavior.
+  - `src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs` (+97 lines) — added conditional `if (aiOptions.InsightsIngest) await EnqueueInsightsIngestAsync(...)` in `QueueNextStageAsync` (alongside existing AppOnlyDocumentAnalysis + RagIndexing queueing); new `EnqueueInsightsIngestAsync` method resolves `DocumentEntity.MatterId` via `IDocumentDataverseService.GetDocumentAsync` (line 1335), reads `TENANT_ID` / `AzureAd:TenantId` config (same pattern as `EnqueueRagIndexingAsync`), gracefully skips with Information log when MatterId or TenantId unresolved (does NOT fail upload), wraps the queue submit in try/catch (failure NEVER impacts existing CRUD/AI pipelines).
+  - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs` (+7 lines) — registered `IJobHandler → InsightsIngestJobHandler` as `Scoped` (matches sibling handler registrations).
+- MatterId resolution mechanism: `IDocumentDataverseService.GetDocumentAsync(documentId.ToString(), ct)` → `DocumentEntity.MatterId` (string, defined Models.cs:261). Already present in `UploadFinalizationWorker._documentService`; no new DI needed. Skip behavior when MatterId missing: log Information + `return` (Phase 1 universal ingest requires Matter subject for Layer 2 Observations; Phase 1.5+ may relax for tenant-scoped Observations).
+- Build: `dotnet build src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` clean — 0 errors, 17 pre-existing warnings (same set as task 040; none in new files). Test project also builds clean — 0 errors.
+- Test verification:
+  - Task 050 subset: **27/27 PASS** (`InsightsIngestJobHandlerTests` — 28 ms)
+  - Full Insights subset: **236/236 PASS** in 476 ms (up from 209 pre-task-050 = +27 new tests, ZERO regressions across all task 020/021/022/023/024/025/030/031/040/041/042 tests)
+- SPEC §3.5.4 forbidden-imports grep on Zone B + dispatch-boundary paths (`Services/Jobs/Insights/`, modified files in `Workers/Office/` + `Infrastructure/DI/`): **ZERO real `using` matches**. The 3 regex matches in `InsightsIngestJobHandler.cs` lines 19-21 are XML doc `<c>` references inside the documentation block explicitly enumerating forbidden namespaces, NOT `using` imports (verified by strict `^using.*` regex). The only Zone-A import across all 5 modified files is `using Sprk.Bff.Api.Services.Ai.PublicContracts;` (the §3.5 facade, explicitly permitted per project CLAUDE.md §3.5.4).
+- Quality gates (Step 9.5):
+  - **code-review** ✅: 0 critical / 0 warnings. Notes: handler does NOT perform cost-cap math itself (delegates to `OpenAiClient` per cost-projection notes — correct architectural choice since Zone B can't compute Zone A cost without leaking AI internals). Try/catch in `EnqueueInsightsIngestAsync` is intentionally best-effort (existing CRUD/AI pipelines must not be impacted by additive ingest).
+  - **adr-check** ✅: 12 ADRs validated (ADR-001, ADR-004, ADR-010, ADR-013, ADR-016, ADR-019) + decisions (D-24, D-27, D-52, D-59) + CLAUDE.md §10 BFF hygiene (zero new NuGet packages; zero new CVE surface; placement justified — IJobHandler at dispatch boundary is the natural Zone B location; facade pattern preserved). 0 violations.
+- Acceptance criteria: **6/6 PASS**:
+  1. SPE-upload event source confirmed → `cost-projection-d-p8.md` Blocker 1: existing `sdap-jobs` IJobHandler pipeline
+  2. Cost projection signed off → `cost-projection-d-p8.md` Blocker 2: $0.10/doc observability cap + monthly deferred
+  3. Consumer dispatches via `IInsightsAi.RunIngestAsync` with `{DocumentId, MatterId, TenantId}` → `ProcessAsync_ValidPayload_DispatchesToFacadeWithCorrectRequest` captures request + asserts all 3 fields
+  4. §3.5 grep clean → strict `^using.*` grep returns zero matches across all 5 modified files
+  5. Backpressure inherited (no new infra) → `ServiceBusJobProcessor` MaxConcurrentCalls=5 + peek-lock + DLQ on delivery>=5; documented in cost-projection notes
+  6. App Insights telemetry per event → 6 structured-log events flowing through existing ILogger → AI bridge
+- Decisions:
+  - **No new BackgroundService or Function**: ADR-001 says BFF-coupled async stays on BackgroundService runtime, and the existing `ServiceBusJobProcessor` already provides all cross-cutting (auth, retry, DLQ, idempotency, correlation, telemetry, concurrency). Building new infrastructure would duplicate proven plumbing and violate ADR-001 single-runtime principle. Documented in cost-projection notes with full pros/cons table.
+  - **Opt-in default-off (`AiProcessingOptions.InsightsIngest = false`)**: Phase 1 must not change behavior of existing upload flows. D-P16 smoke test (task 070) is responsible for flipping the flag on for fixtures; production rollout pending per-tenant monthly cap signoff.
+  - **MatterId required for queue**: documents without a Matter lookup are skipped (Information log) rather than queued with null/empty MatterId because Layer 2 Observations require `matter:{MatterId}` subject (per IngestOrchestrator contract). Phase 1.5+ enhancement could relax for tenant-scoped Observations.
+  - **Cost cap math lives in `OpenAiClient`, not the handler**: Zone B handler can't compute Zone A token costs without leaking AI internals. The cap-exceeded App Insights event is correctly emitted at the layer that actually owns LLM invocation cost.
+  - **Fully-qualified type references in `UploadFinalizationWorker`**: `Sprk.Bff.Api.Services.Jobs.Insights.InsightsIngestJobHandler.JobTypeName` used inline (no new `using`) to keep the worker's file-level usings minimal and match the existing `RagIndexingJobHandler.JobTypeName` reference pattern.
+- Unblocks: D-P16 smoke test (task 070) — once fixtures upload with `AiOptions.InsightsIngest = true`, the full SPE → handler → IngestOrchestrator → IngestOrchestrator → Layer 1 → Layer 2 → gates → Observations to `spaarke-insights-index` flow exercises end-to-end. Task 051 (D-P11 mirror sync) is fully decoupled (changes only `Services/Ai/Insights/Mirror/` + InsightsIngestModule DI), so 051 can run in parallel without collision.
+
+---
 
 **Task 040 — D-P7 Universal ingest playbook + IngestOrchestrator** ✅ (2026-05-28)
 - Rigor: FULL (bff-api code, composes 12-step layered extraction pipeline, foundation for D-P8 SPE consumer + D-P11 mirror sync)

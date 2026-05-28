@@ -1,7 +1,23 @@
 <task id="050" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>D-P8 — SPE-upload event consumer (BackgroundService or Function per ADR-001)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-05-28</completion-date>
+    <completion-notes>
+      Implemented as IJobHandler on existing sdap-jobs queue (NO new BackgroundService/Function per ADR-001).
+      Files NEW: Services/Jobs/Insights/{InsightsIngestJobHandler,InsightsIngestPayload}.cs +
+      tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/Insights/InsightsIngestJobHandlerTests.cs (27 tests) +
+      projects/ai-spaarke-insights-engine-r1/notes/cost-projection-d-p8.md (user-authoritative blocker resolutions).
+      Files MODIFIED: Workers/Office/UploadFinalizationWorker.cs (+EnqueueInsightsIngestAsync conditional queue) +
+      Workers/Office/Messages/OfficeJobMessage.cs (+AiProcessingOptions.InsightsIngest opt-in flag, default false) +
+      Infrastructure/DI/JobProcessingModule.cs (+1 IJobHandler scoped registration).
+      Tests: 27/27 PASS (InsightsIngestJobHandlerTests); 236/236 PASS (full Insights subset; no regressions vs prior 209).
+      §3.5.4 strict using-statement grep: ZERO real forbidden imports (only Services.Ai.PublicContracts.IInsightsAi).
+      Acceptance criteria: 6/6 PASS. Quality gates: code-review 0 critical/0 warnings; adr-check 0 violations.
+      Backpressure inherited from existing ServiceBusJobProcessor (MaxConcurrentCalls=5 + peek-lock + DLQ on delivery >= 5);
+      no new infrastructure needed per blocker 1 resolution. Cost cap $0.10/document Phase 1 = observability only
+      (warns + AI metric); per-tenant monthly cap deferred to Phase 1.5 per user signoff.
+    </completion-notes>
     <wave>6</wave>
     <estimated-effort>1 day</estimated-effort>
     <tags>bff-api, consumer, spe-events, jobs, zone-b, dotnet, adr-001</tags>
