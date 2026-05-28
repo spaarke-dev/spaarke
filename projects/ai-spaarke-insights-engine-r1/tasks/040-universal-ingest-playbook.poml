@@ -1,7 +1,7 @@
 <task id="040" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>D-P7 — Universal ingest playbook authoring (Layer 1 → conditional Layer 2 → gates → emission)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>5</wave>
     <estimated-effort>1 day</estimated-effort>
     <tags>playbook-authoring, ingest, orchestration, zone-a, dataverse-playbook</tags>

@@ -1,18 +1,62 @@
 # Current Task — Spaarke Insights Engine, Phase 1
 
-> **Status**: 🔄 active — Wave 5 tasks 041 + 042 complete; 040 still in flight (parallel)
-> **Last Updated**: 2026-05-28 (post task 041)
-> **Project state**: Waves 1-4 complete + W5 tasks 041 + 042 shipped (13 of 17 D-P + scaffold tasks — 76%)
+> **Status**: 🔄 active — Wave 5 fully complete (040 + 041 + 042); Wave 6 (050 + 051 + 052) ready for parallel dispatch
+> **Last Updated**: 2026-05-28 (post task 040)
+> **Project state**: Waves 1-5 complete (14 of 17 D-P + scaffold tasks — 82%)
 
 ---
 
 ## Active task
 
-None — task 041 just completed. Next: task 040 (D-P7, in flight parallel) or task 050 (D-P8 SPE upload consumer, unblocked once 040 ships).
+None — Wave 5 fully complete. Next: dispatch Wave 6 tasks 050 (D-P8 SPE-upload consumer) + 051 (D-P11 mirror sync — swaps NoOpObservationMirror → DataverseObservationMirror) + 052 (D-P11 review surface) in parallel; or proceed to Wave 7 (060 D-P14 synthesis + 061 D-P15 endpoint) since the facade + ingest are both shipped.
 
 ---
 
 ## Last completed task
+
+**Task 040 — D-P7 Universal ingest playbook + IngestOrchestrator** ✅ (2026-05-28)
+- Rigor: FULL (bff-api code, composes 12-step layered extraction pipeline, foundation for D-P8 SPE consumer + D-P11 mirror sync)
+- Files NEW (12 production + 2 test):
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Sanitization/{IInsightsContentSanitizer,InsightsContentSanitizer}.cs` — D-50/D-A25 minimal-viable sanitizer (strips control chars U+0000-U+001F/U+007F-U+009F except tab/LF/CR; collapses internal whitespace preserving newlines; removes 5 recognized prompt-injection prefix patterns; caps at 200K chars; preserves substantive characters so downstream GroundingVerifier can still match verbatim quotes; Phase 1.5+ LAVERN Sanitizer swap path documented inline)
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Mirror/{IObservationMirror,NoOpObservationMirror}.cs` — D-P11 mirror seam (Phase 1 NoOp logs via EventId 8041 but does not write; task 051 swaps in DataverseObservationMirror without orchestrator changes)
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Ingest/{IIngestDocumentSource,FilesIndexIngestDocumentSource}.cs` — reads chunks from spaarke-files-index via SearchIndexClient filtered by documentId+tenantId, ordered by chunkIndex; returns null for docs with zero chunks or all-empty content (treated as no-op terminal — non-indexable upload is expected, not an error); uses SearchDocument dynamic-property access to defend against upstream SDAP schema field-name drift
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Ingest/{IObservationIndexUpserter,ObservationIndexUpserter,ObservationIndexDocument}.cs` — composes `{predicate} = {value} ({first-quote})` content string, embeds via IOpenAiClient.GenerateEmbeddingAsync (text-embedding-3-large @ 3072 dims per SPEC §3.4 / D-P2), MergeOrUpload to spaarke-insights-index; idempotent on Observation.Id (stable across re-runs)
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Ingest/{IIngestOrchestrator,IngestOrchestrator}.cs` (468 lines) — main orchestrator; 12-step pipeline: FetchDocument → Sanitize → Layer1 LLM → EmitLayer1Observation+upsert+mirror → GateLayer2 (outcome-bearing AND confidence≥0.7 per D-59) → Layer2 LLM → ValidateLayer2 (per OutcomeExtractionResponseValidator) → BuildExtractionResult with grounding-drop (unverified quotes dropped BEFORE confidence gating per SPEC §3.4) → EmitLayer2Observations via IObservationEmitter+upsert+mirror; mirror failures non-fatal (substrate is system-of-record); substrate-write failures fatal (D-P8 consumer dead-letters)
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/{IInsightsPromptLoader,InsightsPromptLoader}.cs` — loads classification.v1.txt + classification.v1.schema.json + outcome-extraction.v1.txt + outcome-extraction.v1.schema.json from AppContext.BaseDirectory/Services/Ai/Insights/Prompts/; cached per-basename (process-lifetime; restart to refresh)
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/universal-ingest.v1.json` — documented contract spec (matches existing layer1-classification.node.json + layer2-outcome-extraction.node.json pattern; 12-step sequence with implementedBy pointers + downstream-producer/consumer documentation)
+  - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/InsightsIngestModule.cs` — new Zone A feature module (AiModule at 15/15 cap per ADR-010); 6 interface seams all justified per ADR-010 §Exceptions inline
+  - `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Ingest/IngestOrchestratorTests.cs` (~600 lines) — 11 IngestOrchestratorTests + 1 UniversalIngestPlaybookSpecTests = 12 tests covering all 6 acceptance criteria
+  - `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Sanitization/InsightsContentSanitizerTests.cs` (~155 lines) — 13 xUnit/FluentAssertions tests covering null/empty handling, C0+C1 control-char stripping, whitespace collapse with newline preservation, all 5 injection-prefix patterns, mid-document not-stripped behavior, oversize truncation, cancellation, substantive-char preservation, diagnostic counters
+- Files MODIFIED (4):
+  - `src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs` (+2 fields: FilesIndexName="spaarke-files-index", InsightsIndexName="spaarke-insights-index")
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs` (task 042's facade) — +1 ctor dep IIngestOrchestrator; RunIngestAsync now delegates instead of throwing NotImplementedException; XML doc updated to "complete"
+  - `src/server/api/Sprk.Bff.Api/Program.cs` (+5 lines: AddInsightsIngestModule wired before AddInsightsFacadeModule)
+  - `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/InsightsOrchestratorTests.cs` — task 042's RunIngestAsync test updated from "ThrowsScaffoldNotImplemented" to "DelegatesToIngestOrchestrator" (verifies new behavior; +1 ctor mock for IIngestOrchestrator already existed from task 042)
+- Build: `dotnet build src/server/api/Sprk.Bff.Api/` clean — 0 errors, 17 pre-existing warnings (none in new files; same set as tasks 020/021/022/042)
+- Test verification:
+  - Task 040 + 042 subset: 59/59 PASS (35 IngestOrchestratorTests + 1 spec-file + 12 InsightsContentSanitizerTests + 24 InsightsOrchestratorTests, ALL pass with no regressions)
+  - Full Insights subset: 209/209 PASS (includes all tasks 001/002/020/021/022/023/024/025/030/031/041/042 + this task)
+  - Full BFF test suite: 5420 passed, 339 pre-existing failures (SseStreaming integration tests etc., unrelated to Insights)
+- SPEC §3.5.4 forbidden-imports grep on Zone B paths: ZERO forbidden imports. One regex match in `StubLiveFactResolver.cs` is a `<see cref>` XML doc reference inherited from task 022, NOT a `using` import. Explicit grep on real imports returns ZERO matches in Zone B.
+- Quality gates (Step 9.5):
+  - code-review ✅: 0 critical / 0 warnings / 1 minor cleanup applied (dead pattern-match cast in ObservationIndexUpserter); 6 interface seams (IInsightsContentSanitizer, IObservationMirror, IIngestDocumentSource, IObservationIndexUpserter, IInsightsPromptLoader, IIngestOrchestrator) all justified per ADR-010 §Exceptions inline (Phase 1.5+ swap paths + testability)
+  - adr-check ✅: 12 ADRs validated (ADR-007, 009, 010, 013, 014, 016, 028, 029) + 14 decisions (D-04, D-05, D-24, D-27, D-47, D-50/D-A25, D-52, D-54, D-59, D-62, D-63, D-P9, D-P10, D-P11 mirror seam) + CLAUDE.md §10 BFF hygiene checklist (placement justified — Zone A code-defined orchestrator; facade used — IInsightsAi delegates; zero new packages; zero new CVE surface). 0 violations.
+- Acceptance criteria: 6/6 (5 PASS + 1 SCAFFOLD per task brief):
+  1. Ingest playbook publishes to Dataverse playbook entity — ✅ REINTERPRETED per task brief: code-defined orchestrator + universal-ingest.v1.json spec file (matches existing layer1/layer2 node JSON pattern). Verified by `UniversalIngestPlaybookSpecFile_ExistsAndParses` test.
+  2. E2E closing-letter → Layer 1 → Layer 2 → gates pass → Observations to spaarke-insights-index — ✅ `RunAsync_ClosingLetterFixture_FullPipelineEmitsObservations` (4 Observations: 1 L1 + 3 L2; substrate writes verified)
+  3. E2E correspondence-email → Layer 1 classifies → ConditionNode skips Layer 2 → only Classification Observation written — ✅ `RunAsync_CorrespondenceFixture_GatesOffLayer2` + `RunAsync_OutcomeBearingButLowConfidence_GatesOffLayer2`
+  4. sprk_analysis mirror written for every Observation — ✅ SCAFFOLD: `RunAsync_AllEmittedObservations_AreMirrored` verifies the seam is INVOKED for every Observation; NoOpObservationMirror in Phase 1; task 051 swaps in real Dataverse impl
+  5. ISanitizer invoked before any LLM step — ✅ `RunAsync_SanitizerInvokedBeforeLayer1` (strict order assertion via call-order capture list)
+  6. IInsightsAi.RunIngestAsync invokes this playbook — ✅ `RunIngestAsync_WithValidRequest_DelegatesToIngestOrchestrator` (in task 042's file; verifies facade is a thin pass-through)
+- Design decisions:
+  - Universal-ingest = Zone A code-defined orchestration, NOT a Dataverse playbook entity row. Rationale: the sequence is fixed across all documents (D-59 cheap-gates-expensive); the configurability that drives playbook-as-data doesn't apply. JSON spec documents the contract for external readers (matches the existing layer1-classification.node.json + layer2-outcome-extraction.node.json convention)
+  - Created NEW `IInsightsContentSanitizer` Zone A interface + impl rather than reusing `IConversationHistorySanitizer` (chat-history-specific, doesn't match Phase 1 ingest needs). Document as minimal-viable; LAVERN Sanitizer swap path inline
+  - D-P11 mirror as interface seam (`IObservationMirror`) + Phase 1 NoOp impl. Task 051 registers `DataverseObservationMirror` without orchestrator changes
+  - FilesIndexIngestDocumentSource uses SearchDocument dynamic-property access (not strongly-typed POCO) to defend against upstream SDAP schema field-name drift; returns null for non-indexable docs (no-op terminal — D-P16 smoke test (task 070) will verify field names against deployed index)
+  - Mirror failures non-fatal (logged + continued); substrate-write failures fatal (propagated for D-P8 dead-letter). Substrate IS the system-of-record; mirror is the review-surface convenience
+  - Cache TTL = 0 (no cache wrap) per POML §step 3: ingest is one-shot. Idempotency comes from Observation.Id determinism (subject+field+document) + MergeOrUpload semantics in upserter
+  - Used `FixedTimeProvider` inline test helper rather than adding `Microsoft.Extensions.TimeProvider.Testing` NuGet (per CLAUDE.md §10 BFF hygiene — zero new packages)
+- Unblocks: Wave 6 task 050 (D-P8 SPE consumer can now construct InsightsIngestRequest + dispatch via IInsightsAi.RunIngestAsync); Wave 6 task 051 (D-P11 mirror sync — swap NoOpObservationMirror → DataverseObservationMirror in InsightsIngestModule DI; no orchestrator changes); Wave 6 task 052 (D-P11 review surface)
 
 **Task 041 — D-P4 Precedent → spaarke-insights-index projection sync** ✅ (2026-05-28)
 - Rigor: STANDARD (Zone B sync service, foundation for D-P14 Precedent retrieval)

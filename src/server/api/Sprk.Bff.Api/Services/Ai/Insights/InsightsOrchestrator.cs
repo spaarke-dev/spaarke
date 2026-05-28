@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
+using Sprk.Bff.Api.Services.Ai.Insights.Ingest;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Insights;
@@ -32,10 +33,12 @@ namespace Sprk.Bff.Api.Services.Ai.Insights;
 ///   (D-P14 synthesis playbook). The implementation here invokes the cache directly so
 ///   that as soon as a D-P14 playbook id is supplied as <see cref="InsightsAgentRequest.Question"/>
 ///   the wiring is honest.</item>
-///   <item><see cref="RunIngestAsync"/> — <b>scaffold</b>: throws
-///   <see cref="NotImplementedException"/> with a "task 040 (D-P7)" message until the
-///   universal ingest playbook lands and the orchestrator can resolve it by convention.
-///   The D-P8 consumer (task 050) is the first caller that will exercise this path.</item>
+///   <item><see cref="RunIngestAsync"/> — <b>complete</b> (task 040): delegates to
+///   <see cref="IIngestOrchestrator"/> which composes Sanitizer → Layer 1 → conditional
+///   Layer 2 → GroundingVerifier → ConfidenceThreshold → ObservationEmitter →
+///   IndexUpsert → Mirror. D-P11 mirror is wired as <see cref="Mirror.IObservationMirror"/>
+///   seam; Phase 1 ships <see cref="Mirror.NoOpObservationMirror"/>; task 051 swaps in
+///   the real Dataverse impl.</item>
 /// </list>
 /// </para>
 /// <para>
@@ -55,17 +58,20 @@ public sealed class InsightsOrchestrator : IInsightsAi
     private readonly IPlaybookExecutionEngine _engine;
     private readonly IInsightsPlaybookExecutionCache _cache;
     private readonly IOpenAiClient _openAi;
+    private readonly IIngestOrchestrator _ingestOrchestrator;
     private readonly ILogger<InsightsOrchestrator> _logger;
 
     public InsightsOrchestrator(
         IPlaybookExecutionEngine engine,
         IInsightsPlaybookExecutionCache cache,
         IOpenAiClient openAi,
+        IIngestOrchestrator ingestOrchestrator,
         ILogger<InsightsOrchestrator> logger)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _openAi = openAi ?? throw new ArgumentNullException(nameof(openAi));
+        _ingestOrchestrator = ingestOrchestrator ?? throw new ArgumentNullException(nameof(ingestOrchestrator));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -163,17 +169,12 @@ public sealed class InsightsOrchestrator : IInsightsAi
         ArgumentException.ThrowIfNullOrWhiteSpace(request.MatterId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
 
-        // Phase 1 scaffold: full implementation lands with task 040 (D-P7 universal
-        // ingest playbook) — the orchestrator will resolve the playbook by convention
-        // (e.g., "insights:ingest:universal@v1"), invoke ExecuteBatchAsync with the
-        // single document id, and read structured aggregate counts from the playbook
-        // run output. The D-P8 SPE-upload consumer (task 050) is the first real
-        // caller that will exercise this path.
-        throw new NotImplementedException(
-            "RunIngestAsync — Phase 1 scaffold. Full universal ingest playbook " +
-            "(D-P7) lands with task 040; this method becomes operational then. " +
-            "The D-P8 SPE-upload consumer (task 050) is the first caller that will " +
-            "exercise the live path.");
+        // Task 040 (D-P7) delegates to IIngestOrchestrator, which composes the universal
+        // ingest pipeline (Sanitizer → Layer 1 → conditional Layer 2 → mechanical gates →
+        // emission → substrate write → mirror). The facade stays thin so Zone B callers
+        // (D-P8 SPE-upload consumer per task 050) see a stable IInsightsAi contract while
+        // the Zone A pipeline composition evolves freely.
+        return _ingestOrchestrator.RunAsync(request, cancellationToken);
     }
 
     /// <inheritdoc />

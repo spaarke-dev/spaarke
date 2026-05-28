@@ -57,7 +57,7 @@
 
 | ID | D-P | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [040](040-universal-ingest-playbook.poml) | D-P7 | Universal ingest playbook (Layer 1 → Layer 2 → gates → emission) | 🔲 | 1d | ✅ | 020, 021, 022, 025, 030, 031, 042 |
+| [040](040-universal-ingest-playbook.poml) | D-P7 | Universal ingest playbook (Layer 1 → Layer 2 → gates → emission) | ✅ | 1d | ✅ | 020, 021, 022, 025, 030, 031, 042 |
 | [041](041-precedent-projection-sync.poml) | D-P4 | Precedent → spaarke-insights-index projection sync | ✅ | 4h | ✅ | 011, 012, 025 |
 | [042](042-iinsights-ai-facade.poml) | facade | IInsightsAi facade + InsightsOrchestrator (Zone A) | ✅ | 4h | ✅ | 022, 023 |
 

@@ -82,11 +82,19 @@ builder.Services.AddAnalysisServicesModule(builder.Configuration);
 // Future Wave-3 additions: D-P9 GroundingVerifier wiring, D-P12 node executors.
 builder.Services.AddInsightsExtractionModule(builder.Configuration);
 
+// Spaarke Insights Engine — Zone A universal ingest pipeline per SPEC §3 (D-P7, task 040).
+// IIngestOrchestrator composes: Sanitizer → Layer 1 → conditional Layer 2 → mechanical
+// gates (GroundingVerifier, ConfidenceThreshold) → emission → spaarke-insights-index
+// upsert → D-P11 mirror (NoOp until task 051 swaps in DataverseObservationMirror).
+// Must precede AddInsightsFacadeModule which ctor-injects IIngestOrchestrator.
+builder.Services.AddInsightsIngestModule();
+
 // Spaarke Insights Engine — Zone A public facade per SPEC §3.5 (task 042).
 // IInsightsAi → InsightsOrchestrator: the ONLY Zone-A surface Zone B code may import.
 // Wraps IPlaybookExecutionEngine + IInsightsPlaybookExecutionCache (D-P13) + IOpenAiClient
-// behind a 3-method facade (AnswerQuestionAsync / RunIngestAsync / EmbedTextAsync).
-// Must follow AnalysisServicesModule which registers the engine + D-P13 cache.
+// + IIngestOrchestrator behind a 3-method facade (AnswerQuestionAsync / RunIngestAsync / EmbedTextAsync).
+// Must follow AnalysisServicesModule which registers the engine + D-P13 cache, AND
+// AddInsightsIngestModule which registers IIngestOrchestrator.
 builder.Services.AddInsightsFacadeModule();
 
 // AI Platform R2: safety perimeter (content safety, prompt shield, groundedness)
