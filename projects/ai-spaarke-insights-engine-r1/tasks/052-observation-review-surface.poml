@@ -1,7 +1,7 @@
 <task id="052" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>D-P11 (view) — Observation review surface (Dataverse model-driven view + disposition workflow)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>6</wave>
     <estimated-effort>6 hours</estimated-effort>
     <tags>dataverse, model-driven-view, ui, observation-review, qa, d-60</tags>

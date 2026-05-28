@@ -36,7 +36,8 @@ public class DataverseObservationMirrorTests
     private readonly Mock<IGenericEntityService> _entityServiceMock = new(MockBehavior.Strict);
 
     private DataverseObservationMirror CreateSut(
-        InsightsMirrorOptions? options = null)
+        InsightsMirrorOptions? options = null,
+        Random? random = null)
     {
         options ??= new InsightsMirrorOptions
         {
@@ -47,7 +48,8 @@ public class DataverseObservationMirrorTests
         return new DataverseObservationMirror(
             _entityServiceMock.Object,
             Options.Create(options),
-            NullLogger<DataverseObservationMirror>.Instance);
+            NullLogger<DataverseObservationMirror>.Instance,
+            random);
     }
 
     private static ObservationArtifact MakeObservation(
@@ -503,5 +505,334 @@ public class DataverseObservationMirrorTests
         Func<Task> act = () => sut.MirrorAsync(MakeObservation(), CancellationToken.None);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // QA disposition sampling (task 052 D-P11)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Wire up the entity-service mock to return a successful happy-path so a single
+    /// MirrorAsync call writes one row that the caller can inspect via the captured Entity.
+    /// </summary>
+    private Entity? SetupHappyPathAndCaptureEntity()
+    {
+        Entity? captured = null;
+
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_document"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DocumentLookupResult(DocumentId));
+
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_analysis"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => captured = e)
+            .ReturnsAsync(AnalysisId);
+
+        return captured;
+    }
+
+    [Fact]
+    public async Task MirrorAsync_DefaultSamplingPercentage_TagsRowPendingReview()
+    {
+        // Default options (no SamplingPercentage override) = Phase 1 100% sampling.
+        Entity? captured = null;
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_document"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DocumentLookupResult(DocumentId));
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_analysis"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => captured = e)
+            .ReturnsAsync(AnalysisId);
+
+        var sut = CreateSut(); // default options: SamplingPercentage = 1.0
+
+        await sut.MirrorAsync(MakeObservation(), CancellationToken.None);
+
+        captured.Should().NotBeNull();
+        captured!.Contains("sprk_disposition").Should().BeTrue(
+            "Phase 1 default (1.0) must tag every Observation PendingReview");
+        ((OptionSetValue)captured["sprk_disposition"]).Value
+            .Should().Be(ObservationMirrorMapper.DispositionPendingReview);
+    }
+
+    [Fact]
+    public async Task MirrorAsync_FullSamplingExplicit_TagsRowPendingReview()
+    {
+        Entity? captured = null;
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_document"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DocumentLookupResult(DocumentId));
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_analysis"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => captured = e)
+            .ReturnsAsync(AnalysisId);
+
+        var sut = CreateSut(new InsightsMirrorOptions
+        {
+            InsightsObservationActionId = ActionId,
+            EnableMirror = true,
+            EnableIdempotencyCheck = true,
+            SamplingPercentage = 1.0,
+        });
+
+        await sut.MirrorAsync(MakeObservation(), CancellationToken.None);
+
+        captured.Should().NotBeNull();
+        captured!.Contains("sprk_disposition").Should().BeTrue();
+        ((OptionSetValue)captured["sprk_disposition"]).Value
+            .Should().Be(ObservationMirrorMapper.DispositionPendingReview);
+    }
+
+    [Fact]
+    public async Task MirrorAsync_ZeroSamplingPercentage_NeverTagsRow()
+    {
+        Entity? captured = null;
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_document"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DocumentLookupResult(DocumentId));
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_analysis"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => captured = e)
+            .ReturnsAsync(AnalysisId);
+
+        var sut = CreateSut(new InsightsMirrorOptions
+        {
+            InsightsObservationActionId = ActionId,
+            EnableMirror = true,
+            EnableIdempotencyCheck = true,
+            SamplingPercentage = 0.0,
+        });
+
+        await sut.MirrorAsync(MakeObservation(), CancellationToken.None);
+
+        captured.Should().NotBeNull();
+        captured!.Contains("sprk_disposition").Should().BeFalse(
+            "0.0 sampling must never tag a row");
+    }
+
+    [Theory]
+    [InlineData(-0.5)] // negative clamps to 0 → never tag
+    [InlineData(double.NegativeInfinity)]
+    public async Task MirrorAsync_NegativeSamplingPercentage_ClampsToZero(double samplingPercentage)
+    {
+        Entity? captured = null;
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_document"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DocumentLookupResult(DocumentId));
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_analysis"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => captured = e)
+            .ReturnsAsync(AnalysisId);
+
+        var sut = CreateSut(new InsightsMirrorOptions
+        {
+            InsightsObservationActionId = ActionId,
+            EnableMirror = true,
+            EnableIdempotencyCheck = true,
+            SamplingPercentage = samplingPercentage,
+        });
+
+        await sut.MirrorAsync(MakeObservation(), CancellationToken.None);
+
+        captured!.Contains("sprk_disposition").Should().BeFalse(
+            "negative sampling must clamp to 0 (no tagging)");
+    }
+
+    [Theory]
+    [InlineData(2.0)] // > 1 clamps to 1 → always tag
+    [InlineData(double.PositiveInfinity)]
+    public async Task MirrorAsync_OverOneSamplingPercentage_ClampsToOne(double samplingPercentage)
+    {
+        Entity? captured = null;
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_document"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DocumentLookupResult(DocumentId));
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_analysis"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => captured = e)
+            .ReturnsAsync(AnalysisId);
+
+        var sut = CreateSut(new InsightsMirrorOptions
+        {
+            InsightsObservationActionId = ActionId,
+            EnableMirror = true,
+            EnableIdempotencyCheck = true,
+            SamplingPercentage = samplingPercentage,
+        });
+
+        await sut.MirrorAsync(MakeObservation(), CancellationToken.None);
+
+        captured!.Contains("sprk_disposition").Should().BeTrue(
+            "over-1 sampling must clamp to 1 (always tag)");
+        ((OptionSetValue)captured["sprk_disposition"]).Value
+            .Should().Be(ObservationMirrorMapper.DispositionPendingReview);
+    }
+
+    /// <summary>
+    /// With a 10% sampling rate and a seeded RNG over 1000 trials, the count of rows
+    /// marked PendingReview should be statistically close to 100. With a fixed seed we
+    /// assert an exact count; the test will only flake on Math.Clamp / Random impl drift
+    /// (extremely unlikely in stable .NET 8).
+    /// </summary>
+    [Fact]
+    public async Task MirrorAsync_TenPercentSampling_TagsAboutTenPercentOfRows()
+    {
+        int taggedCount = 0;
+        int totalCount = 0;
+
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_document"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DocumentLookupResult(DocumentId));
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_analysis"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) =>
+            {
+                totalCount++;
+                if (e.Contains("sprk_disposition")) taggedCount++;
+            })
+            .ReturnsAsync(AnalysisId);
+
+        // Seeded RNG → deterministic test outcome (drift-free unless framework changes).
+        var sut = CreateSut(
+            new InsightsMirrorOptions
+            {
+                InsightsObservationActionId = ActionId,
+                EnableMirror = true,
+                EnableIdempotencyCheck = false, // skip dedup query (irrelevant to sampling)
+                SamplingPercentage = 0.10,
+            },
+            random: new Random(42));
+
+        for (var i = 0; i < 1000; i++)
+        {
+            // Vary observation id per iteration so the SHA-256 idempotency keys differ
+            // (we already disabled the idempotency-check query, but the keys still get
+            // serialized into the entity so distinct ids = realistic test).
+            await sut.MirrorAsync(MakeObservation(id: $"obs:test:{i}"), CancellationToken.None);
+        }
+
+        totalCount.Should().Be(1000);
+        // Expectation = 100 ± 3-sigma binomial band ~30 for n=1000, p=0.1; seeded RNG
+        // produces a stable value within this range.
+        taggedCount.Should().BeInRange(70, 130,
+            $"10% sampling over 1000 trials must produce ~100 tagged rows (got {taggedCount})");
+    }
+
+    /// <summary>
+    /// Exact deterministic check with seed=42 on Random.NextDouble(). Asserts the test rig
+    /// is wired correctly (sampling logic is invoked once per call, not at construction or
+    /// in batch).
+    /// </summary>
+    [Fact]
+    public async Task MirrorAsync_SamplingIsDecidedPerCall_NotAtConstruction()
+    {
+        Entity? captured = null;
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_document"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DocumentLookupResult(DocumentId));
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_analysis"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => captured = e)
+            .ReturnsAsync(AnalysisId);
+
+        // Custom RNG that returns 0.5 on first call. With sampling rate 0.6 → 0.5 < 0.6 → tag.
+        // With sampling rate 0.4 → 0.5 >= 0.4 → don't tag.
+        var fixedRng = new FixedSequenceRandom(0.5);
+
+        var sutTagsIt = CreateSut(
+            new InsightsMirrorOptions
+            {
+                InsightsObservationActionId = ActionId,
+                EnableMirror = true,
+                EnableIdempotencyCheck = false,
+                SamplingPercentage = 0.6,
+            },
+            random: fixedRng);
+
+        await sutTagsIt.MirrorAsync(MakeObservation(id: "obs:fixed:tag"), CancellationToken.None);
+        captured!.Contains("sprk_disposition").Should().BeTrue("0.5 < 0.6 → tag");
+        captured = null;
+
+        var fixedRng2 = new FixedSequenceRandom(0.5);
+        var sutSkipsIt = CreateSut(
+            new InsightsMirrorOptions
+            {
+                InsightsObservationActionId = ActionId,
+                EnableMirror = true,
+                EnableIdempotencyCheck = false,
+                SamplingPercentage = 0.4,
+            },
+            random: fixedRng2);
+
+        await sutSkipsIt.MirrorAsync(MakeObservation(id: "obs:fixed:skip"), CancellationToken.None);
+        captured!.Contains("sprk_disposition").Should().BeFalse("0.5 >= 0.4 → no tag");
+    }
+
+    /// <summary>
+    /// Deterministic Random subclass that always returns a fixed double sequence. Used to
+    /// pin sampling-rate boundary tests.
+    /// </summary>
+    private sealed class FixedSequenceRandom : Random
+    {
+        private readonly double _value;
+        public FixedSequenceRandom(double value) { _value = value; }
+        protected override double Sample() => _value;
     }
 }

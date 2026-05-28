@@ -68,15 +68,31 @@ public sealed class DataverseObservationMirror : IObservationMirror
     private readonly IGenericEntityService _entityService;
     private readonly InsightsMirrorOptions _options;
     private readonly ILogger<DataverseObservationMirror> _logger;
+    private readonly Random _random;
 
     public DataverseObservationMirror(
         IGenericEntityService entityService,
         IOptions<InsightsMirrorOptions> options,
         ILogger<DataverseObservationMirror> logger)
+        : this(entityService, options, logger, random: null)
+    {
+    }
+
+    /// <summary>
+    /// Test-only constructor accepting an injectable <see cref="Random"/> so sampling-rate
+    /// behaviour can be asserted deterministically (seeded RNG). Production callers use the
+    /// 3-arg ctor which defaults to <see cref="Random.Shared"/>.
+    /// </summary>
+    internal DataverseObservationMirror(
+        IGenericEntityService entityService,
+        IOptions<InsightsMirrorOptions> options,
+        ILogger<DataverseObservationMirror> logger,
+        Random? random)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _random = random ?? Random.Shared;
     }
 
     /// <inheritdoc />
@@ -135,11 +151,22 @@ public sealed class DataverseObservationMirror : IObservationMirror
             }
         }
 
-        // 5. Build + write the row
+        // 5. Sampling draw (task 052 D-P11): decide whether to tag this row for the QA
+        // review queue. Clamp probability to [0, 1]; values outside this range are operator
+        // misconfigurations and should fail safe (0 = no sampling, 1 = always sample).
+        var samplingProbability = Math.Clamp(_options.SamplingPercentage, 0.0, 1.0);
+        int? disposition = null;
+        if (samplingProbability > 0.0 && _random.NextDouble() < samplingProbability)
+        {
+            disposition = ObservationMirrorMapper.DispositionPendingReview;
+        }
+
+        // 6. Build + write the row
         var entity = ObservationMirrorMapper.BuildEntity(
             observation,
             _options.InsightsObservationActionId,
-            documentId.Value);
+            documentId.Value,
+            disposition);
 
         try
         {

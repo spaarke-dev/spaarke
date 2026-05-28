@@ -50,4 +50,26 @@ public sealed class InsightsMirrorOptions
     /// orchestrator is guaranteed not to re-run.
     /// </summary>
     public bool EnableIdempotencyCheck { get; init; } = true;
+
+    /// <summary>
+    /// Probability in [0.0, 1.0] that a mirrored Observation row is marked
+    /// <c>sprk_disposition = PendingReview (100000000)</c> for the model-driven review queue
+    /// surfaced by task 052 (D-P11). When the random draw falls within the sampling band,
+    /// the row carries the PendingReview disposition (visible in the "Insights Observations
+    /// — Review Queue" view); otherwise <c>sprk_disposition</c> is left null and the row is
+    /// invisible to reviewers.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Phase 1 default = 1.0 (100% sampling)</b> — the calibration period requires every
+    /// Observation be reviewable so SMEs can establish ground-truth disposition rates per
+    /// predicate / per Layer. Once threshold-drift data is available (Phase 1.5+), operators
+    /// may lower to 0.10 (initial steady-state) then 0.01–0.02 (long-run QA sampling).
+    /// </para>
+    /// <para>
+    /// <b>Values outside [0.0, 1.0]</b> are clamped at the mirror callsite: ≤0 disables
+    /// sampling (no row ever marked PendingReview), ≥1 enables 100% sampling.
+    /// </para>
+    /// </remarks>
+    public double SamplingPercentage { get; init; } = 1.0;
 }

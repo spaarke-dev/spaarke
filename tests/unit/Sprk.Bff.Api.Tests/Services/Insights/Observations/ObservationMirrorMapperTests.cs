@@ -326,4 +326,50 @@ public class ObservationMirrorMapperTests
         var entity = ObservationMirrorMapper.BuildEntity(MakeObservation(quote: null), ActionId, DocumentId);
         entity["sprk_workingdocument"].Should().Be(string.Empty);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BuildEntity — QA disposition (task 052 D-P11)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildEntity_DefaultDisposition_FieldOmitted()
+    {
+        // Backwards-compatible: 3-arg overload (no disposition) leaves the field unset.
+        var entity = ObservationMirrorMapper.BuildEntity(MakeObservation(), ActionId, DocumentId);
+        entity.Contains("sprk_disposition").Should().BeFalse(
+            "row with no sampling tag must be invisible to the review queue");
+    }
+
+    [Fact]
+    public void BuildEntity_NullDispositionExplicit_FieldOmitted()
+    {
+        var entity = ObservationMirrorMapper.BuildEntity(MakeObservation(), ActionId, DocumentId, disposition: null);
+        entity.Contains("sprk_disposition").Should().BeFalse();
+    }
+
+    [Fact]
+    public void BuildEntity_PendingReviewDisposition_FieldSetToOptionSetValue()
+    {
+        var entity = ObservationMirrorMapper.BuildEntity(
+            MakeObservation(),
+            ActionId,
+            DocumentId,
+            disposition: ObservationMirrorMapper.DispositionPendingReview);
+
+        entity.Contains("sprk_disposition").Should().BeTrue();
+        entity["sprk_disposition"].Should().BeOfType<OptionSetValue>();
+        ((OptionSetValue)entity["sprk_disposition"]).Value
+            .Should().Be(ObservationMirrorMapper.DispositionPendingReview);
+        ((OptionSetValue)entity["sprk_disposition"]).Value
+            .Should().Be(100000000); // pin the protocol value (option set ids are public contract)
+    }
+
+    [Fact]
+    public void DispositionConstants_StableNumericValues()
+    {
+        // Pin the protocol numeric value — these are read by the Dataverse view filter
+        // and must not drift without coordinated solution + view re-export.
+        ObservationMirrorMapper.DispositionPendingReview.Should().Be(100000000);
+        ObservationMirrorMapper.DispositionField.Should().Be("sprk_disposition");
+    }
 }

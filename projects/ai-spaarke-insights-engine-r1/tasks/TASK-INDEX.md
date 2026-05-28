@@ -67,7 +67,7 @@
 |---|---|---|---|---|---|---|
 | [050](050-spe-upload-consumer.poml) | D-P8 | SPE-upload event consumer (BackgroundService or Function) | ✅ | 1d | ✅ | 042 |
 | [051](051-observation-mirror-sync.poml) | D-P11 (mirror) | Observation mirror sync to sprk_analysis polymorphic | ✅ | 4h | ✅ | 021, 025 |
-| [052](052-observation-review-surface.poml) | D-P11 (view) | Dataverse model-driven view + disposition workflow | 🔲 | 6h | ✅ | 051 |
+| [052](052-observation-review-surface.poml) | D-P11 (view) | Dataverse model-driven view + disposition workflow | ✅ | 6h | ✅ | 051 |
 
 ### Wave 7 — Synthesis + endpoint (parallel)
 

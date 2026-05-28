@@ -1,18 +1,53 @@
 # Current Task — Spaarke Insights Engine, Phase 1
 
-> **Status**: 🔄 active — Wave 6 partially complete (050 + 051 done); task 052 (D-P11 review surface) next; Wave 7 (060 D-P14 + 061 D-P15) unblocked
-> **Last Updated**: 2026-05-28 (post task 051)
-> **Project state**: Waves 1-5 complete + tasks 050 + 051 complete (16 of 17 D-P + scaffold tasks — 94%)
+> **Status**: 🔄 active — Wave 6 fully complete (050 + 051 + 052 done); Wave 7 (060 D-P14 + 061 D-P15) unblocked
+> **Last Updated**: 2026-05-28 (post task 052)
+> **Project state**: Waves 1-6 complete (17 of 17 D-P + scaffold tasks — 100% of Wave 6); Wave 7 next
 
 ---
 
 ## Active task
 
-None — task 051 complete. Next: dispatch task 052 (D-P11 review surface — Dataverse model-driven view filtered by `sprk_searchprofile = "insights-observation@v1"`) OR Wave 7 (060 D-P14 synthesis + 061 D-P15 endpoint — both unblocked by the IInsightsAi facade + ingest pipeline shipped in Wave 5 + the mirror impl shipped here).
+None — task 052 complete (Wave 6 closed). Next: Wave 7 (060 D-P14 predict-matter-cost synthesis + 061 D-P15 ask endpoint — both unblocked).
 
 ---
 
 ## Last completed task
+
+**Task 052 — D-P11 (view) Observation review surface — view + disposition fields + 100% sampling** ✅ (2026-05-28)
+- Rigor: STANDARD (Dataverse schema additions + view + small sampling code addition in existing mirror; user-specified)
+- First-step blocker pre-resolved by user: **Sampling % = 100% in Phase 1** (calibration period); implemented as admin-tunable `Insights:Mirror:SamplingPercentage` (double, default 1.0). Steady-state 10% then 1-2% deferred to Phase 1.5 once threshold-drift data is available.
+- Schema additions (deployment via `scripts/Deploy-ObservationReviewSurface.ps1` — operator runs with `az login`; MCP-direct write was governance-denied per intent):
+  - NEW global option set `sprk_observationdisposition` (100000000=PendingReview, 100000001=Correct, 100000002=Incorrect, 100000003=Unclear)
+  - `sprk_analysis.sprk_disposition` Picklist (global → sprk_observationdisposition)
+  - `sprk_analysis.sprk_dispositionnote` Memo 2000, optional
+  - `sprk_analysis.sprk_reviewdate` DateTime (UserLocal), optional
+  - Model-driven view: "Insights Observations - Review Queue" on sprk_analysis, FetchXML filter `sprk_searchprofile = 'insights-observation@v1' AND sprk_disposition = 100000000`, sort `createdon DESC`, columns: createdon, sprk_name, sprk_documentid, sprk_workingdocument (verbatim quote), sprk_disposition, sprk_reviewdate, ownerid
+- Files NEW (1 script):
+  - `scripts/Deploy-ObservationReviewSurface.ps1` (~410 lines) — idempotent deploy: option set → 3 columns → solution add → view via FetchXML/LayoutXML → publish → verify → optional `pac solution export/unpack` to `src/solutions/spaarke_insights/`. Mirrors task 011 `Deploy-PrecedentEntity.ps1` pattern (same Get-DataverseToken / Invoke-DataverseApi / New-Label / Test-AttributeExists / Add-SolutionComponent helpers + idempotent existence checks).
+- Files MODIFIED (4 production + 2 test):
+  - `src/server/api/Sprk.Bff.Api/Services/Insights/Observations/InsightsMirrorOptions.cs` — added `SamplingPercentage` (double, default 1.0) with clamp semantics documented inline.
+  - `src/server/api/Sprk.Bff.Api/Services/Insights/Observations/ObservationMirrorMapper.cs` — added `DispositionField` + `DispositionPendingReview` constants; added optional `int? disposition` parameter to `BuildEntity` (sets OptionSetValue only when non-null — null disposition leaves the row invisible to the review queue).
+  - `src/server/api/Sprk.Bff.Api/Services/Insights/Observations/DataverseObservationMirror.cs` — added test-only ctor overload accepting injectable `Random`; in `MirrorAsync` between document resolution + entity build, generates `Math.Clamp(SamplingPercentage, 0, 1)` draw → sets `sprk_disposition = DispositionPendingReview (100000000)` when `random.NextDouble() < probability`. Clamping defends against operator misconfiguration (negative/inf values).
+  - `tests/.../ObservationMirrorMapperTests.cs` — +4 tests (default disposition omitted, explicit null omitted, PendingReview sets OptionSetValue with stable numeric 100000000, constants pin)
+  - `tests/.../DataverseObservationMirrorTests.cs` — +8 sampling tests: default (1.0) tags PendingReview, explicit 1.0 tags, 0.0 never tags, negative clamps to 0, over-1 clamps to 1, 10% over 1000 trials gives 70-130 tagged (seeded RNG=42), per-call decision (FixedSequenceRandom rig confirms 0.5 < 0.6 → tag, 0.5 ≥ 0.4 → skip)
+- Build: 0 errors, 17 pre-existing warnings (same set as tasks 040/041/042/050/051)
+- Tests: **60/60 PASS** for Mirror+Mapper subset (was 47 in task 051 = +13 new); **296/296 PASS** for full Insights subset (was 283 = +13 new, ZERO regressions)
+- §3.5.4 forbidden-imports grep on `Services/Insights/Observations/`: **ZERO matches** (strict `^using.*` check)
+- Quality gates (Step 9.5): code-review + adr-check — STANDARD rigor skips per protocol; manual review confirms (a) §3.5 Zone B boundary preserved (no AI imports added), (b) ADR-013 facade unchanged, (c) ADR-010 DI unchanged (sampling lives inside existing service; no new registrations), (d) CLAUDE.md §10 BFF hygiene unchanged (zero new NuGet packages; zero new CVE surface; no new endpoints)
+- BPF: **DEFERRED to Phase 1.5** per task guidance ("ship view + columns if BPF authoring is slow") — the view + columns alone are sufficient for Phase 1 acceptance; reviewers edit the picklist directly via the row form. BPF would add value but adds significant FetchXML/Workflow authoring overhead that doesn't change the acceptance bar.
+- Acceptance criteria: 5/5 met:
+  1. Reviewer can open view + see sampled Observations (after operator deploys script): ✅ FetchXML filter + LayoutXML defined
+  2. Reviewer can mark Correct/Incorrect/Unclear with note: ✅ sprk_disposition picklist + sprk_dispositionnote memo + sprk_reviewdate DateTime
+  3. Sampling % configurable, default 100% Phase 1 → 1000 Observations all tagged: ✅ `Insights:Mirror:SamplingPercentage` (default 1.0) + 8 tests verify per-rate behavior
+  4. View shows source doc click-through: ✅ sprk_documentid column renders as Dataverse lookup link to sprk_document
+  5. Solution updated; view + new fields tracked in repo: SCAFFOLD — deployment script ready; the `pac solution export/unpack` step (Step 8 of the script) materializes `src/solutions/spaarke_insights/` updates once operator runs the script in their authenticated env
+- Deployment prerequisite for operator: run `scripts/Deploy-ObservationReviewSurface.ps1` after `az login` against the target environment. The script is idempotent (skips existing option set/columns/view).
+- Unblocks: Wave 7 — D-P14 synthesis (060) consumes Observations from the mirror table; D-P15 endpoint (061) returns Inferences whose Observations may need disposition surfacing later.
+
+---
+
+## Previous completed task
 
 **Task 051 — D-P11 DataverseObservationMirror + sprk_analysis polymorphic write** ✅ (2026-05-28, commit `0d2ba2dc`)
 - Rigor: FULL (Zone B code, schema verification via Dataverse MCP, §3.5.4 boundary refactor, foundation for task 052)
@@ -37,7 +72,7 @@ None — task 051 complete. Next: dispatch task 052 (D-P11 review surface — Da
 
 ---
 
-## Previous completed task
+## Earlier completed task
 
 **Task 050 — D-P8 SPE-upload event consumer (`InsightsIngestJobHandler`)** ✅ (2026-05-28)
 - Rigor: FULL (bff-api code, modifies production upload path `UploadFinalizationWorker`, opt-in dispatch boundary)

@@ -66,6 +66,16 @@ public static class ObservationMirrorMapper
     /// <summary>Maximum length of the <c>sprk_name</c> field per schema.</summary>
     public const int NameMaxLength = 200;
 
+    /// <summary>Field name carrying the QA disposition picklist (task 052).</summary>
+    public const string DispositionField = "sprk_disposition";
+
+    /// <summary>
+    /// <c>sprk_disposition</c> picklist value for "Pending Review" — set on mirror write
+    /// when the per-Observation sampling draw fires (task 052). Reviewers see only rows
+    /// with this disposition in the "Insights Observations — Review Queue" view.
+    /// </summary>
+    public const int DispositionPendingReview = 100000000;
+
     /// <summary>
     /// Compute the deterministic idempotency key for an Observation. SHA-256 over
     /// <see cref="InsightArtifact.Id"/>, hex-encoded, truncated to
@@ -96,13 +106,18 @@ public static class ObservationMirrorMapper
     /// "Insights Observation Mirror" semantic. Required, non-empty.</param>
     /// <param name="documentId">GUID of the resolved <c>sprk_document</c> row. Required,
     /// non-empty (the schema enforces NOT NULL).</param>
+    /// <param name="disposition">Optional picklist value for <c>sprk_disposition</c>
+    /// (task 052). When non-null, the row is tagged with this disposition (typically
+    /// <see cref="DispositionPendingReview"/> when the sampling draw fires); when null,
+    /// the column is left unset and the row is invisible to the review queue.</param>
     /// <returns>An <see cref="Entity"/> ready for <c>IGenericEntityService.CreateAsync</c>.</returns>
     /// <exception cref="ArgumentNullException">When <paramref name="observation"/> is null.</exception>
     /// <exception cref="ArgumentException">When required GUIDs are empty.</exception>
     public static Entity BuildEntity(
         ObservationArtifact observation,
         Guid analysisActionId,
-        Guid documentId)
+        Guid documentId,
+        int? disposition = null)
     {
         ArgumentNullException.ThrowIfNull(observation);
 
@@ -143,6 +158,13 @@ public static class ObservationMirrorMapper
             // Primary verbatim quote (Layer 2 outcome extraction signature)
             ["sprk_workingdocument"] = ExtractPrimaryQuote(observation) ?? string.Empty,
         };
+
+        // QA disposition (task 052) — set only when sampling draw fires; null disposition
+        // means the row is invisible to the "Insights Observations — Review Queue" view.
+        if (disposition.HasValue)
+        {
+            entity[DispositionField] = new OptionSetValue(disposition.Value);
+        }
 
         return entity;
     }
