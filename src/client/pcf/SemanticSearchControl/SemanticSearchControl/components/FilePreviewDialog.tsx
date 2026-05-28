@@ -1,6 +1,43 @@
 /**
  * FilePreviewDialog — Modal for document preview.
  *
+ * v1.1.50 (Item 8) — Shared-component analysis decision: Option B.
+ *
+ *   The shared library has its own `FilePreviewDialog` at
+ *   `@spaarke/ui-components/dist/components/FilePreview/FilePreviewDialog`
+ *   but it is significantly behind this PCF-local version:
+ *     - 880px max-width (vs 1280px here)
+ *     - Single-column body with a top Toolbar (no 2-column metadata pane)
+ *     - No Prev/Next navigation
+ *     - No 3-dot DocumentRowMenu (the PCF version uses FR-DOC-01 dispatch)
+ *     - Services injected via `IFilePreviewServices` prop (different API
+ *       shape from this version's callback prop API)
+ *     - No AI summary section / Tags chip / Details grid
+ *
+ *   Promoting this richer version into `Spaarke.UI.Components` as the
+ *   canonical shared dialog is the RIGHT long-term move (so the Document
+ *   Viewer Code Page + Office Add-ins + any other consumer inherit the
+ *   same surface). It requires:
+ *     1. Moving the implementation into the shared lib alongside the
+ *        existing `FilePreview/` folder (or replacing it).
+ *     2. Adapting the prop API to the shared lib's pattern (services
+ *        injection vs raw callbacks) WHILE preserving the navigation,
+ *        prev/next, and metadata pane features added in v1.1.46-v1.1.50.
+ *     3. Rebuilding the shared `dist/` and updating PCF imports to the
+ *        new deep-path.
+ *     4. Updating the Document Viewer Code Page + other consumers.
+ *
+ *   That work is 3-5 hours minimum (file moves, type re-exports, barrel
+ *   updates, build + verify across consumers). To keep v1.1.50 scoped
+ *   to UX polish, we ship this round with the local version unchanged
+ *   and queue the promotion as a follow-up.
+ *
+ *   v1.1.51 follow-up: promote this local FilePreviewDialog into
+ *   `@spaarke/ui-components/dist/components/FilePreview/FilePreviewDialog`
+ *   (replacing or extending the existing 880px version), then update
+ *   the Document Viewer Code Page to import the shared one. Track in
+ *   the matter-ui-r1 backlog.
+ *
  * Per FR-DOC-03 (task 044), the dialog uses a 2-column body layout
  * (left iframe · 320 px metadata pane) clamped to a max-width.
  * The metadata pane renders three sections top→bottom:
@@ -77,7 +114,9 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import {
-  Sparkle20Filled,
+  // v1.1.50 (Item 6) — Sparkle20Filled removed; the inline AI summary
+  // section is no longer rendered. AI summary is reachable via the
+  // 3-dot menu and via the list-view + card-view sparkle columns.
   ChevronLeft20Regular,
   ChevronRight20Regular,
 } from '@fluentui/react-icons';
@@ -490,26 +529,22 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState(false);
 
-  // AI summary state — lazily fetched once per dialog open. Reset on close.
-  const [summary, setSummary] = React.useState<IFilePreviewDialogSummary | null>(null);
-  const [summaryLoading, setSummaryLoading] = React.useState(false);
-  const [summaryError, setSummaryError] = React.useState(false);
+  // v1.1.50 (Item 6) — AI summary state + effect REMOVED. The summary
+  // section no longer renders inline; the AI Summary is reachable via
+  // the list-view sparkle column, card-view sparkle icon, and the 3-dot
+  // menu's "AI summary" item (when `onFetchSummary` is wired). The
+  // `onFetchSummary` prop is retained on the API surface for back-compat
+  // and still drives the menu-item visibility through `disabledActions`.
 
   // Fetch preview URL when dialog opens — pipeline unchanged from task 040.
   // v1.1.46 — when the parent navigates (Prev/Next) and swaps `documentId` +
-  // `fetchPreviewUrl`, this effect re-fires. We also reset `previewUrl` and
-  // `summary` to null at the top so the old iframe + old summary text don't
-  // briefly flash while the new ones are fetching. Adding `documentId` to
-  // deps is belt-and-braces: parent SHOULD also pass a fresh fetchPreviewUrl
-  // closure on navigation, but if any caller forgets, the documentId change
-  // alone still triggers the refresh.
+  // `fetchPreviewUrl`, this effect re-fires. We also reset `previewUrl` to
+  // null at the top so the old iframe doesn't briefly flash while the new
+  // one is fetching. Adding `documentId` to deps is belt-and-braces.
   React.useEffect(() => {
     if (!open) {
       setPreviewUrl(null);
       setError(false);
-      // Also reset summary state on close so the next open re-fetches.
-      setSummary(null);
-      setSummaryError(false);
       return;
     }
 
@@ -533,34 +568,6 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
       cancelled = true;
     };
   }, [open, documentId, fetchPreviewUrl]);
-
-  // Fetch AI summary when dialog opens (only if caller provided a fetcher).
-  // v1.1.46 — also re-fires when `documentId` changes so Prev/Next swaps
-  // the summary text alongside the preview iframe.
-  React.useEffect(() => {
-    if (!open || !onFetchSummary) return;
-
-    let cancelled = false;
-    setSummary(null);
-    setSummaryLoading(true);
-    setSummaryError(false);
-
-    void onFetchSummary()
-      .then(data => {
-        if (cancelled) return;
-        setSummary(data);
-        setSummaryLoading(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setSummaryError(true);
-        setSummaryLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, documentId, onFetchSummary]);
 
   const handleRetry = React.useCallback(() => {
     setLoading(true);
@@ -803,47 +810,11 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
     return <div className={styles.centerContent} />;
   };
 
-  const renderSummarySection = (): React.ReactElement => {
-    // No fetcher provided — render the empty state without firing any request.
-    if (!onFetchSummary) {
-      return (
-        <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-          Summary not available for this document.
-        </Text>
-      );
-    }
-    if (summaryLoading) {
-      return <Spinner size="small" label="Loading summary..." labelPosition="after" />;
-    }
-    if (summaryError) {
-      return (
-        <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-          Summary not available for this document.
-        </Text>
-      );
-    }
-    if (!summary || (!summary.tldr && !summary.summary)) {
-      return (
-        <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-          No summary available for this document.
-        </Text>
-      );
-    }
-    return (
-      <>
-        {summary.tldr && (
-          <Text className={styles.summaryTldr} size={300}>
-            {summary.tldr}
-          </Text>
-        )}
-        {summary.summary && (
-          <Text className={styles.summaryBody} size={200}>
-            {summary.summary}
-          </Text>
-        )}
-      </>
-    );
-  };
+  // v1.1.50 (Item 6) — `renderSummarySection` helper REMOVED.
+  // The inline AI summary section is no longer rendered (see metadata
+  // pane render below). The `onFetchSummary` prop is preserved for
+  // back-compat and still gates the 3-dot menu's "AI summary" item via
+  // `disabledActions`.
 
   const renderTagSection = (): React.ReactElement => {
     if (!documentType || documentType.trim().length === 0) {
@@ -965,16 +936,21 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
         <div className={styles.body} role="group" aria-label="Document preview body">
           <div className={styles.thumbnailCell}>{renderPreviewArea()}</div>
           <div className={styles.metadataPane}>
-            {/* Section 1: AI summary */}
-            <section className={styles.section} aria-labelledby="fpd-summary-heading">
-              <Text id="fpd-summary-heading" className={styles.sectionHeader} size={300}>
-                <Sparkle20Filled aria-hidden="true" />
-                AI summary
-              </Text>
-              {renderSummarySection()}
-            </section>
+            {/* v1.1.50 (Item 6) — AI summary section REMOVED from the
+                metadata pane. The summary is still reachable via:
+                  - The 3-dot menu's "AI summary" item (visible when
+                    `onFetchSummary` is wired) which the host opens with
+                    the AiSummaryPopover trigger ref.
+                  - The list-view sparkle column AND the card-view
+                    sparkle icon (both share the AiSummaryPopover surface).
+                The `renderSummarySection` helper + onFetchSummary prop
+                are retained for back-compat of the prop API (callers can
+                still pass the fetcher even though the dialog no longer
+                renders the section inline). The `aiSummary` menu item is
+                still hidden via `disabledActions` when no fetcher exists,
+                so behavior is unchanged on that path. */}
 
-            {/* Section 2: Tags */}
+            {/* Section 1: Tags */}
             <section className={styles.section} aria-labelledby="fpd-tags-heading">
               <Text id="fpd-tags-heading" className={styles.sectionHeader} size={300}>
                 Tags
@@ -982,7 +958,7 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
               {renderTagSection()}
             </section>
 
-            {/* Section 3: Details */}
+            {/* Section 2: Details */}
             <section className={styles.section} aria-labelledby="fpd-details-heading">
               <Text id="fpd-details-heading" className={styles.sectionHeader} size={300}>
                 Details

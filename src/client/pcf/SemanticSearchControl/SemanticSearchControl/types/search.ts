@@ -111,6 +111,26 @@ export interface SearchResult {
   speFileId?: string;
   /** SPE drive ID. Needed alongside speFileId to invoke AI analysis. */
   driveId?: string;
+  /**
+   * v1.1.50 — Relationship origin tag, used to drive the list-view
+   * Relationship + Similarity pill styling (Items 3 + 5).
+   *
+   * - `'associated'`: result came from the direct-association
+   *   (Dataverse-direct) path — i.e. parent record FK match. Pill label
+   *   "Same Matter", blue badge, similarity column shows no percentage
+   *   (the BFF returns 0 score on this path).
+   * - `'semantic'`: result came from the Azure AI Search semantic path.
+   *   Pill label "Semantic", brand-colored badge, similarity column
+   *   shows the combinedScore percentage in a light-yellow pill.
+   *
+   * Tagged client-side by `SemanticSearchApiService.searchUnion` after
+   * merging both paths; on dedupe (same docId in both), "associated"
+   * wins because the direct-association is the stronger signal.
+   *
+   * When undefined (legacy single-path requests), the UI falls back to
+   * inferring from `combinedScore` (zero → associated, >0 → semantic).
+   */
+  relationship?: 'associated' | 'semantic';
 }
 
 /**

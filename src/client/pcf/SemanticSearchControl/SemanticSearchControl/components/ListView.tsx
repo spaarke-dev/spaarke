@@ -1,10 +1,40 @@
 /**
  * ListView component (FR-DOC-04)
  *
- * Tabular list view for the Documents PCF. Renders a Fluent v9 `DataGrid`
- * with the spec column order:
+ * Tabular list view for the Documents PCF. Renders a Fluent v9 `DataGrid`.
  *
- *   Selection checkbox | Pin | Name | Modified | Modified by | Match | Menu
+ * v1.1.50 column order (Items 3 + 5):
+ *
+ *   Select | Pin | Document | Relationship | Similarity | Type | Modified | AI | Menu
+ *
+ * - Document: file-type icon + name (was "Name" in v1.1.49).
+ * - Relationship: NEW (Item 5). Fluent v9 `Badge` showing "Same Matter"
+ *   (color="success", green) when the row's `relationship` tag is
+ *   'associated', or "Semantic" (color="brand", blue) when 'semantic'.
+ *   Determined by `SemanticSearchApiService.searchUnion` tagging.
+ * - Similarity: was "Match" in v1.1.49. Pill background changes based on
+ *   the row's relationship — 'associated' rows show a blue badge with NO
+ *   percentage (user request — direct-association docs report 0%); 'semantic'
+ *   rows show a light-yellow badge with the combinedScore percentage.
+ * - Type: NEW (Item 3). Falls back to `documentType` or file extension.
+ * - AI: NEW (Item 4). Sparkle icon in its own column LEFT of the 3-dot menu;
+ *   reuses the shared `AiSummaryPopover` (same as card view).
+ * - Modified by REMOVED (Item 3) — auxiliary; surfaced in preview metadata.
+ *
+ * Sortable columns: Document (name), Modified, Similarity. Relationship +
+ * Type are non-sortable. Pin lifts to the top regardless of sort.
+ *
+ * v1.1.50 (Items 1 + 2):
+ * - Lazy-load IntersectionObserver sentinel row appended below the
+ *   DataGrid body (Item 1). When the host wires `onLoadMoreSentinel`, the
+ *   sentinel fires the callback on viewport intersection (mirrors the
+ *   card-view ResultsList behavior; same threshold + rootMargin).
+ * - List-view preview dialog can now route through the SAME host-level
+ *   FilePreviewDialog as the card view (Item 2). When the parent supplies
+ *   `onOpenPreview`, ListView no longer mounts its own FilePreviewDialog;
+ *   instead it emits the docId up so the host's single shared dialog
+ *   instance owns Prev/Next navigation across both views. Back-compat:
+ *   when `onOpenPreview` is omitted, the legacy local dialog still renders.
  *
  * v1.1.45 (UAT round 2):
  *   • Switched from `Table` → `DataGrid` so columns become user-resizable.
@@ -42,7 +72,7 @@
 
 import * as React from 'react';
 import {
-  Avatar,
+  Badge,
   Button,
   Checkbox,
   DataGrid,
@@ -72,6 +102,7 @@ import {
   ImageRegular,
   MailRegular,
   Pin20Filled,
+  Sparkle20Regular,
 } from '@fluentui/react-icons';
 // Deep-path imports (NOT the barrel) — the barrel pulls in RichTextEditor →
 // `@lexical/react` ESM modules that don't resolve `react/jsx-runtime` under
@@ -82,6 +113,10 @@ import {
   type DocumentRowAction,
   type IDocumentRowMenuTarget,
 } from '@spaarke/ui-components/dist/components/DocumentRowMenu';
+// v1.1.50 (Item 4) — AI Summary sparkle column. Deep-path import for the
+// same Lexical / React-16 reason as DocumentRowMenu above. Mirrors the
+// card-view `ResultCard.tsx` usage so both surfaces share one popover.
+import { AiSummaryPopover } from '@spaarke/ui-components/dist/components/AiSummaryPopover';
 import { SearchResult, SummaryData } from '../types';
 import { FilePreviewDialog } from './FilePreviewDialog';
 import type { ColumnWidths } from '../hooks/useDocumentListPrefs';
@@ -97,35 +132,49 @@ export type ListSortColumn = 'name' | 'modifiedAt' | 'combinedScore';
 export type ListSortDirection = 'asc' | 'desc';
 
 // Internal DataGrid column ids — string literals so localStorage keys are stable.
+//
+// v1.1.50 (Items 3 + 4 + 5):
+// - COL_NAME → COL_DOCUMENT (label changes from "Name" → "Document"; sort
+//   key still resolves to `'name'` so persisted user prefs from earlier
+//   versions still order correctly).
+// - COL_MODIFIED_BY removed (auxiliary; reachable via preview metadata).
+// - COL_RELATIONSHIP added (Item 5).
+// - COL_TYPE added (Item 3).
+// - COL_AI added (Item 4).
+// COL_MATCH renamed to COL_SIMILARITY in the user-facing header (the
+// internal id stays 'combinedScore' so persisted sort prefs are preserved).
 const COL_SELECT = 'select';
 const COL_PIN = 'pin';
-const COL_NAME = 'name';
+const COL_DOCUMENT = 'name';
+const COL_RELATIONSHIP = 'relationship';
+const COL_SIMILARITY = 'combinedScore';
+const COL_TYPE = 'documentType';
 const COL_MODIFIED = 'modifiedAt';
-const COL_MODIFIED_BY = 'modifiedBy';
-const COL_MATCH = 'combinedScore';
+const COL_AI = 'aiSummary';
 const COL_MENU = 'menu';
 
 // Default intrinsic widths in pixels (used when no user override is persisted).
-// v1.1.47 — Name default widened 360 → 480 px to give long file names room
-// to breathe at typical viewport widths (UAT round 3). User-resized widths
-// still persist via useDocumentListPrefs.columnWidths and win over this default.
 const DEFAULT_WIDTHS: Record<string, number> = {
   [COL_SELECT]: 40,
   [COL_PIN]: 36,
-  [COL_NAME]: 480,
+  [COL_DOCUMENT]: 400,
+  [COL_RELATIONSHIP]: 130,
+  [COL_SIMILARITY]: 100,
+  [COL_TYPE]: 120,
   [COL_MODIFIED]: 130,
-  [COL_MODIFIED_BY]: 180,
-  [COL_MATCH]: 80,
+  [COL_AI]: 40,
   [COL_MENU]: 44,
 };
 
 const MIN_WIDTHS: Record<string, number> = {
   [COL_SELECT]: 40,
   [COL_PIN]: 36,
-  [COL_NAME]: 140,
+  [COL_DOCUMENT]: 160,
+  [COL_RELATIONSHIP]: 110,
+  [COL_SIMILARITY]: 80,
+  [COL_TYPE]: 80,
   [COL_MODIFIED]: 90,
-  [COL_MODIFIED_BY]: 100,
-  [COL_MATCH]: 60,
+  [COL_AI]: 40,
   [COL_MENU]: 44,
 };
 
@@ -311,31 +360,37 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
     display: 'block',
   },
-  avatarRow: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-    minWidth: 0,
-    ...shorthands.overflow('hidden'),
-  },
-  modifiedByName: {
-    ...shorthands.overflow('hidden'),
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    minWidth: 0,
-  },
-  scoreBadge: {
+  // v1.1.50 — Similarity pill base. Padding/typography only; per-row
+  // background + foreground colors are layered via `similaritySemantic`
+  // or `similarityAssociated` so the same chrome carries both palettes.
+  // All tokens (ADR-021); dark-mode safe.
+  similarityBase: {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
     ...shorthands.borderRadius(tokens.borderRadiusSmall),
-    ...shorthands.padding('1px', tokens.spacingHorizontalXS),
+    ...shorthands.padding('1px', tokens.spacingHorizontalS),
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightSemibold,
     lineHeight: tokens.lineHeightBase100,
     whiteSpace: 'nowrap',
+  },
+  // 'semantic' rows — light yellow (Marigold) palette for both light AND
+  // dark themes; the Fluent v9 Marigond background/foreground tokens
+  // are the closest token-pair to "light yellow" that reads cleanly on
+  // both surfaces (mirrors the card-view mid-tier badge).
+  similaritySemantic: {
+    backgroundColor: tokens.colorPaletteMarigoldBackground2,
+    color: tokens.colorPaletteMarigoldForeground2,
+  },
+  // 'associated' rows — brand blue pill, no percentage text. The empty
+  // chip still occupies the column track so the column doesn't collapse
+  // on rows that have no similarity score.
+  similarityAssociated: {
     backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorBrandForeground1,
+    minWidth: '20px',
+    minHeight: '14px',
   },
   iconButton: {
     minWidth: 'auto',
@@ -398,6 +453,31 @@ export interface IListViewProps {
   onCopyLink: (result: SearchResult) => void;
   onToggleWorkspace: (result: SearchResult) => void;
   isInWorkspace: (result: SearchResult) => boolean;
+
+  /**
+   * v1.1.50 (Item 2) — When provided, ListView routes preview-open through
+   * the SAME host-mounted FilePreviewDialog used by the card view (Item 6
+   * from v1.1.49). The local `<FilePreviewDialog />` instance is suppressed
+   * so list AND card views share one navigation set across the entire PCF
+   * surface (selection wins; otherwise full sorted/filtered results).
+   *
+   * When omitted, the legacy local FilePreviewDialog still renders, so
+   * any standalone caller / unit test that doesn't wire host preview still
+   * works (back-compat).
+   */
+  onOpenPreview?: (documentId: string) => void;
+
+  /**
+   * v1.1.50 (Item 1) — Lazy-load infinite-scroll sentinel. When supplied,
+   * a 1-px sentinel row is appended below the DataGrid body and an
+   * IntersectionObserver fires this callback when the sentinel enters the
+   * viewport. Mirrors `ResultsList.onLoadMoreSentinel` so the host can
+   * route both views through one load-more pipeline.
+   *
+   * When omitted, no sentinel is mounted; existing pagination semantics
+   * are unchanged.
+   */
+  onLoadMoreSentinel?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -424,13 +504,54 @@ export const ListView: React.FC<IListViewProps> = ({
   onCopyLink,
   onToggleWorkspace,
   isInWorkspace,
+  onOpenPreview,
+  onLoadMoreSentinel,
 }) => {
   const styles = useStyles();
+
+  // v1.1.50 (Item 2) — Host-level preview routing.
+  // When `onOpenPreview` is wired, the host owns the FilePreviewDialog and
+  // the local instance is suppressed. We still keep the local-dialog state
+  // path for back-compat when callers don't pass `onOpenPreview`.
+  const useHostPreview = typeof onOpenPreview === 'function';
+  const openPreview = React.useCallback(
+    (docId: string) => {
+      if (useHostPreview) {
+        onOpenPreview!(docId);
+      } else {
+        setPreviewDocId(docId);
+      }
+    },
+    [useHostPreview, onOpenPreview]
+  );
 
   // Preview dialog state. We store the target's documentId (not the full
   // SearchResult) so the active doc tracks any in-place results updates
   // (e.g., docType override applied while the dialog is open).
+  // Only used when useHostPreview === false (back-compat path).
   const [previewDocId, setPreviewDocId] = React.useState<string | null>(null);
+
+  // v1.1.50 (Item 1) — IntersectionObserver sentinel for lazy load.
+  // Attached only when the host wired `onLoadMoreSentinel`. Same
+  // threshold + rootMargin as ResultsList so both views feel identical
+  // when scrolling into the long tail.
+  const sentinelRef = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    if (!onLoadMoreSentinel) return;
+    const node = sentinelRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      entries => {
+        const [entry] = entries;
+        if (entry.isIntersecting) {
+          onLoadMoreSentinel();
+        }
+      },
+      { threshold: 0.1, rootMargin: '200px' }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [onLoadMoreSentinel]);
 
   // Sort the results in render (cheap — caller already filtered).
   const sortedResults = React.useMemo(
@@ -539,17 +660,20 @@ export const ListView: React.FC<IListViewProps> = ({
   };
 
   // ── 3-dot menu dispatch — mirrors ResultCard's handler ────────────────
+  // v1.1.50 — `preview` + `aiSummary` route through `openPreview` so they
+  // honor the host-level preview dialog when wired (Item 2). When the
+  // host isn't wired, openPreview falls back to setPreviewDocId locally.
   const buildRowActionHandler = React.useCallback(
     (result: SearchResult) => (action: DocumentRowAction) => {
       switch (action) {
         case 'preview':
-          setPreviewDocId(result.documentId);
+          openPreview(result.documentId);
           return;
         case 'aiSummary':
           // AI summary in the list view = open the preview dialog where the
           // summary section is integrated. Mirrors the design of ResultCard's
           // sparkle popover but without a separate inline popover surface.
-          setPreviewDocId(result.documentId);
+          openPreview(result.documentId);
           return;
         case 'openFile':
           onOpenFile(result, 'desktop');
@@ -589,7 +713,7 @@ export const ListView: React.FC<IListViewProps> = ({
         }
       }
     },
-    [onOpenFile, onFindSimilar, onCopyLink, onEmailDocument, onOpenRecord, onToggleWorkspace, onTogglePin]
+    [openPreview, onOpenFile, onFindSimilar, onCopyLink, onEmailDocument, onOpenRecord, onToggleWorkspace, onTogglePin]
   );
 
   // ── DataGrid column definitions ───────────────────────────────────────
@@ -644,19 +768,20 @@ export const ListView: React.FC<IListViewProps> = ({
         },
       }),
 
-      // Name column — sortable, ellipsis-truncates.
+      // Document column (v1.1.50 — renamed from "Name") — sortable, ellipsis-truncates.
+      // Sort key still resolves to 'name' so persisted user prefs survive.
       createTableColumn<SearchResult>({
-        columnId: COL_NAME,
+        columnId: COL_DOCUMENT,
         renderHeaderCell: () => (
           <span
             className={styles.sortHeader}
             onClick={() => handleHeaderClick('name')}
             role="button"
-            aria-label={`Sort by name — currently ${
+            aria-label={`Sort by document name — currently ${
               sortColumn === 'name' ? sortDirection : 'unsorted'
             }`}
           >
-            Name{renderSortCaret('name')}
+            Document{renderSortCaret('name')}
           </span>
         ),
         renderCell: (result: SearchResult) => {
@@ -670,12 +795,106 @@ export const ListView: React.FC<IListViewProps> = ({
                 className={styles.nameLink}
                 onClick={ev => {
                   ev.stopPropagation();
-                  setPreviewDocId(result.documentId);
+                  openPreview(result.documentId);
                 }}
               >
                 {result.name}
               </Link>
             </span>
+          );
+        },
+      }),
+
+      // Relationship column (v1.1.50, Item 5) — NEW, non-sortable.
+      // Fluent v9 `Badge` with `color="success"` for 'associated' (green
+      // "Same Matter" pill) or `color="brand"` for 'semantic' (blue
+      // "Semantic" pill). Falls back to score-based inference when the
+      // result's `relationship` tag is undefined (legacy single-path
+      // responses): score=0 → associated, score>0 → semantic.
+      createTableColumn<SearchResult>({
+        columnId: COL_RELATIONSHIP,
+        renderHeaderCell: () => <span>Relationship</span>,
+        renderCell: (result: SearchResult) => {
+          const rel: 'associated' | 'semantic' =
+            result.relationship ??
+            ((result.combinedScore ?? 0) === 0 ? 'associated' : 'semantic');
+          if (rel === 'associated') {
+            return (
+              <Badge appearance="filled" color="success" size="medium" shape="rounded">
+                Same Matter
+              </Badge>
+            );
+          }
+          return (
+            <Badge appearance="filled" color="brand" size="medium" shape="rounded">
+              Semantic
+            </Badge>
+          );
+        },
+      }),
+
+      // Similarity column (v1.1.50 — renamed from "Match") — sortable.
+      // Sort key still resolves to 'combinedScore' so persisted user prefs
+      // survive. Pill styling depends on the row's relationship:
+      //   - 'associated' → blue (brand) pill, NO percentage text
+      //   - 'semantic'   → light-yellow (Marigold) pill, WITH percentage
+      createTableColumn<SearchResult>({
+        columnId: COL_SIMILARITY,
+        renderHeaderCell: () => (
+          <span
+            className={styles.sortHeader}
+            onClick={() => handleHeaderClick('combinedScore')}
+            role="button"
+            aria-label={`Sort by similarity — currently ${
+              sortColumn === 'combinedScore' ? sortDirection : 'unsorted'
+            }`}
+          >
+            Similarity{renderSortCaret('combinedScore')}
+          </span>
+        ),
+        renderCell: (result: SearchResult) => {
+          const rel: 'associated' | 'semantic' =
+            result.relationship ??
+            ((result.combinedScore ?? 0) === 0 ? 'associated' : 'semantic');
+          if (rel === 'associated') {
+            // Direct-association rows: blue pill, NO percentage (BFF
+            // returns 0% on this path so the number is meaningless).
+            return (
+              <span
+                className={mergeClasses(styles.similarityBase, styles.similarityAssociated)}
+                role="img"
+                aria-label="Direct association"
+              />
+            );
+          }
+          const pct = Math.round((result.combinedScore ?? 0) * 100);
+          return (
+            <span
+              className={mergeClasses(styles.similarityBase, styles.similaritySemantic)}
+              role="img"
+              aria-label={`Semantic similarity: ${pct}%`}
+            >
+              {pct}%
+            </span>
+          );
+        },
+      }),
+
+      // Type column (v1.1.50, Item 3) — NEW, non-sortable.
+      // Falls back to file extension when documentType is empty so the
+      // column always has something to display (e.g. "pdf", "docx").
+      createTableColumn<SearchResult>({
+        columnId: COL_TYPE,
+        renderHeaderCell: () => <span>Type</span>,
+        renderCell: (result: SearchResult) => {
+          const typeLabel =
+            (result.documentType && result.documentType.trim().length > 0
+              ? result.documentType
+              : result.fileType) || '';
+          return (
+            <Text size={200} title={typeLabel}>
+              {typeLabel}
+            </Text>
           );
         },
       }),
@@ -700,48 +919,30 @@ export const ListView: React.FC<IListViewProps> = ({
         ),
       }),
 
-      // Modified by column — non-sortable.
+      // AI Summary column (v1.1.50, Item 4) — NEW, non-sortable.
+      // Sparkle icon that opens the SHARED AiSummaryPopover (same as the
+      // card-view sparkle in ResultCard.tsx). Sits directly to the LEFT
+      // of the 3-dot menu column.
       createTableColumn<SearchResult>({
-        columnId: COL_MODIFIED_BY,
-        renderHeaderCell: () => <span>Modified by</span>,
-        renderCell: (result: SearchResult) =>
-          result.modifiedBy ? (
-            <span className={styles.avatarRow}>
-              <Avatar name={result.modifiedBy} size={20} aria-hidden="true" />
-              <Text size={200} className={styles.modifiedByName} title={result.modifiedBy}>
-                {result.modifiedBy}
-              </Text>
-            </span>
-          ) : null,
-      }),
-
-      // Match column — sortable.
-      createTableColumn<SearchResult>({
-        columnId: COL_MATCH,
-        renderHeaderCell: () => (
-          <span
-            className={styles.sortHeader}
-            onClick={() => handleHeaderClick('combinedScore')}
-            role="button"
-            aria-label={`Sort by match score — currently ${
-              sortColumn === 'combinedScore' ? sortDirection : 'unsorted'
-            }`}
-          >
-            Match{renderSortCaret('combinedScore')}
-          </span>
+        columnId: COL_AI,
+        renderHeaderCell: () => <span aria-label="AI Summary" />,
+        renderCell: (result: SearchResult) => (
+          <AiSummaryPopover
+            onFetchSummary={() => onSummary(result)}
+            trigger={
+              <Tooltip content="AI Summary" relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  className={styles.iconButton}
+                  icon={<Sparkle20Regular aria-hidden="true" />}
+                  aria-label={`AI Summary for ${result.name}`}
+                  onClick={ev => ev.stopPropagation()}
+                />
+              </Tooltip>
+            }
+          />
         ),
-        renderCell: (result: SearchResult) => {
-          const pct = Math.round((result.combinedScore ?? 0) * 100);
-          return (
-            <span
-              className={styles.scoreBadge}
-              role="img"
-              aria-label={`Relevance: ${pct}%`}
-            >
-              {pct}%
-            </span>
-          );
-        },
       }),
 
       // 3-dot menu column — non-sortable.
@@ -775,13 +976,15 @@ export const ListView: React.FC<IListViewProps> = ({
     sortDirection,
     handleHeaderClick,
     buildRowActionHandler,
+    openPreview,
+    onSummary,
     styles.iconButton,
     styles.pinnedIcon,
     styles.nameWrap,
     styles.nameLink,
-    styles.avatarRow,
-    styles.modifiedByName,
-    styles.scoreBadge,
+    styles.similarityBase,
+    styles.similaritySemantic,
+    styles.similarityAssociated,
     styles.sortHeader,
     // styles.menuCell is read via mergeClasses in the row render below, not in
     // the columns memo — keeping it out of this dep list is correct.
@@ -792,16 +995,24 @@ export const ListView: React.FC<IListViewProps> = ({
   // still get a sane initial track width.
   const columnSizingOptions: TableColumnSizingOptions = React.useMemo(() => {
     const opts: TableColumnSizingOptions = {};
-    const columnIds = [COL_SELECT, COL_PIN, COL_NAME, COL_MODIFIED, COL_MODIFIED_BY, COL_MATCH, COL_MENU];
+    // v1.1.50 — new column set (Items 3 + 4 + 5). COL_MODIFIED_BY removed,
+    // COL_RELATIONSHIP / COL_TYPE / COL_AI added. Same iteration order as
+    // the createTableColumn() order above so sizing keys stay in sync.
+    const columnIds = [
+      COL_SELECT,
+      COL_PIN,
+      COL_DOCUMENT,
+      COL_RELATIONSHIP,
+      COL_SIMILARITY,
+      COL_TYPE,
+      COL_MODIFIED,
+      COL_AI,
+      COL_MENU,
+    ];
     for (const id of columnIds) {
       opts[id] = {
         minWidth: MIN_WIDTHS[id],
         idealWidth: columnWidths[id] ?? DEFAULT_WIDTHS[id],
-        // Mark fixed-width control columns as non-resizable to keep their
-        // intrinsic widths honest (select/pin/menu look broken if resized).
-        ...(id === COL_SELECT || id === COL_PIN || id === COL_MENU
-          ? {}
-          : {}),
       };
     }
     return opts;
@@ -821,14 +1032,16 @@ export const ListView: React.FC<IListViewProps> = ({
   );
 
   // Row click → open preview (matches Card view's row-click behavior in ResultCard).
+  // v1.1.50 — routes through `openPreview` so the host-level dialog is used
+  // when wired (Item 2).
   const handleRowClick = React.useCallback(
     (ev: React.MouseEvent, result: SearchResult) => {
       // Don't fire on buttons, checkboxes, links, or the menu trigger.
       const target = ev.target as HTMLElement;
       if (target.closest('button') || target.closest('input') || target.closest('a')) return;
-      setPreviewDocId(result.documentId);
+      openPreview(result.documentId);
     },
-    []
+    [openPreview]
   );
 
   return (
@@ -871,12 +1084,18 @@ export const ListView: React.FC<IListViewProps> = ({
                     const isSelectCell = columnId === COL_SELECT;
                     const isPinCell = columnId === COL_PIN;
                     const isMenuCell = columnId === COL_MENU;
+                    // v1.1.50 (Item 4) — AI Summary cell uses the same
+                    // flush-right styling as the menu cell so the two
+                    // icon-only columns visually anchor the trailing
+                    // edge of the row together.
+                    const isAiCell = columnId === COL_AI;
                     const cellClass = mergeClasses(
                       styles.gridCell,
                       isSelectCell && styles.selectCell,
                       isPinCell && styles.pinCell,
                       // v1.1.47 — flush the menu icon to the right edge.
-                      isMenuCell && styles.menuCell
+                      // v1.1.50 — same for the AI sparkle icon cell.
+                      (isMenuCell || isAiCell) && styles.menuCell
                     );
                     return (
                       <DataGridCell
@@ -886,7 +1105,7 @@ export const ListView: React.FC<IListViewProps> = ({
                           onTogglePin(item.documentId);
                         } : undefined}
                       >
-                        <TableCellLayout truncate={!isSelectCell && !isPinCell && !isMenuCell}>
+                        <TableCellLayout truncate={!isSelectCell && !isPinCell && !isMenuCell && !isAiCell}>
                           {renderCell(item)}
                         </TableCellLayout>
                       </DataGridCell>
@@ -897,10 +1116,30 @@ export const ListView: React.FC<IListViewProps> = ({
             }}
           </DataGridBody>
         </DataGrid>
+
+        {/* v1.1.50 (Item 1) — Lazy-load sentinel.
+            Rendered INSIDE the scrollable `styles.container` so the
+            IntersectionObserver fires relative to the DataGrid scroll
+            surface, not the page viewport. Same threshold + rootMargin
+            as ResultsList for parity. Renders only when the host wired
+            `onLoadMoreSentinel` — back-compat: when omitted, no observer
+            is attached and pagination semantics are unchanged. */}
+        {onLoadMoreSentinel && (
+          <div
+            ref={sentinelRef}
+            style={{ height: '1px', width: '100%' }}
+            aria-hidden="true"
+          />
+        )}
       </div>
 
       {/* Preview dialog — instantiated once at the list level; opens for whichever
           row triggered it via menu or row click.
+          v1.1.50 (Item 2) — suppressed when the host wired `onOpenPreview`.
+          In that mode the host owns a single FilePreviewDialog shared with
+          the card view so Prev/Next navigates one cross-view nav set.
+          Back-compat path: when `onOpenPreview` is omitted, the local
+          dialog still renders.
           v1.1.46 — receives navigationTotal/currentIndex/onNavigate so the
           footer can render Prev/Next when the navigation set has >1 item.
           The navigation set is `previewNavigationSet` (selected docs when
@@ -909,7 +1148,7 @@ export const ListView: React.FC<IListViewProps> = ({
           doc — when the user clicks Next, previewTarget updates via the
           previewDocId state change, and all closures rebind on the next
           render. */}
-      {previewTarget && (
+      {!useHostPreview && previewTarget && (
         <FilePreviewDialog
           open={!!previewTarget}
           documentName={previewTarget.name}

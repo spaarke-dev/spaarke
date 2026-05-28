@@ -1543,6 +1543,18 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
               onCopyLink={handleCopyLinkTelemetry}
               onToggleWorkspace={handleToggleWorkspaceTelemetry}
               isInWorkspace={isInWorkspace}
+              // v1.1.50 (Item 2) — Route list-view preview through the
+              // SAME host-mounted FilePreviewDialog as the card view so
+              // Prev/Next nav set is shared across views.
+              onOpenPreview={setHostPreviewDocId}
+              // v1.1.50 (Item 1) — Lazy-load sentinel parity with the
+              // card view. Same gating as ResultsList: only attach when
+              // there's more to load AND we're not already loading.
+              onLoadMoreSentinel={
+                !filters.associatedOnly && hasMore && !isLoadingMore
+                  ? loadMore
+                  : undefined
+              }
             />
           </>
         );
@@ -1756,25 +1768,20 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.49 • Built 2026-05-28</Text>
+        <Text size={100}>v1.1.50 • Built 2026-05-28</Text>
       </div>
 
-      {/* v1.1.49 — Host-mounted preview dialog (Item 6). Single instance per
-          PCF surface so list AND card views share the navigation set. The
-          callbacks all close over the CURRENT target — when the user clicks
-          Next, `hostPreviewDocId` flips and the closures rebind on the next
-          render. When the host dialog is open, ResultCard / ResultsList do
-          NOT mount their own FilePreviewDialog (the `onOpenPreview` prop
-          flips that path off).
+      {/* Host-mounted preview dialog. Single instance per PCF surface so
+          list AND card views share the navigation set. The callbacks all
+          close over the CURRENT target — when the user clicks Next,
+          `hostPreviewDocId` flips and the closures rebind on the next
+          render.
 
-          Note: ListView ALSO renders its own FilePreviewDialog. That is
-          back-compat and renders ONLY when the user opens preview from a
-          row action while in list view (the host's `hostPreviewDocId` is
-          null in that case). This intentionally tracks the v1.1.46 ListView
-          behavior we don't want to regress. Future cleanup: thread the
-          host's setHostPreviewDocId into ListView so it ALSO routes through
-          the host dialog — left for next round to avoid expanding ListView
-          surface in this patch. */}
+          v1.1.49 (Item 6) — card view routed through this dialog.
+          v1.1.50 (Item 2) — list view also routed through this dialog
+          via the new `ListView.onOpenPreview` prop. ListView no longer
+          mounts its own FilePreviewDialog when wired, so Prev/Next nav
+          set is shared across list and card views. */}
       {hostPreviewTarget && (
         <FilePreviewDialog
           open={!!hostPreviewTarget}
@@ -1802,7 +1809,23 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       {/* Find Similar — shared iframe dialog */}
       <FindSimilarDialog open={!!findSimilarUrl} onClose={() => setFindSimilarUrl(null)} url={findSimilarUrl} />
 
-      {/* Send Email Dialog (single-document, legacy) */}
+      {/* Send Email Dialog (single-document, shared @spaarke/ui-components).
+          v1.1.50 (Item 7) — Modal-over-modal: when the user clicks "Email"
+          from inside FilePreviewDialog's 3-dot menu, `handleEmailDocument`
+          fires `setEmailDialogResult(result)` which opens this dialog ON
+          TOP of the FilePreviewDialog (both render via React Portal so
+          they stack naturally; the SendEmailDialog's higher mount order
+          wins z-index). FilePreviewDialog stays open underneath until
+          the user either sends/cancels the email or explicitly closes
+          the preview, preserving the "Re: {documentName}" context.
+          The Subject and Body are pre-populated from the active doc via
+          `emailDefaultSubject` / `emailDefaultBody`.
+
+          Sizing follow-up (v1.1.51 candidate): the shared SendEmailDialog
+          currently caps at 520px; users may want a larger surface to
+          match the 1280px preview. Promoting the override into shared
+          would impact other consumers (Code Pages, Office Add-ins) so
+          this stays scoped here for now. */}
       <SendEmailDialog
         open={!!emailDialogResult}
         onClose={() => setEmailDialogResult(null)}

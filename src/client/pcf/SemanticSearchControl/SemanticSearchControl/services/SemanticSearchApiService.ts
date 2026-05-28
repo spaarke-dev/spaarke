@@ -134,17 +134,36 @@ export class SemanticSearchApiService {
       }
     }
 
-    // Dedupe by documentId. Semantic results win on tie (their
-    // combinedScore is meaningful; associated-only path returns score=0).
+    // Dedupe by documentId.
+    //
+    // v1.1.50 — Each result is tagged with `relationship` so the list view
+    // can render the Relationship + Similarity pills correctly (Items 3 + 5).
+    // Dedupe order: associated first, then semantic OVERWRITES — EXCEPT we
+    // preserve the 'associated' relationship tag on conflict because the
+    // direct-association is the stronger/canonical relationship signal per
+    // the user's request ("for docs by direct Association, color the pill
+    // blue but do not provide the percentage"). The semantic result still
+    // wins on combinedScore (the BFF returns 0 on associated-only path) so
+    // the percentage that would otherwise have read 0% is suppressed by
+    // the Relationship='associated' tag — UI inspects relationship FIRST,
+    // similarity column SECOND.
     const byId = new Map<string, typeof semantic extends null ? never : SearchResponse['results'][number]>();
     if (associated) {
       for (const r of associated.results) {
-        if (r.documentId) byId.set(r.documentId, r);
+        if (r.documentId) byId.set(r.documentId, { ...r, relationship: 'associated' });
       }
     }
     if (semantic) {
       for (const r of semantic.results) {
-        if (r.documentId) byId.set(r.documentId, r);
+        if (!r.documentId) continue;
+        const prior = byId.get(r.documentId);
+        // Conflict: preserve 'associated' tag (canonical relationship) but
+        // adopt the semantic record's combinedScore + metadata for sort.
+        if (prior && prior.relationship === 'associated') {
+          byId.set(r.documentId, { ...r, relationship: 'associated' });
+        } else {
+          byId.set(r.documentId, { ...r, relationship: 'semantic' });
+        }
       }
     }
 
@@ -184,6 +203,14 @@ export class SemanticSearchApiService {
    */
   async search(request: SearchRequest): Promise<SearchResponse> {
     const endpoint = `${this.apiBaseUrl}/api/ai/search`;
+    // v1.1.50 — tag each result with its relationship origin so the list
+    // view's Relationship + Similarity pills render correctly (Items 3 + 5).
+    // When associatedOnly=true the BFF served the Dataverse-direct path;
+    // every result is 'associated'. Otherwise the BFF returned semantic
+    // (AI-Search) results. Note: `searchUnion` overrides this tagging on
+    // its dedupe step (associated wins on conflict) — see above.
+    const relationshipTag: 'associated' | 'semantic' =
+      request.filters?.associatedOnly === true ? 'associated' : 'semantic';
 
     try {
       // Transform PCF request format to API format
@@ -225,7 +252,7 @@ export class SemanticSearchApiService {
         })),
       });
 
-      return this.validateResponse(data);
+      return this.validateResponse(data, relationshipTag);
     } catch (error) {
       // Re-throw SearchError as-is
       if (this.isSearchError(error)) {
@@ -386,9 +413,18 @@ export class SemanticSearchApiService {
   }
 
   /**
-   * Validate and normalize the API response
+   * Validate and normalize the API response.
+   *
+   * @param data Raw API response payload.
+   * @param relationshipTag v1.1.50 — relationship origin to apply to each
+   *        result (Items 3 + 5). The BFF itself does not yet emit this
+   *        field; we tag client-side based on which BFF path was invoked.
+   *        `searchUnion` may overwrite the tag during dedupe.
    */
-  private validateResponse(data: unknown): SearchResponse {
+  private validateResponse(
+    data: unknown,
+    relationshipTag: 'associated' | 'semantic' = 'semantic'
+  ): SearchResponse {
     // Type guard for response structure
     if (!data || typeof data !== 'object') {
       throw this.createError('Invalid response from search service.', 'INVALID_RESPONSE', true);
@@ -416,6 +452,8 @@ export class SemanticSearchApiService {
         modifiedBy: r.modifiedBy ?? null,
         summary: r.summary ?? null,
         tldr: r.tldr ?? null,
+        // v1.1.50 — relationship origin (Items 3 + 5).
+        relationship: r.relationship ?? relationshipTag,
       })),
       // BFF returns total count in metadata.totalResults, not at top level
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
