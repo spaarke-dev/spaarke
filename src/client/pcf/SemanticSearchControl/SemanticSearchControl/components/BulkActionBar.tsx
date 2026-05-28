@@ -126,32 +126,39 @@ const useStyles = makeStyles({
   // Inline icon-only bar — composed into the list view's top-right toolbar
   // (v1.1.45). Bare flex row, no background, no border, no sticky positioning;
   // the parent toolbar owns the surrounding chrome. The row groups the six
-  // bulk-action icons + the selection-count text + the Clear (Dismiss) button.
+  // bulk-action icons + the selection-count text + a leading separator.
+  //
+  // v1.1.55 — `gap` widened from XS → M per UAT: "for the selected tool bar,
+  // increase the space between the tool icons". Provides a more comfortable
+  // hit target spacing without breaking the inline-toolbar composition.
   root: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
+    gap: tokens.spacingHorizontalM,
     minHeight: '32px',
     boxSizing: 'border-box',
   },
   // Selection-count label (e.g. "3 selected"). Sits before the action icons.
+  // v1.1.55 — paddingRight removed; the new leading `divider` (rendered between
+  // countText and the first icon) carries the visual separation now.
   countText: {
     color: tokens.colorNeutralForeground2,
-    paddingRight: tokens.spacingHorizontalXS,
   },
   // Tight icon-button override — match the existing Reload/Add toolbar size.
   iconButton: {
     minWidth: 'auto',
     ...shorthands.padding('0px'),
   },
-  // Vertical hairline separator between the bulk-action group and the toolbar's
-  // other buttons (Reload / Add). Token-driven so dark mode is automatic.
+  // Vertical hairline separator. v1.1.55 — now used as a LEADING separator
+  // between the selection-count text and the first action icon (UAT request:
+  // "add subtle separator line between number of document selected and the
+  // tool bar icons"). Token-driven so dark mode is automatic.
   divider: {
     width: '1px',
     alignSelf: 'stretch',
     backgroundColor: tokens.colorNeutralStroke2,
-    marginLeft: tokens.spacingHorizontalXXS,
-    marginRight: tokens.spacingHorizontalXXS,
+    marginTop: tokens.spacingVerticalXXS,
+    marginBottom: tokens.spacingVerticalXXS,
   },
   // Confirmation dialog body — unchanged from v1.1.44.
   dialogBody: {
@@ -239,6 +246,11 @@ export const BulkActionBar: React.FC<IBulkActionBarProps> = ({
         <Text size={200} className={styles.countText} aria-live="polite">
           {countLabel}
         </Text>
+
+        {/* v1.1.55 — leading vertical hairline between the count text and the
+            first action icon (UAT: "add subtle separator line between number
+            of document selected and the tool bar icons"). */}
+        <span className={styles.divider} aria-hidden="true" />
 
         {/* 1. Email selected — icon-only with Tooltip for hover label */}
         <Tooltip content={`Email ${countLabel}`} relationship="label">
@@ -348,8 +360,10 @@ export const BulkActionBar: React.FC<IBulkActionBarProps> = ({
             checkbox (uncheck it) OR by clicking individual row/card checkboxes.
             The `onClear` prop stays in the contract so callers (and tests)
             don't need a shape change; it is simply no longer surfaced as a
-            visible action in the bulk bar. */}
-        <span className={styles.divider} aria-hidden="true" />
+            visible action in the bulk bar.
+            v1.1.55 — trailing divider was removed; the leading divider
+            between countText and the first icon carries the visual
+            separation now (UAT request). */}
       </div>
 
       {/* Delete confirmation Dialog — Fluent v9 Dialog is portal-rendered;
