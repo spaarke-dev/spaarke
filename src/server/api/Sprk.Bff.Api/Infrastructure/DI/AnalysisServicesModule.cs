@@ -1,8 +1,10 @@
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Insights;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -53,6 +55,9 @@ public static class AnalysisServicesModule
 
             services.AddAiModule(configuration);
             Console.WriteLine("\u2713 AI Platform Foundation module enabled (DocumentParserRouter, SemanticDocumentChunker, RagQueryBuilder)");
+
+            AddInsightsCache(services);
+            Console.WriteLine("\u2713 Insights playbook execution cache enabled (D-P13, ADR-009)");
 
             Console.WriteLine("\u2713 Analysis services enabled");
         }
@@ -205,6 +210,29 @@ public static class AnalysisServicesModule
         // Singleton matches the other INodeExecutor registrations above (executors are stateless).
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor,
             Sprk.Bff.Api.Services.Ai.Nodes.GroundingVerifyNode>();
+    }
+
+    /// <summary>
+    /// Registers the D-P13 Insights playbook execution cache (SPEC §3.1) wrapping
+    /// <see cref="IPlaybookExecutionEngine"/> calls in a Redis layer per ADR-009.
+    /// </summary>
+    /// <remarks>
+    /// Two singletons:
+    /// <list type="bullet">
+    /// <item><see cref="InsightsCacheMetrics"/> — OpenTelemetry meter for cache hit/miss/eviction
+    /// counters. Singleton because the underlying <see cref="System.Diagnostics.Metrics.Meter"/>
+    /// is intended to be long-lived.</item>
+    /// <item><see cref="IInsightsPlaybookExecutionCache"/> — stateless wrapper over
+    /// <see cref="Microsoft.Extensions.Caching.Distributed.IDistributedCache"/> (singleton)
+    /// + <see cref="InsightsCacheMetrics"/> (singleton). Singleton is the correct lifetime
+    /// per ADR-010 (no per-request state). The future <c>InsightsOrchestrator</c> facade
+    /// (task 042 D-P9) will consume it.</item>
+    /// </list>
+    /// </remarks>
+    private static void AddInsightsCache(IServiceCollection services)
+    {
+        services.AddSingleton<InsightsCacheMetrics>();
+        services.AddSingleton<IInsightsPlaybookExecutionCache, InsightsPlaybookExecutionCache>();
     }
 
     private static void AddRagServices(IServiceCollection services, IConfiguration configuration)
