@@ -193,6 +193,18 @@ public static class AnalysisServicesModule
         // CodeInterpreterTools are NOT registered here — they are factory-instantiated by SprkChatAgentFactory
         // following the WebSearchTools pattern (ADR-010: no unnecessary DI registrations).
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Foundry.CodeInterpreterBridge>();
+
+        // GroundingVerifier — D-P9 / D-47 / LAVERN ADR 10.6 platform primitive (Insights Engine Phase 1).
+        // Mechanical zero-LLM citation verifier (substring + sliding-window, 10K-char DoS cap).
+        // Singleton: stateless, thread-safe; shared across Insights synthesis (D-P14) and Action Engine consumers.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.CitationVerification.IGroundingVerifier,
+            Sprk.Bff.Api.Services.Ai.CitationVerification.GroundingVerifier>();
+
+        // GroundingVerifyNode — D-P9 + D-P12 node executor (ActionType.GroundingVerify = 70).
+        // Wraps IGroundingVerifier as INodeExecutor for the node-based playbook system.
+        // Singleton matches the other INodeExecutor registrations above (executors are stateless).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor,
+            Sprk.Bff.Api.Services.Ai.Nodes.GroundingVerifyNode>();
     }
 
     private static void AddRagServices(IServiceCollection services, IConfiguration configuration)
