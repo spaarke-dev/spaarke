@@ -39,6 +39,7 @@ import {
   Spinner,
   Text,
   makeStyles,
+  shorthands,
   tokens,
 } from '@fluentui/react-components';
 import { Dismiss24Regular } from '@fluentui/react-icons';
@@ -102,21 +103,51 @@ export interface ISendEmailDialogProps {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  // v1.1.56 — `width: '90vw'` was the binding width constraint, which
-  // capped the surface below the `maxWidth` value on common laptop
-  // viewports (90% of 1366 = 1229, which clips a passed maxWidth=1280).
-  // Switched to `width: '100%'` so the surface always grows to its
-  // maxWidth, matching FilePreviewDialog's pattern (which reliably
-  // hits 1280px on every viewport). The Dialog's portal still constrains
-  // the surface within the viewport, so no overflow on smaller screens.
   surface: {
     maxWidth: '520px',
     width: '100%',
+    // v1.1.58 — when the consumer passes an explicit `height` (e.g. '85vh'),
+    // the surface needs to be a flex column so DialogBody can flex-grow
+    // to fill it. Fluent v9 DialogSurface is already display: flex by
+    // default; we just ensure the direction is column.
+    display: 'flex',
+    flexDirection: 'column',
   },
-  // v1.1.56 — `form` is now a flex column with `flex: 1` so it fills
-  // the surface when an explicit height is set. `minHeight: 0` lets
-  // children with `flex: 1` shrink instead of pushing the form out of
-  // the dialog (default flex behavior would otherwise force overflow).
+  // v1.1.58 — DialogBody is the inner region that holds Title +
+  // Content + Actions. To make Content grow and Actions pin to the
+  // bottom, DialogBody must flex-grow within the surface AND lay out
+  // its own children as a flex column.
+  dialogBody: {
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  // v1.1.58 — DialogContent now flex-grows within DialogBody and
+  // scrolls internally when content overflows (so the form stays
+  // visible and the footer stays anchored).
+  dialogContent: {
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    overflowY: 'auto',
+  },
+  // v1.1.58 — DialogActions becomes a real footer: visible top
+  // border, right-aligned button cluster, anchored to the bottom of
+  // the DialogBody by being the last grid/flex row after the
+  // grow-to-fill DialogContent.
+  dialogActions: {
+    flexShrink: 0,
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalS,
+    ...shorthands.borderTop(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
+  },
+  // v1.1.58 — `form` fills the DialogContent so the Message Field can
+  // flex-grow to take all remaining vertical space.
   form: {
     display: 'flex',
     flexDirection: 'column',
@@ -125,19 +156,30 @@ const useStyles = makeStyles({
     flex: 1,
     minHeight: 0,
   },
-  // v1.1.56 — Message Field grows to fill remaining vertical space when
-  // the surface has an explicit height; flat content layout otherwise.
   messageField: {
     display: 'flex',
     flexDirection: 'column',
     flex: 1,
     minHeight: 0,
   },
-  // v1.1.56 — Textarea inside the Message Field grows with the field.
-  // `minHeight` keeps the writing area usable even on short modals.
+  // v1.1.58 — to make the actual `<textarea>` element fill its
+  // wrapper we have to reach inside via descendant selector. The
+  // Fluent v9 `Textarea` wraps the input element; without overriding
+  // the inner element's `block-size`, the textarea stays at its
+  // `rows` natural height even when the wrapper flex-grows. The
+  // descendant selector pattern is idiomatic makeStyles and survives
+  // Fluent's slot rendering.
   messageTextarea: {
     flex: 1,
     minHeight: '180px',
+    display: 'flex',
+    flexDirection: 'column',
+    '& > textarea': {
+      flex: 1,
+      minHeight: 0,
+      height: '100%',
+      resize: 'vertical',
+    },
   },
   labelRow: {
     display: 'inline-flex',
@@ -254,8 +296,8 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
           Email Document
         </DialogTitle>
 
-        <DialogBody>
-          <DialogContent>
+        <DialogBody className={styles.dialogBody}>
+          <DialogContent className={styles.dialogContent}>
             <div className={styles.form}>
               {/* To — user lookup */}
               <LookupField
@@ -306,7 +348,7 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
           </DialogContent>
         </DialogBody>
 
-        <DialogActions>
+        <DialogActions className={styles.dialogActions}>
           <Button appearance="secondary" onClick={onClose} disabled={sending}>
             Cancel
           </Button>
