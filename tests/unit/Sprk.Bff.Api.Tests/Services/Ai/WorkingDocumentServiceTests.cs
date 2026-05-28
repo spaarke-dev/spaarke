@@ -16,12 +16,14 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 /// </summary>
 public class WorkingDocumentServiceTests
 {
-    private readonly Mock<IDataverseService> _dataverseServiceMock;
+    private readonly Mock<IGenericEntityService> _genericEntityServiceMock;
+    private readonly Mock<IServiceProvider> _serviceProviderMock;
     private readonly Mock<ILogger<WorkingDocumentService>> _loggerMock;
 
     public WorkingDocumentServiceTests()
     {
-        _dataverseServiceMock = new Mock<IDataverseService>();
+        _genericEntityServiceMock = new Mock<IGenericEntityService>();
+        _serviceProviderMock = new Mock<IServiceProvider>();
         _loggerMock = new Mock<ILogger<WorkingDocumentService>>();
     }
 
@@ -31,7 +33,7 @@ public class WorkingDocumentServiceTests
         {
             MaxWorkingVersions = maxWorkingVersions
         });
-        return new WorkingDocumentService(_dataverseServiceMock.Object, options, _loggerMock.Object);
+        return new WorkingDocumentService(_genericEntityServiceMock.Object, _serviceProviderMock.Object, options, _loggerMock.Object);
     }
 
     #region UpdateWorkingDocumentAsync Tests

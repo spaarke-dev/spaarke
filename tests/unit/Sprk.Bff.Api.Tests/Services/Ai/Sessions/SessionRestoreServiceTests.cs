@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Azure.Identity;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -553,6 +554,7 @@ public class SessionRestoreServiceTests
             persistenceMock.Object,
             httpClientFactoryMock.Object,
             configuration,
+            new DefaultAzureCredential(),
             loggerMock.Object);
 
         return (sut, persistenceMock, httpHandlerMock);

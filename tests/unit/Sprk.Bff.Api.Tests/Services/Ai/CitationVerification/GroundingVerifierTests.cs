@@ -53,7 +53,7 @@ public sealed class GroundingVerifierTests
         results.Should().HaveCount(1);
         results[0].Verdict.Should().Be(VerificationVerdict.Verified);
         results[0].MatchedChunkId.Should().Be("doc-1#chunk-3");
-        results[0].Reason.Should().Contain("exact substring", StringComparison.OrdinalIgnoreCase);
+        results[0].Reason.Should().ContainEquivalentOf("exact substring");
     }
 
     [Fact]
@@ -101,7 +101,7 @@ public sealed class GroundingVerifierTests
         results[0].Verdict.Should().Be(VerificationVerdict.VerifiedApproximate,
             because: "all 6 distinct quote tokens appear within the sliding window, exceeding the 0.70 overlap threshold");
         results[0].MatchedChunkId.Should().Be("doc-3#chunk-1");
-        results[0].Reason.Should().Contain("sliding-window", StringComparison.OrdinalIgnoreCase);
+        results[0].Reason.Should().ContainEquivalentOf("sliding-window");
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public sealed class GroundingVerifierTests
 
         results[0].Verdict.Should().Be(VerificationVerdict.NotFound);
         results[0].MatchedChunkId.Should().BeNull();
-        results[0].Reason.Should().Contain("No exact", StringComparison.OrdinalIgnoreCase);
+        results[0].Reason.Should().ContainEquivalentOf("No exact");
     }
 
     [Fact]
@@ -140,7 +140,7 @@ public sealed class GroundingVerifierTests
 
         results[0].Verdict.Should().Be(VerificationVerdict.InvalidInput,
             because: "the DoS cap rejected the only source chunk, leaving nothing verifiable");
-        results[0].Reason.Should().Contain("DoS", StringComparison.OrdinalIgnoreCase);
+        results[0].Reason.Should().ContainEquivalentOf("DoS");
     }
 
     [Fact]
@@ -401,7 +401,7 @@ public sealed class GroundingVerifyNodeTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_RegisteredAndDispatchableViaRegistry()
+    public Task ExecuteAsync_RegisteredAndDispatchableViaRegistry()
     {
         // Integration-ish: confirm a real NodeExecutorRegistry can resolve our executor by ActionType.
         var verifier = new GroundingVerifier(NullLogger<GroundingVerifier>.Instance);
@@ -412,6 +412,7 @@ public sealed class GroundingVerifyNodeTests
         var resolved = registry.GetExecutor(ActionType.GroundingVerify);
         resolved.Should().NotBeNull();
         resolved.Should().BeOfType<GroundingVerifyNode>();
+        return Task.CompletedTask;
     }
 
     /// <summary>
