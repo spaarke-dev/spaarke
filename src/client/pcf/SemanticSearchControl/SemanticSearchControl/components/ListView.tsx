@@ -168,17 +168,21 @@ const COL_MENU = 'menu';
 // fits inside a typical Matter form section). User-persisted widths
 // from earlier rounds are invalidated by the v2 localStorage key
 // prefix bump (see useDocumentListPrefs.ts).
-// v1.1.61 — COL_DOCUMENT bumped 240 → 480 to eliminate the empty space at
-// the right of the menu column on typical Matter form viewports (~1050px).
-// New column total: 40 + 36 + 480 + 110 + 70 + 48 + 100 + 44 = 928px,
-// plus ~30px DataGrid internal chrome ≈ 958px. Closer to typical Matter
-// form widths. On narrower viewports the existing sticky-menu logic still
-// pins the 3-dot to the right edge on horizontal scroll. Users can still
-// drag-resize Document narrower via the persisted columnWidths pref.
+// v1.1.64 — COL_DOCUMENT reverted 480 → 240. The v1.1.61 bump (240→480)
+// was meant to "fill" the empty space to the right of the menu column on
+// wide Matter form sections, but it caused a horizontal scrollbar to
+// appear on slightly narrower form widths. Now that v1.1.63 anchors the
+// menu cell to the row's right edge via `marginInlineStart: 'auto'`
+// (Fluent v9 DataGrid rows are flexbox; the auto-margin consumes any
+// leftover inline space), there's no need to inflate the Document
+// column to fill. Reverting gives us a comfortable 688px column total
+// + ~30px chrome ≈ 720px — comfortably under typical Matter form
+// section widths (~900-1050px), so NO horizontal scroll, and the menu
+// still ends up flush right because of the auto-margin.
 const DEFAULT_WIDTHS: Record<string, number> = {
   [COL_SELECT]: 40,
   [COL_PIN]: 36,
-  [COL_DOCUMENT]: 480,
+  [COL_DOCUMENT]: 240,
   [COL_RELATIONSHIP]: 110,
   [COL_SIMILARITY]: 70,
   // v1.1.53 (Item 4 Part B) — Type column now renders just the file icon
