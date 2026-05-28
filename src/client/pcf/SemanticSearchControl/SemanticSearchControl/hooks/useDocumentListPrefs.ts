@@ -28,8 +28,20 @@ const VIEW_KEY_PREFIX = 'spaarke.docs.view';
 /** localStorage key prefix for pin state */
 const PIN_KEY_PREFIX = 'spaarke.docs.pinned';
 
-/** localStorage key prefix for column widths (v1.1.45). */
-const COLWIDTHS_KEY_PREFIX = 'spaarke.docs.colwidths';
+/**
+ * localStorage key prefix for column widths.
+ *
+ * v1.1.45 introduced `spaarke.docs.colwidths.{userId}.{matterId}`. v1.1.59
+ * bumps to `.v2` because the DEFAULT_WIDTHS were reduced to fit a
+ * 1920x1080 viewport without horizontal scroll — persisted widths from
+ * the wider v1.1.45–v1.1.58 defaults would otherwise re-introduce the
+ * scrollbar after import.
+ *
+ * The v1 keys remain in users' localStorage as orphans; no migration
+ * needed because they're scoped per matter and silently ignored under
+ * the new prefix.
+ */
+const COLWIDTHS_KEY_PREFIX = 'spaarke.docs.colwidths.v2';
 
 /** Default view per spec FR-DOC-04 */
 const DEFAULT_VIEW: DocumentListView = 'list';

@@ -1846,7 +1846,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.58 • Built 2026-05-28</Text>
+        <Text size={100}>v1.1.59 • Built 2026-05-28</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so

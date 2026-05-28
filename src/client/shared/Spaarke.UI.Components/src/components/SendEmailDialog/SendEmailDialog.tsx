@@ -42,7 +42,8 @@ import {
   shorthands,
   tokens,
 } from '@fluentui/react-components';
-import { Dismiss24Regular } from '@fluentui/react-icons';
+// v1.1.59 — Dismiss24Regular import removed alongside the title-bar
+// X close button (per UAT request for cross-modal consistency).
 import { LookupField } from '../LookupField/LookupField';
 import type { ILookupItem } from '../../types/LookupTypes';
 
@@ -162,24 +163,28 @@ const useStyles = makeStyles({
     flex: 1,
     minHeight: 0,
   },
-  // v1.1.58 — to make the actual `<textarea>` element fill its
-  // wrapper we have to reach inside via descendant selector. The
-  // Fluent v9 `Textarea` wraps the input element; without overriding
-  // the inner element's `block-size`, the textarea stays at its
-  // `rows` natural height even when the wrapper flex-grows. The
-  // descendant selector pattern is idiomatic makeStyles and survives
-  // Fluent's slot rendering.
+  // v1.1.59 — the descendant selector `& > textarea` (v1.1.58) didn't
+  // override Fluent v9 Textarea's inner-element height — UAT confirmed
+  // the inner <textarea> stayed at its `rows` natural height (~260px
+  // on rows=10). Switched to the SLOT-PROP approach:
+  // `<Textarea textarea={{ className: styles.messageTextareaInner }}>`
+  // applies the className directly to the inner element via Fluent's
+  // slot rendering, which bypasses Fluent's internal styling entirely.
   messageTextarea: {
     flex: 1,
     minHeight: '180px',
     display: 'flex',
     flexDirection: 'column',
-    '& > textarea': {
-      flex: 1,
-      minHeight: 0,
-      height: '100%',
-      resize: 'vertical',
-    },
+  },
+  // v1.1.59 — applied to the inner `<textarea>` via slot prop.
+  // `height: 100%` + `flex: 1` makes it fill the messageTextarea
+  // wrapper (which itself fills the form via flex:1). minHeight:0
+  // lets it shrink without forcing overflow.
+  messageTextareaInner: {
+    flex: 1,
+    minHeight: 0,
+    height: '100%',
+    boxSizing: 'border-box',
   },
   labelRow: {
     display: 'inline-flex',
@@ -290,11 +295,11 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
         className={styles.surface}
         style={{ maxWidth, height, minHeight: height }}
       >
-        <DialogTitle
-          action={<Button appearance="subtle" icon={<Dismiss24Regular />} aria-label="Close" onClick={onClose} />}
-        >
-          Email Document
-        </DialogTitle>
+        {/* v1.1.59 — title-bar X close icon removed per UAT.
+            The Cancel button in the footer is the single close
+            affordance, matching FilePreviewDialog's pattern
+            (v1.1.46) for consistency across our shared modals. */}
+        <DialogTitle>Email Document</DialogTitle>
 
         <DialogBody className={styles.dialogBody}>
           <DialogContent className={styles.dialogContent}>
@@ -321,13 +326,16 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
                 />
               </Field>
 
-              {/* Body — v1.1.56: Field + Textarea flex-grow to fill any
-                  explicit surface height (host passes height="85vh" on
-                  the SemanticSearchControl). `rows` still provides a
-                  sane default height when surface height is 'auto'. */}
+              {/* Body — v1.1.59: the inner <textarea> is styled via the
+                  `textarea` slot prop (NOT a descendant selector on the
+                  wrapper className) so Fluent v9's slot rendering
+                  applies our class directly to the inner element. This
+                  is the only reliable way to override Fluent's
+                  rows-based natural height on the inner textarea. */}
               <Field label={renderLabel('Message')} className={styles.messageField}>
                 <Textarea
                   className={styles.messageTextarea}
+                  textarea={{ className: styles.messageTextareaInner }}
                   value={body}
                   onChange={e => setBody(e.target.value)}
                   placeholder="Compose your message..."

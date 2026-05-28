@@ -163,17 +163,22 @@ const COL_MENU = 'menu';
 // horizontal scrollbar. The DataGrid's resizable columns + per-user width
 // persistence (via `setColumnWidth`) means users can still widen Document
 // manually if their viewport is wide enough.
+// v1.1.59 — defaults trimmed to eliminate horizontal scroll at 1920x1080
+// (sum 688px + DataGrid internal padding ~30px ≈ 720px, comfortably
+// fits inside a typical Matter form section). User-persisted widths
+// from earlier rounds are invalidated by the v2 localStorage key
+// prefix bump (see useDocumentListPrefs.ts).
 const DEFAULT_WIDTHS: Record<string, number> = {
   [COL_SELECT]: 40,
   [COL_PIN]: 36,
-  [COL_DOCUMENT]: 260,
-  [COL_RELATIONSHIP]: 130,
-  [COL_SIMILARITY]: 100,
+  [COL_DOCUMENT]: 240,
+  [COL_RELATIONSHIP]: 110,
+  [COL_SIMILARITY]: 70,
   // v1.1.53 (Item 4 Part B) — Type column now renders just the file icon
   // (no text), so its default width drops from 120 → 48 to free space
   // for the wider Document / Relationship columns.
   [COL_TYPE]: 48,
-  [COL_MODIFIED]: 130,
+  [COL_MODIFIED]: 100,
   [COL_MENU]: 44,
 };
 
@@ -338,18 +343,24 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     textAlign: 'center',
   },
-  // v1.1.47 — Menu column cell. Flush the 3-dot icon button against the right
-  // edge of the cell (with a small XS breathing-room pad) so the menu trigger
-  // never appears stranded mid-cell. The DataGrid's TableCellLayout inside
-  // wraps a flex container around renderCell output; this rule applies to
-  // the outer DataGridCell to guarantee right-alignment regardless of inner
-  // layout. Tokens-only (ADR-021).
+  // v1.1.59 — Menu column cell is now STICKY to the right edge of the
+  // visible grid (per UAT: "ensure that the row menu is right aligned
+  // so stays to the right at different resolutions"). `position:
+  // sticky; right: 0` pins the cell to the viewport right edge
+  // regardless of horizontal scroll position; background carries the
+  // neutral row color so content scrolling underneath doesn't bleed
+  // through. zIndex keeps it above other cells during horizontal
+  // scroll. Cell still right-aligns the 3-dot trigger inside itself.
   menuCell: {
     display: 'flex',
     justifyContent: 'flex-end',
     alignItems: 'center',
     paddingLeft: 0,
     paddingRight: tokens.spacingHorizontalXS,
+    position: 'sticky',
+    right: 0,
+    backgroundColor: tokens.colorNeutralBackground1,
+    zIndex: 1,
   },
   // v1.1.45 — name cell truncates with ellipsis and bleeds NO further than its
   // column track (the user-reported regression). `minWidth: 0` is required on
