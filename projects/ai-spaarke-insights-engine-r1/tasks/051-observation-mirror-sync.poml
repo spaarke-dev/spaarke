@@ -1,7 +1,7 @@
 <task id="051" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>D-P11 (mirror) — Observation mirror sync to sprk_analysis polymorphic</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>6</wave>
     <estimated-effort>4 hours</estimated-effort>
     <tags>bff-api, sync, observation-mirror, sprk-analysis, zone-b, dotnet</tags>

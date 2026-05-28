@@ -1,18 +1,43 @@
 # Current Task — Spaarke Insights Engine, Phase 1
 
-> **Status**: 🔄 active — Wave 6 in progress (task 050 ✅ complete; 051 + 052 may run next)
-> **Last Updated**: 2026-05-28 (post task 050)
-> **Project state**: Waves 1-5 complete + task 050 (D-P8) complete (15 of 17 D-P + scaffold tasks — 88%)
+> **Status**: 🔄 active — Wave 6 partially complete (050 + 051 done); task 052 (D-P11 review surface) next; Wave 7 (060 D-P14 + 061 D-P15) unblocked
+> **Last Updated**: 2026-05-28 (post task 051)
+> **Project state**: Waves 1-5 complete + tasks 050 + 051 complete (16 of 17 D-P + scaffold tasks — 94%)
 
 ---
 
 ## Active task
 
-None — task 050 complete. Next: dispatch Wave 6 remaining tasks 051 (D-P11 mirror sync — swap `NoOpObservationMirror` → `DataverseObservationMirror`) + 052 (D-P11 review surface) in parallel; or proceed to Wave 7 (060 D-P14 synthesis + 061 D-P15 endpoint).
+None — task 051 complete. Next: dispatch task 052 (D-P11 review surface — Dataverse model-driven view filtered by `sprk_searchprofile = "insights-observation@v1"`) OR Wave 7 (060 D-P14 synthesis + 061 D-P15 endpoint — both unblocked by the IInsightsAi facade + ingest pipeline shipped in Wave 5 + the mirror impl shipped here).
 
 ---
 
 ## Last completed task
+
+**Task 051 — D-P11 DataverseObservationMirror + sprk_analysis polymorphic write** ✅ (2026-05-28, commit `0d2ba2dc`)
+- Rigor: FULL (Zone B code, schema verification via Dataverse MCP, §3.5.4 boundary refactor, foundation for task 052)
+- First-step blocker resolution: `mcp__dataverse__describe_table("sprk_analysis")` revealed schema has NO polymorphic source-type discriminator field (POML inherited "polymorphic" framing from superseded D-56). Resolution: use existing `sprk_searchprofile NVARCHAR(100)` carrying `"insights-observation@v1"` as artifactType discriminator + `sprk_sessionid NVARCHAR(50)` as SHA-256-hashed idempotency key. Full mapping documented in `projects/ai-spaarke-insights-engine-r1/notes/sprk-analysis-polymorphic-confirmation.md`.
+- §3.5.4 architectural decision: moved `IObservationMirror` from `Services/Ai/Insights/Mirror/` (Zone A) to `Services/Ai/PublicContracts/` because the Zone B impl cannot import `Services.Ai.Insights.*` per the §3.5.4 grep (`Services\.Ai\.Insights[^.P]` only allows the PublicContracts sub-namespace). Matches the `IInsightsAi` cross-zone facade pattern.
+- Files NEW (4 production + 2 test + 1 notes):
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IObservationMirror.cs` — moved from Zone A
+  - `src/server/api/Sprk.Bff.Api/Services/Insights/Observations/InsightsMirrorOptions.cs` — bound at `Insights:Mirror`
+  - `src/server/api/Sprk.Bff.Api/Services/Insights/Observations/ObservationMirrorMapper.cs` — pure mapping + SHA-256 idempotency key
+  - `src/server/api/Sprk.Bff.Api/Services/Insights/Observations/DataverseObservationMirror.cs` — Zone B impl; 7 stable EventIds (8050-8056); dev-safe fallback when ActionId unset; resolves `sprk_documentid` via `sprk_driveitemid` from SPE evidence ref; fire-and-forget swallows non-OCE exceptions
+  - `tests/.../Services/Insights/Observations/ObservationMirrorMapperTests.cs` (24 tests)
+  - `tests/.../Services/Insights/Observations/DataverseObservationMirrorTests.cs` (23 tests)
+  - `projects/.../notes/sprk-analysis-polymorphic-confirmation.md` — first-step blocker resolution
+- Files MODIFIED (5): NoOpObservationMirror + IngestOrchestrator + InsightsIngestModule (using imports updated to PublicContracts); InsightsModule (`services.Replace` swap with rationale); test imports update
+- Build: 0 errors, 17 pre-existing warnings (same set as tasks 040/041/042/050)
+- Tests: **47/47 PASS new** (24 mapper + 23 mirror); **283/283 PASS full Insights subset** — zero regressions from namespace move
+- §3.5.4 forbidden-imports grep on Zone B: **ZERO using-directive matches**. Pre-existing `<see cref>` XML doc in `StubLiveFactResolver.cs` is task 022 inheritance.
+- Quality gates: code-review ✅ (0/0/0); adr-check ✅ (0 violations across ADR-001/007/010/013/029 + D-56/D-60/D-62 + CLAUDE.md §10)
+- Acceptance criteria: 5/5 PASS (criterion 1 with schema caveat — POML "polymorphic" was wrong, discriminator chosen)
+- Unblocks: task 052 (D-P11 review surface — Dataverse model-driven view filtered by `sprk_searchprofile = "insights-observation@v1"`)
+- Coordination: task 050 (parallel) completed first; both touched different DI modules (050 → JobProcessingModule + AiProcessingOptions; 051 → InsightsModule + InsightsIngestModule). No collision. Task 051 commit `0d2ba2dc` clean rebase on task 050 commit `67345bfb`.
+
+---
+
+## Previous completed task
 
 **Task 050 — D-P8 SPE-upload event consumer (`InsightsIngestJobHandler`)** ✅ (2026-05-28)
 - Rigor: FULL (bff-api code, modifies production upload path `UploadFinalizationWorker`, opt-in dispatch boundary)
