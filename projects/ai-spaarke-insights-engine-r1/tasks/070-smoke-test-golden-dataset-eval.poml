@@ -1,0 +1,77 @@
+<task id="070" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P16 — End-to-end smoke + golden dataset + eval harness baseline</title>
+    <status>not-started</status>
+    <wave>8</wave>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>tests, evaluation, smoke, golden-dataset, eval-harness, acceptance-gate</tags>
+    <dependencies>040, 050, 060, 061</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>D-P16</d-p>
+  </metadata>
+
+  <prompt>
+    Ship the Phase 1 acceptance gate: end-to-end smoke test (3-5 fixture closing-letter documents → universal ingest → Observation production → predict-matter-cost synthesis cycle on REAL Observations, not mocks) + 10-15 golden dataset tuples for predict-matter-cost + eval harness baseline run (RAG-triad metrics with permissive Phase 1 thresholds). Verifies all SPEC §5.1 acceptance criteria.
+  </prompt>
+
+  <role>Test engineer + eval framework developer familiar with RAG-triad metrics (Retrieval / Groundedness / Relevance) and end-to-end integration testing.</role>
+
+  <goal>
+    Smoke test executes the full Phase 1 dataflow: SPE event → ingest playbook → Observations in insights-index → sprk_analysis mirrors → admin creates Precedent → projection to insights-index → POST /api/insights/ask {predict-matter-cost} → InsightArtifact OR DeclineResponse returned. Golden dataset (10-15 tuples) exercises sufficient + insufficient paths + Precedent citation path. Eval harness computes RAG-triad metrics; baseline pass at permissive Phase 1 thresholds (groundedness ≥ 95% rather than 100%); CI gate registered.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P16, §5.1 acceptance criteria)</file>
+    <file purpose="rationale">projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md (§7 D-P16 deliverable description)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="D-40">RAG-triad metrics; CI gate fails on groundedness regression or insufficient-evidence miscalls</constraint>
+    <constraint source="Phase-1-threshold">Permissive thresholds for Phase 1 — groundedness ≥ 95% (not 100%); harden Phase 1.5+</constraint>
+    <constraint source="real-data-acceptance">Per SPEC §1 acceptance bar: smoke must run against REAL Observations produced by ingest pipeline (not mocks)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>rag-triad-eval, golden-dataset, smoke-testing, ci-gate</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Author 3-5 fixture documents">Realistic closing letters + 1-2 settlement agreements; each tied to a fictional matter (M-FIXTURE-001, etc.)</step>
+    <step order="2" name="Author 10-15 golden tuples">tests/Insights/golden/predict-matter-cost.json — each tuple: {parameters, expected-band, expected-evidence-count, expected-displayHint, (for insufficient) expected-actionableGap}; cover ~8 sufficient + 3-5 insufficient cases + 1-2 with applicable Precedent</step>
+    <step order="3" name="Author smoke test">tests/integration/EndToEnd/Phase1SmokeTest.cs: setup tenant → upload fixtures via mock SPE event → wait for ingest completion (poll insights-index) → admin creates fixture Precedent → poll for projection → POST /api/insights/ask × N golden tuples → verify each response matches expected band/decline/Precedent-citation</step>
+    <step order="4" name="Author eval harness">Reads golden dataset → invokes endpoint → computes Retrieval-overlap + Groundedness-pass-rate + Relevance-score → compare to thresholds → emit report</step>
+    <step order="5" name="CI integration">Add eval harness as GitHub Actions step on PR; fail PR on regression beyond threshold</step>
+    <step order="6" name="Acceptance verification">Walk through all SPEC §5.1 acceptance criteria — each checked off via test output or manual verification step documented in notes/</step>
+    <step order="7" name="Quality gates">code-review + adr-check</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="gh">GitHub Actions for CI integration</tool>
+  </tools>
+
+  <outputs>
+    <output type="test-fixtures">tests/Insights/fixtures/ — 3-5 fictional matters' closing-letters/settlement-agreements</output>
+    <output type="test-fixtures">tests/Insights/fixtures/precedents/ — 1-2 fictional SME-authored Precedents</output>
+    <output type="test-data">tests/Insights/golden/predict-matter-cost.json — 10-15 tuples</output>
+    <output type="test">tests/integration/EndToEnd/Phase1SmokeTest.cs</output>
+    <output type="test">tests/eval/PredictMatterCostEvalHarness.cs</output>
+    <output type="ci">.github/workflows/insights-eval.yml (GitHub Actions step)</output>
+    <output type="docs">projects/ai-spaarke-insights-engine-r1/notes/acceptance-criteria-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Smoke test passes: SPE upload event → real Observations in insights-index (verified by query)</criterion>
+    <criterion testable="true">Smoke test passes: predict-matter-cost on a fixture matter returns either valid Inference or DeclineResponse</criterion>
+    <criterion testable="true">Smoke test passes: GroundingVerifier strips one synthetic bad citation injected into a fixture</criterion>
+    <criterion testable="true">Eval harness: golden dataset baseline run passes (groundedness ≥ 95%, no insufficient miscalls beyond tolerance)</criterion>
+    <criterion testable="true">CI gate registered: PR to insights-engine paths runs eval harness</criterion>
+    <criterion testable="true">All SPEC §5.1 acceptance criteria checked off (via test output OR notes/acceptance-criteria-verification.md)</criterion>
+    <criterion testable="true">All SPEC §5.1.1 §3.5 facade grep criteria pass (zero forbidden imports in Zone B paths)</criterion>
+  </acceptance-criteria>
+</task>

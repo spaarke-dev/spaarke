@@ -1,0 +1,86 @@
+<task id="022" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P12 — Six Insights-mode node executors (LiveFactNode, IndexRetrieveNode, EvidenceSufficiencyNode, DeclineToFindNode, ReturnInsightArtifactNode, plus GroundingVerifyNode coordination)</title>
+    <status>not-started</status>
+    <wave>3</wave>
+    <estimated-effort>2 days</estimated-effort>
+    <tags>bff-api, node-executors, playbook, zone-a, dotnet</tags>
+    <dependencies>001, 002, 020</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>D-P12</d-p>
+  </metadata>
+
+  <prompt>
+    Implement 5 new Insights-mode node executors in `Services/Ai/Nodes/` (the 6th, `GroundingVerifyNode`, lands with D-P9 task 020). Each extends the existing 10-executor registry following the established `INodeExecutor` pattern. Per Q5 audit, three previously-proposed nodes were collapsed: `SpeContentRetrieveNode` lives in D-P7 ingest reading `spaarke-files-index` directly; `EmitObservationNode` lives in D-P10; `GraphTraverseNode` defers with Cosmos to Phase 1.5.
+  </prompt>
+
+  <role>Senior .NET developer familiar with the existing `INodeExecutor` pattern (10 executors), node config JSON, NodeOutput shape, and AI Search retrieval.</role>
+
+  <goal>
+    All 5 node executors implemented, registered via DI, dispatched correctly via `NodeExecutorRegistry` for new `ActionType` enum values. Each follows existing executor patterns. Unit tests cover the happy path + one edge case per node. Action enum extensions registered: LiveFact, IndexRetrieve, EvidenceSufficiency, DeclineToFind, ReturnInsightArtifact.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P12 enumeration)</file>
+    <file purpose="rationale">projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md (§3 Q5 audit findings — what's NEW vs collapsed)</file>
+    <file purpose="existing-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs (3-tier retrieval pattern for IndexRetrieveNode reference)</file>
+    <file purpose="existing-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/QueryDataverseNodeExecutor.cs (config + dispatch pattern)</file>
+    <file purpose="existing-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs (interface + ActionType enum)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Auto-discover via `IEnumerable&lt;INodeExecutor&gt;` DI pattern; no new modules</constraint>
+    <constraint source="§3.5">Zone A placement; all 5 nodes under Services/Ai/Nodes/</constraint>
+    <constraint source="D-A23">Evidence-bearing nodes (IndexRetrieveNode, ReturnInsightArtifactNode) must Validate non-empty evidence at runtime</constraint>
+    <constraint source="Q5-audit">Do NOT re-implement existing capabilities — IndexRetrieveNode extracts AiAnalysisNodeExecutor's 3-tier composition into a reusable helper consumable by both</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>node-executors, playbook-substrate, ai-search-retrieve, evidence-sufficiency</topic>
+    <files>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing executors">AiAnalysisNodeExecutor.cs (1287 lines — focus on retrieval composition section); QueryDataverseNodeExecutor.cs (293 lines — config pattern); INodeExecutor.cs</step>
+    <step order="2" name="Extend ActionType enum">Add LiveFact, IndexRetrieve, EvidenceSufficiency, DeclineToFind, ReturnInsightArtifact (and GroundingVerify if not already added by task 020)</step>
+    <step order="3" name="Extract retrieval composition helper">From AiAnalysisNodeExecutor's 3-tier merge logic; new helper Services/Ai/Insights/Composition/MultiIndexComposer.cs used by both AiAnalysis (existing) and IndexRetrieveNode (new) — per Q5 audit recommendation</step>
+    <step order="4" name="Author LiveFactNode">Wraps LiveFactResolverService.GetMatterFactAsync(predicate, subjectId) → NodeOutput</step>
+    <step order="5" name="Author IndexRetrieveNode">Config-driven AI Search query against insights-index (filter + vector); returns NodeOutput.StructuredData with retrieved artifacts</step>
+    <step order="6" name="Author EvidenceSufficiencyNode">Config: evidence rule (e.g., {minComparableMatters: 12}); reads prior node outputs; returns sufficient/insufficient verdict</step>
+    <step order="7" name="Author DeclineToFindNode">Returns DeclineResponse with structured insufficient-evidence template; deterministic exit per D-49</step>
+    <step order="8" name="Author ReturnInsightArtifactNode">Final node; serializes playbook output as InsightArtifact envelope per D-P1 types; EvidenceGuard.Validate before return</step>
+    <step order="9" name="DI registration">Each node implements INodeExecutor; auto-discovered by NodeExecutorRegistry via existing IEnumerable pattern</step>
+    <step order="10" name="Unit tests">One happy path + one edge per node; integration test wires a mini playbook end-to-end (mock data)</step>
+    <step order="11" name="Quality gates">code-review + adr-check at Step 9.5</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LiveFactNode.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/IndexRetrieveNode.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EvidenceSufficiencyNode.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/DeclineToFindNode.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ReturnInsightArtifactNode.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Composition/MultiIndexComposer.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs (extended ActionType enum)</output>
+    <output type="test">tests/unit/Services/Ai/Nodes/ (one test file per new node)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 5 new nodes implement INodeExecutor and resolve via NodeExecutorRegistry by ActionType</criterion>
+    <criterion testable="true">LiveFactNode returns a Fact artifact from LiveFactResolverService (mock backend)</criterion>
+    <criterion testable="true">IndexRetrieveNode queries insights-index with filter + vector; returns retrieved artifacts in NodeOutput.StructuredData</criterion>
+    <criterion testable="true">EvidenceSufficiencyNode correctly flags sufficient vs insufficient against {minComparableMatters: 12} rule</criterion>
+    <criterion testable="true">DeclineToFindNode emits structured DeclineResponse (typed) — not freely-composed prose</criterion>
+    <criterion testable="true">ReturnInsightArtifactNode validates non-empty evidence before returning (throws EvidenceRequiredException on empty)</criterion>
+    <criterion testable="true">MultiIndexComposer helper is consumed by both existing AiAnalysisNodeExecutor AND new IndexRetrieveNode (refactor preserves AiAnalysisNodeExecutor behavior)</criterion>
+  </acceptance-criteria>
+</task>

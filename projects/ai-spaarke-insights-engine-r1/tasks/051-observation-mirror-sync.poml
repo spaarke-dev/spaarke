@@ -1,0 +1,73 @@
+<task id="051" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P11 (mirror) — Observation mirror sync to sprk_analysis polymorphic</title>
+    <status>not-started</status>
+    <wave>6</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, sync, observation-mirror, sprk-analysis, zone-b, dotnet</tags>
+    <dependencies>021, 025</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <d-p>D-P11</d-p>
+    <first-step-blocker>Confirm sprk_analysis polymorphic pattern is in use for AI outputs; identify source-type field via Dataverse MCP describe_table</first-step-blocker>
+  </metadata>
+
+  <prompt>
+    Implement small in-process sync that writes one `sprk_analysis` Dataverse row per persisted Observation (D-P10 emission) as a side-effect of the universal ingest playbook (D-P7). This mirror enables the D-P11 (view task 052) Dataverse model-driven view to display Observations for sample-based QA per D-60. Per [SPEC-phase-1-minimum.md §5](../SPEC-phase-1-minimum.md), the polymorphic source-type pattern is consistent with existing Spaarke AI output routing.
+  </prompt>
+
+  <role>Senior .NET developer with Dataverse write patterns + polymorphic entity familiarity.</role>
+
+  <goal>
+    `ObservationMirrorSync.MirrorAsync(observation, ct)` writes a `sprk_analysis` row with the new source-type value (TBD per first-step blocker) carrying: source-document ref, predicate, extracted value, verbatim quote, confidence, producedBy, asOf. Fired as fire-and-forget side-effect from D-P7 ingest playbook completion. Idempotent (re-mirror is no-op via deduplication key).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P11 mirror)</file>
+    <file purpose="rationale">projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md (§5 Observation review surface — mirror mechanism)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="§3.5">Zone B placement (Services/Insights/Observations/)</constraint>
+    <constraint source="D-56">Use existing sprk_analysis polymorphic pattern — NO new sprk_observation entity</constraint>
+    <constraint source="idempotency">Mirror deduplication by (subject, predicate, producedBy.version, documentId) — re-mirror is no-op</constraint>
+    <constraint source="performance">Fire-and-forget from ingest playbook; do not block ingest on mirror failures (log only)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse-write, polymorphic-entity, sprk-analysis, observation-mirroring</topic>
+    <files>
+      <file>knowledge/dataverse-sync/INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="First-step blocker">Use mcp__dataverse__describe_table(sprk_analysis) to confirm polymorphic pattern, identify source-type field name, identify all required fields; document findings</step>
+    <step order="1" name="Author ObservationMirrorMapper">Maps ObservationArtifact → sprk_analysis row structure with new source-type value</step>
+    <step order="2" name="Author ObservationMirrorSync service">MirrorAsync(observation, ct); uses IDataverseService for write; idempotent check before insert</step>
+    <step order="3" name="Wire to ingest playbook completion">D-P7 ingest playbook's emission step fires MirrorAsync per Observation (fire-and-forget with error logging)</step>
+    <step order="4" name="Integration test">Run ingest on fixture → verify sprk_analysis rows created with new source-type value + all expected fields</step>
+    <step order="5" name="Quality gates">code-review + adr-check; verify idempotency</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="dataverse-mcp">mcp__dataverse__describe_table for schema validation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Insights/Observations/ObservationMirrorSync.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Insights/Observations/ObservationMirrorMapper.cs</output>
+    <output type="test">tests/integration/Services/Insights/Observations/ObservationMirrorSyncTests.cs</output>
+    <output type="docs">projects/ai-spaarke-insights-engine-r1/notes/sprk-analysis-polymorphic-confirmation.md (first-step blocker resolution)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_analysis polymorphic source-type field identified and documented</criterion>
+    <criterion testable="true">Each emitted Observation produces one sprk_analysis mirror row</criterion>
+    <criterion testable="true">Mirror row contains all expected fields (source-doc ref, predicate, value, quote, confidence, producedBy, asOf)</criterion>
+    <criterion testable="true">Re-mirror on already-mirrored Observation is no-op (idempotency)</criterion>
+    <criterion testable="true">Mirror failure does not block ingest playbook completion (verified by deliberate Dataverse write failure injection)</criterion>
+  </acceptance-criteria>
+</task>

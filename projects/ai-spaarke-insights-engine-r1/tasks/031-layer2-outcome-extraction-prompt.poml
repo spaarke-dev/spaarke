@@ -1,0 +1,76 @@
+<task id="031" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P6 — Layer 2 outcome extraction node + prompt template @v1</title>
+    <status>not-started</status>
+    <wave>4</wave>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>bff-api, ai-analysis, prompt-template, extraction, zone-a, extraction-layer</tags>
+    <dependencies>022</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>D-P6</d-p>
+    <first-step-blocker>Product/SME confirmation of confidence threshold starter values per D-63</first-step-blocker>
+  </metadata>
+
+  <prompt>
+    Implement Layer 2 (outcome extraction) playbook node + `outcome-extraction@v1` prompt template per [SPEC-phase-1-minimum.md §3.4](../SPEC-phase-1-minimum.md). Realized via existing `AiAnalysisNodeExecutor`. Single LLM call returning structured outcome JSON with verbatim evidence quotes + per-field confidences. Conditional invocation per D-P7 ingest playbook (gated by Layer 1 outcome).
+  </prompt>
+
+  <role>Senior .NET developer + prompt engineer with structured-output extraction expertise.</role>
+
+  <goal>
+    `outcome-extraction@v1` returns valid JSON per SPEC-phase-1-minimum.md §3.4 schema: outcomeCategory + settlementAmount + settlementCurrency + outcomeDate + matterDurationDays + keyTerms[] + per-field evidence quotes + per-field confidences. Three mechanical gates (D-P9, D-P10) run downstream. Test against 3 fixture closing-letter / settlement-agreement documents shows correct extraction + verbatim quotes.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P6, §3.4.1 worked Observation example)</file>
+    <file purpose="rationale">projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md (§3.4 Layer 2 prompt specification with starter template)</file>
+    <file purpose="existing-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="D-59">Layer 2 only fires when Layer 1 ∈ {closing_letter, settlement_agreement, opinion_judgment} AND confidence ≥ 0.7</constraint>
+    <constraint source="D-62">Prompt is versioned; producedBy = "outcome-extraction@v1"</constraint>
+    <constraint source="D-63">Per-field confidence thresholds (admin-tunable) gate emission downstream — prompt MUST return per-field confidences</constraint>
+    <constraint source="D-47">Each extracted field MUST have a verbatim quote from the source document for GroundingVerifier to mechanically check</constraint>
+    <constraint source="D-50">Input sanitized via ISanitizer before LLM</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>prompt-engineering, structured-extraction, verbatim-quotes, layered-extraction</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="First-step blocker">Confirm confidence threshold starter values (outcomeCategory≥0.75, settlementAmount≥0.85, outcomeDate≥0.85, matterDurationDays≥0.75) with product/SME</step>
+    <step order="1" name="Author prompt template">outcome-extraction@v1 per SPEC-phase-1-minimum.md §3.4 (verbatim starter)</step>
+    <step order="2" name="Author playbook node config">References outcome-extraction@v1; uses AiAnalysisNodeExecutor with KnowledgeRetrievalConfig.Mode = Auto (may augment with related-matter context)</step>
+    <step order="3" name="Validate JSON schema">Add validator that rejects malformed output before downstream gates (e.g., missing evidence field for an extracted value); retry once on schema failure</step>
+    <step order="4" name="Author 3 fixture documents">Realistic closing letter, settlement agreement, decision memo with extractable outcome data</step>
+    <step order="5" name="Integration test">Each fixture extracted; verbatim quotes present; per-field confidences populated</step>
+    <step order="6" name="Quality gates">code-review + adr-check; verify input sanitization wired</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="prompt">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/outcome-extraction.v1.txt</output>
+    <output type="config">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/layer2-outcome-extraction.node.json</output>
+    <output type="test-fixtures">tests/Insights/fixtures/ — 3 outcome-bearing documents (closing letter, settlement agreement, decision memo)</output>
+    <output type="test">tests/integration/Services/Ai/Insights/Layer2OutcomeExtractionTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Prompt returns valid JSON matching SPEC-phase-1-minimum.md §3.4 schema (outcomeCategory + settlementAmount + etc. + per-field evidence + per-field confidences)</criterion>
+    <criterion testable="true">Fixture closing letter extracted: outcomeCategory + settlementAmount + outcomeDate all with verbatim quotes</criterion>
+    <criterion testable="true">Fixture settlement agreement extracted: settlementAmount + keyTerms[] populated</criterion>
+    <criterion testable="true">Missing field in document → returned as null with confidence 0 + brief explanation (not fabricated)</criterion>
+    <criterion testable="true">Verbatim quotes match the source document verbatim (verified by manual inspection against fixtures)</criterion>
+    <criterion testable="true">producedBy="outcome-extraction@v1" on every emitted Observation</criterion>
+  </acceptance-criteria>
+</task>

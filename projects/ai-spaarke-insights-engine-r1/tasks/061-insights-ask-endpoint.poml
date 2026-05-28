@@ -1,0 +1,78 @@
+<task id="061" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P15 — POST /api/insights/ask endpoint via IInsightsAi facade</title>
+    <status>not-started</status>
+    <wave>7</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, endpoint, public-api, zone-b, dotnet, adr-008, adr-016, adr-019</tags>
+    <dependencies>042</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>D-P15</d-p>
+  </metadata>
+
+  <prompt>
+    Implement `POST /api/insights/ask` Minimal API endpoint per SPEC §3.1 D-P15. Accepts `{question, subject, parameters}`, returns InsightArtifact or DeclineResponse via `IInsightsAi.AnswerQuestionAsync` facade. Endpoint filter for resource auth (ADR-008); rate limiting (ADR-016); ProblemDetails errors (ADR-019). Zone B — calls facade only; §3.5 forbidden imports verified by grep.
+  </prompt>
+
+  <role>Senior .NET developer with Minimal API + ADR-008 endpoint filter + ADR-016 rate limiting + ADR-019 ProblemDetails expertise.</role>
+
+  <goal>
+    Endpoint registered in EndpointMappingExtensions.cs as `MapInsightsAskEndpoint()`. POST with valid {question, subject, parameters} returns 200 with InsightArtifact OR 200 with DeclineResponse (per facade response shape). Invalid request returns 400 + ProblemDetails. Unauthenticated returns 401; unauthorized returns 403. Rate-limited returns 429. Integration test against fixture invokes end-to-end via mocked IInsightsAi.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P15, §3.5 facade boundary, §5.1.1 acceptance)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md (forbidden imports in Zone B)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-008">Endpoint filter for resource auth — verify caller has tenant access</constraint>
+    <constraint source="ADR-016">Rate limiting per caller (default 60 requests/minute)</constraint>
+    <constraint source="ADR-019">ProblemDetails for all errors with appropriate problem type URIs</constraint>
+    <constraint source="§3.5">Zone B placement (Api/Insights/); MUST inject IInsightsAi only; NO IChatClient / PlaybookExecutionEngine imports</constraint>
+    <constraint source="D-27">DefaultAzureCredential for Dataverse outbound (if endpoint reads access scope from Dataverse)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>minimal-api, endpoint-filter, rate-limiting, problemdetails, facade-consumption</topic>
+    <files>
+      <file>docs/adr/ADR-008-endpoint-filter-authorization.md</file>
+      <file>docs/adr/ADR-016-ai-cost-rate-limit-and-backpressure.md</file>
+      <file>docs/adr/ADR-019-problemdetails.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Author InsightAskRequest DTO">In Models/Insights/ — {Question, Subject, Parameters} with validation attributes</step>
+    <step order="2" name="Author endpoint">Api/Insights/InsightEndpoints.cs with MapInsightsAskEndpoint(); POST /api/insights/ask handler</step>
+    <step order="3" name="Endpoint filter">Tenant access verification per ADR-008</step>
+    <step order="4" name="Rate limit">Per-caller bucket via existing rate limiting middleware (ADR-016)</step>
+    <step order="5" name="Inject IInsightsAi">Call IInsightsAi.AnswerQuestionAsync(request, ct) → return result.Artifact OR result.Decline</step>
+    <step order="6" name="ProblemDetails">Validation failure → 400 ProblemDetails; auth failure → 401/403 ProblemDetails; rate limit → 429 ProblemDetails</step>
+    <step order="7" name="Register in DI">EndpointMappingExtensions.cs adds MapInsightsAskEndpoint() call</step>
+    <step order="8" name="Integration test">POST valid request → expect 200 + InsightArtifact; POST invalid → 400; mock IInsightsAi for sufficient + insufficient paths</step>
+    <step order="9" name="§3.5 grep">Run boundary verification on Api/Insights/ → zero hits expected</step>
+    <step order="10" name="Quality gates">code-review + adr-check</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Insights/InsightEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Insights/InsightAskRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (extended with MapInsightsAskEndpoint())</output>
+    <output type="test">tests/integration/Api/Insights/InsightEndpointsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/insights/ask with valid {question:"predict-matter-cost", subject:"matter:M-1234"} returns 200 + InsightArtifact OR DeclineResponse</criterion>
+    <criterion testable="true">POST with invalid request (missing question) returns 400 + ProblemDetails</criterion>
+    <criterion testable="true">Unauthenticated request returns 401 + ProblemDetails</criterion>
+    <criterion testable="true">Rate-limited request (over threshold) returns 429 + ProblemDetails with Retry-After</criterion>
+    <criterion testable="true">§3.5 grep clean — no IChatClient/PlaybookExecutionEngine imports in Api/Insights/</criterion>
+    <criterion testable="true">Endpoint registered via MapInsightsAskEndpoint() in EndpointMappingExtensions.cs</criterion>
+  </acceptance-criteria>
+</task>

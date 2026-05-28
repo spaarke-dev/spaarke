@@ -1,0 +1,71 @@
+<task id="002" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P17 — IInsightGraph interface + DTOs + stub impl (Cosmos defers to Phase 1.5)</title>
+    <status>not-started</status>
+    <wave>1</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>bff-api, interface, graph, dotnet, swap-path-preservation</tags>
+    <dependencies></dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <d-p>D-P17</d-p>
+  </metadata>
+
+  <prompt>
+    Define the `IInsightGraph` interface + traversal-spec DTOs in `Sprk.Bff.Api/Services/Insights/Graph/` so Phase 1.5 Cosmos implementation slots in cleanly. Ship a stub `NotImplementedException`-throwing implementation registered in DI so synthesis playbook authors can reason about the abstraction without depending on Cosmos. Preservation #2 from the SPEC integration — cheap to ship now, preserves swap path.
+  </prompt>
+
+  <role>Senior .NET developer familiar with named-traversal abstractions and DI stub patterns.</role>
+
+  <goal>
+    `IInsightGraph` interface compiled with vertex/edge upsert + named traversals (`FindMattersInvolvingPartyAsync`, `FindConnectedEntitiesAsync` from [design.md §4.2.2](../design.md)). Stub implementation `StubInsightGraph` registered in DI; throws `NotImplementedException("Cosmos NoSqlInsightGraph deferred to Phase 1.5 first deliverable per SPEC §3.3")` on every method. Unit tests verify the stub is reachable via DI.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P17, §3.3 Phase 1.5 first deliverable)</file>
+    <file purpose="design">projects/ai-spaarke-insights-engine-r1/design.md (§4.2.2 IInsightGraph C# interface)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — register stub via existing module pattern, no new modules</constraint>
+    <constraint source="ADR-013">Zone B placement (Services/Insights/Graph/); no AI internals imports</constraint>
+    <constraint source="D-09">Cosmos NoSQL chosen for Phase 1.5; interface must not leak Gremlin syntax</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>interface-design, di-stub, swap-path</topic>
+    <files>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read design.md §4.2.2">Confirm interface shape</step>
+    <step order="2" name="Create folder">Create `Services/Insights/Graph/`</step>
+    <step order="3" name="Author DTOs">InsightVertex, InsightEdge, GraphTraversalSpec, GraphTraversalScope, MatterRef</step>
+    <step order="4" name="Author interface">IInsightGraph with 6-7 methods (vertex upsert/get/delete, edge upsert/delete, 2 named traversals)</step>
+    <step order="5" name="Author stub">StubInsightGraph throwing `NotImplementedException` with clear "Phase 1.5" message + SPEC reference</step>
+    <step order="6" name="DI registration">Register `IInsightGraph` -> StubInsightGraph in existing DI module (likely AnalysisServicesModule or new InsightsModule)</step>
+    <step order="7" name="Verify discovery">Unit test resolves IInsightGraph via DI; method call throws expected exception</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run unit tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Insights/Graph/IInsightGraph.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Insights/Graph/InsightVertex.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Insights/Graph/InsightEdge.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Insights/Graph/StubInsightGraph.cs</output>
+    <output type="test">tests/unit/Services/Insights/Graph/StubInsightGraphTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Interface compiles with vertex + edge + 2 named traversal methods</criterion>
+    <criterion testable="true">Stub is resolved via `IServiceProvider.GetRequiredService&lt;IInsightGraph&gt;()` in unit test</criterion>
+    <criterion testable="true">Calling any stub method throws NotImplementedException with message referencing SPEC §3.3 Phase 1.5</criterion>
+    <criterion testable="true">No AI internals imports (grep clean for §3.5.4 forbidden list)</criterion>
+  </acceptance-criteria>
+</task>

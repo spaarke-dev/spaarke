@@ -1,0 +1,76 @@
+<task id="012" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P3 (endpoint) — POST /api/insights/admin/precedents admin endpoint</title>
+    <status>not-started</status>
+    <wave>2</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, endpoint, admin, jwt-auth, precedent, dotnet</tags>
+    <dependencies>011</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>D-P3</d-p>
+  </metadata>
+
+  <prompt>
+    Implement admin endpoint `POST /api/insights/admin/precedents` for manual SME authoring of Precedents (D-P3 Phase 1 mode of D-61). JWT-authorized, admin role per ADR-008 endpoint filter. Creates `sprk_precedent` row with Tentative status; SME later promotes to Confirmed (manual; out of Phase 1 D-A27 admin flow scope).
+  </prompt>
+
+  <role>Senior .NET developer with Minimal API + ADR-008 endpoint filter expertise.</role>
+
+  <goal>
+    `POST /api/insights/admin/precedents {patternStatement, scope, supportingMatterIds[]}` creates a `sprk_precedent` row in Dataverse with status=Tentative, reviewerBy=current user, asOf=now. Returns 201 with precedent ID. Endpoint filter validates admin role per ADR-008. ProblemDetails errors per ADR-019.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P3, §3.5 facade boundary — Zone B placement)</file>
+    <file purpose="rationale">projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md (§2.2 Phase 1 SME manual authoring mode)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-008">Endpoint filter for resource auth (admin role)</constraint>
+    <constraint source="ADR-019">ProblemDetails for all errors</constraint>
+    <constraint source="ADR-016">Rate limit per admin per hour</constraint>
+    <constraint source="§3.5">Zone B — calls IDataverseService directly, no AI internals imports</constraint>
+    <constraint source="D-27">DefaultAzureCredential for Dataverse outbound</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>minimal-api, endpoint-filter-auth, problemdetails, dataverse-write</topic>
+    <files>
+      <file>docs/adr/ADR-008-endpoint-filter-authorization.md</file>
+      <file>docs/adr/ADR-019-problemdetails.md</file>
+      <file>docs/adr/ADR-016-ai-cost-rate-limit-and-backpressure.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing endpoints">Look at Sprk.Bff.Api/Api/AdminKnowledgeEndpoints.cs for admin-endpoint pattern reference</step>
+    <step order="2" name="Create folder">Services/Insights/Precedents/ + Api/Insights/</step>
+    <step order="3" name="Author IPrecedentBoard interface">Async methods: CreateTentativeAsync, GetAsync, ConfirmAsync (Phase 1 manual), DeprecateAsync</step>
+    <step order="4" name="Author DataversePrecedentBoard">Implementation using IDataverseService (D-A26 scaffold)</step>
+    <step order="5" name="Author endpoint">PrecedentAdminEndpoints.cs with MapPrecedentAdminEndpoints() extension; register in EndpointMappingExtensions.cs</step>
+    <step order="6" name="Add endpoint filter">Admin role check via existing AuthorizationModule pattern</step>
+    <step order="7" name="Write integration test">Posts a Precedent, verifies sprk_precedent row created with Tentative status</step>
+    <step order="8" name="Quality gates">code-review + adr-check at Step 9.5; verify zero AI-internals imports via grep</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Insights/PrecedentAdminEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Insights/Precedents/IPrecedentBoard.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Insights/Precedents/DataversePrecedentBoard.cs</output>
+    <output type="test">tests/integration/Api/Insights/PrecedentAdminEndpointsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/insights/admin/precedents creates a sprk_precedent row with status=Tentative (verified via Dataverse query)</criterion>
+    <criterion testable="true">Endpoint requires admin role; non-admin returns 403 with ProblemDetails</criterion>
+    <criterion testable="true">Validation errors return 400 with ProblemDetails</criterion>
+    <criterion testable="true">Zero AI-internals imports (grep clean for §3.5.4 forbidden list)</criterion>
+    <criterion testable="true">Integration test passes against Spaarke Dev environment</criterion>
+  </acceptance-criteria>
+</task>

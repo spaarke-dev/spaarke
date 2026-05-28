@@ -1,0 +1,73 @@
+<task id="080" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>Deploy Phase 1 to Spaarke Dev environment</title>
+    <status>not-started</status>
+    <wave>deploy</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>deploy, bff-deploy, azure-deploy, dataverse-deploy, integration, environment</tags>
+    <dependencies>070</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>deploy</d-p>
+  </metadata>
+
+  <prompt>
+    Deploy Phase 1 build to Spaarke Dev environment: Bicep infrastructure (insights-index + Function App per D-P2) + BFF API redeploy (with all new D-P12 nodes, D-P13 cache, IInsightsAi facade, endpoints) + Dataverse solution import (sprk_precedent + Observation review view + BPF). Verify SPEC §5.1 acceptance criteria pass against deployed environment.
+  </prompt>
+
+  <role>Deployment engineer familiar with `bff-deploy`, `azure-deploy`, `dataverse-deploy` skills; understands Spaarke Dev environment.</role>
+
+  <goal>
+    Insights Engine Phase 1 functional in Spaarke Dev: insights-index provisioned, BFF API endpoint responding, sprk_precedent + Observations queryable, ingest playbook fires on real SPE upload event, smoke + eval harness pass against deployed environment.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§5.1 acceptance criteria)</file>
+    <file purpose="azure-inventory">projects/ai-spaarke-insights-engine-r1/azure-inventory.md (Spaarke Dev resources)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">BFF deployed via bff-deploy skill; Function App (if used for D-P8) deployed separately</constraint>
+    <constraint source="single-tenant">Use the Spaarke Dev parameter file (one customer = one parameter file pattern per D-P2)</constraint>
+    <constraint source="zero-downtime">Deployments should not break existing BFF functionality</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deployment, ci-cd, environment-management</topic>
+    <files>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Invoke azure-deploy skill">Deploy Bicep modules (D-P2) to Spaarke Dev using single-tenant parameter file</step>
+    <step order="2" name="Invoke bff-deploy skill">Deploy BFF API (with all D-P9, D-P12, D-P13, D-P14, D-P15, IInsightsAi facade)</step>
+    <step order="3" name="Invoke dataverse-deploy skill">Import spaarke_insights solution (sprk_precedent entity, Observation review view, BPF, fields)</step>
+    <step order="4" name="Deploy D-P8 consumer">If Function App: deploy Function; if BackgroundService: restart BFF App Service to pick up</step>
+    <step order="5" name="Smoke against deployed env">Re-run task 070 smoke + eval harness against Spaarke Dev URLs</step>
+    <step order="6" name="Verify §5.1 acceptance">Walk through each criterion against deployed environment; document any deviations</step>
+    <step order="7" name="Update README with deploy status">"Phase 1 deployed to Spaarke Dev (date)"</step>
+  </steps>
+
+  <tools>
+    <tool name="bff-deploy">BFF API deployment skill</tool>
+    <tool name="azure-deploy">Bicep deployment skill</tool>
+    <tool name="dataverse-deploy">Dataverse solution import skill</tool>
+    <tool name="dotnet">Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployed-resources">Bicep + BFF + Dataverse solution + (optional Function App) live in Spaarke Dev</output>
+    <output type="docs">projects/ai-spaarke-insights-engine-r1/notes/deployment-verification-phase1.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">insights-index exists in spaarke-search-dev and is queryable</criterion>
+    <criterion testable="true">BFF API responds 200 to POST /api/insights/ask on Spaarke Dev URL</criterion>
+    <criterion testable="true">sprk_precedent entity queryable in Spaarke Dev Dataverse</criterion>
+    <criterion testable="true">Smoke test (task 070) passes against deployed environment</criterion>
+    <criterion testable="true">All SPEC §5.1 acceptance criteria verified against deployed environment (documented)</criterion>
+    <criterion testable="true">No regression in existing BFF API functionality (existing tests pass)</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,75 @@
+<task id="020" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P9 — GroundingVerifier + GroundingVerifyNode (mechanical citation check)</title>
+    <status>not-started</status>
+    <wave>3</wave>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>bff-api, platform-primitive, citation-verification, lavern, zone-a, dotnet</tags>
+    <dependencies>001</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>D-P9</d-p>
+  </metadata>
+
+  <prompt>
+    Implement `GroundingVerifier` — mechanical substring + sliding-window citation check (zero LLM, 10K-char DoS cap) — in `Services/Ai/CitationVerification/` plus the `GroundingVerifyNode` executor wrapper (used by D-P12). Shared platform primitive; also consumed by Action Engine (LAVERN ADR 10.6). Closes the D-04 provenance-as-contract gap between principle and code enforcement.
+  </prompt>
+
+  <role>Senior .NET developer familiar with text matching algorithms, performance-bounded primitives, and Spaarke AI service patterns.</role>
+
+  <goal>
+    `IGroundingVerifier.VerifyAsync(citations, sourceChunks, ct)` returns per-citation verdict (Verified / NotFound / Annotated). Substring + sliding-window matching; 10K-char DoS cap rejects oversized inputs with explicit error. Unit tests show: (a) exact-quote citation verifies; (b) lightly-paraphrased quote within window verifies; (c) fabricated quote fails. `GroundingVerifyNode` (D-P12) wraps it as a node executor.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P9, §3.4.1 worked example with evidence quotes)</file>
+    <file purpose="decisions">projects/ai-spaarke-insights-engine-r1/decisions.md (D-47 GroundingVerifier, D-04 provenance contract)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="D-47">Mechanical zero-LLM verifier; substring + sliding-window; 10K-char DoS cap</constraint>
+    <constraint source="ADR-013">Zone A placement; may import AI internals (but design doesn't require any)</constraint>
+    <constraint source="ADR-010">DI: register IGroundingVerifier singleton in AiModule or new InsightsAiModule</constraint>
+    <constraint source="LAVERN-ADR-10.6">Shared platform primitive; consumable by Action Engine</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>citation-verification, lavern-primitives, text-matching</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>projects/ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md</file>
+      <file>projects/ai-spaarke-insights-engine-r1/lavern-pattern-assessment.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read LAVERN analysis">Confirm GroundingVerifier interface from ADR 10.6 proposal</step>
+    <step order="2" name="Author interface">IGroundingVerifier with VerifyAsync(IEnumerable&lt;EvidenceRef&gt; citations, IEnumerable&lt;ChunkRef&gt; sourceChunks, CancellationToken) -> IReadOnlyList&lt;VerificationResult&gt;</step>
+    <step order="3" name="Author implementation">GroundingVerifier with substring matching first, sliding-window (window size 100 chars; step 50) for paraphrase tolerance; reject inputs &gt; 10K chars per citation</step>
+    <step order="4" name="Author GroundingVerifyNode">Wraps IGroundingVerifier as INodeExecutor for D-P12 set; reads citations from prior node output, verifies, annotates failures with "[citation could not be verified]"</step>
+    <step order="5" name="DI registration">Register IGroundingVerifier + GroundingVerifyNode in AiModule</step>
+    <step order="6" name="Unit tests">Three core scenarios: exact match; paraphrased within window; fabricated; plus DoS cap rejection test</step>
+    <step order="7" name="Quality gates">code-review + adr-check at Step 9.5</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/CitationVerification/IGroundingVerifier.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/CitationVerification/GroundingVerifier.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/GroundingVerifyNode.cs</output>
+    <output type="test">tests/unit/Services/Ai/CitationVerification/GroundingVerifierTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Exact-quote citation against source chunk returns Verified</criterion>
+    <criterion testable="true">Paraphrased quote (light word-order changes within 100-char window) returns Verified</criterion>
+    <criterion testable="true">Fabricated quote returns NotFound (and annotated "[citation could not be verified]")</criterion>
+    <criterion testable="true">Citation &gt; 10K chars rejected with explicit error (DoS cap)</criterion>
+    <criterion testable="true">GroundingVerifyNode registered + dispatched via NodeExecutorRegistry; integration test wires it into a minimal playbook</criterion>
+    <criterion testable="true">Zero LLM calls (verified by mocking IOpenAiClient + asserting no invocations)</criterion>
+  </acceptance-criteria>
+</task>

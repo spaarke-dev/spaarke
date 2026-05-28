@@ -1,0 +1,76 @@
+<task id="052" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P11 (view) — Observation review surface (Dataverse model-driven view + disposition workflow)</title>
+    <status>not-started</status>
+    <wave>6</wave>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>dataverse, model-driven-view, ui, observation-review, qa, d-60</tags>
+    <dependencies>051</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <d-p>D-P11</d-p>
+    <first-step-blocker>Confirm sampling percentage (10% initial, 1-2% ongoing per SPEC) and reviewer capacity with admin</first-step-blocker>
+  </metadata>
+
+  <prompt>
+    Build the Observation review surface as a Dataverse model-driven view + disposition workflow per [SPEC-phase-1-minimum.md §5](../SPEC-phase-1-minimum.md) and D-60. **MANDATORY in Phase 1** — without sample-based QA, extraction accuracy is unverified and the honesty contract becomes performative. Reviewers mark each sampled Observation as Correct/Incorrect/Unclear with optional note; dispositions feed prompt iteration loop.
+  </prompt>
+
+  <role>Dataverse model-driven app developer + UX/QA designer familiar with views, business process flows, and sampling strategies.</role>
+
+  <goal>
+    Dataverse model-driven view on `sprk_analysis` (filtered to Insights Observation source-type) showing recent Observations with source-document click-through, field name, extracted value, verbatim quote, confidence. Disposition workflow: Correct / Incorrect / Unclear with free-text note. Sampling configurable (default 10% initial, 1-2% ongoing per admin tunable). Solution exported + tracked in repo.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P11 view, §5.1 acceptance — review surface)</file>
+    <file purpose="rationale">projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md (§5 review surface complete spec)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="D-60">MANDATORY — Phase 1 acceptance gate</constraint>
+    <constraint source="dataverse-conventions">Use existing sprk_analysis polymorphic; view filters on the Insights source-type confirmed in task 051</constraint>
+    <constraint source="ux">Reviewer should see source document, extracted value, verbatim quote in one screen for fast QA</constraint>
+    <constraint source="sampling">Sampling logic admin-tunable (IConfiguration or a Dataverse settings entity)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse-model-driven-app, business-process-flow, sampling-strategy, qa-workflow</topic>
+    <files>
+      <file>knowledge/dataverse-sync/INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="First-step blocker">Confirm sampling percentage and reviewer capacity policy with admin</step>
+    <step order="1" name="Author Dataverse view">"Insights Observations — Review Queue" filtered to sprk_analysis where source-type = Insights Observation; columns: source-doc, predicate, extracted value, verbatim quote, confidence, status (defaults to Pending Review for sampled), reviewerBy, reviewerDate</step>
+    <step order="2" name="Author disposition fields">sprk_disposition (option set: PendingReview / Correct / Incorrect / Unclear), sprk_dispositionnote (text 2000), sprk_reviewdate (datetime)</step>
+    <step order="3" name="Author business process flow">"Observation Review" — pulls sampled Observation, presents fields, captures disposition + note, marks reviewed</step>
+    <step order="4" name="Author sampling logic">In ObservationMirrorSync (task 051 extension): on mirror, with probability = configured percentage, set sprk_disposition = PendingReview; else leave null (not sampled)</step>
+    <step order="5" name="Add to Dataverse solution">Include view + BPF in spaarke_insights solution</step>
+    <step order="6" name="UAT smoke">Reviewer can open view, see sampled Observations, mark dispositions; dispositions persisted</step>
+    <step order="7" name="Quality gates">code-review (for sampling code) + adr-check</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">PAC CLI for solution + view export</tool>
+    <tool name="dotnet">For sampling code in ObservationMirrorSync</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse-view">"Insights Observations — Review Queue" model-driven view in sprk_analysis entity</output>
+    <output type="dataverse-bpf">"Observation Review" business process flow</output>
+    <output type="dataverse-fields">sprk_disposition, sprk_dispositionnote, sprk_reviewdate on sprk_analysis</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Insights/Observations/ObservationMirrorSync.cs (extended with sampling logic)</output>
+    <output type="solution">Updated src/solutions/spaarke_insights/ with view + BPF</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Reviewer can open "Insights Observations — Review Queue" view and see recent sampled Observations</criterion>
+    <criterion testable="true">Reviewer can mark a sampled Observation as Correct / Incorrect / Unclear with note; disposition persists</criterion>
+    <criterion testable="true">Sampling percentage configurable (default 10%); 1000 Observations → ~100 marked PendingReview</criterion>
+    <criterion testable="true">View shows source document click-through (deep link to SPE doc)</criterion>
+    <criterion testable="true">Solution exported; view + BPF + new fields tracked in repo</criterion>
+  </acceptance-criteria>
+</task>

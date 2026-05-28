@@ -1,0 +1,68 @@
+<task id="024" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>Q5 side-quest — Generic IDistributedCacheExtensions.GetOrCreateAsync&lt;T&gt; helper</title>
+    <status>not-started</status>
+    <wave>3</wave>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>shared, redis, caching, refactor, optional, low-risk</tags>
+    <dependencies></dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <d-p>Q5-side-quest</d-p>
+  </metadata>
+
+  <prompt>
+    Optional Q5-audit side-quest: extract a generic `IDistributedCacheExtensions.GetOrCreateAsync&lt;T&gt;(key, factory, ttl)` helper that the project-wide Redis cache primitives (EmbeddingCache, ChatSessionManager, new D-P13 InsightsPlaybookExecutionCache) can use. Per Q5 audit, no such generic helper exists today — every bespoke cache reimplements the Get→null check→factory→Set pattern. High-leverage; benefits whole codebase.
+  </prompt>
+
+  <role>Senior .NET developer with IDistributedCache familiarity and refactoring discipline.</role>
+
+  <goal>
+    Generic `GetOrCreateAsync&lt;T&gt;(this IDistributedCache cache, string key, Func&lt;CancellationToken, Task&lt;T&gt;&gt; factory, TimeSpan ttl, CancellationToken ct)` extension method available in shared assembly (Spaarke.Core or similar). Optional opt-in adoption by existing caches (EmbeddingCache, ChatSessionManager) — only if non-disruptive; otherwise just makes the helper available for D-P13 and future caches.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P13 side-quest note)</file>
+    <file purpose="existing-pattern">src/server/shared/Spaarke.Core/Cache/RequestCache.cs (existing in-process GetOrCreateAsync pattern)</file>
+    <file purpose="existing-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingCache.cs (bespoke Redis cache without helper)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-009">Redis-first caching; helper must use IDistributedCache abstraction</constraint>
+    <constraint source="ADR-010">DI minimalism; extension method only — no new service registrations</constraint>
+    <constraint source="low-risk">Opt-in adoption only — do NOT refactor existing caches in this task; create the helper and let new code adopt it</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>redis-caching, generic-helpers, refactoring</topic>
+    <files>
+      <file>docs/adr/ADR-009-redis-first-caching.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read RequestCache.cs">Existing in-process pattern is the template for the API shape</step>
+    <step order="2" name="Author extension method">In Spaarke.Core (or Sprk.Bff.Api/Infrastructure/Cache/ if shared assembly placement is contentious); generic, async, JSON-based serialization, configurable TTL</step>
+    <step order="3" name="Unit tests">Cache hit returns cached; cache miss invokes factory + caches; TTL eviction (manual test via Redis FLUSHDB or mocking IDistributedCache)</step>
+    <step order="4" name="Optional: adopt in EmbeddingCache">If non-disruptive, refactor EmbeddingCache.GetEmbeddingForContentAsync to use the new helper — gate behind a feature flag if any risk</step>
+    <step order="5" name="Quality gates">code-review + adr-check</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/shared/Spaarke.Core/Cache/IDistributedCacheExtensions.cs</output>
+    <output type="test">tests/unit/Spaarke.Core/Cache/IDistributedCacheExtensionsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GetOrCreateAsync&lt;T&gt; invokes factory on cache miss and caches result with TTL</criterion>
+    <criterion testable="true">GetOrCreateAsync&lt;T&gt; returns cached value on cache hit without invoking factory</criterion>
+    <criterion testable="true">Generic over T (works with custom POCOs serialized via System.Text.Json)</criterion>
+    <criterion testable="true">D-P13 InsightsPlaybookExecutionCache can use this helper (verified by import + integration test)</criterion>
+    <criterion testable="true">Optional: no existing caches broken by this addition (regression tests pass)</criterion>
+  </acceptance-criteria>
+</task>
