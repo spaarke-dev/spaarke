@@ -13,11 +13,11 @@
 
 | Field | Value |
 |---|---|
-| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.58** packaged, awaiting user UAT |
-| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `ccb0f143` (v1.1.58); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.58 NOT yet merged |
-| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.58.zip` (213 KB) — user imports via `pac solution delete` then `pac solution import` |
-| **Pending user actions** | (1) UAT v1.1.58; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
-| **Next Action** | Awaiting user UAT feedback on v1.1.58. v1.1.58 fixes SendEmailDialog inner layout: (a) Message Textarea now fills the tall surface via `'& > textarea'` descendant selector that reaches Fluent v9 Textarea's inner element (previously stayed at rows-natural height despite wrapper flex); (b) DialogActions now anchors to surface bottom as a visible footer (top border, right-aligned buttons) via complete flex hierarchy on surface → body → content → form → field → textarea, with `flexShrink: 0` on Actions. All changes in shared `@spaarke/ui-components`. FilePreview promotion (Option A, 3-5h) still deferred. |
+| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.59** packaged, awaiting user UAT |
+| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `6abab84e` (v1.1.59); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.59 NOT yet merged |
+| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.59.zip` (213 KB) — user imports via `pac solution delete` then `pac solution import` |
+| **Pending user actions** | (1) UAT v1.1.59; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
+| **Next Action** | Awaiting user UAT feedback on v1.1.59. v1.1.59 addresses 4 items: (1) SendEmailDialog Textarea fill — switched from descendant selector (`& > textarea`) to Fluent v9 SLOT-PROP `<Textarea textarea={{className}} />` which applies className directly to inner element; v1.1.58 descendant selector did NOT override inner-textarea height; (2) Hide title-bar X — DialogTitle no longer renders the close icon; footer Cancel is the single close affordance (matches FilePreview v1.1.46); (3) Grid no horizontal scroll at 1920x1080 — DEFAULT_WIDTHS reduced (DOCUMENT 260→240, RELATIONSHIP 130→110, SIMILARITY 100→70, MODIFIED 130→100; sum 688px) + localStorage prefix bumped to `.v2` to invalidate persisted widths from earlier rounds; (4) Sticky menu — COL_MENU cell uses `position: sticky; right: 0; backgroundColor` so 3-dot stays pinned to visible right edge at any resolution/scroll. FilePreview promotion (Option A, 3-5h) still deferred. |
 | **Compaction handoff** | See [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) — full session state for resuming in a fresh context |
 
 ### Files Modified This Session
