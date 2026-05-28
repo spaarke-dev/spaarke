@@ -1797,7 +1797,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.52 • Built 2026-05-28</Text>
+        <Text size={100}>v1.1.53 • Built 2026-05-28</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so
@@ -1853,9 +1853,14 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           v1.1.52 (Item 3): the shared SendEmailDialog now accepts a
           `maxWidth` override prop. Default 520px is preserved for
           existing consumers (LegalWorkspace FilePreviewDialog,
-          SpeDocumentViewer); this PCF passes 720px so the modal feels
-          positioned over its 1280px FilePreviewDialog backdrop rather
-          than tiny by comparison. */}
+          SpeDocumentViewer).
+          v1.1.53 (Item 5): widened from 720px → 1200px so the email
+          composer visually dominates the FilePreviewDialog (1280px)
+          behind it. Fluent v9 `<Dialog>` defaults `modalType="modal"`,
+          which renders an opaque backdrop — the wider modal + default
+          backdrop combine to give the "cover" effect requested in UAT.
+          We do NOT override the backdrop color (would require hex/rgb
+          which violates ADR-021). */}
       <SendEmailDialog
         open={!!emailDialogResult}
         onClose={() => setEmailDialogResult(null)}
@@ -1863,7 +1868,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         defaultBody={emailDefaultBody}
         onSearchUsers={handleSearchUsers}
         onSend={handleSendEmail}
-        maxWidth="720px"
+        maxWidth="1200px"
       />
 
       {/* Document Email Wizard (multi-document, new) — opens from the toolbar

@@ -166,7 +166,10 @@ const DEFAULT_WIDTHS: Record<string, number> = {
   [COL_DOCUMENT]: 260,
   [COL_RELATIONSHIP]: 130,
   [COL_SIMILARITY]: 100,
-  [COL_TYPE]: 120,
+  // v1.1.53 (Item 4 Part B) — Type column now renders just the file icon
+  // (no text), so its default width drops from 120 → 48 to free space
+  // for the wider Document / Relationship columns.
+  [COL_TYPE]: 48,
   [COL_MODIFIED]: 130,
   [COL_AI]: 40,
   [COL_MENU]: 44,
@@ -180,7 +183,9 @@ const MIN_WIDTHS: Record<string, number> = {
   [COL_DOCUMENT]: 140,
   [COL_RELATIONSHIP]: 110,
   [COL_SIMILARITY]: 80,
-  [COL_TYPE]: 80,
+  // v1.1.53 (Item 4 Part B) — Type column min width shrunk from 80 → 40 to
+  // match the new icon-only rendering footprint.
+  [COL_TYPE]: 40,
   [COL_MODIFIED]: 90,
   [COL_AI]: 40,
   [COL_MENU]: 44,
@@ -793,10 +798,11 @@ export const ListView: React.FC<IListViewProps> = ({
           </span>
         ),
         renderCell: (result: SearchResult) => {
-          const IconComp = getFileIcon(result.fileType);
+          // v1.1.53 (Item 4 Part A) — File-type icon removed from the
+          // Document column; the icon now lives in the dedicated Type
+          // column. The cell shows the document name link only.
           return (
             <span className={styles.nameWrap} title={result.name}>
-              <IconComp fontSize={20} aria-label={result.fileType || 'Document'} />
               <Link
                 as="button"
                 appearance="subtle"
@@ -900,20 +906,23 @@ export const ListView: React.FC<IListViewProps> = ({
       }),
 
       // Type column (v1.1.50, Item 3) — NEW, non-sortable.
-      // Falls back to file extension when documentType is empty so the
-      // column always has something to display (e.g. "pdf", "docx").
+      // v1.1.53 (Item 4 Part B) — Renders the file-type icon only (no
+      // text). The icon was moved here from the Document column. The
+      // surrounding span carries the type label as title + aria-label
+      // so screen-readers still read the type when navigating.
       createTableColumn<SearchResult>({
         columnId: COL_TYPE,
         renderHeaderCell: () => <span>Type</span>,
         renderCell: (result: SearchResult) => {
+          const IconComp = getFileIcon(result.fileType);
           const typeLabel =
             (result.documentType && result.documentType.trim().length > 0
               ? result.documentType
-              : result.fileType) || '';
+              : result.fileType) || 'Document';
           return (
-            <Text size={200} title={typeLabel}>
-              {typeLabel}
-            </Text>
+            <span title={typeLabel} aria-label={typeLabel}>
+              <IconComp fontSize={20} aria-hidden="true" />
+            </span>
           );
         },
       }),

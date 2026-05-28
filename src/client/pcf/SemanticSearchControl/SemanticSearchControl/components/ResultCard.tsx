@@ -51,16 +51,9 @@ import {
   Badge,
 } from '@fluentui/react-components';
 import {
-  Document20Regular,
   Document48Regular,
-  DocumentPdf20Regular,
   DocumentPdf32Regular,
-  DocumentText20Regular,
   DocumentText48Regular,
-  TableRegular,
-  SlideTextRegular,
-  ImageRegular,
-  MailRegular,
   Sparkle20Regular,
 } from '@fluentui/react-icons';
 import { AiSummaryPopover } from '@spaarke/ui-components/dist/components/AiSummaryPopover';
@@ -79,13 +72,14 @@ import { FilePreviewDialog } from './FilePreviewDialog';
 // ---------------------------------------------------------------------------
 // File-type icon mapping
 //
-// Two sizes: a "preview-hero" (center of the hatched area, ~32-48 px) and a
-// "row-icon" (small, beside the filename, 20 px). PDF tops out at 32 in
-// @fluentui/react-icons; Word/Text/Generic have a 48 variant. We accept the
-// minor size delta (32 vs 48) — visually balanced once tinted.
+// v1.1.53 (Item 3) — Row-icon (small, beside the filename) was removed from
+// the title row, so only the hero icon (center of the hatched preview area,
+// 32-48 px) remains. PDF tops out at 32 in @fluentui/react-icons; Word/Text/
+// Generic have a 48 variant. We accept the minor size delta (32 vs 48) —
+// visually balanced once tinted.
 // ---------------------------------------------------------------------------
 
-type IconComponent = typeof Document20Regular;
+type IconComponent = typeof Document48Regular;
 
 type FileIconKind = 'pdf' | 'word' | 'spreadsheet' | 'slide' | 'image' | 'mail' | 'default';
 
@@ -119,25 +113,6 @@ function classifyFileType(fileType: string): FileIconKind {
       return 'mail';
     default:
       return 'default';
-  }
-}
-
-function getRowIcon(kind: FileIconKind): IconComponent {
-  switch (kind) {
-    case 'pdf':
-      return DocumentPdf20Regular;
-    case 'word':
-      return DocumentText20Regular;
-    case 'spreadsheet':
-      return TableRegular;
-    case 'slide':
-      return SlideTextRegular;
-    case 'image':
-      return ImageRegular;
-    case 'mail':
-      return MailRegular;
-    default:
-      return Document20Regular;
   }
 }
 
@@ -298,18 +273,15 @@ const useStyles = makeStyles({
     minHeight: '96px',
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
   },
-  // v1.1.52 (Item 1) — `nameRow` reverted to: file icon + 2-line name.
-  // No inline date here; the date lives in its own `meta` row below.
+  // v1.1.53 (Item 3) — `nameRow` no longer includes the small file-type
+  // icon next to the file name. The hero icon already sits in the preview
+  // area above; the small row icon was redundant. The Text for the name
+  // now takes the full row width.
   nameRow: {
     display: 'flex',
     alignItems: 'flex-start',
     gap: tokens.spacingHorizontalS,
     minWidth: 0,
-  },
-  nameIcon: {
-    flexShrink: 0,
-    color: tokens.colorNeutralForeground2,
-    marginTop: '2px',
   },
   // 2-line ellipsised name — `-webkit-line-clamp` is widely supported in the
   // browsers Power Platform targets; falls back to single-line ellipsis in
@@ -348,11 +320,15 @@ const useStyles = makeStyles({
     minWidth: 0,
     flexWrap: 'wrap',
   },
-  // Similarity chip shown alongside the Relationship pill for 'semantic'
-  // or 'both' rows. Marigold-token-based so it matches the ListView's
-  // COL_SIMILARITY rendering (Item 5: "Same Marigold style as the
-  // ListView COL_SIMILARITY"). ADR-021 tokens only.
-  similarityChip: {
+  // v1.1.53 (Items 1 + 2) — Similarity slot is now ALWAYS rendered as
+  // a chip (LEFT of the Relationship pill). 'associated' rows render a
+  // blank blue (brand) chip — same chrome the ListView's COL_SIMILARITY
+  // shows on direct-association rows. 'semantic' / 'both' rows render
+  // the Marigold % chip. Padding/typography is shared via
+  // `similarityBase`; per-relationship colors layer on top via
+  // `similarityAssociated` or `similaritySemantic` (mirrors the
+  // ListView styles exactly). ADR-021 tokens only.
+  similarityBase: {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -365,6 +341,16 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     lineHeight: tokens.lineHeightBase100,
     whiteSpace: 'nowrap',
+    // v1.1.53 — give the blank `associated` chip visible presence so
+    // it occupies an equivalent footprint to the % chip even when no
+    // text is rendered. Matches the ListView's blank-chip footprint.
+    minWidth: '44px',
+  },
+  similarityAssociated: {
+    backgroundColor: tokens.colorBrandBackground2,
+    color: tokens.colorBrandForeground2,
+  },
+  similaritySemantic: {
     backgroundColor: tokens.colorPaletteMarigoldBackground2,
     color: tokens.colorPaletteMarigoldForeground2,
   },
@@ -466,7 +452,6 @@ export const ResultCard: React.FC<IResultCardProps> = ({
   const sparkleTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const fileKind = classifyFileType(result.fileType);
-  const RowIcon = getRowIcon(fileKind);
   const HeroIcon = getHeroIcon(fileKind);
   const tier = tierFromScore(result.combinedScore);
   const tierClassName =
@@ -583,16 +568,20 @@ export const ResultCard: React.FC<IResultCardProps> = ({
 
   const formattedDate = formatShortDate(result.modifiedAt ?? result.createdAt);
 
-  // v1.1.51 (Items 5 + 7) — Classify the row's relationship so the bottom
-  // pill row mirrors ListView's COL_RELATIONSHIP + COL_SIMILARITY rendering.
-  // 'both' rows show Same Matter pill + similarity %, matching the list
-  // view contract. Fallback to score-inference (zero → associated) on
-  // legacy single-path responses with no `relationship` tag.
+  // v1.1.51 (Items 5 + 7) / v1.1.53 (Items 1 + 2) — Classify the row's
+  // relationship so the bottom pill row mirrors ListView's
+  // COL_RELATIONSHIP + COL_SIMILARITY rendering.
+  // 'both' rows show Same Matter pill + similarity %; 'associated' rows
+  // show Same Matter pill + a BLANK blue chip (matches ListView's blank
+  // chip). Fallback to score-inference (zero → associated) on legacy
+  // single-path responses with no `relationship` tag.
+  // v1.1.53 (Item 1) — Similarity chip is always rendered LEFT of the
+  // Relationship pill (was: conditional + right). Layout is consistent
+  // across all cards.
   const rel: 'associated' | 'semantic' | 'both' =
     result.relationship ??
     ((result.combinedScore ?? 0) === 0 ? 'associated' : 'semantic');
   const showRelationshipPill = true;
-  const showSimilarityChip = rel === 'semantic' || rel === 'both';
   const similarityPct = Math.round((result.combinedScore ?? 0) * 100);
 
   const ariaLabel = [result.name, result.documentType, formattedDate ? `Modified: ${formattedDate}` : '']
@@ -683,11 +672,10 @@ export const ResultCard: React.FC<IResultCardProps> = ({
               - v1.1.51 Item 7 `tint` Badge variants for Relationship +
                 Marigold similarity chip stay exactly as-is. */}
         <div className={styles.info}>
+          {/* v1.1.53 (Item 3) — Row icon removed; the hero icon in the
+              preview area carries the file-type signal. Card aria-label
+              still includes documentType for screen-reader parity. */}
           <div className={styles.nameRow}>
-            <RowIcon
-              className={styles.nameIcon}
-              aria-hidden="true"
-            />
             <Text as="span" size={300} className={styles.name} title={result.name}>
               {result.name}
             </Text>
@@ -699,6 +687,24 @@ export const ResultCard: React.FC<IResultCardProps> = ({
           )}
           {showRelationshipPill && (
             <div className={styles.pillRow} aria-hidden="false">
+              {/* v1.1.53 (Items 1 + 2) — Similarity chip LEFT of the
+                  Relationship pill, always rendered. 'associated' rows
+                  render a blank blue chip (matches ListView). */}
+              {rel === 'associated' ? (
+                <span
+                  className={mergeClasses(styles.similarityBase, styles.similarityAssociated)}
+                  role="img"
+                  aria-label="Direct association"
+                />
+              ) : (
+                <span
+                  className={mergeClasses(styles.similarityBase, styles.similaritySemantic)}
+                  role="img"
+                  aria-label={`Semantic similarity: ${similarityPct}%`}
+                >
+                  {similarityPct}%
+                </span>
+              )}
               {rel === 'associated' || rel === 'both' ? (
                 <Badge appearance="tint" color="success" size="medium" shape="rounded">
                   Same Matter
@@ -707,15 +713,6 @@ export const ResultCard: React.FC<IResultCardProps> = ({
                 <Badge appearance="tint" color="brand" size="medium" shape="rounded">
                   Semantic
                 </Badge>
-              )}
-              {showSimilarityChip && (
-                <span
-                  className={styles.similarityChip}
-                  role="img"
-                  aria-label={`Semantic similarity: ${similarityPct}%`}
-                >
-                  {similarityPct}%
-                </span>
               )}
             </div>
           )}
