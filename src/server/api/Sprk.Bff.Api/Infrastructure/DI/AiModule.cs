@@ -89,14 +89,39 @@ public static class AiModule
         var azureOpenAiChatModel = configuration["AzureOpenAI:ChatModelName"];
         if (!string.IsNullOrEmpty(azureOpenAiEndpoint) && !string.IsNullOrEmpty(azureOpenAiChatModel))
         {
-            // Local helper that constructs the inner IChatClient using the DI-injected
-            // TokenCredential (UAMI-pinned via ManagedIdentityCredentialFactory).
+            // Local helper that constructs the inner IChatClient.
+            //
+            // Auth mode is chosen by configuration:
+            //  - If AzureOpenAI:ApiKey is set (typically a Key Vault reference), use API key auth.
+            //    This is the documented ADR-028 exception (2026-05-28) for AIServices-kind
+            //    accounts where MI auth returned persistent 401 PermissionDenied despite full
+            //    Cognitive Services User wildcard + Cognitive Services OpenAI User grants.
+            //    Documented Microsoft escape hatch (see learn.microsoft.com Q&A 2168038).
+            //  - Otherwise (and as the long-term target), use the DI-injected TokenCredential
+            //    (UAMI-pinned via ManagedIdentityCredentialFactory). Restore-to-MI is a single
+            //    config change (clear the AzureOpenAI:ApiKey setting).
+            //
+            // Both code paths remain live so per-env choice is a config toggle, not a redeploy.
             static IChatClient BuildInnerClient(IServiceProvider sp, string endpoint, string model)
             {
-                var credential = sp.GetRequiredService<TokenCredential>();
-                return new AzureOpenAIClient(new Uri(endpoint), credential)
-                    .GetChatClient(model)
-                    .AsIChatClient();
+                var config = sp.GetRequiredService<IConfiguration>();
+                var apiKey = config["AzureOpenAI:ApiKey"];
+                var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("Sprk.Bff.Api.AiModule");
+
+                AzureOpenAIClient client;
+                if (!string.IsNullOrWhiteSpace(apiKey))
+                {
+                    logger.LogInformation("AzureOpenAI auth: KV-backed ApiKey (ADR-028 scoped exception for AIServices-kind MI 401).");
+                    client = new AzureOpenAIClient(new Uri(endpoint), new System.ClientModel.ApiKeyCredential(apiKey));
+                }
+                else
+                {
+                    logger.LogInformation("AzureOpenAI auth: Managed Identity (canonical, ADR-028).");
+                    var credential = sp.GetRequiredService<TokenCredential>();
+                    client = new AzureOpenAIClient(new Uri(endpoint), credential);
+                }
+
+                return client.GetChatClient(model).AsIChatClient();
             }
 
             // Register the raw (pre-function-invocation) client under a keyed name.
