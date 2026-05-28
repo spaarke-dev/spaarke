@@ -1,7 +1,7 @@
 <task id="060" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>D-P14 — predict-matter-cost synthesis playbook (end-to-end)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>7</wave>
     <estimated-effort>1 day</estimated-effort>
     <tags>playbook-authoring, synthesis, predict-matter-cost, zone-a, evidence-sufficiency</tags>
@@ -73,4 +73,26 @@
     <criterion testable="true">Precedent citation: if applicable Confirmed Precedent exists, it's cited in Inference evidence[] as precedent://... ref</criterion>
     <criterion testable="true">D-P13 cache hit on second identical invocation (verified via App Insights cache_hit event)</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-05-28. Files NEW (3):
+    - src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json (168 lines) — declarative playbook spec for Deploy-Playbook.ps1
+    - src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/predict-matter-cost-synthesis.v1.txt (99 lines) — synthesis LLM prompt with honesty contract
+    - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Playbooks/PredictMatterCostPlaybookTests.cs (396 lines, 7 tests)
+
+    Publication mechanism: Dataverse sprk_analysisplaybook row + 8 sprk_playbooknodes rows. JSON spec is checked into repo as source of truth; deployment via existing scripts/Deploy-Playbook.ps1 (pattern matches universal-ingest.v1.json convention). InsightsAgentRequest.Question being a Guid forces Dataverse path; SPEC §3.5.2 explicitly specifies "Playbook definition (Dataverse playbook entity)" for D-P14.
+
+    Synthesis executor adaptation: Used AgentServiceNodeExecutor (ActionType=60) instead of POML-suggested AiAnalysisNodeExecutor (ActionType=0). Rationale: AiAnalysisNodeExecutor requires NodeExecutionContext.Document with extracted text (it bridges to IAnalysisToolHandler which is document-bound). Synthesis composes prior-node outputs into a prompt — no document. AgentServiceNodeExecutor accepts pure prompt + tenantId via ConfigJson, matching synthesis semantics. Documented in playbook JSON $comment-deviation.
+
+    Tests: 7/7 PASS (6 acceptance criteria + 1 bonus cache-key isolation). Full Insights subset: 161/161 PASS (zero regressions).
+    §3.5.4 grep: ZERO Zone B matches (all artifacts in Zone A or Zone A test paths).
+    Build: 0 errors, 1 pre-existing NU1903 warning (Microsoft.Kiota.Abstractions — same as prior tasks).
+    Quality gates: code-review CLEAN (0 critical, 0 warnings, 3 optional suggestions); adr-check CLEAN (8 compliant, 0 violations).
+
+    Deployment prerequisite (task 080): operator runs `scripts/Deploy-Playbook.ps1 -DefinitionFile src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json` after `az login` against target Dataverse env. Script creates the sprk_analysisplaybook row + 8 sprk_playbooknodes rows. The new playbook's Guid is then plumbed to the D-P15 endpoint (task 061) as the resolution target for `question: "predict-matter-cost"`.
+
+    Phase 1 scaffold acknowledgement: InsightsOrchestrator's decline-path handling (when ReturnInsightArtifactNode is NOT emitted because DeclineToFindNode fired instead) returns a generic "no-artifact-produced" DeclineResponse rather than extracting the structured gap analysis from the DeclineToFindNode's stream event. Tests assert contract invariants only (returns Decline, not fabricated Artifact). Structured decline extraction is task 061's responsibility — the D-P15 endpoint can introspect the engine stream directly or extend the orchestrator's stream-drain logic.
+
+    Coordination: task 061 (D-P15 ask endpoint, parallel) modifies Zone B (Api/Insights/, Models/Insights/, Infrastructure/DI/EndpointMappingExtensions.cs). No collision — task 060 stays in Zone A.
+  </notes>
 </task>

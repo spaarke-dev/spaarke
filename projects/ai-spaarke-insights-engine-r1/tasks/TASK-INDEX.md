@@ -73,7 +73,7 @@
 
 | ID | D-P | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [060](060-predict-matter-cost-playbook.poml) | D-P14 | predict-matter-cost synthesis playbook (end-to-end) | 🔲 | 1d | ✅ | 020, 021, 022, 023, 041 |
+| [060](060-predict-matter-cost-playbook.poml) | D-P14 | predict-matter-cost synthesis playbook (end-to-end) | ✅ | 1d | ✅ | 020, 021, 022, 023, 041 |
 | [061](061-insights-ask-endpoint.poml) | D-P15 | POST /api/insights/ask endpoint via IInsightsAi facade | 🔲 | 4h | ✅ | 042 |
 
 ### Wave 8 — Smoke + eval baseline (serial)

@@ -1,18 +1,80 @@
 # Current Task — Spaarke Insights Engine, Phase 1
 
-> **Status**: 🔄 active — Wave 6 fully complete (050 + 051 + 052 done); Wave 7 (060 D-P14 + 061 D-P15) unblocked
-> **Last Updated**: 2026-05-28 (post task 052)
-> **Project state**: Waves 1-6 complete (17 of 17 D-P + scaffold tasks — 100% of Wave 6); Wave 7 next
+> **Status**: 🔄 active — Wave 7 task 060 ✅ COMPLETE (D-P14 synthesis playbook); task 061 in-progress (D-P15 ask endpoint, parallel)
+> **Last Updated**: 2026-05-28 (post task 060 completion + concurrent with task 061)
+> **Project state**: Waves 1-6 complete + Wave 7 task 060 complete; remaining: Wave 7 task 061 (in-progress, parallel session) + Wave 8 task 070 (blocked on 040+050+060+061)
 
 ---
 
 ## Active task
 
-None — task 052 complete (Wave 6 closed). Next: Wave 7 (060 D-P14 predict-matter-cost synthesis + 061 D-P15 ask endpoint — both unblocked).
+**Task 061 — D-P15 POST /api/insights/ask endpoint via IInsightsAi facade** 🔄
+- Rigor: FULL (bff-api code, public endpoint with auth + rate limit + ProblemDetails)
+- Wave: 7 (parallel with task 060)
+- Dependencies: 042 (IInsightsAi facade with AnswerQuestionAsync) ✅
+- Started: 2026-05-28
+- Next Action: Step 1 — Author InsightAskRequest DTO
+
+### Knowledge files loaded
+- `Api/Insights/PrecedentAdminEndpoints.cs` (canonical template — task 012)
+- `Services/Ai/PublicContracts/IInsightsAi.cs` + DTOs (`InsightsAgentRequest`, `InsightsAgentResult` — task 042)
+- `Models/Insights/InsightArtifact.cs` + `DeclineResponse.cs` (Zone B POCOs — task 001/004)
+- `Infrastructure/DI/RateLimitingModule.cs` — picked `ai-context` policy (60/min sliding window per user) — matches POML "60 req/min" target
+- `Api/Filters/TenantAuthorizationFilter.cs` — N/A (request DTO has no tenantId; we derive `tid` from auth claim)
+- `Infrastructure/DI/EndpointMappingExtensions.cs` — registration site
+- `Infrastructure/DI/InsightsFacadeModule.cs` — confirms `IInsightsAi` Singleton registration
+- `tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs` + `PrecedentAdminEndpointsTests.cs` (test template)
+- ADR-008 + ADR-016 + ADR-019 (loaded; standard pattern)
+
+### Design decisions
+- **Auth**: `RequireAuthorization()` only — no role gate (tenant user, not admin). Validate `tid` claim in handler.
+- **Rate limit**: `ai-context` policy (60/min sliding window keyed by `oid`) — exact match for POML "60 req/min" + semantically correct (read-heavy context resolution).
+- **Wire shape**: Both Success and Decline return **200 OK** with envelope `{ "artifact": InsightArtifact|null, "decline": DeclineResponse|null }`. Decline is NOT an error — playbook executed successfully and produced structured insufficient-evidence response per D-49. SPEC §5.1.1 lists both as normal returns.
+- **Question parsing**: POML/SPEC use `question:"predict-matter-cost"` string, but `InsightsAgentRequest.Question` is `Guid`. Map string → Guid via `Insights:Playbooks:{name}` configuration (Phase 1 acceptable: accept Guid in request OR allow string with config lookup; Phase 1 narrows to Guid-only for simplicity, with the wire DTO accepting string for flexibility and the handler parsing).
+- **Subject parsing**: Accept `matter:{guid}` or `matter:{loose-id}` per POML guidance.
+- **AccessibleScopeHash**: SHA-256(`tid:{tid}|oid:{oid}`) — Phase 1 deferral acknowledged in task POML; document Phase 1.5 enhancement.
+- **Response headers**: `X-Insights-Cache: true|false`, `X-Insights-Elapsed-Ms: N` for observability.
+
+### Applicable ADRs
+- ADR-008 (endpoint filter authorization)
+- ADR-013 (AI architecture — §3.5 facade boundary)
+- ADR-016 (rate limit + cost)
+- ADR-019 (ProblemDetails errors)
+
+### Files modified (this task)
+- (none yet)
+
+### Completed steps
+- (none yet)
+
+### Decisions made
+- (none yet)
 
 ---
 
 ## Last completed task
+
+**Task 060 — D-P14 predict-matter-cost synthesis playbook (end-to-end)** ✅ (2026-05-28)
+- Rigor: FULL (synthesis playbook + integration tests; Phase 1 acceptance-bar question)
+- Publication mechanism: **Dataverse `sprk_analysisplaybook` row + 8 `sprk_playbooknodes` rows** (per SPEC §3.5.2 explicit "Playbook definition (Dataverse playbook entity)"). JSON spec file is source of truth in repo; deployment via existing `scripts/Deploy-Playbook.ps1` (idempotent, requires `az login`). The `InsightsAgentRequest.Question` field being a `Guid` makes Dataverse the only path that compiles without rearchitecting.
+- Synthesis executor adaptation: Used `AgentServiceNodeExecutor` (ActionType=60) instead of POML-suggested `AiAnalysisNodeExecutor` (ActionType=0). Rationale: AiAnalysisNodeExecutor requires `NodeExecutionContext.Document` with extracted text (bridges to IAnalysisToolHandler). Synthesis composes prior-node outputs into a prompt — no document. AgentServiceNodeExecutor accepts pure prompt + tenantId via ConfigJson, matching synthesis semantics. Documented in playbook JSON `$comment-deviation` block.
+- Files NEW (3):
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json` (168 lines) — declarative Dataverse playbook spec; full 8-node graph (LiveFact → IndexRetrieve×2 → EvidenceSufficiency → [sufficient: Synthesize → GroundingVerify → ReturnInsightArtifact] OR [insufficient: DeclineToFind]); cacheTtlSeconds=300, evidenceRule.comparableMatters.min=12, insufficientEvidenceTemplate per D-49 LAVERN Pattern #7
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/predict-matter-cost-synthesis.v1.txt` (99 lines) — synthesis LLM prompt with 7 non-negotiable rules (12-citation minimum, verbatim quotes ≥12 chars, citation-source format, statistical honesty, Precedent weighting, confidence scaling, JSON-only output); template variables `{{liveFacts}}`/`{{cohortObservations}}`/`{{precedents}}` resolved from prior-node outputs
+  - `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Playbooks/PredictMatterCostPlaybookTests.cs` (396 lines, 7 tests) — end-to-end orchestration tests against synthetic engine streams
+- Tests: **7/7 PASS new**; **161/161 PASS full Insights subset** — zero regressions
+- Build: 0 errors, 1 pre-existing NU1903 warning (Microsoft.Kiota.Abstractions)
+- §3.5.4 forbidden-imports grep on Zone B: **ZERO matches** (all artifacts in Zone A)
+- Quality gates (Step 9.5): **code-review CLEAN** (0 critical, 0 warnings, 3 optional suggestions); **adr-check CLEAN** (8 compliant ADRs: 001/007/008/009/010/013/021/028; 0 violations)
+- Acceptance criteria: **6/6 met** — (1) playbook JSON structurally complete + script-deployable [SCAFFOLD: deployment requires operator + auth env]; (2-6) all PASS via orchestration tests covering sufficient/insufficient/grounding-strip/precedent-cite/cache-hit
+- Phase 1 scaffold acknowledged: InsightsOrchestrator's null-artifact handling returns a generic decline rather than extracting structured gap analysis from the DeclineToFindNode's stream event. Full structured decline propagation is task 061 scope.
+- Deployment prerequisite for task 080: operator runs `scripts/Deploy-Playbook.ps1 -DefinitionFile src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json` after `az login`. Script creates the row + 8 node rows; resulting Guid plumbed to D-P15 endpoint (task 061) for `question: "predict-matter-cost"` resolution.
+- Coordination: task 061 (parallel-in-progress) modifies Zone B paths. Task 060 stays in Zone A. Zero collision.
+- Unblocks: Wave 8 task 070 (D-P16 smoke test) once 061 also lands.
+
+---
+
+## Earlier completed task
 
 **Task 052 — D-P11 (view) Observation review surface — view + disposition fields + 100% sampling** ✅ (2026-05-28)
 - Rigor: STANDARD (Dataverse schema additions + view + small sampling code addition in existing mirror; user-specified)
