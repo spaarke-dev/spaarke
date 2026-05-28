@@ -5,9 +5,13 @@
  * Fully callback-based — consumer provides search and send implementations.
  * No service dependencies; works in both PCF controls and Code Page solutions.
  *
+ * Domain-agnostic: title, subject, and body are all consumer-supplied props,
+ * so the same dialog can compose document emails, matter updates, invoice
+ * notifications, or any other recipient-lookup-plus-message scenario.
+ *
  * Layout:
  *   ┌──────────────────────────────────────────────────────────────────────┐
- *   │  Email Document                                              [X]    │
+ *   │  {title}                                                            │
  *   │                                                                     │
  *   │  To *      [Search users...                             ]           │
  *   │                                                                     │
@@ -16,7 +20,7 @@
  *   │  Message * [Dear Colleague,                              ]          │
  *   │            [Please find the following document...]                  │
  *   │                                                                     │
- *   │                                     [Cancel]  [Send]               │
+ *   │ ─────────────────────────────────────────────[Cancel]  [Send]──── │
  *   └──────────────────────────────────────────────────────────────────────┘
  *
  * Constraints:
@@ -97,6 +101,21 @@ export interface ISendEmailDialogProps {
    * @since v1.1.56 (SemanticSearchControl UAT polish round 11)
    */
   height?: string;
+
+  /**
+   * Dialog title text shown in the DialogTitle slot. Defaults to
+   * `'Email Document'` for backward compatibility with the three
+   * original consumers (SemanticSearchControl, SpeDocumentViewer,
+   * LegalWorkspace FilePreview) which all email a single document.
+   *
+   * Override for other domains — e.g. `'Email Matter'`,
+   * `'Email Selected Records'`, `'Send Update'` — so the same
+   * dialog can be reused anywhere an email-with-recipient-lookup
+   * composer is needed.
+   *
+   * @since v1.1.60 (SemanticSearchControl UAT polish round 15)
+   */
+  title?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +237,7 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
   onSend,
   maxWidth = '520px',
   height = 'auto',
+  title = 'Email Document',
 }) => {
   const styles = useStyles();
 
@@ -298,8 +318,12 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
         {/* v1.1.59 — title-bar X close icon removed per UAT.
             The Cancel button in the footer is the single close
             affordance, matching FilePreviewDialog's pattern
-            (v1.1.46) for consistency across our shared modals. */}
-        <DialogTitle>Email Document</DialogTitle>
+            (v1.1.46) for consistency across our shared modals.
+            v1.1.60 — title text is now consumer-configurable via
+            the `title` prop (default 'Email Document' for back-
+            compat) so the dialog can be reused for non-document
+            email scenarios. */}
+        <DialogTitle>{title}</DialogTitle>
 
         <DialogBody className={styles.dialogBody}>
           <DialogContent className={styles.dialogContent}>
