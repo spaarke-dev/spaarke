@@ -13,11 +13,11 @@
 
 | Field | Value |
 |---|---|
-| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.60** packaged, awaiting user UAT |
-| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `4c4e8310` (v1.1.60); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.60 NOT yet merged |
-| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.60.zip` (213 KB) — user imports via `pac solution delete` then `pac solution import` |
-| **Pending user actions** | (1) UAT v1.1.60; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
-| **Next Action** | Awaiting user UAT feedback on v1.1.60. v1.1.60 adds `title?: string` prop to shared `SendEmailDialog` (default `'Email Document'` — back-compat for SemanticSearchControl + SpeDocumentViewer + LegalWorkspace FilePreview). With this change `SendEmailDialog` has ZERO project-specific bindings remaining and is fully reusable across any domain (Matter, Invoice, generic record updates, etc.). FilePreview promotion (Option A, 3-5h) still deferred. |
+| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.61** packaged, awaiting user UAT |
+| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `2db4cd09` (v1.1.61); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.61 NOT yet merged |
+| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.61.zip` (207 KB) — user imports via `pac solution delete` then `pac solution import` |
+| **Pending user actions** | (1) UAT v1.1.61; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
+| **Next Action** | Awaiting user UAT feedback on v1.1.61. v1.1.61 is a meaningful tech-debt cleanup: single-doc Email now uses the SAME DocumentEmailWizard as bulk Email (unified UX with combined users+contacts picker, AI Summary step, sprk_communication tracking, Attach Files + Send Document Links toggles). SendEmailDialog import, state (emailDialogResult + previewedBeforeEmail), handlers (handleSearchUsers + handleSendEmail + handleEmailDialogClose), computed (emailDefaultSubject/Body), and JSX block all REMOVED from SemanticSearchControl + their historical narrative comments scrubbed. Verified zero orphan references. Shared SendEmailDialog stays in `@spaarke/ui-components` for LegalWorkspace + SpeDocumentViewer. Also: ListView COL_DOCUMENT idealWidth bumped 240→480 so the menu sits closer to the right edge at typical 1920x1080 Matter form widths. FilePreview promotion (Option A, 3-5h) still deferred. |
 | **Compaction handoff** | See [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) — full session state for resuming in a fresh context |
 
 ### Files Modified This Session
