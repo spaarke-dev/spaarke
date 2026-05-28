@@ -40,6 +40,18 @@ public interface IPrecedentBoard
     Task<PrecedentRecord?> GetAsync(Guid precedentId, CancellationToken ct);
 
     /// <summary>
+    /// Retrieve the <c>sprk_matter</c> row ids associated with a Precedent via the
+    /// <c>sprk_precedent_matter</c> N:N relationship. Returns an empty list when no
+    /// supporting matters are attached or the Precedent does not exist. Used by the
+    /// D-P4 projection sync (task 041) to populate the SPEC §3.4.2 <c>evidence[]</c>
+    /// array and <c>value.raw.supportingMatters</c> field.
+    /// </summary>
+    /// <param name="precedentId">The Precedent row id.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Matter row ids; empty when none attached.</returns>
+    Task<IReadOnlyList<Guid>> GetSupportingMatterIdsAsync(Guid precedentId, CancellationToken ct);
+
+    /// <summary>
     /// Promote a <c>Tentative</c> Precedent to <c>Confirmed</c>. Phase 1 manual
     /// flow: typically performed via the Dataverse model-driven view; this
     /// method exists for the future admin-promote endpoint and the D-P4 sync

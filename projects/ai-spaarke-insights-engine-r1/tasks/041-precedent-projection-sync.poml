@@ -1,7 +1,7 @@
 <task id="041" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>D-P4 — Precedent → spaarke-insights-index projection sync (status → Confirmed)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>5</wave>
     <estimated-effort>4 hours</estimated-effort>
     <tags>bff-api, sync, precedent, ai-search-upsert, zone-b, dotnet</tags>

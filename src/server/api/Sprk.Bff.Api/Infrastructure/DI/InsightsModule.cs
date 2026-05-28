@@ -54,6 +54,14 @@ public static class InsightsModule
         // IGenericEntityService (Zone B) — no AI internals are imported.
         services.AddScoped<IPrecedentBoard, DataversePrecedentBoard>();
 
+        // IPrecedentProjectionSync — D-P4 Precedent → spaarke-insights-index projection (task 041).
+        // Scoped because IPrecedentBoard above is Scoped (consistent lifetime — avoids the captive
+        // dependency warning that would arise from a Singleton consuming a Scoped). Zone B per
+        // SPEC §3.5: imports IInsightsAi (the §3.5 facade, the ONLY Zone-A type permitted in
+        // Zone B per project CLAUDE.md §3.5.4) for embedding generation, plus the standalone
+        // Azure.Search.Documents.Indexes.SearchIndexClient already registered in Program.cs.
+        services.AddScoped<IPrecedentProjectionSync, PrecedentProjectionSync>();
+
         // ILiveFactResolver — D-P12 task 022 swap-path-preservation seam. Phase 1: StubLiveFactResolver
         // throws LiveFactNotSupportedException with a "Phase 1" message. Replace this registration
         // when DataverseLiveFactResolver lands with D-P7 task 040 (universal ingest playbook).

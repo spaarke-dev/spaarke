@@ -40,12 +40,18 @@ public class InsightsOrchestratorTests
     private readonly Mock<IPlaybookExecutionEngine> _engineMock = new(MockBehavior.Strict);
     private readonly Mock<IInsightsPlaybookExecutionCache> _cacheMock = new(MockBehavior.Strict);
     private readonly Mock<IOpenAiClient> _openAiMock = new(MockBehavior.Strict);
+    // Loose mock for IIngestOrchestrator (task 040 added this dependency to InsightsOrchestrator's
+    // ctor for D-P7 universal ingest wiring). These tests cover AnswerQuestionAsync + EmbedTextAsync
+    // (which don't touch ingest); strict mode would over-constrain. Task 040's own tests cover
+    // RunIngestAsync exercising this dependency.
+    private readonly Mock<Sprk.Bff.Api.Services.Ai.Insights.Ingest.IIngestOrchestrator> _ingestMock = new();
 
     private InsightsOrchestrator CreateSut()
         => new(
             _engineMock.Object,
             _cacheMock.Object,
             _openAiMock.Object,
+            _ingestMock.Object,
             NullLogger<InsightsOrchestrator>.Instance);
 
     private static InsightsAgentRequest MakeAgentRequest(
@@ -84,7 +90,7 @@ public class InsightsOrchestratorTests
     public void Constructor_NullEngine_Throws()
     {
         Action act = () => new InsightsOrchestrator(
-            null!, _cacheMock.Object, _openAiMock.Object, NullLogger<InsightsOrchestrator>.Instance);
+            null!, _cacheMock.Object, _openAiMock.Object, _ingestMock.Object, NullLogger<InsightsOrchestrator>.Instance);
         act.Should().Throw<ArgumentNullException>().WithParameterName("engine");
     }
 
@@ -92,7 +98,7 @@ public class InsightsOrchestratorTests
     public void Constructor_NullCache_Throws()
     {
         Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, null!, _openAiMock.Object, NullLogger<InsightsOrchestrator>.Instance);
+            _engineMock.Object, null!, _openAiMock.Object, _ingestMock.Object, NullLogger<InsightsOrchestrator>.Instance);
         act.Should().Throw<ArgumentNullException>().WithParameterName("cache");
     }
 
@@ -100,7 +106,7 @@ public class InsightsOrchestratorTests
     public void Constructor_NullOpenAi_Throws()
     {
         Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, null!, NullLogger<InsightsOrchestrator>.Instance);
+            _engineMock.Object, _cacheMock.Object, null!, _ingestMock.Object, NullLogger<InsightsOrchestrator>.Instance);
         act.Should().Throw<ArgumentNullException>().WithParameterName("openAi");
     }
 
@@ -108,7 +114,7 @@ public class InsightsOrchestratorTests
     public void Constructor_NullLogger_Throws()
     {
         Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, _openAiMock.Object, null!);
+            _engineMock.Object, _cacheMock.Object, _openAiMock.Object, _ingestMock.Object, null!);
         act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
     }
 
@@ -284,7 +290,7 @@ public class InsightsOrchestratorTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // RunIngestAsync — Phase 1 scaffold (throws NotImplementedException)
+    // RunIngestAsync — facade delegation to IIngestOrchestrator (task 040 wires this)
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -309,14 +315,30 @@ public class InsightsOrchestratorTests
     }
 
     [Fact]
-    public async Task RunIngestAsync_WithValidRequest_ThrowsScaffoldNotImplemented()
+    public async Task RunIngestAsync_WithValidRequest_DelegatesToIngestOrchestrator()
     {
-        var sut = CreateSut();
+        // Task 040 (D-P7) replaced the scaffold NotImplementedException with delegation
+        // to IIngestOrchestrator. This test verifies the facade is a thin pass-through:
+        // - Argument validation still runs at the facade
+        // - The orchestrator is invoked exactly once with the same request + ct
+        // - The orchestrator's result is returned verbatim (no transformation)
         var req = new InsightsIngestRequest("doc-1", "M-1", TenantId);
+        var expectedResult = new InsightsIngestResult(
+            ObservationsEmitted: 3,
+            Layer1Classification: "closing_letter",
+            Layer2Triggered: true);
+        _ingestMock
+            .Setup(o => o.RunAsync(req, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expectedResult)
+            .Verifiable();
 
-        Func<Task> act = () => sut.RunIngestAsync(req);
-        var ex = await act.Should().ThrowAsync<NotImplementedException>();
-        ex.Which.Message.Should().Contain("task 040", "scaffold message must point to D-P7 task 040");
+        var sut = CreateSut();
+        var actual = await sut.RunIngestAsync(req);
+
+        actual.Should().Be(expectedResult);
+        _ingestMock.Verify(
+            o => o.RunAsync(req, It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

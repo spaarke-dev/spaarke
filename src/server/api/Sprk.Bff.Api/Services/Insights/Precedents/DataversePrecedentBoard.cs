@@ -1,4 +1,5 @@
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Insights.Precedents;
@@ -159,6 +160,64 @@ public sealed class DataversePrecedentBoard : IPrecedentBoard
         {
             return null;
         }
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetSupportingMatterIdsAsync(Guid precedentId, CancellationToken ct)
+    {
+        if (precedentId == Guid.Empty)
+        {
+            return Array.Empty<Guid>();
+        }
+
+        // Walk the sprk_precedent_matter N:N intersect from precedent → matter using a
+        // QueryExpression with a LinkEntity. The intersect table name == the relationship
+        // schema name per Dataverse convention for custom N:N (verified in task 011 deploy
+        // logs). Project only the matter id column (sprk_matterid) to minimize payload.
+        var query = new QueryExpression(MatterEntityName)
+        {
+            ColumnSet = new ColumnSet("sprk_matterid"),
+            NoLock = true,
+        };
+
+        var link = query.AddLink(
+            linkToEntityName: SupportingMatterRelationship,
+            linkFromAttributeName: "sprk_matterid",
+            linkToAttributeName: "sprk_matterid");
+
+        link.LinkCriteria.AddCondition(
+            attributeName: "sprk_precedentid",
+            conditionOperator: ConditionOperator.Equal,
+            values: precedentId);
+
+        EntityCollection results;
+        try
+        {
+            results = await _entityService.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex) when (
+            ex is InvalidOperationException
+            && (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase)))
+        {
+            return Array.Empty<Guid>();
+        }
+
+        if (results.Entities.Count == 0)
+        {
+            return Array.Empty<Guid>();
+        }
+
+        var matterIds = new List<Guid>(results.Entities.Count);
+        foreach (var entity in results.Entities)
+        {
+            var matterId = entity.GetAttributeValue<Guid>("sprk_matterid");
+            if (matterId != Guid.Empty)
+            {
+                matterIds.Add(matterId);
+            }
+        }
+
+        return matterIds;
     }
 
     public async Task ConfirmAsync(Guid precedentId, Guid confirmedByUserId, CancellationToken ct)
