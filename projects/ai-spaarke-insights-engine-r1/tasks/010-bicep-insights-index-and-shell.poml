@@ -1,7 +1,7 @@
 <task id="010" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>D-P2 — Bicep modules for spaarke-insights-index + Function App shell + single-tenant parameter file</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>2</wave>
     <estimated-effort>1 day</estimated-effort>
     <tags>infra, bicep, ai-search, function-app, single-tenant, azure</tags>

@@ -26,7 +26,7 @@
 
 | ID | D-P | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [010](010-bicep-spaarke-insights-index-and-shell.poml) | D-P2 | Bicep modules — spaarke-insights-index + Function App shell + single-tenant params | 🔲 | 1d | ✅ | — |
+| [010](010-bicep-insights-index-and-shell.poml) | D-P2 | Bicep modules — spaarke-insights-index + Function App shell + single-tenant params | ✅ | 1d | ✅ | — |
 | [011](011-sprk-precedent-entity.poml) | D-P3 (entity) | sprk_precedent Dataverse entity + relationship tables | ✅ | 4h | ✅ | — |
 | [012](012-precedent-admin-endpoint.poml) | D-P3 (endpoint) | POST /api/insights/admin/precedents admin endpoint | 🔲 | 4h | ❌ (needs 011) | 011 |
 

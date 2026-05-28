@@ -1,32 +1,40 @@
 # Current Task — Spaarke Insights Engine, Phase 1
 
-> **Status**: ✅ idle — task 011 just completed
+> **Status**: ✅ idle — Wave 2 partial: tasks 010 + 011 both completed
 > **Last Updated**: 2026-05-28
-> **Project state**: Wave 1 complete; Wave 2 in progress (task 010 in parallel, task 011 done)
+> **Project state**: Wave 1 complete; Wave 2 in progress (010 done, 011 done, 012 pending)
 
 ---
 
 ## Active task
 
-**none** — ready for next task pickup. Task 010 (D-P2 Bicep) was previously active; task 011 (D-P3 sprk_precedent entity) just completed in parallel and is recorded under "Last completed tasks" below.
-
-### Environment context (loaded for this task)
-- Subscription: `484bc857-3802-427f-9ea5-ca47b43db0f0` (Spaarke Dev), tenant `a221a95e-...`, user `ralph.schroeder@spaarke.com`
-- RG: `spe-infrastructure-westus2` (westus2)
-- AI Search: `spaarke-search-dev` (standard, 2 replicas / 1 partition; identity:none — need to enable SystemAssigned for vectorizer if used)
-- AIServices (OpenAI): `spaarke-openai-dev` in eastus; `text-embedding-3-large` deployed (3072 dim) ✓
-- Key Vault: `sprkspaarkedev-aif-kv`
-- App Insights: `spe-insights-dev-67e2xz`; Log Analytics: `spe-logs-dev-67e2xz`
-- Existing UAMI (for BFF, not for Functions): `mi-bff-api-dev` — task creates a NEW per-tenant UAMI
-- Existing indexes on `spaarke-search-dev`: discovery-index, knowledge-index, playbook-embeddings, spaarke-invoices-dev, spaarke-knowledge-index{,-v2}, spaarke-knowledge-shared, spaarke-rag-references, spaarke-records-index — `spaarke-insights-index` does NOT exist ✓
-- Reference schema (3072-dim vector profile + HNSW + semantic config): `spaarke-rag-references` — used as structural template
-
-### Tooling versions
-- az CLI 2.77.0, Bicep CLI 0.41.2 — both functional
+**none** — ready for next task pickup (012 admin endpoint or Wave 3 platform primitives).
 
 ---
 
 ## Last completed tasks
+
+**Task 010 — D-P2 Bicep modules + spaarke-insights-index + Function App shell** ✅ (2026-05-28)
+- Rigor: FULL (infra deployment, foundational, shared-state)
+- First-step blocker RESOLVED: index name = `spaarke-insights-index` (user confirmed 2026-05-28)
+- Files: `infra/insights/main.bicep` + 5 modules + `parameters/dev.json` + `schemas/spaarke-insights-index.index.json` + `README.md` + `.gitignore` (bicep build artifacts)
+- Deployed to Spaarke Dev `spe-infrastructure-westus2` — deployment `insights-engine-spaarkedev-20260528120631` (provisioningState: Succeeded)
+- Resources created (6, all tagged `spaarkeProject=insights-engine`):
+  - `insights-spaarkedev-uami` — per-tenant UAMI (auth boundary per D-27/ADR-024)
+  - `insights-search-deploy-uami` — transient UAMI for the deploymentScript container
+  - `insights-spaarkedev-plan` — Flex Consumption FC1 hosting plan
+  - `insights-spaarkedev-func` — Function App shell (dotnet-isolated 8.0, 2048MB, alwaysReady=1, state=Running, hostname `insights-spaarkedev-func.azurewebsites.net`)
+  - `insightsspaarkedevstg` — Standard_LRS storage for Flex deployment artifacts
+  - `deploy-spaarke-insights-index` — deploymentScript (one-shot; cleanupPreference=OnSuccess removes ACI on success)
+  - + Key Vault Secrets User RBAC grant on existing `sprkspaarkedev-aif-kv` for the per-tenant UAMI
+- Index verified on `spaarke-search-dev`: all 14 SPEC §3.4 fields present, contentVector dims=3072 (matches text-embedding-3-large), HNSW vector profile, semantic config, vectorFilterMode=preFilter friendly (all discriminator fields filterable=true)
+- SPEC §3.4.3 worked-example filter queries verified — both Query 1 (cohort observations: `tenantId + artifactType + predicate` filters) and Query 2 (precedents: `tenantId + artifactType + status + value/raw/scope/matterType + value/raw/scope/opposingCounsel` filters) parse cleanly against the deployed schema (return 0 results from empty index — no errors)
+- Function App reachable at `https://insights-spaarkedev-func.azurewebsites.net/` — returns default "Your Azure Function App is up and running" page (shell, no functions deployed per D-P2 scope)
+- Zero new SAS keys, zero new `ClientSecretCredential` per D-24/D-27 (AzureWebJobsStorage uses platform-required auto-generated storage key, documented as known constraint)
+- Single-tenant parameter file pattern documented in `infra/insights/README.md` — onboarding a new customer = copy `parameters/dev.json`, set `tenantShortName`+`tenantDisplayName`, redeploy
+- Quality gates: self-run code-review + adr-check (8 ADRs/decisions checked, all pass)
+- Acceptance criteria: 6/6 PASS — see task POML
+- Deploy iterations: 3 (first 2 failed: FUNCTIONS_WORKER_RUNTIME invalid for Flex; curl not in deploymentScript container; both fixed)
 
 **Task 011 — D-P3 (entity) sprk_precedent Dataverse entity + relationships** ✅ (2026-05-28)
 - Rigor: STANDARD (Dataverse schema; quality gates inside dataverse-create-schema skill)
@@ -71,9 +79,9 @@ Wave 1 complete. Wave 2 (infrastructure provisioning) unlocks next — pick D-P2
 
 | State | Count |
 |---|---|
-| ✅ Completed | 3 (001, 002, 011) |
+| ✅ Completed | 4 (001, 002, 010, 011) |
 | 🔄 In progress | 0 |
-| 🔲 Pending | 14 |
+| 🔲 Pending | 13 |
 | ⏭️ Deferred (Phase 1.5+) | — see SPEC §3.3 |
 
 ---
