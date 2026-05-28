@@ -1,58 +1,55 @@
 # Current Task — Spaarke Insights Engine, Phase 1
 
-> **Status**: 🔄 active — Wave 7 task 060 ✅ COMPLETE (D-P14 synthesis playbook); task 061 in-progress (D-P15 ask endpoint, parallel)
-> **Last Updated**: 2026-05-28 (post task 060 completion + concurrent with task 061)
-> **Project state**: Waves 1-6 complete + Wave 7 task 060 complete; remaining: Wave 7 task 061 (in-progress, parallel session) + Wave 8 task 070 (blocked on 040+050+060+061)
+> **Status**: 🔄 active — Wave 7 fully complete (task 060 + 061 both ✅); Wave 8 (task 070 D-P16 smoke + golden + eval) next
+> **Last Updated**: 2026-05-28 (post task 061)
+> **Project state**: Waves 1-7 complete; Wave 8 (task 070) is the project's last D-P task
 
 ---
 
 ## Active task
 
-**Task 061 — D-P15 POST /api/insights/ask endpoint via IInsightsAi facade** 🔄
-- Rigor: FULL (bff-api code, public endpoint with auth + rate limit + ProblemDetails)
-- Wave: 7 (parallel with task 060)
-- Dependencies: 042 (IInsightsAi facade with AnswerQuestionAsync) ✅
-- Started: 2026-05-28
-- Next Action: Step 1 — Author InsightAskRequest DTO
-
-### Knowledge files loaded
-- `Api/Insights/PrecedentAdminEndpoints.cs` (canonical template — task 012)
-- `Services/Ai/PublicContracts/IInsightsAi.cs` + DTOs (`InsightsAgentRequest`, `InsightsAgentResult` — task 042)
-- `Models/Insights/InsightArtifact.cs` + `DeclineResponse.cs` (Zone B POCOs — task 001/004)
-- `Infrastructure/DI/RateLimitingModule.cs` — picked `ai-context` policy (60/min sliding window per user) — matches POML "60 req/min" target
-- `Api/Filters/TenantAuthorizationFilter.cs` — N/A (request DTO has no tenantId; we derive `tid` from auth claim)
-- `Infrastructure/DI/EndpointMappingExtensions.cs` — registration site
-- `Infrastructure/DI/InsightsFacadeModule.cs` — confirms `IInsightsAi` Singleton registration
-- `tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs` + `PrecedentAdminEndpointsTests.cs` (test template)
-- ADR-008 + ADR-016 + ADR-019 (loaded; standard pattern)
-
-### Design decisions
-- **Auth**: `RequireAuthorization()` only — no role gate (tenant user, not admin). Validate `tid` claim in handler.
-- **Rate limit**: `ai-context` policy (60/min sliding window keyed by `oid`) — exact match for POML "60 req/min" + semantically correct (read-heavy context resolution).
-- **Wire shape**: Both Success and Decline return **200 OK** with envelope `{ "artifact": InsightArtifact|null, "decline": DeclineResponse|null }`. Decline is NOT an error — playbook executed successfully and produced structured insufficient-evidence response per D-49. SPEC §5.1.1 lists both as normal returns.
-- **Question parsing**: POML/SPEC use `question:"predict-matter-cost"` string, but `InsightsAgentRequest.Question` is `Guid`. Map string → Guid via `Insights:Playbooks:{name}` configuration (Phase 1 acceptable: accept Guid in request OR allow string with config lookup; Phase 1 narrows to Guid-only for simplicity, with the wire DTO accepting string for flexibility and the handler parsing).
-- **Subject parsing**: Accept `matter:{guid}` or `matter:{loose-id}` per POML guidance.
-- **AccessibleScopeHash**: SHA-256(`tid:{tid}|oid:{oid}`) — Phase 1 deferral acknowledged in task POML; document Phase 1.5 enhancement.
-- **Response headers**: `X-Insights-Cache: true|false`, `X-Insights-Elapsed-Ms: N` for observability.
-
-### Applicable ADRs
-- ADR-008 (endpoint filter authorization)
-- ADR-013 (AI architecture — §3.5 facade boundary)
-- ADR-016 (rate limit + cost)
-- ADR-019 (ProblemDetails errors)
-
-### Files modified (this task)
-- (none yet)
-
-### Completed steps
-- (none yet)
-
-### Decisions made
-- (none yet)
+None — task 061 complete (Wave 7 closed). Next: Wave 8 task 070 (D-P16 end-to-end smoke + golden dataset + eval harness baseline). Depends on 040, 050, 060, 061 — ALL complete, so 070 is unblocked.
 
 ---
 
 ## Last completed task
+
+**Task 061 — D-P15 POST /api/insights/ask endpoint via IInsightsAi facade** ✅ (2026-05-28)
+- Rigor: FULL (Zone B endpoint with auth + rate limit + ProblemDetails; public-facing tenant-user API)
+- Files NEW (2 production + 1 test):
+  - `src/server/api/Sprk.Bff.Api/Models/Insights/InsightAskRequest.cs` — wire DTOs (`InsightAskRequest` request + `InsightAskResponse` envelope), DataAnnotations validation, Zone B POCO
+  - `src/server/api/Sprk.Bff.Api/Api/Insights/InsightEndpoints.cs` — `MapInsightsAskEndpoint()` extension + static `Ask` handler; ~320 lines (40% XML doc + design-decision comments)
+  - `tests/unit/Sprk.Bff.Api.Tests/Api/Insights/InsightEndpointsTests.cs` — 14 in-process WAF tests (path differs from POML `tests/integration/...` because `Spe.Integration.Tests` has pre-existing compile errors that task-012's fix-up commit `1c2a1053` repaired only for the unit project; same convention task 012 used)
+- Files MODIFIED (1):
+  - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs` — added `app.MapInsightsAskEndpoint()` call with §3.5 boundary comment
+- Design decisions:
+  - **Wire shape**: Both Success and Decline return **200 OK** with `InsightAskResponse` envelope (`{artifact, decline}` discriminator). Decline is NOT an error per D-49 — playbook produced a structured insufficient-evidence response successfully. ProblemDetails reserved for real failures (400/401/429/500).
+  - **Question parsing**: Wire string → Guid via `Guid.TryParse`. Phase 1 requires Guid id; friendly-name catalog ("predict-matter-cost") deferred to Phase 1.5 (documented + verified by `PostAsk_NonGuidQuestion_Returns400`).
+  - **Subject parsing**: `matter:{id}` only Phase 1; other schemes 400 (verified by `PostAsk_NonMatterSubject_Returns400`).
+  - **Auth**: `RequireAuthorization()` only + handler-level `tid`/`oid` claim validation as defense-in-depth. No role gate (regular tenant user per POML).
+  - **Rate limit**: `ai-context` policy (60/min sliding window per oid) — exact POML target + semantically correct for synthesis (read-heavy context resolution).
+  - **AccessibleScopeHash**: Phase 1 = SHA-256(`tid:{tid}|oid:{oid}`); DEP-3 Phase 1.5 enhancement noted inline.
+  - **Defensive 500 on facade contract violation**: if `IInsightsAi` returns `Artifact = null && Decline = null`, surface as 500 with `INSIGHTS_FACADE_EMPTY_RESULT` rather than empty envelope.
+  - **Observability headers**: `X-Insights-Cache: true|false` + `X-Insights-Elapsed-Ms: N` (verified by tests).
+- Build: 0 errors, 17 pre-existing warnings (same set as tasks 040-052).
+- Tests: **14/14 PASS** (InsightEndpointsTests); 10s wall time.
+- §3.5.4 forbidden-imports grep on new files: **ZERO matches**. Pre-existing `<see cref>` in `StubLiveFactResolver.cs` (task 022 inheritance) unchanged.
+- Quality gates:
+  - code-review ✅ (0 critical / 0 warning / 1 suggestion declined — handler step count mirrors canonical `PrecedentAdminEndpoints`; refactor would add an unjustified DI seam per ADR-010)
+  - adr-check ✅ (11 ADRs compliant: ADR-001/007/008/009/010/013/016/019/028/D-24/D-27 + CLAUDE.md §10)
+- Acceptance criteria: 6/6 PASS:
+  1. POST valid → 200 + Artifact OR Decline ✅ (`PostAsk_ValidRequest_ReturnsArtifact` + `PostAsk_ValidRequest_ReturnsDecline`)
+  2. Missing question → 400 ProblemDetails ✅ (`PostAsk_MissingQuestion_Returns400` verifies `application/problem+json`)
+  3. Unauthenticated → 401 ✅ (`PostAsk_Unauthenticated_Returns401` + `PostAsk_MissingTenantClaim_Returns401WithProblemDetails`)
+  4. Rate-limited → 429 + Retry-After ✅ (architectural: policy applied; shared `RateLimitingModule.OnRejected` handles header centrally)
+  5. §3.5 grep clean ✅ (zero matches on new files)
+  6. Endpoint registered ✅ (`PostAsk_EndpointRegistered`)
+- Unblocks: Wave 8 task 070 (D-P16 end-to-end smoke — last D-P deliverable in Phase 1).
+- Coordination with task 060 (parallel): task 060 owned Zone A (`Services/Ai/Insights/Playbooks/` + `Prompts/` + new Dataverse `sprk_analysisplaybook` row); task 061 owned Zone B (`Api/Insights/` + `Models/Insights/`). Zero file collision. Both consume the existing `IInsightsAi` facade (task 042) from opposite sides.
+
+---
+
+## Previous completed task
 
 **Task 060 — D-P14 predict-matter-cost synthesis playbook (end-to-end)** ✅ (2026-05-28)
 - Rigor: FULL (synthesis playbook + integration tests; Phase 1 acceptance-bar question)
@@ -109,7 +106,7 @@
 
 ---
 
-## Previous completed task
+## Older completed task
 
 **Task 051 — D-P11 DataverseObservationMirror + sprk_analysis polymorphic write** ✅ (2026-05-28, commit `0d2ba2dc`)
 - Rigor: FULL (Zone B code, schema verification via Dataverse MCP, §3.5.4 boundary refactor, foundation for task 052)

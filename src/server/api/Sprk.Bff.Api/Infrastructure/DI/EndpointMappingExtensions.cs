@@ -191,6 +191,13 @@ public static class EndpointMappingExtensions
         // IPrecedentBoard which calls IDataverseService directly, no AI internals.
         app.MapPrecedentAdminEndpoints();
 
+        // Insights Engine public endpoint (/api/insights/ask) — D-P15 task 061 —
+        // synthesizes an Inference InsightArtifact or returns a structured DeclineResponse
+        // via the IInsightsAi facade (only Zone-A surface Zone B may import per SPEC §3.5).
+        // Auth: any authenticated tenant user (no admin role). Rate limit: ai-context
+        // policy (60/min sliding window per caller). Errors: ADR-019 ProblemDetails.
+        app.MapInsightsAskEndpoint();
+
         // SPE Admin endpoints (/api/spe/*) — environments, configs, business units, containers, audit log, dashboard
         app.MapSpeAdminEndpoints();
 

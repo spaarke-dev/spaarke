@@ -1,7 +1,7 @@
 <task id="061" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>D-P15 — POST /api/insights/ask endpoint via IInsightsAi facade</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>7</wave>
     <estimated-effort>4 hours</estimated-effort>
     <tags>bff-api, endpoint, public-api, zone-b, dotnet, adr-008, adr-016, adr-019</tags>
@@ -75,4 +75,40 @@
     <criterion testable="true">§3.5 grep clean — no IChatClient/PlaybookExecutionEngine imports in Api/Insights/</criterion>
     <criterion testable="true">Endpoint registered via MapInsightsAskEndpoint() in EndpointMappingExtensions.cs</criterion>
   </acceptance-criteria>
+
+  <notes>
+## Completion summary (2026-05-28)
+
+**Files NEW** (2 production + 1 test):
+- `src/server/api/Sprk.Bff.Api/Models/Insights/InsightAskRequest.cs` — wire DTOs (`InsightAskRequest` request + `InsightAskResponse` envelope)
+- `src/server/api/Sprk.Bff.Api/Api/Insights/InsightEndpoints.cs` — `MapInsightsAskEndpoint()` + `Ask` handler
+- `tests/unit/Sprk.Bff.Api.Tests/Api/Insights/InsightEndpointsTests.cs` — 14 in-process WAF tests (test path differs from POML `tests/integration/...` because `Spe.Integration.Tests` project has pre-existing compile errors that task-012 fix-up `1c2a1053` repaired only for the unit project — same situation task 012 documented)
+
+**Files MODIFIED** (1):
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs` — added `app.MapInsightsAskEndpoint()` registration with §3.5 boundary comment
+
+**Design decisions**:
+- **Auth**: `RequireAuthorization()` only (no role gate — tenant user per POML); handler validates `tid` + `oid` claims explicitly as defense-in-depth
+- **Rate limit**: `ai-context` policy (60/min sliding window keyed by `oid`) — exact match for POML "60 req/min" + semantically correct (read-heavy context resolution)
+- **Wire shape**: BOTH Success and Decline return **200 OK** with envelope `{ "artifact": InsightArtifact|null, "decline": DeclineResponse|null }`. Decline is NOT an error (per D-49 it's a structured successful production of "insufficient evidence"). SPEC §5.1.1 lists both as normal returns. Rationale documented inline on `InsightAskResponse`.
+- **Question parsing**: Wire DTO accepts string; handler parses to `Guid`. Phase 1 requires Guid id; friendly-name catalog ("predict-matter-cost") deferred to Phase 1.5 (documented inline + verified by `PostAsk_NonGuidQuestion_Returns400` test).
+- **Subject parsing**: Phase 1 accepts `matter:{id}` only (strict prefix check + non-empty id after prefix). Other schemes return 400 (verified by `PostAsk_NonMatterSubject_Returns400` test).
+- **AccessibleScopeHash**: Phase 1 = SHA-256(`tid:{tid}|oid:{oid}`). DEP-3 Phase 1.5 enhancement noted inline (proper accessible-scope projection once matter-scope claims arrive on principal).
+- **Observability headers**: `X-Insights-Cache: true|false` + `X-Insights-Elapsed-Ms: N` from `InsightsAgentResult.CacheHit` + `ProcessingTimeMs` (verified by tests).
+- **Defensive 500 on facade contract violation**: if facade returns `Artifact = null && Decline = null` (contract violation per `IInsightsAi.AnswerQuestionAsync` doc), surface as 500 with `INSIGHTS_FACADE_EMPTY_RESULT` error code rather than hiding behind an empty envelope.
+
+**Build**: 0 errors, 17 pre-existing warnings (same set as tasks 040-052).
+**Tests**: **14/14 PASS** (`InsightEndpointsTests`); zero regressions in shared infrastructure.
+- Coverage by acceptance criterion: AC1 = 3 tests (Artifact + Decline + CacheHit), AC2 = 1 test, AC3 = 2 tests, AC4 = architectural (policy registered + shared `OnRejected`), AC5 = external grep (zero matches), AC6 = 1 test + endpoint registration verified in handler test mock invocations.
+
+**§3.5.4 grep**: ZERO matches on new files; pre-existing `<see cref>` doc-comment in `StubLiveFactResolver.cs` (task 022 inheritance, documented in task 051) is not a real violation.
+
+**Quality gates**:
+- code-review: ✅ 0 critical, 0 warnings, 1 borderline suggestion (handler step count — declined refactor; matches canonical `PrecedentAdminEndpoints` pattern; refactor would introduce unjustified DI seam per ADR-010)
+- adr-check: ✅ 11 ADRs compliant, 0 warnings, 0 violations
+
+**Unblocks**: Wave 8 — D-P16 smoke test (task 070) — end-to-end synthesis via `POST /api/insights/ask` against fixture corpus.
+
+**Coordination with task 060 (parallel)**: Task 060 owns Zone A `Services/Ai/Insights/Playbooks/` + `Services/Ai/Insights/Prompts/`; this task owns Zone B `Api/Insights/` + `Models/Insights/`. Zero file collisions. Both tasks consume the existing `IInsightsAi` facade (task 042) from opposite sides.
+  </notes>
 </task>
