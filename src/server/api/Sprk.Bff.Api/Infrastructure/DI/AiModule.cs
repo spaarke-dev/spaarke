@@ -4,7 +4,6 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
@@ -90,24 +89,39 @@ public static class AiModule
         var azureOpenAiChatModel = configuration["AzureOpenAI:ChatModelName"];
         if (!string.IsNullOrEmpty(azureOpenAiEndpoint) && !string.IsNullOrEmpty(azureOpenAiChatModel))
         {
-            // Local helper that constructs the inner IChatClient using the DI-injected
-            // TokenCredential (UAMI-pinned via ManagedIdentityCredentialFactory).
-            // DIAG: when OpenAI:LogTokenClaims=true, wraps the credential with LoggingTokenCredential
-            // to log the first MI token's selected claims (oid/appid/aud/iss/idtyp/tid/scopes) on
-            // App Insights. The raw token is never logged. Gated; default OFF.
+            // Local helper that constructs the inner IChatClient.
+            //
+            // Auth mode is chosen by configuration:
+            //  - If AzureOpenAI:ApiKey is set (typically a Key Vault reference), use API key auth.
+            //    This is the documented ADR-028 exception (2026-05-28) for AIServices-kind
+            //    accounts where MI auth returned persistent 401 PermissionDenied despite full
+            //    Cognitive Services User wildcard + Cognitive Services OpenAI User grants.
+            //    Documented Microsoft escape hatch (see learn.microsoft.com Q&A 2168038).
+            //  - Otherwise (and as the long-term target), use the DI-injected TokenCredential
+            //    (UAMI-pinned via ManagedIdentityCredentialFactory). Restore-to-MI is a single
+            //    config change (clear the AzureOpenAI:ApiKey setting).
+            //
+            // Both code paths remain live so per-env choice is a config toggle, not a redeploy.
             static IChatClient BuildInnerClient(IServiceProvider sp, string endpoint, string model)
             {
-                var credential = sp.GetRequiredService<TokenCredential>();
                 var config = sp.GetRequiredService<IConfiguration>();
-                if (config.GetValue<bool>("OpenAI:LogTokenClaims"))
+                var apiKey = config["AzureOpenAI:ApiKey"];
+                var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("Sprk.Bff.Api.AiModule");
+
+                AzureOpenAIClient client;
+                if (!string.IsNullOrWhiteSpace(apiKey))
                 {
-                    var diagLogger = sp.GetRequiredService<ILoggerFactory>()
-                        .CreateLogger("Sprk.Bff.Api.Diagnostics.OpenAITokenClaims");
-                    credential = new LoggingTokenCredential(credential, diagLogger);
+                    logger.LogInformation("AzureOpenAI auth: KV-backed ApiKey (ADR-028 scoped exception for AIServices-kind MI 401).");
+                    client = new AzureOpenAIClient(new Uri(endpoint), new System.ClientModel.ApiKeyCredential(apiKey));
                 }
-                return new AzureOpenAIClient(new Uri(endpoint), credential)
-                    .GetChatClient(model)
-                    .AsIChatClient();
+                else
+                {
+                    logger.LogInformation("AzureOpenAI auth: Managed Identity (canonical, ADR-028).");
+                    var credential = sp.GetRequiredService<TokenCredential>();
+                    client = new AzureOpenAIClient(new Uri(endpoint), credential);
+                }
+
+                return client.GetChatClient(model).AsIChatClient();
             }
 
             // Register the raw (pre-function-invocation) client under a keyed name.
