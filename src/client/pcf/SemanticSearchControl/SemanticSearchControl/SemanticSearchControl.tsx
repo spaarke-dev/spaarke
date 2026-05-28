@@ -318,11 +318,12 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
   // Holds the single document item when DocumentEmailWizard is launched
   // from a row's 3-dot menu; null when launched from the bulk-toolbar
-  // Email icon (in which case the wizard receives `emailWizardItems` —
-  // the full current result set — and the user prunes in step 1).
-  // The wizard's `selectedDocuments` prop reads
-  // `singleDocForWizard ? [it] : emailWizardItems` so one wizard
-  // instance serves both flows.
+  // Email icon (in which case the wizard receives
+  // `emailWizardItemsSelected` — only the CHECKED docs as of v1.1.63;
+  // previously the entire result set was passed and the user had to
+  // prune in step 1). The wizard's `selectedDocuments` prop reads
+  // `singleDocForWizard ? [it] : emailWizardItemsSelected` so one
+  // wizard instance serves both flows.
   const [singleDocForWizard, setSingleDocForWizard] = useState<IDocumentEmailWizardItem | null>(null);
 
   // Initialize services (memoized to prevent recreation)
@@ -790,10 +791,27 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   );
 
   // Map current results into the wizard's lightweight item shape.
-  // driveId + itemId are required to run AI analysis (Document Profile playbook)
-  // in the wizard's Summary step — without them the wizard falls back to the
-  // cached summary/tldr text.
-  const emailWizardItems: IDocumentEmailWizardItem[] = useMemo(
+  // driveId + itemId are required to run AI analysis (Document Profile
+  // playbook) in the wizard's Summary step — without them the wizard
+  // falls back to the cached summary/tldr text.
+  //
+  // v1.1.63 — renamed from `emailWizardItems` → `emailWizardItemsAll`.
+  // This is now the UNFILTERED mapping of every result row. The
+  // `emailWizardItemsSelected` memo below filters to only the
+  // user-checked rows, and the wizard receives that subset for the
+  // bulk Email path (UAT round 17 — "Bulk Email should only load the
+  // docs I selected, not the entire result set"). The full mapping
+  // is still computed once so the selection filter is O(n) over a
+  // stable identity-array.
+  //
+  // fileSizeBytes is intentionally omitted here — the BFF
+  // SearchResult contract doesn't currently expose file size. See
+  // v1.1.63 commit notes: a BFF SearchResult.fileSize addition is
+  // queued as v1.1.64 + BFF redeploy to enable the > 25 MB warning
+  // banner in the DocumentEmailWizard. Without it, the wizard
+  // reports "size unknown" and the warning never triggers (which is
+  // current behavior — no regression).
+  const emailWizardItemsAll: IDocumentEmailWizardItem[] = useMemo(
     () =>
       results.map(r => ({
         documentId: r.documentId ?? '',
@@ -806,16 +824,37 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     [results]
   );
 
+  // v1.1.63 — bulk Email subset: only items the user has checked.
+  // Drives the wizard `selectedDocuments` prop when the wizard is
+  // launched via the bulk-toolbar Email button (singleDocForWizard
+  // is null). The single-doc path bypasses this memo entirely —
+  // `handleEmailDocument` populates `singleDocForWizard` with the
+  // one targeted row and the wizard receives `[it]`.
+  const emailWizardItemsSelected: IDocumentEmailWizardItem[] = useMemo(
+    () => emailWizardItemsAll.filter(i => selectedIds.has(i.documentId)),
+    [emailWizardItemsAll, selectedIds]
+  );
+
   // Handle Email Document — opens DocumentEmailWizard scoped to a single
   // document. Single-doc and bulk Email share the same wizard so the UX
   // is consistent (combined users+contacts picker, AI Summary step,
   // sprk_communication tracking, Attach Files + Send Document Links
-  // toggles). We close the host preview underneath because the wizard
-  // is a full modal; on wizard close we do NOT re-open the preview —
-  // the user can re-launch preview from the list if needed.
+  // toggles).
+  //
+  // v1.1.63 — preview stays visible behind the wizard for BOTH entry
+  // points (row-menu Email AND preview-dialog Email). Previously
+  // (v1.1.61) the preview-dialog path closed the preview via
+  // `setHostPreviewDocId(null)`, so the wizard rendered against an
+  // empty background; UAT flagged the inconsistent feel between the
+  // two paths. The wizard is a Fluent v9 Dialog and renders as a
+  // modal-over-modal on top of the FilePreviewDialog without conflict
+  // (same pattern that already worked for row-menu Email + open preview
+  // simultaneously). On wizard close (Cancel, X, or successful Send),
+  // the user lands back on the preview at the same docId, which is the
+  // natural mental-model continuation.
   const handleEmailDocument = useCallback(
     (result: SearchResult) => {
-      setHostPreviewDocId(null);
+      // No setHostPreviewDocId(null) — preview stays open behind wizard.
       setSingleDocForWizard({
         documentId: result.documentId ?? '',
         name: result.name ?? '(untitled)',
@@ -1577,7 +1616,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
             onReload={handleReload}
             onAddDocument={handleAddDocument}
             onOpenViewer={handleOpenViewer}
-            onEmailDocuments={emailWizardItems.length > 0 ? handleEmailDocuments : undefined}
+            onEmailDocuments={selectedIds.size > 0 ? handleEmailDocuments : undefined}
             // v1.1.49 — Item 1: card selection wiring (host-owned).
             selectedIds={selectedIds}
             onToggleSelect={handleToggleCardSelect}
@@ -1757,7 +1796,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.62 • Built 2026-05-28</Text>
+        <Text size={100}>v1.1.63 • Built 2026-05-28</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so
@@ -1800,18 +1839,26 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Document Email Wizard — unified single-doc + bulk Email surface.
           When launched from a row's 3-dot menu, `handleEmailDocument`
-          populates `singleDocForWizard` and the wizard receives `[it]` as
-          its selected set. When launched from the bulk-toolbar Email
-          icon, `singleDocForWizard` is null and the wizard receives
-          `emailWizardItems` (the full result set, which the user can
-          prune in step 1). */}
+          populates `singleDocForWizard` and the wizard receives `[it]`
+          as its selected set. When launched from the bulk-toolbar
+          Email icon, `singleDocForWizard` is null and the wizard
+          receives `emailWizardItemsSelected` — the CHECKED docs only
+          (v1.1.63, UAT round 17). Pre-v1.1.63 the wizard received the
+          full result set and the user had to prune in step 1; the
+          bulk-toolbar Email button is now gated on `selectedIds.size
+          > 0` so launching with zero selection is impossible.
+          v1.1.63 — `maxWidth='1280px'` + `height='85vh'` mirror the
+          FilePreviewDialog so the wizard footprint matches when
+          stacked over an open preview (Item 3 + Item 2 combine: the
+          preview stays open behind the wizard for both row-menu and
+          preview-launched single-doc Email). */}
       <DocumentEmailWizard
         open={emailWizardOpen}
         onClose={() => {
           setEmailWizardOpen(false);
           setSingleDocForWizard(null);
         }}
-        selectedDocuments={singleDocForWizard ? [singleDocForWizard] : emailWizardItems}
+        selectedDocuments={singleDocForWizard ? [singleDocForWizard] : emailWizardItemsSelected}
         parentEntityType={searchScope === 'matter' ? 'sprk_matter'
           : searchScope === 'project' ? 'sprk_project'
           : searchScope === 'invoice' ? 'sprk_invoice'
@@ -1820,6 +1867,15 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={apiBaseUrl}
         dataService={dataService}
+        // v1.1.63 — match the FilePreviewDialog footprint so the wizard
+        // doesn't feel mismatched when stacked over an open preview.
+        // FilePreviewDialog uses maxWidth='1280px' height='85vh' (see
+        // SemanticSearchControl/components/FilePreviewDialog.tsx
+        // styles.surface). Mirroring those values here removes the
+        // visual size jump UAT flagged when the wizard launches with
+        // the preview still open.
+        maxWidth="1280px"
+        height="85vh"
       />
 
       {/* Toaster — single instance per PCF surface (FR-DOC-02 bulk-action

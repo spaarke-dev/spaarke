@@ -350,20 +350,41 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     textAlign: 'center',
   },
-  // v1.1.59 — Menu column cell is now STICKY to the right edge of the
-  // visible grid (per UAT: "ensure that the row menu is right aligned
-  // so stays to the right at different resolutions"). `position:
-  // sticky; right: 0` pins the cell to the viewport right edge
-  // regardless of horizontal scroll position; background carries the
-  // neutral row color so content scrolling underneath doesn't bleed
-  // through. zIndex keeps it above other cells during horizontal
-  // scroll. Cell still right-aligns the 3-dot trigger inside itself.
+  // v1.1.63 — Menu cell is anchored to the right edge of the visible row
+  // regardless of total column width vs container width.
+  //
+  // Why this works: Fluent v9 DataGridRow is rendered with
+  // `display: flex; alignItems: center` (see @fluentui/react-table
+  // useTableRowStyles.styles.raw.js — flex layout via
+  // `noNativeElements`, NOT CSS grid). Each DataGridCell receives an
+  // inline `style: { width, minWidth, maxWidth }` from the
+  // `columnSizing_unstable` plugin so user-resized widths still apply.
+  // Because the layout is flexbox, `margin-inline-start: auto` on the
+  // last cell consumes ALL remaining inline space in the row, pushing
+  // the menu cell flush against the row's right edge whenever the
+  // column total is narrower than the container.
+  //
+  // When the sum of fixed widths EXCEEDS the container (horizontal
+  // scroll case), the auto-margin collapses to 0 (no remaining space)
+  // and the v1.1.59 `position: sticky; right: 0` keeps the menu cell
+  // pinned to the visible-scroll right edge as the user scrolls
+  // horizontally. Both behaviors compose cleanly.
+  //
+  // Two earlier approaches considered + rejected:
+  // 1. `gridTemplateColumns` override on `[role="row"]` — does nothing
+  //    because Fluent rows use FLEX, not GRID (verified in node_modules).
+  // 2. `width: 100%` on the row — would let the cell stretch but would
+  //    also distort other column widths. Auto-margin on the LAST cell
+  //    is the surgical fix.
   menuCell: {
     display: 'flex',
     justifyContent: 'flex-end',
     alignItems: 'center',
     paddingLeft: 0,
     paddingRight: tokens.spacingHorizontalXS,
+    // v1.1.63 — anchor to the row's right edge in the no-overflow case.
+    marginInlineStart: 'auto',
+    // v1.1.59 — keep sticky behavior for the horizontal-overflow case.
     position: 'sticky',
     right: 0,
     backgroundColor: tokens.colorNeutralBackground1,
@@ -1105,13 +1126,23 @@ export const ListView: React.FC<IListViewProps> = ({
         >
           <DataGridHeader>
             <DataGridRow>
-              {({ renderHeaderCell }) => (
-                <DataGridHeaderCell
-                  className={mergeClasses(styles.headerCell, styles.gridCell)}
-                >
-                  {renderHeaderCell()}
-                </DataGridHeaderCell>
-              )}
+              {({ renderHeaderCell, columnId }) => {
+                // v1.1.63 — header menu cell mirrors the body's
+                // `marginInlineStart: auto` so the header alignment tracks
+                // the right-edge flush of the body menu cell. See styles.menuCell.
+                const isMenuHeader = columnId === COL_MENU;
+                return (
+                  <DataGridHeaderCell
+                    className={mergeClasses(
+                      styles.headerCell,
+                      styles.gridCell,
+                      isMenuHeader && styles.menuCell
+                    )}
+                  >
+                    {renderHeaderCell()}
+                  </DataGridHeaderCell>
+                );
+              }}
             </DataGridRow>
           </DataGridHeader>
           <DataGridBody<SearchResult>>
