@@ -155,6 +155,83 @@ az webapp config appsettings set --resource-group $RG --name $APP --settings \
 
 Failure mode if missing: `InvalidOperationException: CosmosPersistence:Endpoint is not configured` at startup, `AiPersistenceModule.cs:56`.
 
+#### Azure dependency RBAC + KV reference identity (4 prerequisites — surfaced 2026-05-28)
+
+The 2026-05-28 Spaarke AI Assistant chat-bring-up surfaced **four** App-Service-layer requirements that none of the prior runbook sections mentioned. Each one independently breaks the BFF (silent KV-reference failure, MI 401, Cosmos 403). All four are required for the BFF to function end-to-end and must be set before declaring an env "auth-complete".
+
+##### (a) `keyVaultReferenceIdentity` MUST point to the UAMI
+
+**This is the single most painful gap because the failure mode is silent.** By default, App Service uses its **System-Assigned MI** to resolve Key Vault references — even when the app uses a User-Assigned MI for everything else. If the App Service is bound ONLY to a UAMI (the canonical Spaarke pattern), KV reference resolution silently fails: `az webapp config appsettings list` shows the literal `@Microsoft.KeyVault(SecretUri=...)` string instead of the secret value, and the BFF receives that literal string as the config value. Downstream: "invalid subscription key" from OpenAI, "401 Unauthorized" from any KV-backed credential, etc.
+
+```bash
+UAMI_RESOURCE_ID="/subscriptions/{sub}/resourcegroups/{rg-of-uami}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{uami-name}"
+
+az rest --method patch \
+  --uri "https://management.azure.com/subscriptions/{sub}/resourceGroups/{app-rg}/providers/Microsoft.Web/sites/{app-name}?api-version=2022-09-01" \
+  --body "{\"properties\":{\"keyVaultReferenceIdentity\":\"$UAMI_RESOURCE_ID\"}}"
+```
+
+> **Note**: `az webapp update --set keyVaultReferenceIdentity=...` returns `Bad Request`. Use the REST PATCH above. App Service must be restarted after this change.
+
+Verify: after restart, dump app settings via Kudu (`https://{app}.scm.azurewebsites.net/api/settings`) and confirm KV-backed values are resolved (e.g., 32-char API key string rather than `@Microsoft.KeyVault(...)`).
+
+##### (b) Key Vault Secrets User on the UAMI
+
+The UAMI needs **Key Vault Secrets User** (`4633458b-17de-408a-b874-0445c86b69e6`) on every Key Vault the BFF references. RBAC-mode vaults need this role; access-policy-mode vaults need the equivalent "Get/List" policy. Without it, KV reference resolution returns 403 and falls through to the literal-string failure mode in (a).
+
+```bash
+KV_ID="/subscriptions/{sub}/resourceGroups/{kv-rg}/providers/Microsoft.KeyVault/vaults/{kv-name}"
+ROLE_DEF="/subscriptions/{sub}/providers/Microsoft.Authorization/roleDefinitions/4633458b-17de-408a-b874-0445c86b69e6"
+RA_ID=$(uuidgen 2>/dev/null || powershell -NoProfile -c "[guid]::NewGuid().ToString()")
+
+az rest --method put \
+  --uri "https://management.azure.com${KV_ID}/providers/Microsoft.Authorization/roleAssignments/${RA_ID}?api-version=2022-04-01" \
+  --body "{\"properties\":{\"roleDefinitionId\":\"$ROLE_DEF\",\"principalId\":\"{uami-principal-id}\",\"principalType\":\"ServicePrincipal\"}}"
+```
+
+> **`az role assignment create` workaround**: in some PowerShell harnesses on Windows, the CLI subcommand fails with `MissingSubscription` even with a valid subscription context. Use the REST PUT above as a reliable fallback.
+
+##### (c) Azure OpenAI / AI Services authentication
+
+The BFF authenticates to Azure OpenAI in `AiModule.BuildInnerClient` (`src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs`). Two paths supported:
+
+- **Preferred (MI)**: when `AzureOpenAI:ApiKey` is not set, the BFF uses the UAMI's `TokenCredential`. UAMI needs the **Cognitive Services User** role (wildcard `Microsoft.CognitiveServices/*`) on each AI Services / OpenAI account. The narrower `Cognitive Services OpenAI User` role is documented as sufficient for inference but observed to be insufficient for `kind=AIServices` (unified Azure AI Foundry) accounts.
+
+- **Documented exception (ADR-028 E-2, 2026-05-28)**: when MI auth returns persistent `HTTP 401 PermissionDenied` on AIServices-kind accounts despite full Cognitive Services User wildcard grants (community-documented pattern — see [Microsoft Q&A 2168038](https://learn.microsoft.com/en-us/answers/questions/2168038/how-to-fix-openai-authenticationerror-error-code-4)), fall back to API key auth via Key Vault. Set `AzureOpenAI__ApiKey` to a `@Microsoft.KeyVault(SecretUri=...)` reference pointing at the OpenAI account's `key1`. Restore to MI when MI auth becomes consistently reliable on AIServices kind (track Microsoft Foundry product updates).
+
+```bash
+# (Path A) MI auth — grant Cognitive Services User on the OpenAI account
+OPENAI_ID="/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.CognitiveServices/accounts/{openai-account}"
+ROLE_DEF="/subscriptions/{sub}/providers/Microsoft.Authorization/roleDefinitions/a97b65f3-24c7-4388-baec-2e87135dc908"
+RA_ID=$(powershell -NoProfile -c "[guid]::NewGuid().ToString()")
+az rest --method put \
+  --uri "https://management.azure.com${OPENAI_ID}/providers/Microsoft.Authorization/roleAssignments/${RA_ID}?api-version=2022-04-01" \
+  --body "{\"properties\":{\"roleDefinitionId\":\"$ROLE_DEF\",\"principalId\":\"{uami-principal-id}\",\"principalType\":\"ServicePrincipal\"}}"
+
+# (Path B) ADR-028 E-2 — KV-backed API key
+KEY=$(az cognitiveservices account keys list --name {openai-account} --resource-group {rg} --query key1 -o tsv)
+az keyvault secret set --vault-name {kv-name} --name AzureOpenAI-ApiKey --value "$KEY"
+unset KEY
+az webapp config appsettings set --resource-group $RG --name $APP --settings \
+  "AzureOpenAI__ApiKey=@Microsoft.KeyVault(SecretUri=https://{kv-name}.vault.azure.net/secrets/AzureOpenAI-ApiKey/)"
+```
+
+The app setting `AzureOpenAI__Endpoint` and `AzureOpenAI__ChatModelName` are still required regardless of auth path.
+
+##### (d) Cosmos DB data-plane RBAC — see existing subsection above
+
+The existing "Cosmos DB persistence" subsection covers the `Cosmos DB Built-in Data Contributor` role (id `00000000-0000-0000-0000-000000000002`) grant correctly. **No change needed** — but flagging here so the four-prerequisite mental model is complete in one place.
+
+##### Pre-flight checklist for any new env
+
+Before declaring auth-complete in a new env, verify each of:
+
+- [ ] `az webapp show --name $APP --resource-group $RG --query keyVaultReferenceIdentity -o tsv` returns the **UAMI resource ID** (not `"SystemAssigned"`)
+- [ ] UAMI has **Key Vault Secrets User** on every referenced KV
+- [ ] UAMI has **Cognitive Services User** on every AI Services / OpenAI account (or KV-backed `AzureOpenAI__ApiKey` is set per ADR-028 E-2)
+- [ ] UAMI has **Cosmos DB Built-in Data Contributor** on the Cosmos account (per the existing subsection)
+- [ ] Kudu `/api/settings` dump shows KV-backed values **resolved** (not the literal `@Microsoft.KeyVault(...)` string)
+
 #### AgentService configuration (4 settings; placeholders OK if not actively using Agent Framework)
 
 The BFF validates `AgentServiceOptions` at startup even if Agent Framework isn't actively used. Use placeholder values for envs that don't yet have a real Azure AI Project + agent.
