@@ -4,6 +4,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
@@ -91,9 +92,19 @@ public static class AiModule
         {
             // Local helper that constructs the inner IChatClient using the DI-injected
             // TokenCredential (UAMI-pinned via ManagedIdentityCredentialFactory).
+            // DIAG: when OpenAI:LogTokenClaims=true, wraps the credential with LoggingTokenCredential
+            // to log the first MI token's selected claims (oid/appid/aud/iss/idtyp/tid/scopes) on
+            // App Insights. The raw token is never logged. Gated; default OFF.
             static IChatClient BuildInnerClient(IServiceProvider sp, string endpoint, string model)
             {
                 var credential = sp.GetRequiredService<TokenCredential>();
+                var config = sp.GetRequiredService<IConfiguration>();
+                if (config.GetValue<bool>("OpenAI:LogTokenClaims"))
+                {
+                    var diagLogger = sp.GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("Sprk.Bff.Api.Diagnostics.OpenAITokenClaims");
+                    credential = new LoggingTokenCredential(credential, diagLogger);
+                }
                 return new AzureOpenAIClient(new Uri(endpoint), credential)
                     .GetChatClient(model)
                     .AsIChatClient();
