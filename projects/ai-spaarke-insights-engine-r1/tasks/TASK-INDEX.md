@@ -35,23 +35,23 @@
 | ID | D-P | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
 | [020](020-grounding-verifier.poml) | D-P9 | GroundingVerifier + GroundingVerifyNode | ✅ | 1d | ✅ | 001 |
-| [021](021-confidence-gating-emission.poml) | D-P10 | Confidence threshold gating + per-field Observation emission | 🔲 | 6h | ✅ | 001 |
+| [021](021-confidence-gating-emission.poml) | D-P10 | Confidence threshold gating + per-field Observation emission | ✅ | 6h | ✅ | 001 |
 | [022](022-insights-mode-node-executors.poml) | D-P12 | 5 Insights-mode node executors (LiveFact/IndexRetrieve/EvidenceSufficiency/DeclineToFind/ReturnInsightArtifact — GroundingVerify shipped in 020) | ✅ | 2d | ✅ | 001, 002, 020 |
-| [023](023-insights-playbook-cache.poml) | D-P13 | Insights playbook execution cache (Redis wrap of PlaybookExecutionEngine) | 🔲 | 6h | ✅ | — |
+| [023](023-insights-playbook-cache.poml) | D-P13 | Insights playbook execution cache (Redis wrap of PlaybookExecutionEngine) | ✅ | 6h | ✅ | — |
 | [024](024-generic-cache-helper.poml) | Q5 side-quest | Generic IDistributedCacheExtensions.GetOrCreateAsync&lt;T&gt; helper | ✅ | 3h | ✅ | — |
 
 ### Wave 3.5 — Reuse refactor (serial; small)
 
 | ID | D-P | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [025](025-reference-indexing-parameterization.poml) | W3.5 | Parameterize ReferenceIndexingService for index name + schema mapper | 🔲 | 4h | ✅ (vs other waves) | — |
+| [025](025-reference-indexing-parameterization.poml) | W3.5 | Parameterize ReferenceIndexingService for index name + schema mapper | ✅ | 4h | ✅ (vs other waves) | — |
 
 ### Wave 4 — Layer prompts (parallel)
 
 | ID | D-P | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [030](030-layer1-classification-prompt.poml) | D-P5 | Layer 1 document classification node + classification@v1 prompt | 🔲 | 4h | ✅ | 022 |
-| [031](031-layer2-outcome-extraction-prompt.poml) | D-P6 | Layer 2 outcome extraction node + outcome-extraction@v1 prompt | 🔲 | 1d | ✅ | 022 |
+| [030](030-layer1-classification-prompt.poml) | D-P5 | Layer 1 document classification node + classification@v1 prompt | ✅ | 4h | ✅ | 022 |
+| [031](031-layer2-outcome-extraction-prompt.poml) | D-P6 | Layer 2 outcome extraction node + outcome-extraction@v1 prompt | ✅ | 1d | ✅ | 022 |
 
 ### Wave 5 — Ingest orchestration + Precedent projection + facade scaffold (parallel)
 
@@ -59,7 +59,7 @@
 |---|---|---|---|---|---|---|
 | [040](040-universal-ingest-playbook.poml) | D-P7 | Universal ingest playbook (Layer 1 → Layer 2 → gates → emission) | 🔲 | 1d | ✅ | 020, 021, 022, 025, 030, 031, 042 |
 | [041](041-precedent-projection-sync.poml) | D-P4 | Precedent → spaarke-insights-index projection sync | 🔲 | 4h | ✅ | 011, 012, 025 |
-| [042](042-iinsights-ai-facade.poml) | facade | IInsightsAi facade + InsightsOrchestrator (Zone A) | 🔲 | 4h | ✅ | 022, 023 |
+| [042](042-iinsights-ai-facade.poml) | facade | IInsightsAi facade + InsightsOrchestrator (Zone A) | ✅ | 4h | ✅ | 022, 023 |
 
 ### Wave 6 — SPE consumer + review surface (mostly parallel)
 

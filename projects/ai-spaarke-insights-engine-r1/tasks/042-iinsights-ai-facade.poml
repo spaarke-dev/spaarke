@@ -1,7 +1,7 @@
 <task id="042" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>Facade scaffold — IInsightsAi interface + InsightsOrchestrator (Zone A)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>5</wave>
     <estimated-effort>4 hours</estimated-effort>
     <tags>bff-api, facade, zone-a, public-contracts, dotnet, dep-7</tags>

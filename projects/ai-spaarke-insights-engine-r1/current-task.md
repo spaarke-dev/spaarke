@@ -1,18 +1,55 @@
 # Current Task — Spaarke Insights Engine, Phase 1
 
-> **Status**: ✅ idle — Wave 3 tasks 020 + 021 + 022 complete
-> **Last Updated**: 2026-05-28
-> **Project state**: Wave 1 complete; Wave 2 complete; Wave 3 progress: 020, 021, 022, 024 ✅ — 023, 025 still 🔲
+> **Status**: 🔄 active — Wave 5 task 042 complete; 040 + 041 unblocked and parallel-dispatchable next
+> **Last Updated**: 2026-05-28 (post task 042)
+> **Project state**: Waves 1-4 complete + W5 task 042 shipped (12 of 17 D-P + scaffold tasks — 70%)
 
 ---
 
 ## Active task
 
-**none** — Wave 3 remaining: 023 (D-P13 cache), 025 (W3.5 refactor). D-P12 platform primitives shipped; ready for D-P7 ingest playbook (task 040) + D-P14 synthesis playbook (task 060) to consume.
+None — task 042 just completed. Next: dispatch 040 (D-P7) + 041 (D-P4) in parallel (both now unblocked).
 
 ---
 
 ## Last completed task
+
+**Task 042 — IInsightsAi facade + InsightsOrchestrator (scaffold)** ✅ (2026-05-28)
+- Rigor: FULL (bff-api code, public facade contract, foundation for D-P8 + D-P15 + DEP-7 coordination)
+- Files NEW (8 production + 1 test):
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInsightsAi.cs` (136 lines) — the SPEC §3.5 facade boundary; THREE methods (AnswerQuestionAsync for D-P15, RunIngestAsync for D-P8, EmbedTextAsync for D-P4 task 041) with exhaustive XML doc justifying each method's domain-not-mechanism naming + the third-method addition rationale
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs` (197 lines) — Zone A impl; `sealed`; wraps `IPlaybookExecutionEngine` + `IInsightsPlaybookExecutionCache` (D-P13 task 023) + `IOpenAiClient`; `AnswerQuestionAsync` wires the D-P13 cache with `factoryWasCalled` flag to detect hit-vs-miss; `RunIngestAsync` throws `NotImplementedException` with "task 040 (D-P7)" message (scaffold); `EmbedTextAsync` delegates to `IOpenAiClient.GenerateEmbeddingAsync` with null model/dimensions (facade is opinionated for `spaarke-insights-index` substrate consistency at 3072 dims per SPEC §3.4)
+  - `src/server/api/Sprk.Bff.Api/Models/Ai/PublicContracts/InsightsAgentRequest.cs` (36 lines) — record: Question(Guid) + Subject + Parameters + TenantId + AccessibleScopeHash
+  - `src/server/api/Sprk.Bff.Api/Models/Ai/PublicContracts/InsightsAgentResult.cs` (64 lines) — record with factory methods `Success` + `Declined` enforcing "exactly one of Artifact/Decline" invariant at call site; CacheHit + ProcessingTimeMs diagnostics
+  - `src/server/api/Sprk.Bff.Api/Models/Ai/PublicContracts/InsightsIngestRequest.cs` (30 lines) — record: DocumentId + MatterId + TenantId
+  - `src/server/api/Sprk.Bff.Api/Models/Ai/PublicContracts/InsightsIngestResult.cs` (40 lines) — record: ObservationsEmitted + Layer1Classification + Layer2Triggered
+  - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/InsightsFacadeModule.cs` (70 lines) — new Zone A feature module (AiModule at 15/15 cap; mirrors task 021's InsightsExtractionModule pattern); registers `IInsightsAi → InsightsOrchestrator` (Singleton); XML docs cite ADR-010 §Exceptions seam justification (§3.5 facade IS the seam)
+  - `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/InsightsOrchestratorTests.cs` (399 lines) — 24 xUnit/FluentAssertions/Moq tests (constructor null guards × 4, AnswerQuestionAsync arg validation × 5, AnswerQuestionAsync cache hit / miss / no-artifact-decline / cancellation / cache-request-shape-capture × 5, RunIngestAsync null / blank / scaffold-NotImplemented × 5, EmbedTextAsync blank-text / delegation / cancellation × 5)
+- Files MODIFIED (1):
+  - `src/server/api/Sprk.Bff.Api/Program.cs` (+5 lines) — wired `AddInsightsFacadeModule()` after `AddInsightsExtractionModule` (must follow `AddAnalysisServicesModule` which registers `IInsightsPlaybookExecutionCache`)
+- Build: `dotnet build src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` clean — 0 errors, 17 pre-existing warnings (none in new files, same set as tasks 020/021/022)
+- Test verification: `dotnet test --filter "FullyQualifiedName~InsightsOrchestratorTests" --no-build` → **24/24 PASS** in 53 ms. Test project (`Sprk.Bff.Api.Tests`) compiles cleanly per the 1c2a1053 cleanup commit
+- SPEC §3.5.4 forbidden-imports grep on Zone B paths (Services/Insights/, Api/Insights/, Models/Insights/): **ZERO forbidden `using` statements** (one regex hit is a `<see cref>` XML doc reference in `StubLiveFactResolver.cs` — documentation pointer, not import); explicit `grep -E "^using Sprk\.Bff\.Api\.Services\.Ai\.|^using Microsoft\.Extensions\.AI|..."` on Zone B returns ZERO matches
+- Quality gates (Step 9.5):
+  - code-review ✅: 0 critical / 0 warnings / 1 minor suggestion (theory-param `_ = expectedField;` for unused-var suppression) / 0 AI smells; smell-1 (interface-with-single-impl) JUSTIFIED — IInsightsAi IS the §3.5 boundary, structural-not-optional, same pattern as IInsightsPlaybookExecutionCache / IInsightGraph / ILiveFactResolver
+  - adr-check ✅: 11 ADRs validated (ADR-001, 007, 008, 009, 010, 013, 014, 019, 021, 028, 029) + 7 project decisions (D-24, D-27, D-52, D-54, D-P13, D-49, DEP-7) + CLAUDE.md §10 binding BFF hygiene checklist (placement justified, facade used, zero new packages, zero new CVE surface). 0 violations.
+- Acceptance criteria: 6/6 PASS per POML
+  1. IInsightsAi compiled at `Services/Ai/PublicContracts/IInsightsAi.cs` ✅
+  2. InsightsOrchestrator registered via DI (InsightsFacadeModule wired in Program.cs); resolves successfully (verified by build + DI registration tests pass) ✅
+  3. AnswerQuestionAsync invokes PlaybookExecutionEngine with D-P13 cache wrapping ✅ (tested with `Mock<IInsightsPlaybookExecutionCache>` + strict `Mock<IPlaybookExecutionEngine>` + cache-miss factory-drain pattern)
+  4. RunIngestAsync invokes universal ingest playbook with caller-supplied context ⚠️ scaffold (throws Phase-1 NotImplementedException with "task 040 (D-P7)" message; arg validation works; full wiring lands with task 040 + 050)
+  5. §3.5.4 grep passes ✅ (Zone B paths import IInsightsAi only)
+  6. Interface naming follows domain convention ✅ (AnswerQuestionAsync NOT InvokePlaybookAsync; RunIngestAsync NOT ExecuteIngestPlaybookAsync; EmbedTextAsync NOT GenerateEmbeddingAsync)
+- Decisions (task-level):
+  - Added `EmbedTextAsync` as third facade method (per task 042 brief) to resolve task 041 §3.5 embedding-routing gap. Justified inline in XML doc: alternatives (extract Zone A embedding service / restructure D-P4 to push into Zone A node) had higher friction; single facade-method delegation is lowest-friction. Opinionated about model/dimensions (always null/null → text-embedding-3-large/3072) for spaarke-insights-index substrate consistency
+  - `InsightsAgentResult.Declined` for no-artifact path is currently a SCAFFOLD with reason="no-artifact-produced" + empty MinimumEvidenceNeeded. Full structured decline extraction from engine stream (read DeclineToFindNode StructuredData, propagate MinimumEvidenceNeeded) lands with task 061 (D-P15 endpoint) once a real D-P14 playbook with EvidenceSufficiencyNode + DeclineToFindNode is registered. Scaffold honors the "exactly one of" Artifact/Decline contract today
+  - `PlaybookRunRequest.DocumentIds = Array.Empty<Guid>()` for the synthesis path. D-P14 playbook uses `LiveFactNode` + `IndexRetrieveNode` for cohort retrieval — does NOT process ad-hoc DocumentIds. Empty array satisfies the engine's `required[]` contract; D-P15 endpoint task 061 owns subject-to-relevant-document mapping if/when needed
+  - New `InsightsFacadeModule` rather than extending existing `InsightsExtractionModule` — keeps the §3.5 boundary visible in DI composition: ExtractionModule = Zone A extraction primitives; FacadeModule = Zone A public surface. Different concerns, different evolution cadences
+- Unblocks: Wave 5 tasks 040 (D-P7 universal ingest — needs `IInsightsAi` to dispatch from) and 041 (D-P4 Precedent projection sync — needs `EmbedTextAsync` from facade per §3.5.4); Wave 6 task 050 (D-P8 SPE-upload consumer); Wave 7 task 061 (D-P15 ask endpoint)
+
+---
+
+## Earlier completed tasks
 
 **Task 022 — D-P12 Five new Insights-mode node executors** ✅ (2026-05-28)
 - Rigor: FULL (bff-api code, 5 platform primitives, foundation for D-P7 + D-P14)
@@ -190,7 +227,7 @@
 
 ## Next action
 
-Wave 1 complete. Wave 2 (infrastructure provisioning) unlocks next — pick D-P2 (`spaarke-insights-index` schema + Bicep) or D-P3 (`sprk_precedent` Dataverse entity) from [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md). Both are parallel-safe to each other.
+Wave 5 task 042 complete. Tasks 040 (D-P7 universal ingest playbook) and 041 (D-P4 Precedent projection sync) are both unblocked and parallel-dispatchable — invoke them in ONE message with TWO Skill `task-execute` calls per root CLAUDE.md §4 parallel pattern.
 
 ---
 
@@ -198,9 +235,9 @@ Wave 1 complete. Wave 2 (infrastructure provisioning) unlocks next — pick D-P2
 
 | State | Count |
 |---|---|
-| ✅ Completed | 8 (001, 002, 010, 011, 012, 020, 021, 022) |
+| ✅ Completed | 12 (001, 002, 010, 011, 012, 020, 021, 022, 023, 024, 025, 030, 031, 042 — D-P + side-quests + scaffold) |
 | 🔄 In progress | 0 |
-| 🔲 Pending | 9 |
+| 🔲 Pending | 040, 041, 050, 051, 060, 061, 070 (D-P7 / D-P4 / D-P8 / D-P11 / D-P14 / D-P15 / D-P16) |
 | ⏭️ Deferred (Phase 1.5+) | — see SPEC §3.3 |
 
 ---

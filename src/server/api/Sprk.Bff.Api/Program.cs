@@ -82,6 +82,13 @@ builder.Services.AddAnalysisServicesModule(builder.Configuration);
 // Future Wave-3 additions: D-P9 GroundingVerifier wiring, D-P12 node executors.
 builder.Services.AddInsightsExtractionModule(builder.Configuration);
 
+// Spaarke Insights Engine — Zone A public facade per SPEC §3.5 (task 042).
+// IInsightsAi → InsightsOrchestrator: the ONLY Zone-A surface Zone B code may import.
+// Wraps IPlaybookExecutionEngine + IInsightsPlaybookExecutionCache (D-P13) + IOpenAiClient
+// behind a 3-method facade (AnswerQuestionAsync / RunIngestAsync / EmbedTextAsync).
+// Must follow AnalysisServicesModule which registers the engine + D-P13 cache.
+builder.Services.AddInsightsFacadeModule();
+
 // AI Platform R2: safety perimeter (content safety, prompt shield, groundedness)
 builder.Services.AddAiSafetyModule(builder.Configuration);
 
