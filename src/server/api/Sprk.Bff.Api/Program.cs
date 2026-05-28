@@ -88,6 +88,11 @@ builder.Services.AddAiPersistenceModule(builder.Configuration);
 // AI Platform R2: agent and chat extensions (ISprkAgent impls, orchestration)
 builder.Services.AddAiChatModule(builder.Configuration);
 
+// Spaarke Insights Engine — Zone B domain services per SPEC §3.5 facade boundary.
+// Phase 1: IInsightGraph + StubInsightGraph (D-P17 swap-path preservation;
+// CosmosNoSqlInsightGraph deferred to Phase 1.5 per SPEC §3.3).
+builder.Services.AddInsightsModule();
+
 // Email-to-Document conversion services
 builder.Services.AddEmailServicesModule(builder.Configuration);
 

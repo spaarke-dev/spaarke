@@ -1,7 +1,7 @@
 <task id="002" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>D-P17 — IInsightGraph interface + DTOs + stub impl (Cosmos defers to Phase 1.5)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>1</wave>
     <estimated-effort>2 hours</estimated-effort>
     <tags>bff-api, interface, graph, dotnet, swap-path-preservation</tags>
@@ -68,4 +68,29 @@
     <criterion testable="true">Calling any stub method throws NotImplementedException with message referencing SPEC §3.3 Phase 1.5</criterion>
     <criterion testable="true">No AI internals imports (grep clean for §3.5.4 forbidden list)</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-05-28. Files delivered:
+    - `src/server/api/Sprk.Bff.Api/Services/Insights/Graph/IInsightGraph.cs` — interface with 7 methods (3 vertex + 2 edge + 2 named traversals)
+    - `src/server/api/Sprk.Bff.Api/Services/Insights/Graph/InsightVertex.cs`, `InsightEdge.cs`, `GraphTraversalSpec.cs` (also contains `GraphTraversalScope` + `MatterRef`) — POCOs with no Gremlin/SQL leaks
+    - `src/server/api/Sprk.Bff.Api/Services/Insights/Graph/StubInsightGraph.cs` — every method throws `NotImplementedException("Cosmos NoSqlInsightGraph deferred to Phase 1.5 first deliverable per SPEC §3.3...")` (full message contains both "Phase 1.5" and "SPEC §3.3")
+    - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/InsightsModule.cs` — new Zone B feature module per ADR-010 (interface seam justified by D-P17 swap path); registers `IInsightGraph` -> `StubInsightGraph` as singleton
+    - `src/server/api/Sprk.Bff.Api/Program.cs` — registration call added after `AddAiChatModule`
+    - `tests/unit/Sprk.Bff.Api.Tests/Services/Insights/Graph/StubInsightGraphTests.cs` — 8 xunit tests (DI resolution + 7 method throw assertions)
+
+    Acceptance criteria evidence:
+    - Interface compiles with 7 methods: VERIFIED via `dotnet build src/server/api/Sprk.Bff.Api/` — 0 errors, 17 pre-existing warnings (none in new files)
+    - Stub resolved via DI: VERIFIED via standalone verifier program (ALL 9 CHECKS PASSED)
+    - Every method throws NotImplementedException with "Phase 1.5" + "SPEC §3.3": VERIFIED via verifier (7/7 methods)
+    - Zone B §3.5.4 grep clean: VERIFIED (exit code 1, zero matches) against `Services/Insights/Graph/`
+
+    Judgment calls (Step 3 decision):
+    1. Created NEW `InsightsModule.cs` rather than extending `AnalysisServicesModule`. Rationale: AnalysisServicesModule is Zone A (freely imports `IOpenAiClient`, `IPlaybookService`, `Microsoft.Extensions.AI` types); the §3.5 facade boundary mandates Zone B Insights code be wired separately so the boundary is visible in DI composition. ADR-010 §Exceptions explicitly permits new interfaces when there's "a true seam" — D-P17 IS a true seam (Phase 1 stub ↔ Phase 1.5 Cosmos impl). Module count cost: +1 of 25 existing modules; offset by Zone B clarity.
+
+    Test runner blocker (pre-existing, unrelated to D-P17):
+    - The `Sprk.Bff.Api.Tests` project has 7 pre-existing compile errors from namespace drift in 3 unrelated test files (`EmbeddingMigrationServiceTests`, `AppOnlyDocumentAnalysisJobHandlerTests`, `EmailAnalysisIntegrationTests`). These were last touched months before the Insights Engine work (HEAD: d59f7efd, 1435419e) and are NOT caused by this task's changes. Verified by checking git log -- no commits between origin/master..HEAD modified those test files.
+    - To stay on-scope (D-P17 = interface + stub only, STANDARD rigor), I did NOT fix the pre-existing test breakage. Instead I verified the stub's behavior end-to-end via a temporary standalone console verifier referencing the built Sprk.Bff.Api assembly. All 9 verifier checks passed (DI resolution + all 7 stub methods throwing with correct message). The 8-test xunit file (`StubInsightGraphTests.cs`) is shipped as the task deliverable; it will run cleanly once the pre-existing test-project breakage is fixed by whoever owns that area.
+
+    No new ADR violations. No new vulnerabilities. Effort: ~1.5 hours (vs 2 hour estimate).
+  </notes>
 </task>
