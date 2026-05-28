@@ -18,7 +18,7 @@
   <role>Playbook author familiar with Spaarke playbook entity schema, node executors, conditional routing, and PlaybookExecutionEngine semantics.</role>
 
   <goal>
-    Universal ingest playbook published in Dataverse playbook entity. On invocation with `{documentId, matterId, tenantId}`: runs Layer 1 classification → if outcome-bearing AND confidence ≥ 0.7 → runs Layer 2 extraction → applies GroundingVerifier on quotes → applies confidence-threshold gating → emits Observations to insights-index + mirrors to sprk_analysis (D-P11). On non-outcome-bearing: Layer 1 Observation emitted only; playbook ends. `IInsightsAi.RunIngestAsync` invokes this playbook via PlaybookExecutionEngine.
+    Universal ingest playbook published in Dataverse playbook entity. On invocation with `{documentId, matterId, tenantId}`: runs Layer 1 classification → if outcome-bearing AND confidence ≥ 0.7 → runs Layer 2 extraction → applies GroundingVerifier on quotes → applies confidence-threshold gating → emits Observations to spaarke-insights-index + mirrors to sprk_analysis (D-P11). On non-outcome-bearing: Layer 1 Observation emitted only; playbook ends. `IInsightsAi.RunIngestAsync` invokes this playbook via PlaybookExecutionEngine.
   </goal>
 
   <inputs>
@@ -46,11 +46,11 @@
 
   <steps>
     <step order="1" name="Read SPEC-phase-1-minimum.md §3">Confirm universal ingest flow and layer ordering</step>
-    <step order="2" name="Design playbook node graph">Sanitizer → Layer 1 (AiAnalysisNodeExecutor with classification config) → ConditionNode (classification check + confidence threshold) → [if pass] Layer 2 (AiAnalysisNodeExecutor with outcome extraction config) → GroundingVerifyNode → ObservationEmitter (D-P10) → DeliverToIndex (insights-index)</step>
+    <step order="2" name="Design playbook node graph">Sanitizer → Layer 1 (AiAnalysisNodeExecutor with classification config) → ConditionNode (classification check + confidence threshold) → [if pass] Layer 2 (AiAnalysisNodeExecutor with outcome extraction config) → GroundingVerifyNode → ObservationEmitter (D-P10) → DeliverToIndex (spaarke-insights-index)</step>
     <step order="3" name="Author playbook definition">Insights-mode metadata (output mode = OnComplete; tier = observation; no evidence sufficiency rule needed at ingest layer; cache TTL = 0 — ingest is one-shot)</step>
     <step order="4" name="Author IngestOrchestrator service">Wraps PlaybookExecutionEngine.ExecuteBatchAsync with ingest-specific context (documentId, matterId, tenantId); exposed via IInsightsAi.RunIngestAsync facade</step>
     <step order="5" name="Author Observation mirror hook">Side-effect of ingest playbook completion: per emitted Observation, write a sprk_analysis row (D-P11 mirror); fire-and-forget pattern with error logging</step>
-    <step order="6" name="Integration test">Mock SPE upload event → invoke ingest playbook on a fixture closing-letter → verify Observations in insights-index + sprk_analysis mirror rows</step>
+    <step order="6" name="Integration test">Mock SPE upload event → invoke ingest playbook on a fixture closing-letter → verify Observations in spaarke-insights-index + sprk_analysis mirror rows</step>
     <step order="7" name="Quality gates">code-review + adr-check; verify §3.5 facade boundary respected</step>
   </steps>
 
@@ -67,7 +67,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">Ingest playbook publishes successfully to Dataverse playbook entity</criterion>
-    <criterion testable="true">End-to-end test: closing-letter fixture → Layer 1 classifies → Layer 2 extracts → gates pass → Observations written to insights-index</criterion>
+    <criterion testable="true">End-to-end test: closing-letter fixture → Layer 1 classifies → Layer 2 extracts → gates pass → Observations written to spaarke-insights-index</criterion>
     <criterion testable="true">End-to-end test: correspondence-email fixture → Layer 1 classifies → ConditionNode skips Layer 2 → only Classification Observation written</criterion>
     <criterion testable="true">sprk_analysis mirror row written for every persisted Observation</criterion>
     <criterion testable="true">ISanitizer invoked before any LLM step (verified via capture)</criterion>

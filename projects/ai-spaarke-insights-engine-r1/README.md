@@ -14,7 +14,7 @@ This is **not** the implementation. Implementation lives in `src/server/api/Sprk
 
 ## Why an "Engine"
 
-"Engine" honestly scopes this component: signals come in, derived context comes out. The Engine **owns** the resolver (`InsightsOrchestrator`), synthesis layer, universal ingest playbook, `insights-index` (derived AI Search index), and the Precedent layer. It **consumes — but does not own** source systems (Dataverse, SPE, AI Search operational substrate) as signal inputs. It **emits to — but does not own** presentation surfaces (which land in Phase 1.5+). This ownership boundary is the load-bearing architectural decision (D-01, D-02 in `decisions.md`).
+"Engine" honestly scopes this component: signals come in, derived context comes out. The Engine **owns** the resolver (`InsightsOrchestrator`), synthesis layer, universal ingest playbook, `spaarke-insights-index` (derived AI Search index), and the Precedent layer. It **consumes — but does not own** source systems (Dataverse, SPE, AI Search operational substrate) as signal inputs. It **emits to — but does not own** presentation surfaces (which land in Phase 1.5+). This ownership boundary is the load-bearing architectural decision (D-01, D-02 in `decisions.md`).
 
 ## Core taxonomy: four artifact types
 
@@ -23,17 +23,17 @@ Every piece of context the Engine produces is one of four things, each with a di
 | Type | Source | Confidence | Where it lives | How it's presented |
 |---|---|---|---|---|
 | **Fact** | Deterministic computation over Dataverse (Live Facts on read via `LiveFactNode` per D-P12) | 1.0 always | Live query — no persistence in Phase 1 (no projection sync) | Stated directly. No hedging. |
-| **Observation** | LLM extraction (D-P6 Layer 2 outcome extraction) from documents with verbatim quote, gated by confidence threshold (D-P10) and `GroundingVerifier` (D-P9) | 0.75–1.0 (above per-field thresholds; lower-confidence dropped) | `insights-index` (AI Search) with `artifactType: "observation"` — discriminator | Stated with confidence + evidence quote + source-document link |
-| **Precedent** | Phase 1: manual SME authoring via D-P3 admin endpoint. Phase 1.5+: system-proposed Tentative from nightly cluster job + SME refinement (D-61). | SME-confirmed (no probabilistic confidence) | `sprk_precedent` Dataverse entity (system of record) + `insights-index` (read-optimized projection per D-P4) with `artifactType: "precedent"` | Stated as institutional rule with supporting-matter count + confirmation status + drill-through to basis matters |
+| **Observation** | LLM extraction (D-P6 Layer 2 outcome extraction) from documents with verbatim quote, gated by confidence threshold (D-P10) and `GroundingVerifier` (D-P9) | 0.75–1.0 (above per-field thresholds; lower-confidence dropped) | `spaarke-insights-index` (AI Search) with `artifactType: "observation"` — discriminator | Stated with confidence + evidence quote + source-document link |
+| **Precedent** | Phase 1: manual SME authoring via D-P3 admin endpoint. Phase 1.5+: system-proposed Tentative from nightly cluster job + SME refinement (D-61). | SME-confirmed (no probabilistic confidence) | `sprk_precedent` Dataverse entity (system of record) + `spaarke-insights-index` (read-optimized projection per D-P4) with `artifactType: "precedent"` | Stated as institutional rule with supporting-matter count + confirmation status + drill-through to basis matters |
 | **Inference** | Synthesized on demand by `predict-matter-cost` Insights-mode playbook (D-P14) over Live Facts + Observations + Precedents | 0.0–1.0 | Never authoritatively stored (cached via D-P13) | Stated with confidence, comparable set, citable Precedents, reasoning. Insufficient → structured `DeclineResponse` per D-49 |
 
 ## Substrate
 
 | Concern | Decision (2026-05-28 canonical) |
 |---|---|
-| Vector + structured retrieval | **Azure AI Search** — ONE new derived index (`insights-index`) with `artifactType` discriminator (Observations + Precedents). D-53 revised from prior 5-index framing. Operational substrate (`spaarke-files-index`, `spaarke-records-index`, `spaarke-invoices-index`, `spaarke-rag-references`) consumed as-is — `spaarke-files-index` read by ingest (Layer 2) + grounding verification. |
+| Vector + structured retrieval | **Azure AI Search** — ONE new derived index (`spaarke-insights-index`) with `artifactType` discriminator (Observations + Precedents). D-53 revised from prior 5-index framing. Operational substrate (`spaarke-files-index`, `spaarke-records-index`, `spaarke-invoices-index`, `spaarke-rag-references`) consumed as-is — `spaarke-files-index` read by ingest (Layer 2) + grounding verification. |
 | Graph (entities + typed edges) | **`IInsightGraph` interface ships in Phase 1 (D-P17 — stub)**; **`CosmosNoSqlInsightGraph` implementation is first Phase 1.5 deliverable**. Adjacency-list pattern per D-09; NOT Gremlin. |
-| Precedent layer | `sprk_precedent` Dataverse entity (system of record) + projection sync to `insights-index` on Confirmed (D-P4). Phase 1: manual SME authoring (D-P3). Phase 1.5+: system-proposed Tentative + lifecycle automation (decay, drift, promotion). |
+| Precedent layer | `sprk_precedent` Dataverse entity (system of record) + projection sync to `spaarke-insights-index` on Confirmed (D-P4). Phase 1: manual SME authoring (D-P3). Phase 1.5+: system-proposed Tentative + lifecycle automation (decay, drift, promotion). |
 | Live Facts | Direct Dataverse queries via `LiveFactResolverService` wrapped in `LiveFactNode` (D-P12). No projection writing in Phase 1 (Mode A removed per D-58 superseded). |
 | Document extraction | **Universal layered ingest** on every SPE upload (D-P7 + D-P8). Layer 1 classification (D-P5 cheap, runs always); Layer 2 outcome extraction (D-P6, conditional on Layer 1 classification + confidence ≥ 0.7). Cheap layers gate expensive ones per D-59. |
 | Synthesis layer | **Insights questions are Spaarke playbooks** executed by existing `PlaybookExecutionEngine` with Insights-mode metadata + caching (D-P13). NO parallel question-catalog system per D-54. |

@@ -12,13 +12,13 @@
   </metadata>
 
   <prompt>
-    Deploy Phase 1 build to Spaarke Dev environment: Bicep infrastructure (insights-index + Function App per D-P2) + BFF API redeploy (with all new D-P12 nodes, D-P13 cache, IInsightsAi facade, endpoints) + Dataverse solution import (sprk_precedent + Observation review view + BPF). Verify SPEC §5.1 acceptance criteria pass against deployed environment.
+    Deploy Phase 1 build to Spaarke Dev environment: Bicep infrastructure (spaarke-insights-index + Function App per D-P2) + BFF API redeploy (with all new D-P12 nodes, D-P13 cache, IInsightsAi facade, endpoints) + Dataverse solution import (sprk_precedent + Observation review view + BPF). Verify SPEC §5.1 acceptance criteria pass against deployed environment.
   </prompt>
 
   <role>Deployment engineer familiar with `bff-deploy`, `azure-deploy`, `dataverse-deploy` skills; understands Spaarke Dev environment.</role>
 
   <goal>
-    Insights Engine Phase 1 functional in Spaarke Dev: insights-index provisioned, BFF API endpoint responding, sprk_precedent + Observations queryable, ingest playbook fires on real SPE upload event, smoke + eval harness pass against deployed environment.
+    Insights Engine Phase 1 functional in Spaarke Dev: spaarke-insights-index provisioned, BFF API endpoint responding, sprk_precedent + Observations queryable, ingest playbook fires on real SPE upload event, smoke + eval harness pass against deployed environment.
   </goal>
 
   <inputs>
@@ -63,7 +63,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">insights-index exists in spaarke-search-dev and is queryable</criterion>
+    <criterion testable="true">spaarke-insights-index exists in spaarke-search-dev and is queryable</criterion>
     <criterion testable="true">BFF API responds 200 to POST /api/insights/ask on Spaarke Dev URL</criterion>
     <criterion testable="true">sprk_precedent entity queryable in Spaarke Dev Dataverse</criterion>
     <criterion testable="true">Smoke test (task 070) passes against deployed environment</criterion>

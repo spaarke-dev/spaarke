@@ -75,7 +75,7 @@ When tasks can run in parallel (per TASK-INDEX.md parallel groups), each task ST
 
 | Knowledge | Tags | Tasks |
 |---|---|---|
-| [knowledge/azure-ai-search/](../../knowledge/azure-ai-search/) | `ai-search`, `vector-search`, `insights-index` | 010 (D-P2 schema design), 022 (D-P12 IndexRetrieveNode), 060 (D-P14 cohort retrieval) |
+| [knowledge/azure-ai-search/](../../knowledge/azure-ai-search/) | `ai-search`, `vector-search`, `spaarke-insights-index` | 010 (D-P2 schema design), 022 (D-P12 IndexRetrieveNode), 060 (D-P14 cohort retrieval) |
 | [knowledge/azure-functions-isv/](../../knowledge/azure-functions-isv/) | `functions`, `flex-consumption`, `spe-consumer` | 050 (D-P8) |
 | [knowledge/dataverse-sync/](../../knowledge/dataverse-sync/) | `dataverse-sync`, `precedent-projection` | 041 (D-P4 Precedent projection), 051 (D-P11 Observation mirror) |
 
@@ -87,7 +87,7 @@ When tasks can run in parallel (per TASK-INDEX.md parallel groups), each task ST
 |---|---|---|---|
 | 3-tier retrieval composition | [`AiAnalysisNodeExecutor.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs) | 030 (D-P5), 031 (D-P6), 022 (D-P12 IndexRetrieveNode) | Layer 1/2 prompts use this node as host; IndexRetrieveNode extracts the retrieval composition into a reusable helper |
 | Dataverse → AI Search sync | [`DataverseIndexSyncService.cs`](../../src/server/api/Sprk.Bff.Api/Services/RecordMatching/DataverseIndexSyncService.cs) | 041 (D-P4 Precedent projection) | Template for status→Confirmed projection |
-| Idempotent indexer | [`ReferenceIndexingService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs) | 025 (W3.5 refactor), 010 (D-P2), 041 (D-P4), 051 (D-P11) | Parameterize for index name + schema mapper (W3.5); reuse for `insights-index` |
+| Idempotent indexer | [`ReferenceIndexingService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs) | 025 (W3.5 refactor), 010 (D-P2), 041 (D-P4), 051 (D-P11) | Parameterize for index name + schema mapper (W3.5); reuse for `spaarke-insights-index` |
 | Playbook execution wrapping | [`PlaybookExecutionEngine.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs) | 023 (D-P13 cache wrap), 042 (facade impl), 060 (D-P14 invocation) | Cache wraps `ExecuteBatchAsync`; facade calls into it |
 | Node executor pattern | [`Services/Ai/Nodes/`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/) (10 existing) | 022 (D-P12) | New 6 nodes follow `INodeExecutor` + `NodeExecutorRegistry` pattern |
 | Endpoint registration | [`Sprk.Bff.Api/Program.cs`](../../src/server/api/Sprk.Bff.Api/Program.cs) + `EndpointMappingExtensions.cs` | 012 (D-P3), 061 (D-P15) | `MapInsightsEndpoints()` + `MapInsightsAdminEndpoints()` |

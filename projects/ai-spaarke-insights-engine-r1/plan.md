@@ -16,7 +16,7 @@ Phase 1 ships the **Insights Engine context production service** end-to-end agai
 
 ## Phase 1 goals (from SPEC §2)
 
-1. Provision the new derived `insights-index` (one index, discriminator-based) + Bicep infrastructure (single-tenant per D-52)
+1. Provision the new derived `spaarke-insights-index` (one index, discriminator-based) + Bicep infrastructure (single-tenant per D-52)
 2. Implement `InsightArtifact` envelope POCOs (four-tier per D-03/D-46)
 3. Implement universal layered ingest playbook (Layer 1 classification + conditional Layer 2 outcome extraction; cheap-gates-expensive per D-59)
 4. Implement three mechanical post-processing gates: `GroundingVerifier`, confidence threshold gating, per-field Observation emission
@@ -46,11 +46,11 @@ Waves are sequential; tasks within a wave run in parallel where dependencies all
 
 | Task | D-P ID | Deliverable |
 |---|---|---|
-| 010 | D-P2 | Bicep modules for `insights-index` + Function App shell + single-tenant parameter file pattern (D-A28) |
+| 010 | D-P2 | Bicep modules for `spaarke-insights-index` + Function App shell + single-tenant parameter file pattern (D-A28) |
 | 011 | D-P3 (entity) | `sprk_precedent` Dataverse entity + relationship tables via `dataverse-create-schema` skill |
 | 012 | D-P3 (endpoint) | `POST /api/insights/admin/precedents` admin endpoint (JWT auth per ADR-008) |
 
-**First-step blockers**: 010 → confirm `insights-index` final name; 011 → confirm Phase 1 Precedent seeding count from SME. **Acceptance**: Bicep deploys clean to Spaarke Dev; `sprk_precedent` queryable; admin endpoint creates Precedent.
+**First-step blockers**: 010 → confirm `spaarke-insights-index` final name; 011 → confirm Phase 1 Precedent seeding count from SME. **Acceptance**: Bicep deploys clean to Spaarke Dev; `sprk_precedent` queryable; admin endpoint creates Precedent.
 
 ### Wave 3 — Platform primitives + node executors (parallel)
 
@@ -68,7 +68,7 @@ Waves are sequential; tasks within a wave run in parallel where dependencies all
 
 | Task | D-P ID | Deliverable |
 |---|---|---|
-| 025 | (refactor) | Parameterize `ReferenceIndexingService` for index name + schema mapper so both `spaarke-rag-references` and `insights-index` use one code path (~half day) |
+| 025 | (refactor) | Parameterize `ReferenceIndexingService` for index name + schema mapper so both `spaarke-rag-references` and `spaarke-insights-index` use one code path (~half day) |
 
 **Acceptance**: existing reference indexing behavior unchanged; new parameterized API ready for D-P2 + D-P4 + D-P11.
 
@@ -86,7 +86,7 @@ Waves are sequential; tasks within a wave run in parallel where dependencies all
 | Task | D-P ID | Deliverable |
 |---|---|---|
 | 040 | D-P7 | Universal ingest playbook authoring (Layer 1 → conditional Layer 2 → gates → emission); playbook definition + `Services/Ai/Insights/IngestOrchestrator.cs` |
-| 041 | D-P4 | Precedent → `insights-index` projection sync (small job, fires on `sprk_precedent` status → Confirmed); uses W3.5 parameterized `ReferenceIndexingService` |
+| 041 | D-P4 | Precedent → `spaarke-insights-index` projection sync (small job, fires on `sprk_precedent` status → Confirmed); uses W3.5 parameterized `ReferenceIndexingService` |
 | 042 | (facade) | `IInsightsAi` facade scaffold at `Services/Ai/PublicContracts/IInsightsAi.cs` with `AnswerQuestionAsync` + `RunIngestAsync` method stubs; impl in `Services/Ai/Insights/InsightsOrchestrator.cs` (Zone A) |
 
 **Acceptance**: ingest playbook executes against a fixture document (mock SPE event); Precedent projection round-trips.
@@ -99,7 +99,7 @@ Waves are sequential; tasks within a wave run in parallel where dependencies all
 | 051 | D-P11 (mirror) | Observation mirror sync — writes one `sprk_analysis` row per Observation as side-effect of ingest playbook |
 | 052 | D-P11 (view) | Dataverse model-driven view for Observation review surface + disposition workflow (Correct/Incorrect/Unclear) |
 
-**First-step blockers**: 050 → confirm SPE-upload event source + dispatch shape + auth context; production live-ingest cost projection; 051 → confirm `sprk_analysis` polymorphic source-type via Dataverse MCP; 052 → confirm sampling percentage. **Acceptance**: end-to-end ingest smoke (fixture closing-letter upload → Observations in `insights-index` + mirrored to `sprk_analysis`).
+**First-step blockers**: 050 → confirm SPE-upload event source + dispatch shape + auth context; production live-ingest cost projection; 051 → confirm `sprk_analysis` polymorphic source-type via Dataverse MCP; 052 → confirm sampling percentage. **Acceptance**: end-to-end ingest smoke (fixture closing-letter upload → Observations in `spaarke-insights-index` + mirrored to `sprk_analysis`).
 
 ### Wave 7 — Synthesis + API endpoint (parallel)
 

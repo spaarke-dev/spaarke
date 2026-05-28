@@ -19,7 +19,7 @@ This design document was authored against an earlier Phase 1 framing. **Two pass
 | Current commitment | Decisions | Where this design doc lags |
 |---|---|---|
 | **Single-tenant Phase 1 scope** | D-52 (stands) | §3.5, §7.2, §9.5 — callouts already added (still current) |
-| **ONE derived index (`insights-index`) with `artifactType` discriminator** | D-53 **revised 2026-05-28** (was: 5 indexes) | §4.1 — in-line callout still describes 5 indexes; **treat SPEC §3.4 as authoritative** |
+| **ONE derived index (`spaarke-insights-index`) with `artifactType` discriminator** | D-53 **revised 2026-05-28** (was: 5 indexes) | §4.1 — in-line callout still describes 5 indexes; **treat SPEC §3.4 as authoritative** |
 | **Questions-as-playbooks** | D-54 (stands) | §5 — callouts already added (still current) |
 | **Universal layered ingest** (Layer 1 classification + conditional Layer 2 outcome extraction) | D-59 (new 2026-05-28) | §6.4 — in-line callout describes the older "document-extraction-design" generalization; **the new universal-ingest model supersedes** |
 | **Observation review surface — MANDATORY** | D-60 (new 2026-05-28) | Not covered in this design doc; see SPEC §3.1 D-P11 + [SPEC-phase-1-minimum.md §5](SPEC-phase-1-minimum.md) |

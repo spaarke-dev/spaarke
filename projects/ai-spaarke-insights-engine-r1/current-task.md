@@ -35,7 +35,7 @@
 
 ## Next action
 
-Wave 1 complete. Wave 2 (infrastructure provisioning) unlocks next — pick D-P2 (`insights-index` schema + Bicep) or D-P3 (`sprk_precedent` Dataverse entity) from [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md). Both are parallel-safe to each other.
+Wave 1 complete. Wave 2 (infrastructure provisioning) unlocks next — pick D-P2 (`spaarke-insights-index` schema + Bicep) or D-P3 (`sprk_precedent` Dataverse entity) from [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md). Both are parallel-safe to each other.
 
 ---
 

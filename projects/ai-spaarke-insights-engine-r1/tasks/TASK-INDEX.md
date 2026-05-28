@@ -26,7 +26,7 @@
 
 | ID | D-P | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [010](010-bicep-insights-index-and-shell.poml) | D-P2 | Bicep modules — insights-index + Function App shell + single-tenant params | 🔲 | 1d | ✅ | — |
+| [010](010-bicep-spaarke-insights-index-and-shell.poml) | D-P2 | Bicep modules — spaarke-insights-index + Function App shell + single-tenant params | 🔲 | 1d | ✅ | — |
 | [011](011-sprk-precedent-entity.poml) | D-P3 (entity) | sprk_precedent Dataverse entity + relationship tables | 🔲 | 4h | ✅ | — |
 | [012](012-precedent-admin-endpoint.poml) | D-P3 (endpoint) | POST /api/insights/admin/precedents admin endpoint | 🔲 | 4h | ❌ (needs 011) | 011 |
 
@@ -58,7 +58,7 @@
 | ID | D-P | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
 | [040](040-universal-ingest-playbook.poml) | D-P7 | Universal ingest playbook (Layer 1 → Layer 2 → gates → emission) | 🔲 | 1d | ✅ | 020, 021, 022, 025, 030, 031, 042 |
-| [041](041-precedent-projection-sync.poml) | D-P4 | Precedent → insights-index projection sync | 🔲 | 4h | ✅ | 011, 012, 025 |
+| [041](041-precedent-projection-sync.poml) | D-P4 | Precedent → spaarke-insights-index projection sync | 🔲 | 4h | ✅ | 011, 012, 025 |
 | [042](042-iinsights-ai-facade.poml) | facade | IInsightsAi facade + InsightsOrchestrator (Zone A) | 🔲 | 4h | ✅ | 022, 023 |
 
 ### Wave 6 — SPE consumer + review surface (mostly parallel)
@@ -141,7 +141,7 @@ Per SPEC §6.1 — each task's POML resolves its blocker before proceeding to im
 
 | Blocker | Task | Method |
 |---|---|---|
-| insights-index final name | 010 | SME confirmation |
+| spaarke-insights-index final name | 010 | SME confirmation |
 | SME review of document-type taxonomy (Layer 1) | 030 | SME review |
 | Confidence threshold starter values (Layer 2) | 031 | Product/SME confirmation |
 | SPE-upload event source + dispatch shape + auth | 050 | Architecture confirmation |

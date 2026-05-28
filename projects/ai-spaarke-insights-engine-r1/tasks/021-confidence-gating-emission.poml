@@ -12,13 +12,13 @@
   </metadata>
 
   <prompt>
-    Implement the deterministic non-LLM post-processor invoked after Layer 2 (D-P6) extraction: applies per-field confidence threshold gating, drops below-threshold fields (with optional logging), and emits each surviving field as its own Observation in `insights-index`. Realizes D-63 (gating as mechanical primitive) and D-P10 emission semantics.
+    Implement the deterministic non-LLM post-processor invoked after Layer 2 (D-P6) extraction: applies per-field confidence threshold gating, drops below-threshold fields (with optional logging), and emits each surviving field as its own Observation in `spaarke-insights-index`. Realizes D-63 (gating as mechanical primitive) and D-P10 emission semantics.
   </prompt>
 
   <role>Senior .NET developer familiar with post-extraction pipelines, threshold configuration, and AI Search upsert patterns.</role>
 
   <goal>
-    `IObservationEmitter.EmitFromExtractionAsync(extractionResult, gatingConfig, ct)` produces zero-or-more Observations. Per-field threshold gating per [SPEC-phase-1-minimum.md §3.4](../SPEC-phase-1-minimum.md): outcomeCategory≥0.75, settlementAmount≥0.85, outcomeDate≥0.85, matterDurationDays≥0.75 (admin-tunable via IConfiguration). Each surviving field becomes its own Observation row in `insights-index` per D-P10. Below-threshold fields logged to App Insights for review surface drift analysis.
+    `IObservationEmitter.EmitFromExtractionAsync(extractionResult, gatingConfig, ct)` produces zero-or-more Observations. Per-field threshold gating per [SPEC-phase-1-minimum.md §3.4](../SPEC-phase-1-minimum.md): outcomeCategory≥0.75, settlementAmount≥0.85, outcomeDate≥0.85, matterDurationDays≥0.75 (admin-tunable via IConfiguration). Each surviving field becomes its own Observation row in `spaarke-insights-index` per D-P10. Below-threshold fields logged to App Insights for review surface drift analysis.
   </goal>
 
   <inputs>
@@ -47,7 +47,7 @@
     <step order="2" name="Author config">ConfidenceThresholdOptions with per-field thresholds + admin-tunable defaults; IConfiguration-bound</step>
     <step order="3" name="Author IObservationEmitter interface">EmitFromExtractionAsync producing IReadOnlyList&lt;ObservationArtifact&gt;</step>
     <step order="4" name="Author implementation">Reads extraction JSON (typed schema from D-P6); for each field, checks threshold; if pass, constructs ObservationArtifact with evidence + producedBy; if fail, logs to App Insights</step>
-    <step order="5" name="Author IndexUpserter helper">Uses parameterized ReferenceIndexingService (Wave 3.5 D-P25) to upsert Observation to insights-index</step>
+    <step order="5" name="Author IndexUpserter helper">Uses parameterized ReferenceIndexingService (Wave 3.5 D-P25) to upsert Observation to spaarke-insights-index</step>
     <step order="6" name="DI registration">Register IObservationEmitter + options in AiModule</step>
     <step order="7" name="Unit tests">High-confidence field emits; below-threshold field drops + logs; multi-field extraction emits multiple Observations</step>
     <step order="8" name="Quality gates">code-review + adr-check</step>

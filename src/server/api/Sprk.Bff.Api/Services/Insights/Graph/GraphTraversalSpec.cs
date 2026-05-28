@@ -82,7 +82,7 @@ public sealed record GraphTraversalScope
 /// <summary>
 /// Lightweight matter reference returned by graph traversals. Keeps the
 /// abstraction lean — callers that need full matter detail re-fetch from Dataverse
-/// or <c>insights-index</c> via the matter id.
+/// or <c>spaarke-insights-index</c> via the matter id.
 /// </summary>
 public sealed record MatterRef
 {

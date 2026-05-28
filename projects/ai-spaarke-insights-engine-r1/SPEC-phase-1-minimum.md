@@ -32,8 +32,8 @@ The existing taxonomy (Fact / Observation / Precedent / Inference) describes the
 | Tier | Example | Source | Confidence | Lives in |
 |---|---|---|---|---|
 | **Fact** | "Matter M-1234 has been pending 287 days" | Deterministic computation from `sprk_matter.openDate` and current date | 1.0 | Live query against Dataverse (no persistence) |
-| **Observation** | "Matter M-1234 settled for $310,000" | LLM extraction from the settlement agreement document with verbatim quote | 0.91 | `[PROPOSED: insights-index]` |
-| **Precedent** | "In IP licensing matters with BigFirm LLP, cure-period clauses typically survive negotiation (12 of 14 matters)" | SME-authored pattern statement, citing the supporting matters | n/a — confirmed by human | `sprk_precedent` entity + projected to `[PROPOSED: insights-index]` |
+| **Observation** | "Matter M-1234 settled for $310,000" | LLM extraction from the settlement agreement document with verbatim quote | 0.91 | `[PROPOSED: spaarke-insights-index]` |
+| **Precedent** | "In IP licensing matters with BigFirm LLP, cure-period clauses typically survive negotiation (12 of 14 matters)" | SME-authored pattern statement, citing the supporting matters | n/a — confirmed by human | `sprk_precedent` entity + projected to `[PROPOSED: spaarke-insights-index]` |
 | **Inference** | "Predicted cost for this new IP licensing matter: ~$310K (confidence 0.74), based on 12 comparable matters" | Synthesis playbook combining Live Facts + Observations + Precedents | 0.0–1.0 | Returned in response; cached, not authoritatively persisted |
 
 All four use the same `InsightArtifact` envelope when returned through the API. Surfaces render them through the Insight Card visual primitive, varying only the rendering details per tier (Facts state directly, Observations and Inferences show confidence and evidence).
@@ -97,9 +97,9 @@ The data model in Phase 1 supports both modes. Only the manual mode is wired in 
 
 **System of record**: `sprk_precedent` entity in Dataverse. Curation, lifecycle management, security roles, audit, and admin views all happen in Dataverse — this benefits from existing Spaarke patterns (model-driven views, business process flows, the customer's existing admin experience).
 
-**Read-optimized projection**: `[PROPOSED: insights-index]` (one index, holds both Observations and Precedents — see §4). When a Precedent's status changes to Confirmed, a small sync job projects it to the index for retrieval by synthesis playbooks. Same pattern as `DataverseIndexSyncService` already uses for matter records.
+**Read-optimized projection**: `[PROPOSED: spaarke-insights-index]` (one index, holds both Observations and Precedents — see §4). When a Precedent's status changes to Confirmed, a small sync job projects it to the index for retrieval by synthesis playbooks. Same pattern as `DataverseIndexSyncService` already uses for matter records.
 
-The synthesis playbook (e.g., `predict-matter-cost`) queries `[PROPOSED: insights-index]` for applicable Precedents, not Dataverse directly — vector similarity over pattern statements is the access path, not Dataverse filtering.
+The synthesis playbook (e.g., `predict-matter-cost`) queries `[PROPOSED: spaarke-insights-index]` for applicable Precedents, not Dataverse directly — vector similarity over pattern statements is the access path, not Dataverse filtering.
 
 ---
 
@@ -154,9 +154,9 @@ Return JSON only:
 }
 ```
 
-**Output of Layer 1**: one Observation of type `documentClassification` per document, written to `[PROPOSED: insights-index]`. Subject = the document; predicate = `classification`; value = the typed enum; confidence = as returned; evidence = pointer to the document.
+**Output of Layer 1**: one Observation of type `documentClassification` per document, written to `[PROPOSED: spaarke-insights-index]`. Subject = the document; predicate = `classification`; value = the typed enum; confidence = as returned; evidence = pointer to the document.
 
-**Gating downstream**: Layer 2 runs if and only if Layer 1 returned `closing_letter`, `settlement_agreement`, or `opinion_judgment` AND confidence ≥ 0.7. Otherwise Layer 2 returns nothing and the document contributes nothing further to the insights-index for outcome content (other layers may apply in Phase 1.5+).
+**Gating downstream**: Layer 2 runs if and only if Layer 1 returned `closing_letter`, `settlement_agreement`, or `opinion_judgment` AND confidence ≥ 0.7. Otherwise Layer 2 returns nothing and the document contributes nothing further to the spaarke-insights-index for outcome content (other layers may apply in Phase 1.5+).
 
 ### 3.4 Layer 2 — Outcome extraction — prompt specification
 
@@ -201,7 +201,7 @@ Return JSON only.
 
 1. **Grounding verification**. Each evidence quote is mechanically checked (substring + sliding-window match) against the source document chunks in `spaarke-files-index`. Quotes that don't appear in the source are rejected; the corresponding extracted field is dropped or annotated `[citation could not be verified]`. This is the `GroundingVerifier` primitive (per existing D-A22 / D-47).
 2. **Confidence threshold gating**. Per-field thresholds (Phase 1 starting values, refined with calibration data from the review surface): `outcomeCategory ≥ 0.75`, `settlementAmount ≥ 0.85`, `outcomeDate ≥ 0.85`, `matterDurationDays ≥ 0.75`. Fields below threshold are not persisted; they may be logged for review.
-3. **Per-field Observation emission**. Each surviving field becomes its own Observation in `[PROPOSED: insights-index]`. Subject = the matter the document belongs to; predicate = the field name; value = the extracted typed value; evidence = the verbatim quote + document reference; producedBy = `outcome-extraction@v1`.
+3. **Per-field Observation emission**. Each surviving field becomes its own Observation in `[PROPOSED: spaarke-insights-index]`. Subject = the matter the document belongs to; predicate = the field name; value = the extracted typed value; evidence = the verbatim quote + document reference; producedBy = `outcome-extraction@v1`.
 
 ### 3.5 Prompt versioning and re-extraction
 
@@ -219,9 +219,9 @@ Backfill of historical documents (those uploaded to SPE before the Engine existe
 
 `spaarke-files-index` is optimized for *content retrieval* — chunked source text vectorized to support "find documents about X". Different chunk sizes, surrounding context, embedding model tuned for content similarity.
 
-`[PROPOSED: insights-index]` is optimized for *derived intelligence retrieval* — short structured claim statements (an Observation or Precedent pattern statement, typically 1–3 sentences) vectorized to support "find Observations/Precedents matching pattern Y" with structured field filtering.
+`[PROPOSED: spaarke-insights-index]` is optimized for *derived intelligence retrieval* — short structured claim statements (an Observation or Precedent pattern statement, typically 1–3 sentences) vectorized to support "find Observations/Precedents matching pattern Y" with structured field filtering.
 
-These are different retrieval objectives and the design correctly separates them into different indexes. `spaarke-files-index` is consumed as-is by this project; `[PROPOSED: insights-index]` is the one new index Phase 1 ships.
+These are different retrieval objectives and the design correctly separates them into different indexes. `spaarke-files-index` is consumed as-is by this project; `[PROPOSED: spaarke-insights-index]` is the one new index Phase 1 ships.
 
 ### 4.2 Index contents
 
@@ -243,17 +243,17 @@ status: <Observation lifecycle: produced | reviewed | superseded; Precedent life
 
 ### 4.3 The SPE upload plumbing fork
 
-When a document is uploaded to SPE, today it flows through the existing pipeline into `spaarke-files-index` (chunked content). Going forward, the same event also triggers the new ingest playbook (§3) which produces Observations into `[PROPOSED: insights-index]`.
+When a document is uploaded to SPE, today it flows through the existing pipeline into `spaarke-files-index` (chunked content). Going forward, the same event also triggers the new ingest playbook (§3) which produces Observations into `[PROPOSED: spaarke-insights-index]`.
 
 Two consumers subscribe to the SPE-upload event:
 - **Existing consumer** — chunks content for `spaarke-files-index`. No change to current behavior.
-- **New consumer** — runs the ingest playbook (Layer 1 classification, optionally Layer 2 outcome extraction). Writes Observations to `[PROPOSED: insights-index]`. Reads document content from `spaarke-files-index` (already chunked) rather than re-fetching from SPE.
+- **New consumer** — runs the ingest playbook (Layer 1 classification, optionally Layer 2 outcome extraction). Writes Observations to `[PROPOSED: spaarke-insights-index]`. Reads document content from `spaarke-files-index` (already chunked) rather than re-fetching from SPE.
 
 The new consumer is a new BackgroundService or Function per ADR-001. It follows existing patterns (same event source, same dispatch shape, same authorization model). The architectural addition is real but bounded.
 
 ### 4.4 Precedent projection
 
-When a `sprk_precedent` row's status is set to Confirmed (Phase 1: by an SME via admin endpoint; Phase 1.5+: by the SME reviewing a system-proposed Tentative), a small sync job projects the Precedent to `[PROPOSED: insights-index]` with `artifactType = "precedent"`. This is the read-optimized projection the synthesis playbook queries.
+When a `sprk_precedent` row's status is set to Confirmed (Phase 1: by an SME via admin endpoint; Phase 1.5+: by the SME reviewing a system-proposed Tentative), a small sync job projects the Precedent to `[PROPOSED: spaarke-insights-index]` with `artifactType = "precedent"`. This is the read-optimized projection the synthesis playbook queries.
 
 ---
 
@@ -271,7 +271,7 @@ Phase 1 ships an **Observation review surface** for QA-sampling produced Observa
 
 **Feedback loop**: review dispositions feed prompt iteration. A high incorrect-rate on a specific field signals the prompt needs adjustment; consistent failures on a specific document type signal Layer 1 classification is mis-firing. Both are inputs to `outcome-extraction@v2` and `classification@v2` over time.
 
-**Where the UI lives**: a Dataverse model-driven view is sufficient for Phase 1. The Observations are persisted in `[PROPOSED: insights-index]` but mirrored to a `sprk_analysis` row (or new `sprk_observation` row — depends on the polymorphic pattern decision from §6 open question 4 in the previous addendum) so Dataverse model-driven views can display them. The mirror writes one Dataverse row per Observation as a side-effect of the ingest playbook.
+**Where the UI lives**: a Dataverse model-driven view is sufficient for Phase 1. The Observations are persisted in `[PROPOSED: spaarke-insights-index]` but mirrored to a `sprk_analysis` row (or new `sprk_observation` row — depends on the polymorphic pattern decision from §6 open question 4 in the previous addendum) so Dataverse model-driven views can display them. The mirror writes one Dataverse row per Observation as a side-effect of the ingest playbook.
 
 This is a small but genuinely new Phase 1 deliverable that I missed in the previous addendum.
 
@@ -297,7 +297,7 @@ Phase 1 ships one synthesis question end-to-end: `predict-matter-cost`. Concrete
 
 **Response on insufficient evidence**: structured `DeclineResponse` per existing D-A24 / D-49 — *"need ~N more comparable matters; try widening practice area or removing jurisdiction constraint"*.
 
-The new node executor types needed for this playbook (per existing addendum §3.3): `LiveFactNode`, `IndexRetrieveNode` (queries `[PROPOSED: insights-index]`), `EvidenceSufficiencyNode`, `DeclineToFindNode`, `GroundingVerifyNode`, `ReturnInsightArtifactNode`. All are Phase 1 deliverables.
+The new node executor types needed for this playbook (per existing addendum §3.3): `LiveFactNode`, `IndexRetrieveNode` (queries `[PROPOSED: spaarke-insights-index]`), `EvidenceSufficiencyNode`, `DeclineToFindNode`, `GroundingVerifyNode`, `ReturnInsightArtifactNode`. All are Phase 1 deliverables.
 
 ---
 
@@ -308,9 +308,9 @@ This list supersedes the deliverable summary in `SPEC-refinement-addendum.md` §
 | ID | Deliverable | Layer |
 |---|---|---|
 | D-P1 | InsightArtifact envelope POCOs (Fact / Observation / Precedent / Inference) | Domain types |
-| D-P2 | `[PROPOSED: insights-index]` schema + provisioning via Bicep (one index, holds Observations and Precedents with discriminator) | Infra |
+| D-P2 | `[PROPOSED: spaarke-insights-index]` schema + provisioning via Bicep (one index, holds Observations and Precedents with discriminator) | Infra |
 | D-P3 | `sprk_precedent` Dataverse entity + admin endpoint `POST /api/insights/admin/precedents` for manual SME authoring | Entity + API |
-| D-P4 | Precedent → `[PROPOSED: insights-index]` projection sync (small job, fires on Precedent status → Confirmed) | Substrate |
+| D-P4 | Precedent → `[PROPOSED: spaarke-insights-index]` projection sync (small job, fires on Precedent status → Confirmed) | Substrate |
 | D-P5 | Layer 1 — document classification — playbook node + prompt template @v1 | Extraction pipeline |
 | D-P6 | Layer 2 — outcome extraction — playbook node + prompt template @v1 | Extraction pipeline |
 | D-P7 | Universal ingest playbook (orchestrates layers 1 and 2; runs on every SPE upload via new consumer) | Extraction pipeline |
@@ -357,7 +357,7 @@ The `IInsightsAi` facade boundary per existing addendum §3.5 still applies — 
 
 | Earlier content | Status |
 |---|---|
-| `SPEC-refinement-addendum.md` §1 (five `insight-*` indexes) | **Superseded**: one new index (`[PROPOSED: insights-index]`) holds Observations and Precedents with a discriminator |
+| `SPEC-refinement-addendum.md` §1 (five `insight-*` indexes) | **Superseded**: one new index (`[PROPOSED: spaarke-insights-index]`) holds Observations and Precedents with a discriminator |
 | `SPEC-refinement-addendum.md` §1 (dual-substrate framing) | **Refined**: existing operational substrate (`spaarke-files-index`, `spaarke-records-index`, `spaarke-invoices-index`, `spaarke-rag-references`) unchanged; one new derived-intelligence index added |
 | `SPEC-refinement-addendum.md` §2 (Signal Contract document) | **Superseded**: the Signal Contract document is no longer needed in Phase 1 because Mode A "narrow derived projection" is replaced by Live Fact computation on read; no projection writing happens in Phase 1 except via the ingest playbook |
 | `SPEC-refinement-addendum.md` §2.5 (Mode C — document content extraction as design-only) | **Superseded**: document extraction ships in Phase 1 as the universal ingest playbook with two layers |
@@ -382,7 +382,7 @@ Content from `SPEC-refinement-addendum.md` that **stands unchanged**:
 These need human judgment before Claude Code begins:
 
 1. **Observation mirror to Dataverse**: §5 proposes mirroring each Observation to a Dataverse row for the review surface. Confirm whether this lands on `sprk_analysis` (existing polymorphic AI output entity, per userMemories standing pattern) or whether a new `sprk_observation` entity is warranted. The polymorphic-on-`sprk_analysis` answer is consistent with prior decisions; confirm before D-P11.
-2. **`[PROPOSED: insights-index]` final naming**: confirm name. Suggestions: `insights-index`, `spaarke-insights`, or align to existing `spaarke-*-index` naming convention.
+2. **`[PROPOSED: spaarke-insights-index]` final naming**: confirm name. Suggestions: `spaarke-insights-index`, `spaarke-insights`, or align to existing `spaarke-*-index` naming convention.
 3. **Layer 1 starter prompt** (§3.3): the document type taxonomy should be reviewed by an SME before being committed as the v1 prompt. Adding, removing, or re-defining categories now is much cheaper than after Observations have been produced under v1.
 4. **Layer 2 confidence threshold values** (§3.4): the starting values (`outcomeCategory ≥ 0.75`, `settlementAmount ≥ 0.85`, etc.) are reasonable defaults but should be confirmed with the product/SME team. Too-strict thresholds reject useful Observations; too-lenient produce noise.
 5. **Observation review sampling percentage** (§5): 10% initial / 1–2% ongoing is a reasonable starting policy but should be confirmed against reviewer capacity. Higher sampling means slower drift detection at the cost of reviewer time.

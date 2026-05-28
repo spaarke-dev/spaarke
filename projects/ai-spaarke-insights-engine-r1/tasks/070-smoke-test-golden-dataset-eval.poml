@@ -18,7 +18,7 @@
   <role>Test engineer + eval framework developer familiar with RAG-triad metrics (Retrieval / Groundedness / Relevance) and end-to-end integration testing.</role>
 
   <goal>
-    Smoke test executes the full Phase 1 dataflow: SPE event → ingest playbook → Observations in insights-index → sprk_analysis mirrors → admin creates Precedent → projection to insights-index → POST /api/insights/ask {predict-matter-cost} → InsightArtifact OR DeclineResponse returned. Golden dataset (10-15 tuples) exercises sufficient + insufficient paths + Precedent citation path. Eval harness computes RAG-triad metrics; baseline pass at permissive Phase 1 thresholds (groundedness ≥ 95% rather than 100%); CI gate registered.
+    Smoke test executes the full Phase 1 dataflow: SPE event → ingest playbook → Observations in spaarke-insights-index → sprk_analysis mirrors → admin creates Precedent → projection to spaarke-insights-index → POST /api/insights/ask {predict-matter-cost} → InsightArtifact OR DeclineResponse returned. Golden dataset (10-15 tuples) exercises sufficient + insufficient paths + Precedent citation path. Eval harness computes RAG-triad metrics; baseline pass at permissive Phase 1 thresholds (groundedness ≥ 95% rather than 100%); CI gate registered.
   </goal>
 
   <inputs>
@@ -43,7 +43,7 @@
   <steps>
     <step order="1" name="Author 3-5 fixture documents">Realistic closing letters + 1-2 settlement agreements; each tied to a fictional matter (M-FIXTURE-001, etc.)</step>
     <step order="2" name="Author 10-15 golden tuples">tests/Insights/golden/predict-matter-cost.json — each tuple: {parameters, expected-band, expected-evidence-count, expected-displayHint, (for insufficient) expected-actionableGap}; cover ~8 sufficient + 3-5 insufficient cases + 1-2 with applicable Precedent</step>
-    <step order="3" name="Author smoke test">tests/integration/EndToEnd/Phase1SmokeTest.cs: setup tenant → upload fixtures via mock SPE event → wait for ingest completion (poll insights-index) → admin creates fixture Precedent → poll for projection → POST /api/insights/ask × N golden tuples → verify each response matches expected band/decline/Precedent-citation</step>
+    <step order="3" name="Author smoke test">tests/integration/EndToEnd/Phase1SmokeTest.cs: setup tenant → upload fixtures via mock SPE event → wait for ingest completion (poll spaarke-insights-index) → admin creates fixture Precedent → poll for projection → POST /api/insights/ask × N golden tuples → verify each response matches expected band/decline/Precedent-citation</step>
     <step order="4" name="Author eval harness">Reads golden dataset → invokes endpoint → computes Retrieval-overlap + Groundedness-pass-rate + Relevance-score → compare to thresholds → emit report</step>
     <step order="5" name="CI integration">Add eval harness as GitHub Actions step on PR; fail PR on regression beyond threshold</step>
     <step order="6" name="Acceptance verification">Walk through all SPEC §5.1 acceptance criteria — each checked off via test output or manual verification step documented in notes/</step>
@@ -66,7 +66,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Smoke test passes: SPE upload event → real Observations in insights-index (verified by query)</criterion>
+    <criterion testable="true">Smoke test passes: SPE upload event → real Observations in spaarke-insights-index (verified by query)</criterion>
     <criterion testable="true">Smoke test passes: predict-matter-cost on a fixture matter returns either valid Inference or DeclineResponse</criterion>
     <criterion testable="true">Smoke test passes: GroundingVerifier strips one synthetic bad citation injected into a fixture</criterion>
     <criterion testable="true">Eval harness: golden dataset baseline run passes (groundedness ≥ 95%, no insufficient miscalls beyond tolerance)</criterion>

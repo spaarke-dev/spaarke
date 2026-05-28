@@ -12,7 +12,7 @@
   </metadata>
 
   <prompt>
-    Refactor `ReferenceIndexingService` (currently hard-coded to `spaarke-rag-references` per Q5 audit) to accept an index-name parameter + optional schema mapper so D-P2 (insights-index upserts) and D-P4 (Precedent projection) can reuse the same indexing infrastructure without duplication. Per Q5 audit finding — half-day refactor that eliminates parallel implementation.
+    Refactor `ReferenceIndexingService` (currently hard-coded to `spaarke-rag-references` per Q5 audit) to accept an index-name parameter + optional schema mapper so D-P2 (spaarke-insights-index upserts) and D-P4 (Precedent projection) can reuse the same indexing infrastructure without duplication. Per Q5 audit finding — half-day refactor that eliminates parallel implementation.
   </prompt>
 
   <role>Senior .NET developer with refactoring discipline and AI Search SDK familiarity.</role>

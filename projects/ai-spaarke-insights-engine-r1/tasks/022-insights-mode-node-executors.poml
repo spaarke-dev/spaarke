@@ -50,7 +50,7 @@
     <step order="2" name="Extend ActionType enum">Add LiveFact, IndexRetrieve, EvidenceSufficiency, DeclineToFind, ReturnInsightArtifact (and GroundingVerify if not already added by task 020)</step>
     <step order="3" name="Extract retrieval composition helper">From AiAnalysisNodeExecutor's 3-tier merge logic; new helper Services/Ai/Insights/Composition/MultiIndexComposer.cs used by both AiAnalysis (existing) and IndexRetrieveNode (new) — per Q5 audit recommendation</step>
     <step order="4" name="Author LiveFactNode">Wraps LiveFactResolverService.GetMatterFactAsync(predicate, subjectId) → NodeOutput</step>
-    <step order="5" name="Author IndexRetrieveNode">Config-driven AI Search query against insights-index (filter + vector); returns NodeOutput.StructuredData with retrieved artifacts</step>
+    <step order="5" name="Author IndexRetrieveNode">Config-driven AI Search query against spaarke-insights-index (filter + vector); returns NodeOutput.StructuredData with retrieved artifacts</step>
     <step order="6" name="Author EvidenceSufficiencyNode">Config: evidence rule (e.g., {minComparableMatters: 12}); reads prior node outputs; returns sufficient/insufficient verdict</step>
     <step order="7" name="Author DeclineToFindNode">Returns DeclineResponse with structured insufficient-evidence template; deterministic exit per D-49</step>
     <step order="8" name="Author ReturnInsightArtifactNode">Final node; serializes playbook output as InsightArtifact envelope per D-P1 types; EvidenceGuard.Validate before return</step>
@@ -77,7 +77,7 @@
   <acceptance-criteria>
     <criterion testable="true">All 5 new nodes implement INodeExecutor and resolve via NodeExecutorRegistry by ActionType</criterion>
     <criterion testable="true">LiveFactNode returns a Fact artifact from LiveFactResolverService (mock backend)</criterion>
-    <criterion testable="true">IndexRetrieveNode queries insights-index with filter + vector; returns retrieved artifacts in NodeOutput.StructuredData</criterion>
+    <criterion testable="true">IndexRetrieveNode queries spaarke-insights-index with filter + vector; returns retrieved artifacts in NodeOutput.StructuredData</criterion>
     <criterion testable="true">EvidenceSufficiencyNode correctly flags sufficient vs insufficient against {minComparableMatters: 12} rule</criterion>
     <criterion testable="true">DeclineToFindNode emits structured DeclineResponse (typed) — not freely-composed prose</criterion>
     <criterion testable="true">ReturnInsightArtifactNode validates non-empty evidence before returning (throws EvidenceRequiredException on empty)</criterion>

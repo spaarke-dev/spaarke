@@ -20,12 +20,12 @@ Phase 1 ships **real Observation production from real documents end-to-end**, no
 
 ## 2. Goals (Phase 1)
 
-1. Provision the **one new derived AI Search index** (`insights-index` per D-P2 — holds Observations + Precedents differentiated by an `artifactType` discriminator) plus shell infrastructure (Function App per ADR-001, Service Bus subscriptions, Key Vault refs, App Insights, single-tenant Bicep parameter file pattern per D-52).
+1. Provision the **one new derived AI Search index** (`spaarke-insights-index` per D-P2 — holds Observations + Precedents differentiated by an `artifactType` discriminator) plus shell infrastructure (Function App per ADR-001, Service Bus subscriptions, Key Vault refs, App Insights, single-tenant Bicep parameter file pattern per D-52).
 2. Implement the `InsightArtifact` envelope C# types (four-tier: Fact / Observation / Precedent / Inference) per design.md §2.2 + decisions.md D-03/D-46.
 3. Implement the **universal layered ingest playbook** that runs on every SPE upload: Layer 1 (document classification) + conditional Layer 2 (outcome extraction with verbatim-quote evidence). Cheap layers gate expensive ones per D-59.
 4. Implement the three mechanical post-processing gates: `GroundingVerifier` substring/sliding-window check (D-P9), per-field confidence threshold gating (D-P10/D-63), per-field Observation emission with `producedBy.version` propagation (D-62).
 5. Ship the **Observation review surface** (Dataverse model-driven view) for sample-based QA per D-P11/D-60 — without it the honesty contract is unverified.
-6. Implement `sprk_precedent` Dataverse entity + admin endpoint for manual SME authoring (D-P3) + projection sync to `insights-index` on Confirmed (D-P4) — Phase 1 mode of D-61 (two-mode authoring).
+6. Implement `sprk_precedent` Dataverse entity + admin endpoint for manual SME authoring (D-P3) + projection sync to `spaarke-insights-index` on Confirmed (D-P4) — Phase 1 mode of D-61 (two-mode authoring).
 7. Implement `LiveFactResolverService` (direct Dataverse queries — Live Facts on read; no projection writing) consumed via `LiveFactNode` (D-P12 subset).
 8. Implement the new Insights-mode node executors (D-P12) and the `predict-matter-cost` synthesis playbook (D-P14) with evidence-sufficiency rule + insufficient-evidence response template.
 9. Expose `POST /api/insights/ask` on the BFF through the `IInsightsAi` facade per §3.5 boundary (D-P15).
@@ -38,9 +38,9 @@ Phase 1 ships **real Observation production from real documents end-to-end**, no
 | ID | Deliverable | Layer |
 |---|---|---|
 | **D-P1** | `InsightArtifact` envelope POCOs (Fact / Observation / Precedent / Inference) in `Sprk.Bff.Api/Models/Insights/` per design.md §2.2 | Domain types (Zone B) |
-| **D-P2** | `insights-index` schema + provisioning via Bicep — ONE derived index holding Observations and Precedents differentiated by `artifactType` field (per §3.4). Includes `tenantId` field retained per D-52. | Infra |
+| **D-P2** | `spaarke-insights-index` schema + provisioning via Bicep — ONE derived index holding Observations and Precedents differentiated by `artifactType` field (per §3.4). Includes `tenantId` field retained per D-52. | Infra |
 | **D-P3** | `sprk_precedent` Dataverse entity + relationship tables + admin endpoint `POST /api/insights/admin/precedents` (JWT-authorized; admin role per ADR-008) for **manual SME authoring** — Phase 1 mode of D-61 two-mode authoring. Concretized per [SPEC-phase-1-minimum.md §2](SPEC-phase-1-minimum.md) | Entity + API (Zone B) |
-| **D-P4** | Precedent → `insights-index` projection sync — small job fires on Precedent status → Confirmed; reuses `DataverseIndexSyncService` patterns | Substrate (Zone B) |
+| **D-P4** | Precedent → `spaarke-insights-index` projection sync — small job fires on Precedent status → Confirmed; reuses `DataverseIndexSyncService` patterns | Substrate (Zone B) |
 | **D-P5** | **Layer 1 — document classification** — Insights-mode playbook node + prompt template `classification@v1` per [SPEC-phase-1-minimum.md §3.3](SPEC-phase-1-minimum.md). Realized via existing `AiAnalysisNodeExecutor` (per Q5 audit — no new node needed for prompt-bearing layer). First-step blocker: SME review of document-type taxonomy. | Extraction pipeline (Zone A) |
 | **D-P6** | **Layer 2 — outcome extraction** — Insights-mode playbook node + prompt template `outcome-extraction@v1` per [SPEC-phase-1-minimum.md §3.4](SPEC-phase-1-minimum.md). Realized via existing `AiAnalysisNodeExecutor`. First-step blocker: confidence threshold values confirmed by product/SME. | Extraction pipeline (Zone A) |
 | **D-P7** | **Universal ingest playbook** orchestrating Layer 1 → conditional Layer 2 → mechanical gates → Observation emission. Single playbook published per D-54 (questions-as-playbooks); runs on every SPE upload via D-P8. | Extraction pipeline (Zone A) |
@@ -50,7 +50,7 @@ Phase 1 ships **real Observation production from real documents end-to-end**, no
 | **D-P11** | **Observation review surface** — Dataverse model-driven view + disposition workflow (Correct / Incorrect / Unclear) for sample-based QA per [SPEC-phase-1-minimum.md §5](SPEC-phase-1-minimum.md). Mirror writes one `sprk_analysis` row per Observation (first-step blocker: confirm polymorphic source-type via Dataverse MCP) as a side-effect of the ingest playbook. Phase 1 sampling: ~10% initial 4–6 weeks, then 1–2% ongoing — admin-tunable. | UI / Operations (Zone B) |
 | **D-P12** | **New Insights-mode node executors** in `Sprk.Bff.Api/Services/Ai/Nodes/`: `LiveFactNode`, `IndexRetrieveNode`, `EvidenceSufficiencyNode`, `DeclineToFindNode`, `GroundingVerifyNode`, `ReturnInsightArtifactNode`. Per Q5 audit — 6 nodes (not 9 — `GraphTraverseNode` deferred with Cosmos; `SpeContentRetrieveNode` collapses into D-P7 reading from `spaarke-files-index`; `EmitObservationNode` collapses into D-P10 post-processing). | Platform primitive (Zone A) |
 | **D-P13** | **Insights playbook execution caching** — Redis layer wrapping `PlaybookExecutionEngine` for Insights-mode playbooks only. Cache key: `(playbookId, subject, parameters, accessibleScopeHash)`. Per ADR-009. Side-quest opportunity per Q5: extract a generic `IDistributedCacheExtensions.GetOrCreateAsync<T>` helper while building this. | Platform (Zone A) |
-| **D-P14** | **`predict-matter-cost` synthesis playbook** end-to-end — published as Insights-mode playbook with metadata (tier=inference, evidence rule `comparableMatters.min: 12`, insufficient-evidence response template, subject entity type, parameter schema, cache TTL). Node graph: `LiveFactNode` → `IndexRetrieveNode` (cohort + Precedents from `insights-index`) → `EvidenceSufficiencyNode` → AiAnalysis synthesis → `GroundingVerifyNode` → `ReturnInsightArtifactNode`; decline path → `DeclineToFindNode`. Per [SPEC-phase-1-minimum.md §6](SPEC-phase-1-minimum.md). | Question (Zone A — playbook authoring) |
+| **D-P14** | **`predict-matter-cost` synthesis playbook** end-to-end — published as Insights-mode playbook with metadata (tier=inference, evidence rule `comparableMatters.min: 12`, insufficient-evidence response template, subject entity type, parameter schema, cache TTL). Node graph: `LiveFactNode` → `IndexRetrieveNode` (cohort + Precedents from `spaarke-insights-index`) → `EvidenceSufficiencyNode` → AiAnalysis synthesis → `GroundingVerifyNode` → `ReturnInsightArtifactNode`; decline path → `DeclineToFindNode`. Per [SPEC-phase-1-minimum.md §6](SPEC-phase-1-minimum.md). | Question (Zone A — playbook authoring) |
 | **D-P15** | **API endpoint `POST /api/insights/ask`** in `Sprk.Bff.Api/Api/Insights/InsightEndpoints.cs` — accepts `{question, subject, parameters}`, returns `InsightArtifact` or `DeclineResponse`. Endpoint filter for resource auth per ADR-008. Rate limiting per ADR-016. ProblemDetails errors per ADR-019. Calls `IInsightsAi` facade per §3.5 (NOT `PlaybookExecutionEngine` or `IChatClient` directly). | API (Zone B) |
 | **D-P16** | **Smoke test + small golden dataset + eval harness baseline** — end-to-end test that ingests a small fixture document corpus (3–5 closing letters), produces real Observations, runs `predict-matter-cost` against them, verifies Inference + DeclineResponse paths both work and `GroundingVerifier` strips one synthetic bad citation. 10–15 golden tuples for `predict-matter-cost` in `tests/Insights/golden/predict-matter-cost.json`; CI baseline run (RAG-triad metrics permissive thresholds for Phase 1; harden Phase 1.5+). | Tests / Evaluation |
 | **D-P17** ⭐ | **`IInsightGraph` interface design** in `Sprk.Bff.Api/Services/Insights/Graph/` — typed named traversal patterns (`FindMattersInvolvingPartyAsync`, `FindConnectedEntitiesAsync`, etc.) per design.md §4.2.2. **Interface + DTOs + stub implementation only** (returns empty/throws `NotImplementedException`). Preserved as Phase 1 deliverable per preservation #2 — Cosmos implementation defers to Phase 1.5. **Cost**: ~1–2 hours; benefit: preserves swap path; synthesis playbook authors learn the abstraction without depending on it. | Domain types (Zone B) |
@@ -59,15 +59,15 @@ Phase 1 ships **real Observation production from real documents end-to-end**, no
 > - `AiAnalysisNodeExecutor` (existing — hosts the L1/L2 prompts for D-P5/D-P6)
 > - `PlaybookExecutionEngine` (existing — orchestrates D-P7 ingest and D-P14 synthesis)
 > - `IAiToolHandler` + `IToolHandlerRegistry` (existing — pattern for the AI handlers behind D-P5/D-P6)
-> - `IOpenAiClient` + `EmbeddingCache` (existing — embedding generation for `insights-index`)
+> - `IOpenAiClient` + `EmbeddingCache` (existing — embedding generation for `spaarke-insights-index`)
 > - `IDataverseService` (existing — Live Facts via D-P12 `LiveFactNode`)
 > - `spaarke-files-index` (existing — read by D-P7 ingest and D-P9 grounding verification; **NOT modified**)
 > - `DataverseIndexSyncService` patterns (template for D-P4 Precedent projection sync)
-> - `ReferenceIndexingService` patterns (template for `insights-index` upsert; **small refactor**: parameterize `ReferenceIndexingService` to accept index name + schema mapper so both `spaarke-rag-references` AND `insights-index` use the same code path — eliminates duplication; ~half-day work; not a separate deliverable)
+> - `ReferenceIndexingService` patterns (template for `spaarke-insights-index` upsert; **small refactor**: parameterize `ReferenceIndexingService` to accept index name + schema mapper so both `spaarke-rag-references` AND `spaarke-insights-index` use the same code path — eliminates duplication; ~half-day work; not a separate deliverable)
 
 ### 3.2 Track B — auth-blocked work (mostly dissolved by D-P architecture)
 
-The original Track B (Dataverse webhook → Service Bus → consumer Function pattern for record-projection sync) is **largely dissolved** by the D-P architecture. Mode A "narrow derived projection" is replaced by Live Facts on read (D-58 superseded); the only writes to `insights-index` are (a) ingest playbook on SPE upload (D-P7/D-P8 — NOT Dataverse webhook), and (b) Precedent projection on `sprk_precedent` Confirmed status (D-P4 — small in-process job). Neither needs the Phase C HMAC/clientState webhook auth work.
+The original Track B (Dataverse webhook → Service Bus → consumer Function pattern for record-projection sync) is **largely dissolved** by the D-P architecture. Mode A "narrow derived projection" is replaced by Live Facts on read (D-58 superseded); the only writes to `spaarke-insights-index` are (a) ingest playbook on SPE upload (D-P7/D-P8 — NOT Dataverse webhook), and (b) Precedent projection on `sprk_precedent` Confirmed status (D-P4 — small in-process job). Neither needs the Phase C HMAC/clientState webhook auth work.
 
 **What remains in Track B for Phase 1.5+**:
 - If the Phase 1.5 system-proposed Tentative Precedent workflow (nightly cluster job per [SPEC-phase-1-minimum.md §2.2](SPEC-phase-1-minimum.md)) needs Dataverse change-tracking, the original D-B1..D-B6 auth-coupled work returns as Phase 1.5 scope.
@@ -92,14 +92,14 @@ Phase 1 has **no remaining auth-blocked work**. DEP-1 / DEP-2 (Phase C task coor
 
 ### 3.4 The single derived index — operational substrate consumption discipline
 
-The Engine spans the existing **operational substrate** (`spaarke-files-index`, `spaarke-records-index`, `spaarke-invoices-index`, `spaarke-rag-references` — consumed as-is, **no schema changes by this project**) and a single new **derived index** (`insights-index` per D-P2).
+The Engine spans the existing **operational substrate** (`spaarke-files-index`, `spaarke-records-index`, `spaarke-invoices-index`, `spaarke-rag-references` — consumed as-is, **no schema changes by this project**) and a single new **derived index** (`spaarke-insights-index` per D-P2).
 
 **Operational substrate consumption in Phase 1**:
 - `spaarke-files-index` — read by D-P7 ingest playbook (Layer 2 reads document content for extraction) and by D-P9 `GroundingVerifier` (verifies extracted quotes against source chunks)
-- `spaarke-records-index` / `spaarke-invoices-index` / `spaarke-rag-references` — **not directly queried** by Phase 1 synthesis; `predict-matter-cost` queries `insights-index` for cohort Observations + Precedents and uses `LiveFactNode` for current-matter Facts via Dataverse direct
-- The dual-substrate "composition discipline" from prior SPEC versions (compose across operational + derived in a single retrieval) is **not needed in Phase 1** — the dataflow is "operational → ingest → insights-index → synthesis", with no in-synthesis composition across both legs
+- `spaarke-records-index` / `spaarke-invoices-index` / `spaarke-rag-references` — **not directly queried** by Phase 1 synthesis; `predict-matter-cost` queries `spaarke-insights-index` for cohort Observations + Precedents and uses `LiveFactNode` for current-matter Facts via Dataverse direct
+- The dual-substrate "composition discipline" from prior SPEC versions (compose across operational + derived in a single retrieval) is **not needed in Phase 1** — the dataflow is "operational → ingest → spaarke-insights-index → synthesis", with no in-synthesis composition across both legs
 
-**Derived index — `insights-index` schema** (per [SPEC-phase-1-minimum.md §4.2](SPEC-phase-1-minimum.md)):
+**Derived index — `spaarke-insights-index` schema** (per [SPEC-phase-1-minimum.md §4.2](SPEC-phase-1-minimum.md)):
 ```
 artifactType: "observation" | "precedent"   (discriminator)
 subject: "matter:M-1234" | "document:abc" | "party:acme"
@@ -115,13 +115,13 @@ status: <lifecycle state>
 tenantId: <string>   (retained per D-52)
 ```
 
-**`tenantId` asymmetry**: `spaarke-records-index` lacks `tenantId` (acknowledged gap, Phase 3 cleanup outside this project per D-53 revised). The new `insights-index` has `tenantId` as first-class. Under D-52 single-tenant Phase 1, this asymmetry is safe at the privilege layer (physical isolation handles tenant separation); it's preserved as belt-and-suspenders for future federation.
+**`tenantId` asymmetry**: `spaarke-records-index` lacks `tenantId` (acknowledged gap, Phase 3 cleanup outside this project per D-53 revised). The new `spaarke-insights-index` has `tenantId` as first-class. Under D-52 single-tenant Phase 1, this asymmetry is safe at the privilege layer (physical isolation handles tenant separation); it's preserved as belt-and-suspenders for future federation.
 
 #### 3.4.1 Worked example — Observation row (D-P6 outcome extraction output)
 
 Scenario: closing letter uploaded to SPE for matter M-2024-0341 (IP licensing dispute against BigFirm LLP). D-P7 universal ingest playbook fires: D-P5 Layer 1 classifies the document as `closing_letter` (confidence 0.92); D-P6 Layer 2 extracts outcome fields with verbatim quotes; D-P9 `GroundingVerifier` verifies each quote against `spaarke-files-index` chunks; D-P10 confidence gating passes (`outcomeCategory: 0.91 ≥ 0.75`, `settlementAmount: 0.94 ≥ 0.85`, `outcomeDate: 0.97 ≥ 0.85`, `matterDurationDays: 0.88 ≥ 0.75`). Each surviving field becomes its own Observation row.
 
-Example `outcomeCategory` Observation row in `insights-index`:
+Example `outcomeCategory` Observation row in `spaarke-insights-index`:
 
 ```jsonc
 {
@@ -152,7 +152,7 @@ A parallel `settlementAmount` Observation row for the same matter+document carri
 
 #### 3.4.2 Worked example — Precedent row (D-P3 manual SME authoring output)
 
-Scenario: an attorney recognizes a pattern across multiple IP licensing matters with BigFirm LLP and authors a Precedent via D-P3 admin endpoint per [SPEC-phase-1-minimum.md §2](SPEC-phase-1-minimum.md). The `sprk_precedent` row is created; on status → Confirmed, D-P4 projects to `insights-index`:
+Scenario: an attorney recognizes a pattern across multiple IP licensing matters with BigFirm LLP and authors a Precedent via D-P3 admin endpoint per [SPEC-phase-1-minimum.md §2](SPEC-phase-1-minimum.md). The `sprk_precedent` row is created; on status → Confirmed, D-P4 projects to `spaarke-insights-index`:
 
 ```jsonc
 {
@@ -190,7 +190,7 @@ The `content` field — the pattern statement — is what the synthesis playbook
 
 #### 3.4.3 Worked example — synthesis query (D-P14 `predict-matter-cost`)
 
-When `POST /api/insights/ask {question:"predict-matter-cost", subject:"matter:M-NEW-0042"}` invokes the playbook, the `IndexRetrieveNode` (D-P12) issues TWO queries against `insights-index`:
+When `POST /api/insights/ask {question:"predict-matter-cost", subject:"matter:M-NEW-0042"}` invokes the playbook, the `IndexRetrieveNode` (D-P12) issues TWO queries against `spaarke-insights-index`:
 
 **Query 1 — cohort Observations (Phase 1 only retrieves the discriminator subset needed)**:
 ```
@@ -238,7 +238,7 @@ This project lives inside `Sprk.Bff.Api/` and shares its codebase with parallel 
 | Deliverable | Placement | Zone |
 |---|---|---|
 | D-P1 `InsightArtifact` envelope POCOs | `Models/Insights/` | B (POCOs only — no AI imports) |
-| D-P2 `insights-index` schema (JSON) | `infra/insights/schemas/` | (infra — out of zone framing) |
+| D-P2 `spaarke-insights-index` schema (JSON) | `infra/insights/schemas/` | (infra — out of zone framing) |
 | D-P3 `sprk_precedent` entity + admin endpoint | `Api/Insights/PrecedentAdminEndpoints.cs` + Dataverse | B (Dataverse access only) |
 | D-P4 Precedent projection sync | `Services/Insights/Precedents/PrecedentProjectionSync.cs` | B (Dataverse → AI Search; calls indexing helper) |
 | **D-P5 Layer 1 classification playbook node config** | Authored against existing `AiAnalysisNodeExecutor` at `Services/Ai/Nodes/` | A (uses LLM internals) |
@@ -324,14 +324,14 @@ Per [decisions.md](decisions.md), Phase 1 commits to:
 
 - **Engine framing** (D-59, integrating [SPEC-phase-1-minimum.md §0](SPEC-phase-1-minimum.md)): Spaarke's context production service — deterministic + probabilistic + synthesized claims orchestrated uniformly through one envelope and one facade
 - **Taxonomy**: **four-tier** Fact / Observation / Precedent / Inference per D-03 and D-46
-- **Single derived index** (D-53 revised): operational substrate consumed as-is + one new `insights-index` holding Observations and Precedents with `artifactType` discriminator
+- **Single derived index** (D-53 revised): operational substrate consumed as-is + one new `spaarke-insights-index` holding Observations and Precedents with `artifactType` discriminator
 - **Universal layered ingest** (D-59): every SPE upload → Layer 1 classification → conditional Layer 2 outcome extraction; cheap layers gate expensive ones
 - **Three mechanical post-processing gates** (D-63): `GroundingVerifier` (D-P9) + per-field confidence threshold gating + per-field Observation emission. Wired into the ingest playbook between extraction and persistence.
 - **Prompt versioning + targeted re-extraction** (D-62): `producedBy.version` on every Observation enables `v1 → v2` re-extraction without re-extracting unchanged-version Observations
 - **Observation review surface** (D-60, mandatory): Dataverse model-driven view + sample-based QA + disposition workflow. Without it the honesty contract is performative.
 - **Precedent two-mode authoring** (D-61): Phase 1 ships manual SME authoring (D-P3); Phase 1.5 adds system-proposed Tentative Precedents via nightly cluster job
 - **Questions-as-playbooks** (D-54): `predict-matter-cost` and future questions ARE Insights-mode playbooks on the existing `PlaybookExecutionEngine`; NO parallel question-catalog entity
-- **Embedding**: `text-embedding-3-large` (3072 dim) on `insights-index`
+- **Embedding**: `text-embedding-3-large` (3072 dim) on `spaarke-insights-index`
 - **Synthesis runtime**: `InsightsOrchestrator` in `Sprk.Bff.Api/Services/Ai/Insights/` (Zone A) wraps `PlaybookExecutionEngine` with D-P13 cache. Exposed to Zone B via `Services/Ai/PublicContracts/IInsightsAi` facade per §3.5.
 - **LAVERN-derived enforcement primitives**:
   - `ISanitizer` (D-A25 / D-50) — strips prompt-injection vectors before any LLM step; wired into D-P7 ingest before Layer 1
@@ -349,14 +349,14 @@ Refinement narrative: [SPEC-phase-1-minimum.md](SPEC-phase-1-minimum.md) (canoni
 ### 5.1 Track A acceptance
 
 - [ ] Bicep deploys cleanly to Spaarke Dev environment (`spe-infrastructure-westus2`) using single-tenant parameter file pattern (D-52)
-- [ ] **`insights-index`** provisioned with correct schema — `artifactType` discriminator, 3072-dim vectors, vectorFilterMode-preFilter friendly, `tenantId` first-class
+- [ ] **`spaarke-insights-index`** provisioned with correct schema — `artifactType` discriminator, 3072-dim vectors, vectorFilterMode-preFilter friendly, `tenantId` first-class
 - [ ] `sprk_precedent` Dataverse entity provisioned and queryable; relationship tables created
 - [ ] `sprk_analysis` polymorphic source-type for Observation mirroring resolved and documented (first-step blocker on D-P11)
 - [ ] `Sprk.Bff.Api` builds and existing tests pass after additions (no regressions)
 - [ ] **4-tier envelope** round-trips through `InsightArtifact` C# types (Fact / Observation / Precedent / Inference all serialize/deserialize correctly)
 - [ ] `IInsightGraph` interface (D-P17) compiles and stub registered in DI; resolves but throws on traversal calls
-- [ ] **End-to-end ingest smoke**: a fixture closing-letter document uploaded to SPE triggers D-P8 consumer → D-P7 universal ingest playbook → Layer 1 classifies as `closing_letter` (confidence ≥ 0.7) → Layer 2 extracts outcome fields → `GroundingVerifier` verifies all quotes → confidence gating passes ≥ thresholds → per-field Observations persist to `insights-index` AND mirror to `sprk_analysis` for the review surface
-- [ ] **End-to-end Precedent smoke**: Precedent created via `POST /api/insights/admin/precedents` → D-P4 projection writes to `insights-index` with `artifactType=precedent` → retrievable by `IndexRetrieveNode` query
+- [ ] **End-to-end ingest smoke**: a fixture closing-letter document uploaded to SPE triggers D-P8 consumer → D-P7 universal ingest playbook → Layer 1 classifies as `closing_letter` (confidence ≥ 0.7) → Layer 2 extracts outcome fields → `GroundingVerifier` verifies all quotes → confidence gating passes ≥ thresholds → per-field Observations persist to `spaarke-insights-index` AND mirror to `sprk_analysis` for the review surface
+- [ ] **End-to-end Precedent smoke**: Precedent created via `POST /api/insights/admin/precedents` → D-P4 projection writes to `spaarke-insights-index` with `artifactType=precedent` → retrievable by `IndexRetrieveNode` query
 - [ ] **End-to-end synthesis smoke**: `POST /api/insights/ask {question:"predict-matter-cost", subject:"matter:M-FIXTURE"}` returns either:
   - An Inference `InsightArtifact` with predicted cost, confidence, evidence refs (12+ comparable matter IDs from real Observations + any cited Precedents), reasoning summary; OR
   - A structured `DeclineResponse` per D-49 with `MinimumEvidenceNeeded` populated
@@ -411,7 +411,7 @@ Refinement narrative: [SPEC-phase-1-minimum.md](SPEC-phase-1-minimum.md) (canoni
 
 | First-step blocker | Owns the resolution |
 |---|---|
-| `insights-index` final name (e.g., `spaarke-insights`, `insights-index`) | D-P2 Step 0 |
+| `spaarke-insights-index` final name (e.g., `spaarke-insights`, `spaarke-insights-index`) | D-P2 Step 0 |
 | Document classification taxonomy SME review of Layer 1 enum values | D-P5 Step 0 |
 | Layer 2 confidence threshold starter values confirmed by product/SME | D-P6 Step 0 |
 | SPE-upload event source confirmed (event mechanism, dispatch shape, auth context) | D-P8 Step 0 |
@@ -441,9 +441,9 @@ A natural ordering for Phase 1. Each task's POML resolves its first-step blocker
 | Wave | Tasks | Rationale |
 |---|---|---|
 | W1 | D-P1, D-P17 | Foundation: `InsightArtifact` envelope POCOs + `IInsightGraph` interface design (stub) — both small, no runtime dependencies |
-| W2 | D-P2, D-P3 | Infrastructure: `insights-index` schema + Bicep + provisioning; `sprk_precedent` entity provisioning. Parallel. First-step blockers Q-name, Q-seeding. |
+| W2 | D-P2, D-P3 | Infrastructure: `spaarke-insights-index` schema + Bicep + provisioning; `sprk_precedent` entity provisioning. Parallel. First-step blockers Q-name, Q-seeding. |
 | W3 | D-P9, D-P10, D-P12, D-P13 | Platform primitives (Zone A): `GroundingVerifier`; confidence gating + emission post-processor; new node executors; playbook execution cache. Parallel; all independent. Side-quest: generic `IDistributedCacheExtensions.GetOrCreateAsync<T>` helper. |
-| W3.5 | `ReferenceIndexingService` parameterization refactor | Half-day refactor — parameterize for index name + schema mapper so both `spaarke-rag-references` AND `insights-index` use one code path. Not a separate D-P deliverable; foundation for D-P4 and D-P11 mirror writes. |
+| W3.5 | `ReferenceIndexingService` parameterization refactor | Half-day refactor — parameterize for index name + schema mapper so both `spaarke-rag-references` AND `spaarke-insights-index` use one code path. Not a separate D-P deliverable; foundation for D-P4 and D-P11 mirror writes. |
 | W4 | D-P5, D-P6 | Layer 1 + Layer 2 prompt-bearing nodes (authored against existing `AiAnalysisNodeExecutor`). First-step blockers Q-taxonomy, Q-thresholds. |
 | W5 | D-P7, D-P4 | Universal ingest playbook authoring (D-P7 — depends on W3 + W4); Precedent projection sync (D-P4 — depends on W3.5). Parallel. |
 | W6 | D-P8, D-P11 | SPE-upload event consumer (D-P8 — depends on D-P7 + facade D-P15-in-progress). Observation review surface (D-P11 — Dataverse view + mirror sync, depends on W5 to have Observations to review). First-step blockers Q-event-source, Q-polymorphic, Q-sampling, Q-cost-projection. |
@@ -489,7 +489,7 @@ Tasks within a wave can be parallel where deps allow. The §5.1 acceptance crite
 - [`Sprk.Bff.Api/Infrastructure/DI/AiModule.cs`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs) — `IChatClient` registration, tool framework
 - [`Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs) + [`Sprk.Bff.Api/Services/Ai/Nodes/`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/) — engine + 10 existing node executors that D-P12 extends
 - [`Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs) — hosts D-P5/D-P6 Layer 1/2 prompts; existing 3-tier retrieval (L1/L2/L3) informs D-P12 `IndexRetrieveNode` design
-- [`Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs) — template for `insights-index` upsert (parameterize per W3.5)
+- [`Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs) — template for `spaarke-insights-index` upsert (parameterize per W3.5)
 - [`Sprk.Bff.Api/Services/RecordMatching/DataverseIndexSyncService.cs`](../../src/server/api/Sprk.Bff.Api/Services/RecordMatching/DataverseIndexSyncService.cs) — pattern for D-P4 Precedent projection sync
 
 ## 10. Pipeline next step

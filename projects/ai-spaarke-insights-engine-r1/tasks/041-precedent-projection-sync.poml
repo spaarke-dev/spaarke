@@ -1,6 +1,6 @@
 <task id="041" project="ai-spaarke-insights-engine-r1">
   <metadata>
-    <title>D-P4 — Precedent → insights-index projection sync (status → Confirmed)</title>
+    <title>D-P4 — Precedent → spaarke-insights-index projection sync (status → Confirmed)</title>
     <status>not-started</status>
     <wave>5</wave>
     <estimated-effort>4 hours</estimated-effort>
@@ -12,13 +12,13 @@
   </metadata>
 
   <prompt>
-    Implement small in-process sync job that projects a `sprk_precedent` Dataverse row to `insights-index` with `artifactType=precedent` when status transitions to Confirmed. Fires from the admin endpoint flow (or from a future Phase 1.5 SME review queue). Uses Wave 3.5 parameterized `ReferenceIndexingService` to perform the upsert.
+    Implement small in-process sync job that projects a `sprk_precedent` Dataverse row to `spaarke-insights-index` with `artifactType=precedent` when status transitions to Confirmed. Fires from the admin endpoint flow (or from a future Phase 1.5 SME review queue). Uses Wave 3.5 parameterized `ReferenceIndexingService` to perform the upsert.
   </prompt>
 
   <role>Senior .NET developer familiar with Dataverse → AI Search projection patterns (DataverseIndexSyncService template) and idempotent upserts.</role>
 
   <goal>
-    `PrecedentProjectionSync.ProjectAsync(precedentId, ct)` reads the `sprk_precedent` row, builds a Precedent row per SPEC §3.4.2 worked example, and upserts to `insights-index` via parameterized ReferenceIndexingService (task 025). Idempotent (re-running on already-projected Precedent is no-op). Fired from D-P3 admin endpoint when SME promotes to Confirmed; fire-and-forget with error logging.
+    `PrecedentProjectionSync.ProjectAsync(precedentId, ct)` reads the `sprk_precedent` row, builds a Precedent row per SPEC §3.4.2 worked example, and upserts to `spaarke-insights-index` via parameterized ReferenceIndexingService (task 025). Idempotent (re-running on already-projected Precedent is no-op). Fired from D-P3 admin endpoint when SME promotes to Confirmed; fire-and-forget with error logging.
   </goal>
 
   <inputs>
@@ -43,10 +43,10 @@
 
   <steps>
     <step order="1" name="Read existing pattern">DataverseIndexSyncService.cs for projection template</step>
-    <step order="2" name="Author PrecedentProjectionMapper">Maps sprk_precedent → insights-index row per SPEC §3.4.2; generates embedding from pattern statement via IOpenAiClient</step>
+    <step order="2" name="Author PrecedentProjectionMapper">Maps sprk_precedent → spaarke-insights-index row per SPEC §3.4.2; generates embedding from pattern statement via IOpenAiClient</step>
     <step order="3" name="Author PrecedentProjectionSync service">ProjectAsync(precedentId, ct); reads via IDataverseService; embedding via IOpenAiClient (in Zone A — Wait — actually this is on a Zone B path; route embedding via IInsightsAi facade extension if needed). NOTE: embedding generation is AI-internal — needs facade method like `IInsightsAi.EmbedTextAsync` OR project embedding generation happens at upsert layer in Zone A. Resolve design at task time.</step>
     <step order="4" name="Wire to admin endpoint">D-P3 admin endpoint's "promote to Confirmed" flow calls ProjectAsync (fire-and-forget with logging)</step>
-    <step order="5" name="Integration test">Create Precedent via admin endpoint → promote to Confirmed → verify insights-index has row with artifactType=precedent</step>
+    <step order="5" name="Integration test">Create Precedent via admin endpoint → promote to Confirmed → verify spaarke-insights-index has row with artifactType=precedent</step>
     <step order="6" name="Quality gates">code-review + adr-check; resolve §3.5 facade boundary for embedding generation</step>
   </steps>
 
@@ -61,7 +61,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Confirmed sprk_precedent row projected to insights-index with artifactType=precedent</criterion>
+    <criterion testable="true">Confirmed sprk_precedent row projected to spaarke-insights-index with artifactType=precedent</criterion>
     <criterion testable="true">Projected row matches SPEC §3.4.2 worked example structure</criterion>
     <criterion testable="true">Re-projection on already-projected Precedent is idempotent (no duplicate rows)</criterion>
     <criterion testable="true">IndexRetrieveNode (D-P12) query for Precedents returns the projected Precedent (round-trip)</criterion>
