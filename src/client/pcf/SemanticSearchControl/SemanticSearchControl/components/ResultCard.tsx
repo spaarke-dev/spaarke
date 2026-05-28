@@ -7,28 +7,29 @@
  * Structure (top → bottom):
  *
  *   ┌────────────────────────────────────┐
- *   │ [82%]              ┊         [⋯] │  ← preview placeholder
+ *   │ [☐]                          [⋯] │  ← preview placeholder
  *   │            ┊                      │     - hatched grey background
- *   │           [📄]                    │     - top-L: tier-colored score badge
+ *   │           [📄]                    │     - top-L: selection checkbox
  *   │            ┊                      │     - top-R: 3-dot menu trigger
  *   │            ┊                      │     - center: large file-type icon
  *   ├────────────────────────────────────┤
- *   │ 📄  Engagement Letter.docx        │  ← info area (white)
- *   │                                    │     - small icon + 2-line name + ellipsis
- *   │ May 6, 2026 · 215 KB              │     - date · size meta line
- *   └────────────────────────────────────┘
+ *   │  Engagement Letter.docx           │  ← info area (white, flex-1)
+ *   │                                    │     - 2-line name + ellipsis (top)
+ *   │  May 6, 2026                      │     - date meta line
+ *   │                                    │     - whitespace gap (flex spacer)
+ *   │  100%  [Same Matter]              │     - pillRow (bottom: % chip +
+ *   └────────────────────────────────────┘     Relationship pill, v1.1.54)
  *
  * Interaction:
- *   - Click anywhere on the card EXCEPT the 3-dot menu trigger or the
- *     sparkle (AI summary) icon → opens the preview dialog.
- *   - 3-dot menu retains the full FR-DOC-01 13-action set, dispatched via
- *     the shared DocumentRowMenu (deep-path import per Lexical/React 16
- *     barrel constraint — same rationale as v1.1.46).
+ *   - Click anywhere on the card EXCEPT the 3-dot menu trigger → opens the
+ *     preview dialog.
+ *   - 3-dot menu shows the v1.1.54 (Item 6) standardized set: Preview, Open
+ *     File, Find Similar, Download, Copy link, Email, Open Record, Pin to
+ *     top, Delete. Hidden: AI Summary, Toggle workspace, Rename.
  *
- * Match-score tier colors (Fluent v9 semantic tokens only):
- *   - ≥80%   green     (colorPaletteGreenBackground2 / colorPaletteGreenForeground2)
- *   - 60-79% marigold  (colorPaletteMarigoldBackground2 / colorPaletteMarigoldForeground2)
- *   - <60%   red       (colorPaletteRedBackground2 / colorPaletteRedForeground2)
+ * Similarity chip colors (Fluent v9 semantic tokens only):
+ *   - 'associated' / "100%"     → green     (matches the "Same Matter" pill)
+ *   - 'semantic'   / "<pct>%"   → marigold
  *
  * @see ADR-012 - Shared component library (DocumentRowMenu, AiSummaryPopover)
  * @see ADR-021 - Fluent UI v9 requirements (tokens only, dark-mode safe)
@@ -38,14 +39,13 @@
  */
 
 import * as React from 'react';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   makeStyles,
   mergeClasses,
   shorthands,
   tokens,
   Text,
-  Button,
   Checkbox,
   Tooltip,
   Badge,
@@ -54,9 +54,7 @@ import {
   Document48Regular,
   DocumentPdf32Regular,
   DocumentText48Regular,
-  Sparkle20Regular,
 } from '@fluentui/react-icons';
-import { AiSummaryPopover } from '@spaarke/ui-components/dist/components/AiSummaryPopover';
 // Deep-path import (not the barrel) — the barrel pulls in RichTextEditor →
 // `@lexical/react` ESM modules that don't resolve `react/jsx-runtime` under
 // React 16's resolution (PCF target per ADR-022). Matches the existing
@@ -170,16 +168,9 @@ function formatShortDate(dateString: string | null): string {
   }
 }
 
-type ScoreTier = 'high' | 'mid' | 'low';
-
-function tierFromScore(score: number): ScoreTier {
-  // `score` is the canonical combinedScore in [0, 1]; round to a whole-percent
-  // tier (matches the badge text shown to the user — no off-by-one drift).
-  const pct = Math.round(score * 100);
-  if (pct >= 80) return 'high';
-  if (pct >= 60) return 'mid';
-  return 'low';
-}
+// v1.1.54 (Item 1) — `tierFromScore` + `ScoreTier` removed alongside the
+// top-LEFT % pill. The single bottom % chip uses similaritySemantic /
+// similarityAssociated (relationship-driven, not tier-driven).
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -231,14 +222,11 @@ const useStyles = makeStyles({
     left: tokens.spacingHorizontalXS,
     zIndex: 2,
   },
-  // v1.1.49 — Match-score badge moves to BELOW the checkbox in the same
-  // top-left column to free the top-right for AI sparkle + 3-dot menu
-  // (Item 1 reshuffle).
-  badgeWrap: {
-    position: 'absolute',
-    top: '32px',
-    left: tokens.spacingHorizontalS,
-  },
+  // v1.1.54 (Item 1) — Top-LEFT % pill (previously rendered via `badgeWrap`)
+  // is removed. The % is now ONLY shown in the bottom pill row next to the
+  // Relationship pill (see `pillRow` + `similarityBase`). The ScoreBadge
+  // component + its tier styles (`badgeBase`/`badgeHigh`/`badgeMid`/
+  // `badgeLow`) are also removed below since they're no longer referenced.
   toolsWrap: {
     position: 'absolute',
     top: tokens.spacingVerticalXS,
@@ -266,11 +254,20 @@ const useStyles = makeStyles({
   // v1.1.52 (Item 1) — Reverts v1.1.51 Item 6 (inline date in title row).
   // Date moves back to its own `meta` row below the name; the v1.1.51
   // Item 5 bottom Relationship pill row is preserved.
+  //
+  // v1.1.54 (Item 3) — `flex: 1` so the info area grows to fill the card's
+  // remaining height (the card is flex-direction: column). Combined with
+  // `marginTop: 'auto'` on `pillRow`, the title+date sit at the top and
+  // the pill row is pushed to the BOTTOM of the card, creating a clean
+  // visual separation from the title block. `minHeight` bumped 96 → 104
+  // so cards still have a consistent footprint when pillRow has minimal
+  // content.
   info: {
     display: 'flex',
     flexDirection: 'column',
+    flex: 1,
     gap: tokens.spacingVerticalS,
-    minHeight: '96px',
+    minHeight: '104px',
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
   },
   // v1.1.53 (Item 3) — `nameRow` no longer includes the small file-type
@@ -312,13 +309,18 @@ const useStyles = makeStyles({
     textOverflow: 'ellipsis',
   },
   // v1.1.51 (Item 5) — bottom row of the info area: Relationship pill +
-  // optional Similarity badge. Sits flush below the title+date row.
+  // optional Similarity badge.
+  // v1.1.54 (Item 3) — `marginTop: 'auto'` pushes the pill row to the
+  // BOTTOM of the info area (the parent `info` div is `flex: 1` and
+  // `flexDirection: 'column'`). Visual outcome: title + date at top,
+  // whitespace gap, pill row anchored at the bottom of the card.
   pillRow: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     minWidth: 0,
     flexWrap: 'wrap',
+    marginTop: 'auto',
   },
   // v1.1.53 (Items 1 + 2) — Similarity slot is now ALWAYS rendered as
   // a chip (LEFT of the Relationship pill). 'associated' rows render a
@@ -346,69 +348,28 @@ const useStyles = makeStyles({
     // text is rendered. Matches the ListView's blank-chip footprint.
     minWidth: '44px',
   },
+  // v1.1.54 (Item 2) — Switched 'associated' chip from brand-blue to green
+  // (matches the Relationship 'success' pill so cards reading "Same Matter
+  // 100%" share one cohesive green family). Tokens only per ADR-021.
   similarityAssociated: {
-    backgroundColor: tokens.colorBrandBackground2,
-    color: tokens.colorBrandForeground2,
+    backgroundColor: tokens.colorPaletteGreenBackground2,
+    color: tokens.colorPaletteGreenForeground2,
   },
   similaritySemantic: {
     backgroundColor: tokens.colorPaletteMarigoldBackground2,
     color: tokens.colorPaletteMarigoldForeground2,
   },
-  // ── Badge tiers — each gets a token-driven bg + fg pair (ADR-021). ────
-  badgeBase: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shorthands.borderRadius(tokens.borderRadiusSmall),
-    paddingTop: '1px',
-    paddingBottom: '1px',
-    paddingLeft: tokens.spacingHorizontalXS,
-    paddingRight: tokens.spacingHorizontalXS,
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    lineHeight: tokens.lineHeightBase200,
-    whiteSpace: 'nowrap',
-  },
-  badgeHigh: {
-    backgroundColor: tokens.colorPaletteGreenBackground2,
-    color: tokens.colorPaletteGreenForeground2,
-  },
-  badgeMid: {
-    backgroundColor: tokens.colorPaletteMarigoldBackground2,
-    color: tokens.colorPaletteMarigoldForeground2,
-  },
-  badgeLow: {
-    backgroundColor: tokens.colorPaletteRedBackground2,
-    color: tokens.colorPaletteRedForeground2,
-  },
-  // Tools (sparkle + menu) — small subtle icon buttons. Tighter padding than
-  // the default so they don't dominate the corner of the card.
-  toolButton: {
-    minWidth: 'auto',
-    ...shorthands.padding('2px'),
-  },
+  // v1.1.54 (Item 6) — `toolButton` style removed; the AI sparkle button
+  // it styled is gone (AiSummary hidden across all surfaces). The 3-dot
+  // menu trigger uses DocumentRowMenu's built-in styling.
 });
 
-// ---------------------------------------------------------------------------
-// Score badge
-// ---------------------------------------------------------------------------
-
-const ScoreBadge: React.FC<{ score: number; className: string; tierClassName: string }> = ({
-  score,
-  className,
-  tierClassName,
-}) => {
-  const pct = Math.round(score * 100);
-  return (
-    <span
-      role="img"
-      aria-label={`Relevance: ${pct}%`}
-      className={mergeClasses(className, tierClassName)}
-    >
-      {pct}%
-    </span>
-  );
-};
+// v1.1.54 (Item 1) — `ScoreBadge` removed. The match-score % previously
+// rendered top-LEFT of the preview area is gone; the % now appears ONLY
+// in the bottom pill row (rendered inline below via similarityBase/
+// similaritySemantic for semantic rows; "100%" via similarityBase/
+// similarityAssociated for direct-association rows). Removing the
+// duplicate top-left pill simplifies the visual hierarchy.
 
 // ---------------------------------------------------------------------------
 // Component
@@ -424,6 +385,9 @@ export const ResultCard: React.FC<IResultCardProps> = ({
   isSelected,
   onToggleSelect,
   onPreview,
+  // v1.1.54 (Item 6) — `onSummary` accepted for back-compat (parent still
+  // passes it) but unused now that the sparkle popover is removed.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onSummary,
   onEmailDocument,
   onCopyLink,
@@ -449,13 +413,9 @@ export const ResultCard: React.FC<IResultCardProps> = ({
       setPreviewOpen(true);
     }
   }, [useHostPreview, onOpenPreview]);
-  const sparkleTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const fileKind = classifyFileType(result.fileType);
   const HeroIcon = getHeroIcon(fileKind);
-  const tier = tierFromScore(result.combinedScore);
-  const tierClassName =
-    tier === 'high' ? styles.badgeHigh : tier === 'mid' ? styles.badgeMid : styles.badgeLow;
 
   const handleCardClick = useCallback(
     (ev: React.MouseEvent) => {
@@ -493,8 +453,13 @@ export const ResultCard: React.FC<IResultCardProps> = ({
   }, [onOpenRecord]);
 
   // -------------------------------------------------------------------------
-  // 3-dot menu dispatch — mirrors v1.1.46. AI summary still wires through the
-  // sparkle popover ref so the menu and hover paths share one popover surface.
+  // 3-dot menu dispatch
+  // v1.1.54 (Item 6) — Menu is now standardized across card + row + dialog
+  // surfaces. Visible: Preview, Open File, Find Similar, Download, Copy
+  // link, Email, Open Record, Pin to top, Delete. Hidden via
+  // `disabledActions`: AI Summary, Toggle workspace, Rename. The
+  // `aiSummary` / `toggleWorkspace` / `rename` cases are still listed
+  // here as no-ops so the exhaustive `never` check stays valid.
   // -------------------------------------------------------------------------
   const target = React.useMemo<IDocumentRowMenuTarget>(
     () => ({
@@ -505,18 +470,11 @@ export const ResultCard: React.FC<IResultCardProps> = ({
     [result.documentId, result.name, result.documentType]
   );
 
-  const handleAiSummaryFromMenu = useCallback(() => {
-    sparkleTriggerRef.current?.click();
-  }, []);
-
   const handleRowAction = useCallback(
     (action: DocumentRowAction) => {
       switch (action) {
         case 'preview':
           openPreview();
-          return;
-        case 'aiSummary':
-          handleAiSummaryFromMenu();
           return;
         case 'openFile':
           onOpenFile('desktop');
@@ -537,13 +495,16 @@ export const ResultCard: React.FC<IResultCardProps> = ({
         case 'openRecord':
           onOpenRecord(false);
           return;
+        case 'aiSummary':
         case 'toggleWorkspace':
-          onToggleWorkspace();
+        case 'rename':
+          // v1.1.54 (Item 6) — hidden via `disabledActions`; defensive
+          // no-ops here keep the exhaustive `never` check valid.
           return;
         case 'pinToTop':
-        case 'rename':
         case 'delete':
-          // Not yet wired in the PCF card surface (Phase 4 follow-on tasks).
+          // Visible in the menu, but not yet wired in the PCF card surface
+          // (Phase 4 follow-on tasks).
           return;
         default: {
           // Exhaustiveness check — any new DocumentRowAction must be handled
@@ -555,14 +516,12 @@ export const ResultCard: React.FC<IResultCardProps> = ({
       }
     },
     [
-      handleAiSummaryFromMenu,
       openPreview,
       onOpenFile,
       onFindSimilar,
       onCopyLink,
       onEmailDocument,
       onOpenRecord,
-      onToggleWorkspace,
     ]
   );
 
@@ -624,37 +583,25 @@ export const ResultCard: React.FC<IResultCardProps> = ({
               </Tooltip>
             </div>
           )}
-          <div className={styles.badgeWrap} aria-hidden="true">
-            <ScoreBadge
-              score={result.combinedScore}
-              className={styles.badgeBase}
-              tierClassName={tierClassName}
-            />
-          </div>
+          {/* v1.1.54 (Item 1) — Top-LEFT % pill (`badgeWrap` / ScoreBadge)
+              removed; the % now appears ONLY in the bottom pill row next
+              to the Relationship pill. */}
           <div className={styles.toolsWrap}>
-            {/* AiSummaryPopover sparkle is RETAINED per FR-DOC-01 Owner
-                Clarification — hover quick-glance + menu item for keyboard
-                access. The sparkle button is also the ref target for the
-                menu's "AI summary" item (programmatic click). */}
-            <AiSummaryPopover
-              onFetchSummary={onSummary}
-              trigger={
-                <Tooltip content="AI Summary" relationship="label">
-                  <Button
-                    ref={sparkleTriggerRef}
-                    appearance="subtle"
-                    size="small"
-                    className={styles.toolButton}
-                    icon={<Sparkle20Regular aria-hidden="true" />}
-                    aria-label="AI Summary"
-                  />
-                </Tooltip>
-              }
-            />
+            {/* v1.1.54 (Item 6) — AiSummaryPopover sparkle removed from the
+                card. AI Summary is hidden across all surfaces this round
+                (also hidden via `disabledActions` in the menu below). */}
             {/* 3-dot menu — DocumentRowMenu handles its own stopPropagation
                 internally so card-click doesn't fire when interacting with
-                the menu's trigger or items. */}
-            <DocumentRowMenu document={target} onAction={handleRowAction} />
+                the menu's trigger or items.
+                v1.1.54 (Item 6) — `disabledActions` standardized: hide
+                AI Summary, Toggle workspace, Rename. Visible: Preview,
+                Open File, Find Similar, Download, Copy link, Email,
+                Open Record, Pin to top, Delete. */}
+            <DocumentRowMenu
+              document={target}
+              onAction={handleRowAction}
+              disabledActions={['aiSummary', 'toggleWorkspace', 'rename']}
+            />
           </div>
           <div
             className={styles.heroIcon}
@@ -687,15 +634,23 @@ export const ResultCard: React.FC<IResultCardProps> = ({
           )}
           {showRelationshipPill && (
             <div className={styles.pillRow} aria-hidden="false">
-              {/* v1.1.53 (Items 1 + 2) — Similarity chip LEFT of the
-                  Relationship pill, always rendered. 'associated' rows
-                  render a blank blue chip (matches ListView). */}
+              {/* v1.1.54 (Item 2) — Reverses v1.1.53 Item 2: 'associated'
+                  rows now render "100%" text in a GREEN chip (was: blank
+                  blue chip). The green palette matches the Relationship
+                  "Same Matter" tint so cards reading "Same Matter 100%"
+                  share one cohesive green family. 'both' rows surface the
+                  SEMANTIC %, not 100% — the semantic match score is the
+                  more interesting signal when both relationships exist.
+                  Similarity chip stays LEFT of the Relationship pill
+                  (v1.1.53 Item 1 layout). */}
               {rel === 'associated' ? (
                 <span
                   className={mergeClasses(styles.similarityBase, styles.similarityAssociated)}
                   role="img"
-                  aria-label="Direct association"
-                />
+                  aria-label="Direct association: 100%"
+                >
+                  100%
+                </span>
               ) : (
                 <span
                   className={mergeClasses(styles.similarityBase, styles.similaritySemantic)}

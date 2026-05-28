@@ -721,12 +721,16 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
           // it's still a no-op here because the section is in-view.
           return;
         case 'preview':
-        case 'pinToTop':
         case 'rename':
+          // Hidden via `disabledActions` — defensive no-op cases keep
+          // the exhaustive `never` check happy.
+          return;
+        case 'pinToTop':
         case 'delete':
-          // Not reachable from the dialog surface — hidden via
-          // `disabledActions` below. The cases keep the exhaustive
-          // `never` check happy.
+          // v1.1.54 (Item 6) — now VISIBLE in the dialog menu, but the
+          // handlers are still no-ops at the PCF surface (Phase 4
+          // follow-on tasks). Visibility was the user-requested change
+          // this round.
           return;
         default: {
           const _never: never = action;
@@ -747,8 +751,6 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
 
   // Hide only the actions the dialog cannot service.
   // `preview` is always hidden (dialog IS the preview).
-  // `pinToTop` / `rename` / `delete` are hidden until handlers exist at the
-  // PCF surface (scoped to follow-on Phase 4 tasks per project plan).
   // `findSimilar` is hidden when no callback was provided.
   //
   // v1.1.45 — `toggleWorkspace` is ALWAYS hidden from this dialog's menu.
@@ -758,21 +760,23 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   // confusing. Row-context still exposes `toggleWorkspace` via
   // ResultCard.tsx + ListView.tsx — only the dialog hides it.
   //
-  // v1.1.51 (Item 4) — `aiSummary` is now ALWAYS hidden, not just when
-  // `onFetchSummary` is missing. The AI summary is already rendered inline
-  // in the dialog's right-pane metadata column (see the section comment at
-  // the `aiSummary` case in the row-action handler above and the layout
-  // notes at the top of this file), so the menu item is duplicative and
-  // was reported by UAT as confusing. Row-context (ResultCard + ListView)
-  // still exposes `aiSummary` as the canonical entry point to the popover.
+  // v1.1.51 (Item 4) — `aiSummary` is ALWAYS hidden. Originally hidden in
+  // the dialog because the AI summary was rendered inline; in v1.1.54
+  // Item 6 it's now hidden across all surfaces (card + row + dialog) so
+  // the menu is uniform.
+  //
+  // v1.1.54 (Item 6) — Menu standardized across card + row + dialog
+  // surfaces. Dialog hides: preview, aiSummary, toggleWorkspace, rename
+  // (rename added this round per user request). `pinToTop` + `delete`
+  // are NOW visible in the dialog menu (previously hidden as "Phase 4
+  // follow-on"); the handlers are still no-ops in `handleRowAction`
+  // but visibility was the user-requested change for this round.
   const dialogDisabledActions = React.useMemo<DocumentRowAction[]>(() => {
     const hidden: DocumentRowAction[] = [
-      'preview',
-      'pinToTop',
-      'rename',
-      'delete',
-      'toggleWorkspace',
-      'aiSummary',
+      'preview',         // dialog IS the preview surface
+      'aiSummary',       // hidden across all surfaces (Item 6)
+      'toggleWorkspace', // dialog IS the workspace surface
+      'rename',          // hidden across all surfaces (Item 6)
     ];
     if (!onFindSimilar) hidden.push('findSimilar');
     return hidden;

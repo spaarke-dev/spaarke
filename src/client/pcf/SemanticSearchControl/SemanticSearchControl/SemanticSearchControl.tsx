@@ -316,6 +316,21 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // public surface — leave for future cleanup).
   const [hostPreviewDocId, setHostPreviewDocId] = useState<string | null>(null);
 
+  // v1.1.54 (Item 5) — Preview-hide pattern for the email modal.
+  // The Fluent v9 modal-over-modal stacking pattern (SendEmailDialog over
+  // FilePreviewDialog) did NOT fully occlude the preview underneath even
+  // after widening to 1200px (v1.1.52/v1.1.53). Each Dialog renders its
+  // own Portal + backdrop, but the outer dialog's content still bled
+  // through visually around the inner modal. Fix: close the preview
+  // while the email is open, then re-open it when the email closes.
+  // The string holds the docId of the preview that was open when the
+  // email started; null when no preview-hide is in flight. We only
+  // consume this state through the functional setter form
+  // (`setPreviewedBeforeEmail(prev => ...)`), so the value is never
+  // directly read at render — eslint-disable accordingly.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [previewedBeforeEmail, setPreviewedBeforeEmail] = useState<string | null>(null);
+
   // Multi-document email wizard state. When open, passes the current results
   // (top N visible) into the wizard's first step where the user can deselect
   // any docs they don't want before composing.
@@ -802,9 +817,43 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     [results]
   );
 
-  // Handle Email Document — opens SendEmailDialog with result context
-  const handleEmailDocument = useCallback((result: SearchResult) => {
-    setEmailDialogResult(result);
+  // Handle Email Document — opens SendEmailDialog with result context.
+  // v1.1.54 (Item 5) — Implements the preview-hide pattern: if the host-
+  // mounted FilePreviewDialog is open when the user picks Email, we
+  // capture the active docId in `previewedBeforeEmail`, close the
+  // preview (setHostPreviewDocId(null)), and then open the email modal.
+  // The matching close handler (`handleEmailDialogClose`) re-opens the
+  // preview when the email modal is dismissed.
+  const handleEmailDocument = useCallback(
+    (result: SearchResult) => {
+      // Capture preview-open state before closing it. We use a functional
+      // form to avoid stale-closure issues with `hostPreviewDocId`.
+      setHostPreviewDocId(prevPreviewId => {
+        if (prevPreviewId) {
+          setPreviewedBeforeEmail(prevPreviewId);
+        }
+        // Close the preview (returning null from the updater).
+        return null;
+      });
+      setEmailDialogResult(result);
+    },
+    []
+  );
+
+  // v1.1.54 (Item 5) — Email-modal close handler. Re-opens the preview
+  // dialog on the doc that was open when the email started, if any. The
+  // re-open is gated on `previewedBeforeEmail` (set in
+  // `handleEmailDocument`). The Send path also routes through this
+  // handler — the shared SendEmailDialog calls `onClose` after a
+  // successful send.
+  const handleEmailDialogClose = useCallback(() => {
+    setEmailDialogResult(null);
+    setPreviewedBeforeEmail(prev => {
+      if (prev) {
+        setHostPreviewDocId(prev);
+      }
+      return null;
+    });
   }, []);
 
   // Handle Copy Link — copies Dataverse record URL to clipboard
@@ -1797,7 +1846,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.53 • Built 2026-05-28</Text>
+        <Text size={100}>v1.1.54 • Built 2026-05-28</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so
@@ -1839,36 +1888,32 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       <FindSimilarDialog open={!!findSimilarUrl} onClose={() => setFindSimilarUrl(null)} url={findSimilarUrl} />
 
       {/* Send Email Dialog (single-document, shared @spaarke/ui-components).
-          v1.1.50 (Item 7) — Modal-over-modal: when the user clicks "Email"
-          from inside FilePreviewDialog's 3-dot menu, `handleEmailDocument`
-          fires `setEmailDialogResult(result)` which opens this dialog ON
-          TOP of the FilePreviewDialog (both render via React Portal so
-          they stack naturally; the SendEmailDialog's higher mount order
-          wins z-index). FilePreviewDialog stays open underneath until
-          the user either sends/cancels the email or explicitly closes
-          the preview, preserving the "Re: {documentName}" context.
-          The Subject and Body are pre-populated from the active doc via
-          `emailDefaultSubject` / `emailDefaultBody`.
+          v1.1.50 (Item 7) — initially attempted modal-over-modal: launching
+          this dialog from inside FilePreviewDialog's 3-dot menu while the
+          preview stayed open underneath. Each Dialog renders its own
+          Portal + backdrop, but the outer dialog's content still bled
+          through visually around the inner modal even at 1200px width.
 
-          v1.1.52 (Item 3): the shared SendEmailDialog now accepts a
-          `maxWidth` override prop. Default 520px is preserved for
-          existing consumers (LegalWorkspace FilePreviewDialog,
-          SpeDocumentViewer).
-          v1.1.53 (Item 5): widened from 720px → 1200px so the email
-          composer visually dominates the FilePreviewDialog (1280px)
-          behind it. Fluent v9 `<Dialog>` defaults `modalType="modal"`,
-          which renders an opaque backdrop — the wider modal + default
-          backdrop combine to give the "cover" effect requested in UAT.
-          We do NOT override the backdrop color (would require hex/rgb
-          which violates ADR-021). */}
+          v1.1.54 (Item 5) — Switched to a preview-HIDE pattern.
+          `handleEmailDocument` now captures the currently-open preview
+          docId, closes the host preview (setHostPreviewDocId(null)),
+          then opens this dialog. `handleEmailDialogClose` reverses the
+          process: closes the email dialog, then re-opens the preview
+          on the same doc. This guarantees full occlusion (no modal-
+          stacking artifacts) and preserves the user's context.
+
+          The `maxWidth` is reverted from 1200px → 640px since the email
+          composer no longer needs to visually dominate the preview
+          (the preview is hidden while it's open). 640px matches the
+          composer-friendly default. */}
       <SendEmailDialog
         open={!!emailDialogResult}
-        onClose={() => setEmailDialogResult(null)}
+        onClose={handleEmailDialogClose}
         defaultSubject={emailDefaultSubject}
         defaultBody={emailDefaultBody}
         onSearchUsers={handleSearchUsers}
         onSend={handleSendEmail}
-        maxWidth="1200px"
+        maxWidth="640px"
       />
 
       {/* Document Email Wizard (multi-document, new) — opens from the toolbar

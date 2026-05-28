@@ -3,22 +3,22 @@
  *
  * Tabular list view for the Documents PCF. Renders a Fluent v9 `DataGrid`.
  *
- * v1.1.50 column order (Items 3 + 5):
+ * v1.1.54 column order (Item 6 standardization):
  *
- *   Select | Pin | Document | Relationship | Similarity | Type | Modified | AI | Menu
+ *   Select | Pin | Document | Relationship | Similarity | Type | Modified | Menu
  *
  * - Document: file-type icon + name (was "Name" in v1.1.49).
- * - Relationship: NEW (Item 5). Fluent v9 `Badge` showing "Same Matter"
- *   (color="success", green) when the row's `relationship` tag is
- *   'associated', or "Semantic" (color="brand", blue) when 'semantic'.
- *   Determined by `SemanticSearchApiService.searchUnion` tagging.
+ * - Relationship: Fluent v9 `Badge` showing "Same Matter" (color="success",
+ *   green) when the row's `relationship` tag is 'associated', or "Semantic"
+ *   (color="brand", blue) when 'semantic'. Determined by
+ *   `SemanticSearchApiService.searchUnion` tagging.
  * - Similarity: was "Match" in v1.1.49. Pill background changes based on
- *   the row's relationship — 'associated' rows show a blue badge with NO
- *   percentage (user request — direct-association docs report 0%); 'semantic'
- *   rows show a light-yellow badge with the combinedScore percentage.
- * - Type: NEW (Item 3). Falls back to `documentType` or file extension.
- * - AI: NEW (Item 4). Sparkle icon in its own column LEFT of the 3-dot menu;
- *   reuses the shared `AiSummaryPopover` (same as card view).
+ *   the row's relationship — 'associated' rows show a green "100%" pill
+ *   (v1.1.54 Item 4 — was: blank blue pill); 'semantic' rows show a
+ *   light-yellow Marigold pill with the combinedScore percentage.
+ * - Type: file-type icon only.
+ * - AI column REMOVED (v1.1.54 Item 6) — AI Summary action is hidden across
+ *   card + row + dialog surfaces this round.
  * - Modified by REMOVED (Item 3) — auxiliary; surfaced in preview metadata.
  *
  * Sortable columns: Document (name), Modified, Similarity. Relationship +
@@ -102,7 +102,6 @@ import {
   ImageRegular,
   MailRegular,
   Pin20Filled,
-  Sparkle20Regular,
 } from '@fluentui/react-icons';
 // Deep-path imports (NOT the barrel) — the barrel pulls in RichTextEditor →
 // `@lexical/react` ESM modules that don't resolve `react/jsx-runtime` under
@@ -113,10 +112,9 @@ import {
   type DocumentRowAction,
   type IDocumentRowMenuTarget,
 } from '@spaarke/ui-components/dist/components/DocumentRowMenu';
-// v1.1.50 (Item 4) — AI Summary sparkle column. Deep-path import for the
-// same Lexical / React-16 reason as DocumentRowMenu above. Mirrors the
-// card-view `ResultCard.tsx` usage so both surfaces share one popover.
-import { AiSummaryPopover } from '@spaarke/ui-components/dist/components/AiSummaryPopover';
+// v1.1.54 (Item 6) — `AiSummaryPopover` import removed; the COL_AI sparkle
+// column is dropped this round as part of the menu/AI standardization
+// (AI Summary hidden across card + row + dialog surfaces).
 import { SearchResult, SummaryData } from '../types';
 import { FilePreviewDialog } from './FilePreviewDialog';
 import type { ColumnWidths } from '../hooks/useDocumentListPrefs';
@@ -141,6 +139,12 @@ export type ListSortDirection = 'asc' | 'desc';
 // - COL_RELATIONSHIP added (Item 5).
 // - COL_TYPE added (Item 3).
 // - COL_AI added (Item 4).
+//
+// v1.1.54 (Item 6) — COL_AI removed. The AI Summary sparkle column is
+// dropped as part of the menu/AI standardization (AI Summary hidden
+// across card + row + dialog surfaces). User-persisted COL_AI widths
+// linger as orphan keys in localStorage but are no longer iterated, so
+// they do not affect rendering. No data migration needed.
 // COL_MATCH renamed to COL_SIMILARITY in the user-facing header (the
 // internal id stays 'combinedScore' so persisted sort prefs are preserved).
 const COL_SELECT = 'select';
@@ -150,7 +154,6 @@ const COL_RELATIONSHIP = 'relationship';
 const COL_SIMILARITY = 'combinedScore';
 const COL_TYPE = 'documentType';
 const COL_MODIFIED = 'modifiedAt';
-const COL_AI = 'aiSummary';
 const COL_MENU = 'menu';
 
 // Default intrinsic widths in pixels (used when no user override is persisted).
@@ -171,7 +174,6 @@ const DEFAULT_WIDTHS: Record<string, number> = {
   // for the wider Document / Relationship columns.
   [COL_TYPE]: 48,
   [COL_MODIFIED]: 130,
-  [COL_AI]: 40,
   [COL_MENU]: 44,
 };
 
@@ -187,7 +189,6 @@ const MIN_WIDTHS: Record<string, number> = {
   // match the new icon-only rendering footprint.
   [COL_TYPE]: 40,
   [COL_MODIFIED]: 90,
-  [COL_AI]: 40,
   [COL_MENU]: 44,
 };
 
@@ -396,14 +397,15 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorPaletteMarigoldBackground2,
     color: tokens.colorPaletteMarigoldForeground2,
   },
-  // 'associated' rows — brand blue pill, no percentage text. The empty
-  // chip still occupies the column track so the column doesn't collapse
-  // on rows that have no similarity score.
+  // v1.1.54 (Item 4) — 'associated' rows now show "100%" text in a GREEN
+  // pill (matches the Relationship "Same Matter" tint so the row reads
+  // as one cohesive Same-Matter+100% block). Previously: blank brand-blue
+  // pill. Switched palette to colorPaletteGreenBackground2/Foreground2
+  // for contrast parity with the text rendering and to match the card
+  // view (ResultCard.tsx) chip styling. Tokens-only per ADR-021.
   similarityAssociated: {
-    backgroundColor: tokens.colorBrandBackground2,
-    color: tokens.colorBrandForeground1,
-    minWidth: '20px',
-    minHeight: '14px',
+    backgroundColor: tokens.colorPaletteGreenBackground2,
+    color: tokens.colorPaletteGreenForeground2,
   },
   iconButton: {
     minWidth: 'auto',
@@ -856,9 +858,12 @@ export const ListView: React.FC<IListViewProps> = ({
       // Similarity column (v1.1.50 — renamed from "Match") — sortable.
       // Sort key still resolves to 'combinedScore' so persisted user prefs
       // survive. Pill styling depends on the row's relationship:
-      //   - 'associated' → blue (brand) pill, NO percentage text
+      //   - 'associated' → green pill with "100%" text (v1.1.54 Item 4 —
+      //                    direct associations are always 100% match; the
+      //                    green palette matches the "Same Matter" pill so
+      //                    the row reads as a single Same-Matter+100% block)
       //   - 'semantic'   → light-yellow (Marigold) pill, WITH percentage
-      //   - 'both'       → light-yellow (Marigold) pill WITH percentage
+      //   - 'both'       → light-yellow (Marigold) pill WITH semantic %
       //                    (v1.1.51 Item 2 — surfaces the semantic match
       //                    score even when the doc is also directly
       //                    associated, per the user's UAT request)
@@ -881,14 +886,17 @@ export const ListView: React.FC<IListViewProps> = ({
             result.relationship ??
             ((result.combinedScore ?? 0) === 0 ? 'associated' : 'semantic');
           if (rel === 'associated') {
-            // Direct-association-only rows: blue pill, NO percentage (BFF
-            // returns 0% on this path so the number is meaningless).
+            // v1.1.54 (Item 4) — direct-association rows render "100%" in
+            // a green pill (was: blank brand-blue pill). Mirrors the card
+            // view's similarityAssociated rendering.
             return (
               <span
                 className={mergeClasses(styles.similarityBase, styles.similarityAssociated)}
                 role="img"
-                aria-label="Direct association"
-              />
+                aria-label="Direct association: 100%"
+              >
+                100%
+              </span>
             );
           }
           // 'semantic' or 'both' — both surface the semantic % score.
@@ -947,33 +955,17 @@ export const ListView: React.FC<IListViewProps> = ({
         ),
       }),
 
-      // AI Summary column (v1.1.50, Item 4) — NEW, non-sortable.
-      // Sparkle icon that opens the SHARED AiSummaryPopover (same as the
-      // card-view sparkle in ResultCard.tsx). Sits directly to the LEFT
-      // of the 3-dot menu column.
-      createTableColumn<SearchResult>({
-        columnId: COL_AI,
-        renderHeaderCell: () => <span aria-label="AI Summary" />,
-        renderCell: (result: SearchResult) => (
-          <AiSummaryPopover
-            onFetchSummary={() => onSummary(result)}
-            trigger={
-              <Tooltip content="AI Summary" relationship="label">
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  className={styles.iconButton}
-                  icon={<Sparkle20Regular aria-hidden="true" />}
-                  aria-label={`AI Summary for ${result.name}`}
-                  onClick={ev => ev.stopPropagation()}
-                />
-              </Tooltip>
-            }
-          />
-        ),
-      }),
+      // v1.1.54 (Item 6) — COL_AI (AI Summary sparkle) column removed.
+      // The AI Summary action is hidden across all surfaces (also hidden
+      // via `disabledActions` in the row menu below). Reduces column set
+      // to: Select / Pin / Document / Relationship / Similarity / Type /
+      // Modified / Menu.
 
       // 3-dot menu column — non-sortable.
+      // v1.1.54 (Item 6) — `disabledActions` standardized to match card
+      // view + dialog: hide AI Summary, Toggle workspace, Rename.
+      // Visible: Preview, Open File, Find Similar, Download, Copy link,
+      // Email, Open Record, Pin to top, Delete.
       createTableColumn<SearchResult>({
         columnId: COL_MENU,
         renderHeaderCell: () => <span aria-label="Actions" />,
@@ -987,6 +979,7 @@ export const ListView: React.FC<IListViewProps> = ({
             <DocumentRowMenu
               document={target}
               onAction={buildRowActionHandler(result)}
+              disabledActions={['aiSummary', 'toggleWorkspace', 'rename']}
             />
           );
         },
@@ -1005,7 +998,9 @@ export const ListView: React.FC<IListViewProps> = ({
     handleHeaderClick,
     buildRowActionHandler,
     openPreview,
-    onSummary,
+    // v1.1.54 (Item 6) — `onSummary` removed from this dep list; the
+    // COL_AI cell that consumed it is gone. The prop is still used by
+    // the local fallback FilePreviewDialog mounted below.
     styles.iconButton,
     styles.pinnedIcon,
     styles.nameWrap,
@@ -1026,6 +1021,9 @@ export const ListView: React.FC<IListViewProps> = ({
     // v1.1.50 — new column set (Items 3 + 4 + 5). COL_MODIFIED_BY removed,
     // COL_RELATIONSHIP / COL_TYPE / COL_AI added. Same iteration order as
     // the createTableColumn() order above so sizing keys stay in sync.
+    // v1.1.54 (Item 6) — COL_AI dropped from this iteration; user-
+    // persisted COL_AI widths linger as orphan keys in localStorage but
+    // do not affect rendering.
     const columnIds = [
       COL_SELECT,
       COL_PIN,
@@ -1034,7 +1032,6 @@ export const ListView: React.FC<IListViewProps> = ({
       COL_SIMILARITY,
       COL_TYPE,
       COL_MODIFIED,
-      COL_AI,
       COL_MENU,
     ];
     for (const id of columnIds) {
@@ -1112,18 +1109,15 @@ export const ListView: React.FC<IListViewProps> = ({
                     const isSelectCell = columnId === COL_SELECT;
                     const isPinCell = columnId === COL_PIN;
                     const isMenuCell = columnId === COL_MENU;
-                    // v1.1.50 (Item 4) — AI Summary cell uses the same
-                    // flush-right styling as the menu cell so the two
-                    // icon-only columns visually anchor the trailing
-                    // edge of the row together.
-                    const isAiCell = columnId === COL_AI;
+                    // v1.1.54 (Item 6) — COL_AI removed; the `isAiCell`
+                    // branch is gone. Only the menu cell now gets the
+                    // flush-right styling.
                     const cellClass = mergeClasses(
                       styles.gridCell,
                       isSelectCell && styles.selectCell,
                       isPinCell && styles.pinCell,
                       // v1.1.47 — flush the menu icon to the right edge.
-                      // v1.1.50 — same for the AI sparkle icon cell.
-                      (isMenuCell || isAiCell) && styles.menuCell
+                      isMenuCell && styles.menuCell
                     );
                     return (
                       <DataGridCell
@@ -1133,7 +1127,7 @@ export const ListView: React.FC<IListViewProps> = ({
                           onTogglePin(item.documentId);
                         } : undefined}
                       >
-                        <TableCellLayout truncate={!isSelectCell && !isPinCell && !isMenuCell && !isAiCell}>
+                        <TableCellLayout truncate={!isSelectCell && !isPinCell && !isMenuCell}>
                           {renderCell(item)}
                         </TableCellLayout>
                       </DataGridCell>
