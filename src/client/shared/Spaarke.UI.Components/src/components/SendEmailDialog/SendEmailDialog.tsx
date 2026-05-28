@@ -232,12 +232,22 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
         if (!data.open) onClose();
       }}
     >
-      {/* v1.1.56 — Inline `style={{ maxWidth, height }}` overrides the
-          makeStyles defaults. `maxWidth` defaults to '520px' and `height`
-          defaults to 'auto' so existing consumers render identically.
-          SemanticSearchControl passes maxWidth="1280px" height="85vh"
-          to match the FilePreviewDialog footprint. */}
-      <DialogSurface className={styles.surface} style={{ maxWidth, height }}>
+      {/* v1.1.57 — Inline style now sets BOTH `height` and `minHeight`.
+          Fluent v9 DialogSurface internally applies `block-size:
+          fit-content` (or equivalent) at a specificity that overrides
+          our inline `height` alone — empirically observed in v1.1.56
+          UAT: surface remained content-sized (540px) even with
+          `style={{ height: '85vh' }}`. Adding `minHeight` forces the
+          surface to grow to at least the requested height regardless
+          of Fluent's content-sizing rule, because `min-height`
+          semantics override `block-size: fit-content`.
+          Default of 'auto' produces { height: 'auto', minHeight: 'auto' }
+          which is a no-op for back-compat consumers (LegalWorkspace +
+          SpeDocumentViewer). */}
+      <DialogSurface
+        className={styles.surface}
+        style={{ maxWidth, height, minHeight: height }}
+      >
         <DialogTitle
           action={<Button appearance="subtle" icon={<Dismiss24Regular />} aria-label="Close" onClick={onClose} />}
         >
