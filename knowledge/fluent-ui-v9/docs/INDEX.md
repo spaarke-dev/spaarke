@@ -22,6 +22,15 @@
 | [`pcf-virtual-controls.md`](./pcf-virtual-controls.md) | 74 | Orientation only — background context for platform-library PCFs. |
 | [`modern-theming-api-control-sample.md`](./modern-theming-api-control-sample.md) | 42 | Orienting around the `FluentThemingAPIControl` sample (mirrored in `../samples/`). |
 
+## Host visual standards — "make it look native"
+
+| Doc | Lines | When to load |
+|---|---:|---|
+| [`host-mda-modern-look.md`](./host-mda-modern-look.md) | 95 | Anything rendering inside MDA — the visual target. Floating command bar, Fluent field controls, Power Apps grid, custom-pages caveat (no auto-theme). |
+| [`host-canvas-modern-controls.md`](./host-canvas-modern-controls.md) | 32 | Orientation — what "modern controls" means in Canvas. Toggle, control catalog. |
+| [`host-canvas-modern-theming.md`](./host-canvas-modern-theming.md) | 100 | Designing a Spaarke brand theme — 16-slot brand ramp, YAML format, `App.Theme` Power Fx binding. Cross-surface brand consistency. |
+| [`host-code-pages-styling.md`](./host-code-pages-styling.md) | 90 | **Mandatory for `src/client/code-pages/**`** — Code Pages do NOT auto-inherit MDA theme; developer picks at root. |
+
 ## Microsoft official — Fluent 2 design system (cross-platform)
 
 | Doc | Lines | When to load |
@@ -52,5 +61,6 @@
 | `ui/fluent-v9-theming.md` | `theming.md`, `community/birkelbach-standard-custom-theming.md` |
 | `ui/fluent-v9-portal-gotcha.md` | `theming.md` §FluentProvider, `community/birkelbach-style-fluent-ui-9-pcfs.md` §portal, sample `samples/fluentui_react-v9/Provider/FluentProviderApplyStylesToPortals.stories.tsx` |
 | `ui/fluent-v9-react-version-boundaries.md` | `react-version-support.md` |
+| `ui/fluent-v9-host-visual-fit.md` | `host-mda-modern-look.md`, `host-canvas-modern-theming.md`, `host-code-pages-styling.md` |
 | `pcf/fluent-v9-modern-theming.md` | `pcf-modern-theming.md`, sample `samples/PowerApps-Samples_FluentThemingAPIControl/` |
 | `pcf/fluent-v9-canvas-vs-mda-disabled.md` | `community/birkelbach-style-fluent-ui-9-pcfs.md` |
