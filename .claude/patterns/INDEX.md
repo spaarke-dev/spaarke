@@ -22,9 +22,9 @@
 | [ai/](ai/INDEX.md) | 3 | Streaming endpoints, text extraction, analysis scopes | 2026-04-05 | Verified |
 | [testing/](testing/INDEX.md) | 3 | Unit tests, mocking, integration/arch tests | 2026-04-05 | Verified |
 | [webresource/](webresource/INDEX.md) | 4 | Code Pages, wizard wrappers, custom dialogs, subgrid rollup | 2026-04-05 | Verified |
-| [ui/](ui/INDEX.md) | 5 | Choice dialog + **Fluent v9 component authoring / theming / portal-gotcha / React-version boundaries** | 2026-05-26 | Verified + 4 Current |
+| [ui/](ui/INDEX.md) | 6 | Choice dialog + **Fluent v9 component authoring / theming / portal-gotcha / React-version boundaries / host-visual-fit** | 2026-05-28 | Verified + 5 Current |
 
-**Total**: 51 pointer files across 9 subdirectories (6 added 2026-05-26 for Fluent v9)
+**Total**: 52 pointer files across 9 subdirectories (7 added 2026-05-26..28 for Fluent v9 + host-visual-fit)
 
 ---
 
