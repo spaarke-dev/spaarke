@@ -19,7 +19,7 @@
 
 | ID | D-P | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [001](001-insight-artifact-envelope.poml) | D-P1 | InsightArtifact envelope POCOs (four-tier) | 🔲 | 3h | ✅ | — |
+| [001](001-insight-artifact-envelope.poml) | D-P1 | InsightArtifact envelope POCOs (four-tier) | ✅ | 3h | ✅ | — |
 | [002](002-iinsightgraph-interface.poml) | D-P17 | IInsightGraph interface + stub (Cosmos defers to Phase 1.5) | 🔲 | 2h | ✅ | — |
 
 ### Wave 2 — Infrastructure provisioning (mostly parallel)

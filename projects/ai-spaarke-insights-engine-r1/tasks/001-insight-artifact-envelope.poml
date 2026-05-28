@@ -1,7 +1,7 @@
 <task id="001" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>D-P1 — InsightArtifact envelope POCOs (four-tier taxonomy)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>1</wave>
     <estimated-effort>3 hours</estimated-effort>
     <tags>bff-api, models, domain-types, four-tier, dotnet</tags>
@@ -71,4 +71,27 @@
     <criterion testable="true">`Sprk.Bff.Api` builds clean; zero new warnings</criterion>
     <criterion testable="true">No imports from Services/Ai/* in this Models/Insights/ code (zone-B grep clean per §3.5.4)</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-05-28. Delivered:
+    - Models/Insights/InsightArtifact.cs — polymorphic envelope (System.Text.Json `[JsonPolymorphic]` on `type` discriminator) + FactArtifact / ObservationArtifact / PrecedentArtifact / InferenceArtifact subtypes + Value / ProducedBy / Scope companion records.
+    - Models/Insights/EvidenceRef.cs — refType / ref / optional quote shape per SPEC §3.4.1 worked example.
+    - Models/Insights/DeclineResponse.cs — five-field shape per D-49 (Reason / Explanation / MinimumEvidenceNeeded / SuggestedActions / ConfidenceInDecline).
+    - tests/unit/Sprk.Bff.Api.Tests/Models/Insights/InsightArtifactTests.cs — 7 xunit Facts; all pass: per-tier round-trip + EvidenceRef shape + DeclineResponse round-trip + heterogeneous polymorphic array.
+
+    Verification:
+    - `dotnet build src/server/api/Sprk.Bff.Api/` succeeded clean — zero new warnings, zero errors (17 pre-existing warnings unchanged).
+    - 7/7 tests pass via standalone runner (test project Sprk.Bff.Api.Tests has pre-existing compile errors in EmbeddingMigrationServiceTests / AppOnlyDocumentAnalysisJobHandlerTests / EmailAnalysisIntegrationTests referencing types not present in current Sprk.Bff.Api — verified pre-existing by stashing my work, build still fails with same 7 errors; unrelated to this task and out of scope).
+    - SPEC §3.5.4 forbidden-imports grep clean: zero matches in Models/Insights/.
+
+    Quality gates:
+    - code-review: PASS — zero AI smells, zero warnings, zero criticals; metrics within thresholds; positive patterns acknowledged.
+    - adr-check: PASS — ADR-013 §3.5 facade boundary compliant, ADR-010 POCO-only (no DI footprint), ADR-007 N/A (no Graph), no violations.
+
+    Judgment calls:
+    - Used C# records (immutable) over classes — matches POML "Record types" wording, cleaner serialization, no accidental mutation in pipelines.
+    - `PrecedentArtifact` does NOT carry `confidence` on the wire (matches SPEC §3.4.2 worked example `"confidence": null`; Precedents are SME-confirmed per D-46) and adds `Status` (lifecycle state per design §2.1 Precedent row + SPEC §3.4.2 `"status": "confirmed"`).
+    - `Value.Raw` typed as `JsonElement` to preserve arbitrary JSON (string enum, integer, nested Precedent object) without custom converters.
+    - All POCOs marked `sealed record` per Spaarke modern-C# convention.
+  </notes>
 </task>
