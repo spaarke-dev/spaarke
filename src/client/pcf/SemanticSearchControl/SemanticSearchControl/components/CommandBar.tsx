@@ -35,13 +35,13 @@ import {
   Popover,
   PopoverTrigger,
   PopoverSurface,
-  Switch,
   TabList,
   Tab,
+  Tooltip,
   makeStyles,
+  mergeClasses,
   shorthands,
   tokens,
-  Text,
 } from '@fluentui/react-components';
 import { AppsList20Regular, Grid20Regular, ChevronDownRegular } from '@fluentui/react-icons';
 // Deep-path import (NOT the barrel) — same React-16-via-Lexical-via-barrel issue
@@ -95,8 +95,50 @@ const useStyles = makeStyles({
     flex: 1,
     minWidth: 0,
   },
-  associatedSwitch: {
-    // Keep label + switch inline; rely on Fluent default sizing.
+  // v1.1.49 — 2-state Associated/All toggle (Item 8 Part C).
+  // Replaces the Fluent v9 Switch with a token-driven 2-button group so the
+  // ACTIVE state can carry an unambiguous color cue: green for "All
+  // Documents", brand-blue for "Associated Only". Inactive state is neutral.
+  // All values flow through `tokens.*` per ADR-021 so dark mode + brand
+  // themes resolve correctly.
+  scopeToggleGroup: {
+    display: 'inline-flex',
+    alignItems: 'stretch',
+    ...shorthands.borderRadius(tokens.borderRadiusMedium),
+    ...shorthands.border(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
+    ...shorthands.overflow('hidden'),
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  scopeToggleButton: {
+    minWidth: 'auto',
+    ...shorthands.borderRadius('0px'),
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightRegular,
+    color: tokens.colorNeutralForeground2,
+    backgroundColor: 'transparent',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+  },
+  scopeToggleActiveAll: {
+    backgroundColor: tokens.colorPaletteGreenBackground2,
+    color: tokens.colorPaletteGreenForeground2,
+    fontWeight: tokens.fontWeightSemibold,
+    ':hover': {
+      backgroundColor: tokens.colorPaletteGreenBackground2,
+    },
+  },
+  scopeToggleActiveAssociated: {
+    backgroundColor: tokens.colorBrandBackground2,
+    color: tokens.colorBrandForeground2,
+    fontWeight: tokens.fontWeightSemibold,
+    ':hover': {
+      backgroundColor: tokens.colorBrandBackground2,
+    },
   },
   filterButton: {
     // Subtle button with the filter label + selection summary.
@@ -207,11 +249,18 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
   // observe `filters.associatedOnly` mutations. We MUST therefore route
   // through `onFiltersChange` — never via a separate handler — so the
   // parent's existing ref + effect logic fires unchanged.
-  const handleAssociatedOnlyChange = React.useCallback(
-    (ev: React.ChangeEvent<HTMLInputElement>) => {
-      onFiltersChange({ ...filters, associatedOnly: ev.currentTarget.checked });
+  //
+  // v1.1.49 — UI reskinned to a 2-state button group (Item 8 Part C). The
+  // boolean semantic is unchanged: true = Associated Only, false = All
+  // Documents. Each button writes the new value through `onFiltersChange`
+  // so the parent's auto-search ref + effect fire exactly as before.
+  const associatedOnlyChecked = filters.associatedOnly ?? false;
+  const setAssociatedOnly = React.useCallback(
+    (next: boolean) => {
+      if (next === associatedOnlyChecked) return;
+      onFiltersChange({ ...filters, associatedOnly: next });
     },
-    [filters, onFiltersChange]
+    [associatedOnlyChecked, filters, onFiltersChange]
   );
 
   // ── File Type (multi-select) ───────────────────────────────────────────
@@ -282,15 +331,44 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
     <div className={styles.root} role="toolbar" aria-label="Document filters and view">
       {/* Associated Only — only shown for entity-scoped surfaces. The auto-search
           ref/effect in SemanticSearchControl.tsx observes mutations to filters.associatedOnly
-          and re-fires the search on its own. This component must not call search() directly. */}
+          and re-fires the search on its own. This component must not call search() directly.
+
+          v1.1.49 — UI is a 2-state button group instead of a Switch (Item 8 Part C).
+          The underlying contract is unchanged: `filters.associatedOnly` is the
+          boolean source of truth; both buttons just call onFiltersChange with the
+          appropriate value. Active button gets a token-driven color cue (green
+          for All Documents, brand-blue for Associated Only). */}
       {showAssociatedOnly && (
-        <Switch
-          className={styles.associatedSwitch}
-          label="Associated Only"
-          checked={filters.associatedOnly ?? false}
-          onChange={handleAssociatedOnlyChange}
-          disabled={disabled}
-        />
+        <div
+          className={styles.scopeToggleGroup}
+          role="group"
+          aria-label="Document scope toggle"
+        >
+          <Button
+            className={mergeClasses(
+              styles.scopeToggleButton,
+              !associatedOnlyChecked ? styles.scopeToggleActiveAll : undefined
+            )}
+            appearance="subtle"
+            onClick={() => setAssociatedOnly(false)}
+            aria-pressed={!associatedOnlyChecked}
+            disabled={disabled}
+          >
+            All Documents
+          </Button>
+          <Button
+            className={mergeClasses(
+              styles.scopeToggleButton,
+              associatedOnlyChecked ? styles.scopeToggleActiveAssociated : undefined
+            )}
+            appearance="subtle"
+            onClick={() => setAssociatedOnly(true)}
+            aria-pressed={associatedOnlyChecked}
+            disabled={disabled}
+          >
+            Associated Only
+          </Button>
+        </div>
       )}
 
       {/* File Type — multi-select via MenuItemCheckbox */}
@@ -419,7 +497,11 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
       {/* View toggle — list (AppsList20Regular) / card (Grid20Regular).
           v1.1.47: hidden when `showViewToggle === false` so a host form
           can lock the surface to a single view (the parent simultaneously
-          forces `view` to `defaultView` so this also enforces the lock). */}
+          forces `view` to `defaultView` so this also enforces the lock).
+          v1.1.49 (Item 7): icon-only tabs. The Tooltip wrap provides the
+          accessible name for hover + screen-reader readers; the Tab's own
+          `aria-label` is still set so AT users get the same label even
+          when the tooltip is not surfaced (e.g. touch). */}
       {showViewToggle && (
         <TabList
           className={styles.viewToggle}
@@ -429,12 +511,12 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
           size="small"
           aria-label="View toggle"
         >
-          <Tab value="list" icon={<AppsList20Regular />} aria-label="List view">
-            <Text size={100}>List</Text>
-          </Tab>
-          <Tab value="card" icon={<Grid20Regular />} aria-label="Card view">
-            <Text size={100}>Card</Text>
-          </Tab>
+          <Tooltip content="List view" relationship="label">
+            <Tab value="list" icon={<AppsList20Regular />} aria-label="List view" />
+          </Tooltip>
+          <Tooltip content="Card view" relationship="label">
+            <Tab value="card" icon={<Grid20Regular />} aria-label="Card view" />
+          </Tooltip>
         </TabList>
       )}
     </div>

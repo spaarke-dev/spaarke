@@ -63,7 +63,6 @@ import {
 import {
   ArrowDownload20Regular,
   Delete20Regular,
-  Dismiss20Regular,
   DocumentBulletList20Regular,
   Link20Regular,
   Mail20Regular,
@@ -173,6 +172,11 @@ const useStyles = makeStyles({
 export const BulkActionBar: React.FC<IBulkActionBarProps> = ({
   selectedIds,
   docTypeOptions,
+  // v1.1.49 — `onClear` is no longer surfaced as a visible Dismiss button
+  // (UAT Item 4) but the prop stays in the contract for back-compat with
+  // any caller (or future affordance) that wants to drive a programmatic
+  // clear. We accept + ignore here; intentionally unused.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onClear,
   onEmail,
   onDownload,
@@ -339,19 +343,13 @@ export const BulkActionBar: React.FC<IBulkActionBarProps> = ({
           />
         </Tooltip>
 
+        {/* v1.1.49 — UAT Item 4: the X (Dismiss) "Clear selection" affordance
+            is removed. Users clear selection via the column-header select-all
+            checkbox (uncheck it) OR by clicking individual row/card checkboxes.
+            The `onClear` prop stays in the contract so callers (and tests)
+            don't need a shape change; it is simply no longer surfaced as a
+            visible action in the bulk bar. */}
         <span className={styles.divider} aria-hidden="true" />
-
-        {/* Clear selection — small X icon at the far end of the bulk group. */}
-        <Tooltip content="Clear selection" relationship="label">
-          <Button
-            className={styles.iconButton}
-            appearance="subtle"
-            size="small"
-            icon={<Dismiss20Regular />}
-            onClick={onClear}
-            aria-label="Clear selection"
-          />
-        </Tooltip>
       </div>
 
       {/* Delete confirmation Dialog — Fluent v9 Dialog is portal-rendered;

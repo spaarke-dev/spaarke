@@ -38,7 +38,7 @@ import {
   useId,
   useToastController,
 } from '@fluentui/react-components';
-import { Add20Regular, ArrowClockwise20Regular } from '@fluentui/react-icons';
+import { Add20Regular, ArrowClockwise20Regular, Open20Regular } from '@fluentui/react-icons';
 import {
   ISemanticSearchControlProps,
   SearchFilters,
@@ -55,6 +55,7 @@ import {
   ListView,
   CommandBar,
   BulkActionBar,
+  FilePreviewDialog,
   type ListSortColumn,
   type ListSortDirection,
 } from './components';
@@ -159,10 +160,13 @@ const useStyles = makeStyles({
   // edge). The internal <BulkActionBar> renders null at zero selection
   // so the row gracefully collapses to just Reload + Add when nothing is
   // selected (UAT request — no separate sticky bulk bar).
+  // v1.1.49 — UAT Item 3: bump the horizontal gap between toolbar icons
+  // from `S` to `M` so refresh / add / open-full-view + the bulk-action
+  // icon group breathe. Other rules unchanged.
   emptyStateToolbar: {
     display: 'flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
+    gap: tokens.spacingHorizontalM,
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
   },
@@ -300,6 +304,17 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
   // Email dialog state (per-row email — emails ONE document)
   const [emailDialogResult, setEmailDialogResult] = useState<SearchResult | null>(null);
+
+  // ── v1.1.49 — Host-level preview dialog state (Item 6) ─────────────────
+  // Both list view AND card view now route preview-open through the SAME
+  // host-mounted FilePreviewDialog so the navigation set (Prev/Next) is
+  // shared across views. When the user picks 5 cards then clicks one
+  // preview, Prev/Next walks the 5; when nothing is selected, it walks
+  // the full current result set. ListView's internal preview state is
+  // retained for back-compat (it now stays unused since the host owns the
+  // dialog, but pulling it out would be a larger refactor of ListView's
+  // public surface — leave for future cleanup).
+  const [hostPreviewDocId, setHostPreviewDocId] = useState<string | null>(null);
 
   // Multi-document email wizard state. When open, passes the current results
   // (top N visible) into the wizard's first step where the user can deselect
@@ -1043,6 +1058,64 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     [filteredResults, selectedIds]
   );
 
+  // ── v1.1.49 — Card-view selection helper (Item 1) ─────────────────────
+  // Single-id toggle wrapper so each ResultCard can flip its own selection
+  // through the parent-owned `selectedIds` set.
+  const handleToggleCardSelect = useCallback(
+    (documentId: string) => {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        if (next.has(documentId)) {
+          next.delete(documentId);
+        } else {
+          next.add(documentId);
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  // ── v1.1.49 — Host-level preview navigation set (Item 6) ───────────────
+  // Mirrors ListView's previewNavigationSet logic so list AND card views
+  // share the same Prev/Next nav semantics. Selection wins; otherwise
+  // walk the full filteredResults.
+  const hostPreviewNavSet = useMemo<SearchResult[]>(() => {
+    if (selectedIds.size > 0) {
+      return filteredResults.filter(r => selectedIds.has(r.documentId));
+    }
+    return filteredResults;
+  }, [selectedIds, filteredResults]);
+
+  const hostPreviewTarget = useMemo<SearchResult | null>(() => {
+    if (!hostPreviewDocId) return null;
+    return (
+      hostPreviewNavSet.find(r => r.documentId === hostPreviewDocId) ??
+      filteredResults.find(r => r.documentId === hostPreviewDocId) ??
+      null
+    );
+  }, [hostPreviewDocId, hostPreviewNavSet, filteredResults]);
+
+  const hostPreviewIndex = useMemo<number>(() => {
+    if (!hostPreviewDocId) return -1;
+    return hostPreviewNavSet.findIndex(r => r.documentId === hostPreviewDocId);
+  }, [hostPreviewDocId, hostPreviewNavSet]);
+
+  const handleHostPreviewNavigate = useCallback(
+    (nextIndex: number) => {
+      if (nextIndex < 0 || nextIndex >= hostPreviewNavSet.length) return;
+      setHostPreviewDocId(hostPreviewNavSet[nextIndex].documentId);
+    },
+    [hostPreviewNavSet]
+  );
+
+  // Card-view preview-open handler — fired by ResultCard via the new
+  // `onOpenPreview` prop (Item 6).
+  const handleOpenHostPreview = useCallback((result: SearchResult) => {
+    setHostPreviewDocId(result.documentId);
+    AppInsightsService.trackEvent('preview_dialog_opened', { source: 'card' });
+  }, []);
+
   // Toast dispatch helpers — small wrappers so handlers below stay readable.
   const showToast = useCallback(
     (
@@ -1505,6 +1578,18 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
             onAddDocument={handleAddDocument}
             onOpenViewer={handleOpenViewer}
             onEmailDocuments={emailWizardItems.length > 0 ? handleEmailDocuments : undefined}
+            // v1.1.49 — Item 1: card selection wiring (host-owned).
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleCardSelect}
+            // v1.1.49 — Item 6: card preview routes through the SAME host-mounted
+            // FilePreviewDialog as the list view, so Prev/Next nav set is shared.
+            onOpenPreview={handleOpenHostPreview}
+            // v1.1.49 — Item 2: the host renders the consolidated single-row
+            // toolbar above ResultsList; suppress the duplicate inner toolbar.
+            hideToolbar
+            // v1.1.49 — Item 9: lazy-load sentinel — fires loadMore when the
+            // bottom of the card grid enters the viewport.
+            onLoadMoreSentinel={!filters.associatedOnly && hasMore && !isLoadingMore ? loadMore : undefined}
             compactMode={compactMode}
           />
         </>
@@ -1570,10 +1655,25 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           />
         </Tooltip>
       )}
-      {/* "Open full viewer" is intentionally omitted in the empty state.
-          DocumentRelationshipViewer is single-document-centric (requires a
-          documentId) — opening it with no results would just show a
-          "Missing Parameters" error. */}
+      {/* v1.1.49 — UAT Items 2 & 5: "Open full viewer" button (Document
+          Relationship Viewer) is rendered in BOTH list and card view
+          toolbars so users always have a single, consistent path to the
+          full viewer. The button is suppressed only when no document is
+          available (results empty AND no first-doc fallback) so the
+          underlying handler doesn't open the viewer with no docId — the
+          legacy "single-document-centric requires-docId" guard. */}
+      {results.length > 0 && (
+        <Tooltip content="Open full viewer" relationship="label">
+          <Button
+            className={styles.emptyStateToolbarButton}
+            appearance="subtle"
+            size="small"
+            icon={<Open20Regular />}
+            aria-label="Open full viewer"
+            onClick={handleOpenViewer}
+          />
+        </Tooltip>
+      )}
     </div>
   );
 
@@ -1656,8 +1756,48 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.48 • Built 2026-05-27</Text>
+        <Text size={100}>v1.1.49 • Built 2026-05-28</Text>
       </div>
+
+      {/* v1.1.49 — Host-mounted preview dialog (Item 6). Single instance per
+          PCF surface so list AND card views share the navigation set. The
+          callbacks all close over the CURRENT target — when the user clicks
+          Next, `hostPreviewDocId` flips and the closures rebind on the next
+          render. When the host dialog is open, ResultCard / ResultsList do
+          NOT mount their own FilePreviewDialog (the `onOpenPreview` prop
+          flips that path off).
+
+          Note: ListView ALSO renders its own FilePreviewDialog. That is
+          back-compat and renders ONLY when the user opens preview from a
+          row action while in list view (the host's `hostPreviewDocId` is
+          null in that case). This intentionally tracks the v1.1.46 ListView
+          behavior we don't want to regress. Future cleanup: thread the
+          host's setHostPreviewDocId into ListView so it ALSO routes through
+          the host dialog — left for next round to avoid expanding ListView
+          surface in this patch. */}
+      {hostPreviewTarget && (
+        <FilePreviewDialog
+          open={!!hostPreviewTarget}
+          documentName={hostPreviewTarget.name}
+          documentId={hostPreviewTarget.documentId}
+          documentType={hostPreviewTarget.documentType}
+          createdAt={hostPreviewTarget.createdAt}
+          createdBy={hostPreviewTarget.createdBy}
+          onClose={() => setHostPreviewDocId(null)}
+          fetchPreviewUrl={() => handlePreviewTelemetry(hostPreviewTarget)}
+          onFetchSummary={() => handleSummary(hostPreviewTarget)}
+          onOpenFile={mode => handleOpenFileTelemetry(hostPreviewTarget, mode)}
+          onOpenRecord={() => handleOpenRecordTelemetry(hostPreviewTarget, false)}
+          onEmailDocument={() => handleEmailDocumentTelemetry(hostPreviewTarget)}
+          onCopyLink={() => handleCopyLinkTelemetry(hostPreviewTarget)}
+          onToggleWorkspace={() => handleToggleWorkspaceTelemetry(hostPreviewTarget)}
+          isInWorkspace={isInWorkspace(hostPreviewTarget)}
+          onFindSimilar={() => handleFindSimilarTelemetry(hostPreviewTarget)}
+          navigationTotal={hostPreviewNavSet.length}
+          currentIndex={hostPreviewIndex >= 0 ? hostPreviewIndex : undefined}
+          onNavigate={handleHostPreviewNavigate}
+        />
+      )}
 
       {/* Find Similar — shared iframe dialog */}
       <FindSimilarDialog open={!!findSimilarUrl} onClose={() => setFindSimilarUrl(null)} url={findSimilarUrl} />

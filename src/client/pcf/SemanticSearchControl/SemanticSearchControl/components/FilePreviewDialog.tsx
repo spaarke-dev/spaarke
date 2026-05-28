@@ -67,6 +67,7 @@ import {
   DialogTitle,
   DialogActions,
   Button,
+  Divider,
   Tooltip,
   Spinner,
   Text,
@@ -236,6 +237,27 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
   },
+  // v1.1.49 — Prev/Next nav cluster relocated from footer (DialogActions) to
+  // the title bar's right side, just before the 3-dot DocumentRowMenu.
+  titleNav: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
+  },
+  // Subtle vertical separator between the nav cluster and the menu.
+  // Fluent's <Divider vertical /> is the canonical hairline; margin
+  // gives breathing room without crowding the icons.
+  titleNavDivider: {
+    height: '20px',
+    marginLeft: tokens.spacingHorizontalXS,
+    marginRight: tokens.spacingHorizontalXS,
+  },
+  titleNavCounter: {
+    color: tokens.colorNeutralForeground2,
+    paddingLeft: tokens.spacingHorizontalXXS,
+    paddingRight: tokens.spacingHorizontalXXS,
+    fontVariantNumeric: 'tabular-nums',
+  },
   // 2-column body grid: fluid iframe column | 320 px metadata pane.
   // v1.1.46 — iframe column is now `1fr` so it expands to fill the wider
   // 1280 px surface (previously a hard 640 px, which left a wide gap at
@@ -394,21 +416,8 @@ const useStyles = makeStyles({
     borderTopColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
   },
-  // Leading-edge nav cluster: [Prev] [N of M] [Next]. Centered counter
-  // uses neutral foreground so it reads as auxiliary metadata, not an
-  // interactive control.
-  footerNav: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  footerCounter: {
-    color: tokens.colorNeutralForeground3,
-    // Minimum width keeps the counter from flickering when the index
-    // changes single-digit → double-digit (e.g., "9 of 12" → "10 of 12").
-    minWidth: '64px',
-    textAlign: 'center' as const,
-  },
+  // (v1.1.46 footerNav + footerCounter styles removed in v1.1.49 when nav
+  //  moved to the title bar — see titleNav + titleNavCounter above.)
 });
 
 // ---------------------------------------------------------------------------
@@ -910,6 +919,36 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
               isInWorkspace ? 'Document actions (in workspace)' : 'Document actions'
             }
           >
+            {navigationEnabled && (
+              <>
+                <div className={styles.titleNav} role="group" aria-label="Document navigation">
+                  <Tooltip content="Previous document" relationship="label">
+                    <Button
+                      appearance="subtle"
+                      size="small"
+                      icon={<ChevronLeft20Regular />}
+                      aria-label="Previous document"
+                      disabled={prevDisabled}
+                      onClick={handlePrev}
+                    />
+                  </Tooltip>
+                  <Text size={200} className={styles.titleNavCounter} aria-live="polite">
+                    {(currentIndex ?? 0) + 1} of {navigationTotal}
+                  </Text>
+                  <Tooltip content="Next document" relationship="label">
+                    <Button
+                      appearance="subtle"
+                      size="small"
+                      icon={<ChevronRight20Regular />}
+                      aria-label="Next document"
+                      disabled={nextDisabled}
+                      onClick={handleNext}
+                    />
+                  </Tooltip>
+                </div>
+                <Divider vertical className={styles.titleNavDivider} />
+              </>
+            )}
             <DocumentRowMenu
               document={target}
               onAction={handleRowAction}
@@ -953,43 +992,12 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
           </div>
         </div>
 
-        {/* Footer (v1.1.46): leading-edge Prev/Next nav cluster (when the
-            parent supplies navigationTotal+currentIndex+onNavigate),
-            trailing-edge Close. When nav is NOT enabled, the leading edge
-            renders a zero-width spacer so the footer chrome (border-top,
-            padding, justify-content: space-between) stays consistent and
-            the Close button stays right-aligned.
-            "Find similar" and "Open file" remain reachable via the 3-dot
-            menu in the title bar — the redundant footer affordances were
-            removed per UAT round 1 feedback. */}
+        {/* Footer (v1.1.49): Close only. Prev/Next nav cluster relocated to
+            the title bar (right side, before the 3-dot menu) per UAT round 4
+            feedback — keeps document navigation visually adjacent to the
+            document-context actions (3-dot menu) instead of split across
+            opposite edges of the dialog. */}
         <DialogActions className={styles.footer}>
-          {navigationEnabled ? (
-            <div className={styles.footerNav} role="group" aria-label="Document navigation">
-              <Tooltip content="Previous document" relationship="label">
-                <Button
-                  appearance="subtle"
-                  icon={<ChevronLeft20Regular />}
-                  aria-label="Previous document"
-                  disabled={prevDisabled}
-                  onClick={handlePrev}
-                />
-              </Tooltip>
-              <Text size={200} className={styles.footerCounter} aria-live="polite">
-                {(currentIndex ?? 0) + 1} of {navigationTotal}
-              </Text>
-              <Tooltip content="Next document" relationship="label">
-                <Button
-                  appearance="subtle"
-                  icon={<ChevronRight20Regular />}
-                  aria-label="Next document"
-                  disabled={nextDisabled}
-                  onClick={handleNext}
-                />
-              </Tooltip>
-            </div>
-          ) : (
-            <span aria-hidden="true" />
-          )}
           <Button appearance="primary" onClick={onClose}>
             Close
           </Button>

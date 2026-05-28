@@ -61,6 +61,122 @@ export class SemanticSearchApiService {
   }
 
   /**
+   * v1.1.49 (Item 8 Part B) — "All Documents" client-side merge.
+   *
+   * Investigation (see SemanticSearchService.cs Step 4 BuildFilter + line 96
+   * SearchAssociatedOnlyAsync): the BFF treats `associatedOnly` as TWO
+   * disjoint paths:
+   *   - `true`  → bypasses Azure AI Search, queries Dataverse directly →
+   *               returns ALL parent-associated docs (no semantic filter)
+   *   - `false` → goes through Azure AI Search WITH entity scope filter →
+   *               returns ONLY indexed docs scoped by entity (recently
+   *               uploaded docs may not be in the index yet)
+   * This is BY DESIGN — the AI-Search path needs an indexed doc to score it.
+   * To deliver the user's expected "All Documents = semantic + associated"
+   * behavior we therefore have to MERGE client-side. We fire both paths in
+   * parallel, dedupe by `documentId`, and sort by combinedScore DESC, then
+   * modifiedAt DESC. The merged result count + paging semantics are
+   * preserved relative to the AI-Search path (the associated-only path
+   * contributes any docs the AI-Search path missed).
+   *
+   * IMPORTANT: only triggered when scope is entity-scoped AND
+   * associatedOnly=false. The associatedOnly=true path is unchanged. When
+   * scope = 'all'/'custom' the union is meaningless (no parent FK) so we
+   * skip it.
+   */
+  async searchUnion(request: SearchRequest): Promise<SearchResponse> {
+    const isEntityScope = ['matter', 'project', 'invoice', 'account', 'contact', 'document', 'entity'].includes(request.scope);
+    const associatedOnly = request.filters?.associatedOnly === true;
+
+    // Not eligible for union — fall back to plain search.
+    if (!isEntityScope || associatedOnly) {
+      return this.search(request);
+    }
+
+    // Build the associatedOnly=true variant. We reuse the request shape but
+    // flip the filter and force offset=0 so the associated path always
+    // returns from the top (it's a small N — direct Dataverse query).
+    const associatedRequest: SearchRequest = {
+      ...request,
+      filters: {
+        ...(request.filters ?? {
+          documentTypes: [],
+          matterTypes: [],
+          dateRange: null,
+          fileTypes: [],
+          threshold: 0,
+          searchMode: 'hybrid',
+        }),
+        associatedOnly: true,
+      },
+      options: { ...request.options, offset: 0 },
+    };
+
+    // Fire both in parallel. If either fails, we still want partial coverage
+    // — wrap in `Promise.allSettled` and fall back to whichever resolved.
+    const [semanticOutcome, associatedOutcome] = await Promise.allSettled([
+      this.search(request),
+      this.search(associatedRequest),
+    ]);
+
+    const semantic =
+      semanticOutcome.status === 'fulfilled' ? semanticOutcome.value : null;
+    const associated =
+      associatedOutcome.status === 'fulfilled' ? associatedOutcome.value : null;
+
+    // Both failed — re-throw the semantic error (the primary path).
+    if (!semantic && !associated) {
+      if (semanticOutcome.status === 'rejected') {
+        throw semanticOutcome.reason;
+      }
+      if (associatedOutcome.status === 'rejected') {
+        throw associatedOutcome.reason;
+      }
+    }
+
+    // Dedupe by documentId. Semantic results win on tie (their
+    // combinedScore is meaningful; associated-only path returns score=0).
+    const byId = new Map<string, typeof semantic extends null ? never : SearchResponse['results'][number]>();
+    if (associated) {
+      for (const r of associated.results) {
+        if (r.documentId) byId.set(r.documentId, r);
+      }
+    }
+    if (semantic) {
+      for (const r of semantic.results) {
+        if (r.documentId) byId.set(r.documentId, r);
+      }
+    }
+
+    // Sort: combinedScore DESC, then modifiedAt DESC. Stable order so the
+    // user's mental "this is most relevant" + "this is most recent" model
+    // both line up at the top of the list.
+    const merged = Array.from(byId.values()).sort((a, b) => {
+      const scoreDelta = (b.combinedScore ?? 0) - (a.combinedScore ?? 0);
+      if (scoreDelta !== 0) return scoreDelta;
+      const aMod = a.modifiedAt ? new Date(a.modifiedAt).getTime() : 0;
+      const bMod = b.modifiedAt ? new Date(b.modifiedAt).getTime() : 0;
+      return bMod - aMod;
+    });
+
+    // Composite totalCount: prefer the larger of the two reported totals
+    // so the footer reads "N of M" with the user's expected upper bound.
+    const totalCount = Math.max(
+      semantic?.totalCount ?? 0,
+      associated?.totalCount ?? 0,
+      merged.length
+    );
+
+    return {
+      results: merged,
+      totalCount,
+      metadata:
+        semantic?.metadata ??
+        associated?.metadata ?? { searchTimeMs: 0, query: request.query },
+    };
+  }
+
+  /**
    * Execute a semantic search
    * @param request - Search request parameters
    * @returns Search response with results

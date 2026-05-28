@@ -46,6 +46,7 @@ import {
   tokens,
   Text,
   Button,
+  Checkbox,
   Tooltip,
 } from '@fluentui/react-components';
 import {
@@ -243,9 +244,23 @@ const useStyles = makeStyles({
     backgroundImage: `repeating-linear-gradient(45deg, ${tokens.colorNeutralBackground2}, ${tokens.colorNeutralBackground2} 8px, ${tokens.colorNeutralBackground3} 8px, ${tokens.colorNeutralBackground3} 9px)`,
     ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
   },
+  // v1.1.49 — Selection checkbox overlay (Item 1). Top-left of the preview
+  // area, with `pointerEvents: auto` so the card's `onClick` doesn't swallow
+  // the toggle. The inner Checkbox calls `stopPropagation` defensively, but
+  // separating the absolute positioning here lets it overlap the badge area
+  // cleanly without re-flowing other corners.
+  checkboxWrap: {
+    position: 'absolute',
+    top: tokens.spacingVerticalXS,
+    left: tokens.spacingHorizontalXS,
+    zIndex: 2,
+  },
+  // v1.1.49 — Match-score badge moves to BELOW the checkbox in the same
+  // top-left column to free the top-right for AI sparkle + 3-dot menu
+  // (Item 1 reshuffle).
   badgeWrap: {
     position: 'absolute',
-    top: tokens.spacingVerticalS,
+    top: '32px',
     left: tokens.spacingHorizontalS,
   },
   toolsWrap: {
@@ -255,6 +270,13 @@ const useStyles = makeStyles({
     display: 'inline-flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalXXS,
+  },
+  // v1.1.49 — Selected-state card chrome (Item 1). Brand-strokes the border
+  // + slight shadow lift so the user sees the toggle effect clearly. Token-
+  // only per ADR-021.
+  cardSelected: {
+    ...shorthands.borderColor(tokens.colorBrandStroke1),
+    boxShadow: tokens.shadow4,
   },
   // The hero icon sits centered in the preview placeholder. Its color is set
   // inline (heroColor() above) so the same component supports type tinting.
@@ -373,6 +395,9 @@ export const ResultCard: React.FC<IResultCardProps> = ({
   onOpenFile,
   onOpenRecord,
   onFindSimilar,
+  onOpenPreview,
+  isSelected,
+  onToggleSelect,
   onPreview,
   onSummary,
   onEmailDocument,
@@ -385,7 +410,20 @@ export const ResultCard: React.FC<IResultCardProps> = ({
   compactMode,
 }) => {
   const styles = useStyles();
+  // v1.1.49 — When `onOpenPreview` is supplied, the host owns the
+  // FilePreviewDialog (shared with the list view, Item 6) and we route
+  // preview-open through it. The local `previewOpen` path is back-compat
+  // only — kept so any caller that does NOT pass `onOpenPreview` still
+  // works (legacy unit tests, standalone card use).
   const [previewOpen, setPreviewOpen] = useState(false);
+  const useHostPreview = typeof onOpenPreview === 'function';
+  const openPreview = useCallback(() => {
+    if (useHostPreview) {
+      onOpenPreview!();
+    } else {
+      setPreviewOpen(true);
+    }
+  }, [useHostPreview, onOpenPreview]);
   const sparkleTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const fileKind = classifyFileType(result.fileType);
@@ -401,12 +439,15 @@ export const ResultCard: React.FC<IResultCardProps> = ({
       // menu item buttons) MUST NOT open the preview dialog. DocumentRowMenu
       // trigger also calls stopPropagation internally — defense-in-depth here.
       if ((ev.target as HTMLElement).closest('button')) return;
-      setPreviewOpen(true);
+      // v1.1.49 — also skip if the click came from inside the checkbox input
+      // (the Checkbox stops propagation, but we belt-and-braces this).
+      if ((ev.target as HTMLElement).closest('input[type="checkbox"]')) return;
+      openPreview();
       // Mirror v1.1.46 behavior: the parent's `onClick` writes the selectedDocumentId
       // output so other surfaces (parent form, downstream selections) can react.
       onClick();
     },
-    [onClick]
+    [onClick, openPreview]
   );
 
   const handleCardKeyDown = useCallback(
@@ -415,11 +456,12 @@ export const ResultCard: React.FC<IResultCardProps> = ({
       // nested button). Matches v1.1.46's RecordCardShell keyboard contract.
       if (ev.key !== 'Enter' && ev.key !== ' ') return;
       if ((ev.target as HTMLElement).closest('button')) return;
+      if ((ev.target as HTMLElement).closest('input[type="checkbox"]')) return;
       ev.preventDefault();
-      setPreviewOpen(true);
+      openPreview();
       onClick();
     },
-    [onClick]
+    [onClick, openPreview]
   );
 
   const handleOpenRecord = useCallback(() => {
@@ -447,7 +489,7 @@ export const ResultCard: React.FC<IResultCardProps> = ({
     (action: DocumentRowAction) => {
       switch (action) {
         case 'preview':
-          setPreviewOpen(true);
+          openPreview();
           return;
         case 'aiSummary':
           handleAiSummaryFromMenu();
@@ -490,6 +532,7 @@ export const ResultCard: React.FC<IResultCardProps> = ({
     },
     [
       handleAiSummaryFromMenu,
+      openPreview,
       onOpenFile,
       onFindSimilar,
       onCopyLink,
@@ -515,16 +558,40 @@ export const ResultCard: React.FC<IResultCardProps> = ({
   return (
     <>
       <div
-        className={styles.card}
+        className={mergeClasses(styles.card, isSelected ? styles.cardSelected : undefined)}
         role="button"
         tabIndex={0}
         aria-label={ariaLabel}
+        aria-pressed={isSelected ? 'true' : undefined}
         onClick={handleCardClick}
         onKeyDown={handleCardKeyDown}
       >
         {/* ─── Top preview placeholder ─────────────────────────────────── */}
-        <div className={styles.preview} aria-hidden="true">
-          <div className={styles.badgeWrap}>
+        <div className={styles.preview}>
+          {/* v1.1.49 — Selection checkbox overlay (Item 1).
+              Rendered only when the parent wired `onToggleSelect`; defensive
+              `stopPropagation` on click + keydown so card-open does not also
+              fire. Tooltip wraps for accessibility. */}
+          {typeof onToggleSelect === 'function' && (
+            <div className={styles.checkboxWrap}>
+              <Tooltip content={isSelected ? 'Deselect' : 'Select'} relationship="label">
+                <Checkbox
+                  checked={!!isSelected}
+                  onChange={() => onToggleSelect()}
+                  onClick={ev => ev.stopPropagation()}
+                  onKeyDown={ev => {
+                    // Space toggles via native checkbox; intercept here so the
+                    // card's Enter/Space handler doesn't ALSO fire.
+                    if (ev.key === ' ' || ev.key === 'Enter') {
+                      ev.stopPropagation();
+                    }
+                  }}
+                  aria-label={isSelected ? `Deselect ${result.name}` : `Select ${result.name}`}
+                />
+              </Tooltip>
+            </div>
+          )}
+          <div className={styles.badgeWrap} aria-hidden="true">
             <ScoreBadge
               score={result.combinedScore}
               className={styles.badgeBase}
@@ -583,20 +650,26 @@ export const ResultCard: React.FC<IResultCardProps> = ({
         </div>
       </div>
 
-      <FilePreviewDialog
-        open={previewOpen}
-        documentName={result.name}
-        documentId={result.documentId}
-        documentType={result.documentType}
-        onClose={() => setPreviewOpen(false)}
-        fetchPreviewUrl={onPreview}
-        onOpenFile={onOpenFile}
-        onOpenRecord={handleOpenRecord}
-        onEmailDocument={onEmailDocument}
-        onCopyLink={onCopyLink}
-        onToggleWorkspace={onToggleWorkspace}
-        isInWorkspace={isInWorkspace}
-      />
+      {/* v1.1.49 — Local FilePreviewDialog is back-compat only. When the host
+          supplies `onOpenPreview` (Item 6), the host owns the dialog and the
+          local instance is suppressed so the navigation set + Prev/Next are
+          shared with the list view. */}
+      {!useHostPreview && (
+        <FilePreviewDialog
+          open={previewOpen}
+          documentName={result.name}
+          documentId={result.documentId}
+          documentType={result.documentType}
+          onClose={() => setPreviewOpen(false)}
+          fetchPreviewUrl={onPreview}
+          onOpenFile={onOpenFile}
+          onOpenRecord={handleOpenRecord}
+          onEmailDocument={onEmailDocument}
+          onCopyLink={onCopyLink}
+          onToggleWorkspace={onToggleWorkspace}
+          isInWorkspace={isInWorkspace}
+        />
+      )}
     </>
   );
 };
