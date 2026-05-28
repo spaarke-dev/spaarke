@@ -13,11 +13,11 @@
 
 | Field | Value |
 |---|---|
-| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.53** packaged, awaiting user UAT |
-| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `c75490a3` (v1.1.53); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.53 NOT yet merged |
-| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.53.zip` (210 KB) — user imports via `pac solution delete` then `pac solution import` |
-| **Pending user actions** | (1) UAT v1.1.53; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
-| **Next Action** | Awaiting user UAT feedback on v1.1.53. v1.1.53 addressed 5 UAT items: (1) Card pill order swapped — % chip LEFT, Relationship pill RIGHT; (2) blank blue similarity chip when 'associated' (matches grid); (3) removed small file-icon from card document title (hero icon redundant); (4) removed same icon from grid Document col + Type col now icon-only (DEFAULT 48px / MIN 40px); (5) Email modal maxWidth 720→1200px so it dominates the 1280px preview backdrop. FilePreview promotion (Option A, 3-5h) still deferred to v1.1.54. |
+| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.54** packaged, awaiting user UAT |
+| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `c9faeaec` (v1.1.54); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.54 NOT yet merged |
+| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.54.zip` (213 KB) — user imports via `pac solution delete` then `pac solution import` |
+| **Pending user actions** | (1) UAT v1.1.54; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
+| **Next Action** | Awaiting user UAT feedback on v1.1.54. v1.1.54 addressed 6 UAT items: (1) Card top-LEFT % pill removed; (2) 'associated' shows 100% in green chip (not blank); (3) pill row anchored to bottom of info area via flex 1 + marginTop auto; (4) grid mirrors 100% green chip; (5) **email preview-hide pattern** — close preview when email opens, re-open after (single-modal UX, replaces failed width-only fixes from v1.1.52/53); (6) menu standardization across row/card/preview — hide AI Summary + Toggle workspace + Rename; show Preview/Open File/Find Similar/Download/Copy link/Email/Open Record/Pin to top/Delete. AI sparkle column + card overlay removed. FilePreview promotion (Option A, 3-5h) still deferred to v1.1.55. |
 | **Compaction handoff** | See [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) — full session state for resuming in a fresh context |
 
 ### Files Modified This Session
@@ -33,7 +33,7 @@
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-**Project core complete; in UAT polish loop on SemanticSearchControl PCF.** 31 of 34 tasks merged to master (v1.1.45..v1.1.49 ALL in master via merge commit `b451bbe1`; v1.1.50..v1.1.53 pushed to origin but not yet merged). The session ran 8 polish rounds (v1.1.45 through v1.1.53) addressing iterative UAT feedback. Latest pending action: user UAT on v1.1.53 (ZIP at `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.53.zip`). v1.1.53 highlights: (a) Card pill order swapped + blank associated chip, (b) file-icon removed from both card title and grid Document column, (c) grid Type column converted to icon-only (matches card hero classification), (d) Email modal bumped 720→1200px to dominate the preview backdrop. FilePreview promotion (Option A, 3-5 hours) still deferred to v1.1.54. **Pre-compaction handoff: [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) is the historical source of truth.**
+**Project core complete; in UAT polish loop on SemanticSearchControl PCF.** 31 of 34 tasks merged to master (v1.1.45..v1.1.49 ALL in master via merge commit `b451bbe1`; v1.1.50..v1.1.54 pushed to origin but not yet merged). The session ran 9 polish rounds (v1.1.45 through v1.1.54) addressing iterative UAT feedback. Latest pending action: user UAT on v1.1.54 (ZIP at `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.54.zip`). v1.1.54 highlights: (a) Card top-% pill removed (only shows alongside Relationship at bottom), (b) 'associated' → "100%" in green chip across card+grid, (c) pill row bottom-anchored via flex 1 + marginTop auto, (d) **email preview-hide pattern replaces width-only fixes** — preview closes when email opens, re-opens after (eliminates nested Dialog backdrop issues), (e) menu standardization — both row+card+preview menus show the user's preferred 9 actions and hide AI Summary/Toggle workspace/Rename. Card sparkle + grid AI column also removed. FilePreview promotion (Option A, 3-5 hours) still deferred to v1.1.55. **Pre-compaction handoff: [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) is the historical source of truth.**
 
 ---
 
