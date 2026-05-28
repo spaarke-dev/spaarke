@@ -13,11 +13,11 @@
 
 | Field | Value |
 |---|---|
-| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.50** packaged, awaiting user UAT |
-| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `b921bc63` (v1.1.50); v1.1.45..v1.1.49 merged to master; v1.1.50 NOT yet merged |
-| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.50.zip` (213 KB) — user imports via `pac solution delete` then `pac solution import` |
-| **Pending user actions** | (1) UAT v1.1.50; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
-| **Next Action** | Awaiting user UAT feedback on v1.1.50. Next polish round will be v1.1.51 with the queued FilePreview promotion (Option A) + 4 smaller follow-ups documented in [handoff-2026-05-28-pre-compact.md](notes/handoffs/handoff-2026-05-28-pre-compact.md) |
+| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.51** packaged, awaiting user UAT |
+| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `53ae96ef` (v1.1.51); v1.1.45..v1.1.49 merged to master; v1.1.50 + v1.1.51 NOT yet merged |
+| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.51.zip` (215 KB) — user imports via `pac solution delete` then `pac solution import` |
+| **Pending user actions** | (1) UAT v1.1.51; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
+| **Next Action** | Awaiting user UAT feedback on v1.1.51. v1.1.51 addressed 8 UAT items: (1) Clear filters button, (2) Same Matter/Semantic dedupe fix via 'both' tag, (3) Document col 400→260px, (4) AI Summary permanently hidden in preview menu, (5) Card view bottom Relationship pill + similarity %, (6) Card view date inline with title, (7) Lighter pills via Badge tint, (8) Search button outline (toned-down brand). FilePreview promotion (Option A) still deferred to v1.1.52. |
 | **Compaction handoff** | See [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) — full session state for resuming in a fresh context |
 
 ### Files Modified This Session
@@ -33,7 +33,7 @@
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-**Project core complete; in UAT polish loop on SemanticSearchControl PCF.** 31 of 34 tasks merged to master (v1.1.45..v1.1.49 ALL in master via merge commit `b451bbe1`; v1.1.50 pushed to origin but not yet merged). The session ran 5 polish rounds (v1.1.45 through v1.1.50) addressing iterative UAT feedback on the Documents PCF. Latest pending action is user UAT on v1.1.50 (ZIP at `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.50.zip`). v1.1.51 follow-ups are queued (most important: promote PCF FilePreviewDialog into shared `@spaarke/ui-components` so Document Viewer Code Page + Office Add-ins inherit the 1280px / 2-col / Prev-Next surface — multi-paragraph rationale in `FilePreviewDialog.tsx` lines 1-39). **Pre-compaction handoff: [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) is the source of truth for everything.**
+**Project core complete; in UAT polish loop on SemanticSearchControl PCF.** 31 of 34 tasks merged to master (v1.1.45..v1.1.49 ALL in master via merge commit `b451bbe1`; v1.1.50 + v1.1.51 pushed to origin but not yet merged). The session ran 6 polish rounds (v1.1.45 through v1.1.51) addressing iterative UAT feedback. Latest pending action: user UAT on v1.1.51 (ZIP at `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.51.zip`). v1.1.51 highlights: (a) `relationship: 'both'` tag added so dupes-across-paths render as Same Matter pill AND show semantic %, fixing v1.1.50 regression; (b) Clear filters button; (c) Document col narrower; (d) AI Summary permanently hidden in preview menu; (e) Card view bottom pills + date moved inline with title; (f) lighter Badge tint palette + Search button outlined. FilePreview promotion (Option A, 3-5 hours) still deferred to v1.1.52. **Pre-compaction handoff: [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) is the historical source of truth.**
 
 ---
 
