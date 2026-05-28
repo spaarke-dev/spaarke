@@ -138,15 +138,25 @@ export class SemanticSearchApiService {
     //
     // v1.1.50 — Each result is tagged with `relationship` so the list view
     // can render the Relationship + Similarity pills correctly (Items 3 + 5).
-    // Dedupe order: associated first, then semantic OVERWRITES — EXCEPT we
-    // preserve the 'associated' relationship tag on conflict because the
-    // direct-association is the stronger/canonical relationship signal per
-    // the user's request ("for docs by direct Association, color the pill
-    // blue but do not provide the percentage"). The semantic result still
-    // wins on combinedScore (the BFF returns 0 on associated-only path) so
-    // the percentage that would otherwise have read 0% is suppressed by
-    // the Relationship='associated' tag — UI inspects relationship FIRST,
-    // similarity column SECOND.
+    //
+    // v1.1.51 (Item 2) — Conflict handling changed.
+    //   Before: on conflict, we tagged the row `'associated'` and adopted
+    //   the semantic combinedScore. Result: the Relationship column
+    //   correctly showed "Same Matter", but the Similarity column read the
+    //   tag FIRST and rendered the no-percentage chip → the user lost
+    //   visibility of the semantic match strength on docs that appeared
+    //   in BOTH paths (UAT round 6 Item 2: "results only return 'Same
+    //   matter' not Semantic related").
+    //   Now: on conflict, we tag the row `'both'`. The Relationship column
+    //   still renders "Same Matter" (canonical/stronger label), but the
+    //   Similarity column renders the % chip for `'both'` rows (treated
+    //   as semantic for the similarity readout). Behavior for rows that
+    //   appear in ONLY ONE path is unchanged.
+    //
+    //   Dedupe order: associated first, semantic merges in. When the same
+    //   docId is in both, the SEMANTIC record wins on body+score (it has
+    //   the meaningful combinedScore the user wants to see) but is tagged
+    //   `'both'` so the UI preserves the "Same Matter" relationship label.
     const byId = new Map<string, typeof semantic extends null ? never : SearchResponse['results'][number]>();
     if (associated) {
       for (const r of associated.results) {
@@ -157,10 +167,11 @@ export class SemanticSearchApiService {
       for (const r of semantic.results) {
         if (!r.documentId) continue;
         const prior = byId.get(r.documentId);
-        // Conflict: preserve 'associated' tag (canonical relationship) but
-        // adopt the semantic record's combinedScore + metadata for sort.
         if (prior && prior.relationship === 'associated') {
-          byId.set(r.documentId, { ...r, relationship: 'associated' });
+          // Conflict: tag 'both' so the UI shows "Same Matter" pill AND
+          // the semantic similarity %. Adopt the semantic record's
+          // combinedScore + metadata (it carries the meaningful score).
+          byId.set(r.documentId, { ...r, relationship: 'both' });
         } else {
           byId.set(r.documentId, { ...r, relationship: 'semantic' });
         }

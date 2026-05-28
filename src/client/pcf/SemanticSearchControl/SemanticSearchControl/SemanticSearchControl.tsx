@@ -538,6 +538,34 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     [setFilters]
   );
 
+  // v1.1.51 (Item 1) — Clear filters callback wired into CommandBar.
+  //
+  // Resets ONLY: fileTypes, dateRange, threshold, searchMode, selectedTags.
+  //
+  // BINDING (FR-DOC-06): preserves `filters.associatedOnly` verbatim. The
+  // scope toggle is NOT a filter — it triggers the auto-search effect
+  // (see lines ~509-530 above) and the spec mandates that toggle behavior
+  // remain untouched. If a user has "Associated Only" selected, the Clear
+  // button must not silently flip them back to "All Documents" (which
+  // would re-fire the union path and surprise the user).
+  //
+  // We use a single batched `setFilters` call so the parent's auto-search
+  // effect compares the new associatedOnly value against the ref — which
+  // is unchanged — and therefore does NOT re-fire. The user must still hit
+  // Search (or Enter) to apply the cleared filters; this mirrors the
+  // existing handleFiltersChange contract.
+  const handleClearFilters = useCallback(() => {
+    setFilters({
+      ...filters,
+      fileTypes: [],
+      dateRange: null,
+      threshold: 0,
+      searchMode: 'hybrid',
+      // associatedOnly intentionally unchanged (FR-DOC-06)
+    });
+    setSelectedTags([]);
+  }, [filters, setFilters]);
+
   // Handle retry after error
   const handleRetry = useCallback(() => {
     if (query.trim()) {
@@ -1735,6 +1763,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           optionsLoading={filterOptionsLoading}
           selectedTags={selectedTags}
           onSelectedTagsChange={handleSelectedTagsChange}
+          onClearFilters={handleClearFilters}
           view={effectiveView}
           onViewChange={handleViewChange}
           showViewToggle={showViewToggle}
@@ -1768,7 +1797,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.50 • Built 2026-05-28</Text>
+        <Text size={100}>v1.1.51 • Built 2026-05-28</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so

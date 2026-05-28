@@ -48,6 +48,7 @@ import {
   Button,
   Checkbox,
   Tooltip,
+  Badge,
 } from '@fluentui/react-components';
 import {
   Document20Regular,
@@ -285,15 +286,20 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // Bottom "info" half — white surface with name + meta. Slightly taller
-  // than the preview to comfortably fit a 2-line ellipsised name + meta row.
+  // Bottom "info" half — white surface with name+date row + bottom pill row.
+  // v1.1.51 (Items 5 + 6) — minHeight raised slightly to accommodate the
+  // new bottom relationship-pill row beneath the date+title row.
   info: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-    minHeight: '88px',
+    gap: tokens.spacingVerticalS,
+    minHeight: '96px',
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
   },
+  // v1.1.51 (Item 6) — `nameRow` now holds: file icon + 2-line name
+  // (flex: 1) + date (right-aligned, no-wrap, top-aligned). The date
+  // moves UP from its old standalone `meta` row so the user can read it
+  // at a glance without scanning to a second line.
   nameRow: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -321,13 +327,46 @@ const useStyles = makeStyles({
     lineHeight: tokens.lineHeightBase300,
     wordBreak: 'break-word',
   },
-  meta: {
+  // v1.1.51 (Item 6) — inline date that lives in the title row.
+  // No-wrap so it never breaks; pushed to the right edge of the row by
+  // the flex: 1 on the name. Top-aligned so it lines up with the first
+  // line of a multi-line filename.
+  dateInline: {
+    flexShrink: 0,
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
-    lineHeight: tokens.lineHeightBase200,
+    lineHeight: tokens.lineHeightBase300,
     whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
+    paddingTop: '2px',
+  },
+  // v1.1.51 (Item 5) — bottom row of the info area: Relationship pill +
+  // optional Similarity badge. Sits flush below the title+date row.
+  pillRow: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    minWidth: 0,
+    flexWrap: 'wrap',
+  },
+  // Similarity chip shown alongside the Relationship pill for 'semantic'
+  // or 'both' rows. Marigold-token-based so it matches the ListView's
+  // COL_SIMILARITY rendering (Item 5: "Same Marigold style as the
+  // ListView COL_SIMILARITY"). ADR-021 tokens only.
+  similarityChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shorthands.borderRadius(tokens.borderRadiusSmall),
+    paddingTop: '1px',
+    paddingBottom: '1px',
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    fontSize: tokens.fontSizeBase100,
+    fontWeight: tokens.fontWeightSemibold,
+    lineHeight: tokens.lineHeightBase100,
+    whiteSpace: 'nowrap',
+    backgroundColor: tokens.colorPaletteMarigoldBackground2,
+    color: tokens.colorPaletteMarigoldForeground2,
   },
   // ── Badge tiers — each gets a token-driven bg + fg pair (ADR-021). ────
   badgeBase: {
@@ -544,12 +583,17 @@ export const ResultCard: React.FC<IResultCardProps> = ({
 
   const formattedDate = formatShortDate(result.modifiedAt ?? result.createdAt);
 
-  // Meta line — date only for now. The SearchResult shape does not currently
-  // expose a file size; the prototype's "215 KB" portion is intentionally
-  // omitted until FR-BFF-01 surfaces a size field (or until the upstream
-  // search projection adds it). Date alone still satisfies the prototype's
-  // information density goal.
-  const metaLine = formattedDate;
+  // v1.1.51 (Items 5 + 7) — Classify the row's relationship so the bottom
+  // pill row mirrors ListView's COL_RELATIONSHIP + COL_SIMILARITY rendering.
+  // 'both' rows show Same Matter pill + similarity %, matching the list
+  // view contract. Fallback to score-inference (zero → associated) on
+  // legacy single-path responses with no `relationship` tag.
+  const rel: 'associated' | 'semantic' | 'both' =
+    result.relationship ??
+    ((result.combinedScore ?? 0) === 0 ? 'associated' : 'semantic');
+  const showRelationshipPill = true;
+  const showSimilarityChip = rel === 'semantic' || rel === 'both';
+  const similarityPct = Math.round((result.combinedScore ?? 0) * 100);
 
   const ariaLabel = [result.name, result.documentType, formattedDate ? `Modified: ${formattedDate}` : '']
     .filter(Boolean)
@@ -632,6 +676,15 @@ export const ResultCard: React.FC<IResultCardProps> = ({
         </div>
 
         {/* ─── Bottom info area ────────────────────────────────────────── */}
+        {/* v1.1.51 (Items 5 + 6 + 7):
+              - Date moved INTO the title row (right-aligned, no-wrap) so the
+                user sees the name + date on a single horizontal axis.
+              - The old standalone `meta` row is removed (date was its only
+                content).
+              - New bottom row: Relationship pill + optional similarity %.
+                Mirrors ListView's COL_RELATIONSHIP + COL_SIMILARITY
+                renderers — same `tint` Badge variants (Item 7) so card and
+                list views read identically. */}
         <div className={styles.info}>
           <div className={styles.nameRow}>
             <RowIcon
@@ -641,11 +694,33 @@ export const ResultCard: React.FC<IResultCardProps> = ({
             <Text as="span" size={300} className={styles.name} title={result.name}>
               {result.name}
             </Text>
+            {formattedDate && (
+              <Text as="span" size={200} className={styles.dateInline}>
+                {formattedDate}
+              </Text>
+            )}
           </div>
-          {metaLine && (
-            <Text as="span" size={200} className={styles.meta}>
-              {metaLine}
-            </Text>
+          {showRelationshipPill && (
+            <div className={styles.pillRow} aria-hidden="false">
+              {rel === 'associated' || rel === 'both' ? (
+                <Badge appearance="tint" color="success" size="medium" shape="rounded">
+                  Same Matter
+                </Badge>
+              ) : (
+                <Badge appearance="tint" color="brand" size="medium" shape="rounded">
+                  Semantic
+                </Badge>
+              )}
+              {showSimilarityChip && (
+                <span
+                  className={styles.similarityChip}
+                  role="img"
+                  aria-label={`Semantic similarity: ${similarityPct}%`}
+                >
+                  {similarityPct}%
+                </span>
+              )}
+            </div>
           )}
         </div>
       </div>

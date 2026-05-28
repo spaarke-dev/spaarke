@@ -749,7 +749,7 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   // `preview` is always hidden (dialog IS the preview).
   // `pinToTop` / `rename` / `delete` are hidden until handlers exist at the
   // PCF surface (scoped to follow-on Phase 4 tasks per project plan).
-  // `aiSummary` / `findSimilar` are hidden when no callback was provided.
+  // `findSimilar` is hidden when no callback was provided.
   //
   // v1.1.45 — `toggleWorkspace` is ALWAYS hidden from this dialog's menu.
   // The dialog itself IS the workspace surface for the document (the user
@@ -757,6 +757,14 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   // visually present but functionally a no-op, which UAT flagged as
   // confusing. Row-context still exposes `toggleWorkspace` via
   // ResultCard.tsx + ListView.tsx — only the dialog hides it.
+  //
+  // v1.1.51 (Item 4) — `aiSummary` is now ALWAYS hidden, not just when
+  // `onFetchSummary` is missing. The AI summary is already rendered inline
+  // in the dialog's right-pane metadata column (see the section comment at
+  // the `aiSummary` case in the row-action handler above and the layout
+  // notes at the top of this file), so the menu item is duplicative and
+  // was reported by UAT as confusing. Row-context (ResultCard + ListView)
+  // still exposes `aiSummary` as the canonical entry point to the popover.
   const dialogDisabledActions = React.useMemo<DocumentRowAction[]>(() => {
     const hidden: DocumentRowAction[] = [
       'preview',
@@ -764,11 +772,11 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
       'rename',
       'delete',
       'toggleWorkspace',
+      'aiSummary',
     ];
-    if (!onFetchSummary) hidden.push('aiSummary');
     if (!onFindSimilar) hidden.push('findSimilar');
     return hidden;
-  }, [onFetchSummary, onFindSimilar]);
+  }, [onFindSimilar]);
 
   // -------------------------------------------------------------------------
   // Render helpers

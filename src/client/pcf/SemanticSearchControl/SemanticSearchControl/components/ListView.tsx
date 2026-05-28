@@ -154,10 +154,16 @@ const COL_AI = 'aiSummary';
 const COL_MENU = 'menu';
 
 // Default intrinsic widths in pixels (used when no user override is persisted).
+// v1.1.51 (Item 3) — COL_DOCUMENT shrunk from 400 → 260 so the typical Matter
+// form viewport can fit all nine columns (Select + Pin + Document +
+// Relationship + Similarity + Type + Modified + AI + Menu) without a
+// horizontal scrollbar. The DataGrid's resizable columns + per-user width
+// persistence (via `setColumnWidth`) means users can still widen Document
+// manually if their viewport is wide enough.
 const DEFAULT_WIDTHS: Record<string, number> = {
   [COL_SELECT]: 40,
   [COL_PIN]: 36,
-  [COL_DOCUMENT]: 400,
+  [COL_DOCUMENT]: 260,
   [COL_RELATIONSHIP]: 130,
   [COL_SIMILARITY]: 100,
   [COL_TYPE]: 120,
@@ -169,7 +175,9 @@ const DEFAULT_WIDTHS: Record<string, number> = {
 const MIN_WIDTHS: Record<string, number> = {
   [COL_SELECT]: 40,
   [COL_PIN]: 36,
-  [COL_DOCUMENT]: 160,
+  // v1.1.51 (Item 3) — relaxed from 160 → 140 so the Document column can be
+  // sized down to match tighter viewports without losing legibility.
+  [COL_DOCUMENT]: 140,
   [COL_RELATIONSHIP]: 110,
   [COL_SIMILARITY]: 80,
   [COL_TYPE]: 80,
@@ -806,27 +814,33 @@ export const ListView: React.FC<IListViewProps> = ({
       }),
 
       // Relationship column (v1.1.50, Item 5) — NEW, non-sortable.
-      // Fluent v9 `Badge` with `color="success"` for 'associated' (green
-      // "Same Matter" pill) or `color="brand"` for 'semantic' (blue
-      // "Semantic" pill). Falls back to score-based inference when the
-      // result's `relationship` tag is undefined (legacy single-path
-      // responses): score=0 → associated, score>0 → semantic.
+      // v1.1.51 (Items 2 + 7):
+      //   - Tag union extended to `'both'` to handle docs that appear in
+      //     BOTH the Dataverse-direct AND semantic paths. 'both' renders
+      //     "Same Matter" (the canonical/stronger label, per UAT) but the
+      //     Similarity column still shows the semantic % (Item 2 fix).
+      //   - Badges switched from `appearance="filled"` to
+      //     `appearance="tint"` so the green/blue pills read lighter
+      //     (Item 7 UAT — "too bright").
       createTableColumn<SearchResult>({
         columnId: COL_RELATIONSHIP,
         renderHeaderCell: () => <span>Relationship</span>,
         renderCell: (result: SearchResult) => {
-          const rel: 'associated' | 'semantic' =
+          const rel: 'associated' | 'semantic' | 'both' =
             result.relationship ??
             ((result.combinedScore ?? 0) === 0 ? 'associated' : 'semantic');
-          if (rel === 'associated') {
+          // 'both' renders as Same Matter — the direct association is the
+          // canonical, stronger relationship signal even when a semantic
+          // match exists.
+          if (rel === 'associated' || rel === 'both') {
             return (
-              <Badge appearance="filled" color="success" size="medium" shape="rounded">
+              <Badge appearance="tint" color="success" size="medium" shape="rounded">
                 Same Matter
               </Badge>
             );
           }
           return (
-            <Badge appearance="filled" color="brand" size="medium" shape="rounded">
+            <Badge appearance="tint" color="brand" size="medium" shape="rounded">
               Semantic
             </Badge>
           );
@@ -838,6 +852,10 @@ export const ListView: React.FC<IListViewProps> = ({
       // survive. Pill styling depends on the row's relationship:
       //   - 'associated' → blue (brand) pill, NO percentage text
       //   - 'semantic'   → light-yellow (Marigold) pill, WITH percentage
+      //   - 'both'       → light-yellow (Marigold) pill WITH percentage
+      //                    (v1.1.51 Item 2 — surfaces the semantic match
+      //                    score even when the doc is also directly
+      //                    associated, per the user's UAT request)
       createTableColumn<SearchResult>({
         columnId: COL_SIMILARITY,
         renderHeaderCell: () => (
@@ -853,11 +871,11 @@ export const ListView: React.FC<IListViewProps> = ({
           </span>
         ),
         renderCell: (result: SearchResult) => {
-          const rel: 'associated' | 'semantic' =
+          const rel: 'associated' | 'semantic' | 'both' =
             result.relationship ??
             ((result.combinedScore ?? 0) === 0 ? 'associated' : 'semantic');
           if (rel === 'associated') {
-            // Direct-association rows: blue pill, NO percentage (BFF
+            // Direct-association-only rows: blue pill, NO percentage (BFF
             // returns 0% on this path so the number is meaningless).
             return (
               <span
@@ -867,6 +885,7 @@ export const ListView: React.FC<IListViewProps> = ({
               />
             );
           }
+          // 'semantic' or 'both' — both surface the semantic % score.
           const pct = Math.round((result.combinedScore ?? 0) * 100);
           return (
             <span

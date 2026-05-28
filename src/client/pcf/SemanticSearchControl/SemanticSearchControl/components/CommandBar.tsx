@@ -180,6 +180,21 @@ export interface ICommandBarProps {
   selectedTags: string[];
   onSelectedTagsChange: (next: string[]) => void;
 
+  /**
+   * v1.1.51 (Item 1) — Clear all filters callback. When provided, a small
+   * subtle "Clear" button is rendered immediately to the right of the
+   * TagFilter, visible only when at least one of the resettable filters
+   * is non-default. Resets `fileTypes`, `dateRange`, `threshold`,
+   * `searchMode`, and `selectedTags`.
+   *
+   * IMPORTANT (FR-DOC-06 binding): this MUST NOT reset
+   * `filters.associatedOnly`. The associatedOnly toggle is the SCOPE
+   * control, not a filter — it triggers the auto-search ref/effect at
+   * the parent (SemanticSearchControl.tsx). The parent's onClearFilters
+   * implementation preserves the current associatedOnly value verbatim.
+   */
+  onClearFilters?: () => void;
+
   /** Active view (list | card) — owned by parent via useDocumentListPrefs. */
   view: DocumentListView;
   onViewChange: (next: DocumentListView) => void;
@@ -237,6 +252,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
   optionsLoading,
   selectedTags,
   onSelectedTagsChange,
+  onClearFilters,
   view,
   onViewChange,
   showViewToggle = true,
@@ -491,6 +507,35 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
         label="Tags"
         sortAlphabetical
       />
+
+      {/* v1.1.51 (Item 1) — Subtle Clear button.
+          Visible only when at least one resettable filter is non-default
+          (compute inline so the affordance never sits there grey-clickable
+          on an unfiltered view). Active set: fileTypes / dateRange /
+          threshold / searchMode / selectedTags. NOT included:
+          `associatedOnly` (FR-DOC-06 binding — that's a scope, not a
+          filter, and resetting it would fire the auto-search effect). */}
+      {onClearFilters && (() => {
+        const hasActiveFilters =
+          (filters.fileTypes && filters.fileTypes.length > 0) ||
+          (filters.dateRange !== null &&
+            (!!filters.dateRange.from || !!filters.dateRange.to)) ||
+          (filters.threshold ?? 0) !== 0 ||
+          (filters.searchMode ?? 'hybrid') !== 'hybrid' ||
+          (selectedTags && selectedTags.length > 0);
+        if (!hasActiveFilters) return null;
+        return (
+          <Button
+            appearance="subtle"
+            size="small"
+            onClick={onClearFilters}
+            disabled={disabled}
+            aria-label="Clear filters"
+          >
+            Clear
+          </Button>
+        );
+      })()}
 
       <div className={styles.spacer} aria-hidden="true" />
 
