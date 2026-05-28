@@ -1,6 +1,6 @@
 using Sprk.Bff.Api.Models.Insights;
 
-namespace Sprk.Bff.Api.Services.Ai.Insights.Mirror;
+namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 /// <summary>
 /// D-P11 — projects emitted Observations to the <c>sprk_analysis</c> Dataverse table so the
@@ -10,17 +10,26 @@ namespace Sprk.Bff.Api.Services.Ai.Insights.Mirror;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Phase 1 scaffold (task 040)</b>: the real implementation lands with task 051
-/// (D-P11 mirror sync). Task 040 ships this interface seam plus a
-/// <see cref="NoOpObservationMirror"/> impl that logs but does not write — the seam is
-/// load-bearing so the ingest orchestrator wires the call today and task 051 swaps
-/// the registration without touching the orchestrator.
+/// <b>Cross-zone seam (task 051 design decision)</b>: this interface is consumed by
+/// Zone A (the <c>IngestOrchestrator</c> in <c>Services/Ai/Insights/Ingest/</c>) and
+/// implemented by Zone B (<c>DataverseObservationMirror</c> in
+/// <c>Services/Insights/Observations/</c>). Per project <c>CLAUDE.md §3.5.4</c>, Zone B
+/// is forbidden from importing <c>Services.Ai.Insights.*</c> (only <c>PublicContracts</c>
+/// is permitted via the <c>[^.P]</c> exception in the grep pattern). Placing this
+/// interface in <c>Services/Ai/PublicContracts/</c> alongside <see cref="IInsightsAi"/>
+/// preserves the §3.5.4 facade discipline without per-feature carve-outs.
 /// </para>
 /// <para>
-/// <b>Zone A placement</b>: lives under <c>Services/Ai/Insights/Mirror/</c>. The seam is
-/// in Zone A because the orchestrator (Zone A) is the caller; task 051's
-/// <c>DataverseObservationMirror</c> will also live in Zone A so it can be called from
-/// the orchestrator without a Zone B import.
+/// <b>Phase 1 implementations</b>:
+/// <list type="bullet">
+///   <item><c>NoOpObservationMirror</c> (Zone A, <c>Services/Ai/Insights/Mirror/</c>) —
+///   logs but does not write; default in dev/test (kept as fallback when
+///   <c>InsightsMirrorOptions.InsightsObservationActionId</c> is unset).</item>
+///   <item><c>DataverseObservationMirror</c> (Zone B,
+///   <c>Services/Insights/Observations/</c>) — performs the real
+///   <c>sprk_analysis</c> upsert via <see cref="Spaarke.Dataverse.IGenericEntityService"/>
+///   when the action GUID is configured.</item>
+/// </list>
 /// </para>
 /// <para>
 /// <b>Why "fire-and-forget with error logging" semantics</b>: per SPEC-phase-1-minimum.md §5,

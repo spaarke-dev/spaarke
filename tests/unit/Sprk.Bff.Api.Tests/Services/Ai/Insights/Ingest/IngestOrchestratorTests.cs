@@ -9,9 +9,9 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.CitationVerification;
 using Sprk.Bff.Api.Services.Ai.Insights.Extraction;
 using Sprk.Bff.Api.Services.Ai.Insights.Ingest;
-using Sprk.Bff.Api.Services.Ai.Insights.Mirror;
 using Sprk.Bff.Api.Services.Ai.Insights.Prompts;
 using Sprk.Bff.Api.Services.Ai.Insights.Sanitization;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Insights.Ingest;

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Models.Insights;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Insights.Mirror;
 
@@ -9,22 +10,22 @@ namespace Sprk.Bff.Api.Services.Ai.Insights.Mirror;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Swap path</b>: task 051 (D-P11 mirror sync) ships <c>DataverseObservationMirror</c>
-/// which performs the real <c>sprk_analysis</c> upsert via <c>IDataverseService</c>. The
-/// DI registration in <c>InsightsIngestModule</c> switches from this no-op to the real
-/// impl when 051 lands — no orchestrator changes required.
+/// <b>Phase 1 role (post-task 051)</b>: this no-op is the dev/test default. When the
+/// <c>InsightsMirrorOptions.InsightsObservationActionId</c> is unset (Empty Guid), the
+/// real <c>DataverseObservationMirror</c> (task 051) cannot run safely, so the DI module
+/// keeps this no-op registered. In environments where the configuration is populated, the
+/// module swaps to <c>DataverseObservationMirror</c>.
 /// </para>
 /// <para>
 /// <b>Why a no-op rather than commented-out call site</b>: the orchestrator (task 040) ships
-/// today with the mirror call wired up. The acceptance test verifies that the mirror is
-/// INVOKED — not that a real Dataverse row is written. This matches the task brief's
-/// scope clarification: "test verifies the hook is INVOKED, not that a real Dataverse
-/// row is written."
+/// with the mirror call wired up. Unit tests verify that the mirror is INVOKED — not that
+/// a real Dataverse row is written. This matches the task 040 brief's scope clarification:
+/// "test verifies the hook is INVOKED, not that a real Dataverse row is written."
 /// </para>
 /// <para>
 /// <b>Structured logging</b>: stable <c>EventId(8041, "ObservationMirrorNoOp")</c> so
 /// App Insights queries can confirm the mirror path is being exercised in pre-prod
-/// before the real impl lands.
+/// before the real impl is enabled.
 /// </para>
 /// </remarks>
 internal sealed class NoOpObservationMirror : IObservationMirror

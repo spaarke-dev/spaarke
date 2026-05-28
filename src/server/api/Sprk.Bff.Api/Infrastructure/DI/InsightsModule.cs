@@ -1,5 +1,8 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Insights.Graph;
 using Sprk.Bff.Api.Services.Insights.LiveFacts;
+using Sprk.Bff.Api.Services.Insights.Observations;
 using Sprk.Bff.Api.Services.Insights.Precedents;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -68,6 +71,31 @@ public static class InsightsModule
         // Singleton: the future Dataverse impl is stateless (consumes IDataverseService per call);
         // the stub is also stateless.
         services.AddSingleton<ILiveFactResolver, StubLiveFactResolver>();
+
+        // IObservationMirror — D-P11 task 051. SWAP OUT the NoOp registered by
+        // InsightsIngestModule (Zone A) with the real DataverseObservationMirror impl
+        // (Zone B). The IObservationMirror interface lives in Services/Ai/PublicContracts/
+        // (the canonical cross-zone seam per §3.5.4 — same pattern as IInsightsAi).
+        //
+        // Why Replace rather than overwrite-by-last-wins: explicit intent. AddInsightsModule
+        // is registered AFTER AddInsightsIngestModule in Program.cs, so the last-wins behavior
+        // would already work — but Replace makes the swap a visible architectural decision
+        // and would fail loudly if a future refactor changed the registration order.
+        //
+        // Singleton lifetime: matches the upstream NoOp registration AND matches the
+        // upstream IIngestOrchestrator (Singleton, consumes IObservationMirror — a Scoped
+        // mirror would trigger a captive-dependency warning). Safe because the only DI
+        // dependency is IGenericEntityService, which is registered as Singleton in this
+        // codebase (see GraphModule.cs: AddSingleton<IGenericEntityService>(...) bridges
+        // to IDataverseService Singleton). InsightsMirrorOptions is bound via IOptions
+        // pattern (Singleton-safe).
+        //
+        // Defense-in-depth: DataverseObservationMirror itself handles the "InsightsObservationActionId
+        // unset" case by logging a Warning and skipping the write — so even though we swap to the
+        // real impl unconditionally, dev/test environments without the deployment-prerequisite
+        // sprk_analysisaction row stay safe (no malformed rows). See InsightsMirrorOptions XML doc.
+        services.AddOptions<InsightsMirrorOptions>().BindConfiguration(InsightsMirrorOptions.SectionName);
+        services.Replace(ServiceDescriptor.Singleton<IObservationMirror, DataverseObservationMirror>());
 
         return services;
     }

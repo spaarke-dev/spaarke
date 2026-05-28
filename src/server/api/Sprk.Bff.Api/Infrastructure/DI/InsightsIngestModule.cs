@@ -3,6 +3,7 @@ using Sprk.Bff.Api.Services.Ai.Insights.Ingest;
 using Sprk.Bff.Api.Services.Ai.Insights.Mirror;
 using Sprk.Bff.Api.Services.Ai.Insights.Prompts;
 using Sprk.Bff.Api.Services.Ai.Insights.Sanitization;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 

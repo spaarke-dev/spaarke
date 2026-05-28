@@ -7,9 +7,9 @@ using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
 using Sprk.Bff.Api.Services.Ai.CitationVerification;
 using Sprk.Bff.Api.Services.Ai.Insights.Extraction;
-using Sprk.Bff.Api.Services.Ai.Insights.Mirror;
 using Sprk.Bff.Api.Services.Ai.Insights.Prompts;
 using Sprk.Bff.Api.Services.Ai.Insights.Sanitization;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Insights.Ingest;
 
