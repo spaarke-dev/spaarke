@@ -1,7 +1,7 @@
 <task id="022" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>D-P12 — Six Insights-mode node executors (LiveFactNode, IndexRetrieveNode, EvidenceSufficiencyNode, DeclineToFindNode, ReturnInsightArtifactNode, plus GroundingVerifyNode coordination)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>3</wave>
     <estimated-effort>2 days</estimated-effort>
     <tags>bff-api, node-executors, playbook, zone-a, dotnet</tags>

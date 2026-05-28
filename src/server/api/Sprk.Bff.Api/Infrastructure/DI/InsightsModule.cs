@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Services.Insights.Graph;
+using Sprk.Bff.Api.Services.Insights.LiveFacts;
 using Sprk.Bff.Api.Services.Insights.Precedents;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -52,6 +53,13 @@ public static class InsightsModule
         // and the board carries no state of its own. The implementation consumes only
         // IGenericEntityService (Zone B) — no AI internals are imported.
         services.AddScoped<IPrecedentBoard, DataversePrecedentBoard>();
+
+        // ILiveFactResolver — D-P12 task 022 swap-path-preservation seam. Phase 1: StubLiveFactResolver
+        // throws LiveFactNotSupportedException with a "Phase 1" message. Replace this registration
+        // when DataverseLiveFactResolver lands with D-P7 task 040 (universal ingest playbook).
+        // Singleton: the future Dataverse impl is stateless (consumes IDataverseService per call);
+        // the stub is also stateless.
+        services.AddSingleton<ILiveFactResolver, StubLiveFactResolver>();
 
         return services;
     }

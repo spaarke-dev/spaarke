@@ -36,7 +36,7 @@
 |---|---|---|---|---|---|---|
 | [020](020-grounding-verifier.poml) | D-P9 | GroundingVerifier + GroundingVerifyNode | ✅ | 1d | ✅ | 001 |
 | [021](021-confidence-gating-emission.poml) | D-P10 | Confidence threshold gating + per-field Observation emission | 🔲 | 6h | ✅ | 001 |
-| [022](022-insights-mode-node-executors.poml) | D-P12 | 6 Insights-mode node executors (LiveFact/IndexRetrieve/EvidenceSufficiency/DeclineToFind/GroundingVerify/ReturnInsightArtifact) | 🔲 | 2d | ❌ (needs 020) | 001, 002, 020 |
+| [022](022-insights-mode-node-executors.poml) | D-P12 | 5 Insights-mode node executors (LiveFact/IndexRetrieve/EvidenceSufficiency/DeclineToFind/ReturnInsightArtifact — GroundingVerify shipped in 020) | ✅ | 2d | ✅ | 001, 002, 020 |
 | [023](023-insights-playbook-cache.poml) | D-P13 | Insights playbook execution cache (Redis wrap of PlaybookExecutionEngine) | 🔲 | 6h | ✅ | — |
 | [024](024-generic-cache-helper.poml) | Q5 side-quest | Generic IDistributedCacheExtensions.GetOrCreateAsync&lt;T&gt; helper | ✅ | 3h | ✅ | — |
 

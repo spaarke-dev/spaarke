@@ -210,6 +210,24 @@ public static class AnalysisServicesModule
         // Singleton matches the other INodeExecutor registrations above (executors are stateless).
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor,
             Sprk.Bff.Api.Services.Ai.Nodes.GroundingVerifyNode>();
+
+        // D-P12 task 022 — Five new Insights-mode node executors (ActionType 80–120).
+        // All five are stateless and follow the GroundingVerifyNode singleton pattern.
+        // - LiveFactNode (80)           — wraps ILiveFactResolver; emits FactArtifact
+        // - IndexRetrieveNode (90)      — config-driven AI Search query against spaarke-insights-index
+        // - EvidenceSufficiencyNode (100) — deterministic rule evaluator (D-49 LAVERN Pattern #7)
+        // - DeclineToFindNode (110)     — emits typed DeclineResponse (D-49)
+        // - ReturnInsightArtifactNode (120) — final node; serializes envelope + D-A23/D-48 EvidenceGuard
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor,
+            Sprk.Bff.Api.Services.Ai.Nodes.LiveFactNode>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor,
+            Sprk.Bff.Api.Services.Ai.Nodes.IndexRetrieveNode>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor,
+            Sprk.Bff.Api.Services.Ai.Nodes.EvidenceSufficiencyNode>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor,
+            Sprk.Bff.Api.Services.Ai.Nodes.DeclineToFindNode>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor,
+            Sprk.Bff.Api.Services.Ai.Nodes.ReturnInsightArtifactNode>();
     }
 
     /// <summary>

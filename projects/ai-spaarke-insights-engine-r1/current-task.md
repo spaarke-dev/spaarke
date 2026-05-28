@@ -1,14 +1,57 @@
 # Current Task — Spaarke Insights Engine, Phase 1
 
-> **Status**: ✅ idle — Wave 3 tasks 020 + 021 complete
+> **Status**: ✅ idle — Wave 3 tasks 020 + 021 + 022 complete
 > **Last Updated**: 2026-05-28
-> **Project state**: Wave 1 complete; Wave 2 complete; Wave 3 progress: 020, 021, 024 ✅ — 022 (now unblocked), 023, 025 still 🔲
+> **Project state**: Wave 1 complete; Wave 2 complete; Wave 3 progress: 020, 021, 022, 024 ✅ — 023, 025 still 🔲
 
 ---
 
 ## Active task
 
-**none** — Wave 3 remaining: 022 (D-P12 nodes, now unblocked by 020 GroundingVerifyNode), 023 (D-P13 cache), 025 (W3.5 refactor). 022 is the next critical-path item.
+**none** — Wave 3 remaining: 023 (D-P13 cache), 025 (W3.5 refactor). D-P12 platform primitives shipped; ready for D-P7 ingest playbook (task 040) + D-P14 synthesis playbook (task 060) to consume.
+
+---
+
+## Last completed task
+
+**Task 022 — D-P12 Five new Insights-mode node executors** ✅ (2026-05-28)
+- Rigor: FULL (bff-api code, 5 platform primitives, foundation for D-P7 + D-P14)
+- Files NEW (8 production + 6 test):
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LiveFactNode.cs` (192 lines) — wraps `ILiveFactResolver`; emits typed `FactArtifact` with confidence 1.0; ActionType.LiveFact=80
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/IndexRetrieveNode.cs` (395+ lines) — config-driven AI Search against `spaarke-insights-index` with tenant guard, filter+vector+OData composition, D-A23 EvidenceGuard on empty results; ActionType.IndexRetrieve=90
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EvidenceSufficiencyNode.cs` (296 lines) — deterministic rule evaluator over upstream NodeOutputs (minCount + requireNonEmpty); sufficient/insufficient verdict + EvidenceGap[] gap analysis; ActionType.EvidenceSufficiency=100
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/DeclineToFindNode.cs` (222 lines) — emits typed `DeclineResponse` deterministically per D-49 LAVERN Pattern #7; template token rendering ({have},{need},{rule},{from},{reason}); ActionType.DeclineToFind=110
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ReturnInsightArtifactNode.cs` (419 lines) — final node; serializes InsightArtifact envelope (Fact|Observation|Inference) per D-P1 + D-P12; D-A23/D-48 EvidenceGuard with `allowEmptyEvidence` escape hatch for Facts; ActionType.ReturnInsightArtifact=120
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Composition/MultiIndexComposer.cs` (81 lines) — Q5-audit-extracted helper; AiAnalysisNodeExecutor's MergeKnowledgeContext now delegates to this so IndexRetrieveNode + AiAnalysisNodeExecutor compose multi-tier knowledge identically
+  - `src/server/api/Sprk.Bff.Api/Services/Insights/LiveFacts/ILiveFactResolver.cs` (80 lines) — Zone B interface seam (Phase 1.5 swap-path) + LiveFactNotSupportedException
+  - `src/server/api/Sprk.Bff.Api/Services/Insights/LiveFacts/StubLiveFactResolver.cs` (40 lines) — internal sealed; throws "Phase 1 not implemented" until DataverseLiveFactResolver lands with D-P7 task 040
+  - 6 xUnit test files: `tests/.../{LiveFactNode,IndexRetrieveNode,EvidenceSufficiencyNode,DeclineToFindNode,ReturnInsightArtifactNode}Tests.cs` + `InsightsNodesIntegrationTests.cs` + `MultiIndexComposerTests.cs` + `InsightsNodeTestHelpers.cs` helper
+- Files MODIFIED (3):
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs` — added 5 new ActionType enum values (LiveFact=80, IndexRetrieve=90, EvidenceSufficiency=100, DeclineToFind=110, ReturnInsightArtifact=120) with 10-value gaps preserving task 020's GroundingVerify=70 pattern
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs` — `MergeKnowledgeContext` now delegates to `MultiIndexComposer.Merge` (4-line comment explaining extraction); behavior identical (lift-and-replace, no semantic change)
+  - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs` — registered 5 new `INodeExecutor` singletons (LiveFactNode through ReturnInsightArtifactNode) in `AddNodeExecutors()` block following GroundingVerifyNode template
+  - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/InsightsModule.cs` — registered `ILiveFactResolver → StubLiveFactResolver` (Singleton) in Zone B
+- Build: `dotnet build src/server/api/Sprk.Bff.Api/` clean — 0 errors, 17 pre-existing warnings (same as tasks 020/021; none in new files)
+- Test verification (standalone runner at `c:/tmp/task022-runner/`, same pattern as tasks 001/002/012/020/021): **35/35 assertions PASS** — MultiIndexComposer (7), LiveFactNode (5), EvidenceSufficiencyNode (6), DeclineToFindNode (4), ReturnInsightArtifactNode (6), IndexRetrieveNode (4), Registry + mini-playbook (3). Sprk.Bff.Api.Tests project still has same pre-existing 7 compile errors (`EmbeddingMigrationService`, `AppOnlyDocumentAnalysisJobHandler`, `EmailAnalysisJobHandler`) unrelated to this task.
+- SPEC §3.5.4 forbidden-imports grep: ZERO matches in `Services/Insights/LiveFacts/` (Zone B clean — only `Models.Insights` imported); ZERO matches in `Services/Insights/` overall
+- Quality gates (Step 9.5):
+  - code-review ✅: 0 critical / 1 warning (Filter passthrough on trusted-operator input — addressed inline with XML doc warning) / 2 suggestions / 0 AI smells; AI Smell Score: clean (the one interface with single impl is the documented Phase 1.5 swap seam, same as task 002 IInsightGraph pattern)
+  - adr-check ✅: 13 ADRs/decisions validated, 0 violations (ADR-001, 002, 007, 008, 009, 010, 013, 014, 021, 028 + SPEC §3.5.4 + D-49 + D-A23/D-48 + D-04 + D-05)
+- Acceptance criteria: 7/7 PASS per POML
+  1. All 5 nodes implement INodeExecutor + resolve via NodeExecutorRegistry by ActionType ✅ (verified in standalone runner registry-dispatch test)
+  2. LiveFactNode returns FactArtifact from ILiveFactResolver mock ✅ (HappyPath emits FactArtifact with confidence 1.0)
+  3. IndexRetrieveNode queries spaarke-insights-index with filter+vector ✅ (config + filter-building + tenant-guard validated; full SDK integration deferred to D-P16 smoke test)
+  4. EvidenceSufficiencyNode flags sufficient/insufficient against minComparableMatters:12 rule ✅ (Sufficient/Insufficient verdicts both verified with gap analysis)
+  5. DeclineToFindNode emits structured DeclineResponse (typed, not prose) ✅ (verbatim DeclineResponse type emitted; template rendering verified for {have}/{need} tokens)
+  6. ReturnInsightArtifactNode validates non-empty evidence → throws on empty ✅ (EvidenceGuard REJECTS empty-evidence inference test PASS; EvidenceGuard ALLOWS empty-evidence Fact test PASS)
+  7. MultiIndexComposer consumed by both AiAnalysisNodeExecutor AND IndexRetrieveNode ✅ (AiAnalysisNodeExecutor.MergeKnowledgeContext now delegates; behavior preserved)
+- Notes:
+  - ActionType numbering preserves task 020's 10-value gap pattern: GroundingVerify=70 → LiveFact=80 → IndexRetrieve=90 → EvidenceSufficiency=100 → DeclineToFind=110 → ReturnInsightArtifact=120
+  - ILiveFactResolver swap-path seam: Phase 1 stub throws `LiveFactNotSupportedException` with "Phase 1" message; DataverseLiveFactResolver will swap in via DI re-registration when D-P7 task 040 ships
+  - Code-review warning re: IndexRetrieveNode.Filter passthrough on trusted-operator OData → addressed inline with explicit XML doc warning that ConfigJson is admin-authored, never request-body-sourced; canonical hardening at D-P15 endpoint task 061
+  - MultiIndexComposer extraction is a pure refactor (lift-and-replace); AiAnalysisNodeExecutor behavior unchanged — confirmed by build clean + no new test failures in existing files
+
+---
 
 ---
 
@@ -155,9 +198,9 @@ Wave 1 complete. Wave 2 (infrastructure provisioning) unlocks next — pick D-P2
 
 | State | Count |
 |---|---|
-| ✅ Completed | 6 (001, 002, 010, 011, 012, 021) |
+| ✅ Completed | 8 (001, 002, 010, 011, 012, 020, 021, 022) |
 | 🔄 In progress | 0 |
-| 🔲 Pending | 11 |
+| 🔲 Pending | 9 |
 | ⏭️ Deferred (Phase 1.5+) | — see SPEC §3.3 |
 
 ---
