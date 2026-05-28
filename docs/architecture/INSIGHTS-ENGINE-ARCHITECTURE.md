@@ -1,11 +1,44 @@
 # Spaarke Insights Engine Architecture
 
-> **Last Updated**: 2026-05-20
-> **Last Reviewed**: 2026-05-20
-> **Revision**: r2 — adds source data and corpus model (§4), surfacing model (§10), evaluation and quality (§14), external integration via MCP (§15), and future considerations (§22). Refines streaming-verification spec, sync re-fetch backpressure, adjacency-list write amplification, embedding lifecycle, and BFF decomposition signals. Moves historical backfill and the evaluation harness into Phase 1.
-> **Status**: Pre-implementation (Phase 1 SPEC.md is pipeline-ready; design.md is canon)
+> **Last Updated**: 2026-05-28 (refinement callout added — see §0 below; body text unchanged from r2)
+> **Last Reviewed**: 2026-05-20 (r2 body); 2026-05-28 (§0 refinement integration)
+> **Revision**: r2 + 2026-05-28 refinement callout. Original r2 — adds source data and corpus model (§4), surfacing model (§10), evaluation and quality (§14), external integration via MCP (§15), and future considerations (§22). 2026-05-28 callout (new §0) — narrows Phase 1 scope to 17 deliverables (D-P1..D-P17) per [`projects/ai-spaarke-insights-engine-r1/SPEC.md`](../../projects/ai-spaarke-insights-engine-r1/SPEC.md) and decisions D-52..D-63.
+> **Status**: Pre-implementation. Phase 1 [`SPEC.md`](../../projects/ai-spaarke-insights-engine-r1/SPEC.md) is pipeline-ready and canonical for Phase 1 scope. This doc remains Spaarke-wide architecture reference; for project Phase 1 deliverables, read SPEC.md.
 > **Purpose**: Spaarke-wide canonical architecture document for the Insights Engine — the back-end subsystem that produces honestly-grounded organizational context for AI agents and end users.
-> **Note on length**: This document is comprehensive (~1500 lines) by explicit user override of the standard `docs/architecture/` "decisions-only" convention. Project-internal authority remains [`projects/ai-spaarke-insights-engine-r1/design.md`](../../projects/ai-spaarke-insights-engine-r1/design.md); when they disagree, `design.md` wins until this doc is updated.
+> **Note on length**: This document is comprehensive (~1500 lines) by explicit user override of the standard `docs/architecture/` "decisions-only" convention. **Project-internal authority for Phase 1 scope and deliverables is [`projects/ai-spaarke-insights-engine-r1/SPEC.md`](../../projects/ai-spaarke-insights-engine-r1/SPEC.md)**; project-internal authority for comprehensive design is [`projects/ai-spaarke-insights-engine-r1/design.md`](../../projects/ai-spaarke-insights-engine-r1/design.md). When this doc conflicts with either, the project docs win until this doc is updated.
+
+---
+
+## 0. 2026-05-28 refinement integration (READ THIS FIRST)
+
+Phase 1 scope was narrowed twice after this doc was last revised (2026-05-20):
+- **2026-05-27** — [SPEC-phase-1-minimum.md](../../projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md) introduced decisions D-52..D-58 (single-tenant, dual-substrate, questions-as-playbooks, three surfaces, snapshot, catalog routing, signal contract)
+- **2026-05-28** — [SPEC-phase-1-minimum.md](../../projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md) narrowed further to 17 deliverables (D-P1..D-P17), revised D-53 (one index not five), deferred D-55/D-56/D-57, superseded D-58, added D-59..D-63
+
+**Where this doc's r2 body conflicts with the 2026-05-28 direction, the spec wins.** Key deltas to be aware of:
+
+| What this doc describes (r2, 2026-05-20) | Current 2026-05-28 direction | Where to read for canonical |
+|---|---|---|
+| Five new Insight indexes (`insight-matters`, `insight-decisions`, `insight-risks`, `insight-sessions`, `insight-precedents`) — §4.1.3, §8.1 | **ONE** new derived index (`insights-index`) with `artifactType` discriminator holding both Observations and Precedents | SPEC §3.4 |
+| Cosmos NoSQL graph with adjacency-list ships in Phase 1 — §8.2 | **Cosmos implementation deferred to Phase 1.5** (first Phase 1.5 deliverable); `IInsightGraph` interface ships in Phase 1 (D-P17) as design-only stub to preserve swap path | SPEC §3.1 D-P17, §3.3 |
+| Closure-extraction as Phase 2 implementation; Phase 1 ships design doc (D-A12) — §6.5, §21.2 | **Universal layered ingest with cheap-gates-expensive economics ships in Phase 1**: Layer 1 (classification) + Layer 2 (outcome extraction) on every SPE upload via new consumer. Real Observations from real documents end-to-end. | SPEC §3.1 D-P5..D-P10; [SPEC-phase-1-minimum.md §3](../../projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md) |
+| Three rendering patterns + three interaction modes + surface map — §10.1..§10.3 | **All three surfaces deferred to Phase 1.5**. Phase 1 ships programmatic API only (`POST /api/insights/ask`). Surface design returns when surfaces land. | SPEC §3.3, §3.6 |
+| Historical backfill as Phase 1 capability — §4.7, §11.4 | **Admin-triggered only**; no automated backfill in Phase 1; admin owns volume + cost projection before any run | [SPEC-phase-1-minimum.md §3.6](../../projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md) |
+| Evaluation harness as CI gate in Phase 1 — §14 | **Smoke test + small golden dataset + eval harness baseline** (D-P16); CI gate is "baseline pass at permissive thresholds"; harden in Phase 1.5+ | SPEC §3.1 D-P16 |
+| MCP server contract as Phase 1 deliverable (Phase 2 implementation) — §15 | **MCP server contract deferred to Phase 1.5** (not Phase 1) along with other surface-coupled work | SPEC §3.6 |
+| Customer-onboarding workflow design as Phase 1 design — §11.4 | **Deferred to Phase 1.5** (single-tenant Phase 1 has no multi-tenant onboarding need; per-customer onboarding deferred until ingest is stable) | SPEC §3.6 |
+| Synthesis layer = "Insights Agent" with C# tool handlers (`IAiToolHandler`) — §9 | **Insights questions are Spaarke playbooks** executed by existing `PlaybookExecutionEngine` with Insights-mode metadata + caching; the "Insights Agent" concept dissolves into `InsightsOrchestrator` (D-P14 + facade `IInsightsAi`); "tools" are realized as node executors (D-P12), NOT `IAiToolHandler` instances. The honesty primitives become mechanical node executors: `EvidenceSufficiencyNode`, `DeclineToFindNode`, `GroundingVerifyNode`. | decisions.md D-54; SPEC §3.1 D-P12, D-P14, §4 |
+| Tenant-list-as-data control plane for ~10 tenants — §13.2, §21.4 | **Single-tenant Phase 1+2**; control-plane evolution deferred beyond Phase 2 (D-52 + DEF-05 re-deferral); each customer = one Bicep parameter file = one full deployment unit | decisions.md D-52; SPEC §3.1 D-A28 (now D-P canonical infra in SPEC §3.1) |
+| BFF AI facade boundary | **Binding** for Phase 1 — placement table at SPEC §3.5.2 covers all D-P deliverables; `IInsightsAi` facade is the only allowed AI consumption path for Zone B code | SPEC §3.5 |
+
+**What stands unchanged from r2**: four-tier taxonomy (§3.1), `InsightArtifact` envelope shape (§3.2), provenance-as-API-contract (§3.3), Precedent layer concept (§3.4 — but Phase 1 implementation per [SPEC-phase-1-minimum.md §2](../../projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md) is concrete manual-SME-authoring mode only; Phase 1.5+ system-proposed Tentative mode), Live Facts via direct Dataverse queries (§8.3), two-tier memory (§8.4), Functions for sync (§11.1, §11.2), no plugins / no Power Automate (§11.3), auth model (§12), privilege model (§13), Azure resources (§16), packagability (§18).
+
+**Pointer summary**: for any Phase 1 question, the answer-order is:
+1. [SPEC.md §3.1](../../projects/ai-spaarke-insights-engine-r1/SPEC.md) — Phase 1 deliverable list (D-P1..D-P17)
+2. [decisions.md D-52..D-63](../../projects/ai-spaarke-insights-engine-r1/decisions.md) — current decisions; D-01..D-51 carry forward
+3. [SPEC-phase-1-minimum.md](../../projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md) — rationale narrative
+4. [design.md](../../projects/ai-spaarke-insights-engine-r1/design.md) §0 — refinement integration table; rest of design.md is comprehensive design reference
+5. This doc — Spaarke-wide architecture reference; body sections below are r2 (2026-05-20)
 
 ---
 

@@ -1,10 +1,50 @@
 # Spaarke Insights Engine — Comprehensive Design (r1)
 
-> **Status**: DRAFT — pre-implementation. Subject to spike outcomes.
-> **Last Updated**: 2026-05-19
+> **Status**: DRAFT — pre-implementation, with 2026-05-27 refinement integrated below.
+> **Last Updated**: 2026-05-27 (refinement pass — see callout below). Original draft 2026-05-19.
 > **Authors**: Spaarke Engineering
-> **Companion documents**: [README.md](README.md) · [ai-inventory.md](ai-inventory.md) · [azure-inventory.md](azure-inventory.md)
+> **Companion documents**: [README.md](README.md) · [SPEC.md](SPEC.md) · [decisions.md](decisions.md) · [SPEC-phase-1-minimum.md](SPEC-phase-1-minimum.md) · [ai-inventory.md](ai-inventory.md) · [azure-inventory.md](azure-inventory.md)
 > **Knowledge base**: [knowledge/azure-ai-search/](../../knowledge/azure-ai-search/) · [knowledge/cosmos-gremlin/](../../knowledge/cosmos-gremlin/) · [knowledge/azure-functions-isv/](../../knowledge/azure-functions-isv/) · [knowledge/dataverse-sync/](../../knowledge/dataverse-sync/) · [knowledge/foundry-memory-patterns/](../../knowledge/foundry-memory-patterns/)
+
+---
+
+## 0. Refinement integration (2026-05-28 — current; supersedes 2026-05-27)
+
+This design document was authored against an earlier Phase 1 framing. **Two passes of refinement** have since narrowed Phase 1 scope significantly. The current canonical Phase 1 spec is [SPEC.md](SPEC.md); this design document is preserved as comprehensive design reference but in-line text may lag the spec.
+
+### 0.1 Current (2026-05-28) — canonical direction
+
+[SPEC.md](SPEC.md) is the canonical Phase 1 scope. The 2026-05-28 spec narrows Phase 1 to **17 deliverables (D-P1..D-P17)** centered on real Observation production end-to-end via universal layered ingest. Read [SPEC-phase-1-minimum.md](SPEC-phase-1-minimum.md) for the rationale narrative.
+
+| Current commitment | Decisions | Where this design doc lags |
+|---|---|---|
+| **Single-tenant Phase 1 scope** | D-52 (stands) | §3.5, §7.2, §9.5 — callouts already added (still current) |
+| **ONE derived index (`insights-index`) with `artifactType` discriminator** | D-53 **revised 2026-05-28** (was: 5 indexes) | §4.1 — in-line callout still describes 5 indexes; **treat SPEC §3.4 as authoritative** |
+| **Questions-as-playbooks** | D-54 (stands) | §5 — callouts already added (still current) |
+| **Universal layered ingest** (Layer 1 classification + conditional Layer 2 outcome extraction) | D-59 (new 2026-05-28) | §6.4 — in-line callout describes the older "document-extraction-design" generalization; **the new universal-ingest model supersedes** |
+| **Observation review surface — MANDATORY** | D-60 (new 2026-05-28) | Not covered in this design doc; see SPEC §3.1 D-P11 + [SPEC-phase-1-minimum.md §5](SPEC-phase-1-minimum.md) |
+| **Precedent two-mode authoring** | D-61 (new 2026-05-28) | §3.4 — Precedent layer described abstractly; concrete two-mode authoring in [SPEC-phase-1-minimum.md §2](SPEC-phase-1-minimum.md) |
+| **Prompt versioning + targeted re-extraction** | D-62 (new 2026-05-28) | §6.7 schema evolution — version-driven re-extraction principle was already there; D-62 ratifies it as Phase 1 mandatory |
+| **Confidence-threshold gating as mechanical primitive** | D-63 (new 2026-05-28) | Not covered explicitly in this design doc; see SPEC §3.1 D-P10 |
+| **Three-surface presentation DEFERRED** to Phase 1.5 | D-55 **deferred 2026-05-28** | §8 — in-line callout describes three surfaces as Phase 1; **defer to Phase 1.5** |
+| **Snapshot persistence DEFERRED** to Phase 2 | D-56 **deferred 2026-05-28** | §8.6 — added 2026-05-27 as new subsection; **mark deferred** |
+| **Catalog index + routing DEFERRED** to Phase 2 | D-57 **deferred 2026-05-28** | §5.3 routing tool reference; **defer** |
+| **Signal Contract document SUPERSEDED** — Live Facts on read | D-58 **superseded 2026-05-28** | §6.1 — in-line callout describes Mode A/B/C and Signal Contract; **Mode A is now Live Fact on read; no projection writing in Phase 1** |
+| **Cosmos NoSQL graph DEFERRED** to Phase 1.5 (first deliverable); `IInsightGraph` interface ships in Phase 1 (D-P17) | original D-A6 deferred | §4.2 — Cosmos NoSQL design preserved as reference; implementation is Phase 1.5 |
+| **D-A28..D-A35 renumbered to D-P1..D-P17** | per SPEC §3.1 | §10.2 — in-line table uses A-series IDs; **see SPEC §3.1 for canonical D-P IDs** |
+
+### 0.2 Earlier (2026-05-27) — partially superseded
+
+The 2026-05-27 [SPEC-phase-1-minimum.md](SPEC-phase-1-minimum.md) introduced D-52..D-58. Of those: **D-52 stands** (single-tenant), **D-54 stands** (questions-as-playbooks), **D-53 was revised** (1 index not 5), **D-55/D-56/D-57 were deferred** (out of Phase 1 scope), **D-58 was superseded** (Live Facts on read replaces backward-derived Signal Contract). The in-line section callouts below were added on 2026-05-27 and may reflect the older framing — when in doubt, **read SPEC.md §3 and decisions.md D-52..D-63 for the current direction**.
+
+### 0.3 Cross-reference precedence
+
+For Phase 1 deliverable scope, **SPEC.md is authoritative**. For decision rationale, **decisions.md is authoritative**. This design document is comprehensive architecture reference — when it conflicts with SPEC.md or decisions.md, those win until this doc is updated.
+
+The historical text below is preserved for context. When in doubt, cross-check against:
+- [SPEC.md §3.1](SPEC.md) — canonical Phase 1 deliverable list (D-P1..D-P17)
+- [decisions.md](decisions.md) — D-52..D-63 (canonical refinement decisions)
+- [SPEC-phase-1-minimum.md](SPEC-phase-1-minimum.md) — 2026-05-28 rationale narrative
 
 ---
 
@@ -39,37 +79,42 @@ Every artifact produced by the Engine carries provenance. Every Inference cites 
 
 | Section | Content |
 |---|---|
-| §2 | Conceptual model — Fact / Observation / Inference taxonomy |
-| §3 | Architecture — component map, request flow, tenant isolation |
-| §4 | Substrate decisions — AI Search, graph, Live Facts |
-| §5 | Synthesis layer — Insights Agent design |
-| §6 | Data flow — Dataverse → indexes/graph, extraction, backfill |
+| §0 | **Refinement integration (2026-05-27)** — pointers to where SPEC.md + addendum updates land |
+| §2 | Conceptual model — **four-tier** Fact / Observation / Precedent / Inference taxonomy (per D-03, D-46) |
+| §3 | Architecture — component map, request flow, tenant isolation (single-tenant Phase 1 per D-52) |
+| §4 | Substrate decisions — **dual-substrate** (operational + derived) per D-53; AI Search, graph, Live Facts |
+| §5 | Synthesis layer — **questions-as-playbooks** per D-54; Insights orchestration in Zone A per SPEC §3.5 |
+| §6 | Data flow — Dataverse → indexes/graph, document extraction (per D-A12), backfill |
 | §7 | Privilege model — per-tenant + in-tenant access trimming |
-| §8 | Surface integration — pane, widget, ribbon, Outlook |
+| §8 | Surface integration — **three surfaces + snapshot persistence** per D-55, D-56; routing per D-57 |
 | §9 | Packagability — Bicep, deployment, schema migration |
-| §10 | AI inventory reconciliation — what existing services map to Engine components |
-| §11 | Phased plan — what ships when |
-| §12 | Open questions / deferred decisions |
+| §10 | AI inventory reconciliation — operational substrate consumed as-is per D-53 |
+| §11 | Phased plan — cross-references SPEC §3.1 as canonical for Phase 1 deliverables |
+| §12 | Open questions / deferred decisions — addendum §7 first-step blockers added |
 
 ---
 
 ## 2. Conceptual Model
 
-### 2.1 The three-artifact taxonomy
+### 2.1 The four-tier artifact taxonomy
 
-Every piece of context the Engine produces is one of three things, each with a different trust profile, store, and presentation rule.
+> **Refinement note (2026-05-22 / 2026-05-27)**: Per decisions.md D-03 and D-46, the taxonomy is **four tiers** (Fact / Observation / Precedent / Inference), not three. Phase 1 ships architecture + scaffold for all four (D-A26, D-A27); Precedent lifecycle automation lands in Phase 1.5. Examples below add a Precedent row.
+
+Every piece of context the Engine produces is one of four things, each with a different trust profile, store, and presentation rule.
 
 | Type | Source | Confidence | Lives in | Presented as |
 |---|---|---|---|---|
 | **Fact** | Deterministic computation over systems of record | 1.0 always | Live query OR materialized feature view | Stated directly. No hedging. |
 | **Observation** | Probabilistic extraction by playbook/LLM at a milestone | 0.0–1.0 | Insight Index (AI Search) + Insight Graph references | Stated with confidence + evidence link |
-| **Inference** | Synthesized on demand by the Insights Agent over Facts + Observations | 0.0–1.0 | Never authoritatively stored (cached only) | Stated with confidence, comparable set, reasoning |
+| **Precedent** | SME-confirmed institutional pattern derived from multiple supporting Observations | 0.0–1.0 (with `confirmed`/`tentative`/`underDriftReview` lifecycle states) | `insight-precedents` index + `sprk_precedent` Dataverse entity + Cosmos `Precedent` vertex (D-A26 scaffold; D-46 layer) | Stated as institutional rule with `precedent://...` provenance + supporting Observation refs |
+| **Inference** | Synthesized on demand by an Insights-mode playbook (D-54) over Facts + Observations + Precedents | 0.0–1.0 | Never authoritatively stored (per-execution cache D-A32 only; explicit user save persists a `sprk_analysis` snapshot per D-A34/D-56) | Stated with confidence, comparable set, reasoning, and cited Precedents where applicable |
 
 #### 2.1.1 Examples to anchor the taxonomy
 
 - **Fact**: `Matter M-1234 was pending 287 days` — computed from `closedDate - openedDate`. Always true given the source. State it directly.
-- **Observation**: `Matter M-1234 outcome quality: favorable (0.92)` — produced by a closure-extraction playbook reading documents and decisions. Carries confidence and evidence. Cite the playbook + source docs.
-- **Inference**: `Predicted cost for this new matter: ~$280K (confidence 0.74), based on 12 comparable matters` — synthesized at query time. Cite the 12 matters and their actual numbers. If only 3 are comparable, return "insufficient evidence" with the gap.
+- **Observation**: `Matter M-1234 outcome quality: favorable (0.92)` — produced by a document-extraction playbook (per D-A12 generalization) reading documents and decisions. Carries confidence and evidence. Cite the playbook + source docs.
+- **Precedent**: `In IP-licensing matters with a 12-month cure period, settlement rates rise 18%` — SME-confirmed pattern derived from N Observations across many matters; lifecycle promotes from tentative → confirmed under SME workflow (Phase 1.5). Cite the supporting Observations and the confirmation event.
+- **Inference**: `Predicted cost for this new matter: ~$280K (confidence 0.74), based on 12 comparable matters` — synthesized at query time by an Insights-mode playbook (D-54) composing Facts + Observations + Precedents. Cite the 12 matters and their actual numbers; cite any Precedents applied. If only 3 are comparable, return "insufficient evidence" with the gap via the `DeclineToFindNode` deterministic decline path (D-A24/D-49).
 
 ### 2.2 The artifact envelope
 
@@ -78,7 +123,7 @@ Every artifact — Fact, Observation, or Inference — uses the same envelope so
 ```json
 {
   "id": "stable-identifier",
-  "type": "fact | observation | inference",
+  "type": "fact | observation | precedent | inference",
   "subject": { "entityType": "matter", "entityId": "M-1234" },
   "predicate": "totalSpend | outcomeQuality | predictedCost | ...",
   "value": {
@@ -140,6 +185,9 @@ This single rule prevents most ways the system could become dishonest.
 ## 3. Architecture
 
 ### 3.1 Where the Insights Engine sits
+
+> **Refinement note (2026-05-27)**: The diagram below reflects the original "InsightsResolverService → Insights Agent → substrates" framing. Under D-54 (questions-as-playbooks), the **Insights Agent box is reframed**: it is now `Services/Ai/Insights/InsightsOrchestrator` (Zone A per SPEC §3.5) wrapping the existing `PlaybookExecutionEngine` (with D-A32 cache). The "Insight tools" inside that box are realized as **node executors** (D-A30: `IndexRetrieveNode`, `GraphTraverseNode`, `LiveFactNode`, `EvidenceSufficiencyNode`, `DeclineToFindNode`, `GroundingVerifyNode`, `SpeContentRetrieveNode`, `EmitObservationNode`, `ReturnInsightArtifactNode`) composable inside Insights-mode playbooks. The **three substrate boxes** also expand under D-53: the Insight Index box is the **derived substrate** (`insight-matters`, `insight-decisions`, `insight-risks`, `insight-sessions`, `insight-precedents`), and a new arrow goes to the **operational substrate** (`spaarke-files-index`, `spaarke-records-index`, `spaarke-invoices-index`, `spaarke-rag-references`) consumed as-is — composition happens inside `IndexRetrieveNode` per D-A35. The **surfaces row** is concretized under D-55 to (a) context-pane card, (b) Assistant pane (LLM-routed via catalog index D-57), (c) field-bound icon.
+
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -207,15 +255,23 @@ This single rule prevents most ways the system could become dishonest.
 
 ### 3.2 Component summary
 
+> **Refinement note (2026-05-27)**: The "Insights Agent" row is reframed per D-54/D-A9 — it is **Insights orchestration in Zone A** (facade impl + playbook invocation wrapper + routing-tool registration), NOT a separate agent. Tools become node executors (D-A30). New rows for D-A30/A32/A33/A34/A35 added at the bottom.
+
 | Component | Lives in | Purpose | Reuses existing? |
 |---|---|---|---|
-| **InsightsResolverService** | `Sprk.Bff.Api/Services/Insights/` (new) | Question router + signal fetcher + provenance assembler + cache + trimming | NEW |
-| **Insights Agent** | `Sprk.Bff.Api/Services/Insights/Agent/` (new) | Tool-driven grounded synthesis | Reuses `IChatClient` + tool framework |
-| **Insight Index** | Azure AI Search (existing service, new indexes) | Vector + metadata retrieval of Observations + materialized Facts | Existing AI Search service |
+| **InsightsResolverService** | `Sprk.Bff.Api/Services/Insights/` (new — Zone B) | Thin orchestrator: translates API request → Insights-mode playbook invocation via `IInsightsAi` facade; enforces `accessibleMatterSet` trimming pre-invocation; assembles `InsightResponse` from playbook output | NEW (thinner than original framing under D-54) |
+| **Insights orchestration (`InsightsOrchestrator`)** | `Sprk.Bff.Api/Services/Ai/Insights/` (new — Zone A; mirrors `Services/Ai/Chat/`) | `IInsightsAi` facade impl; wraps `PlaybookExecutionEngine` with D-A32 cache; registers routing tool (D-A33) with `SprkChatAgent` for Assistant pane | Reuses `IChatClient` + `PlaybookExecutionEngine` + tool framework |
+| **Insights-mode node executors** | `Sprk.Bff.Api/Services/Ai/Nodes/` (new — Zone A; extends existing 10-executor registry) | Composable building blocks: `IndexRetrieveNode`, `GraphTraverseNode`, `LiveFactNode`, `EvidenceSufficiencyNode`, `DeclineToFindNode`, `GroundingVerifyNode`, `SpeContentRetrieveNode`, `EmitObservationNode`, `ReturnInsightArtifactNode` (D-A30) | Extends existing `INodeExecutor` registry |
+| **Multi-index composition pattern** | `Sprk.Bff.Api/Services/Ai/Insights/Composition/` (new — Zone A) | Compose across operational + derived substrates inside `IndexRetrieveNode` (D-A35) | Reuses `RagService` / `RagQueryBuilder` |
+| **Insights playbook execution cache** | `Sprk.Bff.Api/Services/Ai/Insights/InsightsPlaybookExecutionCache.cs` (new — Zone A) | Redis cache wrapping `PlaybookExecutionEngine` for Insights-mode playbooks (D-A32) | Reuses Redis + per-playbook TTL |
+| **Catalog index + routing tool** | `Sprk.Bff.Api/Services/Ai/Insights/Routing/` (new — Zone A) | Catalog index of routing intent statements + `IAiToolHandler` routing tool registered with `SprkChatAgent` (D-A33) | Reuses `ReferenceIndexingService` pattern + chat-agent function calling |
+| **Snapshot persistence** | `Sprk.Bff.Api/Api/Insights/InsightSnapshotEndpoints.cs` + `Services/Insights/Snapshots/` (new — Zone B) | Frozen `InsightArtifact` envelopes via `sprk_analysis` polymorphic with new source-type value (D-A34/D-56) | Reuses existing `sprk_analysis` polymorphic pattern |
+| **Derived substrate (Insight Index)** | Azure AI Search (existing service, new indexes) | `insight-matters` / `insight-decisions` / `insight-risks` / `insight-sessions` / `insight-precedents` (D-A3) — derived substrate per D-53 | Existing AI Search service |
+| **Operational substrate (consumed as-is)** | Existing `spaarke-files-index`, `spaarke-records-index`, `spaarke-invoices-index`, `spaarke-rag-references` | Composed into Insights queries by `IndexRetrieveNode` per D-A35 — **schema NOT modified by this project** (per D-53) | Existing infrastructure |
 | **Insight Graph** | Cosmos DB (new account, see §4.2) | Entity + typed-edge traversal | NEW resource |
-| **Live Fact Resolver** | `Sprk.Bff.Api/Services/Insights/Facts/` (new) | Cheap on-read Dataverse queries | Reuses `IDataverseService` |
-| **Sync Functions** | New Azure Function App | Dataverse → Insight Index sync (Service Bus + Timer) | Pattern from existing `DataverseIndexSyncService` |
-| **Extraction Functions** | Same Function App | Triggers closure-extraction JPS playbook on matter milestone events | Calls existing `PlaybookExecutionEngine` via BFF or directly |
+| **Live Fact Resolver** | `Sprk.Bff.Api/Services/Insights/Facts/` (new — Zone B) | Cheap on-read Dataverse queries; wrapped by `LiveFactNode` (D-A30) for playbook invocation | Reuses `IDataverseService` |
+| **Sync Functions** (Track B) | New Azure Function App | Dataverse → derived-substrate sync (Service Bus + Timer); ingests per Signal Contract (D-A29) | Pattern from existing `DataverseIndexSyncService` |
+| **Document-extraction trigger Function** (Track B) | Same Function App | Fires Insights-mode extraction playbook on matter milestones; reuses chunked content from `spaarke-files-index` via `SpeContentRetrieveNode` (D-A30) | Calls `IInsightsAi` facade |
 | **Re-indexer Function** | Same Function App | Scheduled: embedding refresh, schema migration, version-bump re-extraction | NEW |
 
 ### 3.3 Request flow — typical Inference query
@@ -247,13 +303,15 @@ No Agent involvement. No retrieval. Single round-trip.
 
 ### 3.5 Tenant isolation model
 
+> **Refinement note (2026-05-27)**: D-52 narrows Phase 1 to **single-tenant deployment only** — each customer is one Bicep parameter file = one full deployment unit. The physical-isolation mechanism below is unchanged; what changes is the multi-tenant *evolution path* (the "past ~10 tenants" inflection is deferred beyond Phase 2 per DEF-05). The `tenantId` field on derived-substrate documents is retained for partition keys, audit clarity, and future federation — but is no longer the privilege isolation mechanism in Phase 1 (physical isolation does that).
+
 **Decision**: Physical per-tenant isolation. Each customer tenant gets:
 - Own AI Search service (or shared service with per-tenant indexes — see §7 for the tradeoff)
 - Own Cosmos account for the Insight Graph
 - Own Function App (per-tenant UAMI, per-tenant Service Bus topic — knowledge research confirms this is the recommended ISV pattern via Flex Consumption + tenant-list-as-configuration)
 - Own subset of App Service / shared resources where economically reasonable
 
-For Spaarke r1 with a small number of tenants, **tenant-list-as-configuration in Bicep** is sufficient. Past ~10 tenants, evolve to a tenant-list-as-data control plane (Phase 2 — knowledge research notes this inflection).
+For Spaarke r1 with a small number of tenants, **tenant-list-as-configuration in Bicep** is sufficient. ~~Past ~10 tenants, evolve to a tenant-list-as-data control plane (Phase 2 — knowledge research notes this inflection).~~ **Re-deferred 2026-05-27 per D-52 + DEF-05: single-tenant Phase 1 + Phase 2 makes the control-plane evolution non-load-bearing; revisit only if a future commercial decision overrides D-52 to pursue multi-tenant shared deployment.**
 
 ---
 
@@ -261,20 +319,24 @@ For Spaarke r1 with a small number of tenants, **tenant-list-as-configuration in
 
 ### 4.1 Vector + structured retrieval — Azure AI Search
 
+> **Refinement note (2026-05-27 — dual-substrate per D-53)**: The Engine spans **two substrates**, both on the same AI Search service. The **operational substrate** (`spaarke-files-index`, `spaarke-records-index`, `spaarke-invoices-index`, `spaarke-rag-references`) already exists with its populating plumbing in place and is **consumed as-is** by this project — no schema changes. The **derived substrate** (the `insight-*` indexes described below, plus a catalog index per D-A33/D-57) is what this project builds. Insights-mode playbooks compose across both via `IndexRetrieveNode` (D-A30) per the composition pattern in D-A35. The `tenantId` asymmetry (operational `spaarke-records-index` lacks the field; derived `insight-*` indexes have it) is handled at the composition layer — under D-52 single-tenant Phase 1 it's safe at the privilege layer, but composition logic must remain correct under future federation.
+
 #### 4.1.1 Decision
 
-Use the existing Azure AI Search service (already at `spaarke-search-prod` and `spaarke-search-dev`). Add new indexes for Insight artifacts. Reuse existing patterns from `spaarke-rag-references` (small structured docs + embedding + idempotency).
+Use the existing Azure AI Search service (already at `spaarke-search-prod` and `spaarke-search-dev`). Add new indexes for Insight artifacts (derived substrate). Reuse existing patterns from `spaarke-rag-references` (small structured docs + embedding + idempotency); the same `ReferenceIndexingService` pattern is the template for the catalog index (D-A33).
 
-#### 4.1.2 New indexes
+#### 4.1.2 New indexes (derived substrate per D-53)
 
-| Index | Contents | Document size | Embedding |
-|---|---|---|---|
-| `insight-matters` | Closure summaries, outcome facts, party/deal facts, key dates per matter | Small (1-5KB structured + summary) | Yes |
-| `insight-decisions` | Decision points + rationale extracted from sessions/documents | Small | Yes |
-| `insight-risks` | Observed risk patterns and signals | Small | Yes |
-| `insight-sessions` | Notable findings from AI sessions ("save to insights" action) | Small | Yes |
+| Index | Contents | Document size | Embedding | Populated when |
+|---|---|---|---|---|
+| `insight-matters` | Cohort/scope facets + aggregate features + cohort embedding content (narrow derived projection per D-58/D-A29 — does NOT re-project record fields already in `spaarke-records-index`) | Small (1-5KB structured + summary) | Yes | Phase 1 (derived projection) + Phase 2 (extraction) |
+| `insight-decisions` | Decision points + rationale extracted from sessions/documents | Small | Yes | **Phase 2 (closure extraction populates; ships empty in Phase 1)** |
+| `insight-risks` | Observed risk patterns and signals | Small | Yes | **Phase 2 (ships empty in Phase 1)** |
+| `insight-sessions` | Notable findings from AI sessions ("save to insights" action) | Small | Yes | **Phase 2 (ships empty in Phase 1)** |
+| `insight-precedents` | SME-confirmed institutional patterns (D-A26 scaffold; D-46 4th tier) | Small | Yes | Phase 1 (manual via admin endpoint D-A27) + Phase 1.5 (lifecycle automation) |
+| `insights-catalog` (or partition of `spaarke-rag-references` — addendum §7 Q3 first-step blocker) | Routing intent statements + Insights-mode playbook metadata | Small | Yes | Phase 1 (per playbook publish event) |
 
-All indexes share the **artifact envelope** schema from §2.2. Different `predicate` ranges, different vector content (the embedding embeds a representative text composition of the artifact), but a unified retrieval contract.
+All derived indexes share the **artifact envelope** schema from §2.2. Different `predicate` ranges, different vector content (the embedding embeds a representative text composition of the artifact), but a unified retrieval contract. The catalog index has its own schema focused on routing (subject entity types, surfaces enabled, etc.) — see D-A33.
 
 #### 4.1.3 Index schema (illustrative — `insight-matters`)
 
@@ -501,7 +563,9 @@ Cached briefly (5-minute TTL via existing Redis `RequestCache` / `IDistributedCa
 
 ---
 
-## 5. Synthesis Layer — Insights Agent
+## 5. Synthesis Layer — Insights orchestration (questions-as-playbooks)
+
+> **Refinement note (2026-05-27 — D-54 questions-as-playbooks)**: This section was originally titled "Synthesis Layer — Insights Agent" and described a custom agent with C# tool handlers. Under D-54, **Insights questions are implemented as Spaarke playbooks executed by the existing `PlaybookExecutionEngine`** (with Insights-mode metadata D-A31 + caching D-A32). The "agent" concept is reframed as `InsightsOrchestrator` (D-A9) — a thin Zone A wrapper that exposes `IInsightsAi` facade methods, invokes playbooks, and registers a routing tool (D-A33) with the existing `SprkChatAgent` for Assistant-pane natural-language routing. The "tools" listed in §5.3 below are realized as **node executors** (D-A30), composable inside playbooks — not as C# `IAiToolHandler` instances. The honesty contract enforcement primitives (§5.4) move from "agent reasoning rule" to "node executors with deterministic exit paths" (`EvidenceSufficiencyNode`, `DeclineToFindNode`, `GroundingVerifyNode`). The two-tier memory pattern (§5.2) still applies but at the playbook + chat-agent layer. The §5.1 / §5.5 decisions stand unchanged. **Where text below conflicts with this refinement, D-54 and SPEC §3.5 take precedence.**
 
 ### 5.1 Decision: custom BFF agent, not Foundry-hosted
 
@@ -522,22 +586,33 @@ Per knowledge research, Foundry uses a two-tier model: `user_profile` (static) +
 
 These are inputs to the Agent's context — they don't bypass retrieval. Memory shapes the question and the synthesis style; evidence still comes from indexes/graph/facts.
 
-### 5.3 Tools the Insights Agent exposes (initial set)
+### 5.3 Capabilities exposed by Insights-mode node executors (D-A30 — supersedes original "tools" framing)
 
-| Tool | Purpose | Returns |
+> **Refinement note (2026-05-27)**: The original §5.3 listed C# `IAiToolHandler` instances. Under D-54 these are realized as **node executors** composable inside playbooks. The conceptual capabilities are unchanged; their implementation surface moves to `Services/Ai/Nodes/`. Names below are illustrative; confirm against existing `*NodeExecutor` patterns before creating files.
+
+| Capability concept | Node executor (D-A30) | Returns |
 |---|---|---|
-| `FindComparableMatters` | Vector + filter retrieval over `insight-matters` | List of `MatterArtifact` with similarity scores |
-| `GetMatterFacts` | Live-fact lookup for one or more matters | Map of `matterId → {factPredicate → value}` |
-| `RetrieveByGraph` | Named graph traversals (e.g., "matters involving party X", "judges who ruled on issue Y") | List of vertex refs + edge context |
-| `GetObservations` | Retrieve Observations matching a predicate + scope filter | List of Observation artifacts |
-| `AssessEvidenceSufficiency` | Check if comparable set is large/diverse enough for an Inference | `{sufficient: bool, count: N, threshold: M, gap: '...'}` |
-| `ComposeInference` | Final synthesis tool — wraps the conclusion in proper artifact envelope with evidence | Inference artifact |
+| `FindComparableMatters` | `IndexRetrieveNode` composing `spaarke-records-index` (operational current-state filter) ∩ `insight-matters` (derived cohort similarity) per D-A35 | List of matter refs with similarity scores |
+| `GetMatterFacts` | `LiveFactNode` (wraps `LiveFactResolverService`) | Map of `matterId → {factPredicate → value}` |
+| `RetrieveByGraph` | `GraphTraverseNode` (wraps `IInsightGraph` named traversals) | List of vertex refs + edge context |
+| `GetObservations` | `IndexRetrieveNode` against derived substrate (`insight-decisions` / `insight-risks` / `insight-sessions`) | List of Observation artifacts |
+| `AssessEvidenceSufficiency` | `EvidenceSufficiencyNode` (applies rule from playbook metadata D-A31) | `{sufficient: bool, count: N, threshold: M, gap: '...'}` |
+| `DeclineToFind` (insufficient path) | `DeclineToFindNode` (emits structured `DeclineResponse` per D-A24/D-49) | `DeclineResponse` artifact (NOT freely-composed prose) |
+| `ComposeInference` (final synthesis) | Existing `AiAnalysisNodeExecutor` invoked from inside the playbook + `ReturnInsightArtifactNode` for envelope serialization | Inference artifact |
+| `GroundingVerify` (post-synthesis) | `GroundingVerifyNode` (wraps `GroundingVerifier` per D-A22/D-47) — runs at end of every Insights-mode playbook | Verified-or-stripped citation set |
+| `SpeContentRetrieve` (Mode C extraction — Phase 2) | `SpeContentRetrieveNode` reading from `spaarke-files-index`, wired through `ISanitizer` (D-A25/D-50) | Sanitized document content |
+| `EmitObservation` (Mode C extraction — Phase 2) | `EmitObservationNode` (wraps extraction output in Observation envelope with provenance) | Observation artifact |
+| `Precedent search + cite` | composed inside playbook via D-A26 scaffold (`ISearchPrecedentsTool` and `ICitePrecedentTool` realized as node executors per D-A30) | Precedent artifact + citation |
 
-Each tool follows the existing `IAiToolHandler` pattern (per AI inventory §4.9).
+Each node follows the existing `INodeExecutor` pattern (per AI inventory §8). Each evidence-bearing node has `EvidenceGuard.Validate` (D-A23/D-48) protecting against silent empty-evidence returns.
+
+In addition, an **`IAiToolHandler` routing tool** (D-A33) is registered with the existing `SprkChatAgent` for Assistant-pane natural-language routing — it returns `{playbookId, parameters, confidence}` but does NOT itself produce the answer. The Assistant pane's chat agent then invokes the routed playbook through `IInsightsAi.AnswerQuestionAsync` per D-55.
 
 ### 5.4 Evidence-sufficiency rules — non-negotiable
 
-Every Inference question carries (in the question catalog) an evidence-sufficiency rule:
+> **Refinement note (2026-05-27 — D-06 mechanism update under D-54)**: The principle is unchanged: every Inference question carries an evidence-sufficiency rule and enforcement is non-negotiable. Under D-54, the rule no longer lives in a "question catalog" — it lives in **Insights-mode playbook metadata (D-A31)**. The Agent's `AssessEvidenceSufficiency` tool is realized as **`EvidenceSufficiencyNode` (D-A30)**; the insufficient-evidence response is emitted by **`DeclineToFindNode` (D-A24/D-49)** — both deterministic node-graph paths, not LLM-coercible. The JSON example below remains accurate as the metadata shape; conceptually it now lives in playbook metadata rather than a separate registration entity.
+
+Every Inference question carries (in Insights-mode playbook metadata, D-A31) an evidence-sufficiency rule:
 
 ```jsonc
 {
@@ -557,9 +632,9 @@ Every Inference question carries (in the question catalog) an evidence-sufficien
 }
 ```
 
-The Agent's `AssessEvidenceSufficiency` tool reads this rule and either proceeds with synthesis or returns the structured insufficient-evidence response.
+The playbook's `EvidenceSufficiencyNode` (D-A30) reads this rule from playbook metadata (D-A31) and either proceeds with synthesis or routes to `DeclineToFindNode` (D-A24/D-49) which emits the structured insufficient-evidence response.
 
-**Why this matters**: this is the architectural enforcement of the honesty contract. Without explicit sufficiency rules per question, the Agent will default to "make something up with hedging language" — the exact behavior the marketing claims to differ from.
+**Why this matters**: this is the architectural enforcement of the honesty contract. Without explicit sufficiency rules per playbook AND deterministic node-graph routing on the insufficient path, synthesis will default to "make something up with hedging language" — the exact behavior the marketing claims to differ from. Under D-54 + D-49, the decline path is a node executor (mechanical), not an LLM judgment call (coercible).
 
 ### 5.5 Safety controls
 
@@ -570,6 +645,8 @@ The Agent's `AssessEvidenceSufficiency` tool reads this rule and either proceeds
 ---
 
 ## 6. Data Flow
+
+> **Refinement note (2026-05-27 — Signal Contract per D-58)**: Phase 1 ingestion is driven by the **Signal Contract** (D-A29 — `signal-contract.md`), derived backward from the question catalog (currently `predict-matter-cost`) per the backward-design principle. Three collection modes: **Mode A** (narrow Dataverse-derived projection — does NOT re-project record fields already in `spaarke-records-index`), **Mode B** (graph vertices + edges only, no new metadata index), **Mode C** (typed document-content extraction at milestones; Phase 2 implementation via D-A30 nodes per §6.4 below). The §6.1–§6.3 sync flow remains accurate for Modes A and B once Track B unblocks; §6.4 is generalized below to "document extraction" per D-A12.
 
 ### 6.1 Architecture per knowledge research + auth constraints
 
@@ -770,28 +847,35 @@ Timer trigger nightly (or more frequent):
 
 Catches missed events, schema drift, late-binding edges. Idempotent — re-running on a healthy index is a no-op.
 
-### 6.4 Closure-extraction flow
+### 6.4 Document-extraction flow (generalized per D-A12)
+
+> **Refinement note (2026-05-27)**: This was originally "Closure-extraction flow". Per D-A12, the design is **generalized** to "document extraction" covering multiple document types (closing letters / closure summaries, settlement agreements, decision memos, pleadings) and two extraction archetypes (Archetype 1 direct vs. Archetype 2 analytical — see SPEC-phase-1-minimum.md §2.5). The pipeline is composed of new node executors (D-A30): `SpeContentRetrieveNode` (reads from `spaarke-files-index` — does NOT re-ingest from SPE — wired through `ISanitizer` D-A25/D-50) → existing `AiAnalysisNodeExecutor` (LLM extraction) → `EmitObservationNode` (envelope-wrapping with provenance) → existing `DeliverToIndexNodeExecutor` (writes to derived `insight-*` indexes). Phase 1 ships the design only (D-A12); Phase 2 ships implementation. The first document type for Phase 2 implementation is a first-step blocker on D-A12 (addendum §7 Q6 — closing letters / closure summaries are the natural starting point).
 
 Triggered by Service Bus message when a matter reaches a milestone (closure, settlement, judgment):
 
 ```
-┌──────────────────────────────────────┐
-│ Function: ClosureExtractionTrigger   │
-│ ServiceBusTrigger:                   │
-│   "spaarke-matter-milestones-{tenant}"│
-│                                      │
-│  1. Load matter context              │
-│  2. Invoke closure-extraction        │
-│     JPS playbook (via BFF API or     │
-│     direct PlaybookExecutionEngine   │
-│     call — see §6.4.1)               │
-│  3. Playbook output (Observations)   │
-│     flows through                    │
-│     DeliverToIndexNodeExecutor →     │
-│     AI Search                        │
-│  4. Graph vertices/edges updated     │
-│     based on extracted facts         │
-└──────────────────────────────────────┘
+┌────────────────────────────────────────────┐
+│ Function: DocumentExtractionTrigger         │
+│ ServiceBusTrigger:                          │
+│   "spaarke-matter-milestones-{tenant}"      │
+│                                             │
+│  1. Load matter context                     │
+│  2. Invoke Insights-mode extraction         │
+│     playbook (via BFF API IInsightsAi       │
+│     facade — see §6.4.1)                    │
+│  3. Playbook node graph:                    │
+│       SpeContentRetrieveNode                │
+│         (reads spaarke-files-index;         │
+│          sanitizes via ISanitizer)          │
+│       → AiAnalysisNodeExecutor              │
+│         (LLM extraction by archetype)       │
+│       → EmitObservationNode                 │
+│         (envelope + provenance)             │
+│       → DeliverToIndexNodeExecutor          │
+│         (writes to derived insight-*)       │
+│  4. Graph vertices/edges updated            │
+│     based on extracted facts                │
+└────────────────────────────────────────────┘
 ```
 
 #### 6.4.1 BFF call vs. direct playbook engine call
@@ -872,6 +956,8 @@ The artifact envelope's `value.displayHint` field signals which category an arti
 
 ### 7.2 Per-tenant isolation (physical)
 
+> **Refinement note (2026-05-27 — D-52 single-tenant Phase 1)**: The physical-isolation mechanism is unchanged and remains the privilege boundary. What changes is that Phase 1 has **exactly one tenant per deployment** — each customer = one Bicep parameter file = one full deployment unit. The cross-tenant federation marketing is explicitly deferred (DEF-14). The `tenantId` field on derived indexes is retained for partition keys, audit clarity, and future federation but is not load-bearing for privilege isolation under D-52.
+
 Each tenant has its own AI Search service or per-tenant indexes within a shared service, own Cosmos account, own Function App. The privilege boundary is **physical**: cross-tenant data leakage is structurally impossible because there's no path between them.
 
 | Resource | Per-tenant deployment |
@@ -936,6 +1022,8 @@ Append-only Cosmos with immutable policy. This is a compliance artifact, not a d
 ---
 
 ## 8. Surface Integration
+
+> **Refinement note (2026-05-27 — three surfaces + snapshot persistence per D-55, D-56, D-57)**: Phase 1 commits to **three concrete surfaces** with a single execution path: (a) **context-pane Insights card** (relevance-ranked per D-A19 Phase 1 ruleset; calls `POST /api/insights/relevant`), (b) **Assistant pane** (LLM-routed via catalog index D-A33; calls `POST /api/insights/route` then `POST /api/insights/ask`), (c) **field/section-bound AI icon** (PCF static binding to a specific `playbookId`; calls `POST /api/insights/ask`). All three call `IInsightsAi` through the same Zone A path; surfaces differ only in HOW the playbookId is selected. **Critical**: the LLM does NOT synthesize Insight answers — it routes the request to a playbook; the playbook (with `GroundingVerifyNode`) produces the answer with provenance. The original §8.3/§8.4 surface enumeration (form widget, ribbon, Outlook, Teams, notification, public API) reframes as "future surfaces"; Outlook/Teams remain DEF/Phase 2+ per SPEC §3.6. New §8.6 below covers snapshot persistence per D-A34/D-56.
 
 ### 8.1 Surface-agnostic delivery
 
@@ -1002,8 +1090,29 @@ The current unification design defines `context_update` SSE events. We generaliz
 - `insight_response` — full `InsightResponse` payload (broader than `context_update`; consumable by any surface)
 - `insight_highlight` — cross-pane jump (e.g., from a comparable-matter reference → open that matter)
 - `insight_invalidate` — surface should refresh (e.g., a matter status changed, dependent Insights are stale)
+- `insight_snapshot_drift` (new per D-A34/D-56) — surface should signal that a pinned snapshot's revalidation has detected material drift from current values
 
 These coexist with existing `context_update` events during migration; eventually `context_update` becomes a deprecated alias for `insight_response`.
+
+### 8.6 Snapshot persistence (per D-A34, D-56) — new
+
+> **Refinement note (2026-05-27)**: This subsection is new under the 2026-05-27 refinement. Insights are derived on demand by default (per-playbook TTL cache D-A32 wraps execution). When a user **explicitly saves/pins/attaches** an Insight (board report, client email, attached to matter record), a **snapshot** of the `InsightArtifact` envelope is persisted with evidence references frozen — providing a citeable stable reference even if the underlying data changes later.
+
+**Persistence mechanism (D-56)**: snapshots live as `sprk_analysis` polymorphic rows with a new source-type value (NOT a new `sprk_insightsnapshot` entity). The polymorphic pattern is the existing Spaarke route for AI outputs; first-step blocker on D-A34 confirms the pattern is in use for this case (addendum §7 Q4).
+
+**API surface (D-A34 — additions to §8.2 contracts)**:
+- `POST /api/insights/snapshot` — accepts an `InsightArtifact` from a prior `/ask` response + optional `savedReason` / `savedTo`; returns snapshot ID + stable URL
+- `GET /api/insights/snapshot/{id}` — returns the frozen snapshot exactly as persisted
+- `GET /api/insights/snapshot/{id}/revalidate` — re-derives with original parameters; returns `{original, current, drift}` so the surface can show drift if material
+
+**Snapshot properties**:
+- Full `InsightArtifact` envelope captured as JSON (frozen at save)
+- Evidence references preserved as-is (remain valid pointers even if underlying entities change)
+- `superseded_by` link populated when user re-pins (preserves audit chain, allows freshening)
+- Stable URL/ID citeable in reports, emails, exports
+- Drift detection on revalidation surfaces material divergence without invalidating the citation
+
+**Out of scope for Phase 1** (per SPEC §3.6): report builder integration, email template integration, drift visualization in PCF — D-A34 ships the API + persistence; UX deliverables are separate.
 
 ---
 
@@ -1063,11 +1172,13 @@ Each AI Search index is defined as JSON in the repo (`schemas/*.json`). Bicep de
 8. Verify: smoke-test endpoints (`/healthz/insights`), assert indexes exist with expected schema
 ```
 
-### 9.5 Multi-tenant control plane (Phase 2)
+### 9.5 Multi-tenant control plane (deferred per D-52)
 
-For r1 with a small number of tenants, **tenant-list-as-configuration** is sufficient (each tenant has a Bicep parameters file; CI deploys when files change).
+> **Refinement note (2026-05-27 — D-52 supersedes the ~10-tenant inflection)**: Under D-52 + DEF-05, the multi-tenant control-plane evolution is **deferred beyond Phase 2** pending privacy/legal work on cross-tenant federation. Phase 1 ships with the parameter-file-per-deployment pattern (D-A28); each customer = one deployment unit. The text below is preserved for historical context; revisit only if a future commercial decision overrides D-52.
 
-Per knowledge research, evolve to a **tenant-list-as-data control plane** around ~10 tenants. Design TBD; not Phase 1.
+For r1 with a small number of tenants — in fact, with **exactly one tenant per deployment** under D-52 — **tenant-list-as-configuration** is sufficient (each customer has a Bicep parameters file; CI deploys when files change).
+
+~~Per knowledge research, evolve to a **tenant-list-as-data control plane** around ~10 tenants. Design TBD; not Phase 1.~~ **Deferred 2026-05-27 per D-52 + DEF-05.**
 
 ### 9.6 Per-environment vs. per-tenant
 
@@ -1094,26 +1205,40 @@ Within a tenant, you still have dev / staging / prod environments. Bicep paramet
 
 ### 10.2 What's NEW
 
+> **Refinement note (2026-05-27)**: Original list preserved; rows updated for D-54 (no separate question catalog) and rows added for D-A30 / D-A32 / D-A33 / D-A34 / D-A35 / D-A28.
+
 | Component | Why new |
 |---|---|
-| `InsightsResolverService` | The orchestration layer doesn't exist |
-| `Insights Agent` (specific instance) | Existing chat agent factory creates conversational agents; the Insights Agent has a different tool set and synthesis profile |
+| `InsightsResolverService` (Zone B) | The orchestration layer doesn't exist; under D-54 it is a thin orchestrator that calls into `IInsightsAi` facade |
+| `InsightsOrchestrator` + `IInsightsAi` facade (Zone A, D-A9) | Existing chat agent factory creates conversational agents; Insights orchestration wraps `PlaybookExecutionEngine` with Insights-mode caching + routing-tool registration |
 | `IInsightGraph` + `CosmosNoSqlInsightGraph` | No existing graph in the stack |
 | `LiveFactResolverService` | Existing services compose dataverse queries case-by-case; we centralize the Fact production |
-| Insight indexes (`insight-matters`, etc.) | New schemas |
-| Sync Function App | New deployment artifact (no existing Function Apps; new with the narrowed ADR-001) |
-| Question catalog (Foundry agent skills or BFF config) | No existing structured catalog of context questions |
+| Derived-substrate AI Search indexes (`insight-matters`, `insight-decisions`, `insight-risks`, `insight-sessions`, `insight-precedents`) | New schemas (derived substrate per D-53) |
+| Catalog index (`insights-catalog` new index OR partition of `spaarke-rag-references`, D-A33/D-57) | Routes natural-language queries → playbookId for Assistant pane |
+| **Insights-mode node executors (D-A30)** — `IndexRetrieveNode`, `GraphTraverseNode`, `LiveFactNode`, `EvidenceSufficiencyNode`, `DeclineToFindNode`, `GroundingVerifyNode`, `SpeContentRetrieveNode`, `EmitObservationNode`, `ReturnInsightArtifactNode` | Extends existing 10-executor registry under `Services/Ai/Nodes/`; realizes the "tools" concept from original §5.3 as composable nodes |
+| **Insights-mode playbook metadata extension (D-A31)** | New fields on Spaarke playbook schema for Insights-mode (tier, evidence rule, surfaces, routing intent statements, cache TTL, etc.) — first-step blocker on extension-vs-sibling-entity (addendum §7 Q2) |
+| **Insights playbook execution cache (D-A32)** | Redis cache wrapping `PlaybookExecutionEngine` invocation for Insights-mode playbooks; cache key includes `accessibleScopeHash` + per-index staleness tokens per D-A35 |
+| **Routing tool (D-A33)** | `IAiToolHandler` registered with `SprkChatAgent` for Assistant-pane natural-language routing |
+| **Snapshot endpoints + `sprk_analysis` integration (D-A34)** | `POST/GET /api/insights/snapshot` with revalidate-and-drift contract; `sprk_analysis` polymorphic source-type for snapshots (NO new entity) |
+| **Multi-index retrieval composition pattern (D-A35)** | Implementation pattern for `IndexRetrieveNode` composing operational + derived substrates per D-53 |
+| **Signal Contract document (D-A29)** | Backward-derived enumeration of Mode A + Mode B ingestion needs from the Phase 1 question catalog per D-58 |
+| **Single-tenant deployment configuration (D-A28)** | Bicep parameter file pattern: one customer = one parameter file = one deployment unit per D-52 |
+| `document-extraction-design.md` (D-A12, generalized from closure-extraction) | Phase 1 design / Phase 2 implementation; pipeline composed of D-A30 nodes |
+| Sync Function App (Track B) | New deployment artifact (no existing Function Apps; new with the narrowed ADR-001) |
+| ~~Question catalog (Foundry agent skills or BFF config)~~ | **Withdrawn 2026-05-27 per D-54** — the question catalog IS the playbook library filtered to Insights-mode; NO parallel `sprk_insightquestion` entity |
 | `IInsightArtifactStore` (abstraction over AI Search indexes for Insight artifacts) | Wraps `SearchClient` with Insight-specific operations |
 
 ### 10.3 What gets migrated (post-MVP)
 
-| Today | Future state | Why migrate |
-|---|---|---|
-| `PlaybookIndexingBackgroundService` (BFF hosted service, ADR-001 workaround) | Move to a Function | Pure out-of-band integration; ADR-001 now permits |
-| `DataverseIndexSyncService` (BFF HTTP-coupled) | Migrate triggering to Service Bus + Function | Decouple from BFF lifecycle; align with new sync infrastructure |
-| `spaarke-records-index` (no tenantId field) | Add tenantId + backfill | Multi-tenant correctness; pattern established by Insight indexes |
+> **Refinement note (2026-05-27 — D-53 boundary)**: Operational-substrate schema changes (e.g., adding `tenantId` to `spaarke-records-index`) are **explicitly out of scope for this project**. The Insights Engine consumes the operational substrate as-is per D-53 and handles the `tenantId` asymmetry at the composition layer (D-A35). Migrations below remain Phase 3 cleanup owned outside this project; they are not blockers for r1.
 
-These are NOT blockers for r1; they're cleanup that happens once the Engine is stable.
+| Today | Future state | Why migrate | Owned by |
+|---|---|---|---|
+| `PlaybookIndexingBackgroundService` (BFF hosted service, ADR-001 workaround) | Move to a Function | Pure out-of-band integration; ADR-001 now permits | Phase 3 cleanup (outside this project) |
+| `DataverseIndexSyncService` (BFF HTTP-coupled) | Migrate triggering to Service Bus + Function | Decouple from BFF lifecycle; align with new sync infrastructure | Phase 3 cleanup (outside this project) |
+| `spaarke-records-index` (no tenantId field) | Add tenantId + backfill | Multi-tenant correctness; pattern established by Insight indexes — **explicitly out of scope for this project per D-53; not a Phase 1 blocker since D-52 single-tenant makes the privilege concern non-load-bearing** | Phase 3 cleanup (outside this project) |
+
+These are NOT blockers for r1; they're cleanup that happens once the Engine is stable, and they're owned by teams outside the Insights Engine project.
 
 ### 10.4 What gets retired
 
@@ -1137,9 +1262,11 @@ Net: skip directly to Phase 1. Decisions documented in §4 and §6.
 
 ### 11.2 Phase 1 — Foundation (8-12 weeks)
 
-**Goal**: Sync wiring + one end-to-end Inference question working.
+> **Refinement note (2026-05-27)**: The canonical Phase 1 deliverable list is now **[SPEC.md §3.1](SPEC.md)** (D-A1–D-A35), with [SPEC.md §8 phasing](SPEC.md) the canonical wave structure for `/project-pipeline`. The list below is preserved as a high-level historical summary; for any conflict, SPEC.md takes precedence. Key changes since the original list: D-A9 is "Insights orchestration in Zone A" (NOT a separate agent); D-A10 ships "one Insights-mode playbook end-to-end" (NOT a "question catalog entry"); the API surface (D-A11) ships `/ask` + `/relevant` + `/route` (NOT just `/ask`); D-A34 adds snapshot endpoints; D-A28–D-A35 are new.
 
-Deliverables:
+**Goal**: Substrate + Insights orchestration in Zone A + one end-to-end Insights-mode playbook (`predict-matter-cost`) working end-to-end against mock data. (Track B sync wiring blocked on Phase C.)
+
+Deliverables (high-level summary — see SPEC.md §3.1 for canonical list):
 1. Function App (Flex Consumption) provisioned via Bicep in dev environment, with own app registration + UAMI
 2. **Intake Function** (HTTPTrigger) — the auth trust boundary
    - Webhook endpoints: clientState validation initially; HMAC-SHA256 when Phase C task 044 lands. **Copy the validation code from BFF webhook handlers — do not recreate.**
@@ -1198,12 +1325,25 @@ Acceptance criteria:
 
 | # | Question | Owner | When |
 |---|---|---|---|
-| O1 | Will the closure-extraction playbook be JPS or a new specialized format? | Architecture | Before Phase 1 design freeze |
-| O2 | Does `accessibleMatterSet` come from the unified access control project, or do we maintain our own source? | Architecture | Before Phase 1 sync wiring |
-| O3 | What's the minimum `comparableMatters.min` per question — set globally or per question? | Product | Before first Inference question ships |
-| O4 | Outlook/Teams surface integration — Phase 2 or Phase 1? | Product | During Phase 1 |
+| O1 | Will the document-extraction playbook (formerly "closure-extraction" per D-A12) be JPS or a new specialized format? | Architecture | Before Phase 1 design freeze (also tracked as DEP-4 in SPEC §6.1) |
+| O2 | Does `accessibleMatterSet` come from the unified access control project, or do we maintain our own source? | Architecture | Before Phase 1 sync wiring (also tracked as DEP-3 in SPEC §6.1) |
+| O3 | What's the minimum `comparableMatters.min` per playbook (under D-54) — set globally or per playbook? | Product | Before first Insights-mode playbook ships |
+| O4 | Outlook/Teams surface integration — Phase 2 or Phase 1? | Product | During Phase 1 (Phase 1 commits to three surfaces per D-55; Outlook/Teams remain Phase 2+ per SPEC §3.6) |
 
 **Auth questions (AUTH-1 to AUTH-4) — RESOLVED** in §6.2.2. The remaining auth-related work is coordination with Phase C tasks 044, 047, 041, 042 (see §6.2.5).
+
+#### 12.1.1 Spec-refinement first-step blockers (addendum §7 — embedded in per-task POMLs)
+
+> **Refinement note (2026-05-27)**: The six questions from [SPEC-phase-1-minimum.md §7](SPEC-phase-1-minimum.md) do NOT add hard pipeline DEPs; they are embedded as **first-step blockers inside affected tasks** per SPEC §6.1. Each task's Step 0 resolves the relevant question with a documented answer before proceeding to implementation.
+
+| # | Question | Task that owns the first-step | Method |
+|---|---|---|---|
+| Q1 | Confirm AI Search inventory — `spaarke-files-index` and `spaarke-invoices-index` exist as separate production indexes (per Spaarke team confirmation) | D-A29 (Signal Contract) | Run `az search index list` against the Spaarke AI Search service; document the snapshot |
+| Q2 | Playbook entity extension vs. sibling configuration for Insights-mode metadata (D-A31) | D-A31 (playbook metadata extension) | Read current Spaarke playbook schema via Dataverse MCP; propose extension diff |
+| Q3 | Catalog index: new index `insights-catalog` vs partition of existing `spaarke-rag-references`? | D-A33 (catalog + routing) | Decision criteria: lifecycle, access pattern, ownership |
+| Q4 | Snapshot entity: confirm `sprk_analysis` polymorphic pattern is in use for this case; identify source-type field | D-A34 (snapshot endpoints) | Read `sprk_analysis` schema via Dataverse MCP; identify source-type field; raise design question if pattern not yet wired for snapshots |
+| Q5 | Relevance ruleset location: in playbook metadata (D-A31) or separate configuration entity? | D-A19 (surfacing design) | Design decision documented in `surfacing-design.md` |
+| Q6 | First document type for Phase 2 implementation (closing letters / closure summaries are the natural starting point) | D-A12 (document-extraction-design) | Product/architecture call; documented in `document-extraction-design.md` |
 
 ### 12.2 Deferred (can answer post-MVP)
 
@@ -1219,14 +1359,21 @@ Acceptance criteria:
 
 ### 12.3 Hard "do not do" decisions
 
-For clarity, things we have decided NOT to do:
+For clarity, things we have decided NOT to do. **Canonical list is now [decisions.md "Explicit do not do — the negative space"](decisions.md)** (extended 2026-05-27 with 8 new entries from D-52–D-58). Summary:
 
-- **Do not host the Insights Agent in Foundry** (per §5.1)
-- **Do not use Durable Functions** (ADR-001 — orchestration via Service Bus + state machine)
+- **Do not host the Insights orchestration in Foundry** (per §5.1; D-13)
+- **Do not use Durable Functions** (ADR-001; D-20 — orchestration via Service Bus + state machine)
 - **Do not put document content in cross-matter aggregates** (privilege leakage — §7.4)
-- **Do not let any new index lack a `tenantId` field** (§4.1, §10.3)
-- **Do not require human curation of identity resolution** (§4.2.4, §6.5)
-- **Do not return generic AI hedging when Inference evidence is insufficient** (§5.4 — explicit insufficient-evidence response)
+- **Do not let any new derived-substrate index lack a `tenantId` field** (§4.1, §10.3; D-12 — retained per D-52 for partition keys + future federation)
+- **Do not require human curation of identity resolution** (§4.2.4, §6.5; D-29)
+- **Do not return generic AI hedging when Inference evidence is insufficient** (§5.4 — explicit insufficient-evidence response via `DeclineToFindNode`; D-06 + D-49)
+- **Do not create a `sprk_insightquestion` entity** (D-54 — questions ARE playbooks; the catalog IS the playbook library filtered to Insights-mode)
+- **Do not create a `sprk_insightsnapshot` entity** (D-56 — snapshots ARE `sprk_analysis` rows)
+- **Do not re-project record fields already in `spaarke-records-index` into derived `insight-*` indexes** (D-53, D-58 — Mode A is narrow derived projection ONLY)
+- **Do not silently rely on `tenantId` filtering on the operational substrate leg** of cross-substrate compositions (D-53 — `spaarke-records-index` lacks the field; D-52 makes this safe at privilege layer but composition logic must remain correct under future federation)
+- **Do not let the LLM synthesize Insight answers in the Assistant pane** (D-55, D-57 — the LLM routes the request to a playbook; the playbook with `GroundingVerifyNode` produces the answer with provenance)
+- **Do not modify schemas of operational substrate indexes** as part of this project (D-53 — operational substrate consumed as-is; schema fixes are Phase 3 cleanup owned elsewhere)
+- **Do not treat Phase 1 multi-tenant infrastructure** (separate tenant control plane, cross-tenant federation) **as in-scope** (D-52 — deferred beyond Phase 2 pending privacy/legal work)
 
 ---
 
