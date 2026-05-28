@@ -65,12 +65,10 @@ import type { TagFilterOption } from '@spaarke/ui-components/dist/types/TagFilte
 import { authenticatedFetch, resolveTenantIdSync } from '@spaarke/auth';
 import { initializeAuth } from './authInit';
 import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
-import { SendEmailDialog, type ISendEmailPayload } from '@spaarke/ui-components/dist/components/SendEmailDialog';
 import { FindSimilarDialog } from '@spaarke/ui-components/dist/components/FindSimilarDialog';
 import { DocumentEmailWizard, type IDocumentEmailWizardItem } from '@spaarke/ui-components/dist/components/DocumentEmailWizard';
 import { AppInsightsService } from '@spaarke/ui-components/dist/services/AppInsightsService';
 import type { IDataService } from '@spaarke/ui-components/dist/types/serviceInterfaces';
-import type { ILookupItem } from '@spaarke/ui-components/dist/types/LookupTypes';
 
 /**
  * Styles using makeStyles with Fluent design tokens.
@@ -302,9 +300,6 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // Find Similar dialog state — URL of the web resource to show in the iframe dialog
   const [findSimilarUrl, setFindSimilarUrl] = useState<string | null>(null);
 
-  // Email dialog state (per-row email — emails ONE document)
-  const [emailDialogResult, setEmailDialogResult] = useState<SearchResult | null>(null);
-
   // ── v1.1.49 — Host-level preview dialog state (Item 6) ─────────────────
   // Both list view AND card view now route preview-open through the SAME
   // host-mounted FilePreviewDialog so the navigation set (Prev/Next) is
@@ -316,25 +311,19 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // public surface — leave for future cleanup).
   const [hostPreviewDocId, setHostPreviewDocId] = useState<string | null>(null);
 
-  // v1.1.54 (Item 5) — Preview-hide pattern for the email modal.
-  // The Fluent v9 modal-over-modal stacking pattern (SendEmailDialog over
-  // FilePreviewDialog) did NOT fully occlude the preview underneath even
-  // after widening to 1200px (v1.1.52/v1.1.53). Each Dialog renders its
-  // own Portal + backdrop, but the outer dialog's content still bled
-  // through visually around the inner modal. Fix: close the preview
-  // while the email is open, then re-open it when the email closes.
-  // The string holds the docId of the preview that was open when the
-  // email started; null when no preview-hide is in flight. We only
-  // consume this state through the functional setter form
-  // (`setPreviewedBeforeEmail(prev => ...)`), so the value is never
-  // directly read at render — eslint-disable accordingly.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [previewedBeforeEmail, setPreviewedBeforeEmail] = useState<string | null>(null);
-
   // Multi-document email wizard state. When open, passes the current results
   // (top N visible) into the wizard's first step where the user can deselect
   // any docs they don't want before composing.
   const [emailWizardOpen, setEmailWizardOpen] = useState(false);
+
+  // Holds the single document item when DocumentEmailWizard is launched
+  // from a row's 3-dot menu; null when launched from the bulk-toolbar
+  // Email icon (in which case the wizard receives `emailWizardItems` —
+  // the full current result set — and the user prunes in step 1).
+  // The wizard's `selectedDocuments` prop reads
+  // `singleDocForWizard ? [it] : emailWizardItems` so one wizard
+  // instance serves both flows.
+  const [singleDocForWizard, setSingleDocForWizard] = useState<IDocumentEmailWizardItem | null>(null);
 
   // Initialize services (memoized to prevent recreation)
   const apiService = useMemo(() => new SemanticSearchApiService(apiBaseUrl), [apiBaseUrl]);
@@ -817,44 +806,28 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     [results]
   );
 
-  // Handle Email Document — opens SendEmailDialog with result context.
-  // v1.1.54 (Item 5) — Implements the preview-hide pattern: if the host-
-  // mounted FilePreviewDialog is open when the user picks Email, we
-  // capture the active docId in `previewedBeforeEmail`, close the
-  // preview (setHostPreviewDocId(null)), and then open the email modal.
-  // The matching close handler (`handleEmailDialogClose`) re-opens the
-  // preview when the email modal is dismissed.
+  // Handle Email Document — opens DocumentEmailWizard scoped to a single
+  // document. Single-doc and bulk Email share the same wizard so the UX
+  // is consistent (combined users+contacts picker, AI Summary step,
+  // sprk_communication tracking, Attach Files + Send Document Links
+  // toggles). We close the host preview underneath because the wizard
+  // is a full modal; on wizard close we do NOT re-open the preview —
+  // the user can re-launch preview from the list if needed.
   const handleEmailDocument = useCallback(
     (result: SearchResult) => {
-      // Capture preview-open state before closing it. We use a functional
-      // form to avoid stale-closure issues with `hostPreviewDocId`.
-      setHostPreviewDocId(prevPreviewId => {
-        if (prevPreviewId) {
-          setPreviewedBeforeEmail(prevPreviewId);
-        }
-        // Close the preview (returning null from the updater).
-        return null;
+      setHostPreviewDocId(null);
+      setSingleDocForWizard({
+        documentId: result.documentId ?? '',
+        name: result.name ?? '(untitled)',
+        summary: result.summary ?? undefined,
+        tldr: result.tldr ?? undefined,
+        driveId: result.driveId ?? undefined,
+        itemId: result.speFileId ?? undefined,
       });
-      setEmailDialogResult(result);
+      setEmailWizardOpen(true);
     },
     []
   );
-
-  // v1.1.54 (Item 5) — Email-modal close handler. Re-opens the preview
-  // dialog on the doc that was open when the email started, if any. The
-  // re-open is gated on `previewedBeforeEmail` (set in
-  // `handleEmailDocument`). The Send path also routes through this
-  // handler — the shared SendEmailDialog calls `onClose` after a
-  // successful send.
-  const handleEmailDialogClose = useCallback(() => {
-    setEmailDialogResult(null);
-    setPreviewedBeforeEmail(prev => {
-      if (prev) {
-        setHostPreviewDocId(prev);
-      }
-      return null;
-    });
-  }, []);
 
   // Handle Copy Link — copies Dataverse record URL to clipboard
   const handleCopyLink = useCallback(
@@ -951,68 +924,6 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
   // Check if a document is in the workspace
   const isInWorkspace = useCallback((result: SearchResult) => workspaceSet.has(result.documentId), [workspaceSet]);
-
-  // Email dialog: search users via Dataverse WebAPI
-  const handleSearchUsers = useCallback(
-    async (query: string): Promise<ILookupItem[]> => {
-      try {
-        const filter = `contains(fullname,'${query.replace(/'/g, "''")}') or contains(internalemailaddress,'${query.replace(/'/g, "''")}')`;
-        const result = await context.webAPI.retrieveMultipleRecords(
-          'systemuser',
-          `?$select=systemuserid,fullname,internalemailaddress&$filter=${filter}&$top=10`
-        );
-        return (result.entities || [])
-          .filter((u: Record<string, unknown>) => u.internalemailaddress)
-          .map((u: Record<string, unknown>) => ({
-            id: u.systemuserid as string,
-            name: `${u.fullname || 'Unknown'} (${u.internalemailaddress})`,
-          }));
-      } catch (err) {
-        console.error('[SemanticSearchControl] User search failed:', err);
-        return [];
-      }
-    },
-    [context.webAPI]
-  );
-
-  // Email dialog: send email via BFF
-  const handleSendEmail = useCallback(
-    async (payload: ISendEmailPayload) => {
-      // Extract email from "Full Name (email@example.com)" format
-      const emailMatch = payload.to.name.match(/\(([^)]+@[^)]+)\)/);
-      const toEmail = emailMatch ? emailMatch[1] : payload.to.name;
-
-      const response = await authenticatedFetch(`${apiBaseUrl}/api/communications/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          to: [toEmail],
-          subject: payload.subject,
-          body: payload.body,
-          bodyFormat: 'PlainText', // BFF enum is BodyFormat.{PlainText,HTML} (2026-05-25)
-          associations: emailDialogResult
-            ? [
-                {
-                  entityType: 'sprk_document',
-                  entityId: emailDialogResult.documentId,
-                },
-              ]
-            : [],
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to send email: ${response.status}`);
-      }
-    },
-    [apiBaseUrl, emailDialogResult]
-  );
-
-  // Build email defaults from result context
-  const emailDefaultSubject = emailDialogResult ? `Document: ${emailDialogResult.name}` : '';
-  const emailDefaultBody = emailDialogResult
-    ? `Dear Colleague,\n\nPlease find the following document for your review:\n\nDocument: ${emailDialogResult.name}\n\n────\n\n${emailDialogResult.summary || emailDialogResult.tldr || 'No summary available.'}\n\n────\n\nKind regards`
-    : '';
 
   // Load file type options for the command-bar File Type filter. Document type
   // options now flow through the dedicated Tags filter (`tagOptions` state above)
@@ -1846,7 +1757,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.60 • Built 2026-05-28</Text>
+        <Text size={100}>v1.1.61 • Built 2026-05-28</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so
@@ -1887,45 +1798,20 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       {/* Find Similar — shared iframe dialog */}
       <FindSimilarDialog open={!!findSimilarUrl} onClose={() => setFindSimilarUrl(null)} url={findSimilarUrl} />
 
-      {/* Send Email Dialog (single-document, shared @spaarke/ui-components).
-          v1.1.50 (Item 7) — initially attempted modal-over-modal: launching
-          this dialog from inside FilePreviewDialog's 3-dot menu while the
-          preview stayed open underneath. Each Dialog renders its own
-          Portal + backdrop, but the outer dialog's content still bled
-          through visually around the inner modal even at 1200px width.
-
-          v1.1.54 (Item 5) — Switched to a preview-HIDE pattern.
-          `handleEmailDocument` now captures the currently-open preview
-          docId, closes the host preview (setHostPreviewDocId(null)),
-          then opens this dialog. `handleEmailDialogClose` reverses the
-          process: closes the email dialog, then re-opens the preview
-          on the same doc. This guarantees full occlusion (no modal-
-          stacking artifacts) and preserves the user's context.
-
-          v1.1.55 — maxWidth bumped to 1280px (same as FilePreviewDialog).
-          v1.1.56 — height bumped to '85vh' to match FilePreview footprint
-          exactly. Also relies on shared SendEmailDialog v1.1.56 width fix
-          (surface `width: '90vw'` → `'100%'`) so 1280px is actually
-          reached on 1366px laptops (previously capped at ~1229px by the
-          90vw clamp). Composer Message textarea grows flex-1 to fill the
-          tall surface. */}
-      <SendEmailDialog
-        open={!!emailDialogResult}
-        onClose={handleEmailDialogClose}
-        defaultSubject={emailDefaultSubject}
-        defaultBody={emailDefaultBody}
-        onSearchUsers={handleSearchUsers}
-        onSend={handleSendEmail}
-        maxWidth="1280px"
-        height="85vh"
-      />
-
-      {/* Document Email Wizard (multi-document, new) — opens from the toolbar
-          Email icon. Wizard step 1 lets the user prune the selection. */}
+      {/* Document Email Wizard — unified single-doc + bulk Email surface.
+          When launched from a row's 3-dot menu, `handleEmailDocument`
+          populates `singleDocForWizard` and the wizard receives `[it]` as
+          its selected set. When launched from the bulk-toolbar Email
+          icon, `singleDocForWizard` is null and the wizard receives
+          `emailWizardItems` (the full result set, which the user can
+          prune in step 1). */}
       <DocumentEmailWizard
         open={emailWizardOpen}
-        onClose={() => setEmailWizardOpen(false)}
-        selectedDocuments={emailWizardItems}
+        onClose={() => {
+          setEmailWizardOpen(false);
+          setSingleDocForWizard(null);
+        }}
+        selectedDocuments={singleDocForWizard ? [singleDocForWizard] : emailWizardItems}
         parentEntityType={searchScope === 'matter' ? 'sprk_matter'
           : searchScope === 'project' ? 'sprk_project'
           : searchScope === 'invoice' ? 'sprk_invoice'
