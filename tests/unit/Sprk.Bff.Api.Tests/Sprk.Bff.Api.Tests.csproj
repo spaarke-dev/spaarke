@@ -57,4 +57,13 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+
+  <!-- Insights Engine D-P16 golden dataset (task 070): drives the predict-matter-cost
+       eval harness (Eval/PredictMatterCostEvalHarnessTests.cs). Linked so the harness
+       can resolve the file via AppContext.BaseDirectory + "Insights/golden/...". -->
+  <ItemGroup>
+    <Content Include="..\..\Insights\golden\*.*" Link="Insights\golden\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>

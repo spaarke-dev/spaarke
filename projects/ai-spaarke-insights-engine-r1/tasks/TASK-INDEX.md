@@ -80,7 +80,7 @@
 
 | ID | D-P | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [070](070-smoke-test-golden-dataset-eval.poml) | D-P16 | End-to-end smoke + golden dataset + eval harness baseline | 🔲 | 1d | ❌ | 040, 050, 060, 061 |
+| [070](070-smoke-test-golden-dataset-eval.poml) | D-P16 | End-to-end smoke + golden dataset + eval harness baseline | ✅ | 1d | ❌ | 040, 050, 060, 061 |
 
 ### Deploy + wrap-up
 

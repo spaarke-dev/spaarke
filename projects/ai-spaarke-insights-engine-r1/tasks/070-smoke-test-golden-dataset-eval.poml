@@ -1,7 +1,7 @@
 <task id="070" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>D-P16 — End-to-end smoke + golden dataset + eval harness baseline</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>8</wave>
     <estimated-effort>1 day</estimated-effort>
     <tags>tests, evaluation, smoke, golden-dataset, eval-harness, acceptance-gate</tags>
