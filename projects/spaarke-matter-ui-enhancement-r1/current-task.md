@@ -13,11 +13,11 @@
 
 | Field | Value |
 |---|---|
-| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.59** packaged, awaiting user UAT |
-| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `6abab84e` (v1.1.59); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.59 NOT yet merged |
-| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.59.zip` (213 KB) — user imports via `pac solution delete` then `pac solution import` |
-| **Pending user actions** | (1) UAT v1.1.59; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
-| **Next Action** | Awaiting user UAT feedback on v1.1.59. v1.1.59 addresses 4 items: (1) SendEmailDialog Textarea fill — switched from descendant selector (`& > textarea`) to Fluent v9 SLOT-PROP `<Textarea textarea={{className}} />` which applies className directly to inner element; v1.1.58 descendant selector did NOT override inner-textarea height; (2) Hide title-bar X — DialogTitle no longer renders the close icon; footer Cancel is the single close affordance (matches FilePreview v1.1.46); (3) Grid no horizontal scroll at 1920x1080 — DEFAULT_WIDTHS reduced (DOCUMENT 260→240, RELATIONSHIP 130→110, SIMILARITY 100→70, MODIFIED 130→100; sum 688px) + localStorage prefix bumped to `.v2` to invalidate persisted widths from earlier rounds; (4) Sticky menu — COL_MENU cell uses `position: sticky; right: 0; backgroundColor` so 3-dot stays pinned to visible right edge at any resolution/scroll. FilePreview promotion (Option A, 3-5h) still deferred. |
+| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.60** packaged, awaiting user UAT |
+| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `4c4e8310` (v1.1.60); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.60 NOT yet merged |
+| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.60.zip` (213 KB) — user imports via `pac solution delete` then `pac solution import` |
+| **Pending user actions** | (1) UAT v1.1.60; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
+| **Next Action** | Awaiting user UAT feedback on v1.1.60. v1.1.60 adds `title?: string` prop to shared `SendEmailDialog` (default `'Email Document'` — back-compat for SemanticSearchControl + SpeDocumentViewer + LegalWorkspace FilePreview). With this change `SendEmailDialog` has ZERO project-specific bindings remaining and is fully reusable across any domain (Matter, Invoice, generic record updates, etc.). FilePreview promotion (Option A, 3-5h) still deferred. |
 | **Compaction handoff** | See [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) — full session state for resuming in a fresh context |
 
 ### Files Modified This Session
