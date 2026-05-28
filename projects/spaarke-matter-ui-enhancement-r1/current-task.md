@@ -13,11 +13,11 @@
 
 | Field | Value |
 |---|---|
-| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.63** packaged, awaiting user UAT |
-| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `31375c01` (v1.1.63); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.63 NOT yet merged |
-| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.63.zip` (212 KB) — user imports via `pac solution delete` then `pac solution import` |
-| **Pending user actions** | (1) UAT v1.1.63; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
-| **Next Action** | Awaiting user UAT feedback on v1.1.63. v1.1.63 addresses 5 items: (1) Row menu always at right edge via `marginInlineStart: 'auto'` on menu cell (Fluent v9 DataGrid rows are flexbox not grid — verified by reading react-table source); (2) Preview stays open behind wizard for BOTH single-doc paths (removed `setHostPreviewDocId(null)`) — wizard renders modal-over-modal, returns user to preview at same docId; (3) Wizard sized to match FilePreview — added backward-compatible `maxWidth?`/`height?` props on WizardShell + DocumentEmailWizard; host passes 1280px/85vh; (4) Bulk Email loads SELECTED docs only — new `emailWizardItemsSelected` memo + `selectedIds.size > 0` gate; (5) 25 MB warning logic exists in wizard but `fileSizeBytes` is undefined (PCF SearchResult has no size field) — deferred to v1.1.64 with BFF redeploy to add `fileSize` to projection. Shared lib `dist/` rebuilt. FilePreview promotion (Option A, 3-5h) still deferred. |
+| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.64** packaged, awaiting user UAT |
+| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `e0e91d71` (v1.1.64); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.64 NOT yet merged |
+| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.64.zip` (207 KB) — user imports via `pac solution delete` then `pac solution import` |
+| **Pending user actions** | (1) UAT v1.1.64; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
+| **Next Action** | Awaiting user UAT feedback on v1.1.64. v1.1.64 eliminates the horizontal scroll regression introduced by v1.1.61's 480px Document column. Reverted DEFAULT_WIDTHS[COL_DOCUMENT] 480 → 240. With v1.1.63's `marginInlineStart: 'auto'` menu anchor still in place, the row menu stays flush right AND there is no horizontal scroll (column total 688 + chrome ≈ 720, comfortably under typical form widths ~900-1050px). v1.1.63's wizard size/preview-stay-open/bulk-selected-only changes preserved. File size warning still deferred (BFF SearchResult lacks `fileSize` field — separate follow-up). |
 | **Compaction handoff** | See [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) — full session state for resuming in a fresh context |
 
 ### Files Modified This Session
