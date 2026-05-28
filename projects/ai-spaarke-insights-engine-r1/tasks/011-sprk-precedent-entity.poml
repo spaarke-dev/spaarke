@@ -1,7 +1,7 @@
 <task id="011" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>D-P3 (entity) — sprk_precedent Dataverse entity + relationship tables</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>2</wave>
     <estimated-effort>4 hours</estimated-effort>
     <tags>dataverse, entity-creation, sprk-precedent, schema</tags>

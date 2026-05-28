@@ -1,18 +1,46 @@
 # Current Task — Spaarke Insights Engine, Phase 1
 
-> **Status**: none (Wave 1 complete; awaiting next task / wave commit)
+> **Status**: ✅ idle — task 011 just completed
 > **Last Updated**: 2026-05-28
-> **Project state**: Phase 1 Wave 1 COMPLETE — task 001 (D-P1 InsightArtifact envelope POCOs) + task 002 (D-P17 IInsightGraph stub) both finished
+> **Project state**: Wave 1 complete; Wave 2 in progress (task 010 in parallel, task 011 done)
 
 ---
 
 ## Active task
 
-**No active task in this session.** Wave 1 closed; main session will batch the wave commit.
+**none** — ready for next task pickup. Task 010 (D-P2 Bicep) was previously active; task 011 (D-P3 sprk_precedent entity) just completed in parallel and is recorded under "Last completed tasks" below.
+
+### Environment context (loaded for this task)
+- Subscription: `484bc857-3802-427f-9ea5-ca47b43db0f0` (Spaarke Dev), tenant `a221a95e-...`, user `ralph.schroeder@spaarke.com`
+- RG: `spe-infrastructure-westus2` (westus2)
+- AI Search: `spaarke-search-dev` (standard, 2 replicas / 1 partition; identity:none — need to enable SystemAssigned for vectorizer if used)
+- AIServices (OpenAI): `spaarke-openai-dev` in eastus; `text-embedding-3-large` deployed (3072 dim) ✓
+- Key Vault: `sprkspaarkedev-aif-kv`
+- App Insights: `spe-insights-dev-67e2xz`; Log Analytics: `spe-logs-dev-67e2xz`
+- Existing UAMI (for BFF, not for Functions): `mi-bff-api-dev` — task creates a NEW per-tenant UAMI
+- Existing indexes on `spaarke-search-dev`: discovery-index, knowledge-index, playbook-embeddings, spaarke-invoices-dev, spaarke-knowledge-index{,-v2}, spaarke-knowledge-shared, spaarke-rag-references, spaarke-records-index — `spaarke-insights-index` does NOT exist ✓
+- Reference schema (3072-dim vector profile + HNSW + semantic config): `spaarke-rag-references` — used as structural template
+
+### Tooling versions
+- az CLI 2.77.0, Bicep CLI 0.41.2 — both functional
 
 ---
 
-## Last completed tasks (Wave 1)
+## Last completed tasks
+
+**Task 011 — D-P3 (entity) sprk_precedent Dataverse entity + relationships** ✅ (2026-05-28)
+- Rigor: STANDARD (Dataverse schema; quality gates inside dataverse-create-schema skill)
+- Solution: created `spaarke_insights` (Spaarke publisher, prefix `sprk`) — new solution in Spaarke Dev
+- Entity: `sprk_precedent` (LogicalName, SchemaName=sprk_Precedent, EntitySetName=sprk_precedents); primary name `sprk_name`
+- Fields (8 custom): sprk_patternstatement (Memo 4000), sprk_status (Picklist→sprk_precedentstatus), sprk_reviewerby (Lookup→systemuser), sprk_reviewdate (DateOnly), sprk_effectivenessscore (Decimal 0-1, Phase 1.5+), sprk_clusterdefinition (Memo 2000), sprk_samplesize (Integer), sprk_producedby (String 200)
+- Option set `sprk_precedentstatus` (global, 5 values): Tentative(100000000) / Confirmed(100000001) / Under Drift Review(100000002) / Deprecated(100000003) / Retired(100000004)
+- N:N relationships: `sprk_precedent_matter` (supporting matters), `sprk_precedent_related` (self) — both created
+- N:N DEFERRED: `sprk_precedent_observation` — sprk_observation entity does not exist in Phase 1 (will land with D-P11)
+- Views: `Active Precedents` (default), `Tentative Precedents`, `Confirmed Precedents`, `Precedents Under Drift Review`, `Deprecated Precedents`
+- Form: default Main form ("Information") added to solution
+- Solution exported + unpacked to `src/solutions/spaarke_insights/` (27 files)
+- Scripts created: `scripts/Deploy-PrecedentEntity.ps1` (idempotent, 5-phase pattern), `scripts/Deploy-PrecedentViewsAndForm.ps1`
+- All 6 acceptance criteria PASS via Web API verification (queryable, fields present, 5 status values, N:Ns, views, solution export)
 
 **Task 002 — D-P17 IInsightGraph interface + stub** ✅ (2026-05-28)
 - Files: `Services/Insights/Graph/{IInsightGraph,InsightVertex,InsightEdge,GraphTraversalSpec,StubInsightGraph}.cs` + `Infrastructure/DI/InsightsModule.cs` + `Program.cs` registration + `tests/.../StubInsightGraphTests.cs`
@@ -43,9 +71,9 @@ Wave 1 complete. Wave 2 (infrastructure provisioning) unlocks next — pick D-P2
 
 | State | Count |
 |---|---|
-| ✅ Completed | 2 (001, 002) |
+| ✅ Completed | 3 (001, 002, 011) |
 | 🔄 In progress | 0 |
-| 🔲 Pending | 15 |
+| 🔲 Pending | 14 |
 | ⏭️ Deferred (Phase 1.5+) | — see SPEC §3.3 |
 
 ---
