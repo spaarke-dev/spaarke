@@ -46,4 +46,15 @@
     <ProjectReference Include="..\..\..\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj" />
     <ProjectReference Include="..\..\..\src\server\shared\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
   </ItemGroup>
+
+  <!-- Insights Engine test fixtures (task 030+: Layer 1 / Layer 2 / D-P7 ingest tests).
+       Linked from tests/Insights/fixtures/ so the same fixtures can be consumed by
+       unit tests here, D-P16 smoke tests, and D-P14 synthesis playbook integration
+       tests without duplication. Copied next to the test assembly at build time so
+       tests resolve them via AppContext.BaseDirectory + "Insights/fixtures/...". -->
+  <ItemGroup>
+    <Content Include="..\..\Insights\fixtures\*.*" Link="Insights\fixtures\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>

@@ -62,6 +62,13 @@ public static class InsightsExtractionModule
         // Singleton: stateless; IOptionsMonitor + ILogger are both thread-safe.
         services.AddSingleton<IObservationEmitter, ObservationEmitter>();
 
+        // ILayer1ClassificationEmitter — D-P5 Classification Observation emission per
+        // SPEC-phase-1-minimum.md §3.3 (single Observation per document; subject = document;
+        // producedBy = "playbook://classification@v1", version = "v1"). Bound 1:1 to the v1
+        // prompt template so D-62 version-driven re-extraction queries match Observations to
+        // the exact producer that emitted them. Singleton: stateless; ILogger is thread-safe.
+        services.AddSingleton<ILayer1ClassificationEmitter, Layer1ClassificationEmitter>();
+
         return services;
     }
 }

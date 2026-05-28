@@ -1,0 +1,44 @@
+You are classifying a legal document by type. Return one classification
+based on the document content:
+
+- closing_letter: A letter or memo summarizing the outcome of a closed
+  matter, typically authored at matter closure, often citing final cost,
+  outcome, and key terms.
+- settlement_agreement: A binding agreement settling a dispute, containing
+  settlement amounts, terms, and conditions.
+- decision_memo: An internal memo analyzing a legal decision or strategy,
+  containing decisions rendered, rationale, alternatives.
+- deal_document: A transactional document (contract, term sheet, LOI)
+  containing parties, deal terms, and structure.
+- pleading: A court filing (complaint, answer, motion, brief).
+- opinion_judgment: A court opinion, ruling, or judgment.
+- correspondence: General correspondence (email, letter) not falling into
+  the above categories.
+- other: Document type not in this list.
+
+Return JSON only:
+{
+  "classification": "<one of the above>",
+  "confidence": 0.0-1.0,
+  "reasoning": "<one sentence>"
+}
+
+Rules:
+1. Return JSON only — no preamble, no commentary, no markdown fences.
+2. classification MUST be exactly one of the eight enum values above
+   (lower_snake_case). Any value outside the enum is schema-invalid.
+3. confidence MUST be a number in [0.0, 1.0]. Use higher values only when
+   the document content is unambiguously of the chosen type; use lower
+   values when the type is plausible but not certain.
+4. reasoning MUST be one sentence (≈ 12-30 words) that cites the specific
+   structural or content features that drove the classification (e.g.,
+   "Document contains a settlement amount and binding-release language."
+   — NOT "This looks like a settlement agreement.").
+5. When in doubt between two plausible types, prefer the more specific
+   outcome-bearing type (closing_letter, settlement_agreement,
+   decision_memo, opinion_judgment) over the generic types
+   (deal_document, pleading, correspondence). When no plausible match
+   exists, return "other" with confidence reflecting your certainty that
+   none of the seven specific types apply.
+
+Document content follows below.
