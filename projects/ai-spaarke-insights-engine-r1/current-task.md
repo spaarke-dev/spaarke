@@ -1,18 +1,69 @@
 # Current Task — Spaarke Insights Engine, Phase 1
 
-> **Status**: ✅ idle — Wave 2 complete (010 + 011 + 012 all done)
+> **Status**: ✅ idle — Wave 3 tasks 020 + 021 complete
 > **Last Updated**: 2026-05-28
-> **Project state**: Wave 1 complete; Wave 2 complete; ready for Wave 3 platform primitives
+> **Project state**: Wave 1 complete; Wave 2 complete; Wave 3 progress: 020, 021, 024 ✅ — 022 (now unblocked), 023, 025 still 🔲
 
 ---
 
 ## Active task
 
-**none** — ready for Wave 3 (020 D-P9 GroundingVerifier, 021 D-P10 confidence gating, 023 D-P13 cache, 024 Q5 cache helper, 025 W3.5 ReferenceIndexingService refactor — all parallel-safe).
+**none** — Wave 3 remaining: 022 (D-P12 nodes, now unblocked by 020 GroundingVerifyNode), 023 (D-P13 cache), 025 (W3.5 refactor). 022 is the next critical-path item.
 
 ---
 
 ## Last completed tasks
+
+**Task 020 — D-P9 GroundingVerifier + GroundingVerifyNode** ✅ (2026-05-28)
+- Rigor: FULL (bff-api .cs, platform primitive shared with Action Engine, closes D-04 honesty-contract gap)
+- Files NEW:
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/CitationVerification/IGroundingVerifier.cs` (110 lines) — interface + `ChunkRef` + `VerificationResult` + `VerificationVerdict` enum (Verified / VerifiedApproximate / NotFound / NoQuote / InvalidInput)
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/CitationVerification/GroundingVerifier.cs` (282 lines) — mechanical zero-LLM impl: normalize → exact substring → sliding-window (window=200, step=100, overlap threshold=0.70, min-quote=12) → 10K-char DoS cap
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/GroundingVerifyNode.cs` (335 lines) — `INodeExecutor` for new `ActionType.GroundingVerify = 70`; config-driven (`citationsFrom` + `sourceChunksFrom` upstream variable names); annotates failures `[citation could not be verified]`
+  - `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/CitationVerification/GroundingVerifierTests.cs` (~390 lines) — 13 verifier tests + 7 node tests (xUnit + FluentAssertions; shipped in canonical location for when pre-existing test-project errors get fixed)
+- Files MODIFIED:
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs` — added `ActionType.GroundingVerify = 70` enum value with 10-value gap above AgentService=60
+  - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs` — registered `IGroundingVerifier` Singleton + `GroundingVerifyNode` as `INodeExecutor` in `AddNodeExecutors`
+- Build: `dotnet build src/server/api/Sprk.Bff.Api/` clean — 0 errors, 2 pre-existing NU1903 warnings (Microsoft.Kiota.Abstractions CVE — unrelated)
+- Test verification (standalone runner at `c:/tmp/grounding-verifier-test/`, same pattern as task 002): **50/50 assertions PASS** (25 verifier scenarios + 25 node scenarios incl. registry dispatch); test-project (Sprk.Bff.Api.Tests) still has 7 pre-existing compile errors unrelated to this task (`EmbeddingMigrationService`, `AppOnlyDocumentAnalysisJobHandler`, `EmailAnalysisJobHandler` — same as tasks 001/002/012 reported)
+- SPEC §3.5.4 forbidden-imports grep: ZERO matches in `Services/Insights/` (Zone B clean) AND `Services/Ai/CitationVerification/` (zero LLM dependency confirmed — only ILogger in ctor)
+- Quality gates (Step 9.5): code-review ✅ (0 critical / 0 warnings / 0 AI smells; algorithm-tuning rationale inline; named constants for thresholds) / adr-check ✅ (ADR-013 Zone A ✓, ADR-010 singleton justified ✓, D-47 algorithm match ✓, D-04 honesty-contract closure ✓, LAVERN ADR 10.6 platform primitive ✓)
+- Acceptance criteria: 6/6 PASS per POML
+  - (a) Exact-quote → Verified ✅
+  - (b) Paraphrased within window → VerifiedApproximate ✅ (token-overlap ≥0.70)
+  - (c) Fabricated → NotFound + DefaultAnnotation `[citation could not be verified]` ✅
+  - (d) >10K-char chunk → InvalidInput ✅
+  - (e) Node registered + dispatched via NodeExecutorRegistry ✅ (verified in test)
+  - (f) Zero LLM calls ✅ (verified by ctor-parameter design check + functional smoke without any AI plumbing wired)
+- Decision: `ActionType.GroundingVerify = 70` with 10-value gap above AgentService=60 leaves room for the rest of D-P12 nodes (LiveFact=71, IndexRetrieve=72, etc.) without renumbering this one. Algorithm constants (WindowSize=200, WindowStep=100, threshold=0.70, MinApproximateQuoteLength=12) tuned for legal-document quotes; preserves all substantive characters during normalization (only whitespace-collapse + ToLowerInvariant).
+- Action Engine consumption path preserved: `IGroundingVerifier` interface is Zone A platform primitive; LAVERN ADR 10.6 — Action Engine R2 DI-injects this without reaching into Insights internals.
+
+**Task 021 — D-P10 Confidence threshold gating + per-field Observation emission** ✅ (2026-05-28)
+- Rigor: FULL (bff-api code, Zone A platform primitive, foundation for D-P7 universal ingest playbook)
+- Files NEW (5 production + 1 test):
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/ExtractionResult.cs` (145 lines) — typed POCO mirroring SPEC-phase-1-minimum.md §3.4 Layer 2 prompt schema (`Subject + DocumentRef + TenantId + ProducedBy{Kind,Id,Version} + AsOf + Scope + Fields[name → ExtractionField{Value:JsonElement, Quote, Confidence, DisplayHint}]`); Zone A internal contract
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/ConfidenceThresholdOptions.cs` (64 lines) — D-63 admin-tunable per-field thresholds bound to `Insights:Extraction:ConfidenceThresholds`; defaults match SPEC-phase-1-minimum.md §3.4 starters (outcomeCategory 0.75 / settlementAmount 0.85 / outcomeDate 0.85 / matterDurationDays 0.75); case-insensitive `GetThresholdFor` with `DefaultThreshold` fallback
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/IObservationEmitter.cs` (56 lines) — interface for D-P10 third mechanical gate; signature accepts `Func<ObservationArtifact, CancellationToken, Task>? upsertAsync` callback so we don't block on task 025 (W3.5 ReferenceIndexingService refactor) — task 040 (D-P7 ingest playbook) wires the real upsert later
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/ObservationEmitter.cs` (175 lines) — `internal sealed`; per-call options snapshot via `IOptionsMonitor.CurrentValue`; strict `<` threshold (exact equality passes); structured logging with stable `EventId(8021, "ObservationDroppedBelowThreshold")` for App Insights drift dashboard query; preserves field iteration order; honours cancellation; builds Observation with SPEC §3.4.1-matching id pattern `obs:{matterLocal}:{fieldName}:{docLocal}` + two evidence refs (`document` with quote + `playbook-run`) + `ProducedBy.Version` per D-05
+  - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/InsightsExtractionModule.cs` (60 lines) — new Zone A feature module (NOT added to AiModule which is at 15/15 ADR-010 cap); registers `IOptions<ConfidenceThresholdOptions>` with `ValidateDataAnnotations` + `IObservationEmitter → ObservationEmitter` (Singleton)
+  - `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Extraction/ObservationEmitterTests.cs` (320 lines) — 12 xUnit/FluentAssertions tests covering all 4 acceptance criteria + edge cases (cancellation, null guard, default-threshold fallback, case-insensitive lookup, IOptionsMonitor reload between calls); in-process `TestOptionsMonitor` helper. Test project Sprk.Bff.Api.Tests has pre-existing 7 compile errors unrelated to this task (per tasks 001/002/012 notes)
+- Files MODIFIED (1):
+  - `src/server/api/Sprk.Bff.Api/Program.cs` (+5 lines) — wired `AddInsightsExtractionModule(builder.Configuration)` between AnalysisServicesModule and AiSafetyModule
+- Standalone runner: `c:/tmp/task021-emitter-runner/` exercises the same 11 scenarios as the xUnit suite (32 assertions) by resolving `IObservationEmitter` through the production `AddInsightsExtractionModule` extension (verifies real DI wiring at the same time). **All 32 assertions PASS.**
+- Build: `dotnet build src/server/api/Sprk.Bff.Api/` clean — 0 errors, same 2 pre-existing warnings (Kiota CVE × 2) plus 15 unrelated warnings in legacy files (no warnings introduced by new files)
+- SPEC §3.5.4 forbidden-imports grep:
+  - Zone B `Services/Insights/**/*.cs` — ZERO matches (unaffected; we only added Zone A code)
+  - Zone A `Services/Ai/Insights/Extraction/**/*.cs` — ZERO matches (the deterministic primitive happens to import nothing AI-internal either)
+- Quality gates: code-review ✅ (0 critical, 0 warnings on new files; minor `LocalPart` helper note acknowledged in current-task) / adr-check ✅ — ADR-013 (Zone A placement per SPEC §3.5.2), ADR-010 (new feature module justified — AiModule at 15/15; `IObservationEmitter` interface seam justified per §Exceptions — D-P7 ingest consumer + D-62 re-extraction consumer + test seam), ADR-001 N/A, ADR-029 N/A (zero package adds), D-63 ✅ (IOptionsMonitor binding + per-field override + default fallback), D-P10 ✅ (one ObservationArtifact per surviving field; SPEC §3.4.1 evidence shape + `producedBy=outcome-extraction@v1`), D-A23/D-48 EvidenceGuard ✅ (every emitted Observation has Evidence[] populated, never empty), D-52 ✅ (TenantId required + propagated to envelope + Scope), bff-extensions.md ✅ (placement justified, zero new packages)
+- Acceptance criteria: 4/4 PASS per POML
+  1. High-confidence extraction emits N Observations (one per field) — Test 1 (4 fields, all above starter thresholds, 4 emit; predicates + id + value + scope all verified)
+  2. Below-threshold field dropped AND logged to App Insights with field name + actual confidence — Tests 3/4 (drop verified; logged via `EventId(8021)` structured log)
+  3. Thresholds load from IConfiguration via IOptionsMonitor; admin override via appsettings.json — module binds `Insights:Extraction:ConfidenceThresholds` section; Test 6 verifies reload-between-calls applies
+  4. Each emitted Observation has `evidence[]` with verbatim quote + `producedBy="outcome-extraction@v1"` — Test 2 (verbatim SPEC §3.4.1 quote round-trips; `ProducedBy.Id="playbook://outcome-extraction@v1"`, `.Version="v1"`, `.Kind="playbook"`)
+- Notes:
+  - `<` is strict per the literal SPEC wording "fields below threshold are dropped"; equal-to-threshold passes (covered by Test 5)
+  - Upsert callback signature lets task 025 (parameterized ReferenceIndexingService) wire substrate writes later without changing this primitive — D-P7 ingest playbook (task 040) is the canonical caller
+  - `ObservationEmitter` is `internal sealed` (consumed via `IObservationEmitter` interface); `Sprk.Bff.Api.csproj` already grants `InternalsVisibleTo Sprk.Bff.Api.Tests` so the xUnit test can construct directly
 
 **Task 012 — D-P3 (endpoint) POST /api/insights/admin/precedents admin endpoint** ✅ (2026-05-28)
 - Rigor: FULL (bff-api code modifying .cs, admin endpoint, Zone B facade compliance, foundation for D-P4 + D-P14)
@@ -104,9 +155,9 @@ Wave 1 complete. Wave 2 (infrastructure provisioning) unlocks next — pick D-P2
 
 | State | Count |
 |---|---|
-| ✅ Completed | 5 (001, 002, 010, 011, 012) |
+| ✅ Completed | 6 (001, 002, 010, 011, 012, 021) |
 | 🔄 In progress | 0 |
-| 🔲 Pending | 12 |
+| 🔲 Pending | 11 |
 | ⏭️ Deferred (Phase 1.5+) | — see SPEC §3.3 |
 
 ---

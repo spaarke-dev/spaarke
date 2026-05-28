@@ -135,5 +135,12 @@ public enum ActionType
     QueryDataverse = 51,
 
     /// <summary>Routes the playbook node to Azure AI Foundry Agent Service (Phase 2).</summary>
-    AgentService = 60
+    AgentService = 60,
+
+    /// <summary>
+    /// Mechanical zero-LLM citation verification — checks that quoted evidence from prior
+    /// AI nodes matches the source chunks. Wraps <c>IGroundingVerifier</c> per D-P9 / D-47 /
+    /// LAVERN ADR 10.6. Used in Insights synthesis playbooks (D-P14) and the ingest pipeline.
+    /// </summary>
+    GroundingVerify = 70
 }

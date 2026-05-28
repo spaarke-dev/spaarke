@@ -76,6 +76,12 @@ builder.Services.AddGraphModule(builder.Configuration);
 // Document Intelligence, Analysis, Playbook, Builder, RAG, and Record Matching services
 builder.Services.AddAnalysisServicesModule(builder.Configuration);
 
+// Spaarke Insights Engine — Zone A extraction post-processing primitives per SPEC §3.5.
+// Phase 1: D-P10 confidence-threshold gating + per-field Observation emission
+// (admin-tunable per D-63 via IOptionsMonitor on ConfidenceThresholdOptions).
+// Future Wave-3 additions: D-P9 GroundingVerifier wiring, D-P12 node executors.
+builder.Services.AddInsightsExtractionModule(builder.Configuration);
+
 // AI Platform R2: safety perimeter (content safety, prompt shield, groundedness)
 builder.Services.AddAiSafetyModule(builder.Configuration);
 

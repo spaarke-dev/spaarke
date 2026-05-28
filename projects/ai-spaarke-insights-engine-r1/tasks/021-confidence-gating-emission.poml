@@ -1,7 +1,7 @@
 <task id="021" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>D-P10 — Confidence-threshold gating + per-field Observation emission post-processor</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>3</wave>
     <estimated-effort>6 hours</estimated-effort>
     <tags>bff-api, extraction, gating, observation-emission, zone-a, dotnet</tags>
