@@ -1846,7 +1846,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.55 • Built 2026-05-28</Text>
+        <Text size={100}>v1.1.56 • Built 2026-05-28</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so
@@ -1902,14 +1902,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           on the same doc. This guarantees full occlusion (no modal-
           stacking artifacts) and preserves the user's context.
 
-          v1.1.55 — maxWidth bumped to 1280px (same as FilePreviewDialog)
-          per UAT: "for the email we still want the larger size so more
-          room for user to write the email; make dimension same as the
-          preview modal". Applies whether email is invoked from the
-          preview menu OR a row/card menu — single sizing for all
-          paths. The preview-hide pattern (v1.1.54) still solves the
-          stacking issue; this just gives the composer more writing
-          space. */}
+          v1.1.55 — maxWidth bumped to 1280px (same as FilePreviewDialog).
+          v1.1.56 — height bumped to '85vh' to match FilePreview footprint
+          exactly. Also relies on shared SendEmailDialog v1.1.56 width fix
+          (surface `width: '90vw'` → `'100%'`) so 1280px is actually
+          reached on 1366px laptops (previously capped at ~1229px by the
+          90vw clamp). Composer Message textarea grows flex-1 to fill the
+          tall surface. */}
       <SendEmailDialog
         open={!!emailDialogResult}
         onClose={handleEmailDialogClose}
@@ -1918,6 +1917,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         onSearchUsers={handleSearchUsers}
         onSend={handleSendEmail}
         maxWidth="1280px"
+        height="85vh"
       />
 
       {/* Document Email Wizard (multi-document, new) — opens from the toolbar

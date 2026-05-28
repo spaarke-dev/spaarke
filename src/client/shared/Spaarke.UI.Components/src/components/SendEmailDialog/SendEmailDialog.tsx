@@ -84,6 +84,17 @@ export interface ISendEmailDialogProps {
    * @since v1.1.52 (SemanticSearchControl UAT polish round 7)
    */
   maxWidth?: string;
+
+  /**
+   * Override the dialog surface height. Defaults to `'auto'` (content-sized,
+   * preserves original consumer behavior). Pass a viewport-relative value
+   * like `'85vh'` to give the composer a tall presence matching a sibling
+   * host dialog (FilePreviewDialog uses `85vh`). When set, the Message
+   * textarea grows to fill the available vertical space.
+   *
+   * @since v1.1.56 (SemanticSearchControl UAT polish round 11)
+   */
+  height?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,15 +102,42 @@ export interface ISendEmailDialogProps {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
+  // v1.1.56 — `width: '90vw'` was the binding width constraint, which
+  // capped the surface below the `maxWidth` value on common laptop
+  // viewports (90% of 1366 = 1229, which clips a passed maxWidth=1280).
+  // Switched to `width: '100%'` so the surface always grows to its
+  // maxWidth, matching FilePreviewDialog's pattern (which reliably
+  // hits 1280px on every viewport). The Dialog's portal still constrains
+  // the surface within the viewport, so no overflow on smaller screens.
   surface: {
     maxWidth: '520px',
-    width: '90vw',
+    width: '100%',
   },
+  // v1.1.56 — `form` is now a flex column with `flex: 1` so it fills
+  // the surface when an explicit height is set. `minHeight: 0` lets
+  // children with `flex: 1` shrink instead of pushing the form out of
+  // the dialog (default flex behavior would otherwise force overflow).
   form: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     paddingTop: tokens.spacingVerticalS,
+    flex: 1,
+    minHeight: 0,
+  },
+  // v1.1.56 — Message Field grows to fill remaining vertical space when
+  // the surface has an explicit height; flat content layout otherwise.
+  messageField: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: 1,
+    minHeight: 0,
+  },
+  // v1.1.56 — Textarea inside the Message Field grows with the field.
+  // `minHeight` keeps the writing area usable even on short modals.
+  messageTextarea: {
+    flex: 1,
+    minHeight: '180px',
   },
   labelRow: {
     display: 'inline-flex',
@@ -132,6 +170,7 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
   onSearchUsers,
   onSend,
   maxWidth = '520px',
+  height = 'auto',
 }) => {
   const styles = useStyles();
 
@@ -193,12 +232,12 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
         if (!data.open) onClose();
       }}
     >
-      {/* v1.1.52 — Inline `style={{ maxWidth }}` overrides the makeStyles
-          `surface.maxWidth` default. Defaults to '520px' so existing
-          consumers (LegalWorkspace FilePreviewDialog, SpeDocumentViewer)
-          render identically; the SemanticSearchControl PCF passes
-          '720px' to feel positioned over its 1280px FilePreviewDialog. */}
-      <DialogSurface className={styles.surface} style={{ maxWidth }}>
+      {/* v1.1.56 — Inline `style={{ maxWidth, height }}` overrides the
+          makeStyles defaults. `maxWidth` defaults to '520px' and `height`
+          defaults to 'auto' so existing consumers render identically.
+          SemanticSearchControl passes maxWidth="1280px" height="85vh"
+          to match the FilePreviewDialog footprint. */}
+      <DialogSurface className={styles.surface} style={{ maxWidth, height }}>
         <DialogTitle
           action={<Button appearance="subtle" icon={<Dismiss24Regular />} aria-label="Close" onClick={onClose} />}
         >
@@ -230,9 +269,13 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
                 />
               </Field>
 
-              {/* Body */}
-              <Field label={renderLabel('Message')}>
+              {/* Body — v1.1.56: Field + Textarea flex-grow to fill any
+                  explicit surface height (host passes height="85vh" on
+                  the SemanticSearchControl). `rows` still provides a
+                  sane default height when surface height is 'auto'. */}
+              <Field label={renderLabel('Message')} className={styles.messageField}>
                 <Textarea
+                  className={styles.messageTextarea}
                   value={body}
                   onChange={e => setBody(e.target.value)}
                   placeholder="Compose your message..."
