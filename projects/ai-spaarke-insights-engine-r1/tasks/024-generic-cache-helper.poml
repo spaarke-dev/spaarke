@@ -1,7 +1,7 @@
 <task id="024" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>Q5 side-quest — Generic IDistributedCacheExtensions.GetOrCreateAsync&lt;T&gt; helper</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>3</wave>
     <estimated-effort>3 hours</estimated-effort>
     <tags>shared, redis, caching, refactor, optional, low-risk</tags>
