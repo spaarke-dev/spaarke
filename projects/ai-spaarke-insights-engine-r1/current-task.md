@@ -1,18 +1,43 @@
 # Current Task — Spaarke Insights Engine, Phase 1
 
-> **Status**: ✅ idle — Wave 2 partial: tasks 010 + 011 both completed
+> **Status**: ✅ idle — Wave 2 complete (010 + 011 + 012 all done)
 > **Last Updated**: 2026-05-28
-> **Project state**: Wave 1 complete; Wave 2 in progress (010 done, 011 done, 012 pending)
+> **Project state**: Wave 1 complete; Wave 2 complete; ready for Wave 3 platform primitives
 
 ---
 
 ## Active task
 
-**none** — ready for next task pickup (012 admin endpoint or Wave 3 platform primitives).
+**none** — ready for Wave 3 (020 D-P9 GroundingVerifier, 021 D-P10 confidence gating, 023 D-P13 cache, 024 Q5 cache helper, 025 W3.5 ReferenceIndexingService refactor — all parallel-safe).
 
 ---
 
 ## Last completed tasks
+
+**Task 012 — D-P3 (endpoint) POST /api/insights/admin/precedents admin endpoint** ✅ (2026-05-28)
+- Rigor: FULL (bff-api code modifying .cs, admin endpoint, Zone B facade compliance, foundation for D-P4 + D-P14)
+- Files NEW:
+  - `src/server/api/Sprk.Bff.Api/Services/Insights/Precedents/IPrecedentBoard.cs` (125 lines) — interface + DTOs (CreatePrecedentRequest, PrecedentRecord, PrecedentStatus constants)
+  - `src/server/api/Sprk.Bff.Api/Services/Insights/Precedents/DataversePrecedentBoard.cs` (227 lines) — IDataverseService-only impl, no AI internals
+  - `src/server/api/Sprk.Bff.Api/Api/Insights/PrecedentAdminEndpoints.cs` (230 lines) — POST endpoint with ADR-008 filter + ADR-019 ProblemDetails + ADR-016 rate limit
+  - `tests/integration/Spe.Integration.Tests/Api/Insights/PrecedentAdminEndpointsTests.cs` (223 lines) — 6 xUnit tests with mocked IPrecedentBoard (test project has pre-existing 4 compile errors unrelated to this task)
+  - `scripts/Verify-PrecedentAdminEndpoint.ps1` — standalone real-Dataverse acceptance verifier
+- Files MODIFIED:
+  - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/InsightsModule.cs` — registered IPrecedentBoard → DataversePrecedentBoard (Scoped)
+  - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs` — wired `app.MapPrecedentAdminEndpoints()`
+  - `src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs` — added generic `AssociateAsync(entityLogicalName, entityId, relationshipName, relatedEntities, ct)` method
+  - `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs` — real impl using ServiceClient.AssociateAsync; tolerates duplicate-association errors
+  - `src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs` — NotImplementedException stub (matches pattern of other generic-entity methods on that class)
+- Build: `dotnet build src/server/api/Sprk.Bff.Api/` clean — 0 errors, 17 pre-existing warnings (none in new files)
+- §3.5.4 forbidden-imports grep: ZERO matches in `Api/Insights/` and `Services/Insights/Precedents/`
+- Real-Dataverse verification (Verify-PrecedentAdminEndpoint.ps1 against spaarkedev1):
+  - Created sprk_precedent with status=Tentative (100000000), producedBy=manual-sme-author, reviewerBy=current user (1d02f31c-1872-f011-b4cb-7c1e52671ad0)
+  - N:N supporting matter (LITG-226554) associated via sprk_precedent_matter — read-back confirmed count=1
+  - Cleanup: test row deleted
+  - All 6 assertions PASS; ran end-to-end against Spaarke Dev
+- Quality gates: code-review ✅ (0 critical, 0 warnings, 0 AI smells; IPrecedentBoard interface justified per ADR-010 exception — testing seam + D-P4 downstream) / adr-check ✅ (9 ADRs validated, 0 violations)
+- Acceptance criteria: 5/5 PASS per POML
+- Endpoint: `POST /api/insights/admin/precedents` (admin role required, 60/min rate limit, ProblemDetails errors, 201 Created with location header + CreatePrecedentResponse)
 
 **Task 010 — D-P2 Bicep modules + spaarke-insights-index + Function App shell** ✅ (2026-05-28)
 - Rigor: FULL (infra deployment, foundational, shared-state)
@@ -79,9 +104,9 @@ Wave 1 complete. Wave 2 (infrastructure provisioning) unlocks next — pick D-P2
 
 | State | Count |
 |---|---|
-| ✅ Completed | 4 (001, 002, 010, 011) |
+| ✅ Completed | 5 (001, 002, 010, 011, 012) |
 | 🔄 In progress | 0 |
-| 🔲 Pending | 13 |
+| 🔲 Pending | 12 |
 | ⏭️ Deferred (Phase 1.5+) | — see SPEC §3.3 |
 
 ---

@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Api.Events;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
+using Sprk.Bff.Api.Api.Insights;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Workspace;
@@ -184,6 +185,11 @@ public static class EndpointMappingExtensions
         app.MapFinanceEndpoints();
         app.MapFinanceRollupEndpoints();
         app.MapCommunicationEndpoints();
+
+        // Insights Engine admin endpoints (/api/insights/admin/*) — manual SME authoring
+        // of Precedents (D-P3 Phase 1 mode of D-61). Zone B per SPEC §3.5 — consumes
+        // IPrecedentBoard which calls IDataverseService directly, no AI internals.
+        app.MapPrecedentAdminEndpoints();
 
         // SPE Admin endpoints (/api/spe/*) — environments, configs, business units, containers, audit log, dashboard
         app.MapSpeAdminEndpoints();

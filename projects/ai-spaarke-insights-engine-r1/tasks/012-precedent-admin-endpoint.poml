@@ -1,7 +1,7 @@
 <task id="012" project="ai-spaarke-insights-engine-r1">
   <metadata>
     <title>D-P3 (endpoint) — POST /api/insights/admin/precedents admin endpoint</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>2</wave>
     <estimated-effort>4 hours</estimated-effort>
     <tags>bff-api, endpoint, admin, jwt-auth, precedent, dotnet</tags>

@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Services.Insights.Graph;
+using Sprk.Bff.Api.Services.Insights.Precedents;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -45,6 +46,12 @@ public static class InsightsModule
         // which is itself thread-safe and intended to be reused; the stub is
         // stateless so lifetime is irrelevant for Phase 1.
         services.AddSingleton<IInsightGraph, StubInsightGraph>();
+
+        // IPrecedentBoard — D-P3 manual SME authoring of Precedents (task 012).
+        // Scoped because the underlying IGenericEntityService is resolved per-request
+        // and the board carries no state of its own. The implementation consumes only
+        // IGenericEntityService (Zone B) — no AI internals are imported.
+        services.AddScoped<IPrecedentBoard, DataversePrecedentBoard>();
 
         return services;
     }
