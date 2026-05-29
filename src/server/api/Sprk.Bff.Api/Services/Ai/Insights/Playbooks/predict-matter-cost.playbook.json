@@ -8,8 +8,8 @@
     "description": "Insights-mode synthesis playbook (D-P14). Predicts likely total cost + duration of a new legal matter by composing Live Facts (current matter scope) + cohort Observations (from comparable matters via spaarke-insights-index) + applicable Confirmed Precedents. Evidence-sufficiency rule comparableMatters.min=12 routes to DeclineToFindNode on insufficient cohort. Cached for 5 min per D-P13.",
     "isPublic": true,
     "isSystemPlaybook": true,
-    "sprk_playbooktype": 100000000,
-    "$comment-type": "sprk_playbooktype = 100000000 reserved for Insights-mode (vs Analysis = default). Phase 1 uses isSystemPlaybook=true + naming convention to differentiate; future schema can add an explicit insights-mode flag.",
+    "sprk_playbooktype": 0,
+    "$comment-type": "sprk_playbooktype=0 (AiAnalysis) — closest existing semantic in the option set (range 0-4: AiAnalysis/Workflow/Notification/Notification/Hybrid). Phase 1 discriminator for Insights vs Analysis is isSystemPlaybook=true + the '@v1' naming convention. Phase 1.5 may add an explicit Insights value to the type option set AND map sprk_playbookmode=1 (NodeBased) via script; the current Deploy-Playbook.ps1 does not read sprk_playbookmode so adding it here would be a no-op.",
     "sprk_configjson": {
       "mode": "insights",
       "tier": "inference",
