@@ -35,22 +35,87 @@ const PIN_KEY_PREFIX = 'spaarke.docs.pinned';
  * - v1.1.45 introduced `spaarke.docs.colwidths.{userId}.{matterId}`.
  * - v1.1.59 bumped to `.v2` to invalidate widths from the wider
  *   v1.1.45–v1.1.58 defaults.
- * - v1.1.67 bumps to `.v3` because v1.1.66 added MAX_WIDTHS caps in
+ * - v1.1.67 bumped to `.v3` because v1.1.66 added MAX_WIDTHS caps in
  *   ListView (e.g. Document max 600px) BUT Fluent v9 DataGrid's
  *   `resizableColumns` plugin maintains its own internal state for
- *   resized widths separate from the `idealWidth` prop. Persisted
- *   widths in `.v2` larger than the new caps were ignoring the
- *   render-time clamp in `columnSizingOptions` and stretching the
- *   Document column off the visible right edge of the grid (the
- *   sibling columns got clipped by v1.1.65's `overflow: hidden`).
- *   Bumping to `.v3` invalidates the over-large persisted widths;
- *   the grid starts fresh with DEFAULT_WIDTHS which obey MAX_WIDTHS.
+ *   resized widths separate from the `idealWidth` prop.
+ * - v1.1.68 keeps `.v3` and ADDS a runtime clamp + heal at hook
+ *   read-time (see `clampAndHealColumnWidths` below). The prefix
+ *   bump alone wasn't sufficient: any user who dragged a column past
+ *   the cap in v1.1.67 (after the .v3 invalidation) re-persisted a
+ *   stale over-cap width, and Fluent's internal reducer state held
+ *   the dragged value even though our `columnSizingOptions` memo
+ *   passed the clamped `idealWidth` (the Fluent layout-effect
+ *   re-dispatches `COLUMN_SIZING_OPTIONS_UPDATED` but the in-session
+ *   drag-time render still showed the unclamped width for one frame
+ *   before the re-merge). Heal-on-read + a remount counter in
+ *   ListView (Option D = A + C) jointly close this.
  *
  * Old-version keys remain in users' localStorage as orphans; no
  * migration needed because they're scoped per matter and silently
  * ignored under the new prefix.
  */
 const COLWIDTHS_KEY_PREFIX = 'spaarke.docs.colwidths.v3';
+
+/**
+ * v1.1.68 — Hard-coded MAX_WIDTHS caps mirrored from ListView.tsx.
+ *
+ * Why duplicate? The hook is consumed by `SemanticSearchControl.tsx` BEFORE
+ * `ListView.tsx` mounts — clamping at read-time requires the caps to be
+ * known at hook level, not at component level. Keeping the values in sync
+ * is a small maintenance cost (the caps are stable and ListView.tsx still
+ * carries the canonical comment block explaining the rationale).
+ *
+ * If ListView.tsx's MAX_WIDTHS change, update here too. The hook prefers
+ * to err on the side of healing rather than risk an unclamped persisted
+ * width sticking around indefinitely.
+ *
+ * Column ids must match the constants in ListView.tsx exactly.
+ */
+const COLUMN_MAX_WIDTHS: Record<string, number> = {
+  select: 40,
+  pin: 36,
+  name: 600,
+  relationship: 160,
+  combinedScore: 100,
+  documentType: 48,
+  modifiedAt: 160,
+  menu: 44,
+};
+
+/**
+ * v1.1.68 — Heal stale over-cap widths at read-time.
+ *
+ * Step 1 of the Option D fix (Option C component). Reads the parsed
+ * column widths map and clamps each entry to the cap defined in
+ * `COLUMN_MAX_WIDTHS`. Returns:
+ *   - the (possibly clamped) widths map
+ *   - a boolean indicating whether ANY entry was clamped (so the caller
+ *     can re-persist the healed values back to localStorage)
+ *
+ * This addresses the case where a user persisted an over-cap width
+ * during an earlier session — without read-time healing, the over-cap
+ * value sits in localStorage forever and is re-applied on every page
+ * load. With healing, the first load after v1.1.68 ships silently
+ * normalizes the stored value.
+ */
+function clampAndHealColumnWidths(input: Record<string, number>): {
+  widths: Record<string, number>;
+  healed: boolean;
+} {
+  let healed = false;
+  const widths: Record<string, number> = {};
+  for (const [k, v] of Object.entries(input)) {
+    const max = COLUMN_MAX_WIDTHS[k];
+    if (max !== undefined && v > max) {
+      widths[k] = max;
+      healed = true;
+    } else {
+      widths[k] = v;
+    }
+  }
+  return { widths, healed };
+}
 
 /** Default view per spec FR-DOC-04 */
 const DEFAULT_VIEW: DocumentListView = 'list';
@@ -211,6 +276,12 @@ export function useDocumentListPrefs(
   // Map of `columnId` → pixel width. Reads/writes localStorage with the same
   // graceful-degradation pattern as view + pins. Defaults to an empty object so
   // unknown columns fall through to the DataGrid's intrinsic sizing.
+  //
+  // v1.1.68 — Read-time healing: any stored width over `COLUMN_MAX_WIDTHS[id]`
+  // is silently clamped on read AND re-persisted at the clamped value, so
+  // the storage self-heals on the first load after the cap is introduced
+  // (or tightened in a future round). Without this heal, a single drag past
+  // the cap in a prior session would stick forever.
   const [columnWidths, setColumnWidthsState] = useState<ColumnWidths>(() => {
     const raw = safeReadLocalStorage(colWidthsKey);
     if (!raw) return {};
@@ -221,7 +292,11 @@ export function useDocumentListPrefs(
         for (const [k, v] of Object.entries(parsed)) {
           if (typeof v === 'number' && Number.isFinite(v) && v > 0) next[k] = v;
         }
-        return next;
+        // v1.1.68 — clamp + heal. If anything was clamped, write back so
+        // the storage no longer carries the stale over-cap value.
+        const { widths, healed } = clampAndHealColumnWidths(next);
+        if (healed) safeWriteLocalStorage(colWidthsKey, JSON.stringify(widths));
+        return widths;
       }
     } catch {
       // Corrupt JSON — reset
@@ -243,7 +318,10 @@ export function useDocumentListPrefs(
         for (const [k, v] of Object.entries(parsed)) {
           if (typeof v === 'number' && Number.isFinite(v) && v > 0) next[k] = v;
         }
-        setColumnWidthsState(next);
+        // v1.1.68 — clamp + heal on re-hydrate too.
+        const { widths, healed } = clampAndHealColumnWidths(next);
+        if (healed) safeWriteLocalStorage(colWidthsKey, JSON.stringify(widths));
+        setColumnWidthsState(widths);
         return;
       }
     } catch {
@@ -262,8 +340,15 @@ export function useDocumentListPrefs(
   const setColumnWidth = useCallback(
     (columnId: string, width: number) => {
       if (!columnId || !Number.isFinite(width) || width <= 0) return;
+      // v1.1.68 — defensive clamp at the write path so the hook is the
+      // single chokepoint for cap enforcement. ListView.handleColumnResize
+      // also clamps before calling, but this guards against any future
+      // caller forgetting (or callers from other components if the hook
+      // is reused). Tiny CPU cost; large guarantee.
+      const max = COLUMN_MAX_WIDTHS[columnId];
+      const clamped = max !== undefined ? Math.min(width, max) : width;
       setColumnWidthsState(prev => {
-        const next = { ...prev, [columnId]: Math.round(width) };
+        const next = { ...prev, [columnId]: Math.round(clamped) };
         persistColumnWidths(next);
         return next;
       });

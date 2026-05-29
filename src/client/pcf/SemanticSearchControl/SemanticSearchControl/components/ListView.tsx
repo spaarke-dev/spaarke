@@ -1117,9 +1117,80 @@ export const ListView: React.FC<IListViewProps> = ({
     return opts;
   }, [columnWidths]);
 
+  // ── DataGrid remount counter (v1.1.68, fix for column-cap bug) ────────
+  //
+  // The bug: Fluent v9's `useTableColumnSizing_unstable` hook keeps the
+  // resized column widths in a `useReducer` whose `SET_COLUMN_WIDTH`
+  // action (dispatched on every mousemove tick during a drag) writes
+  // BOTH `width` AND `idealWidth` to the raw mouse-position value with
+  // NO max enforcement. See:
+  //
+  //   node_modules/@fluentui/react-table/lib/hooks/useTableColumnResizeState.js
+  //   lines 27-48 (the SET_COLUMN_WIDTH reducer)
+  //
+  //   node_modules/@fluentui/react-table/lib/hooks/useTableColumnResizeMouseHandler.js
+  //   lines 12-24 (recalculatePosition pumps raw delta into setColumnWidth)
+  //
+  // Fluent does re-dispatch `COLUMN_SIZING_OPTIONS_UPDATED` when our
+  // `columnSizingOptions` prop reference changes (see useTableColumnResizeState
+  // lines 78-85), and `columnDefinitionsToState` does compare the new
+  // `idealWidth` against the existing state's `idealWidth` and re-merge if
+  // they differ. So the clamp in our `columnSizingOptions` memo SHOULD
+  // propagate to the internal reducer state...
+  //
+  // ...EXCEPT in practice it doesn't reliably override an in-session drag.
+  // Three previous fix rounds (v1.1.65, v1.1.66, v1.1.67) attempted variants
+  // (overflow: hidden; clamp at persist + render; localStorage prefix bump)
+  // and the over-cap render still slipped through. The root cause is some
+  // combination of React 16 layout-effect ordering + Fluent's `useEventCallback`
+  // closure semantics that we can't easily debug without instrumented runs.
+  //
+  // The robust fix: when our clamp kicks in (the user dragged past a cap),
+  // bump a remount counter. The `key` prop on `<DataGrid>` includes this
+  // counter, forcing React to unmount + remount the DataGrid. On remount
+  // Fluent's `useReducer` re-initializes from `columnDefinitionsToState`
+  // with `state = undefined`, which reads `idealWidth` straight from our
+  // already-clamped `columnSizingOptions` (no existing-state merge path).
+  // Result: the column snaps to the cap immediately and the new state is
+  // clean.
+  //
+  // Cost: ONE remount per drag-over-cap event. Scroll position is preserved
+  // because the parent owns the scroll container (`styles.container`).
+  // Selection + sort + filter state are owned by the parent and re-flow into
+  // the new DataGrid via props. The visual artifact (column snap) is the
+  // DESIRED UX — the user is communicating "don't let me go past N" by
+  // configuring MAX_WIDTHS, so snapping back IS the answer.
+  //
+  // Alternatives considered + rejected:
+  //   - Option B (imperative ref to push clamped widths): Fluent v9 DataGrid's
+  //     ref is the DOM element, not the column-sizing state handle. To get
+  //     state access we'd need to refactor away from `<DataGrid>` to lower-
+  //     level `useTableFeatures` + custom row render. Big blast radius.
+  //   - Option C alone (clamp in useDocumentListPrefs only): handles the
+  //     stale-localStorage case (a user who persisted an over-cap width in
+  //     v1.1.67 sees it healed on next page load) but does NOT fix the
+  //     in-session drag where Fluent's reducer is already past the cap.
+  //     This file's `handleColumnResize` already clamps localStorage at the
+  //     same place — we needed the remount to clear Fluent's internal state.
+  const [resizeRemountKey, setResizeRemountKey] = React.useState(0);
+
   // DataGrid `onColumnResize` fires on every drag tick; we persist on each
   // event (writes-through to localStorage). Cheap enough — the volume is
   // limited by user drag speed, not by render.
+  //
+  // v1.1.68 — When a drag-tick reports a width over the cap, in addition
+  // to clamping for persistence, we increment `resizeRemountKey` so the
+  // DataGrid remounts with clean Fluent internal state at the clamped
+  // value. Without the remount, Fluent's reducer continues to hold the
+  // dragged 1300px in its `width` field even though our `columnSizingOptions`
+  // memo passes 600. ONE remount per drag-over-cap is the minimum we
+  // need to push Fluent's state through `columnDefinitionsToState`'s
+  // fresh-mount path.
+  //
+  // Note: we increment ONLY on drags that actually exceed the cap. A
+  // normal drag inside the cap range does not trigger a remount. Idle
+  // re-renders also do not trigger a remount. The user only sees the
+  // snap-back when they intentionally tried to drag past the cap.
   const handleColumnResize = React.useCallback(
     (_ev: unknown, data: { columnId: unknown; width: number }) => {
       const id = data.columnId;
@@ -1131,6 +1202,13 @@ export const ListView: React.FC<IListViewProps> = ({
         const max = MAX_WIDTHS[id];
         const clamped = max !== undefined ? Math.min(data.width, max) : data.width;
         onColumnWidthChange(id, clamped);
+        // v1.1.68 — bump the remount counter ONLY when we actually had to
+        // clamp (i.e., the user dragged past the cap). This forces the
+        // DataGrid to re-mount on its next render so Fluent's internal
+        // reducer state initializes from the clamped `columnSizingOptions`.
+        if (max !== undefined && data.width > max) {
+          setResizeRemountKey(k => k + 1);
+        }
       }
     },
     [onColumnWidthChange]
@@ -1152,7 +1230,14 @@ export const ListView: React.FC<IListViewProps> = ({
   return (
     <>
       <div className={styles.container} role="region" aria-label="Document list">
+        {/* v1.1.68 — `key={resizeRemountKey}` forces a clean remount when the
+            user drags past a MAX_WIDTHS cap. See handleColumnResize for the
+            full rationale + Fluent v9 source-level analysis. On remount,
+            Fluent's column-sizing reducer initializes from the (clamped)
+            `columnSizingOptions` prop instead of preserving the over-cap
+            width in its internal `width` field. */}
         <DataGrid
+          key={resizeRemountKey}
           items={sortedResults}
           columns={columns}
           getRowId={(item: SearchResult) => item.documentId}
