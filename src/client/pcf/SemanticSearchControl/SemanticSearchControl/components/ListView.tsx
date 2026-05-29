@@ -168,21 +168,17 @@ const COL_MENU = 'menu';
 // fits inside a typical Matter form section). User-persisted widths
 // from earlier rounds are invalidated by the v2 localStorage key
 // prefix bump (see useDocumentListPrefs.ts).
-// v1.1.64 — COL_DOCUMENT reverted 480 → 240. The v1.1.61 bump (240→480)
-// was meant to "fill" the empty space to the right of the menu column on
-// wide Matter form sections, but it caused a horizontal scrollbar to
-// appear on slightly narrower form widths. Now that v1.1.63 anchors the
-// menu cell to the row's right edge via `marginInlineStart: 'auto'`
-// (Fluent v9 DataGrid rows are flexbox; the auto-margin consumes any
-// leftover inline space), there's no need to inflate the Document
-// column to fill. Reverting gives us a comfortable 688px column total
-// + ~30px chrome ≈ 720px — comfortably under typical Matter form
-// section widths (~900-1050px), so NO horizontal scroll, and the menu
-// still ends up flush right because of the auto-margin.
+// v1.1.66 — COL_DOCUMENT bumped 240 → 320 (modest increase). v1.1.64
+// reverted to 240 to kill horizontal scroll; v1.1.65 then suppressed
+// overflow entirely, so we can safely give Document a bit more
+// breathing room without triggering the prior overflow regression.
+// New total: 40+36+320+110+70+48+100+44 = 768 + chrome ≈ 800. Still
+// well under typical form widths (~900-1050px) so the menu cell still
+// auto-margins to the right edge with comfortable leftover space.
 const DEFAULT_WIDTHS: Record<string, number> = {
   [COL_SELECT]: 40,
   [COL_PIN]: 36,
-  [COL_DOCUMENT]: 240,
+  [COL_DOCUMENT]: 320,
   [COL_RELATIONSHIP]: 110,
   [COL_SIMILARITY]: 70,
   // v1.1.53 (Item 4 Part B) — Type column now renders just the file icon
@@ -205,6 +201,27 @@ const MIN_WIDTHS: Record<string, number> = {
   // match the new icon-only rendering footprint.
   [COL_TYPE]: 40,
   [COL_MODIFIED]: 90,
+  [COL_MENU]: 44,
+};
+
+// v1.1.66 — per-column resize ceiling. Without this, a user dragging
+// the Document column wider can push the Modified column off the
+// visible right edge (which is now hidden by overflow: hidden from
+// v1.1.65 — invisible columns are bad UX). We enforce these caps both
+// at persist-time (`handleColumnResize`) and in `columnSizingOptions`
+// so a stale localStorage width can't reintroduce the overflow.
+//
+// Caps chosen so the cumulative max width still fits in a generous
+// 1100px container: even at every column maxed simultaneously, the
+// content stays inside the visible area.
+const MAX_WIDTHS: Record<string, number> = {
+  [COL_SELECT]: 40,
+  [COL_PIN]: 36,
+  [COL_DOCUMENT]: 600,
+  [COL_RELATIONSHIP]: 160,
+  [COL_SIMILARITY]: 100,
+  [COL_TYPE]: 48,
+  [COL_MODIFIED]: 160,
   [COL_MENU]: 44,
 };
 
@@ -1087,9 +1104,14 @@ export const ListView: React.FC<IListViewProps> = ({
       COL_MENU,
     ];
     for (const id of columnIds) {
+      // v1.1.66 — clamp the persisted/ideal width against MAX_WIDTHS so a
+      // stale localStorage value (or a partial drag past the cap) can't
+      // push columns off the visible right edge.
+      const requested = columnWidths[id] ?? DEFAULT_WIDTHS[id];
+      const max = MAX_WIDTHS[id] ?? requested;
       opts[id] = {
         minWidth: MIN_WIDTHS[id],
-        idealWidth: columnWidths[id] ?? DEFAULT_WIDTHS[id],
+        idealWidth: Math.min(requested, max),
       };
     }
     return opts;
@@ -1102,7 +1124,13 @@ export const ListView: React.FC<IListViewProps> = ({
     (_ev: unknown, data: { columnId: unknown; width: number }) => {
       const id = data.columnId;
       if (typeof id === 'string' && typeof data.width === 'number') {
-        onColumnWidthChange(id, data.width);
+        // v1.1.66 — clamp at persist-time so the cap survives reload
+        // (the columnSizingOptions clamp would otherwise re-apply each
+        // render, but persisting the unclamped value is wasteful and
+        // confusing in dev tools).
+        const max = MAX_WIDTHS[id];
+        const clamped = max !== undefined ? Math.min(data.width, max) : data.width;
+        onColumnWidthChange(id, clamped);
       }
     },
     [onColumnWidthChange]
@@ -1144,6 +1172,16 @@ export const ListView: React.FC<IListViewProps> = ({
                 // `marginInlineStart: auto` so the header alignment tracks
                 // the right-edge flush of the body menu cell. See styles.menuCell.
                 const isMenuHeader = columnId === COL_MENU;
+                const isSelectHeader = columnId === COL_SELECT;
+                const isPinHeader = columnId === COL_PIN;
+                // v1.1.66 — wrap the header content in `TableCellLayout` so
+                // the header padding matches the body cells (body cells are
+                // already wrapped in TableCellLayout — see the row render
+                // below). Without this, the header content starts a few
+                // pixels to the left of the body cell content, producing
+                // the misalignment the user reported. The non-text columns
+                // (Select, Pin, Menu) keep `truncate={false}` so the
+                // checkbox/icon glyph isn't clipped.
                 return (
                   <DataGridHeaderCell
                     className={mergeClasses(
@@ -1152,7 +1190,9 @@ export const ListView: React.FC<IListViewProps> = ({
                       isMenuHeader && styles.menuCell
                     )}
                   >
-                    {renderHeaderCell()}
+                    <TableCellLayout truncate={!isSelectHeader && !isPinHeader && !isMenuHeader}>
+                      {renderHeaderCell()}
+                    </TableCellLayout>
                   </DataGridHeaderCell>
                 );
               }}
