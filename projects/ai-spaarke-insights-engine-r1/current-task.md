@@ -1,73 +1,65 @@
 # Current Task — Spaarke Insights Engine, Phase 1
 
-> **Status**: 🔄 IN-PROGRESS — Wave 8.5 task 071 (pre-deploy functional gap fix)
-> **Last Updated**: 2026-05-29 (task 071 started)
-> **Project state**: Waves 1-8 D-P tasks complete (D-P1..D-P17 all ✅); Wave 8.5 task 071 in progress; next: task 080 deploy, then task 090 wrap-up
+> **Status**: 🎯 WAVE 8.5 COMPLETE — task 071 ✅; next is task 080 deploy
+> **Last Updated**: 2026-05-29 (post task 071)
+> **Project state**: Waves 1-8 D-P tasks complete (D-P1..D-P17 all ✅); Wave 8.5 task 071 ✅ (pre-deploy gap fix); next: task 080 deploy, then task 090 wrap-up
 
 ---
 
 ## Active task
 
-**Task 071 — Pre-deploy functional gap fix (DataverseLiveFactResolver + DeclineResponse extraction)** 🔄 in-progress
-- Rigor: FULL (bff-api, modifies .cs; pre-deploy correctness fix; 10-step task)
-- Started: 2026-05-29
-- Two functional gaps surfaced by pre-deploy audit:
-  - Gap 1: `StubLiveFactResolver` throws on every call → predict-matter-cost playbook aborts at first LiveFactNode
-  - Gap 2: `InsightsOrchestrator` returns hardcoded scaffold decline; never extracts real DeclineResponse from engine stream
-- Goal: close both before task 080 deploy so live runbook exercises real synthesis pipeline
-- Approach: (1) New `DataverseLiveFactResolver : ILiveFactResolver` reads sprk_matter via `IGenericEntityService`; (2) New `InsightsEngineRunResult { Artifact, Decline }` typed result; (3) Cache.DrainEngineStreamAsync extracts both event types; (4) Orchestrator surfaces real DeclineResponse; (5) DI swap (Stub → Dataverse); (6) Test coverage update
-- §3.5 boundary: Zone B (DataverseLiveFactResolver) + Zone A (cache + orchestrator decline extraction)
+None — task 071 ✅ (Wave 8.5 closed). Next: task 080 (Deploy Phase 1 to Spaarke Dev), then task 090 (project wrap-up + lessons-learned + Phase 1.5 outline). The live runbook in task 080 will now exercise real LiveFactNode (reading sprk_matter via DataverseLiveFactResolver) + real DeclineToFindNode propagation end-to-end, rather than scaffold fallbacks.
 
-### Rigor Level Audit
-- **Rigor Level**: FULL
-- **Reason**: Task tags include `bff-api`, modifies .cs production files, 10 steps, dependencies on 4 prior tasks (040, 042, 060, 061)
+---
 
-### Knowledge Files Loaded
-- src/server/api/Sprk.Bff.Api/Services/Insights/LiveFacts/ILiveFactResolver.cs
-- src/server/api/Sprk.Bff.Api/Services/Insights/LiveFacts/StubLiveFactResolver.cs
-- src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LiveFactNode.cs
-- src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/DeclineToFindNode.cs
-- src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EvidenceSufficiencyNode.cs
-- src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsPlaybookExecutionCache.cs
-- src/server/api/Sprk.Bff.Api/Services/Ai/Insights/IInsightsPlaybookExecutionCache.cs
-- src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs
-- src/server/api/Sprk.Bff.Api/Infrastructure/DI/InsightsModule.cs
-- src/server/api/Sprk.Bff.Api/Services/Insights/Precedents/DataversePrecedentBoard.cs (Zone B template)
-- src/server/api/Sprk.Bff.Api/Models/Insights/{InsightArtifact, DeclineResponse, EvidenceRef}.cs
-- src/server/api/Sprk.Bff.Api/Models/Ai/PublicContracts/InsightsAgentResult.cs
-- src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json
-- src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs
+## Last completed task
 
-### sprk_matter Schema Findings (Step 1)
-| Predicate | Field | Type | Notes |
-|---|---|---|---|
-| attorney | `sprk_assignedattorney1` | LOOKUP → contact | Primary attorney; #2 reserved for co-counsel |
-| client | `sprk_externalaccount` | LOOKUP → account | External client account |
-| matterType | `sprk_mattertype` | LOOKUP → sprk_mattertype_ref | Reference table |
-| opposingCounsel | `sprk_assignedlawfirm2` | LOOKUP → sprk_organization | LawFirm1 = our firm; LawFirm2 = opposing counsel (Phase 1 mapping; documented in notes/sprk-matter-livefact-predicates.md) |
-
-### Applicable ADRs
-- ADR-010 (DI minimalism) — DI swap only, no new module
-- ADR-013 (AI architecture) — Zone A decline extraction, Zone B fact resolution
-- ADR-019 (ProblemDetails) — error semantics preserved
-- D-47 (decline honesty) — real DeclineResponse propagation
-- D-48 / D-A23 (EvidenceGuard) — unchanged
-- SPEC §3.5.4 (Zone B grep clean)
-
-### Completed Steps
-(none yet)
-
-### Files Modified This Session
-(none yet)
-
-### Decisions Made
-- 2026-05-29: Step 1 — Use `sprk_assignedlawfirm2` as opposingCounsel mapping. `sprk_assignedlawfirm1` is "our firm" / first-assigned; `lawfirm2` is the additional/co-counsel/other-side firm. No explicit "opposing" flag exists in sprk_matter; this is the most defensible Phase 1 mapping. Documented in `notes/sprk-matter-livefact-predicates.md` so Phase 1.5 can revisit if domain ownership disagrees.
-- 2026-05-29: Step 2 — Use `IGenericEntityService` (per `DataversePrecedentBoard` Zone B template) rather than the raw `IDataverseService` — `IGenericEntityService` is the ISP-segregated read/write seam already used by the canonical Zone B Dataverse pattern. Scoped lifetime (consistent with PrecedentBoard registration).
-- 2026-05-29: Step 4-6 — Introduce `InsightsEngineRunResult` record, change `IInsightsPlaybookExecutionCache.GetOrExecuteAsync` signature from `Task<InsightArtifact?>` to `Task<InsightsEngineRunResult>`. This is a breaking change to the cache contract but a Zone A internal interface (no Zone B callers) so the blast radius is limited to InsightsOrchestrator + tests.
-
-### Next Action
-Step 1 (Schema investigation) — COMPLETE
-Step 2 — Author `DataverseLiveFactResolver` + `LiveFactNotSupportedException` extensions
+**Task 071 — Wave 8.5 Pre-deploy functional gap fix (DataverseLiveFactResolver + DeclineResponse extraction)** ✅ (2026-05-29, commit `64cd136c`)
+- Rigor: FULL (bff-api, modifies .cs production code; pre-deploy correctness fix; 10-step task with dependencies on 4 prior tasks 040, 042, 060, 061)
+- Closes two pre-deploy functional gaps surfaced by 2026-05-29 audit:
+  - **Gap 1**: `StubLiveFactResolver` threw `LiveFactNotSupportedException` on every call → predict-matter-cost playbook aborted at first LiveFactNode → every `/api/insights/ask` invocation failed
+  - **Gap 2**: `InsightsOrchestrator` returned hardcoded scaffold decline (`Reason="no-artifact-produced"`, `ConfidenceInDecline=0.0`) on insufficient evidence; `InsightsPlaybookExecutionCache.DrainEngineStreamAsync` only scanned for `ReturnInsightArtifactNode` events and never read `DeclineToFindNode.StructuredData` → all structured `MinimumEvidenceNeeded` gap analysis from `EvidenceSufficiencyNode` was lost
+- Files NEW (5):
+  - `src/server/api/Sprk.Bff.Api/Services/Insights/LiveFacts/DataverseLiveFactResolver.cs` (314 lines) — Zone B; reads sprk_matter via `IGenericEntityService`; supports 4 per-predicate shapes (attorney, client, matterType, opposingCounsel) + composite `currentMatterFacts` matching existing playbook config; `Confidence=1.0` per design.md §2.1; throws `LiveFactNotSupportedException` for unsupported predicates
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsEngineRunResult.cs` (75 lines) — discriminated result record `{Artifact?, Decline?}` with `FromArtifact`/`FromDecline`/`Empty` factory methods enforcing "exactly one of" invariant
+  - `tests/unit/Sprk.Bff.Api.Tests/Services/Insights/LiveFacts/DataverseLiveFactResolverTests.cs` (364 lines, 17 tests) — each of 4 predicates, composite shape, missing-lookup, malformed subject formats, matter-not-found, argument validation, constructor guards, parameterised subject parser
+  - `projects/ai-spaarke-insights-engine-r1/notes/sprk-matter-livefact-predicates.md` — sprk_matter schema findings + Phase 1 predicate-to-field mappings + open question on opposingCounsel mapping flagged for project owner sign-off before deploy
+  - `projects/ai-spaarke-insights-engine-r1/tasks/071-pre-deploy-functional-gap-fix.poml` — task definition
+- Files MODIFIED (10):
+  - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/InsightsModule.cs` — DI swap: `AddSingleton<ILiveFactResolver, StubLiveFactResolver>()` → `AddScoped<ILiveFactResolver, DataverseLiveFactResolver>()`. Scoped lifetime matches `DataversePrecedentBoard` (canonical Zone B Dataverse-read pattern). Stub retained as test-only fallback.
+  - `src/server/api/Sprk.Bff.Api/Services/Insights/LiveFacts/StubLiveFactResolver.cs` — updated XML doc + error message ("test-only stub; production uses DataverseLiveFactResolver"); no behavioral change
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/IInsightsPlaybookExecutionCache.cs` — signature change `Task<InsightArtifact?>` → `Task<InsightsEngineRunResult>` with comprehensive XML doc explaining cache semantics (artifact path: write-through with TTL; decline path: NEVER cached because evidence sufficiency is state-dependent; cache HIT always returns `{Artifact, Decline=null}`)
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsPlaybookExecutionCache.cs` — added `DeclineToFindNodeName` const; rewrote `DrainEngineStreamAsync` to extract BOTH event types; added `TryExtractDecline` + `LooksLikeDeclineResponse` helpers (structural fingerprint fallback so future playbooks can rename the decline node without breaking propagation); decline path explicitly NEVER caches
+  - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs` — surfaces real `DeclineResponse` via `InsightsAgentResult.Declined` when cache returns `HasDecline=true`; `CacheHit` always false on decline path; defensive scaffold preserved for "engine produced nothing" malformed-playbook case (logs Warning + `ConfidenceInDecline=0.0` sentinel)
+  - `tests/.../InsightsPlaybookExecutionCacheTests.cs` — adds 4 task-071 tests: `GetOrExecuteAsync_EngineEmitsDecline_ReturnsRealDeclineNotEmpty`, `GetOrExecuteAsync_DeclineExtracted_NotCached`, `GetOrExecuteAsync_FirstCallDecline_SecondCallArtifact_NoCacheHitForDecline`, `GetOrExecuteAsync_DeclineWithUnexpectedNodeName_StillExtractedByStructuralMatch`. Updates existing tests for new return type.
+  - `tests/.../InsightsOrchestratorTests.cs` — adds `AnswerQuestionAsync_RealDeclineFromEngine_PropagatesStructuredDecline` + `AnswerQuestionAsync_EngineProducesNothing_ReturnsScaffoldDeclineAsDefensiveFallback`. Updates existing tests for new return type.
+  - `tests/.../PredictMatterCostPlaybookTests.cs` — removes the task 060 scaffold note from `PredictMatterCost_InsufficientEvidence_ReturnsDeclineWithGapAnalysis`; now asserts real `MinimumEvidenceNeeded.need >= 7` (12 needed - 5 have) + real `Reason="insufficient-evidence"` + real `ConfidenceInDecline=0.95`. Updates existing tests for new return type.
+  - `projects/ai-spaarke-insights-engine-r1/tasks/TASK-INDEX.md` — adds Wave 8.5 row; task 080 dependency updated to `070, 071`
+  - `projects/ai-spaarke-insights-engine-r1/current-task.md` (this file)
+- sprk_matter Phase 1 predicate-to-field mappings (from `mcp__dataverse__describe_table("sprk_matter")`):
+  - `attorney` → `sprk_assignedattorney1` (LOOKUP → contact)
+  - `client` → `sprk_externalaccount` (LOOKUP → account)
+  - `matterType` → `sprk_mattertype` (LOOKUP → sprk_mattertype_ref); returns plain string per synthesis prompt expectation
+  - `opposingCounsel` → `sprk_assignedlawfirm2` (LOOKUP → sprk_organization); LawFirm1 = our firm convention. **Open question** flagged in notes for owner sign-off before deploy.
+- Build: 0 errors, 17 pre-existing warnings (same set as tasks 040-070); test project compiles cleanly on first try
+- Tests: **373/373 PASS** on the task 070 baseline filter (FullyQualifiedName~Insights | ~Phase1Smoke | ~PredictMatterCostEval | ~Precedent | ~Observation | ~Ingest | ~GroundingVerifier | ~LiveFact). Zero regressions. The 340 other test failures elsewhere in the test suite are pre-existing (PrivilegeLeakage, ConfidenceScoring, AgentConversationService, etc.) and unrelated to task 071.
+- §3.5.4 forbidden-imports grep on Zone B paths (`Services/Insights/`, `Models/Insights/`, `Api/Insights/`) with strict `^using` prefix regex: **ZERO matches**. The single match in `DataverseLiveFactResolver.cs:19` is an XML doc-comment explaining what the class does NOT import (not a `using` import; excluded by strict-prefix regex matching the CI workflow gate).
+- Quality gates:
+  - **adr-check** ✅ — 0 critical / 0 warning / 0 violation (14 compliant: 8 ADRs incl. ADR-001/007/008/009/010/013/019/021/028 + 6 project-specific rules: SPEC §3.5.4 + CLAUDE.md §10 BFF binding + D-24/D-27 no-new-credentials + D-47 decline honesty + D-48/D-A23 EvidenceGuard)
+  - **code-review** ✅ — 0 critical / 0 warning / 1 suggestion (declined with rationale: `System.Text.Json.JsonElement` fully-qualified form is intentional for ambiguity-avoidance)
+- Acceptance criteria (POML 9/9 PASS):
+  1. DataverseLiveFactResolver resolves all 4 predicates from sprk_matter ✅ (4 dedicated tests + composite shape test)
+  2. DI registration is DataverseLiveFactResolver in production ✅ (InsightsModule.cs:81)
+  3. Predict-matter-cost playbook exercises real LiveFactNode path ✅ (resolver returns FactArtifact for all 4 + composite; unsupported predicate test verifies the negative path)
+  4. DrainEngineStreamAsync returns InsightsEngineRunResult with both fields ✅ (`GetOrExecuteAsync_EngineEmitsDecline_ReturnsRealDeclineNotEmpty` test)
+  5. InsightsOrchestrator surfaces real DeclineResponse with non-empty MinimumEvidenceNeeded ✅ (`AnswerQuestionAsync_RealDeclineFromEngine_PropagatesStructuredDecline` test)
+  6. Declines NOT cached ✅ (`GetOrExecuteAsync_DeclineExtracted_NotCached` + `GetOrExecuteAsync_FirstCallDecline_SecondCallArtifact_NoCacheHitForDecline` tests)
+  7. PredictMatterCostPlaybookTests insufficient-evidence asserts real MinimumEvidenceNeeded ≥ 7 ✅ (scaffold note removed; gap.need assertion added)
+  8. §3.5.4 grep on Zone B clean ✅
+  9. All existing Insights tests pass (zero regressions) ✅ (373/373 baseline filter)
+- DI minimalism (ADR-010): DI swap only — no new module, no new interface; `ILiveFactResolver` continues to have exactly ONE production implementation. Stub justified under ADR-010 §Exceptions as test-only fallback.
+- **Confirms for task 080 deploy team**: the live runbook will now exercise real LiveFactNode (reading sprk_matter via `DataverseLiveFactResolver`) + real `DeclineToFindNode` propagation paths end-to-end, rather than scaffold fallbacks that masked runtime failures. The opposing counsel field mapping (sprk_assignedlawfirm2) needs project owner sign-off before deploy — see `notes/sprk-matter-livefact-predicates.md` open question.
+- Unblocks: task 080 (deploy + live-runbook execution); task 090 (project wrap-up).
 
 ---
 
