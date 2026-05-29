@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -108,6 +109,7 @@ public static class InsightEndpoints
         [FromBody] InsightAskRequest? request,
         HttpContext httpContext,
         IInsightsAi insightsAi,
+        IOptionsSnapshot<InsightsPlaybookNameMapOptions> nameMapOptions,
         ILogger<InsightAskRequest> logger,
         CancellationToken ct)
     {
@@ -129,14 +131,28 @@ public static class InsightEndpoints
             return BadRequest("'subject' is required and cannot be empty.");
         }
 
-        // Phase 1 contract: Question is the published Insights-mode playbook Guid id.
-        // Surface naming (e.g., "predict-matter-cost") is a Phase 1.5 catalog enhancement.
+        // Resolve Question → Guid. Two acceptable inputs (in priority order):
+        //   1. A raw Guid (advanced/direct path — original Phase 1 contract; still works).
+        //   2. A canonical playbook name (e.g., "predict-matter-cost@v1") registered in
+        //      the InsightsPlaybookNameMapOptions config map. Lets PCFs / code pages /
+        //      external clients use a stable name across Dev / Test / Prod without
+        //      hard-coding the env-specific Dataverse Guid.
+        // The Guid attempt comes first so existing Guid callers see no behavior change.
         if (!Guid.TryParse(request.Question, out var playbookId) || playbookId == Guid.Empty)
         {
-            return BadRequest(
-                "'question' must be a valid playbook Guid id. " +
-                "Phase 1 does not support question-name aliases; pass the published playbook id directly. " +
-                "(A question-name catalog is a Phase 1.5 enhancement.)");
+            playbookId = nameMapOptions.Value.ResolveOrDefault(request.Question);
+            if (playbookId == Guid.Empty)
+            {
+                var registered = nameMapOptions.Value.Map.Count == 0
+                    ? "<none — Insights:Playbooks:Map is empty in this environment's config>"
+                    : string.Join(", ", nameMapOptions.Value.Map.Keys);
+
+                return BadRequest(
+                    "'question' must be either a valid playbook Guid id OR a canonical name " +
+                    $"registered in '{InsightsPlaybookNameMapOptions.SectionName}:Map' configuration. " +
+                    $"Received: '{request.Question}'. " +
+                    $"Configured names in this environment: {registered}.");
+            }
         }
 
         // Phase 1 subject contract: matter:{id}. Other schemes are out of scope per task POML.

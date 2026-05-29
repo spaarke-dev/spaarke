@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Sprk.Bff.Api.Api.Insights;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Insights.Graph;
 using Sprk.Bff.Api.Services.Insights.LiveFacts;
@@ -105,6 +106,13 @@ public static class InsightsModule
         // sprk_analysisaction row stay safe (no malformed rows). See InsightsMirrorOptions XML doc.
         services.AddOptions<InsightsMirrorOptions>().BindConfiguration(InsightsMirrorOptions.SectionName);
         services.Replace(ServiceDescriptor.Singleton<IObservationMirror, DataverseObservationMirror>());
+
+        // Name → Guid resolution map for /api/insights/ask. Per-env config holds the
+        // env-specific Guids so callers can use stable canonical names like
+        // "predict-matter-cost@v1" without coupling to Dataverse Guid generation.
+        // See InsightsPlaybookNameMapOptions XML doc for config shape + rationale.
+        services.AddOptions<InsightsPlaybookNameMapOptions>()
+            .BindConfiguration(InsightsPlaybookNameMapOptions.SectionName);
 
         return services;
     }

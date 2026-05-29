@@ -289,9 +289,10 @@ public class InsightEndpointsTests : IClassFixture<InsightEndpointsTestFixture>
     }
 
     [Fact]
-    public async Task PostAsk_NonGuidQuestion_Returns400()
+    public async Task PostAsk_NonGuidQuestion_NotInNameMap_Returns400()
     {
-        // Arrange — Phase 1 contract: question must be a Guid id, not a friendly name
+        // Arrange — friendly name with empty map (default fixture has no map entries)
+        // → name resolution returns Guid.Empty → 400 with registered-names listing.
         var client = _fixture.CreateAuthenticatedTenantClient();
         var request = new { question = "predict-matter-cost", subject = SampleSubject };
 
@@ -300,7 +301,98 @@ public class InsightEndpointsTests : IClassFixture<InsightEndpointsTestFixture>
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "Phase 1 requires Guid question id; friendly names land in Phase 1.5");
+            "name not registered in Insights:Playbooks:Map AND not a Guid → 400");
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("Insights:Playbooks", "error must point operator to the config section that fixes this");
+        body.Should().Contain("predict-matter-cost", "error must echo the rejected name to aid debugging");
+    }
+
+    [Fact]
+    public async Task PostAsk_CanonicalNameInMap_ResolvesToGuid_ReturnsArtifact()
+    {
+        // Arrange — canonical playbook name resolves via config map to a real Guid.
+        // The Guid we configure must match what AnswerQuestionAsync sees so we can assert
+        // the resolution actually happened (not just that the path succeeded).
+        var configuredGuid = Guid.Parse("63b80630-975b-f111-a825-3833c5d9bcab");
+        InsightsAgentRequest? captured = null;
+
+        _fixture.InsightsAiMock.Reset();
+        _fixture.InsightsAiMock
+            .Setup(s => s.AnswerQuestionAsync(It.IsAny<InsightsAgentRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<InsightsAgentRequest, CancellationToken>((req, _) => captured = req)
+            .ReturnsAsync(InsightsAgentResult.Success(BuildInferenceArtifact(), cacheHit: false, processingTimeMs: 12));
+
+        var client = _fixture.CreateAuthenticatedTenantClientWithNameMap(new Dictionary<string, Guid>
+        {
+            ["predict-matter-cost@v1"] = configuredGuid
+        });
+        var request = new { question = "predict-matter-cost@v1", subject = SampleSubject };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/insights/ask", request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "canonical name resolved via config map");
+        captured.Should().NotBeNull();
+        captured!.Question.Should().Be(configuredGuid, "endpoint must pass the resolved Guid, not parse the name as a Guid");
+    }
+
+    [Fact]
+    public async Task PostAsk_CanonicalNameInMap_LookupIsCaseInsensitive()
+    {
+        // Arrange — mixed case input MUST resolve to the same Guid as the registered name.
+        var configuredGuid = Guid.Parse("63b80630-975b-f111-a825-3833c5d9bcab");
+        InsightsAgentRequest? captured = null;
+
+        _fixture.InsightsAiMock.Reset();
+        _fixture.InsightsAiMock
+            .Setup(s => s.AnswerQuestionAsync(It.IsAny<InsightsAgentRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<InsightsAgentRequest, CancellationToken>((req, _) => captured = req)
+            .ReturnsAsync(InsightsAgentResult.Success(BuildInferenceArtifact(), cacheHit: false, processingTimeMs: 7));
+
+        var client = _fixture.CreateAuthenticatedTenantClientWithNameMap(new Dictionary<string, Guid>
+        {
+            ["predict-matter-cost@v1"] = configuredGuid // lower-case registration
+        });
+        var request = new { question = "PREDICT-MATTER-COST@V1", subject = SampleSubject }; // upper-case lookup
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/insights/ask", request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "case-insensitive lookup must match");
+        captured.Should().NotBeNull();
+        captured!.Question.Should().Be(configuredGuid);
+    }
+
+    [Fact]
+    public async Task PostAsk_GuidQuestion_StillWorks_EvenWithMapConfigured()
+    {
+        // Arrange — backward compatibility: raw Guid path must continue working when a
+        // map is also configured. Guid attempt happens BEFORE map lookup.
+        InsightsAgentRequest? captured = null;
+
+        _fixture.InsightsAiMock.Reset();
+        _fixture.InsightsAiMock
+            .Setup(s => s.AnswerQuestionAsync(It.IsAny<InsightsAgentRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<InsightsAgentRequest, CancellationToken>((req, _) => captured = req)
+            .ReturnsAsync(InsightsAgentResult.Success(BuildInferenceArtifact(), cacheHit: false, processingTimeMs: 5));
+
+        var directGuid = Guid.NewGuid();
+        var client = _fixture.CreateAuthenticatedTenantClientWithNameMap(new Dictionary<string, Guid>
+        {
+            ["predict-matter-cost@v1"] = Guid.Parse("63b80630-975b-f111-a825-3833c5d9bcab")
+        });
+        var request = new { question = directGuid.ToString(), subject = SampleSubject };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/insights/ask", request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        captured.Should().NotBeNull();
+        captured!.Question.Should().Be(directGuid, "raw Guid must take precedence over map lookup");
     }
 
     [Fact]
@@ -577,6 +669,52 @@ public class InsightEndpointsTestFixture : WebApplicationFactory<Program>
     /// </summary>
     public HttpClient CreateUnauthenticatedTenantClient()
         => CreateClientWithTid(includeTid: true, includeAuth: false);
+
+    /// <summary>
+    /// Authenticated tenant client with an additional <c>Insights:Playbooks:Map</c>
+    /// configuration overlay, so tests can exercise the canonical-name → Guid
+    /// resolution path on /api/insights/ask. Map entries are injected as in-memory
+    /// configuration and bound by <see cref="Sprk.Bff.Api.Api.Insights.InsightsPlaybookNameMapOptions"/>.
+    /// </summary>
+    public HttpClient CreateAuthenticatedTenantClientWithNameMap(Dictionary<string, Guid> map)
+    {
+        var factory = this.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration(config =>
+            {
+                var dict = new Dictionary<string, string?>();
+                foreach (var kvp in map)
+                {
+                    // IConfiguration binder reads "Insights:Playbooks:Map:<name>" = "<guid>"
+                    dict[$"Insights:Playbooks:Map:{kvp.Key}"] = kvp.Value.ToString();
+                }
+                config.AddInMemoryCollection(dict);
+            });
+
+            builder.ConfigureTestServices(services =>
+            {
+                services.AddSingleton(new InsightsAskAuthOptions(true));
+
+                services.AddAuthentication(options =>
+                {
+                    options.DefaultAuthenticateScheme = InsightsAskTenantFakeAuthHandler.SchemeName;
+                    options.DefaultChallengeScheme = InsightsAskTenantFakeAuthHandler.SchemeName;
+                })
+                .AddScheme<AuthenticationSchemeOptions, InsightsAskTenantFakeAuthHandler>(
+                    InsightsAskTenantFakeAuthHandler.SchemeName, _ => { });
+
+                services.PostConfigure<Microsoft.AspNetCore.Authentication.AuthenticationOptions>(options =>
+                {
+                    options.DefaultAuthenticateScheme = InsightsAskTenantFakeAuthHandler.SchemeName;
+                    options.DefaultChallengeScheme = InsightsAskTenantFakeAuthHandler.SchemeName;
+                });
+            });
+        });
+
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", TestBearerToken);
+        return client;
+    }
 
     private HttpClient CreateClientWithTid(bool includeTid, bool includeAuth)
     {
