@@ -324,7 +324,16 @@ const useStyles = makeStyles({
   container: {
     flex: 1,
     overflowY: 'auto',
-    overflowX: 'auto',
+    // v1.1.65 — was `'auto'`. UAT consistently shows a phantom horizontal
+    // scrollbar even at column totals well under container width (688px
+    // columns in a ~1000px container). The visible content fits — the
+    // scrollbar comes from some sub-pixel rounding or hidden element
+    // bleeding past the right edge. Hiding the overflow entirely is the
+    // pragmatic fix: nothing meaningful needs to be visible past the
+    // visible row width (the menu is auto-anchored to the right edge by
+    // marginInlineStart: auto, and the sticky-right defense from v1.1.59
+    // still activates if a future viewport really does overflow).
+    overflowX: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   // v1.1.45 — row height bump.
