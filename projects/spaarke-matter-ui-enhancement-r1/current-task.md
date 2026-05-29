@@ -13,11 +13,11 @@
 
 | Field | Value |
 |---|---|
-| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.66** packaged, awaiting user UAT |
-| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `1049faf1` (v1.1.66); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.66 NOT yet merged |
-| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.66.zip` (207 KB) — user imports via `pac solution delete` then `pac solution import` |
-| **Pending user actions** | (1) UAT v1.1.66; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
-| **Next Action** | Awaiting user UAT feedback on v1.1.66. v1.1.66 addresses 3 UAT items: (1) Document column DEFAULT 240→320 (overflow:hidden from v1.1.65 means we can give it more breathing room); (2) header/body alignment fixed — wrapped DataGridHeaderCell content in TableCellLayout to match the body cells' padding (body was already wrapped); (3) per-column resize ceiling via new MAX_WIDTHS map clamped in both columnSizingOptions and handleColumnResize so user can't drag a column wide enough to push others off the viewport edge (which would clip them invisibly given overflow:hidden). Menu auto-margin + sticky-right + overflow-hidden all preserved. File size warning still deferred (BFF SearchResult lacks `fileSize`). |
+| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.67** packaged, awaiting user UAT |
+| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `b76156eb` (v1.1.67); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.67 NOT yet merged |
+| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.67.zip` (207 KB) — user imports via `pac solution delete` then `pac solution import` |
+| **Pending user actions** | (1) UAT v1.1.67; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
+| **Next Action** | Awaiting user UAT feedback on v1.1.67. v1.1.67 fixes the v1.1.66 regression where Document column rendered ~1300px wide despite MAX_WIDTHS cap of 600. Root cause: Fluent v9 DataGrid's `resizableColumns` plugin maintains its own internal state for resized widths separate from `idealWidth` prop. Persisted widths in localStorage `.v2` from earlier polish rounds were stretching Document beyond the cap. Fix: bump COLWIDTHS_KEY_PREFIX `.v2` → `.v3` to invalidate persisted widths (third such bump — pattern established in v1.1.59). Grid starts fresh with DEFAULT_WIDTHS (Document 320) which respect MAX_WIDTHS at render time. All v1.1.66 work preserved. |
 | **Compaction handoff** | See [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) — full session state for resuming in a fresh context |
 
 ### Files Modified This Session
