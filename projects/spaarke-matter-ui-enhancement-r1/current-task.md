@@ -13,11 +13,11 @@
 
 | Field | Value |
 |---|---|
-| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.65** packaged, awaiting user UAT |
-| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `d83a6683` (v1.1.65); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.65 NOT yet merged |
-| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.65.zip` (207 KB) — user imports via `pac solution delete` then `pac solution import` |
-| **Pending user actions** | (1) UAT v1.1.65; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
-| **Next Action** | Awaiting user UAT feedback on v1.1.65. v1.1.65 finally kills the phantom horizontal scrollbar in the ListView by switching `overflowX: 'auto'` → `'hidden'` on the container. UAT confirmed v1.1.64's column-width reduction wasn't the root cause — some sub-pixel rounding or hidden element bleeds past the right edge by a tiny amount. Clipping the overflow is the pragmatic fix; columns sum to 688px in ~1000px container so nothing meaningful is clipped, the menu cell is auto-margin-anchored to the row right edge (v1.1.63), and the sticky-right defense from v1.1.59 still works under `overflow: hidden`. v1.1.63 wizard size/preview-stay-open/bulk-selected-only changes preserved. File size warning still deferred (BFF SearchResult lacks `fileSize` field — separate follow-up). |
+| **State** | 31/34 tasks merged to master; UAT polish loop on SemanticSearchControl PCF — currently at **v1.1.66** packaged, awaiting user UAT |
+| **Branch** | `work/spaarke-matter-ui-enhancement-r1` at `1049faf1` (v1.1.66); v1.1.45..v1.1.49 merged to master; v1.1.50..v1.1.66 NOT yet merged |
+| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.66.zip` (207 KB) — user imports via `pac solution delete` then `pac solution import` |
+| **Pending user actions** | (1) UAT v1.1.66; (2) Phase 6 form XML; (3) Phase 7 task 074 UAT; (4) Phase 8 task 090 wrap |
+| **Next Action** | Awaiting user UAT feedback on v1.1.66. v1.1.66 addresses 3 UAT items: (1) Document column DEFAULT 240→320 (overflow:hidden from v1.1.65 means we can give it more breathing room); (2) header/body alignment fixed — wrapped DataGridHeaderCell content in TableCellLayout to match the body cells' padding (body was already wrapped); (3) per-column resize ceiling via new MAX_WIDTHS map clamped in both columnSizingOptions and handleColumnResize so user can't drag a column wide enough to push others off the viewport edge (which would clip them invisibly given overflow:hidden). Menu auto-margin + sticky-right + overflow-hidden all preserved. File size warning still deferred (BFF SearchResult lacks `fileSize`). |
 | **Compaction handoff** | See [`notes/handoffs/handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) — full session state for resuming in a fresh context |
 
 ### Files Modified This Session
