@@ -70,6 +70,13 @@ public static class ObservationMirrorMapper
     public const string DispositionField = "sprk_disposition";
 
     /// <summary>
+    /// Field name carrying the Observation confidence as a dedicated decimal column (Path 2
+    /// schema addition, 2026-05-29). Enables numeric sort/filter in the review view without
+    /// parsing <c>sprk_name</c>. Populated on every mirror write.
+    /// </summary>
+    public const string ConfidenceField = "sprk_confidence";
+
+    /// <summary>
     /// <c>sprk_disposition</c> picklist value for "Pending Review" — set on mirror write
     /// when the per-Observation sampling draw fires (task 052). Reviewers see only rows
     /// with this disposition in the "Insights Observations — Review Queue" view.
@@ -157,6 +164,9 @@ public static class ObservationMirrorMapper
 
             // Primary verbatim quote (Layer 2 outcome extraction signature)
             ["sprk_workingdocument"] = ExtractPrimaryQuote(observation) ?? string.Empty,
+
+            // Dedicated confidence column for view sort/filter (Path 2 — see field XML doc)
+            [ConfidenceField] = (decimal)observation.Confidence,
         };
 
         // QA disposition (task 052) — set only when sampling draw fires; null disposition

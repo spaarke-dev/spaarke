@@ -372,4 +372,34 @@ public class ObservationMirrorMapperTests
         ObservationMirrorMapper.DispositionPendingReview.Should().Be(100000000);
         ObservationMirrorMapper.DispositionField.Should().Be("sprk_disposition");
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BuildEntity — sprk_confidence (Path 2 schema addition, 2026-05-29)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildEntity_SetsConfidenceField_AsDecimal()
+    {
+        var entity = ObservationMirrorMapper.BuildEntity(MakeObservation(confidence: 0.92), ActionId, DocumentId);
+        entity.Contains(ObservationMirrorMapper.ConfidenceField).Should().BeTrue();
+        entity[ObservationMirrorMapper.ConfidenceField].Should().BeOfType<decimal>();
+        ((decimal)entity[ObservationMirrorMapper.ConfidenceField]).Should().Be(0.92m);
+    }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(0.5)]
+    [InlineData(1.0)]
+    public void BuildEntity_ConfidenceField_RoundTripsRange(double confidence)
+    {
+        var entity = ObservationMirrorMapper.BuildEntity(MakeObservation(confidence: confidence), ActionId, DocumentId);
+        ((decimal)entity[ObservationMirrorMapper.ConfidenceField]).Should().Be((decimal)confidence);
+    }
+
+    [Fact]
+    public void ConfidenceField_StableLogicalName()
+    {
+        // Pin the logical name — read by the Dataverse review-queue view as a sortable column.
+        ObservationMirrorMapper.ConfidenceField.Should().Be("sprk_confidence");
+    }
 }
