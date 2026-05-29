@@ -31,17 +31,26 @@ const PIN_KEY_PREFIX = 'spaarke.docs.pinned';
 /**
  * localStorage key prefix for column widths.
  *
- * v1.1.45 introduced `spaarke.docs.colwidths.{userId}.{matterId}`. v1.1.59
- * bumps to `.v2` because the DEFAULT_WIDTHS were reduced to fit a
- * 1920x1080 viewport without horizontal scroll — persisted widths from
- * the wider v1.1.45–v1.1.58 defaults would otherwise re-introduce the
- * scrollbar after import.
+ * History:
+ * - v1.1.45 introduced `spaarke.docs.colwidths.{userId}.{matterId}`.
+ * - v1.1.59 bumped to `.v2` to invalidate widths from the wider
+ *   v1.1.45–v1.1.58 defaults.
+ * - v1.1.67 bumps to `.v3` because v1.1.66 added MAX_WIDTHS caps in
+ *   ListView (e.g. Document max 600px) BUT Fluent v9 DataGrid's
+ *   `resizableColumns` plugin maintains its own internal state for
+ *   resized widths separate from the `idealWidth` prop. Persisted
+ *   widths in `.v2` larger than the new caps were ignoring the
+ *   render-time clamp in `columnSizingOptions` and stretching the
+ *   Document column off the visible right edge of the grid (the
+ *   sibling columns got clipped by v1.1.65's `overflow: hidden`).
+ *   Bumping to `.v3` invalidates the over-large persisted widths;
+ *   the grid starts fresh with DEFAULT_WIDTHS which obey MAX_WIDTHS.
  *
- * The v1 keys remain in users' localStorage as orphans; no migration
- * needed because they're scoped per matter and silently ignored under
- * the new prefix.
+ * Old-version keys remain in users' localStorage as orphans; no
+ * migration needed because they're scoped per matter and silently
+ * ignored under the new prefix.
  */
-const COLWIDTHS_KEY_PREFIX = 'spaarke.docs.colwidths.v2';
+const COLWIDTHS_KEY_PREFIX = 'spaarke.docs.colwidths.v3';
 
 /** Default view per spec FR-DOC-04 */
 const DEFAULT_VIEW: DocumentListView = 'list';
