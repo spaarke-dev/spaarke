@@ -104,6 +104,48 @@ public class InsightsPlaybookExecutionCacheTests
         yield return PlaybookStreamEvent.RunCompleted(runId, playbookId, new PlaybookRunMetrics());
     }
 
+    /// <summary>
+    /// Synthetic engine stream that emits a DeclineToFindNode NodeCompleted event carrying
+    /// the supplied <see cref="DeclineResponse"/> (insufficient-evidence path). Task 071.
+    /// </summary>
+    private static async IAsyncEnumerable<PlaybookStreamEvent> EngineStreamWithDecline(
+        DeclineResponse decline,
+        string nodeName = InsightsPlaybookExecutionCache.DeclineToFindNodeName,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var runId = Guid.NewGuid();
+        var playbookId = Guid.NewGuid();
+        var nodeId = Guid.NewGuid();
+
+        yield return PlaybookStreamEvent.RunStarted(runId, playbookId, 1);
+        await Task.Yield();
+
+        yield return PlaybookStreamEvent.NodeCompleted(
+            runId,
+            playbookId,
+            nodeId,
+            nodeName,
+            NodeOutput.Ok(
+                nodeId,
+                outputVariable: "decline",
+                data: decline,
+                textContent: decline.Explanation));
+
+        yield return PlaybookStreamEvent.RunCompleted(runId, playbookId, new PlaybookRunMetrics());
+    }
+
+    private static DeclineResponse MakeDecline(int cohortCount = 5) => new()
+    {
+        Reason = "insufficient-evidence",
+        Explanation = $"Cannot predict cost: only {cohortCount} comparable matters were found (need 12).",
+        MinimumEvidenceNeeded = new Dictionary<string, object>
+        {
+            ["comparableMatters"] = new { have = cohortCount, need = 12 - cohortCount, from = "retrieveCohortObservations", reason = "below-threshold" }
+        },
+        SuggestedActions = new[] { "Broaden the matter-type filter", "Author a Precedent" },
+        ConfidenceInDecline = 0.95
+    };
+
     private static byte[] SerializeArtifact(InsightArtifact a) => JsonSerializer.SerializeToUtf8Bytes(a);
 
     // ─── Tests ───────────────────────────────────────────────────────────────
@@ -135,7 +177,9 @@ public class InsightsPlaybookExecutionCacheTests
 
         // Assert
         result.Should().NotBeNull();
-        result!.Subject.Should().Be(Subject);
+        result.HasArtifact.Should().BeTrue("cache HIT returns cached artifact");
+        result.Artifact!.Subject.Should().Be(Subject);
+        result.Decline.Should().BeNull("cache only stores artifacts, not declines (task 071)");
         engineInvoked.Should().Be(0, "cache hit must not invoke the engine");
         _cacheMock.Verify(
             c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()),
@@ -169,7 +213,8 @@ public class InsightsPlaybookExecutionCacheTests
 
         // Assert
         result.Should().NotBeNull();
-        result!.Predicate.Should().Be("predictedCost");
+        result.HasArtifact.Should().BeTrue();
+        result.Artifact!.Predicate.Should().Be("predictedCost");
         engineInvoked.Should().Be(1, "cache miss must invoke the engine exactly once");
         _cacheMock.Verify(
             c => c.SetAsync(
@@ -253,7 +298,8 @@ public class InsightsPlaybookExecutionCacheTests
         // Assert
         bobEngineInvoked.Should().Be(1, "Bob's scope hash differs from Alice's; engine must run for Bob");
         bobResult.Should().NotBeNull();
-        ((InferenceArtifact)bobResult!).Predicate.Should().Be("predictedCostForBob",
+        bobResult.HasArtifact.Should().BeTrue();
+        ((InferenceArtifact)bobResult.Artifact!).Predicate.Should().Be("predictedCostForBob",
             "Bob must see HIS engine output, not Alice's cached one");
     }
 
@@ -293,15 +339,17 @@ public class InsightsPlaybookExecutionCacheTests
         var bResult = await sut.GetOrExecuteAsync(bRequest, BEngine);
 
         engineInvoked.Should().Be(1, "playbook B must not see playbook A's cached entry");
-        ((InferenceArtifact)bResult!).Predicate.Should().Be("differentPrediction");
+        bResult.HasArtifact.Should().BeTrue();
+        ((InferenceArtifact)bResult.Artifact!).Predicate.Should().Be("differentPrediction");
     }
 
     [Fact]
-    public async Task GetOrExecuteAsync_EngineProducesNoArtifact_ReturnsNullAndDoesNotCache()
+    public async Task GetOrExecuteAsync_EngineProducesNoArtifactAndNoDecline_ReturnsEmptyAndDoesNotCache()
     {
-        // E.g., the decline path: ReturnInsightArtifactNode was skipped because the
-        // playbook short-circuited to DeclineToFindNode. We MUST NOT cache "no result"
-        // because the next call might succeed.
+        // Defensive case: the engine completed but emitted neither ReturnInsightArtifactNode
+        // nor DeclineToFindNode (malformed playbook or branch-routing bug). We MUST NOT cache
+        // because the next call might produce one. The orchestrator surfaces this as a scaffold
+        // decline + logs Warning so the facade contract holds for Zone B.
         _cacheMock
             .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((byte[]?)null);
@@ -312,11 +360,14 @@ public class InsightsPlaybookExecutionCacheTests
 
         var result = await sut.GetOrExecuteAsync(request, EngineStreamWithoutArtifact);
 
-        result.Should().BeNull();
+        result.Should().NotBeNull();
+        result.IsEmpty.Should().BeTrue("engine produced no artifact and no decline");
+        result.Artifact.Should().BeNull();
+        result.Decline.Should().BeNull();
         _cacheMock.Verify(
             c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()),
             Times.Never,
-            "must not cache nulls — next call might produce an artifact");
+            "must not cache empty results — next call might produce an artifact or decline");
     }
 
     [Fact]
@@ -336,7 +387,8 @@ public class InsightsPlaybookExecutionCacheTests
         var result = await sut.GetOrExecuteAsync(request, ct => EngineStreamWith(artifact, ct));
 
         result.Should().NotBeNull();
-        result!.Subject.Should().Be(Subject);
+        result.HasArtifact.Should().BeTrue();
+        result.Artifact!.Subject.Should().Be(Subject);
     }
 
     [Fact]
@@ -363,7 +415,8 @@ public class InsightsPlaybookExecutionCacheTests
         var result = await sut.GetOrExecuteAsync(request, ct => EngineStreamWith(artifact, ct));
 
         result.Should().NotBeNull();
-        result!.Subject.Should().Be(Subject);
+        result.HasArtifact.Should().BeTrue();
+        result.Artifact!.Subject.Should().Be(Subject);
     }
 
     [Fact]
@@ -414,5 +467,134 @@ public class InsightsPlaybookExecutionCacheTests
 
         var act = async () => await sut.EvictAsync(PlaybookA, Subject, null, ScopeHashAlice, TenantId);
         await act.Should().NotThrowAsync("eviction is best-effort; TTL is the safety net");
+    }
+
+    // ─── Task 071 (Wave 8.5): Decline extraction from engine stream ──────────
+
+    [Fact]
+    public async Task GetOrExecuteAsync_EngineEmitsDecline_ReturnsRealDeclineNotEmpty()
+    {
+        // Task 071 Gap 2 closure: DrainEngineStreamAsync now scans for DeclineToFindNode
+        // events (not just ReturnInsightArtifactNode). When the playbook takes the
+        // insufficient-evidence branch, the cache surfaces the real DeclineResponse with
+        // populated MinimumEvidenceNeeded — no more null/scaffold fallback.
+        _cacheMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+
+        var decline = MakeDecline(cohortCount: 5);
+        var sut = CreateSut();
+        var request = new InsightsPlaybookExecutionRequest(
+            PlaybookA, Subject, null, ScopeHashAlice, TenantId);
+
+        var result = await sut.GetOrExecuteAsync(
+            request,
+            ct => EngineStreamWithDecline(decline, ct: ct));
+
+        result.Should().NotBeNull();
+        result.HasDecline.Should().BeTrue("engine emitted DeclineToFindNode output");
+        result.HasArtifact.Should().BeFalse("decline path; no artifact");
+        result.Decline!.Reason.Should().Be("insufficient-evidence");
+        result.Decline.MinimumEvidenceNeeded.Should().ContainKey("comparableMatters",
+            "real gap analysis from EvidenceSufficiencyNode upstream propagates through");
+        result.Decline.ConfidenceInDecline.Should().Be(0.95);
+    }
+
+    [Fact]
+    public async Task GetOrExecuteAsync_DeclineExtracted_NotCached()
+    {
+        // Task 071 cache-correctness contract: declines MUST NOT be cached because evidence
+        // sufficiency depends on the current state of the index — a cached decline becomes
+        // stale the moment a new Observation lands. This test proves the cache does NOT
+        // write-through on the decline path.
+        _cacheMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+
+        var sut = CreateSut();
+        var request = new InsightsPlaybookExecutionRequest(
+            PlaybookA, Subject, null, ScopeHashAlice, TenantId);
+
+        await sut.GetOrExecuteAsync(
+            request,
+            ct => EngineStreamWithDecline(MakeDecline(), ct: ct));
+
+        _cacheMock.Verify(
+            c => c.SetAsync(
+                It.IsAny<string>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<DistributedCacheEntryOptions>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never,
+            "declines are state-dependent; caching them would surface stale decline verdicts after new evidence lands");
+    }
+
+    [Fact]
+    public async Task GetOrExecuteAsync_FirstCallDecline_SecondCallArtifact_NoCacheHitForDecline()
+    {
+        // Task 071 invariant test: a first invocation that returns Decline does NOT cause
+        // the second invocation to see a cache HIT. The second invocation re-runs the engine
+        // (so if the index has changed, the new sufficient-evidence verdict surfaces).
+        _cacheMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+
+        var artifactForSecondCall = MakeInferenceArtifact();
+        var sut = CreateSut();
+        var request = new InsightsPlaybookExecutionRequest(
+            PlaybookA, Subject, null, ScopeHashAlice, TenantId);
+
+        var firstCallEngineInvoked = 0;
+        var secondCallEngineInvoked = 0;
+
+        // First call: insufficient-evidence path
+        var firstResult = await sut.GetOrExecuteAsync(
+            request,
+            ct =>
+            {
+                firstCallEngineInvoked++;
+                return EngineStreamWithDecline(MakeDecline(), ct: ct);
+            });
+
+        // Second call: sufficient-evidence path (the index has been updated between calls)
+        var secondResult = await sut.GetOrExecuteAsync(
+            request,
+            ct =>
+            {
+                secondCallEngineInvoked++;
+                return EngineStreamWith(artifactForSecondCall, ct);
+            });
+
+        firstResult.HasDecline.Should().BeTrue("first call's evidence was insufficient");
+        secondResult.HasArtifact.Should().BeTrue(
+            "second call's engine re-runs (decline was not cached) and now finds sufficient evidence");
+
+        firstCallEngineInvoked.Should().Be(1, "first call invokes the engine");
+        secondCallEngineInvoked.Should().Be(1,
+            "second call MUST re-invoke the engine because the first call's decline was not cached");
+    }
+
+    [Fact]
+    public async Task GetOrExecuteAsync_DeclineWithUnexpectedNodeName_StillExtractedByStructuralMatch()
+    {
+        // Robustness test: the drain matches by exact name (DeclineToFindNodeName) OR by
+        // structural fingerprint (all 5 DeclineResponse required fields present). This guards
+        // against future playbooks renaming the decline node without losing decline propagation.
+        _cacheMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+
+        var decline = MakeDecline();
+        var sut = CreateSut();
+        var request = new InsightsPlaybookExecutionRequest(
+            PlaybookA, Subject, null, ScopeHashAlice, TenantId);
+
+        // Use a non-conventional node name; the structural fingerprint must still match.
+        var result = await sut.GetOrExecuteAsync(
+            request,
+            ct => EngineStreamWithDecline(decline, nodeName: "customDeclineNodeName", ct: ct));
+
+        result.HasDecline.Should().BeTrue(
+            "structural fingerprint (5 required DeclineResponse fields) matches even though node name differs");
     }
 }

@@ -159,7 +159,7 @@ public class InsightsOrchestratorTests
                 It.IsAny<InsightsPlaybookExecutionRequest>(),
                 It.IsAny<Func<CancellationToken, IAsyncEnumerable<PlaybookStreamEvent>>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(artifact); // factory never invoked
+            .ReturnsAsync(InsightsEngineRunResult.FromArtifact(artifact)); // factory never invoked
 
         var sut = CreateSut();
         var req = MakeAgentRequest();
@@ -193,7 +193,7 @@ public class InsightsOrchestratorTests
                 {
                     // Drain the factory's stream to simulate the cache's MISS path.
                     await foreach (var _ in factory(ct).WithCancellation(ct)) { }
-                    return artifact;
+                    return InsightsEngineRunResult.FromArtifact(artifact);
                 });
 
         _engineMock.Setup(e => e.ExecuteBatchAsync(
@@ -220,14 +220,58 @@ public class InsightsOrchestratorTests
     }
 
     [Fact]
-    public async Task AnswerQuestionAsync_NoArtifactProduced_ReturnsScaffoldDecline()
+    public async Task AnswerQuestionAsync_RealDeclineFromEngine_PropagatesStructuredDecline()
     {
-        // Arrange: cache returns null (engine completed without ReturnInsightArtifactNode output)
+        // Task 071 Gap 2 closure: when the cache returns a real DeclineResponse from
+        // DeclineToFindNode, the orchestrator surfaces it via InsightsAgentResult.Declined
+        // with structured MinimumEvidenceNeeded — NOT the scaffold "no-artifact-produced".
+        var realDecline = new DeclineResponse
+        {
+            Reason = "insufficient-evidence",
+            Explanation = "Only 5 comparable matters were found; need 12 per rule 'comparableMatters.min'.",
+            MinimumEvidenceNeeded = new Dictionary<string, object>
+            {
+                ["comparableMatters"] = new { have = 5, need = 7, from = "retrieveCohortObservations" }
+            },
+            SuggestedActions = new[] { "Broaden the matter-type filter", "Author a Precedent" },
+            ConfidenceInDecline = 0.95
+        };
+
         _cacheMock.Setup(c => c.GetOrExecuteAsync(
                 It.IsAny<InsightsPlaybookExecutionRequest>(),
                 It.IsAny<Func<CancellationToken, IAsyncEnumerable<PlaybookStreamEvent>>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((InsightArtifact?)null);
+            .ReturnsAsync(InsightsEngineRunResult.FromDecline(realDecline));
+
+        var sut = CreateSut();
+        var req = MakeAgentRequest();
+
+        // Act
+        var result = await sut.AnswerQuestionAsync(req);
+
+        // Assert — real decline propagation (no scaffold)
+        result.Artifact.Should().BeNull();
+        result.Decline.Should().NotBeNull();
+        result.Decline!.Reason.Should().Be("insufficient-evidence", "real reason from playbook, not 'no-artifact-produced' scaffold");
+        result.Decline.MinimumEvidenceNeeded.Should().ContainKey("comparableMatters",
+            "structured gap analysis from EvidenceSufficiencyNode propagates through");
+        result.Decline.ConfidenceInDecline.Should().Be(0.95,
+            "real confidence from DeclineToFindNode, not scaffold sentinel 0.0");
+        result.CacheHit.Should().BeFalse("declines are never cached; CacheHit is always false on decline path (task 071)");
+    }
+
+    [Fact]
+    public async Task AnswerQuestionAsync_EngineProducesNothing_ReturnsScaffoldDeclineAsDefensiveFallback()
+    {
+        // Defensive path: malformed playbook produced neither artifact nor decline. The
+        // orchestrator logs Warning and emits the scaffold so Zone B sees a valid result
+        // honoring the "exactly one of artifact/decline" facade contract. ConfidenceInDecline=0.0
+        // is a sentinel signaling "this is not a real decline verdict" to observability tooling.
+        _cacheMock.Setup(c => c.GetOrExecuteAsync(
+                It.IsAny<InsightsPlaybookExecutionRequest>(),
+                It.IsAny<Func<CancellationToken, IAsyncEnumerable<PlaybookStreamEvent>>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(InsightsEngineRunResult.Empty);
 
         var sut = CreateSut();
         var req = MakeAgentRequest();
@@ -241,7 +285,7 @@ public class InsightsOrchestratorTests
         result.Decline!.Reason.Should().Be("no-artifact-produced");
         result.Decline.MinimumEvidenceNeeded.Should().BeEmpty();
         result.Decline.SuggestedActions.Should().BeEmpty();
-        result.Decline.ConfidenceInDecline.Should().Be(0.0);
+        result.Decline.ConfidenceInDecline.Should().Be(0.0, "scaffold sentinel: 'not a real decline verdict'");
     }
 
     [Fact]
@@ -254,7 +298,7 @@ public class InsightsOrchestratorTests
                 It.IsAny<Func<CancellationToken, IAsyncEnumerable<PlaybookStreamEvent>>>(),
                 It.IsAny<CancellationToken>()))
             .Returns<InsightsPlaybookExecutionRequest, Func<CancellationToken, IAsyncEnumerable<PlaybookStreamEvent>>, CancellationToken>(
-                (req, factory, ct) => Task.FromCanceled<InsightArtifact?>(ct));
+                (req, factory, ct) => Task.FromCanceled<InsightsEngineRunResult>(ct));
 
         var sut = CreateSut();
         cts.Cancel();
@@ -273,7 +317,7 @@ public class InsightsOrchestratorTests
                 It.IsAny<CancellationToken>()))
             .Callback<InsightsPlaybookExecutionRequest, Func<CancellationToken, IAsyncEnumerable<PlaybookStreamEvent>>, CancellationToken>(
                 (req, _, _) => captured = req)
-            .ReturnsAsync(MakeArtifact());
+            .ReturnsAsync(InsightsEngineRunResult.FromArtifact(MakeArtifact()));
 
         var parameters = new Dictionary<string, string> { ["k1"] = "v1", ["k2"] = "v2" };
         var sut = CreateSut();

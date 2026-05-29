@@ -65,12 +65,21 @@ public static class InsightsModule
         // Azure.Search.Documents.Indexes.SearchIndexClient already registered in Program.cs.
         services.AddScoped<IPrecedentProjectionSync, PrecedentProjectionSync>();
 
-        // ILiveFactResolver — D-P12 task 022 swap-path-preservation seam. Phase 1: StubLiveFactResolver
-        // throws LiveFactNotSupportedException with a "Phase 1" message. Replace this registration
-        // when DataverseLiveFactResolver lands with D-P7 task 040 (universal ingest playbook).
-        // Singleton: the future Dataverse impl is stateless (consumes IDataverseService per call);
-        // the stub is also stateless.
-        services.AddSingleton<ILiveFactResolver, StubLiveFactResolver>();
+        // ILiveFactResolver — D-P12 task 022 swap-path-preservation seam.
+        // Task 071 (Wave 8.5 pre-deploy gap fix, 2026-05-29): swapped from StubLiveFactResolver
+        // to DataverseLiveFactResolver. The stub threw LiveFactNotSupportedException on every
+        // call, which broke the predict-matter-cost playbook (D-P14 task 060) — the playbook's
+        // first node is a LiveFactNode that reads matter facts from sprk_matter. Stub stays in
+        // place at Services/Insights/LiveFacts/StubLiveFactResolver.cs as a test-only fallback
+        // (tests inject their own ILiveFactResolver; the stub is not consumed in production).
+        //
+        // Scoped lifetime: matches DataversePrecedentBoard (Zone B Dataverse-read pattern) and
+        // matches IGenericEntityService which is typically resolved per-request. The previous
+        // Singleton lifetime worked only because the stub was stateless and never invoked.
+        //
+        // Zone B per SPEC §3.5 — DataverseLiveFactResolver imports IGenericEntityService only;
+        // ZERO AI-internal imports. Verified by .github/workflows/insights-eval.yml grep gate.
+        services.AddScoped<ILiveFactResolver, DataverseLiveFactResolver>();
 
         // IObservationMirror — D-P11 task 051. SWAP OUT the NoOp registered by
         // InsightsIngestModule (Zone A) with the real DataverseObservationMirror impl

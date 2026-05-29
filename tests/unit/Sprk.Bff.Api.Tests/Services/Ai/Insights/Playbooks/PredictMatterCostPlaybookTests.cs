@@ -290,7 +290,7 @@ public class PredictMatterCostPlaybookTests
                 {
                     // Drain the factory's stream to simulate cache-miss path (engine is invoked).
                     await foreach (var _ in factory(ct).WithCancellation(ct)) { }
-                    return artifact;
+                    return InsightsEngineRunResult.FromArtifact(artifact);
                 });
 
         _engineMock
@@ -329,9 +329,34 @@ public class PredictMatterCostPlaybookTests
     [Fact]
     public async Task PredictMatterCost_InsufficientEvidence_ReturnsDeclineWithGapAnalysis()
     {
-        // Arrange: cache returns null (engine emitted DeclineToFind, not ReturnInsightArtifactNode).
-        // The orchestrator's null-artifact handling produces a structured DeclineResponse.
+        // Arrange: engine emits a DeclineToFindNode event carrying a real DeclineResponse with
+        // structured MinimumEvidenceNeeded gap analysis. Task 071 (Wave 8.5) closes the gap
+        // where the cache returned null and the orchestrator surfaced a scaffold
+        // "no-artifact-produced" decline. Now the cache extracts the DeclineResponse from
+        // the stream and the orchestrator propagates the REAL gap analysis to Zone B.
         const int cohortCount = 5;
+
+        var realDecline = new DeclineResponse
+        {
+            Reason = "insufficient-evidence",
+            Explanation = $"Cannot predict cost: only {cohortCount} comparable matters were found (need 12).",
+            MinimumEvidenceNeeded = new Dictionary<string, object>
+            {
+                ["comparableMatters"] = new
+                {
+                    have = cohortCount,
+                    need = 12 - cohortCount,
+                    from = "retrieveCohortObservations",
+                    reason = "below-threshold"
+                }
+            },
+            SuggestedActions = new[]
+            {
+                "Broaden the matter-type filter (e.g., 'IP' instead of 'IP licensing')",
+                "Author a Spaarke Precedent for this matter pattern"
+            },
+            ConfidenceInDecline = 0.95
+        };
 
         _cacheMock
             .Setup(c => c.GetOrExecuteAsync(
@@ -341,8 +366,10 @@ public class PredictMatterCostPlaybookTests
             .Returns<InsightsPlaybookExecutionRequest, Func<CancellationToken, IAsyncEnumerable<PlaybookStreamEvent>>, CancellationToken>(
                 async (req, factory, ct) =>
                 {
+                    // Drain the factory's stream (engine invoked); return the REAL decline
+                    // the post-task-071 cache extracts from the DeclineToFindNode event.
                     await foreach (var _ in factory(ct).WithCancellation(ct)) { }
-                    return null; // No ReturnInsightArtifactNode in the stream
+                    return InsightsEngineRunResult.FromDecline(realDecline);
                 });
 
         _engineMock
@@ -355,22 +382,30 @@ public class PredictMatterCostPlaybookTests
         // Act
         var result = await sut.AnswerQuestionAsync(req);
 
-        // Assert — Decline returned, never Artifact
+        // Assert — REAL Decline returned with structured gap analysis (post-task-071 contract)
         result.Should().NotBeNull();
         result.Artifact.Should().BeNull("evidence was insufficient");
         result.Decline.Should().NotBeNull();
+        result.Decline!.Reason.Should().Be("insufficient-evidence",
+            "real reason from DeclineToFindNode, not scaffold 'no-artifact-produced'");
+        result.Decline.Explanation.Should().Contain(cohortCount.ToString(),
+            "explanation carries the actual cohort count from the gap analysis");
 
-        // Acceptance criterion 3: structured gap analysis present
-        // (The Phase 1 scaffold's InsightsOrchestrator emits a generic "no-artifact-produced" decline
-        // because structured stream-level decline propagation is deferred. The acceptance bar verified
-        // here is that a Decline is returned (not a fabricated Inference) and the contract honors the
-        // "exactly one of" invariant. Full structured MinimumEvidenceNeeded propagation from DeclineToFindNode
-        // through the engine stream to Zone B is task 061's responsibility; task 060 verifies the playbook
-        // routes correctly to the decline branch.)
-        result.Decline!.Reason.Should().NotBeNullOrWhiteSpace();
-        result.Decline.Explanation.Should().NotBeNullOrWhiteSpace();
-        result.Decline.MinimumEvidenceNeeded.Should().NotBeNull();
-        result.Decline.SuggestedActions.Should().NotBeNull();
+        // Acceptance criterion 3 (UPDATED for task 071): assert REAL MinimumEvidenceNeeded ≥ 7
+        // (12 needed - 5 have). This was the task 060 scaffold note that task 071 closes.
+        result.Decline.MinimumEvidenceNeeded.Should().ContainKey("comparableMatters",
+            "structured gap analysis from EvidenceSufficiencyNode propagates through DeclineToFindNode");
+
+        var gap = result.Decline.MinimumEvidenceNeeded["comparableMatters"];
+        // The gap is an anonymous-typed object whose 'need' property is (12 - 5) = 7.
+        // Reflection round-trip via JsonElement is the cleanest assertion shape.
+        var gapJson = System.Text.Json.JsonSerializer.SerializeToElement(gap);
+        gapJson.GetProperty("need").GetInt32().Should().BeGreaterThanOrEqualTo(7,
+            "Phase 1 scaffold note removed by task 071: real MinimumEvidenceNeeded.need ≥ 7 (12 needed - 5 have)");
+
+        result.Decline.ConfidenceInDecline.Should().Be(0.95,
+            "real confidence from DeclineToFindNode (not scaffold sentinel 0.0)");
+        result.CacheHit.Should().BeFalse("declines are never cached (task 071)");
     }
 
     // ─── Acceptance criterion 4: GroundingVerifyNode strips fabricated citation ──
@@ -398,7 +433,7 @@ public class PredictMatterCostPlaybookTests
                 async (req, factory, ct) =>
                 {
                     await foreach (var _ in factory(ct).WithCancellation(ct)) { }
-                    return verifiedArtifact;
+                    return InsightsEngineRunResult.FromArtifact(verifiedArtifact);
                 });
 
         _engineMock
@@ -441,7 +476,7 @@ public class PredictMatterCostPlaybookTests
                 async (req, factory, ct) =>
                 {
                     await foreach (var _ in factory(ct).WithCancellation(ct)) { }
-                    return artifactWithPrecedent;
+                    return InsightsEngineRunResult.FromArtifact(artifactWithPrecedent);
                 });
 
         _engineMock
@@ -492,7 +527,7 @@ public class PredictMatterCostPlaybookTests
                         await foreach (var _ in factory(ct).WithCancellation(ct)) { }
                     }
                     // Second call: cache hit — factory is NOT invoked (just return the cached artifact)
-                    return artifact;
+                    return InsightsEngineRunResult.FromArtifact(artifact);
                 });
 
         _engineMock
@@ -546,7 +581,7 @@ public class PredictMatterCostPlaybookTests
                 It.IsAny<CancellationToken>()))
             .Callback<InsightsPlaybookExecutionRequest, Func<CancellationToken, IAsyncEnumerable<PlaybookStreamEvent>>, CancellationToken>(
                 (req, _, _) => capturedRequest = req)
-            .ReturnsAsync(artifact);
+            .ReturnsAsync(InsightsEngineRunResult.FromArtifact(artifact));
 
         var sut = CreateSut();
         var req = MakeRequest();

@@ -3,23 +3,35 @@ using Sprk.Bff.Api.Models.Insights;
 namespace Sprk.Bff.Api.Services.Insights.LiveFacts;
 
 /// <summary>
-/// Phase 1 stub implementation of <see cref="ILiveFactResolver"/>. Always throws
-/// <see cref="LiveFactNotSupportedException"/> so any production call surfaces a clear
-/// "not implemented in Phase 1" message in App Insights.
+/// Test-only stub implementation of <see cref="ILiveFactResolver"/>. Always throws
+/// <see cref="LiveFactNotSupportedException"/> so any accidental production wiring
+/// surfaces a clear "not implemented" message immediately.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why a stub?</b> The full <c>DataverseLiveFactResolver</c> (which queries
-/// <c>sprk_matter</c> + related rows for predicates like <c>totalSpend</c>,
-/// <c>matterType</c>, <c>matterDurationDays</c>) lands with D-P7 (task 040 — universal
-/// ingest playbook) per SPEC §3.1. Wiring the interface + a stub in task 022 lets
-/// <see cref="Sprk.Bff.Api.Services.Ai.Nodes.LiveFactNode"/> register cleanly in DI and
-/// lets task 060 (D-P14 predict-matter-cost playbook) author against the real surface
-/// — when task 040 swaps the implementation, no LiveFactNode-consumer wiring changes.
+/// <b>Production uses <see cref="DataverseLiveFactResolver"/></b> (task 071, Wave 8.5
+/// pre-deploy gap fix, 2026-05-29) — see
+/// <c>Infrastructure/DI/InsightsModule.cs</c>. This stub is retained for two reasons:
 /// </para>
+/// <list type="bullet">
+///   <item>
+///     <b>Documented fallback</b>: if a future test composition root explicitly opts
+///     out of the real Dataverse-backed resolver (e.g., a unit test that needs to
+///     verify <see cref="Sprk.Bff.Api.Services.Ai.Nodes.LiveFactNode"/> handles the
+///     unsupported-predicate error path), it can register this stub via
+///     <c>services.AddSingleton&lt;ILiveFactResolver, StubLiveFactResolver&gt;()</c>
+///     in test setup.
+///   </item>
+///   <item>
+///     <b>Safety net</b>: a hard-fail implementation behind the interface guarantees
+///     that an accidental composition error (e.g., a misordered <c>AddInsightsModule</c>)
+///     surfaces as a clear LiveFactNotSupportedException rather than a silent default.
+///   </item>
+/// </list>
 /// <para>
-/// <b>Tests</b> inject their own <see cref="ILiveFactResolver"/> directly into
-/// <c>LiveFactNode</c>; they do not consume this stub.
+/// <b>Standard test pattern</b>: most tests inject their own <see cref="ILiveFactResolver"/>
+/// mock directly into <see cref="Sprk.Bff.Api.Services.Ai.Nodes.LiveFactNode"/> rather
+/// than using this stub.
 /// </para>
 /// <para>
 /// <b>Zone B</b> per SPEC §3.5 — lives under <c>Services/Insights/LiveFacts/</c>.
@@ -34,7 +46,8 @@ internal sealed class StubLiveFactResolver : ILiveFactResolver
         CancellationToken cancellationToken)
     {
         throw new LiveFactNotSupportedException(
-            $"StubLiveFactResolver (Phase 1): subject='{subject}' predicate='{predicate}'. " +
-            "The real DataverseLiveFactResolver lands with D-P7 task 040.");
+            $"StubLiveFactResolver (test-only): subject='{subject}' predicate='{predicate}'. " +
+            "Production uses DataverseLiveFactResolver (task 071, Wave 8.5). " +
+            "If you see this in production, InsightsModule DI registration is misconfigured.");
     }
 }

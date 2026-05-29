@@ -58,6 +58,22 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
     /// </summary>
     public const string ReturnInsightArtifactNodeName = "ReturnInsightArtifactNode";
 
+    /// <summary>
+    /// Conventional name of the insufficient-evidence terminal node in an Insights-mode
+    /// playbook (D-P12) that emits a structured <see cref="DeclineResponse"/> per D-49.
+    /// Matches the predict-matter-cost playbook (task 060) where the DeclineToFindNode
+    /// instance is named <c>declineInsufficient</c>.
+    /// </summary>
+    /// <remarks>
+    /// Added by task 071 (Wave 8.5) so the cache surfaces real declines through the
+    /// engine stream rather than the orchestrator returning a scaffold "no-artifact-produced"
+    /// fallback. The drain matches both by exact name AND by structural fingerprint
+    /// (deserialising StructuredData as <see cref="DeclineResponse"/> with all 5 required
+    /// fields present) so future playbooks can rename the node without breaking decline
+    /// propagation.
+    /// </remarks>
+    public const string DeclineToFindNodeName = "declineInsufficient";
+
     private readonly IDistributedCache _cache;
     private readonly ILogger<InsightsPlaybookExecutionCache> _logger;
     private readonly InsightsCacheMetrics? _metrics;
@@ -73,7 +89,7 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
     }
 
     /// <inheritdoc />
-    public async Task<InsightArtifact?> GetOrExecuteAsync(
+    public async Task<InsightsEngineRunResult> GetOrExecuteAsync(
         InsightsPlaybookExecutionRequest request,
         Func<CancellationToken, IAsyncEnumerable<PlaybookStreamEvent>> engineInvocation,
         CancellationToken cancellationToken = default)
@@ -88,6 +104,8 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
         var ttlSeconds = (int)ttl.TotalSeconds;
 
         // ---- HOT PATH: try Redis first (ADR-009) ----
+        // Note: declines are NEVER cached (task 071), so any cached bytes deserialise to
+        // an InsightArtifact only. A cache HIT therefore always means sufficient-evidence path.
         var sw = Stopwatch.StartNew();
         byte[]? cachedBytes = null;
         try
@@ -115,7 +133,7 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
                     _logger.LogDebug(
                         "Insights playbook cache HIT for playbook {PlaybookId}, subject {Subject}, key {Key}",
                         request.PlaybookId, request.Subject, key);
-                    return cached;
+                    return InsightsEngineRunResult.FromArtifact(cached);
                 }
 
                 // Corrupt entry — log + treat as miss. Don't throw; we have a recovery path (re-run engine).
@@ -137,20 +155,33 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
             "Insights playbook cache MISS for playbook {PlaybookId}, subject {Subject}; invoking engine",
             request.PlaybookId, request.Subject);
 
-        var artifact = await DrainEngineStreamAsync(engineInvocation, cancellationToken);
-        if (artifact is null)
+        var runResult = await DrainEngineStreamAsync(engineInvocation, cancellationToken);
+
+        // Decline path: never cache (task 071). Evidence sufficiency depends on the current
+        // state of the index; a cached decline becomes stale the moment a new Observation
+        // lands. Return the decline directly so the orchestrator can surface it through
+        // InsightsAgentResult.Declined with real MinimumEvidenceNeeded gap analysis.
+        if (runResult.HasDecline)
         {
-            // Engine completed but no ReturnInsightArtifactNode output (e.g., decline path
-            // emitted a DeclineResponse instead — that's a different code path, the facade
-            // handles it). We don't cache nulls because the next invocation might produce
-            // an artifact if upstream data has appeared.
             _logger.LogDebug(
-                "Insights playbook {PlaybookId} produced no InsightArtifact; not caching",
+                "Insights playbook {PlaybookId} produced DeclineResponse (reason={Reason}); not caching (declines are state-dependent)",
+                request.PlaybookId, runResult.Decline!.Reason);
+            return runResult;
+        }
+
+        // Empty path: engine produced neither artifact nor decline (malformed playbook).
+        // Don't cache; orchestrator logs Warning and surfaces a scaffold decline so the
+        // facade contract's "exactly one of artifact/decline" invariant holds for Zone B.
+        if (runResult.IsEmpty)
+        {
+            _logger.LogDebug(
+                "Insights playbook {PlaybookId} produced no InsightArtifact and no DeclineResponse; not caching",
                 request.PlaybookId);
-            return null;
+            return runResult;
         }
 
         // ---- WRITE-THROUGH: cache the artifact (best-effort) ----
+        var artifact = runResult.Artifact!;
         try
         {
             var serialised = JsonSerializer.SerializeToUtf8Bytes(artifact);
@@ -172,7 +203,7 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
                 request.PlaybookId);
         }
 
-        return artifact;
+        return runResult;
     }
 
     /// <inheritdoc />
@@ -203,47 +234,144 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
 
     /// <summary>
     /// Drain the engine's <see cref="IAsyncEnumerable{PlaybookStreamEvent}"/> stream and
-    /// extract the final <see cref="InsightArtifact"/> from the
-    /// <see cref="ReturnInsightArtifactNodeName"/> NodeCompleted event.
+    /// extract <b>both</b> the <see cref="InsightArtifact"/> from a
+    /// <see cref="ReturnInsightArtifactNodeName"/> NodeCompleted event (sufficient-evidence
+    /// path) and the <see cref="DeclineResponse"/> from a <see cref="DeclineToFindNodeName"/>
+    /// NodeCompleted event (insufficient-evidence path).
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// <b>Task 071 (Wave 8.5)</b>: previously this method only extracted the artifact and
+    /// returned null on decline, forcing the orchestrator into a scaffold "no-artifact-produced"
+    /// fallback that lost all the structured gap analysis from the EvidenceSufficiencyNode
+    /// upstream. Now it returns an <see cref="InsightsEngineRunResult"/> carrying whichever
+    /// path the playbook took, so callers see real DeclineResponse with populated
+    /// MinimumEvidenceNeeded.
+    /// </para>
+    /// <para>
     /// Iterates the full stream (rather than short-circuiting on first match) because:
     /// (a) the engine relies on the consumer draining the stream to allow downstream nodes
-    /// to flush; (b) we want the LAST artifact-emitting event in case multiple ReturnInsightArtifactNode
-    /// instances exist in a playbook graph (which would be unusual but not forbidden).
+    /// to flush; (b) we want the LAST artifact-emitting event in case multiple
+    /// ReturnInsightArtifactNode instances exist in a playbook graph (unusual but not forbidden);
+    /// (c) the same applies for DeclineToFindNode events.
+    /// </para>
+    /// <para>
+    /// <b>Discrimination strategy</b>: matches the artifact node by exact name
+    /// (<see cref="ReturnInsightArtifactNodeName"/> — the documented convention since task 023)
+    /// and the decline node by exact name (<see cref="DeclineToFindNodeName"/> — predict-matter-cost
+    /// task 060 convention) PLUS structural fingerprint (StructuredData deserialises into
+    /// DeclineResponse with all 5 required fields). The structural fallback lets future playbooks
+    /// rename the decline node without breaking propagation.
+    /// </para>
+    /// <para>
+    /// <b>Both-paths defensive case</b>: if the stream contains both event types (shouldn't
+    /// happen with EvidenceSufficiencyNode's branch routing, but possible if a playbook is
+    /// authored without proper branching), <see cref="InsightsEngineRunResult"/> is constructed
+    /// with both populated. The orchestrator's contract (see InsightsOrchestrator) prefers
+    /// Artifact in that case ("sufficient path wins" defensive policy).
+    /// </para>
     /// </remarks>
-    private async Task<InsightArtifact?> DrainEngineStreamAsync(
+    private async Task<InsightsEngineRunResult> DrainEngineStreamAsync(
         Func<CancellationToken, IAsyncEnumerable<PlaybookStreamEvent>> engineInvocation,
         CancellationToken cancellationToken)
     {
         InsightArtifact? artifact = null;
+        DeclineResponse? decline = null;
 
         await foreach (var ev in engineInvocation(cancellationToken).WithCancellation(cancellationToken))
         {
             if (ev.Type != PlaybookEventType.NodeCompleted)
                 continue;
 
-            if (!string.Equals(ev.NodeName, ReturnInsightArtifactNodeName, StringComparison.Ordinal))
-                continue;
-
             if (ev.NodeOutput is not { Success: true, StructuredData: { } structuredData })
                 continue;
 
-            try
+            // Path 1: artifact-emitting node (sufficient-evidence path)
+            if (string.Equals(ev.NodeName, ReturnInsightArtifactNodeName, StringComparison.Ordinal))
             {
-                var candidate = structuredData.Deserialize<InsightArtifact>();
-                if (candidate is not null)
+                try
                 {
-                    artifact = candidate; // keep iterating to drain stream; capture last
+                    var candidate = structuredData.Deserialize<InsightArtifact>();
+                    if (candidate is not null)
+                    {
+                        artifact = candidate; // capture last; keep iterating to drain
+                    }
                 }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning(ex,
+                        "ReturnInsightArtifactNode StructuredData failed to deserialise as InsightArtifact; skipping event");
+                }
+                continue;
             }
-            catch (JsonException ex)
+
+            // Path 2: decline-emitting node (insufficient-evidence path).
+            // Match by conventional name OR by structural fingerprint so future playbooks can
+            // rename the node without breaking decline propagation (per task 071 design).
+            if (TryExtractDecline(ev.NodeName, structuredData, out var candidateDecline))
             {
-                _logger.LogWarning(ex,
-                    "ReturnInsightArtifactNode StructuredData failed to deserialise as InsightArtifact; skipping event");
+                decline = candidateDecline; // capture last; keep iterating to drain
             }
         }
 
-        return artifact;
+        // Construct the result. The "both populated" defensive case is preserved exactly
+        // as-is so the orchestrator can apply its "sufficient path wins" policy explicitly.
+        return new InsightsEngineRunResult(artifact, decline);
+    }
+
+    /// <summary>
+    /// Try to extract a DeclineResponse from a NodeCompleted event's StructuredData.
+    /// Matches the conventional <see cref="DeclineToFindNodeName"/> by exact name, and also
+    /// falls back to structural deserialisation (a JSON object with all 5 required
+    /// <see cref="DeclineResponse"/> fields populated). The structural match makes the cache
+    /// robust against future playbooks renaming the decline node.
+    /// </summary>
+    private bool TryExtractDecline(string? nodeName, System.Text.Json.JsonElement structuredData, out DeclineResponse? decline)
+    {
+        decline = null;
+
+        // Fast path: exact name match (the documented predict-matter-cost convention).
+        bool nameMatch = string.Equals(nodeName, DeclineToFindNodeName, StringComparison.Ordinal);
+
+        // Structural prefilter: must be a JSON object with the 5 required DeclineResponse fields.
+        // Cheap to check before attempting full deserialisation; avoids spurious deserialisation
+        // attempts on every NodeCompleted event in long-running playbooks.
+        if (!nameMatch && !LooksLikeDeclineResponse(structuredData))
+        {
+            return false;
+        }
+
+        try
+        {
+            var candidate = structuredData.Deserialize<DeclineResponse>();
+            if (candidate is not null)
+            {
+                decline = candidate;
+                return true;
+            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex,
+                "Decline node {NodeName} StructuredData failed to deserialise as DeclineResponse; skipping event",
+                nodeName);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Structural fingerprint: true when the element has all 5 required DeclineResponse
+    /// field names. Cheap; avoids invoking the JSON deserialiser unless the shape matches.
+    /// </summary>
+    private static bool LooksLikeDeclineResponse(System.Text.Json.JsonElement element)
+    {
+        if (element.ValueKind != System.Text.Json.JsonValueKind.Object) return false;
+
+        return element.TryGetProperty("reason", out _)
+            && element.TryGetProperty("explanation", out _)
+            && element.TryGetProperty("minimumEvidenceNeeded", out _)
+            && element.TryGetProperty("suggestedActions", out _)
+            && element.TryGetProperty("confidenceInDecline", out _);
     }
 }

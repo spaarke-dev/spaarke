@@ -23,9 +23,12 @@ namespace Sprk.Bff.Api.Services.Ai.Insights;
 public interface IInsightsPlaybookExecutionCache
 {
     /// <summary>
-    /// Return the cached <see cref="InsightArtifact"/> for <paramref name="request"/> if one
-    /// exists within the TTL window; otherwise invoke <paramref name="engineInvocation"/>,
-    /// extract the artifact from the resulting stream, cache it, and return it.
+    /// Return the cached <see cref="InsightArtifact"/> for <paramref name="request"/> wrapped
+    /// in an <see cref="InsightsEngineRunResult"/> if one exists within the TTL window;
+    /// otherwise invoke <paramref name="engineInvocation"/>, drain the resulting stream
+    /// extracting <b>both</b> the <c>ReturnInsightArtifactNode</c> output (sufficient-evidence
+    /// path) and the <c>DeclineToFindNode</c> output (insufficient-evidence path), cache the
+    /// artifact (if present), and return the run result.
     /// </summary>
     /// <param name="request">Cache lookup tuple + per-call options (TTL).</param>
     /// <param name="engineInvocation">Factory that produces a fresh
@@ -33,9 +36,25 @@ public interface IInsightsPlaybookExecutionCache
     /// on cache miss; the cache fully drains the resulting stream.</param>
     /// <param name="cancellationToken">Cancellation token (honoured for both the cache
     /// lookup and the engine invocation).</param>
-    /// <returns>The cached or freshly-computed <see cref="InsightArtifact"/>, or
-    /// <c>null</c> if the engine completed without producing one (e.g., decline path).</returns>
-    Task<InsightArtifact?> GetOrExecuteAsync(
+    /// <returns>
+    /// <para>
+    /// An <see cref="InsightsEngineRunResult"/> with exactly one of <c>Artifact</c> or
+    /// <c>Decline</c> populated in a well-formed run, or <see cref="InsightsEngineRunResult.Empty"/>
+    /// when the engine completed without producing either (malformed playbook; the orchestrator
+    /// logs Warning and surfaces a scaffold decline).
+    /// </para>
+    /// <para>
+    /// <b>Cache semantics</b> (per task 071 Wave 8.5 gap fix):
+    /// <list type="bullet">
+    /// <item>Artifact path: cache write-through with TTL.</item>
+    /// <item>Decline path: <b>never cached</b> — evidence sufficiency depends on the current state
+    /// of the index; a cached decline becomes stale the moment a new Observation lands. Each
+    /// invocation re-runs the engine for the decline path.</item>
+    /// <item>Cache HIT only ever returns <c>{Artifact, Decline=null}</c> — declines are not stored.</item>
+    /// </list>
+    /// </para>
+    /// </returns>
+    Task<InsightsEngineRunResult> GetOrExecuteAsync(
         InsightsPlaybookExecutionRequest request,
         Func<CancellationToken, IAsyncEnumerable<PlaybookStreamEvent>> engineInvocation,
         CancellationToken cancellationToken = default);

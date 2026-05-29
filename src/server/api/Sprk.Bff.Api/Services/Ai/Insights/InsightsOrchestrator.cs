@@ -97,11 +97,12 @@ public sealed class InsightsOrchestrator : IInsightsAi
 
         // Cache wraps the engine. On HIT the engine factory is never invoked.
         // On MISS the cache invokes the factory which drives ExecuteBatchAsync and
-        // drains the stream looking for the ReturnInsightArtifactNode output (D-P12).
-        var preCacheElapsed = sw.ElapsedMilliseconds;
+        // drains the stream looking for BOTH the ReturnInsightArtifactNode output (D-P12)
+        // and the DeclineToFindNode output (task 071). The result carries whichever path
+        // the playbook took.
         bool factoryWasCalled = false;
 
-        var artifact = await _cache.GetOrExecuteAsync(
+        var runResult = await _cache.GetOrExecuteAsync(
             cacheRequest,
             engineInvocation: ct =>
             {
@@ -127,33 +128,50 @@ public sealed class InsightsOrchestrator : IInsightsAi
         var elapsedMs = sw.ElapsedMilliseconds;
         var cacheHit = !factoryWasCalled;
 
-        if (artifact is not null)
+        // Path 1: artifact produced (sufficient-evidence path). Defensive "both populated"
+        // case: prefer Artifact per InsightsEngineRunResult contract ("sufficient path wins").
+        if (runResult.HasArtifact)
         {
             _logger.LogDebug(
                 "InsightsOrchestrator AnswerQuestionAsync: playbook {PlaybookId} subject {Subject} produced artifact (cacheHit={CacheHit}, elapsedMs={ElapsedMs})",
                 request.Question, request.Subject, cacheHit, elapsedMs);
-            return InsightsAgentResult.Success(artifact, cacheHit, elapsedMs);
+            return InsightsAgentResult.Success(runResult.Artifact!, cacheHit, elapsedMs);
         }
 
-        // No artifact emitted by the playbook. Phase 1 scaffold: surface as a stub
-        // decline so the contract honors the "exactly one of" invariant. Full decline
-        // wiring (real DeclineToFindNode output extraction from the engine stream;
-        // structured MinimumEvidenceNeeded propagation) lands with task 061 (D-P15 endpoint)
-        // once a real D-P14 playbook with EvidenceSufficiencyNode + DeclineToFindNode
-        // is registered and the orchestrator can distinguish "no artifact, took decline path"
-        // from "no artifact, engine errored".
-        _logger.LogDebug(
-            "InsightsOrchestrator AnswerQuestionAsync: playbook {PlaybookId} subject {Subject} produced no artifact; returning scaffold decline (cacheHit={CacheHit}, elapsedMs={ElapsedMs})",
+        // Path 2: real decline produced (insufficient-evidence path). Per task 071, the
+        // cache now extracts DeclineToFindNode output from the engine stream and surfaces
+        // it here with structured MinimumEvidenceNeeded gap analysis from upstream
+        // EvidenceSufficiencyNode — no more scaffold "no-artifact-produced" for this case.
+        // CacheHit is ALWAYS false on the decline path because declines are never cached
+        // (evidence sufficiency depends on the current state of the index).
+        if (runResult.HasDecline)
+        {
+            _logger.LogDebug(
+                "InsightsOrchestrator AnswerQuestionAsync: playbook {PlaybookId} subject {Subject} produced decline (reason={Reason}, gaps={GapCount}, elapsedMs={ElapsedMs})",
+                request.Question, request.Subject, runResult.Decline!.Reason,
+                runResult.Decline.MinimumEvidenceNeeded.Count, elapsedMs);
+            return InsightsAgentResult.Declined(runResult.Decline, cacheHit: false, elapsedMs);
+        }
+
+        // Path 3 (defensive): engine produced neither artifact nor decline. This should not
+        // happen with a well-formed playbook (EvidenceSufficiencyNode's branch routing
+        // guarantees exactly one terminal node fires). If it does — malformed playbook,
+        // engine error masked, branch routing bug — log Warning and emit a scaffold decline
+        // so the facade contract's "exactly one of artifact/decline" invariant holds for
+        // Zone B callers. The scaffold's ConfidenceInDecline = 0.0 signals "this is not a
+        // real decline verdict" to observability tooling.
+        _logger.LogWarning(
+            "InsightsOrchestrator AnswerQuestionAsync: playbook {PlaybookId} subject {Subject} produced NO artifact AND NO decline; engine may be misconfigured. Returning scaffold decline. (cacheHit={CacheHit}, elapsedMs={ElapsedMs})",
             request.Question, request.Subject, cacheHit, elapsedMs);
 
         return InsightsAgentResult.Declined(
             new DeclineResponse
             {
                 Reason = "no-artifact-produced",
-                Explanation = "The playbook completed without emitting an InsightArtifact. Phase 1 scaffold response — task 061 (D-P15 endpoint) wires structured decline extraction from the engine stream.",
+                Explanation = "The playbook completed without emitting an InsightArtifact or DeclineResponse. This indicates a malformed playbook (missing terminal node), an engine error masked by node validation, or a branch-routing bug. Operations: inspect the playbook's terminal nodes (ReturnInsightArtifactNode + DeclineToFindNode) and EvidenceSufficiencyNode branch wiring.",
                 MinimumEvidenceNeeded = new Dictionary<string, object>(),
                 SuggestedActions = Array.Empty<string>(),
-                ConfidenceInDecline = 0.0 // Not a real decline verdict — scaffold; consumers should check elapsedMs/cacheHit.
+                ConfidenceInDecline = 0.0 // Sentinel: not a real decline verdict
             },
             cacheHit,
             elapsedMs);

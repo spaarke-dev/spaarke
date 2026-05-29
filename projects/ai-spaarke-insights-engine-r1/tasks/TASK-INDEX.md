@@ -82,11 +82,17 @@
 |---|---|---|---|---|---|---|
 | [070](070-smoke-test-golden-dataset-eval.poml) | D-P16 | End-to-end smoke + golden dataset + eval harness baseline | ✅ | 1d | ❌ | 040, 050, 060, 061 |
 
+### Wave 8.5 — Pre-deploy functional gap fix (serial)
+
+| ID | D-P | Title | Status | Estimated | Parallel-safe | Dependencies |
+|---|---|---|---|---|---|---|
+| [071](071-pre-deploy-functional-gap-fix.poml) | pre-deploy-fix | DataverseLiveFactResolver + DeclineResponse extraction from engine stream | ✅ | 6-8h | ❌ | 040, 042, 060, 061 |
+
 ### Deploy + wrap-up
 
 | ID | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
-| [080](080-deploy-to-spaarke-dev.poml) | Deploy Phase 1 to Spaarke Dev | 🔲 | 4h | ❌ | 070 |
+| [080](080-deploy-to-spaarke-dev.poml) | Deploy Phase 1 to Spaarke Dev | 🔲 | 4h | ❌ | 070, 071 |
 | [090](090-project-wrap-up.poml) | Project wrap-up + lessons-learned + Phase 1.5 outline | 🔲 | 3h | ❌ | 080 |
 
 ---
@@ -107,7 +113,8 @@
 | W6-seq | 052 | 051 | 1 | Review view needs mirror sync |
 | W7 | 060, 061 | varies (see deps) | 2 | Synthesis playbook + endpoint |
 | W8 | 070 | 040, 050, 060, 061 | 1 | End-to-end; can't parallelize |
-| Deploy | 080 | 070 | 1 | Live deployment; serial |
+| W8.5 | 071 | 040, 042, 060, 061 | 1 | Pre-deploy gap fix; serial after W8 |
+| Deploy | 080 | 070, 071 | 1 | Live deployment; serial |
 | Wrap-up | 090 | 080 | 1 | Final task |
 
 **Max concurrency per skill hard limit**: 6 agents per wave (tune only with evidence per project-pipeline skill).
