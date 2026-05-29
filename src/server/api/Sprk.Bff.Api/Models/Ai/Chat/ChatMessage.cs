@@ -2,19 +2,21 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 
 /// <summary>
 /// Role of the author of a chat message.
-/// Corresponds to the Dataverse global option set <c>sprk_aichatrole</c>
-/// (option values: 726490000=User, 726490001=Assistant, 726490002=System).
+/// Corresponds to the Dataverse local option set <c>sprk_aichatmessage.sprk_role</c>.
+/// Values follow the Spaarke standard numbering scheme (publisher prefix 10000 →
+/// values 100000000, 100000001, ...). Confirmed via Dataverse make.powerapps.com on
+/// 2026-05-28; prior values (726490000+) were from a deprecated publisher prefix.
 /// </summary>
 public enum ChatMessageRole
 {
     /// <summary>Message authored by the end user.</summary>
-    User = 726490000,
+    User = 100000000,
 
     /// <summary>Message authored by the AI agent (SprkChatAgent).</summary>
-    Assistant = 726490001,
+    Assistant = 100000001,
 
     /// <summary>System prompt message (typically one per session, at start).</summary>
-    System = 726490002
+    System = 100000002
 }
 
 /// <summary>

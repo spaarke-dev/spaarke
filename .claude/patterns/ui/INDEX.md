@@ -12,6 +12,7 @@
 | [fluent-v9-theming.md](fluent-v9-theming.md) | Theme decisions, FluentProvider wiring, dark mode, Spaarke brand theme | 2026-05-26 | Current |
 | [fluent-v9-portal-gotcha.md](fluent-v9-portal-gotcha.md) | Using Popover / Tooltip / Toast / Dialog / Menu / Combobox dropdown | 2026-05-26 | Current |
 | [fluent-v9-react-version-boundaries.md](fluent-v9-react-version-boundaries.md) | Authoring in Spaarke.UI.Components OR bumping React versions | 2026-05-26 | Current |
+| [fluent-v9-host-visual-fit.md](fluent-v9-host-visual-fit.md) | Surface-by-surface theme-source matrix; "make it look native" inside MDA / Canvas / Code Pages / Office Add-ins | 2026-05-28 | Current |
 
 ## Critical Constraint (ADR-021 + ADR-022)
 

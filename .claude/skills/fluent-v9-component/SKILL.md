@@ -42,11 +42,13 @@ This skill is the loader for `.claude/patterns/ui/fluent-v9-*.md` + `.claude/pat
 
 | Intent | Patterns to load |
 |---|---|
-| Author a new component | `ui/fluent-v9-component-authoring.md` + `ui/fluent-v9-theming.md` |
-| Add/fix theming on existing component | `ui/fluent-v9-theming.md` (+ `ui/fluent-v9-portal-gotcha.md` if portal component) |
+| Author a new component | `ui/fluent-v9-component-authoring.md` + `ui/fluent-v9-theming.md` + `ui/fluent-v9-host-visual-fit.md` |
+| Add/fix theming on existing component | `ui/fluent-v9-theming.md` + `ui/fluent-v9-host-visual-fit.md` (+ `ui/fluent-v9-portal-gotcha.md` if portal component) |
 | Add a `Popover` / `Tooltip` / `Dialog` / `Menu` / `Toast` / `Combobox dropdown` / `Drawer` | `ui/fluent-v9-portal-gotcha.md` **MANDATORY** + `ui/fluent-v9-theming.md` |
-| Author in `Spaarke.UI.Components` (cross-surface library) | `ui/fluent-v9-component-authoring.md` + `ui/fluent-v9-react-version-boundaries.md` |
-| New PCF setup OR PCF manifest changes | `pcf/fluent-v9-modern-theming.md` + `pcf/fluent-v9-canvas-vs-mda-disabled.md` (if dual-target) |
+| Author in `Spaarke.UI.Components` (cross-surface library) | `ui/fluent-v9-component-authoring.md` + `ui/fluent-v9-react-version-boundaries.md` + `ui/fluent-v9-host-visual-fit.md` |
+| New PCF setup OR PCF manifest changes | `pcf/fluent-v9-modern-theming.md` + `pcf/fluent-v9-canvas-vs-mda-disabled.md` (if dual-target) + `ui/fluent-v9-host-visual-fit.md` |
+| Code Page (React 18 SPA) styling | `ui/fluent-v9-host-visual-fit.md` (Code Pages have NO auto-theme inheritance — root-mount code + boundaries live in this pattern) |
+| Surface-specific visual standards / "make it look native" | `ui/fluent-v9-host-visual-fit.md` + drill into `knowledge/fluent-ui-v9/docs/host-mda-modern-look.md` or `host-canvas-modern-theming.md` per surface |
 | Bump React in any surface | `ui/fluent-v9-react-version-boundaries.md` |
 | Accessibility audit | Drill into `knowledge/fluent-ui-v9/docs/accessibility.md` §2 checklist |
 
