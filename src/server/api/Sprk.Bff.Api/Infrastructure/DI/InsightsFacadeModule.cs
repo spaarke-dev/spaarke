@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Insights;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
@@ -25,10 +26,25 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///   §Exceptions: this IS the §3.5 facade boundary — Zone B callers cannot import
 ///   the concrete <see cref="InsightsOrchestrator"/> directly (it lives in Zone A and
 ///   imports AI internals), so the interface is structural-not-optional.</item>
-///   <item>Singleton lifetime — <see cref="InsightsOrchestrator"/> is stateless; all
-///   dependencies are thread-safe (engine resolves per-request HttpContext internally;
-///   cache + IOpenAiClient are themselves singletons or thread-safe scoped).</item>
+///   <item>Scoped lifetime — required because <see cref="IPlaybookExecutionEngine"/>
+///   transitively depends on Scoped services (<see cref="IPlaybookOrchestrationService"/>
+///   in particular). A Singleton InsightsOrchestrator would create a captive-dependency
+///   violation (Singleton → Scoped). Scoped is also natural for the consumers
+///   (Minimal API endpoint, IJobHandler, IPrecedentProjectionSync) which are all
+///   per-request / per-job scopes anyway.</item>
 /// </list>
+/// </para>
+/// <para>
+/// <b>2026-05-29 DI registration fix</b>: the original task 042 wiring assumed
+/// <see cref="IPlaybookExecutionEngine"/> was already registered by
+/// <c>AnalysisServicesModule</c> — but the registration extension
+/// <c>AddPlaybookExecutionEngine</c> existed and was never actually called from any
+/// module. The gap slipped past unit tests because <c>InsightEndpointsTests</c>
+/// overrides <c>IInsightsAi</c> with a mock and never resolves the real orchestrator
+/// chain. Surfaced as a runtime <c>InvalidOperationException</c> on the first live
+/// /api/insights/ask call after task 080 deploy. This module now registers
+/// <see cref="IPlaybookExecutionEngine"/> explicitly (Scoped, matching the existing
+/// extension default) so the gap can't reopen.
 /// </para>
 /// <para>
 /// <b>Why a separate module from <see cref="InsightsExtractionModule"/></b>: that module
@@ -59,11 +75,20 @@ public static class InsightsFacadeModule
     /// </summary>
     public static IServiceCollection AddInsightsFacadeModule(this IServiceCollection services)
     {
+        // IPlaybookExecutionEngine — the dual-mode (batch + conversational) playbook
+        // entry point. Scoped because the impl (PlaybookExecutionEngine) transitively
+        // consumes Scoped services (IPlaybookOrchestrationService). Registered here
+        // rather than in AnalysisServicesModule because InsightsOrchestrator is its
+        // only consumer today — co-locating registration with consumer makes the
+        // dependency visible and prevents the historical "extension exists but is
+        // never called" gap (see XML doc above for the 2026-05-29 incident).
+        services.AddScoped<IPlaybookExecutionEngine, PlaybookExecutionEngine>();
+
         // IInsightsAi — the only Zone-A surface Zone B code may import per SPEC §3.5.
-        // Singleton: stateless wrapper over thread-safe dependencies (engine, cache,
-        // IOpenAiClient). Per ADR-010 §Exceptions the interface seam is justified —
-        // this IS the §3.5 boundary, not an over-abstraction.
-        services.AddSingleton<IInsightsAi, InsightsOrchestrator>();
+        // Scoped: matches the lifetime of its transitive Scoped dependencies (engine →
+        // IPlaybookOrchestrationService). Per ADR-010 §Exceptions the interface seam
+        // is justified — this IS the §3.5 boundary, not an over-abstraction.
+        services.AddScoped<IInsightsAi, InsightsOrchestrator>();
 
         return services;
     }
