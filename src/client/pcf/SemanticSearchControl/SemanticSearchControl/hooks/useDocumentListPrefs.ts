@@ -71,11 +71,20 @@ const COLWIDTHS_KEY_PREFIX = 'spaarke.docs.colwidths.v3';
  * width sticking around indefinitely.
  *
  * Column ids must match the constants in ListView.tsx exactly.
+ *
+ * v1.1.69 — `name` (the Document column) cap raised from 600 → 1800 to
+ * accommodate the new responsive max (ListView.tsx computes
+ * `containerWidth − 240` per ResizeObserver tick; on 4K viewports that
+ * lands around 1780). The hook still serves as an absolute ceiling so a
+ * corrupted/oversized persisted value gets healed; in-session clamping
+ * to the actual responsive max is owned by ListView.tsx
+ * (`dynamicMaxWidths`). Keeping the hook simple — it doesn't need to know
+ * the runtime container width.
  */
 const COLUMN_MAX_WIDTHS: Record<string, number> = {
   select: 40,
   pin: 36,
-  name: 600,
+  name: 1800,
   relationship: 160,
   combinedScore: 100,
   documentType: 48,

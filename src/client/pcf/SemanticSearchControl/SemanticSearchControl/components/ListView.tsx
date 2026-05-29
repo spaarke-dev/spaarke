@@ -637,6 +637,80 @@ export const ListView: React.FC<IListViewProps> = ({
     return () => observer.disconnect();
   }, [onLoadMoreSentinel]);
 
+  // v1.1.69 — Responsive container-width measurement (ResizeObserver).
+  //
+  // The user reported MAX_WIDTHS was capping Document at 600px on viewports
+  // where it should be much wider:
+  //   - HD 1920×1080 form section ≈ 720px → max Document ≈ 480
+  //   - 2K 2560×1440 form section ≈ 1120px → max Document ≈ 880
+  //   - 4K 3840×2160 form section ≈ 2020px → max Document ≈ 1780
+  //
+  // Pattern (user-confirmed): max Document = containerWidth − 240, where 240
+  // covers the sum of other fixed column defaults + DataGrid chrome + a small
+  // safety margin (Select 40 + Pin 36 + Relationship 110 + Similarity 70 +
+  // Type 48 + Modified 100 + Menu 44 ≈ 448 at default widths; the 240 figure
+  // reflects the *post-user-resize* practical minimum the user wants Document
+  // to keep claiming, because in their UAT layout the other columns can ship
+  // at their MIN_WIDTHS — sum ≈ 376 — so 240 leaves a comfortable buffer
+  // without aggressively squeezing Document).
+  //
+  // ResizeObserver fires on initial mount AND on every container size change
+  // (form section resize, sidebar collapse, browser-window resize, dev-tools
+  // open/close). Floor at 240px so a degenerate narrow viewport doesn't
+  // produce a negative or zero cap.
+  //
+  // React 16/17 safe (ADR-022): ResizeObserver is a DOM API, not a React API.
+  // Widely supported in Chromium/Edge/Firefox/Safari since 2018; PCF runtime
+  // is modern-browser-only.
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  // Sensible default for SSR / pre-mount render: 1100px ≈ legacy MAX_WIDTHS
+  // fixed-cap value, so the first render before ResizeObserver fires still
+  // produces sane defaults rather than an aggressive 240px floor.
+  const [containerWidth, setContainerWidth] = React.useState<number>(1100);
+  React.useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    // Guard for SSR / unsupported environments (returns no-op behavior).
+    if (typeof ResizeObserver === 'undefined') {
+      // Fallback: measure once on mount via getBoundingClientRect.
+      const rect = node.getBoundingClientRect();
+      if (rect.width > 0) setContainerWidth(rect.width);
+      return;
+    }
+    const observer = new ResizeObserver(entries => {
+      // Single entry — we observe one node.
+      for (const entry of entries) {
+        const width = entry.contentRect.width;
+        if (width > 0) {
+          setContainerWidth(prev => (Math.abs(prev - width) > 1 ? width : prev));
+        }
+      }
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  // v1.1.69 — Dynamic max widths driven by `containerWidth`.
+  //
+  // Only COL_DOCUMENT scales with the container; the other columns have
+  // intentionally fixed caps (Relationship/Similarity/Type/Modified/Menu)
+  // because their content is small and stable. This produces the
+  // user-confirmed target curve:
+  //   container=720  → Document max 480
+  //   container=1120 → Document max 880
+  //   container=2020 → Document max 1780
+  //
+  // Floor at 240 so Document never goes below its MIN_WIDTHS, but typical
+  // form sections never hit this floor.
+  const dynamicMaxWidths = React.useMemo<Record<string, number>>(() => {
+    const OTHER_COLS_AND_CHROME = 240;
+    const dynamicDocumentMax = Math.max(240, Math.floor(containerWidth - OTHER_COLS_AND_CHROME));
+    return {
+      ...MAX_WIDTHS,
+      [COL_DOCUMENT]: dynamicDocumentMax,
+    };
+  }, [containerWidth]);
+
   // Sort the results in render (cheap — caller already filtered).
   const sortedResults = React.useMemo(
     () => sortResults(results, sortColumn, sortDirection, pinnedIds),
@@ -1107,15 +1181,19 @@ export const ListView: React.FC<IListViewProps> = ({
       // v1.1.66 — clamp the persisted/ideal width against MAX_WIDTHS so a
       // stale localStorage value (or a partial drag past the cap) can't
       // push columns off the visible right edge.
+      // v1.1.69 — `dynamicMaxWidths` overrides MAX_WIDTHS for COL_DOCUMENT
+      // with a value derived from the container width, so wide viewports
+      // (2K / 4K) can take Document up to ~880 / ~1780 instead of the
+      // legacy fixed 600 cap.
       const requested = columnWidths[id] ?? DEFAULT_WIDTHS[id];
-      const max = MAX_WIDTHS[id] ?? requested;
+      const max = dynamicMaxWidths[id] ?? requested;
       opts[id] = {
         minWidth: MIN_WIDTHS[id],
         idealWidth: Math.min(requested, max),
       };
     }
     return opts;
-  }, [columnWidths]);
+  }, [columnWidths, dynamicMaxWidths]);
 
   // ── DataGrid remount counter (v1.1.68, fix for column-cap bug) ────────
   //
@@ -1199,7 +1277,11 @@ export const ListView: React.FC<IListViewProps> = ({
         // (the columnSizingOptions clamp would otherwise re-apply each
         // render, but persisting the unclamped value is wasteful and
         // confusing in dev tools).
-        const max = MAX_WIDTHS[id];
+        // v1.1.69 — Use `dynamicMaxWidths` so the Document cap reflects
+        // the current container width. A user dragging Document on a 4K
+        // monitor (max ≈ 1780) gets that cap respected; the same drag on
+        // an HD monitor (max ≈ 480) snaps at the smaller cap.
+        const max = dynamicMaxWidths[id];
         const clamped = max !== undefined ? Math.min(data.width, max) : data.width;
         onColumnWidthChange(id, clamped);
         // v1.1.68 — bump the remount counter ONLY when we actually had to
@@ -1211,7 +1293,7 @@ export const ListView: React.FC<IListViewProps> = ({
         }
       }
     },
-    [onColumnWidthChange]
+    [onColumnWidthChange, dynamicMaxWidths]
   );
 
   // Row click → open preview (matches Card view's row-click behavior in ResultCard).
@@ -1229,7 +1311,7 @@ export const ListView: React.FC<IListViewProps> = ({
 
   return (
     <>
-      <div className={styles.container} role="region" aria-label="Document list">
+      <div ref={containerRef} className={styles.container} role="region" aria-label="Document list">
         {/* v1.1.68 — `key={resizeRemountKey}` forces a clean remount when the
             user drags past a MAX_WIDTHS cap. See handleColumnResize for the
             full rationale + Fluent v9 source-level analysis. On remount,
@@ -1267,11 +1349,30 @@ export const ListView: React.FC<IListViewProps> = ({
                 // the misalignment the user reported. The non-text columns
                 // (Select, Pin, Menu) keep `truncate={false}` so the
                 // checkbox/icon glyph isn't clipped.
+                //
+                // v1.1.69 — Apply the SAME cell-specific padding styles to
+                // header cells (selectCell / pinCell) that the body row
+                // applies. Without this, header cells fell back to
+                // TableCellLayout's default 8px horizontal padding while
+                // the body cells used the cell-specific padding (Pin: 0,
+                // Select: XS) — DevTools measurements confirmed Pin header
+                // cell rendered at 52px wide vs body Pin cell at 36px wide
+                // (16px mismatch). The mismatch then propagates: every
+                // column to the right of Pin appears 8px offset between
+                // header and body row.
+                //
+                // Pin header content is `<span aria-label="Pinned" />` (empty
+                // span — no visible text), so zero horizontal padding is
+                // visually safe. Select header content is a Checkbox, which
+                // is already centered and fits comfortably within the 40px
+                // column width with XS padding (matches body).
                 return (
                   <DataGridHeaderCell
                     className={mergeClasses(
                       styles.headerCell,
                       styles.gridCell,
+                      isSelectHeader && styles.selectCell,
+                      isPinHeader && styles.pinCell,
                       isMenuHeader && styles.menuCell
                     )}
                   >
