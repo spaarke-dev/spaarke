@@ -30,6 +30,10 @@ OpenClaw is a useful reference point for two specific things:
 
 The dis-analogies matter too. OpenClaw is a personal, file-based, locally-hosted agent runtime that operates with the credentials of the machine it runs on. Spaarke is a tenant-resident, ALM-packaged platform that operates under the customer's existing Microsoft auth, governance, and audit posture. Where OpenClaw influences are useful they should be drawn on; where the underlying model differs Spaarke should not contort itself to match.
 
+### Note on LAVERN references
+
+This document cites patterns and section numbers from **LAVERN** ([AnttiHero/lavern](https://github.com/AnttiHero/lavern)), an Apache-2.0 TypeScript multi-agent legal system used as a reference source for several design patterns (`IGateResolver`, Phase deny-tools, extended Tool Registry metadata, etc.). Pattern adoption is documented in [`projects/ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md`](../ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md) §10. **LAVERN is not a Spaarke ADR series.** Where this design refers to `LAVERN reference §10.x` or `LAVERN Pattern #N`, it points at the analysis document's section/pattern numbers — not at ratified Spaarke ADRs. Per the 2026-05-29 `spec.md` owner clarification, the patterns LAVERN inspired are formalized inline within this project's own design and implementation; no separate Spaarke ADR ratification is required to adopt them.
+
 ---
 
 ## 3. Core Design Principle: Deterministic and Probabilistic Tools Are Peers
@@ -176,7 +180,7 @@ The library of pre-built Tools. The strategic engineering asset — investment h
 - **`Idempotency`** — `Idempotent | NotIdempotent`
 - **`AuthMode`** — `Obo | AppOnly | None` (plus required permissions)
 - **`Discoverability`** — `{ keywords, semanticDescription, sampleInvocations }` for Builder Agent semantic search
-- **`ModelTier`** — `Premium | Standard | Fast | Embedding` (per LAVERN ADR 10.4; enables future EvaluatorGate tier-separation enforcement in R2+)
+- **`ModelTier`** — `Premium | Standard | Fast | Embedding` (per LAVERN reference §10.4; enables future EvaluatorGate tier-separation enforcement in R2+)
 - **`PhaseRestrictions`** — array of phase names where the tool MUST NOT dispatch (per LAVERN Pattern #8; see "Phase deny-tools" below)
 - **`EvidenceRequired`** — bool (per LAVERN Pattern #6; runtime-guards finder / inference tools)
 
@@ -222,9 +226,9 @@ Every Action invocation produces a run record with status states matching ADR-01
 
 Binds a signal-type filter or an event filter to one or more Actions. When the Insights Engine emits a matching signal — or a Dataverse event matches — the Monitor dispatches the bound Action(s). Event-driven, not polling.
 
-### Approval queue — implemented via `IGateResolver` (LAVERN ADR 10.3)
+### Approval queue — implemented via `IGateResolver` (LAVERN reference §10.3)
 
-Approval queue is implemented via the **`IGateResolver` interface** per LAVERN ADR 10.3 (proposed in `projects/ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md` §10.3). The Action Engine MVP is the implementer of this primitive across Spaarke; the Insights Engine consumes it for Phase 2+ write-back paths, and Self-Service Registration / Email Wizard adopt it over time. **One canonical approval primitive** — no per-surface reimplementation.
+Approval queue is implemented via the **`IGateResolver` interface** per LAVERN reference §10.3 (proposed in `projects/ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md` §10.3). The Action Engine MVP is the implementer of this primitive across Spaarke; the Insights Engine consumes it for Phase 2+ write-back paths, and Self-Service Registration / Email Wizard adopt it over time. **One canonical approval primitive** — no per-surface reimplementation.
 
 Four implementations ship in MVP:
 
@@ -415,7 +419,7 @@ The mechanisms that keep conversational invocation safe. None of these are optio
 | 1 | **System prompt discipline** (§7.4.3) | Free-form synthesis of facts about user data | Per-playbook system prompt; tunable |
 | 2 | **Tool descriptions as contracts** | LLM invoking the wrong Tool for the intent | Tool Registry `Description` + `Discoverability` |
 | 3 | **`EvidenceRequired: true` on Tools that produce findings** | Inference Tools running without supporting evidence; LAVERN Pattern #6 | Runtime guard in dispatch layer |
-| 4 | **`IGateResolver` before side effects** (LAVERN ADR 10.3) | "Oops, sent the email." | `humanGate.required: true` on Tools with `SideEffects: External \| Write` |
+| 4 | **`IGateResolver` before side effects** (LAVERN reference §10.3) | "Oops, sent the email." | `humanGate.required: true` on Tools with `SideEffects: External \| Write` |
 | 5 | **Phase deny-tools** (LAVERN Pattern #8) | Execution-phase Tools running from authoring; authoring-phase Tools running from execution | Mechanical at `IToolHandlerRegistry` dispatch |
 | 6 | **Authorization filter** (ADR-008) | LLM proposing actions the user cannot actually invoke | Tool Registry filters discovery results by caller's permissions |
 | 7 | **Citation discipline** | Ungrounded answers appearing grounded; grounded answers without provenance | Tool result schema includes `SourceCitations`; UI renders citations vs general-knowledge differently |
@@ -439,7 +443,7 @@ In Dataverse terms, the Assistant's behavior at landing is determined by a singl
 - **Always-on Tools** registered for the session (§7.4.2)
 - **Default Knowledge sources** scoped for `SearchDocuments`
 - **Default `IGateResolver` behavior** (which gate surface — inline chat card, Teams card, Dataverse Precedent Board, etc.)
-- **Cost/latency budgets** for this surface (which model tier to use by default — see LAVERN ADR 10.4)
+- **Cost/latency budgets** for this surface (which model tier to use by default — see LAVERN reference §10.4)
 
 Tuning the Assistant's behavior across hosts is a Dataverse record change, not a code change. New Assistant hosts (e.g., a new entity form PCF) add a row to `sprk_aichatcontextmap` and are immediately functional.
 
@@ -462,7 +466,7 @@ OpenClaw's UX advantage is that everything lives in one chat surface. Spaarke ha
 
 ## 9. Integration with Adjacent Spaarke Components
 
-- **Insights Engine** — emits structured `InsightArtifact` signals (Fact / Observation / **Precedent** / Inference per the 4-tier taxonomy in Insights Engine `decisions.md` D-03 + D-46 / LAVERN ADR 10.1). The Action Engine subscribes via Monitors on the signal envelope contract (coordination assessment §4.2). **Precedents** are a new artifact type Action Engine AI Tools can cite when drafting content (R2+); supports Mode 4 (Precedent curation) and Mode 6 (weekly briefing) from `ADVANCED-AI-USE-CASE-PATTERNS.md`.
+- **Insights Engine** — emits structured `InsightArtifact` signals (Fact / Observation / **Precedent** / Inference per the 4-tier taxonomy in Insights Engine `decisions.md` D-03 + D-46 / LAVERN reference §10.1). The Action Engine subscribes via Monitors on the signal envelope contract (coordination assessment §4.2). **Precedents** are a new artifact type Action Engine AI Tools can cite when drafting content (R2+); supports Mode 4 (Precedent curation) and Mode 6 (weekly briefing) from `ADVANCED-AI-USE-CASE-PATTERNS.md`.
 - **Playbooks** — the orchestration resource Actions execute. Authoring an Action either selects an existing Playbook + parameters or composes a new one. Single-step Actions resolve to single-step Playbooks.
 - **Microsoft Agent Framework** — candidate runtime for multi-step agent loops (see Section 6). May or may not be adopted depending on architecture evaluation.
 - **Foundry IQ** — grounding/memory for AI steps and for the Builder Agent's understanding of customer context.
@@ -499,15 +503,15 @@ OpenClaw's UX advantage is that everything lives in one chat surface. Spaarke ha
 
 *LAVERN-derived additions for MVP* (per `lavern-pattern-assessment.md`):
 
-- **`IGateResolver` interface + 4 implementations + `sprk_gate_approval` entity + `GateApprovalCard` UI component** (LAVERN ADR 10.3) — the canonical approval primitive across Spaarke. See "Approval queue" subsection in §5.
+- **`IGateResolver` interface + 4 implementations + `sprk_gate_approval` entity + `GateApprovalCard` UI component** (LAVERN reference §10.3) — the canonical approval primitive across Spaarke. See "Approval queue" subsection in §5.
 - **Phase deny-tools schema + dispatch enforcement** (LAVERN Pattern #8) — mechanical phase guardrails for the Builder Agent. See "Phase deny-tools" subsection in §5.
 - **Tool Registry metadata extension** (joint with Insights Engine per `coordination-assessment-with-insights-engine.md` §4.5 + §4.8) — adds `Classification / CostClass / LatencyClass / Idempotency / AuthMode / Discoverability / ModelTier / PhaseRestrictions / EvidenceRequired` to `ToolHandlerMetadata`.
-- **`ModelTier` field on JPS scopes** (LAVERN ADR 10.4) — foundation for EvaluatorGate (LAVERN Pattern #2) in R2+; not used in MVP but the schema is in place.
+- **`ModelTier` field on JPS scopes** (LAVERN reference §10.4) — foundation for EvaluatorGate (LAVERN Pattern #2) in R2+; not used in MVP but the schema is in place.
 - *Optional*: **`PB-011 Tabular Extraction` Playbook** (LAVERN Pattern #12) if any of the 3–5 starter templates is tabulation-style (e.g., cross-matter rollup, invoice approval queue summary).
 
 *MVP-conditional* (depends on starter template choices):
 
-- **CUAD + MAUD seed-data ingestion** + `sprk_clausetype` Dataverse taxonomy + `spaarke-reference-clauses` AI Search index (LAVERN ADR 10.5 + Pattern #9) — **required only if RedFlagDetector ships in MVP starter templates**. If RedFlagDetector defers to R2, this whole workstream defers with it.
+- **CUAD + MAUD seed-data ingestion** + `sprk_clausetype` Dataverse taxonomy + `spaarke-reference-clauses` AI Search index (LAVERN reference §10.5 + Pattern #9) — **required only if RedFlagDetector ships in MVP starter templates**. If RedFlagDetector defers to R2, this whole workstream defers with it.
 
 ### R2
 
@@ -521,10 +525,10 @@ OpenClaw's UX advantage is that everything lives in one chat surface. Spaarke ha
 
 *LAVERN-derived additions for R2*:
 
-- **`EvaluatorGate` JPS Action category** (LAVERN ADR 10.2 / Pattern #2) — opt-in per-step quality check on high-stakes AI Actions. Requires `ModelTier` from MVP. Default off; per-Action opt-in.
+- **`EvaluatorGate` JPS Action category** (LAVERN reference §10.2 / Pattern #2) — opt-in per-step quality check on high-stakes AI Actions. Requires `ModelTier` from MVP. Default off; per-Action opt-in.
 - **`PlaybookExecutionFlow` shared component** (LAVERN Pattern #4) in `Spaarke.UI.Components` — SSE-driven flow UI for multi-step Actions. Mounted by workspace pane, embedded chat, Office add-ins. Consumed by Mode 1 (reactive review) and Mode 2 (proactive monitoring + triage) from `ADVANCED-AI-USE-CASE-PATTERNS.md`.
-- **Consume `ISanitizer` shared primitive** (LAVERN ADR 10.6 + Pattern #10) — Insights Engine Phase 1 builds it; Action Engine R2 wires it into webhook/signal trigger ingestion paths. See coordination assessment §4.7.
-- **Consume `GroundingVerifier` shared primitive** (LAVERN ADR 10.6 + Pattern #3) — Insights Engine Phase 1 builds it; Action Engine R2 AI Tools that return findings (RedFlagDetector, draft tools with citations) consume it. See coordination assessment §4.7.
+- **Consume `ISanitizer` shared primitive** (LAVERN reference §10.6 + Pattern #10) — Insights Engine Phase 1 builds it; Action Engine R2 wires it into webhook/signal trigger ingestion paths. See coordination assessment §4.7.
+- **Consume `GroundingVerifier` shared primitive** (LAVERN reference §10.6 + Pattern #3) — Insights Engine Phase 1 builds it; Action Engine R2 AI Tools that return findings (RedFlagDetector, draft tools with citations) consume it. See coordination assessment §4.7.
 
 ### R3
 
@@ -554,7 +558,7 @@ OpenClaw's UX advantage is that everything lives in one chat surface. Spaarke ha
 - **Human-controlled defaults.** Actions with external side effects default to `humanGate.required: true`. Opt-out is allowed, logged, reviewable.
 - **Tenant-resident.** Runs inside the customer's Microsoft tenant under their auth, governance, and audit.
 - **Reuse existing infrastructure.** ADR-001/002/004/007/008/009/010/017/018 all apply. New infrastructure is justified only by the architecture spike in Section 6.
-- **Approval is a shared primitive.** `IGateResolver` (LAVERN ADR 10.3) is the canonical contract across Spaarke. Action Engine MVP is the implementer; never reimplement approval per surface.
+- **Approval is a shared primitive.** `IGateResolver` (LAVERN reference §10.3) is the canonical contract across Spaarke. Action Engine MVP is the implementer; never reimplement approval per surface.
 - **Phase boundaries are mechanically enforced.** Phase deny-tools (LAVERN Pattern #8) prevents probabilistic agents (Builder Agent) from dispatching tools in the wrong phase. Mechanical enforcement at `IToolHandlerRegistry`, not prompt-coached.
 - **Every conversational invocation goes through a registered Tool.** "Just chatting" is not a category. Every user input resolves either to a Tool from the Registry (grounded or general-knowledge type) or to a clarifying question. No free-form synthesis of facts about the user's data, ever. See §7.4.4.
 - **General knowledge is a Tool category, not a fallback mode.** Pre-trained LLM knowledge is exposed via specific Tools (`AnswerLegalConcept`, etc.) that label their outputs "Based on general knowledge" and audit accordingly. See §7.4.4.
@@ -584,7 +588,7 @@ OpenClaw's UX advantage is that everything lives in one chat surface. Spaarke ha
 Resolved before MVP build (originally listed; some now superseded by LAVERN adoption):
 
 - **Runtime topology** (the central question). Microsoft Agent Framework vs existing BFF orchestrator. Azure-native scheduling vs BFF scheduler. Hybrid composition. Output: a runtime ADR. **Coordination recommendation per §6**: adopt Insights Engine's Hybrid D — BFF for dispatch + Azure-native Function scheduler.
-- Exact entity schema for Action Definition, Template, Instance, Run, Monitor, Approval. Approval entity now `sprk_gate_approval` per LAVERN ADR 10.3.
+- Exact entity schema for Action Definition, Template, Instance, Run, Monitor, Approval. Approval entity now `sprk_gate_approval` per LAVERN reference §10.3.
 - Relationship and migration path between today's playbook entity and the Action / Template / Instance model — do they merge, or does the new layer sit above the existing playbook? **Coordination recommendation per coordination assessment §4.1**: Action Engine sits above the JPS playbook entity (Action Definition → Playbook reference is a foreign key).
 - Tool Handler registration mechanism (attribute, configuration, hybrid).
 - Variable-type control library scope and component shapes (lives in the shared component library per ADR-012).
@@ -592,11 +596,11 @@ Resolved before MVP build (originally listed; some now superseded by LAVERN adop
 - Cost-attribution model for AI tool invocations within Actions (ties to ADR-016).
 - Cross-solution layering rules for Templates (system → ISV → customer overrides).
 - Cancellation and recovery semantics for long-running multi-step Actions.
-- ~~Approval routing rules and escalation timing~~ — **resolved by `IGateResolver` (LAVERN ADR 10.3)**: 5-min default timeout → auto-reject, surface routing via `SurfaceHint`, declared `AuthorizedApproverRoles`.
+- ~~Approval routing rules and escalation timing~~ — **resolved by `IGateResolver` (LAVERN reference §10.3)**: 5-min default timeout → auto-reject, surface routing via `SurfaceHint`, declared `AuthorizedApproverRoles`.
 
 Newly open (introduced by LAVERN adoption):
 
-- **LAVERN ADR ratification timeline**. Action Engine MVP depends on ADRs 10.3 (GateResolver) and (joint) Tool Registry metadata extension being ratified before pipeline. ADRs are proposed in `projects/ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md` §10 but not yet ratified.
+- ~~**LAVERN ADR ratification timeline**~~ — **resolved 2026-05-29** (per `spec.md` owner clarification): LAVERN-derived patterns (`IGateResolver`, Phase deny-tools, extended Tool Registry metadata) are formalized inline as part of THIS project's design. No separate ADR ratification required. LAVERN is an external Apache-2.0 reference project (see §2 clarifying note); `LAVERN-ANALYSIS-AND-PLAN.md §10.x` references are pattern inspiration only.
 - **SME workflow design for Precedent curation surfaces** — cross-cuts to Insights Engine Phase 1.5 (Mode 4 from `ADVANCED-AI-USE-CASE-PATTERNS.md`). Action Engine R2+ surfaces (workspace pin, embedded chat, etc.) may render the SME confirmation queue — surface choice is a product decision deferred to real customer input.
 - **CUAD + MAUD seed-data scope** — depends on whether RedFlagDetector ships in MVP. If yes, ADR 10.5 + Pattern #9 are MVP-blocking; if no, R2.
 - **`PB-011 Tabular Extraction` Playbook scope** — depends on which 3–5 starter templates ship MVP (Pattern #12 is optional MVP).
