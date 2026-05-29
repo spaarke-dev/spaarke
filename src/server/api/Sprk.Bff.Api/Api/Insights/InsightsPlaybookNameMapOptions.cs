@@ -38,15 +38,17 @@ namespace Sprk.Bff.Api.Api.Insights;
 /// <b>Case sensitivity</b>: lookup is case-insensitive (per <see cref="StringComparer.OrdinalIgnoreCase"/>).
 /// </para>
 /// <para>
-/// <b>Map key naming — App Service env-var constraint</b>: Azure App Service Application
-/// Settings reject <c>@</c> in setting names, so when these values are bound from the
-/// hosting layer the API-facing playbook key MUST use kebab-only form (e.g.,
-/// <c>predict-matter-cost-v1</c> — NOT <c>predict-matter-cost@v1</c>). The Dataverse
-/// <c>sprk_analysisplaybook.sprk_name</c> may still use <c>@vN</c> (it's a Dataverse
-/// string, no constraint); the map key is just whatever name the API caller will send
-/// as <c>InsightAskRequest.Question</c>. Bound dictionaries from <c>appsettings.json</c>
-/// (file source) accept any string, but stick to kebab-only form for cross-environment
-/// portability since Prod config typically ships via App Service settings or Key Vault.
+/// <b>Map key naming — App Service env-var constraint (Linux POSIX)</b>: Linux App
+/// Service inherits POSIX env-var naming rules — keys must match
+/// <c>[A-Za-z_][A-Za-z0-9_]*</c>. That means BOTH <c>@</c> AND <c>-</c> are rejected
+/// when these settings are configured via App Service Application Settings or
+/// Key Vault references. The API-facing playbook key MUST use snake_case_only form
+/// (e.g., <c>predict_matter_cost_v1</c>) — not <c>predict-matter-cost@v1</c> and
+/// not <c>predict-matter-cost-v1</c>. The Dataverse <c>sprk_analysisplaybook.sprk_name</c>
+/// is unconstrained and may still use <c>@vN</c>; the map key is just whatever name
+/// the API caller will send as <c>InsightAskRequest.Question</c>. File-source bindings
+/// (appsettings.json) accept any string, but stick to snake_case_only form so the
+/// API contract is identical across Dev / Test / Prod regardless of binding source.
 /// </para>
 /// <para>
 /// <b>Why this layer exists</b>: Dataverse generates a fresh Guid for the
