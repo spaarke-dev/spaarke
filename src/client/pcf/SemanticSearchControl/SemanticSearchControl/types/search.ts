@@ -105,6 +105,13 @@ export interface SearchResult {
    * of `_modifiedby_value` formatted-value. Consumed by the list view "Modified by" column.
    */
   modifiedBy: string | null;
+  /**
+   * File size in bytes (from BFF SearchResult `fileSize` — `sprk_filesize` via post-search
+   * Dataverse enrichment). Plumbed into the DocumentEmailWizard via
+   * `IDocumentEmailWizardItem.fileSizeBytes` so the 25 MB attachment-cap warning fires.
+   * Null/undefined when the underlying Dataverse field is unset.
+   */
+  fileSize?: number | null;
   summary: string | null;
   tldr: string | null;
   /** SPE driveItem ID. Needed alongside driveId to invoke AI analysis. */

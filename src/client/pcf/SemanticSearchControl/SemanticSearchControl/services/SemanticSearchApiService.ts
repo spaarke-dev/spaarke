@@ -461,6 +461,9 @@ export class SemanticSearchApiService {
         // The BFF SearchResult record always emits these fields; missing values arrive as null.
         modifiedAt: r.modifiedAt ?? null,
         modifiedBy: r.modifiedBy ?? null,
+        // fileSize from sprk_filesize via BFF enrichment — drives the DocumentEmailWizard
+        // 25 MB attachment-cap warning. Missing values arrive as null.
+        fileSize: r.fileSize ?? null,
         summary: r.summary ?? null,
         tldr: r.tldr ?? null,
         // v1.1.50 — relationship origin (Items 3 + 5).
