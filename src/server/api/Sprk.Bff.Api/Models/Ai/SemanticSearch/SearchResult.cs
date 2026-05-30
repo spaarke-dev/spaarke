@@ -99,6 +99,14 @@ public sealed record SearchResult
     public string? RecordUrl { get; init; }
 
     /// <summary>
+    /// File size in bytes (from Dataverse <c>sprk_filesize</c> via post-search enrichment;
+    /// also populated on the associated-only direct-Dataverse path). Used by the Documents
+    /// PCF email wizard to enforce the 25 MB attachment-cap warning.
+    /// </summary>
+    [JsonPropertyName("fileSize")]
+    public long? FileSize { get; init; }
+
+    /// <summary>
     /// Document creation timestamp.
     /// </summary>
     [JsonPropertyName("createdAt")]
