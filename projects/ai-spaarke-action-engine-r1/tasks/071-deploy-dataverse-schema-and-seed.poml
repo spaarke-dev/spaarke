@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Deploy Action Engine Dataverse solution + seed default playbook + 3 starter Templates via `dataverse-deploy` + `Deploy-Playbook.ps1` + `Seed-JpsActions.ps1`</title>
+    <phase>Phase 6: Quality Gates + Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>060, 070</dependencies>
+    <blocks>072, 073, 090</blocks>
+    <tags>deploy, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with explicit ADR-002 governance; invokes dataverse-deploy + seed scripts; Phase 6 mandatory</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential deploy: must follow BFF (070) and precede Code Page (072) — Code Page launcher tests target seeded playbook + Templates</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the Action Engine Dataverse solution (6 new entities + extension of `sprk_aichatcontextmap`), seed the default "Spaarke Assistant — General" playbook, and seed the 3 starter Action Templates (Summarize a matter / Send weekly task digest / Find similar matters). Use the `dataverse-deploy` skill for the solution; `Deploy-Playbook.ps1` for the playbook seed; `Seed-JpsActions.ps1` for the Templates.
+  </prompt>
+
+  <role>
+    Senior Spaarke platform engineer with Dataverse ALM expertise (PAC CLI, solution import) and familiarity with the JPS seed scripts (`Deploy-Playbook.ps1`, `Seed-JpsActions.ps1`).
+  </role>
+
+  <goal>
+    Dev Dataverse environment has:
+    - 6 new entities published: `sprk_action`, `sprk_actiontemplate`, `sprk_actioninstance`, `sprk_actionrun`, `sprk_toolregistry`, `sprk_gate_approval`
+    - `sprk_aichatcontextmap` extension fields published
+    - Default "Spaarke Assistant — General" playbook record present (one row in `sprk_aiplaybook`)
+    - 3 starter Template records present in `sprk_actiontemplate`
+    - Tool Registry rows present (≥8 per spec: 3 always-on foundational + 3 meta-tools + ≥2 starter-Template-supporting Tools)
+    - Azure AI Search `spaarke-resource-registry-index` populated with Tool Registry rows
+
+    Deploy log at `projects/ai-spaarke-action-engine-r1/notes/deployments/dataverse-deploy-{date}.md`.
+  </goal>
+
+  <context>
+    <background>
+      This is the second deploy in Phase 6. BFF is live (task 070). Now Dataverse schema + seed data lands so the Code Page (task 072) can render and the post-deploy validation (task 073) can exercise the end-to-end flow.
+
+      Three deploy artifacts:
+      1. Solution import (entities + relationships) via `dataverse-deploy` skill
+      2. Playbook seed via `Deploy-Playbook.ps1`
+      3. Template + Tool Registry seed via `Seed-JpsActions.ps1`
+    </background>
+    <relevant-files>
+      <file>src/solutions/ActionEngine/</file>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>scripts/Seed-JpsActions.ps1</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/deployments/dataverse-deploy-{date}.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">Thin Dataverse plugins. Action triggers via webhooks (R2 scope), NOT plugins. No new plugin code in this deploy.</constraint>
+    <constraint source="dataverse-deploy skill">Use unmanaged solution (ADR-022); use publisher `Spaarke` with prefix `sprk_`; rebuild fresh; never reuse old ZIPs; pack with `pack.ps1`.</constraint>
+    <constraint source="project">Seed scripts MUST be idempotent — re-running them does NOT create duplicate playbook/Template rows. Use upsert by name.</constraint>
+    <constraint source="project">Tool Registry semantic index population is part of this task — after Tool rows seed, populate `spaarke-resource-registry-index`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-deploy unmanaged solution" location=".claude/skills/dataverse-deploy/SKILL.md">PAC CLI solution import; publisher `Spaarke`; rebuild fresh.</pattern>
+      <pattern name="Idempotent seed via upsert" location="scripts/Seed-JpsActions.ps1">Upsert by logical name to avoid duplicate playbook/Template rows on re-run.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Pre-deploy check: task 060 (G1) and 070 (BFF deploy) ✅ in TASK-INDEX.md; BFF endpoints reachable for any seed-script calls.</step>
+    <step order="1">Read `dataverse-deploy` skill SKILL.md; review the existing seed scripts (`Deploy-Playbook.ps1`, `Seed-JpsActions.ps1`); confirm idempotency.</step>
+    <step order="2">Invoke `dataverse-deploy` skill to deploy the Action Engine solution (entities + relationships + extension fields). Verify import success via PAC CLI solution list.</step>
+    <step order="3">Publish all customizations: `pac solution publish` (or via Power Platform admin).</step>
+    <step order="4">Run `Deploy-Playbook.ps1` for "Spaarke Assistant — General" playbook seed; verify exactly ONE row exists in `sprk_aiplaybook` with this name (idempotent — re-run safe).</step>
+    <step order="5">Run `Seed-JpsActions.ps1` for the 3 starter Templates + ≥8 Tool Registry rows; verify counts via PAC `pac data export` or via Web API GET on `sprk_actiontemplate` and `sprk_toolregistry`.</step>
+    <step order="6">Populate the `spaarke-resource-registry-index` semantic search index: query `sprk_toolregistry` rows; for each row, push to the index with `Discoverability.semanticDescription` as the semantic field. Verify count via Azure CLI / portal.</step>
+    <step order="7">Smoke test from BFF: hit a sample endpoint that depends on seeded data (e.g., GET `/playbooks/spaarke-assistant-general`); expect 200 with the seeded playbook.</step>
+    <step order="8">Write deploy log at `projects/ai-spaarke-action-engine-r1/notes/deployments/dataverse-deploy-{YYYY-MM-DD}.md`: solution import result, seed row counts, search-index population count, smoke test result.</step>
+    <step order="9.5">Quality gates skipped per rigor STANDARD (deploy task).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 071 status ✅. Update `current-task.md`: Dataverse seeded; ready for Code Page deploy (072).</step>
+    <step order="11">Document deviations under `projects/ai-spaarke-action-engine-r1/notes/handoffs/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">PAC CLI for solution import + publish + data ops</tool>
+    <tool name="powershell">Seed script execution</tool>
+    <tool name="az">Azure CLI for AI Search index population</tool>
+    <tool name="curl">Smoke-test seeded endpoints</tool>
+    <tool name="terminal">Shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/deployments/dataverse-deploy-{date}.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 new entities + `sprk_aichatcontextmap` extension fields published to dev Dataverse (verified via PAC CLI solution list / Web API metadata).</criterion>
+    <criterion testable="true">Default "Spaarke Assistant — General" playbook row present in `sprk_aiplaybook` (verified via Web API GET).</criterion>
+    <criterion testable="true">3 starter Template rows + ≥8 Tool Registry rows seeded (verified via Web API counts).</criterion>
+    <criterion testable="true">`spaarke-resource-registry-index` populated with Tool Registry rows (verified via Azure CLI search index document count).</criterion>
+    <criterion testable="true">Smoke test from BFF returns seeded playbook (200 OK).</criterion>
+    <criterion testable="true">Seed scripts are idempotent — re-running does NOT duplicate rows.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Order matters: BFF (070) → Dataverse (071) → Code Page (072). The Code Page launcher tests target the seeded playbook + Templates, so seeding MUST land first.
+
+    The Tool Registry semantic index population is part of this task because it's seed data, not schema.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load knowledge files. Declare RIGOR LEVEL: STANDARD. Invoke `dataverse-deploy` skill for the solution import.
+    </protocol>
+  </execution>
+</task>

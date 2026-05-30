@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>ScheduledActionDispatchJobHandler.cs — ADR-004 IJobHandler&lt;T&gt; for scheduler-triggered Action dispatch</title>
+    <phase>Phase 4: Action Execution Runtime</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>001, 041</dependencies>
+    <blocks>052, 053, 054, 055, 060</blocks>
+    <tags>bff-api, ai, worker, job, background</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates background job handler (.cs files) consumed by ServiceBusJobProcessor; tags include bff-api/ai/worker/job/background; modifies code files; depends on the task 001 scheduler ADR + task 041 orchestrator; downstream tasks (templates, integration tests) depend on this handler shape</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Creates new files under Services/Jobs/ — disjoint from task 041 (Services/Ai/ActionEngine/) and task 043 (Infrastructure/Logging/ middleware edit). After 040 lands, 041 + 042 can run in parallel.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create `src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledActionDispatchJob.cs` (Job Contract DTO per ADR-004) and `src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledActionDispatchJobHandler.cs` (`IJobHandler&lt;ScheduledActionDispatchJob&gt;` consumed by the existing `ServiceBusJobProcessor`). The handler is idempotent via `IIdempotencyService` (existing), propagates `CorrelationId`, never places document bytes in payload (ADR-004), and delegates the actual run to the orchestrator from task 041 via `IActionEngineFacade` (task 015 — facade boundary preserved per ADR-013 refined). The scheduler topology (Logic Apps timer / Service Bus scheduled message / Functions timer / Container Apps Jobs) is the one selected in the task 001 runtime ADR.
+  </prompt>
+
+  <role>
+    SPAARKE BFF background-jobs engineer fluent in ADR-004 Job Contract semantics (`IJobHandler&lt;T&gt;`, `JobOutcome`, idempotency via `IIdempotencyService`, at-least-once delivery, poison handling), the existing `ServiceBusJobProcessor.cs` dispatch surface, and the canonical handler shape from other registered handlers (e.g., `RecordSyncJob` / `DocumentVectorBackfillService`). You write handlers that are safe under retry and surface failures via `JobOutcome` not exceptions.
+  </role>
+
+  <goal>
+    Concrete artifacts:
+    1. **`Services/Jobs/ScheduledActionDispatchJob.cs`** — Job Contract DTO. Fields: `ActionId` (Guid), `TenantId` (string), `CorrelationId` (string), `ScheduledForUtc` (DateTime), `ParameterValues` (JSON-serialized dictionary — small payload only; references to large data NOT inlined per ADR-004), `IdempotencyKey` (deterministic — typically `$"action-dispatch:{ActionId}:{ScheduledForUtc:yyyyMMddHHmm}"`). Includes constructor with all required fields and JSON-serialization-friendly properties.
+    2. **`Services/Jobs/ScheduledActionDispatchJobHandler.cs`** — `IJobHandler&lt;ScheduledActionDispatchJob&gt;` implementation. Pipeline: (a) idempotency check via `IIdempotencyService.TryReserveAsync(IdempotencyKey, ct)` — if already reserved, return `JobOutcome.Skipped` (no-op success); (b) load Action Definition via `IActionEngineFacade.GetActionAsync(actionId, ct)`; (c) build `ActionExecutionContext` with `invocationSource = ScheduledJob`, the correlation id from the job message, tenant id, `callerOid = "system:scheduler"`; (d) delegate to `IActionEngineFacade.ExecuteActionAsync(action, parameters, context, ct)`; (e) translate the result to `JobOutcome` (success / retry / poison) per ADR-017 status states.
+    3. **DI registration** — add to `AddActionEngineModule()` (or appropriate job-handlers registration site): `services.AddScoped&lt;IJobHandler&lt;ScheduledActionDispatchJob&gt;, ScheduledActionDispatchJobHandler&gt;();`. The existing `ServiceBusJobProcessor` discovers handlers by `IJobHandler&lt;T&gt;` shape — no additional wiring needed.
+    4. **Scheduler integration** — per the task 001 runtime ADR, configure the chosen Azure-native scheduler to enqueue `ScheduledActionDispatchJob` messages to the existing job Service Bus. The infrastructure piece lands in `infra/scheduler/` (or wherever the runtime ADR specifies); this task creates the handler shape that consumes whatever the scheduler emits.
+    5. **Idempotency verification** — unit test asserts that two messages with the same `IdempotencyKey` produce exactly one Action Run record (the second returns `JobOutcome.Skipped`).
+
+    Acceptance: integration test enqueues a `ScheduledActionDispatchJob` for the "Send weekly task digest" template (FR-20), the handler runs end-to-end, an `sprk_actionrun` record is persisted, idempotency guards prevent duplicate Runs on at-least-once redelivery.
+  </goal>
+
+  <context>
+    <background>
+      Scheduled Actions are one of three invocation paths for the Action Engine (conversational + explicit-UI + scheduled). This handler is the bridge between the Azure-native scheduler (chosen in task 001) and the orchestrator (task 041). The scheduler enqueues a `ScheduledActionDispatchJob` message; the existing `ServiceBusJobProcessor` picks it up; the handler dispatches it to the orchestrator via the facade.
+
+      The task 001 runtime ADR specifies which Azure-native scheduler is chosen. The handler implementation is identical regardless of the scheduler choice — the scheduler's job is to enqueue the message; the handler is invariant under that choice. (If the runtime ADR chose a path that bypasses Service Bus — e.g., direct HTTP call to BFF — that's a different task and not this handler.)
+
+      ADR-004 Job Contract requires: (a) handlers implement `IJobHandler&lt;T&gt;` with `Task&lt;JobOutcome&gt; HandleAsync(T job, CancellationToken ct)`; (b) handlers are idempotent under at-least-once delivery; (c) `CorrelationId` propagates through every log; (d) document bytes / large payloads are NOT in the job message — only identifiers + small parameters.
+
+      Existing patterns to follow (read these before implementing):
+      - `Services/Jobs/IJobHandler.cs` — the interface contract
+      - `Services/Jobs/ServiceBusJobProcessor.cs` — the dispatcher; handlers register via DI; no manual wiring needed
+      - `Services/Jobs/IIdempotencyService.cs` + `IdempotencyService.cs` — `TryReserveAsync(key, ct)` returns true on first reservation, false on subsequent
+      - `Services/Jobs/JobOutcome.cs` — the success/retry/poison/skipped enum
+      - `Services/Jobs/RecordSyncJob.cs` — a recent handler example with the canonical shape
+
+      Run record `Queued` status (ADR-017) is set by the SCHEDULER (or the enqueue path) — not this handler. This handler transitions `Queued → Running` (by calling the orchestrator which owns the transition) → terminal state per ADR-017.
+
+      Facade boundary (G12): the handler injects `IActionEngineFacade` (task 015), NOT `IActionOrchestrationService` (task 041 internal). The handler is "CRUD-side" from the orchestrator's perspective — same boundary rule as the endpoint layer (task 040).
+
+      Binding governance: `.claude/constraints/bff-extensions.md` MUST be loaded. Placement = BFF per spec.md §6. No new NuGet packages.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledActionDispatchJob.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledActionDispatchJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/IJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/IIdempotencyService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/JobOutcome.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/RecordSyncJob.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionEngineFacade.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (or equivalent from task 014)</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/decisions/runtime-topology-ADR-draft.md (from task 001)</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService. NO Azure Functions for in-proc execution. Handler runs inside the BFF's `ServiceBusJobProcessor` BackgroundService.</constraint>
+    <constraint source="ADR-004">Job Contract pattern. `IJobHandler&lt;T&gt;` shape. Handler MUST be idempotent under at-least-once delivery. `CorrelationId` propagation. Document bytes / large payloads NOT in payload.</constraint>
+    <constraint source="ADR-010">DI registration via `AddActionEngineModule()` extension (or the existing job-handlers registration site). Module total ≤15 non-framework registrations.</constraint>
+    <constraint source="ADR-013">Handler injects `IActionEngineFacade` (PublicContracts) — NOT `IActionOrchestrationService` from task 041. Facade boundary preserved (G12).</constraint>
+    <constraint source="ADR-017">Run record status transitions canonical: `Queued → Running → Completed | Failed | Poisoned | Cancelled`. Handler does NOT invent states; uses the orchestrator's transitions and translates final status to `JobOutcome`.</constraint>
+    <constraint source="ADR-019">Errors surfaced via `JobOutcome.Failed` / `JobOutcome.Poisoned` — NOT thrown out of `HandleAsync`. The `ServiceBusJobProcessor` translates outcomes to Service Bus message handling (complete / abandon / dead-letter).</constraint>
+    <constraint source="ADR-029">No new NuGet packages without budget verification.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist: placement = BFF, publish-size delta verified, no new CRUD→AI direct dependencies (facade enforced), no new HIGH-severity CVE.</constraint>
+    <constraint source="project">Scheduler integration follows the task 001 runtime ADR (Azure-native scheduler choice). Handler shape is invariant under that choice; only the message-enqueue surface differs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/architecture/jobs-architecture.md</file>
+      <file>docs/architecture/background-workers-architecture.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/decisions/runtime-topology-ADR-draft.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Job Contract pattern" location=".claude/patterns/api/background-workers.md">`IJobHandler&lt;T&gt;` + `ServiceBusJobProcessor` dispatch; idempotency via `IIdempotencyService`; outcome translation to Service Bus.</pattern>
+      <pattern name="ScheduledRagIndexingService reference" location="src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledRagIndexingService.cs">Existing scheduled-pattern example; structural reference for time-driven dispatch handlers.</pattern>
+      <pattern name="Facade boundary (ADR-013 refined)" location=".claude/adr/ADR-013-ai-architecture.md">Handler injects `IActionEngineFacade`, not the orchestrator directly.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, baseline build passes. Confirm task 001 (runtime ADR) and task 041 (orchestrator) both show ✅ in TASK-INDEX.md. Load the task 001 runtime ADR draft to confirm the scheduler choice. (task-execute Step 0)</step>
+    <step order="1">Load `.claude/constraints/bff-extensions.md` and answer the pre-merge checklist in `notes/decisions/task-042-bff-extensions-checklist.md`. Cite placement = BFF (spec.md §6) and scheduler topology cite (task 001 runtime ADR).</step>
+    <step order="2">Read the existing `IJobHandler.cs` + `ServiceBusJobProcessor.cs` + `IIdempotencyService.cs` + `RecordSyncJob.cs` + `JobOutcome.cs` to capture the handler shape. Note the dispatcher discovers handlers by type — no manual wiring.</step>
+    <step order="3">Create `Services/Jobs/ScheduledActionDispatchJob.cs`. Fields per `&lt;goal&gt;` section. JSON-serializable. Include the deterministic `IdempotencyKey` property (computed if not explicitly set: `$"action-dispatch:{ActionId}:{ScheduledForUtc:yyyyMMddHHmm}"`). Do NOT inline large payloads — small parameter values only (e.g., a Matter id, a recipient hint). Document bytes referenced by id ONLY.</step>
+    <step order="4">Create `Services/Jobs/ScheduledActionDispatchJobHandler.cs`. Constructor-inject `IActionEngineFacade`, `IIdempotencyService`, `ILogger&lt;ScheduledActionDispatchJobHandler&gt;`. Implement `HandleAsync(job, ct)`:
+      (a) Idempotency reservation; if already reserved → return `JobOutcome.Skipped`;
+      (b) Load Action via `IActionEngineFacade.GetActionAsync(job.ActionId, ct)`; if not found → `JobOutcome.Poisoned` (Action was deleted between schedule and dispatch);
+      (c) Build `ActionExecutionContext` with `invocationSource = ScheduledJob`, the correlation id from the job, `tenantId`, `callerOid = "system:scheduler"`;
+      (d) Call `IActionEngineFacade.ExecuteActionAsync(action, job.ParameterValues, context, ct)`;
+      (e) Translate result: `Completed` → `JobOutcome.Succeeded`; `Failed` (transient — task 041 surfaces a flag) → `JobOutcome.Failed` (retryable); `Failed` (permanent) / `GateRejectedException` / `PhaseToolDeniedException` → `JobOutcome.Poisoned`; `Cancelled` → `JobOutcome.Succeeded` (cancellation is a clean exit per ADR-017).</step>
+    <step order="5">DI registration: add `services.AddScoped&lt;IJobHandler&lt;ScheduledActionDispatchJob&gt;, ScheduledActionDispatchJobHandler&gt;();` to `AddActionEngineModule()`. Confirm total non-framework registrations ≤15 per ADR-010.</step>
+    <step order="6">Scheduler integration: per the task 001 runtime ADR, ensure the chosen scheduler enqueues `ScheduledActionDispatchJob` messages to the BFF's job Service Bus queue. The infrastructure piece (Bicep / SB topic + scheduled message / Logic App / etc.) lands in `infra/` per the runtime ADR's path. This task creates the handler shape but does NOT itself provision Azure resources — that's task 064 (BFF + Dataverse deploy) for production rollout.</step>
+    <step order="7">Write unit tests:
+      (a) Idempotency: two messages with same `IdempotencyKey` produce one Run record (second returns `Skipped`);
+      (b) Action-not-found returns `Poisoned`;
+      (c) Orchestrator-throws-`GateRejectedException` returns `Poisoned`;
+      (d) Orchestrator-returns-`Completed` returns `Succeeded`;
+      (e) Cancellation returns `Succeeded` per ADR-017 (cancellation is clean).</step>
+    <step order="8">Write the integration test for FR-20 (Send weekly task digest): enqueue a `ScheduledActionDispatchJob` for the digest template, drive it through `ServiceBusJobProcessor`, assert a `sprk_actionrun` record exists in `Completed` state, assert idempotency replay returns `Skipped` without creating a duplicate run.</step>
+    <step order="9">Run the G12 grep audit: `grep -rn "IActionOrchestrationService" src/server/api/Sprk.Bff.Api/Services/Jobs/` — expect NO matches. The handler reaches the orchestrator only through `IActionEngineFacade`. If a match shows, fix before Step 9.5.</step>
+    <step order="9.5">Run quality gates per task-execute Step 9.5: `code-review` on the new job + handler + DI edit; `adr-check` verifies ADR-004 (handler shape, idempotency, correlation propagation, no document bytes), ADR-010 (registration via module extension), ADR-013 (facade boundary preserved), ADR-017 (canonical state transitions), ADR-019 (errors surface via `JobOutcome`, not thrown), ADR-029 (no new packages). Re-run `dotnet build` and unit + integration tests.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 042 ✅. Verify it unblocks tasks 052, 053, 054, 055, 060. Reset `current-task.md` for the next active task.</step>
+    <step order="11">Document any deviations from this plan in `projects/ai-spaarke-action-engine-r1/notes/handoffs/task-042-handoff.md` and add a brief commit message recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test BFF API including handler tests</tool>
+    <tool name="terminal">Run grep audit for G12 facade integrity in the Jobs module</tool>
+    <tool name="git">Confirm state + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledActionDispatchJob.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledActionDispatchJobHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (edit — register handler)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/ScheduledActionDispatchJobHandlerTests.cs (5+ unit tests covering idempotency, not-found, gate rejection, completion, cancellation)</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/ActionEngine/ScheduledDispatchIntegrationTests.cs (FR-20 end-to-end)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/decisions/task-042-bff-extensions-checklist.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ScheduledActionDispatchJob.cs` + `ScheduledActionDispatchJobHandler.cs` exist; `dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</criterion>
+    <criterion testable="true">Handler implements `IJobHandler&lt;ScheduledActionDispatchJob&gt;` and is discovered by the existing `ServiceBusJobProcessor` via DI registration (verified by smoke test enqueuing a message).</criterion>
+    <criterion testable="true">Idempotency verified: two messages with the same `IdempotencyKey` produce exactly one `sprk_actionrun` record (second returns `JobOutcome.Skipped`).</criterion>
+    <criterion testable="true">`CorrelationId` propagates: assert via log scope inspection that the job's correlation id appears in every log entry the handler emits.</criterion>
+    <criterion testable="true">Handler reaches the orchestrator ONLY through `IActionEngineFacade` (G12 facade integrity). Grep audit on `src/server/api/Sprk.Bff.Api/Services/Jobs/` for `IActionOrchestrationService` returns no matches.</criterion>
+    <criterion testable="true">FR-20 integration test (Send weekly task digest scheduled job) succeeds: handler runs, `sprk_actionrun` record persists in `Completed` state, idempotent replay returns `Skipped`.</criterion>
+    <criterion testable="true">DI registration in `AddActionEngineModule()`; total non-framework registrations ≤15 (ADR-010).</criterion>
+    <criterion testable="true">`notes/decisions/task-042-bff-extensions-checklist.md` exists with every `bff-extensions.md` pre-merge item answered. Scheduler topology cited from task 001 runtime ADR.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` returns no NEW HIGH-severity CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The scheduler topology choice (task 001) determines WHERE messages come from (Logic Apps timer publishing to SB, native SB scheduled message, etc.) but NOT the handler shape. The handler is invariant — it consumes a `ScheduledActionDispatchJob` regardless of which scheduler enqueued it. If the runtime ADR chose a path that bypasses Service Bus, this task is moot — flag the conflict in `notes/handoffs/`.
+
+    Do NOT inject `IActionOrchestrationService` (task 041 internal) directly. Go through `IActionEngineFacade` (task 015). The handler is "CRUD-side" from the orchestrator's view — same G12 boundary as the endpoint layer (task 040).
+
+    The deterministic `IdempotencyKey` uses ScheduledForUtc to the minute (`yyyyMMddHHmm`) — this prevents duplicates from at-least-once redelivery within the same scheduled tick. If the scheduler fires twice at slightly different sub-minute timestamps (which it shouldn't), the key collapses to the same value and the second message is no-op'd via `IIdempotencyService`.
+
+    Cancellation handling: a job that's cancelled mid-execution returns `JobOutcome.Succeeded` per ADR-017 — cancellation is a clean exit, not a failure. The orchestrator (task 041) writes `Cancelled` to the Run record; this handler completes the SB message normally.
+
+    Document bytes are NEVER in the payload (ADR-004). If a Tool needs document content, it reads by id from SPE / Dataverse inside the Tool handler. The job message carries IDs only.
+
+    Spec.md FR-16 (manual + scheduled triggers) is the requirement this task addresses for the scheduled half. Manual triggers go through task 040's `/run` endpoint directly.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5 (code-review + adr-check). G12 grep audit on Services/Jobs/ is part of the Step 9 set.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Dataverse Schema — Action Entities (sprk_action, sprk_actiontemplate, sprk_actioninstance, sprk_actionrun)</title>
+    <phase>Phase 1: Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>020, 021, 022, 040, 041, 042, 050, 053, 054, 055</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates four foundational Dataverse entities whose schema is consumed by all Phase 2+ tasks; mis-shaped fields force expensive rework downstream; has explicit constraint set (ADR-002, ADR-017) and depends on task 001</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only sprk_action / sprk_actiontemplate / sprk_actioninstance / sprk_actionrun entity definitions; disjoint from tasks 011 (sprk_toolregistry), 012 (sprk_gate_approval), 013 (sprk_aichatcontextmap extension)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create the four canonical Action Engine Dataverse entities — `sprk_action`, `sprk_actiontemplate`, `sprk_actioninstance`, `sprk_actionrun` — with the fields specified in spec.md FR-01..FR-06 and design §5. Use the `dataverse-create-schema` skill (Web API + Python SDK pattern) since PAC CLI does not support table/column creation. Status field on `sprk_actionrun` MUST use the ADR-017 canonical state sequence `Queued | Running | Completed | Failed | Poisoned | Cancelled`.
+  </prompt>
+
+  <role>
+    SPAARKE Dataverse schema engineer with hands-on experience using the `dataverse-create-schema` skill (Web API EntityDefinitions + Python SDK) to author publisher-prefixed entities, relationships, and option-sets that survive ALM packaging and round-trip without drift.
+  </role>
+
+  <goal>
+    Four Dataverse tables created in the dev environment under publisher prefix `sprk_`, each with the field set required by spec.md FR-01..FR-06 and design §5:
+    1. **`sprk_action`** — Action Definition: identity, owner (User lookup), template ref (lookup → `sprk_actiontemplate`), playbookId (lookup → `sprk_aiplaybook`), parameterValues (JSON), triggerSpec (Choice + JSON payload), authRequirements (JSON), humanGateConfig (JSON), outputContract (JSON), governance (JSON: feature flag + kill switch per ADR-018), tenantId (text).
+    2. **`sprk_actiontemplate`** — Template: identity, parameterSchema (JSON Schema text), defaults (JSON), validationRules (JSON), naturalLanguageDescription (text), discoverabilityMetadata (JSON), classification (Choice: Deterministic / AI / Hybrid).
+    3. **`sprk_actioninstance`** — Instance: identity, template ref (lookup → `sprk_actiontemplate`), parameterBlob (JSON), tenantId (text).
+    4. **`sprk_actionrun`** — Run record: identity, action ref (lookup → `sprk_action`), instance ref (lookup → `sprk_actioninstance`), **status (Choice: Queued, Running, Completed, Failed, Poisoned, Cancelled — exact ADR-017 sequence)**, inputs (JSON), stepOutcomes (JSON), correlationId (text), attemptCount (integer), approvalHistory (JSON), tenantId (text), startedAt (DateTime), completedAt (DateTime, nullable).
+
+    All four entities packed into the Action Engine solution (`SpaarkeActionEngine` or per-existing-solution choice in plan.md). Deliverable: solution import succeeds in dev environment, all four entities visible in the maker portal, lookups resolve correctly.
+  </goal>
+
+  <context>
+    <background>
+      The Action sits **above** the existing JPS Playbook entity (`sprk_aiplaybook`) per coordination assessment §4.1 — Action.playbookId is a FK to Playbook (FR-05). Deletion of a referenced Playbook MUST be blocked (referential integrity).
+
+      Run status states are ADR-017 canonical: `Queued | Running | Completed | Failed | Poisoned | Cancelled`. Do NOT invent new states. The `Poisoned` state matches `ServiceBusJobProcessor` poison-message semantics (ADR-004).
+
+      `sprk_action` carries the trigger spec discriminator (Manual | Scheduled) — Manual has `null` payload; Scheduled has a cron expression. The scheduler chosen in task 001 will consume this field.
+
+      Tenant scoping: every entity carries `tenantId` (text). All queries from BFF filter by tenantId per NFR-05. Multi-tenant isolation is mechanical via field, not implicit.
+
+      Triggers via Dataverse webhooks are R2 scope (per plan.md ADR-002 note). MVP triggers are manual + cron-via-scheduler. Do NOT implement Dataverse plugins on these entities.
+
+      The `dataverse-create-schema` skill is the canonical approach since PAC CLI lacks `pac table create` / `pac column create`. Use Web API EntityDefinitions for table creation and Python SDK (`dataverse-sdk`) for bulk field creation.
+    </background>
+    <relevant-files>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/plan.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">Thin Dataverse plugins. MUST NOT register plugins on these entities. Triggers via webhooks deferred to R2.</constraint>
+    <constraint source="ADR-017">`sprk_actionrun.status` field MUST use the canonical state sequence `Queued | Running | Completed | Failed | Poisoned | Cancelled`. No invented states.</constraint>
+    <constraint source="ADR-018">`sprk_action.governance` JSON block MUST include feature-flag + kill-switch references.</constraint>
+    <constraint source="ADR-019">If any custom API is registered against these entities (deferred to later phase), error responses use ProblemDetails RFC 7807.</constraint>
+    <constraint source="project">Publisher prefix `sprk_`. All entities tenant-scoped via `tenantId` text field (NFR-05).</constraint>
+    <constraint source="project">`sprk_action.playbookId` is a lookup → existing `sprk_aiplaybook`; cascade delete behavior: Referential Restrict (block deletion of referenced Playbook).</constraint>
+    <constraint source="project">All four entities packaged into the same solution for atomic deploy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-create-schema (Web API + Python SDK)" location=".claude/skills/dataverse-create-schema/SKILL.md">Canonical pattern for creating tables, columns, relationships, and option-sets when PAC CLI lacks the surface.</pattern>
+      <pattern name="dataverse-deploy (solution lifecycle)" location=".claude/skills/dataverse-deploy/SKILL.md">Solution-import + verify pattern.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, baseline build passes, task 001 status is ✅ in TASK-INDEX.md. Load the `dataverse-create-schema` skill. (task-execute Step 0)</step>
+    <step order="1">Read spec.md FR-01..FR-06, design §5, and coordination-assessment-with-insights-engine.md §4.1. Confirm field shapes against spec — esp. status states (ADR-017) and trigger spec discriminator.</step>
+    <step order="2">Determine solution targeting: either an existing Action Engine solution or create a new `SpaarkeActionEngine` unmanaged solution under publisher prefix `sprk_`. Document decision in `notes/decisions/solution-targeting.md`.</step>
+    <step order="3">Author the four entity schemas as Python / Web API scripts. Start with `sprk_actiontemplate` (no lookups), then `sprk_actioninstance` (FK to template), then `sprk_action` (FK to template + FK to existing `sprk_aiplaybook`), then `sprk_actionrun` (FK to action + FK to instance). Lookups: `sprk_action.playbookId` uses Referential Restrict behavior; other lookups use Referential.</step>
+    <step order="4">Apply field-set per &lt;goal&gt; section. JSON fields use Text(Memo) with `Format = TextArea`. Choice columns: `sprk_actionrun.status` uses the canonical 6-state Choice; `sprk_actiontemplate.classification` uses the 3-value Choice (Deterministic / AI / Hybrid); `sprk_action.triggerSpec` discriminator uses the 2-value Choice (Manual / Scheduled) plus a separate Text(Memo) field `triggerSpecPayload` for the cron string or null.</step>
+    <step order="5">Run the schema scripts against the dev environment. Confirm via Web API GET on each EntityDefinition that all fields landed.</step>
+    <step order="6">Pack the solution and export to `src/dataverse/solutions/SpaarkeActionEngine/` (or chosen target). Verify the export contains all four entities and all fields.</step>
+    <step order="7">Smoke-test in maker portal: create one record per entity, verify lookups resolve, verify Choice values render with expected labels, verify `tenantId` is mandatory.</step>
+    <step order="8">Document the schema in `docs/data-model/action-engine-entities.md` (entity-by-entity field list + ERD). This becomes the source of truth that Phase 2+ tasks reference for typing.</step>
+    <step order="9">Run quality gates per task-execute Step 9.5: `code-review` on the schema scripts + the schema doc; `adr-check` confirms ADR-002 (no plugins added) and ADR-017 (status states canonical).</step>
+    <step order="9.5">Re-run the relevant tests: `dotnet build src/server/api/Sprk.Bff.Api/` confirms no regression. (No new C# code in this task, but verifies the solution import didn't break downstream metadata generation if any T4/source generators consume entity metadata.)</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 010 ✅; verify it unblocks tasks 020, 021, 022, 040, 041, 042, 050, 053, 054, 055. Reset `current-task.md` to point to next pending task in Group A or B.</step>
+    <step order="11">Document any deviations from this plan in `projects/ai-spaarke-action-engine-r1/notes/handoffs/task-010-handoff.md` and add a brief commit message recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-create-schema">Skill: Web API + Python SDK for table/column creation</tool>
+    <tool name="pac">CLI for solution pack/unpack/export</tool>
+    <tool name="dotnet">Verify baseline build still passes</tool>
+    <tool name="git">Confirm state + commit</tool>
+    <tool name="terminal">Run shell + Python scripts</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/dataverse/action-engine/create-action-entities.py</output>
+    <output type="solution">src/dataverse/solutions/SpaarkeActionEngine/ (or chosen target) — packed solution with 4 entities</output>
+    <output type="docs">docs/data-model/action-engine-entities.md — entity-by-entity field list + ERD</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/decisions/solution-targeting.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All four entities (`sprk_action`, `sprk_actiontemplate`, `sprk_actioninstance`, `sprk_actionrun`) exist in the dev environment; verified by Web API GET on each EntityDefinition.</criterion>
+    <criterion testable="true">`sprk_actionrun.status` Choice has exactly the 6 ADR-017 values: `Queued | Running | Completed | Failed | Poisoned | Cancelled` — no extras, no omissions.</criterion>
+    <criterion testable="true">`sprk_action.playbookId` lookup resolves against existing `sprk_aiplaybook` entity; cascade behavior is Referential Restrict (deletion of referenced Playbook is blocked); verified by attempting and observing the block.</criterion>
+    <criterion testable="true">All four entities carry the `tenantId` text field marked required (NFR-05).</criterion>
+    <criterion testable="true">Solution exported to `src/dataverse/solutions/...` round-trips cleanly: pack → unpack → diff shows no drift.</criterion>
+    <criterion testable="true">`docs/data-model/action-engine-entities.md` exists with entity-by-entity field list + ERD diagram of the four entities + the `sprk_aiplaybook` FK.</criterion>
+    <criterion testable="true">Baseline build still passes: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The Action sits **above** the Playbook (Action.playbookId → sprk_aiplaybook). This is the inverse of any "Playbook owns Action" wording you might see in older drafts — confirm against design §5 + coordination-assessment-with-insights-engine.md §4.1.
+
+    Use Referential Restrict (NOT Cascade Delete) on `sprk_action.playbookId` — deletion of a Playbook with referencing Actions MUST be blocked. This protects Action Definitions from accidental Playbook cleanup.
+
+    JSON fields (parameterValues, triggerSpec payload, etc.) are stored as Text(Memo) with `Format = TextArea`. The BFF deserializes via System.Text.Json. There is no Dataverse-native JSON type.
+
+    Do NOT add Dataverse plugins to any of these entities. ADR-002 keeps plugins thin (no HTTP/Graph calls); Action triggers will be handled by webhooks in R2.
+
+    The `dataverse-create-schema` skill handles the EntityDefinitions Web API + Python SDK patterns. Don't try to use PAC CLI for table creation — `pac table create` and `pac column create` don't exist.
+
+    `coordination-assessment-with-insights-engine.md` §4.1 confirms Action.playbookId FK direction. Do not change it without revisiting that document.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5. Use the `dataverse-create-schema` skill for the actual table/column creation work.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>`DataverseQueueGateResolver` — writes to `sprk_gate_approval`; resumes on approval-record update</title>
+    <phase>Phase 3: IGateResolver + Approval Surface</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>035</blocks>
+    <tags>bff-api, ai, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements `IGateResolver` for the Dataverse queue path; writes to `sprk_gate_approval`; modifies `.cs` files in `Sprk.Bff.Api`; tags include bff-api + ai + dataverse; audit-critical path per ADR-015</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group D resolver implementations (031, 032, 033, 034) each touch a separate file under `Services/Ai/ActionEngine/Gates/`; no file overlap; all consume the contract from task 030 which is already complete by the time Group D dispatches</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement `DataverseQueueGateResolver : IGateResolver` at `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/DataverseQueueGateResolver.cs`. On `ResolveAsync`, write a new `sprk_gate_approval` record carrying the `GateRequest` fields + `Pending` status; return `GateOutcome` with `GateDecision.Pending`. Resume path is event-driven: when the approval record is updated (status flips to Approved/Rejected), an existing Dataverse webhook handler (or plugin → BFF callback per ADR-002) signals the orchestrator to load the run state and progress. Write audit per ADR-015 on both the initial Pending and any final decision. Register via keyed-DI (`GateType.MeaningCritical` + `EthicsCritical` default).
+  </prompt>
+
+  <role>
+    Senior Spaarke BFF engineer with Dataverse SDK familiarity (`IOrganizationServiceAsync2` or REST). You write minimal, idempotent code; you NEVER place document bytes in Dataverse blobs; you propagate `CorrelationId` from `GateRequest` into the approval record so downstream resume paths can re-stitch context.
+  </role>
+
+  <goal>
+    Concrete deliverables:
+    1. **`DataverseQueueGateResolver` class** implementing `IGateResolver.ResolveAsync` — creates `sprk_gate_approval` record + returns `Pending`.
+    2. **`sprk_gate_approval` record contract** — the resolver MUST write all 8 fields from `GateRequest` + `Status = Pending` + `CreatedAtUtc` + `CorrelationId`. Schema for this entity ships in Phase 1 task 012 (`sprk_gate_approval` entity already created).
+    3. **Idempotency** — duplicate `ResolveAsync` calls for the same `(ActionRunId, ToolDispatchId)` MUST NOT create duplicate approval records. Use existing `IIdempotencyService` (per ADR-004) keyed on `gate:{ActionRunId}:{ToolDispatchId}`.
+    4. **Audit hook** — call `IAuditService.LogGateDecision(...)` per ADR-015 on initial Pending write (decision=`Pending`) and any subsequent terminal decision via the resume path.
+    5. **DI registration** via keyed-DI in `AddGatesFeature()` — `MeaningCritical` + `EthicsCritical` default to `DataverseQueueGateResolver`. `FinalDelivery` defaults to it too (per design §5 routing).
+    6. **Resume hook** — extend (or add stub for) the orchestrator method `OnGateApprovalRecordUpdated(approvalRecordId)` that loads the record, builds a terminal `GateOutcome`, and resumes the run. If orchestrator does not yet expose this method (depends on Phase 4 task 042), add a TODO + a unit test using a fake orchestrator.
+
+    Deliverable location: `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/DataverseQueueGateResolver.cs`. Tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Gates/DataverseQueueGateResolverTests.cs`.
+  </goal>
+
+  <context>
+    <background>
+      The Dataverse queue path is the canonical async resolver — used for `MeaningCritical` (finding quality), `EthicsCritical` (jurisdiction/UPL risk), and `FinalDelivery` (last-mile send). The approval record lives in Dataverse where assigned approvers see it through the standard worklist UX, the future Precedent Board (Insights Engine), and Teams cards (R2+).
+
+      `sprk_gate_approval` entity ships in Phase 1 task 012 with fields: `actionrunid` (FK), `tooldispatchid`, `gatetype` (option set), `status` (option set: `Pending=1`, `Approved=2`, `Rejected=3`, `TimedOut=4`), `requestedbyuserid`, `resolvedbyuserid?`, `reason?`, `createdatutc`, `resolvedatutc?`, `authorizedapproverroles` (multi-select), `surfacehint`, `payload` (JSON text), `correlationid`, `timeoutseconds`.
+
+      Resume is event-driven, not polled. ADR-002 says plugins stay thin; the canonical path is a Dataverse webhook → BFF callback endpoint (added by orchestrator in Phase 4). For MVP, this resolver writes the Pending record; the resume wiring is finalized in Phase 4 task 042. This task ships the resolver + idempotency + audit + DI; the resume entry point is stubbed with a clear TODO.
+    </background>
+    <relevant-files>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/plan.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/IGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateType.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateOutcome.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/DataverseQueueGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/DataverseClient.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Gates/DataverseQueueGateResolverTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService.</constraint>
+    <constraint source="ADR-002">Thin Dataverse plugins. Plugin (if used for the webhook bridge) stays &lt;200 LoC + &lt;50ms p95. This task does NOT add plugin code; resume is wired in Phase 4.</constraint>
+    <constraint source="ADR-004">Idempotent gate creation: duplicate `(ActionRunId, ToolDispatchId)` MUST NOT create duplicate approval records. Use `IIdempotencyService`.</constraint>
+    <constraint source="ADR-008">Endpoint-filter authorization. Resume endpoint (added Phase 4) MUST use `.AddEndpointFilter&lt;&gt;()`.</constraint>
+    <constraint source="ADR-010">Feature-module DI. Keyed-DI registration in `AddGatesFeature()`.</constraint>
+    <constraint source="ADR-013">AI Architecture (refined 2026-05-20). BFF placement.</constraint>
+    <constraint source="ADR-015">Audit per gate decision: Tier 2 hash + Tier 3 work history. Both initial Pending write AND terminal resume MUST audit.</constraint>
+    <constraint source="ADR-019">ProblemDetails for any HTTP errors surfaced by resume endpoint (Phase 4).</constraint>
+    <constraint source="ADR-029">Publish-size delta ≤ 5 MB compressed. This task adds ≤300 LoC + Dataverse SDK calls (already loaded); expected delta &lt; 0.1 MB.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist: placement = BFF; no new NuGet packages; publish-size impact verified; ADRs cited.</constraint>
+    <constraint source="project">Default `GateType` routing: `MeaningCritical`, `EthicsCritical`, `FinalDelivery` → `DataverseQueueGateResolver`. Action Definitions can override per design §5.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-002-thin-dataverse-plugins.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-authorization.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-audit-middleware.md</file>
+      <file>.claude/adr/ADR-019-problem-details.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Idempotency keys" location=".claude/patterns/api/idempotency.md">`IIdempotencyService` keyed on `gate:{ActionRunId}:{ToolDispatchId}`.</pattern>
+      <pattern name="Dataverse entity operations" location=".claude/patterns/dataverse/entity-operations.md">Existing `DataverseClient` wrapper; use `CreateAsync` + `RetrieveAsync` shapes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: working tree clean, branch `work/ai-spaarke-action-engine-r1`, baseline build passes, task 030 ✅ in TASK-INDEX. Load knowledge. Declare RIGOR LEVEL: FULL.</step>
+    <step order="1">Read task 030's `IGateResolver` contract + `GateRequest` / `GateOutcome` records. Read `notes/decisions/030-gateresolver-contract.md` for any contract decisions (keyed-DI shape, audit obligation).</step>
+    <step order="2">Confirm `sprk_gate_approval` entity exists (task 012). If schema gaps: stop and signal back to task 012 owner. Otherwise proceed.</step>
+    <step order="3">Create `DataverseQueueGateResolver.cs` — ctor injects `IDataverseClient`, `IAuditService`, `IIdempotencyService`, `ILogger&lt;DataverseQueueGateResolver&gt;`. Implement `ResolveAsync`: idempotency check → write `sprk_gate_approval` Pending record → audit log → return `GateOutcome` with `Pending`.</step>
+    <step order="4">Map `GateRequest.Payload` (`JsonElement?`) to the `payload` field as serialized JSON text. Map `AuthorizedApproverRoles` to the multi-select. Preserve `CorrelationId` on the record.</step>
+    <step order="5">Register via keyed-DI in `AddGatesFeature()` (extending `AddActionEngineModule.cs`): `services.AddKeyedScoped&lt;IGateResolver, DataverseQueueGateResolver&gt;(GateType.MeaningCritical); ...EthicsCritical; ...FinalDelivery;`. ADR-010 budget check: 3 keyed registrations consume 3 slots.</step>
+    <step order="6">Add resume stub method on the orchestrator (or stand-alone `IGateResumeHandler` if orchestrator-side method not yet in scope per Phase 4 timing): `OnGateApprovalRecordUpdated(Guid approvalRecordId)`. Stub implementation: load record, build `GateOutcome`, audit, log TODO for Phase 4 to wire to actual run resumption.</step>
+    <step order="7">Write unit tests in `DataverseQueueGateResolverTests.cs`:
+      (a) `ResolveAsync_HappyPath_WritesPendingRecordAndReturnsPending` — assert `IDataverseClient.CreateAsync` called once with correct entity logical name + fields.
+      (b) `ResolveAsync_DuplicateCall_IsIdempotent` — second call with same `(ActionRunId, ToolDispatchId)` returns same outcome without creating a second record.
+      (c) `ResolveAsync_Audits_OnPendingWrite` — `IAuditService.LogGateDecision` called with `GateDecision.Pending`.
+      (d) `ResolveAsync_PreservesCorrelationId` — record carries the request's correlationId.
+      (e) `OnGateApprovalRecordUpdated_Approved_BuildsApprovedOutcomeAndAudits`.</step>
+    <step order="8">Build + run unit tests: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0; `dotnet test tests/unit/Sprk.Bff.Api.Tests/` passes new tests.</step>
+    <step order="9">Measure publish-size delta. Expected &lt; 0.1 MB. Record in `notes/measurements/031-publish-size-delta.md`.</step>
+    <step order="9.5">Run quality gates: `code-review` (idempotency correctness, audit ordering: AUDIT-AFTER-WRITE so audit never logs a write that failed), `adr-check` (ADR-001/002/004/008/010/013/015/019/029).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark 031 ✅. Update `current-task.md`: 031 complete; remaining Group D tasks (032, 033, 034) still in-flight or complete.</step>
+    <step order="11">Commit + push branch update. Note any contract refinements for downstream Phase 4 wiring.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size measurement</tool>
+    <tool name="git">Commit and push</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/DataverseQueueGateResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (extended with keyed-DI registrations)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Gates/DataverseQueueGateResolverTests.cs</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/measurements/031-publish-size-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`DataverseQueueGateResolver.cs` exists; implements `IGateResolver`; compiles.</criterion>
+    <criterion testable="true">5 unit tests pass: HappyPath, Idempotent, AuditsOnPending, PreservesCorrelationId, OnGateApprovalRecordUpdated_Approved.</criterion>
+    <criterion testable="true">Keyed-DI registration: `GateType.MeaningCritical`, `EthicsCritical`, `FinalDelivery` all resolve to `DataverseQueueGateResolver`. Verified by integration test.</criterion>
+    <criterion testable="true">Audit hook called on every gate decision: initial Pending write + terminal resume (both verified by unit test mocking `IAuditService`).</criterion>
+    <criterion testable="true">Idempotency: duplicate `(ActionRunId, ToolDispatchId)` does NOT create duplicate `sprk_gate_approval` records.</criterion>
+    <criterion testable="true">Publish-size delta &lt; 0.1 MB compressed; recorded.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass at Step 9.5; ADRs cited in PR.</criterion>
+    <criterion testable="true">ADR-010 DI budget honored (≤15 total non-framework registrations in `AddActionEngineModule()`).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Resume wiring (`OnGateApprovalRecordUpdated`) is intentionally stub-only here. Phase 4 task 042 wires it into the orchestrator's run-resumption logic; that task may add a Dataverse webhook endpoint OR consume a plugin → BFF callback. ADR-002 governs plugin code if added (thin, no HTTP/Graph).
+
+    The `IIdempotencyService` is the same one used for `ScheduledActionDispatchJobHandler` (ADR-004); reuse via constructor injection. Idempotency key shape: `gate:{ActionRunId}:{ToolDispatchId}`.
+
+    AUDIT-AFTER-WRITE ordering matters: if the Dataverse create succeeds but the audit write fails, log + raise — never the other way. The orchestrator MUST observe the actual world state, not just the audit log.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5.
+    </protocol>
+  </execution>
+</task>

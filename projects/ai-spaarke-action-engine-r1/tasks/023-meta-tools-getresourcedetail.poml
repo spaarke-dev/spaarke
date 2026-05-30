@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Meta-tool — GetResourceDetail (full schema + SourceHints)</title>
+    <phase>Phase 2: Tool Registry + Discovery</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>052</blocks>
+    <tags>bff-api, ai, meta-tools</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF code implementation; ADR-013 facade boundary; SK function registration; tags include bff-api + ai</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group C with 022, 024. Depends only on task 020 (data model). Touches a distinct file (`GetResourceDetailTool.cs`) with no shared service state. Parallelizable per task-create §3.8.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement the `GetResourceDetail(string resourceId)` meta-tool — a Semantic Kernel function registered with every Assistant session that returns the full `ResourceDetail` payload (parameter schema, `SourceHints` per parameter, sample invocations, governance metadata) for a single Tool Registry entry. This is the inspection primitive used after `FindResources` returns a candidate and the agent (or the user) needs full schema to plan invocation.
+  </prompt>
+
+  <role>
+    Senior .NET 8 / Semantic Kernel engineer familiar with `[KernelFunction]` registration patterns and the Spaarke BFF AI feature module. Designs payload-shaping to be informative to the LLM (rich `SourceHints` per parameter that distinguish auto-resolvable from user-required) while staying within token budgets.
+  </role>
+
+  <goal>
+    Three concrete outcomes:
+    1. **`GetResourceDetailTool.cs` implementation** — `[KernelFunction]` decorated async method `GetResourceDetail(string resourceId)`. Reads from `sprk_toolregistry` via existing Dataverse client (NOT from the AI Search index — the index has a search-shaped projection; this needs the canonical record).
+    2. **`ResourceDetail` response shape** — full parameter schema + per-parameter `SourceHints` (e.g., `auto: surfaceContext.matterId`, `auto: caller.upn`, `userRequired: subject`), `SampleInvocations` array, governance fields (`humanGate`, `PhaseRestrictions`, `EvidenceRequired`).
+    3. **Authorization check** — caller's permissions verified BEFORE returning detail; ProblemDetails-equivalent error (KernelFunctionResult with error) if forbidden.
+
+    Deliverable: `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/MetaTools/GetResourceDetailTool.cs` + tests; SK registration wired in task 025.
+  </goal>
+
+  <context>
+    <background>
+      Spec.md FR-11: returns `ResourceDetail` with parameter schema, source hints, sample invocations. Design.md §7.4.1 worked example shows the agent calling `GetResourceDetail` after `FindResources` returns a candidate, then using the per-parameter `SourceHints` to decide which parameters to resolve automatically vs ask the user.
+
+      Why this reads Dataverse directly (not the AI Search index):
+      - The index is a search-shaped projection (semantic description, lookup fields) optimized for retrieval
+      - The canonical record in Dataverse has the full parameter schema (a JSON Schema document), all sample invocations, the live `humanGate` configuration, etc.
+      - The detail endpoint must be fresh — search index has indexing lag; for invocation-planning the agent needs the current state
+
+      `SourceHints` schema (lives on the parameter-schema definition itself, alongside `description` / `type`):
+      ```
+      {
+        "name": "subject",
+        "type": "string",
+        "description": "Email subject line",
+        "sourceHints": {
+          "userRequired": true,
+          "auto": null
+        }
+      }
+      ```
+      vs auto-resolvable:
+      ```
+      {
+        "name": "matterId",
+        "sourceHints": {
+          "userRequired": false,
+          "auto": "surfaceContext.matterId"
+        }
+      }
+      ```
+
+      Task 020 defined the `ToolRegistryEntry` shape; this meta-tool's `ResourceDetail` response is a richer view that includes the full parameter schema document (not summarized).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/MetaTools/GetResourceDetailTool.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/ToolRegistryModel.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/MetaTools/GetResourceDetailToolTests.cs</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService. Meta-tool runs in-proc within the BFF Chat agent.</constraint>
+    <constraint source="ADR-008">Endpoint-filter auth applies at calling endpoint (`/api/chat/`). Caller authorization checked inside the meta-tool before returning detail; Tool the caller lacks permission to invoke returns an error (not the detail).</constraint>
+    <constraint source="ADR-010">DI minimalism. Dataverse client + JsonSerializerOptions injected via `[FromServices]`. No service-locator.</constraint>
+    <constraint source="ADR-013">PublicContracts boundary. `GetResourceDetail` is NOT exposed via the facade — internal SK function only.</constraint>
+    <constraint source="ADR-015">Audit Tier 2 + Tier 3 applies automatically via middleware. No manual audit calls.</constraint>
+    <constraint source="ADR-019">Errors propagate to the calling endpoint as ProblemDetails. Internal exceptions wrapped with resource-id context.</constraint>
+    <constraint source="ADR-029">Use existing Dataverse client + JSON. Zero new NuGet packages.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge: placement (in BFF, latency-coupled to Chat agent). Zero publish-size delta.</constraint>
+    <constraint source="project">spec.md FR-11: returns full schema + SourceHints per parameter (which can be auto-resolved from surface context vs which require user input).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-auth.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-audit-middleware.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Semantic Kernel function registration" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs">`[KernelFunction]` + `[Description]` for LLM tool selection; XML-doc parameters; typed return value.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm baseline build passes; task 020 merged or branch-loadable; Dataverse client available in BFF DI.</step>
+    <step order="1">Read all files in `&lt;knowledge&gt;&lt;files&gt;`. Pay attention to spec.md FR-11 and design.md §7.4.1 worked example (SourceHints usage pattern).</step>
+    <step order="2">Sketch `ResourceDetail` response shape: ToolId, DisplayName, FullDescription, ParameterSchema (the full JSON Schema document), SourceHints per parameter, SampleInvocations[], HumanGate config, PhaseRestrictions, EvidenceRequired, Classification, CostClass, LatencyClass. Document defaults for missing fields.</step>
+    <step order="3">Implement `GetResourceDetailTool.cs`: `[KernelFunction, Description("Get full schema and parameter source hints for a Tool Registry entry by ID. Use after FindResources to plan invocation.")]` `Task&lt;ResourceDetail&gt; GetResourceDetailAsync(string resourceId)`. Inject Dataverse client + ICallerContext.</step>
+    <step order="4">Read the `sprk_toolregistry` record via Dataverse client by `resourceId`. Handle not-found: return a `ResourceDetail` with `ErrorKind=NotFound` (or throw `ResourceNotFoundException` if BFF convention is to propagate). Document the choice in code comments.</step>
+    <step order="5">Authorization check: verify caller has permission to inspect this Tool (read permission is broader than invoke permission — design choice: caller MUST hold at least the Tool's read permission). If forbidden, return error or throw.</step>
+    <step order="6">Project the Dataverse record into `ResourceDetail` — preserving the parameter schema as a `JsonElement` or string (LLM consumes structurally). Inflate `SourceHints` per parameter from the stored parameter-schema document.</step>
+    <step order="7">Write unit tests: (a) happy path returns detail with all metadata + parameter schema + SourceHints, (b) not-found returns ProblemDetails-equivalent error, (c) caller without read permission returns forbidden error, (d) parameter schema round-trips intact, (e) SourceHints distinguish auto-resolvable from user-required correctly.</step>
+    <step order="8">Verify build + tests + format: `dotnet build`, `dotnet test --filter "GetResourceDetail"`, `dotnet format`.</step>
+    <step order="9">Verify NFR-10 (no new packages). Confirm no publish-size delta.</step>
+    <step order="9.5">Run quality gates: `code-review` on `GetResourceDetailTool.cs`; `adr-check` verifies ADR-008 (caller auth check inside meta-tool), ADR-010 (DI), ADR-013 (NOT exposed via PublicContracts), ADR-015 (audit auto-applies), ADR-019 (errors propagate cleanly), ADR-029 (no new packages).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 023 ✅. Update `current-task.md`.</step>
+    <step order="11">Document deviations in `projects/ai-spaarke-action-engine-r1/notes/handoffs/`. Commit with brief recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, format</tool>
+    <tool name="git">State + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/MetaTools/GetResourceDetailTool.cs</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/MetaTools/GetResourceDetailToolTests.cs</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GetResourceDetailAsync(string resourceId)` exists, decorated with `[KernelFunction]` + `[Description]` suitable for LLM tool selection.</criterion>
+    <criterion testable="true">Returns `ResourceDetail` with full parameter schema, per-parameter `SourceHints`, `SampleInvocations`, governance metadata (`humanGate`, `PhaseRestrictions`, `EvidenceRequired`) — verified by unit test.</criterion>
+    <criterion testable="true">Not-found case returns a ProblemDetails-equivalent error or throws a typed exception (per BFF convention) — verified by unit test.</criterion>
+    <criterion testable="true">Caller without read permission to the Tool gets forbidden error (ADR-008) — verified by unit test with mocked caller principal.</criterion>
+    <criterion testable="true">Parameter schema round-trips intact through serialization (JSON shape stable) — verified by unit test against golden fixture.</criterion>
+    <criterion testable="true">No new NuGet packages added (NFR-10 preserved). Reads via existing Dataverse client.</criterion>
+    <criterion testable="true">NOT exposed via `PublicContracts/IActionEngineFacade.cs` (ADR-013 boundary) — verified by grep.</criterion>
+    <criterion testable="true">Supports spec gate G2 (conversational invocation resolves intent → Tool) — the discovery → inspect → invoke flow requires this meta-tool.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The choice between reading from Dataverse (canonical, fresh, full schema) vs the AI Search index (already in memory, faster) matters here. Design.md §5 specifies Dataverse-canonical with the index as a search projection. Stick with Dataverse reads — `GetResourceDetail` is called less frequently than `FindResources` (one per candidate-inspect, not one per turn).
+
+    `SourceHints` is the critical UX feature: the LLM uses these to decide which parameters to silently auto-resolve from `surfaceContext` vs which to ask the user about. The shape must be expressive enough but not so verbose it bloats token budgets. Mirror the design.md §7.4.1 example shape exactly.
+
+    Caller's read permission MAY be broader than invoke permission. This task's auth check is "can caller see this Tool" not "can caller invoke" — invoke check happens at `InvokeResource` (task 024) or at `IToolHandlerRegistry` dispatch (task 026).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with reason from `&lt;rigor-reason&gt;`. Follow task-execute skill for checkpoint protocol every 3 steps and quality gates at Step 9.5.
+    </protocol>
+  </execution>
+</task>

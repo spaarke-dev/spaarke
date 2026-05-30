@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Run `code-review` + `adr-check` on all project code; `repo-cleanup`; update README → Complete; lessons-learned; archive</title>
+    <phase>Wrap-up: Project Closure</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>073</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, cleanup</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Project wrap-up runs `code-review` + `adr-check` on entire project surface; modifies README + plan.md; produces lessons-learned; final quality gate per task-create Step 3.7</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task; sequential; must run after all deploy + validation tasks complete</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Execute the mandatory project wrap-up per `task-create` skill Step 3.7: run `code-review` + `adr-check` on all Action Engine project code, run `repo-cleanup`, update README → Complete with all 12 graduation criteria checked, update plan.md → Complete, write lessons-learned, archive the project. This is the final task; project is not "Complete" until this task passes.
+  </prompt>
+
+  <role>
+    Senior Spaarke platform engineer with full-project closure expertise. Familiar with `code-review`, `adr-check`, `repo-cleanup` skills and the canonical project-completion checklist from `task-create` Step 3.7.
+  </role>
+
+  <goal>
+    Project state:
+    - `code-review` ran on all Action Engine code; critical issues fixed; report archived
+    - `adr-check` ran on all Action Engine code; all 15 applicable ADRs verified; violations fixed
+    - `repo-cleanup projects/ai-spaarke-action-engine-r1` ran; ephemeral files removed; handoffs archived
+    - `README.md` status = **Complete**; Last Updated set; Phase = Complete; Progress = 100%; Completed Date set; ALL 12 graduation criteria (G1–G12) checkboxes ✅
+    - `plan.md` status = **Complete**; all milestone statuses ✅
+    - `notes/lessons-learned.md` exists with notable insights (what worked, what didn't, what to carry to R2)
+    - `tasks/TASK-INDEX.md` shows ALL tasks ✅
+    - `current-task.md` set to "none — project complete"
+
+    Project verifiably complete and ready for merge-to-master.
+  </goal>
+
+  <context>
+    <background>
+      This is the mandatory final task per `task-create` skill Step 3.7. Skipping or shortcutting it leaves the project in a half-closed state: undocumented quality issues, ephemeral files cluttering the repo, stale README, missing lessons-learned. The R2 project that follows will inherit this debt.
+
+      The 12 graduation criteria are spec-defined (`spec.md` §Success Criteria + `plan.md` §7). G1–G9 are verified by tasks 060–066; G10 by task 001; G11–G12 by `adr-check` + `code-review` in this task.
+    </background>
+    <relevant-files>
+      <file>projects/ai-spaarke-action-engine-r1/README.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/plan.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/lessons-learned.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/current-task.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/</file>
+      <file>src/solutions/SpaarkeAi/src/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="task-create skill Step 3.7">Wrap-up is MANDATORY for every project. MUST run all 8 enumerated steps; MUST NOT skip code-review or adr-check.</constraint>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService — verify in `adr-check`.</constraint>
+    <constraint source="ADR-008">Endpoint-filter authorization on every Action Engine endpoint — verify via `adr-check` (G11).</constraint>
+    <constraint source="ADR-010">Feature-module DI via `AddActionEngineModule()` ≤15 non-framework registrations — verify in `adr-check`.</constraint>
+    <constraint source="ADR-013">No CRUD-side caller injects AE internals — verify via `code-review` grep audit (G12).</constraint>
+    <constraint source="ADR-015">Audit middleware extension writes Tier 2 hash + Tier 3 Cosmos per Tool dispatch — verify via `adr-check`.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 + dark-mode parity on `GateApprovalCard` — verify via `code-review`.</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2 compliance on all surfaces — verify via `adr-check`.</constraint>
+    <constraint source="ADR-029">Publish hygiene ≤5MB delta — already verified by task 065 (G8); reference here.</constraint>
+    <constraint source="project">All 12 graduation criteria MUST be ✅ before README status flips to Complete.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/task-create/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/plan.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/README.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Wrap-up 8-step protocol" location=".claude/skills/task-create/SKILL.md">Step 3.7 enumerates the canonical 8 wrap-up steps; do not deviate.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Pre-wrap-up check: task 073 (post-deploy validation) ✅ in TASK-INDEX.md; all G1–G9 criteria PASS.</step>
+    <step order="1">**Step 3.7 #1**: Run `/code-review` on all Action Engine project code. Targets: `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/`, `src/server/api/Sprk.Bff.Api/Api/Ai/Action*.cs`, `src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledActionDispatchJobHandler.cs`, `src/solutions/SpaarkeAi/src/`, `src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/`. Capture report.</step>
+    <step order="2">**Step 3.7 #1 cont.**: Fix critical (P0/P1) issues from code-review. Re-run code-review to confirm. Defer non-critical (P3) to R2 — log in lessons-learned.</step>
+    <step order="3">**Step 3.7 #1 cont.**: Run `/adr-check` on all Action Engine code. Verify all 15 applicable ADRs (per project CLAUDE.md §Resources). Capture report. Fix violations.</step>
+    <step order="3.5">Verify G11 (every Action Engine endpoint has endpoint-filter auth) via grep audit: `Grep` for `MapPost|MapGet|MapPut` in Action Engine endpoints + verify `.AddEndpointFilter` on each.</step>
+    <step order="3.6">Verify G12 (no CRUD-side caller injects AE internals) via grep audit: `Grep` for `IActionOrchestrationService` references outside `Services/Ai/ActionEngine/` — should find ZERO. If non-zero, refactor consumer to use `IActionEngineFacade`.</step>
+    <step order="4">**Step 3.7 #2**: Run `/repo-cleanup projects/ai-spaarke-action-engine-r1`. Review cleanup report; approve removals of `notes/debug/`, `notes/spikes/` (intermediate spike files; final reports keep), `notes/drafts/`; archive `notes/handoffs/` → `.archive/`.</step>
+    <step order="5">Checkpoint via `context-handoff` (mandatory after Step 3 + 4 — 3+ completed wrap-up steps).</step>
+    <step order="6">**Step 3.7 #3**: Update `README.md`:
+      - Status → **Complete**
+      - Last Updated → today
+      - Phase → Complete; Progress → 100%
+      - Completed Date → today
+      - Check ALL 12 graduation criteria (G1–G12) checkboxes ✅
+      - Add Changelog entry: "Project complete; merged to master {date}; lessons-learned at notes/lessons-learned.md"</step>
+    <step order="7">**Step 3.7 #4**: Update `plan.md`:
+      - Status → **Complete**
+      - All milestone statuses → ✅
+      - Add a footer "Outcomes" section linking lessons-learned + verifying task references for each criterion</step>
+    <step order="8">**Step 3.7 #5**: Create `projects/ai-spaarke-action-engine-r1/notes/lessons-learned.md`. Include: what worked (e.g., Hybrid D reuse, parallel-group execution), what didn't (e.g., specific bloat surprises, scheduler-choice churn), what to carry to R2 (e.g., Visual Builder, Conversational Builder Agent, signal-triggered Monitors, expanded template library).</step>
+    <step order="9">**Step 3.7 #6**: Final verification:
+      - `tasks/TASK-INDEX.md`: ALL tasks ✅ (including 090)
+      - `current-task.md`: set to "none — project complete; ready for merge-to-master"
+      - All docs current; no critical issues remaining; cleanup completed
+      - All 12 graduation criteria ✅ in README</step>
+    <step order="9.5">Run `/adr-check` and `/code-review` as quality gates per FULL rigor — confirm no regressions from wrap-up edits to README/plan.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 090 status ✅ (final task). Update `current-task.md` to "none — project complete".</step>
+    <step order="11">Document deviations under `projects/ai-spaarke-action-engine-r1/notes/handoffs/`. Recommend next action to user: "Project complete; run `/merge-to-master` to merge `work/ai-spaarke-action-engine-r1` into `master`."</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Shell commands for cleanup + grep audits</tool>
+    <tool name="git">Status verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/README.md (status → Complete; G1–G12 ✅)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/plan.md (status → Complete)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/lessons-learned.md (new)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (all tasks ✅)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (set to "none")</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 12 graduation criteria from README checked ✅; README status = Complete; lessons-learned written; repo-cleanup completed.</criterion>
+    <criterion testable="true">`/code-review` ran on all Action Engine code; critical issues fixed; report shows no remaining P0/P1.</criterion>
+    <criterion testable="true">`/adr-check` ran on all Action Engine code; all 15 applicable ADRs verified; no violations.</criterion>
+    <criterion testable="true">G11 verified via grep: every Action Engine endpoint has `.AddEndpointFilter&lt;...&gt;()`.</criterion>
+    <criterion testable="true">G12 verified via grep: ZERO references to `IActionOrchestrationService` outside `Services/Ai/ActionEngine/`.</criterion>
+    <criterion testable="true">`/repo-cleanup` ran; ephemeral files removed; handoffs archived.</criterion>
+    <criterion testable="true">`plan.md` status = Complete; all milestones ✅.</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` exists with non-trivial content (what worked / didn't / carry-to-R2).</criterion>
+    <criterion testable="true">All tasks in `TASK-INDEX.md` are ✅ (including 090); `current-task.md` set to "none — project complete".</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the **mandatory final task** per `task-create` skill Step 3.7. Do not declare project complete without running all 8 wrap-up steps.
+
+    `code-review` + `adr-check` at FULL rigor — this is the only task where they are mandatory (per task-create wrap-up protocol; other tasks at STANDARD/MINIMAL skip them).
+
+    Carry-to-R2 items in lessons-learned: Visual Builder, Conversational Builder Agent v1+v2, expanded template library (15+), Assistant PCF on entity forms, signal/event-triggered Monitors, `EvaluatorGate` JPS Action category, `PlaybookExecutionFlow` shared component, hard rate-limit caps. See spec.md §Out of Scope.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow task-execute skill including quality gates at Step 9.5. Invoke `code-review`, `adr-check`, and `repo-cleanup` skills as enumerated in Steps 1–4.
+    </protocol>
+  </execution>
+</task>

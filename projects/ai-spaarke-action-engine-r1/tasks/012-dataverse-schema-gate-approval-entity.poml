@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Dataverse Schema — Gate Approval Queue Entity (sprk_gate_approval)</title>
+    <phase>Phase 1: Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>030, 031, 032, 033, 034, 035</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>The `sprk_gate_approval` entity is the queue table consumed by `DataversePrecedentBoardGateResolver`; status field drives the resume-on-approval lifecycle for paused Action runs; mis-shaped gate types or status states force rework across Phase 3 (4 resolvers)</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only `sprk_gate_approval` entity definition; disjoint from tasks 010 (action entities), 011 (sprk_toolregistry), 013 (sprk_aichatcontextmap)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create the `sprk_gate_approval` Dataverse entity — the queue table consumed by `DataversePrecedentBoardGateResolver` (Phase 3) and surfaced via `GateApprovalCard` Fluent v9 component. Carries the five gate types (`EthicsCritical`, `MeaningCritical`, `FinalDelivery`, `EngagementAcceptance`, `TeamSelection`) plus `Custom`, a status field that drives the resume-on-approval flow, and tenant scoping (NFR-05).
+  </prompt>
+
+  <role>
+    SPAARKE Dataverse schema engineer with experience modeling queue-style entities (status-driven, polled-or-webhook-resumed). You understand the gate-resolution flow: Action run pauses → `sprk_gate_approval` record written → user approves/rejects via UI or webhook → run resumes or terminates with reason.
+  </role>
+
+  <goal>
+    `sprk_gate_approval` entity exists in dev with these fields:
+
+    1. **`approvalId`** — Text (primary name); GUID
+    2. **`runId`** — Lookup → `sprk_actionrun`; the paused run awaiting this gate
+    3. **`gateType`** — Choice: EthicsCritical, MeaningCritical, FinalDelivery, EngagementAcceptance, TeamSelection, Custom
+    4. **`status`** — Choice: Pending, Approved, Rejected, TimedOut
+    5. **`requestedAt`** — DateTime
+    6. **`requestedBy`** — Lookup → SystemUser (the user/agent requesting approval)
+    7. **`resolvedAt`** — DateTime, nullable
+    8. **`resolvedBy`** — Lookup → SystemUser, nullable (the approver/rejecter)
+    9. **`reason`** — Text(Memo); rejection reason or approval rationale
+    10. **`contextPayloadJson`** — Text(Memo); JSON: the gate's input context (what's being approved)
+    11. **`gateConfigJson`** — Text(Memo); JSON: gate-specific config (timeout, resolver type, callback URL)
+    12. **`timeoutAt`** — DateTime; computed `requestedAt + 5min` default per spec FR-17 (configurable via gateConfigJson)
+    13. **`tenantId`** — Text; tenant scoping (NFR-05)
+    14. **`correlationId`** — Text; for audit + log correlation with parent run
+
+    Entity packed into the same solution as task 010 + 011 entities. Deliverable: 2 sample records created (one Pending, one Approved), confirming all fields are usable.
+  </goal>
+
+  <context>
+    <background>
+      The gate approval flow per spec FR-17 + design §5:
+      1. Action run hits a gate (e.g., `humanGate = true` on a `SendEmail` Tool)
+      2. The `IGateResolver` impl (Phase 3) writes a `sprk_gate_approval` record with status = Pending, gateType = ..., timeoutAt = now + 5 min
+      3. UI (`GateApprovalCard`) or webhook caller reads the record, prompts the user
+      4. User approves → status flips to Approved; run resumes (resolver detects via poll or webhook)
+      5. User rejects → status flips to Rejected with reason; run terminates with reason
+      6. Timeout (5 min default) → status flips to TimedOut → auto-reject
+
+      The 5-minute default timeout is a hard spec requirement (FR-17). It is stored as `timeoutAt` (computed DateTime) so a sweeper job can scan for expired pending records and flip them to TimedOut.
+
+      The four resolver implementations (`DataversePrecedentBoardGateResolver`, `InteractiveGateResolver`, `WebhookGateResolver`, `AutoApproveGateResolver`) all WRITE to this entity. The first two also poll/listen on it for status transitions. `WebhookGateResolver` writes initially then receives external callback. `AutoApproveGateResolver` writes with status = Approved immediately (audit trail without user interaction).
+
+      Gate types per spec scope section: `EthicsCritical`, `MeaningCritical`, `FinalDelivery`, `EngagementAcceptance`, `TeamSelection`, plus `Custom`. Do NOT add new gate types without spec amendment.
+
+      Tenant scoping: `tenantId` text field, required. Cross-tenant gate visibility forbidden (NFR-05).
+    </background>
+    <relevant-files>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">Thin Dataverse plugins. MUST NOT register plugins on `sprk_gate_approval` (e.g., do NOT auto-flip status via plugin — the BFF resolver layer handles state transitions).</constraint>
+    <constraint source="ADR-017">Run record status (in `sprk_actionrun`, not this entity) follows ADR-017. This gate entity has its own 4-state status: `Pending | Approved | Rejected | TimedOut`. The two state machines are linked but separate.</constraint>
+    <constraint source="ADR-019">If any custom API is registered against this entity (deferred to Phase 3), error responses use ProblemDetails RFC 7807.</constraint>
+    <constraint source="project">Five gate types fixed per spec scope section: `EthicsCritical`, `MeaningCritical`, `FinalDelivery`, `EngagementAcceptance`, `TeamSelection`, plus `Custom`. No new gate types without spec amendment.</constraint>
+    <constraint source="project">Default timeout 5 min per FR-17. `timeoutAt = requestedAt + 5min` if not overridden via `gateConfigJson.timeoutOverride`.</constraint>
+    <constraint source="project">Tenant-scoped via required `tenantId` text field (NFR-05). Cross-tenant queries forbidden.</constraint>
+    <constraint source="project">Packed into the same solution as tasks 010 + 011 entities for atomic deploy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-create-schema (Web API + Python SDK)" location=".claude/skills/dataverse-create-schema/SKILL.md">Canonical pattern for creating tables, columns, relationships, and option-sets when PAC CLI lacks the surface.</pattern>
+      <pattern name="Queue-style entity (status-driven, polled-or-callback-resumed)" location="projects/ai-spaarke-action-engine-r1/design.md">Reference: `sprk_gate_approval` is the canonical example; resolvers in Phase 3 follow this contract.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, baseline build passes, task 001 status is ✅. Load the `dataverse-create-schema` skill. (task-execute Step 0)</step>
+    <step order="1">Read spec.md FR-17 + design §5 (IGateResolver section + 5 gate types) + coordination-assessment-with-insights-engine.md (joint ownership of gate primitive). Confirm the 14-field set + the 4-state gate status machine.</step>
+    <step order="2">Identify target solution from task 010's decision (`notes/decisions/solution-targeting.md`). Use the same solution for atomic deploy.</step>
+    <step order="3">Author the entity schema as Python / Web API script. Create global Choice option-sets first: `sprk_gateapprovalgatetype` (6 values) and `sprk_gateapprovalstatus` (4 values). Then create the entity, then add the 14 columns. The lookup to `sprk_actionrun` requires task 010 to be complete (already in dependencies).</step>
+    <step order="4">Run the schema script against the dev environment. Confirm via Web API GET on the EntityDefinition that all 14 columns landed with correct types and Choice value labels.</step>
+    <step order="5">Pack the entity into the same solution as tasks 010 + 011 entities. Verify the export contains `sprk_gate_approval` + the 2 new option-sets.</step>
+    <step order="6">Smoke-test in maker portal: create 2 sample records — one Pending (gateType=FinalDelivery, status=Pending, timeoutAt=now+5min) and one Approved (status=Approved, resolvedAt=now, resolvedBy=current user, reason="LGTM"). Verify Choice labels render correctly, lookup to `sprk_actionrun` resolves.</step>
+    <step order="7">Append the entity definition to `docs/data-model/action-engine-entities.md`. Include the 4-state gate status state machine diagram and the 6 gate-type taxonomy.</step>
+    <step order="8">Run quality gates per task-execute Step 9.5: `code-review` on the schema script + the schema doc update; `adr-check` confirms ADR-002 (no plugins) and ADR-017 (gate status is separate from run status — both documented).</step>
+    <step order="8.5">Verify baseline build still passes: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark task 012 ✅; verify it unblocks tasks 030, 031, 032, 033, 034, 035. Reset `current-task.md` to point to next pending task.</step>
+    <step order="10">Document any deviations from this plan in `projects/ai-spaarke-action-engine-r1/notes/handoffs/task-012-handoff.md` and add a brief commit message recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-create-schema">Skill: Web API + Python SDK for table/column/option-set creation</tool>
+    <tool name="pac">CLI for solution pack/unpack/export</tool>
+    <tool name="dotnet">Verify baseline build still passes</tool>
+    <tool name="git">Confirm state + commit</tool>
+    <tool name="terminal">Run shell + Python scripts</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/dataverse/action-engine/create-gate-approval-entity.py</output>
+    <output type="solution">src/dataverse/solutions/SpaarkeActionEngine/ (extension) — `sprk_gate_approval` + 2 option-sets</output>
+    <output type="docs">docs/data-model/action-engine-entities.md (extended with `sprk_gate_approval` section + state-machine diagram)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`sprk_gate_approval` exists in dev; verified by Web API GET on EntityDefinition.</criterion>
+    <criterion testable="true">`gateType` Choice has exactly 6 values: `EthicsCritical`, `MeaningCritical`, `FinalDelivery`, `EngagementAcceptance`, `TeamSelection`, `Custom` — no extras, no omissions.</criterion>
+    <criterion testable="true">`status` Choice has exactly 4 values: `Pending`, `Approved`, `Rejected`, `TimedOut`.</criterion>
+    <criterion testable="true">`runId` lookup resolves against `sprk_actionrun` (created in task 010).</criterion>
+    <criterion testable="true">`timeoutAt` field accepts DateTime values; default-computation logic (requestedAt + 5min) implemented at write time by Phase 3 resolver (not in this task).</criterion>
+    <criterion testable="true">2 sample records created in maker portal — one Pending, one Approved — both render correctly with lookup resolution.</criterion>
+    <criterion testable="true">`tenantId` text field is required (NFR-05).</criterion>
+    <criterion testable="true">`docs/data-model/action-engine-entities.md` includes `sprk_gate_approval` section + 4-state status diagram + 6 gate-type taxonomy.</criterion>
+    <criterion testable="true">Baseline build still passes: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The gate status state machine (`Pending → Approved | Rejected | TimedOut`) is **separate from** the run status state machine in `sprk_actionrun` (which follows ADR-017). Don't confuse them. A run that hits a gate stays in `Running` status; only after the gate resolves does the run transition to `Completed`, `Failed`, or back to `Running` (for subsequent steps).
+
+    The 5-minute timeout default is a hard spec requirement (FR-17). DO NOT make it shorter or longer without spec amendment. It is configurable per-Action via `gateConfigJson.timeoutOverride`, but the entity default is 5 min.
+
+    A sweeper job (Phase 3) will scan for expired Pending records every minute or so and flip them to TimedOut. The entity just stores `timeoutAt`; the sweeper logic lives in BFF.
+
+    `coordination-assessment-with-insights-engine.md` notes joint ownership of the gate primitive. Insights Engine will CONSUME `IGateResolver` (and write to this entity), not redefine it. Action Engine defines it canonically.
+
+    Do NOT add plugins to auto-resolve gates or flip statuses. The resolver layer in BFF (Phase 3) handles all state transitions per ADR-002.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5. Use the `dataverse-create-schema` skill for the actual entity creation work.
+    </protocol>
+  </execution>
+</task>

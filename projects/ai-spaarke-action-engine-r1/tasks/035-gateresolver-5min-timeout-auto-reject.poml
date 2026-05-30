@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>5-min auto-reject timeout across all resolvers; configurable per-Action; integration test of all timeout paths</title>
+    <phase>Phase 3: IGateResolver + Approval Surface</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>031, 032, 033, 034</dependencies>
+    <blocks>040, 042</blocks>
+    <tags>bff-api, ai, testing</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements `GateTimeoutService` BackgroundService that sweeps Pending gates across ALL resolvers; G3 graduation-gate enforcement; modifies `.cs` files in `Sprk.Bff.Api`; tags include bff-api + ai + testing; integration tests cover all 4 resolver timeout paths; audit-critical per ADR-015</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on ALL of Group D (031, 032, 033, 034) being complete because the timeout service sweeps all four resolver-state stores; integration tests exercise all four paths together; main-session execution preserves end-to-end visibility</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement `GateTimeoutService : BackgroundService` at `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateTimeoutService.cs` that sweeps Pending gates across ALL four resolvers and auto-rejects on `GateRequest.TimeoutSeconds` expiry (default 300 = 5 min; configurable per-Action). Two sweep targets: (a) `sprk_gate_approval` records with `Status=Pending` and `CreatedAtUtc + TimeoutSeconds &lt; now` → write `Status=TimedOut` + audit; (b) `IGateApprovalChannel`'s pending-TCS dictionary entries that exceed timeout → resolve TCS with `TimedOut`. Webhook callbacks expired by timestamp skew handle their own rejection (covered by task 033). Write an integration test suite `ActionEngine.IntegrationTests.GateResolution` exercising the timeout path for all 4 resolvers — this is the G3 graduation gate.
+  </prompt>
+
+  <role>
+    Senior Spaarke BFF engineer with BackgroundService + sweep-job experience. You write services that are idempotent under multi-instance hosting (App Service scale-out), audit every state transition, and emit App Insights metrics so timeout firings are observable.
+  </role>
+
+  <goal>
+    Concrete deliverables:
+    1. **`GateTimeoutService : BackgroundService`** — periodic sweep (default 30-sec interval, configurable) that:
+       (a) queries `sprk_gate_approval` for Pending records past timeout → updates to `TimedOut` + audits.
+       (b) iterates `IGateApprovalChannel` pending-TCS dictionary → flips expired entries to `TimedOut`.
+    2. **Per-Action timeout configurability** — `Action.governance.gateTimeoutSeconds` overrides the default 300; resolvers populate `GateRequest.TimeoutSeconds` from this when creating gates.
+    3. **Idempotency under multi-instance** — sweep uses optimistic concurrency on the Dataverse update (`If-Match` etag); if another instance already flipped the record, skip + log.
+    4. **App Insights observability** — `gate_engine.timeout_fired` custom event per timeout outcome (resolver name, gateType, actionRunId, elapsedSeconds); `gate_engine.pending_count` custom metric per sweep iteration.
+    5. **DI registration** — `services.AddHostedService&lt;GateTimeoutService&gt;();` in `AddGatesFeature()`. Configurable sweep interval via `IOptions&lt;GateTimeoutServiceOptions&gt;`.
+    6. **Integration test suite** `ActionEngine.IntegrationTests.GateResolution` at `tests/integration/Sprk.Bff.Api.IntegrationTests/ActionEngine/GateResolutionTests.cs` covering all 4 resolvers' timeout paths — the **G3 graduation gate** per spec §"Success Criteria" #3.
+    7. **`GateTimeoutServiceOptions` config** — bound from `appsettings.json` section `ActionEngine:GateTimeoutService`: `SweepIntervalSeconds: 30`, `DefaultTimeoutSeconds: 300`.
+
+    Deliverable locations:
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateTimeoutService.cs`
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateTimeoutServiceOptions.cs`
+    - `tests/integration/Sprk.Bff.Api.IntegrationTests/ActionEngine/GateResolutionTests.cs`
+    - Extend `IGateApprovalChannel` (task 032) with `ExpirePendingAsync(TimeSpan maxAge)` method for the sweep
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-17 + design §5, default 5-min timeout is uniform across all 4 resolvers — but the implementation differs:
+      - **DataverseQueueGateResolver** (031): records live in Dataverse; sweep updates `sprk_gate_approval.status` to `TimedOut`.
+      - **InteractiveInChatGateResolver** (032): pending TCS in `SseGateApprovalChannel` singleton dictionary; sweep flips TCS to `TimedOut`.
+      - **WebhookGateResolver** (033): outbound POST already happened; pending state tracked alongside Dataverse queue OR in a `WebhookPendingStore` (per task 033 decision); sweep covers both.
+      - **AutoApproveGateResolver** (034): synchronous Approved — never Pending; no timeout path needed.
+
+      The G3 graduation gate (spec §"Success Criteria" #3 + plan.md §7 G3) is: **"All gate paths route correctly; 5-min timeout auto-rejects (verified by integration test)"**. This task ships that integration test as the canonical verification artifact.
+
+      Operational concern: multi-instance App Service scale-out means multiple `GateTimeoutService` instances may run simultaneously. Mitigations: (a) optimistic concurrency on Dataverse update, (b) singleton TCS dictionary is naturally single-instance scoped per channel (one channel per BFF instance), (c) `IDistributedLock` (Redis-based per ADR-009) optional but not required if (a) + (b) suffice.
+    </background>
+    <relevant-files>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/plan.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/IGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/IGateApprovalChannel.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/DataverseQueueGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/InteractiveInChatGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/WebhookGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/AutoApproveGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateTimeoutService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateTimeoutServiceOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/ActionEngine/GateResolutionTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService. `GateTimeoutService` is a hosted background service in-proc with the BFF.</constraint>
+    <constraint source="ADR-004">Idempotent under at-least-once / multi-instance. Optimistic concurrency on Dataverse update.</constraint>
+    <constraint source="ADR-008">N/A (no new HTTP endpoints from this task).</constraint>
+    <constraint source="ADR-009">Distributed cache available via `IDistributedCache`; not required if sweep idempotency holds via (a) optimistic concurrency + (b) singleton TCS dictionary. Document the decision.</constraint>
+    <constraint source="ADR-010">Feature-module DI. This task adds 2 registrations (hosted service + options). Total Phase 3 budget tracking continues from task 034's `phase3-di-budget.md`.</constraint>
+    <constraint source="ADR-013">AI Architecture. BFF placement.</constraint>
+    <constraint source="ADR-015">Audit per gate decision INCLUDING auto-timeout `TimedOut` transitions. Tier 2 hash + Tier 3 work history. Sweep emits one audit per timeout.</constraint>
+    <constraint source="ADR-019">ProblemDetails for any HTTP surface. N/A.</constraint>
+    <constraint source="ADR-029">Publish-size delta ≤ 5 MB compressed. This task adds ≤300 LoC + tests; expected delta &lt; 0.1 MB.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist: placement = BFF (sweep coupled to in-proc TCS dictionary + Dataverse client); no new packages; publish-size impact verified; ADRs cited.</constraint>
+    <constraint source="project">Default timeout 300 seconds (5 minutes); configurable per-Action via `governance.gateTimeoutSeconds`; sweep interval 30 sec default (`appsettings.json` configurable).</constraint>
+    <constraint source="project G3 gate">Integration test `ActionEngine.IntegrationTests.GateResolution` MUST cover all 4 resolvers' timeout paths. Spec §"Success Criteria" #3.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-009-redis-first-caching.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-audit-middleware.md</file>
+      <file>.claude/adr/ADR-019-problem-details.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="BackgroundService sweep" location="src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs">Reference shape for hosted services in this codebase — periodic loop with cancellation propagation.</pattern>
+      <pattern name="Integration tests" location=".claude/patterns/testing/integration-tests.md">Test-server-hosted BFF + Testcontainer Dataverse mocks; canonical setup.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: working tree clean, branch `work/ai-spaarke-action-engine-r1`, baseline build passes, tasks 031–034 all ✅. Load knowledge. Declare RIGOR LEVEL: FULL.</step>
+    <step order="1">Read all 4 resolver implementations (031–034). Trace Pending-state storage for each — identify all sweep targets. Confirm the contract: resolvers populate `GateRequest.TimeoutSeconds` from `Action.governance.gateTimeoutSeconds` (or default 300).</step>
+    <step order="2">Create `GateTimeoutServiceOptions.cs` — POCO with `SweepIntervalSeconds` (default 30) + `DefaultTimeoutSeconds` (default 300). Bind from `appsettings.json` section `ActionEngine:GateTimeoutService`.</step>
+    <step order="3">Add `ExpirePendingAsync(TimeSpan maxAge, CancellationToken ct)` to `IGateApprovalChannel` (task 032). Implementation in `SseGateApprovalChannel`: iterate dictionary, flip TCS to `TimedOut` for entries where `now - createdAt > maxAge`. Returns count of flipped entries. Add corresponding unit test.</step>
+    <step order="4">Create `GateTimeoutService.cs` — `BackgroundService` with periodic loop. Each iteration:
+      (a) Query `sprk_gate_approval` for Pending records past `CreatedAtUtc + TimeoutSeconds`. Update each to `TimedOut` with optimistic concurrency (`If-Match` etag). Audit each via `IAuditService.LogGateDecision(GateDecision.TimedOut, reason: "auto-rejected after timeout")`.
+      (b) Call `IGateApprovalChannel.ExpirePendingAsync(MaxAge)`. For each flipped TCS, audit `TimedOut`.
+      (c) Emit App Insights `gate_engine.timeout_fired` custom event per outcome + `gate_engine.pending_count` metric per iteration.
+      (d) `await Task.Delay(SweepIntervalSeconds, stoppingToken)`. Handle `OperationCanceledException` gracefully.</step>
+    <step order="5">Register DI in `AddGatesFeature()`: `services.Configure&lt;GateTimeoutServiceOptions&gt;(...); services.AddHostedService&lt;GateTimeoutService&gt;();`. Update `phase3-di-budget.md` running tally (now ~12 of 15).</step>
+    <step order="6">Update each resolver (031–034) to read `Action.governance.gateTimeoutSeconds` (if set) when constructing the `GateRequest` they pass to the channel/Dataverse. Use `GateTimeoutServiceOptions.DefaultTimeoutSeconds` as the fallback. Minimal-diff edits; do NOT change resolver behavior beyond timeout-value population.</step>
+    <step order="7">Write integration test suite `ActionEngine.IntegrationTests.GateResolution` covering:
+      (a) `DataverseQueueGateResolver_TimesOut_AfterConfiguredSeconds` — create Action with `gateTimeoutSeconds=5`; invoke gate; advance time (or actual wait in short-window test); assert sweep updates record + audit.
+      (b) `InteractiveInChatGateResolver_TimesOut_AfterConfiguredSeconds` — invoke; never POST to respond endpoint; assert sweep resolves TCS + outcome = `TimedOut` + audit.
+      (c) `WebhookGateResolver_TimesOut_AfterConfiguredSeconds` — invoke; never callback; assert sweep covers webhook pending state + audit. Coordinate with task 033 storage decision.
+      (d) `AutoApproveGateResolver_NoTimeoutPath_AlwaysImmediate` — invoke; assert synchronous `Approved` (no Pending state, sweep has nothing to do).
+      (e) `MultiInstance_Idempotent_OptimisticConcurrency` — simulate two sweep instances racing on same Dataverse record; assert exactly one timeout audit emitted, second instance no-ops cleanly.
+      (f) `Audit_TimedOutOutcome_LoggedWithReason` — assert audit contains `Reason = "auto-rejected after timeout"` and `GateDecision = TimedOut`.</step>
+    <step order="8">Build + run tests: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0; `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/` passes new suite. Use short timeout values (e.g., 5 sec) in tests for fast feedback; sweep interval also reduced for tests via test-overridden options.</step>
+    <step order="9">Measure publish-size delta; expect &lt; 0.1 MB. Record in `notes/measurements/035-publish-size-delta.md`. Phase 3 cumulative delta: sum of 030–035 deltas; record cumulative in same file.</step>
+    <step order="9.5">Run quality gates: `code-review` (multi-instance idempotency correctness; sweep interval not too aggressive; audit ordering; observability metric naming), `adr-check` (ADR-001/004/009/010/013/015/029).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: 035 ✅. Update `current-task.md`. Mark Phase 3 ~60% complete (still pending: 036 GateApprovalCard). G3 graduation gate verified by `GateResolutionTests` suite passing.</step>
+    <step order="11">Commit + push. Document any contract refinements in `notes/decisions/035-timeout-sweep-design.md` (interval, multi-instance handling, observability).</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size measurement</tool>
+    <tool name="git">Commit and push</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateTimeoutService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateTimeoutServiceOptions.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/IGateApprovalChannel.cs (extended with `ExpirePendingAsync`)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/SseGateApprovalChannel.cs (extended)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/DataverseQueueGateResolver.cs (timeout-value population)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/InteractiveInChatGateResolver.cs (timeout-value population)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/WebhookGateResolver.cs (timeout-value population)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (extended)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/appsettings.json (ActionEngine:GateTimeoutService section)</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/ActionEngine/GateResolutionTests.cs</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/measurements/035-publish-size-delta.md</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/decisions/035-timeout-sweep-design.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GateTimeoutService.cs` + `GateTimeoutServiceOptions.cs` exist; compile; service starts under `BackgroundService` lifecycle.</criterion>
+    <criterion testable="true">6 integration tests pass in `ActionEngine.IntegrationTests.GateResolution`: all 4 resolver timeout paths + multi-instance idempotency + audit-reason verification.</criterion>
+    <criterion testable="true">**G3 gate verified**: All gate paths route correctly; 5-min timeout auto-rejects (verified by integration test — G3 per spec §"Success Criteria" #3 / plan.md §7).</criterion>
+    <criterion testable="true">Default timeout = 300 seconds; configurable per-Action via `Action.governance.gateTimeoutSeconds`; configurable globally via `appsettings.json:ActionEngine:GateTimeoutService:DefaultTimeoutSeconds`.</criterion>
+    <criterion testable="true">Sweep interval = 30 sec default; configurable via `SweepIntervalSeconds` option.</criterion>
+    <criterion testable="true">Multi-instance idempotency verified: simulated concurrent sweeps on same Dataverse record produce exactly one `TimedOut` audit.</criterion>
+    <criterion testable="true">Audit hook called on every timeout outcome with `GateDecision.TimedOut` and `Reason = "auto-rejected after timeout"`.</criterion>
+    <criterion testable="true">App Insights custom events `gate_engine.timeout_fired` + metric `gate_engine.pending_count` emitted per sweep iteration.</criterion>
+    <criterion testable="true">ADR-010 DI budget honored: total `AddActionEngineModule()` ≤15 — running tally in `phase3-di-budget.md` updated.</criterion>
+    <criterion testable="true">Publish-size delta &lt; 0.1 MB compressed; recorded. Phase 3 cumulative delta &lt; 0.5 MB.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass at Step 9.5; ADRs cited in PR description.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Multi-instance idempotency is the highest-risk correctness axis. Two options:
+    - **Optimistic concurrency** (`If-Match` etag on Dataverse update): minimal new infrastructure; sweep loses race → no-op; audit emitted only by winning instance.
+    - **`IDistributedLock` (Redis)**: heavier-weight; only needed if optimistic concurrency proves insufficient.
+
+    Default to optimistic concurrency; document trade-off in `notes/decisions/035-timeout-sweep-design.md`.
+
+    Test infrastructure: short timeout values (5–10 sec) avoid wall-clock test latency. If your CI/CD runner is slow, override options via test-startup config. Avoid `Thread.Sleep` in tests — use a controllable clock abstraction (`TimeProvider` per .NET 8) for deterministic time advancement.
+
+    The G3 graduation gate test suite (`GateResolutionTests`) is the canonical artifact cited by Phase 6 task 062 (G3 verification). DO NOT inline the timeout assertions only into per-resolver tests — the unified integration suite IS the gate.
+
+    Observability metric naming follows `action_engine.*` namespace per spec NFR-07; `gate_engine.*` here is a deliberate sub-namespace for gate-specific telemetry. Coordinate with Phase 6 dashboard task if any.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5.
+    </protocol>
+  </execution>
+</task>

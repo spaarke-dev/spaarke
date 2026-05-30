@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>BFF — Action Engine Module Skeleton (Services/Ai/ActionEngine/ + AddActionEngineModule() + Program.cs registration)</title>
+    <phase>Phase 1: Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>020, 021, 022, 023, 024, 025, 026, 040, 041, 042</blocks>
+    <tags>bff-api, api, di, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `Program.cs` and creates the canonical DI surface for all Action Engine code; bff-extensions.md governance is binding; placement decision must be explicitly cited; rigor-hint = FULL by every criterion in CLAUDE.md §8</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Creates new file `Infrastructure/DI/AddActionEngineModule.cs` and adds ONE line to `Program.cs`. Task 015 creates only `Services/Ai/PublicContracts/IActionEngineFacade.cs` (different file). Task 016 deploys Azure infra (no BFF code). NO shared file edits between 014/015/016 in Phase 1 — 014 owns Program.cs edit; 015 only adds the interface file (no DI registration of impl yet).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create the BFF Action Engine module skeleton: a new `Services/Ai/ActionEngine/` folder containing only the module shape (empty placeholder service classes and the `AddActionEngineModule()` extension in `Infrastructure/DI/`), and register it in `Program.cs` adjacent to `AddJobProcessingModule()` (~line 95). Apply the scheduler topology choice from task 001's runtime ADR draft. This is a binding BFF addition — `bff-extensions.md` pre-merge checklist MUST be completed in the PR description.
+  </prompt>
+
+  <role>
+    SPAARKE BFF platform engineer experienced with ADR-010 feature-module DI patterns, .NET 8 Minimal API extension methods, and the binding governance from `.claude/constraints/bff-extensions.md`. You write code that follows the existing `AddJobProcessingModule` shape exactly — same naming, same internal structure, same registration site — so the pattern is consistent across modules.
+  </role>
+
+  <goal>
+    Three concrete outcomes:
+
+    1. **`Services/Ai/ActionEngine/` folder structure** created:
+       - `Services/Ai/ActionEngine/Orchestration/ActionOrchestrationService.cs` — class shell only (constructor, ILogger, placeholder methods; no real implementation)
+       - `Services/Ai/ActionEngine/Registry/IToolHandlerRegistry.cs` — interface shell (signatures only; impl deferred to Phase 2)
+       - `Services/Ai/ActionEngine/Models/ActionDefinition.cs` — record/class for the Action Definition DTO (mirrors `sprk_action` shape from task 010)
+       - `Services/Ai/ActionEngine/Models/ActionRun.cs` — record/class for the Run DTO
+       - `Services/Ai/ActionEngine/README.md` — folder-level overview citing ADR-013 + bff-extensions.md placement justification
+
+    2. **`Infrastructure/DI/AddActionEngineModule.cs`** — extension method on `IServiceCollection` that registers the Action Engine surface. For Phase 1 this is a skeleton: registers only the orchestration service stub. Must follow the existing `AddJobProcessingModule` pattern. ≤15 non-framework DI registrations per ADR-010.
+
+    3. **`Program.cs` registration** — add ONE line: `builder.Services.AddActionEngineModule(builder.Configuration);` immediately after the existing `AddJobProcessingModule(...)` call (~line 95). Maintain existing line ordering and conventions.
+
+    Deliverable: BFF builds cleanly (`dotnet build src/server/api/Sprk.Bff.Api/` exits 0); BFF starts without crash (`dotnet run` smoke test); publish-size delta measured and recorded (must be ≤ 5 MB compressed per NFR-10 — for a skeleton this should be negligible, &lt;500 KB).
+  </goal>
+
+  <context>
+    <background>
+      **Placement justification** (binding per CLAUDE.md §10 + `bff-extensions.md`): Action Engine lives in BFF per ADR-013 refined. The placement decision was made in spec.md §6 "Placement Justification" and validated in task 001's architecture spike. This task is the first BFF code addition, so the PR description MUST cite that justification explicitly.
+
+      **Scheduler integration**: task 001 chose the Azure-native scheduler (Logic Apps timer / Service Bus scheduled / Functions timer / Container Apps Jobs). The module skeleton stubs the dispatch entry point (`ScheduledActionDispatchJobHandler` shell, deferred to task 042 for real impl), so this task only needs to know the chosen scheduler to put the right comment + interface placeholder. Do NOT implement the handler logic here.
+
+      **DI minimalism** (ADR-010): the existing `AddJobProcessingModule(...)` in `src/server/api/Sprk.Bff.Api/Infrastructure/DI/` is the canonical reference shape. `AddActionEngineModule()` mirrors it: same naming, same internal layout, same use of named option binding from `IConfiguration`. ≤15 non-framework registrations.
+
+      **bff-extensions.md pre-merge checklist** (binding): every BFF-touching task MUST (a) state placement decision, (b) cite ADR criteria, (c) verify publish-size impact, (d) verify no new HIGH-sev CVE, (e) follow feature-module DI. This task is the canonical first invocation of all five.
+
+      **Existing reference pattern**: `Services/Ai/AnalysisOrchestrationService.cs` is the closest sibling — it's the AnalysisOrchestrationService pattern that `ActionOrchestrationService` will mirror in Phase 4. For Phase 1 we ONLY create the class shell + DI registration — no real orchestration logic.
+
+      **Coordination with task 015**: task 015 creates `Services/Ai/PublicContracts/IActionEngineFacade.cs` (interface only) in parallel. Task 014 (this task) does NOT yet register an impl for that facade — the impl is created in a later phase. The facade interface file is independent of this skeleton; both can land in parallel without conflicts.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddJobProcessingModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/decisions/runtime-topology-ADR-draft.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API. NO Azure Functions for in-proc Action execution. Scheduler external + dispatch in BFF — confirmed by task 001 runtime ADR draft.</constraint>
+    <constraint source="ADR-008">Endpoint-filter authorization. NO endpoints registered in this task (just the module DI surface), but the pattern for Phase 2+ endpoints uses `.AddEndpointFilter&lt;&gt;()`.</constraint>
+    <constraint source="ADR-010">Feature-module DI. Register via `AddActionEngineModule()` extension; NO flat `Program.cs` blob. ≤15 non-framework DI registrations.</constraint>
+    <constraint source="ADR-013">Action Engine lives in BFF per refined 2026-05-20 decision criteria. CRUD-side consumers reach via `Services/Ai/PublicContracts/` facade — created in parallel by task 015.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta MUST be ≤ 5 MB compressed (NFR-10). For a skeleton, expect &lt;500 KB. Measure and record.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist binding: placement decision stated, ADRs cited, publish-size verified, no new HIGH-sev CVE, feature-module DI followed. ALL five MUST be satisfied in PR description.</constraint>
+    <constraint source="project">Apply scheduler choice from task 001's runtime ADR draft. Stub the dispatch entry point with a comment naming the chosen scheduler (real impl in task 042).</constraint>
+    <constraint source="project">Do NOT add NuGet packages beyond what's already in `Sprk.Bff.Api.csproj`. If a package is needed (e.g., Azure AI Search client for task 016), task 015 or 016 owns adding it — NOT this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/decisions/runtime-topology-ADR-draft.md</file>
+    </files>
+    <patterns>
+      <pattern name="Feature-module DI extension" location=".claude/patterns/api/service-registration.md">`Add{Module}Module()` extension on `IServiceCollection`; canonical reference is `AddJobProcessingModule`. ≤15 registrations.</pattern>
+      <pattern name="Endpoint definition (Minimal API)" location=".claude/patterns/api/endpoint-definition.md">Pattern for Phase 2+ endpoints (this task only creates the module surface, no endpoints).</pattern>
+      <pattern name="Endpoint filters (authorization)" location=".claude/patterns/api/endpoint-filters.md">Per ADR-008; applies in Phase 2+.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, baseline build passes, task 001 status is ✅, the runtime ADR draft exists at `notes/decisions/runtime-topology-ADR-draft.md`. Load `bff-extensions.md` end-to-end. (task-execute Step 0)</step>
+    <step order="1">Read the existing `AddJobProcessingModule.cs` and `Program.cs` line ~95 (`AddJobProcessingModule` registration site). Mirror the file structure, naming, and registration shape.</step>
+    <step order="2">Read `Services/Ai/AnalysisOrchestrationService.cs` as the reference pattern for `ActionOrchestrationService` shape (constructor injection, ILogger, public async methods).</step>
+    <step order="3">Capture publish-size baseline: `dotnet publish src/server/api/Sprk.Bff.Api/ --configuration Release --runtime linux-x64 --self-contained false --output ./publish-baseline-014`. Zip the output, measure compressed size. Save baseline to `notes/spikes/task-014-publish-baseline.md`.</step>
+    <step order="4">Create the folder structure under `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/`: `Orchestration/`, `Registry/`, `Models/`, plus the `README.md` at the folder root.</step>
+    <step order="5">Create `Services/Ai/ActionEngine/Orchestration/ActionOrchestrationService.cs` — class shell only. Public sealed class. Constructor accepts `ILogger&lt;ActionOrchestrationService&gt;` and (if config bind required) options. Public async methods are stubs that throw `NotImplementedException` with a clear "implemented in Phase 4" message.</step>
+    <step order="6">Create `Services/Ai/ActionEngine/Registry/IToolHandlerRegistry.cs` — interface with method signatures only: `Task&lt;ToolResult&gt; DispatchAsync(string toolId, IDictionary&lt;string, object&gt; parameters, ToolDispatchContext context, CancellationToken ct)`. Document `PhaseToolDeniedException` will be thrown by Phase 2 impl. No concrete impl in this task.</step>
+    <step order="7">Create `Services/Ai/ActionEngine/Models/ActionDefinition.cs` and `Services/Ai/ActionEngine/Models/ActionRun.cs` — record types mirroring `sprk_action` and `sprk_actionrun` shapes from task 010. Property names use camelCase via `System.Text.Json` attribute; status field uses `ActionRunStatus` enum matching ADR-017 canonical 6-state sequence.</step>
+    <step order="8">Create `Infrastructure/DI/AddActionEngineModule.cs` — extension method on `IServiceCollection`. Register `ActionOrchestrationService` (scoped or singleton per pattern; verify against `AddJobProcessingModule`). Bind any options from `IConfiguration` under the section `"ActionEngine"`. Add a comment block at top citing the scheduler choice from task 001's runtime ADR draft. Keep total non-framework registrations ≤15 (Phase 1 should add ~3-5).</step>
+    <step order="9">Modify `Program.cs` — add ONE line: `builder.Services.AddActionEngineModule(builder.Configuration);` immediately after the existing `AddJobProcessingModule(...)` call (~line 95). Preserve existing line ordering and conventions; do NOT reformat surrounding code.</step>
+    <step order="10">Create `Services/Ai/ActionEngine/README.md` — folder overview citing: (a) placement justification from spec.md §6, (b) ADR-013 + ADR-010 + ADR-008 + ADR-029, (c) `bff-extensions.md` pre-merge checklist confirmation (placement / ADRs / publish-size / CVE / feature-module DI), (d) what's in this folder for Phase 1 vs deferred to Phase 2+/4.</step>
+    <step order="11">Build: `dotnet build src/server/api/Sprk.Bff.Api/` MUST exit 0. Fix any compile errors before proceeding.</step>
+    <step order="12">Smoke-test BFF startup: `dotnet run --project src/server/api/Sprk.Bff.Api/` and `curl http://localhost:5xxx/healthz` MUST return 200. Stop the server.</step>
+    <step order="13">Measure publish-size delta: re-run `dotnet publish ... --output ./publish-after-014`. Zip, compare against baseline. Record delta in `notes/spikes/task-014-publish-delta.md`. MUST be ≤ 5 MB compressed; for a skeleton expect &lt;500 KB.</step>
+    <step order="14">Verify no new HIGH-sev CVE: `dotnet list package --vulnerable --include-transitive --project src/server/api/Sprk.Bff.Api/`. Diff against `notes/spikes/task-014-cve-baseline.md` (capture baseline first if not done). MUST show no NEW HIGH-sev CVEs (existing pre-CLI ones are out of scope).</step>
+    <step order="15">Run quality gates per task-execute Step 9.5: `code-review` on the new module + Program.cs diff + AddActionEngineModule.cs (rigorous review, not just lint); `adr-check` confirms ADR-001, ADR-008, ADR-010, ADR-013, ADR-029 all satisfied. The `bff-extensions.md` checklist MUST be explicit in the PR description.</step>
+    <step order="16">Update `tasks/TASK-INDEX.md`: mark task 014 ✅; verify it unblocks tasks 020, 021, 022, 023, 024, 025, 026, 040, 041, 042. Reset `current-task.md` to point to next pending task in Group B.</step>
+    <step order="17">Document any deviations from this plan in `projects/ai-spaarke-action-engine-r1/notes/handoffs/task-014-handoff.md` and add a brief commit message recap. Commit message MUST cite the placement decision + scheduler choice.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, run, publish, list vulnerable packages</tool>
+    <tool name="git">Confirm state + commit</tool>
+    <tool name="terminal">Run shell commands for measurements + smoke tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Orchestration/ActionOrchestrationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Registry/IToolHandlerRegistry.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Models/ActionDefinition.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Models/ActionRun.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/README.md</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (single-line addition)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/spikes/task-014-publish-baseline.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/spikes/task-014-publish-delta.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/spikes/task-014-cve-baseline.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/handoffs/task-014-handoff.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Folder `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/` exists with the 4 code files + README; verified by `git status` showing new tracked files.</criterion>
+    <criterion testable="true">`Infrastructure/DI/AddActionEngineModule.cs` exists; the extension method registers the module surface; total non-framework DI registrations in the module ≤ 15 (ADR-010).</criterion>
+    <criterion testable="true">`Program.cs` contains exactly one new line: `builder.Services.AddActionEngineModule(builder.Configuration);` placed adjacent to `AddJobProcessingModule(...)` (~line 95).</criterion>
+    <criterion testable="true">Build passes: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</criterion>
+    <criterion testable="true">BFF starts without crash; `curl /healthz` returns 200.</criterion>
+    <criterion testable="true">Publish-size delta measured and recorded in `notes/spikes/task-014-publish-delta.md`; delta ≤ 5 MB compressed (NFR-10).</criterion>
+    <criterion testable="true">No new HIGH-sev CVE introduced; verified by `dotnet list package --vulnerable --include-transitive` diff against baseline.</criterion>
+    <criterion testable="true">`Services/Ai/ActionEngine/README.md` cites placement justification + ADR-013 + ADR-010 + ADR-008 + ADR-029 + bff-extensions.md checklist.</criterion>
+    <criterion testable="true">PR description (drafted in commit message or `notes/handoffs/task-014-handoff.md`) includes the full `bff-extensions.md` pre-merge checklist with all 5 items checked.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The PR description requirement from `bff-extensions.md` is non-negotiable. Even though this is a skeleton with no real logic, the checklist establishes the discipline for subsequent BFF additions. Treat the PR description as a deliverable, not an afterthought.
+
+    The `AddJobProcessingModule` is the canonical reference. If your `AddActionEngineModule` doesn't look structurally identical (same naming, same options binding, same lifetime choices), revisit until it does.
+
+    Do NOT register an impl for `IActionEngineFacade` in this task. That interface is created in parallel by task 015; its impl lands in a later phase. The DI registration of the facade impl is deferred — Phase 1 ships only the skeleton.
+
+    Do NOT add NuGet packages. The skeleton uses only what's already in `Sprk.Bff.Api.csproj`. If you find yourself needing a package (e.g., Azure AI Search client), STOP — that's task 016's territory. Cross-task NuGet additions blow up the publish-size budget.
+
+    The scheduler choice from task 001 lands as a COMMENT in `AddActionEngineModule.cs` and a STUB interface placeholder in `Registry/IToolHandlerRegistry.cs` — no real wiring yet. Real wiring is task 042 (`ScheduledActionDispatchJobHandler`).
+
+    Status enum for `ActionRun.cs`: use the ADR-017 canonical 6 values exactly: `Queued`, `Running`, `Completed`, `Failed`, `Poisoned`, `Cancelled`. Add `[JsonStringEnumConverter]` for clean serialization.
+
+    `ActionDefinition.cs` model fields mirror `sprk_action` from task 010. Property naming uses camelCase via `[JsonPropertyName]` if the Dataverse fields are PascalCase-stored — verify against task 010's schema doc.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;` — ESPECIALLY `.claude/constraints/bff-extensions.md` in full. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5. The `bff-extensions.md` pre-merge checklist MUST be explicit in the PR description — this is binding.
+    </protocol>
+  </execution>
+</task>

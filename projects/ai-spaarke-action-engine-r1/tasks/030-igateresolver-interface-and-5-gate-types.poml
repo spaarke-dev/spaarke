@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>`IGateResolver` interface + 5 gate types (EthicsCritical, MeaningCritical, FinalDelivery, Manual, Conditional)</title>
+    <phase>Phase 3: IGateResolver + Approval Surface</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>012, 014, 015</dependencies>
+    <blocks>031, 032, 033, 034, 035, 036</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Foundational interface contract that 4 resolver implementations + GateApprovalCard consume; modifies `.cs` files in `Sprk.Bff.Api`; tags include bff-api + ai; blast radius across Phase 3 (Group D) + Phase 4 dispatch wiring</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Contract-defining task; blocks all four resolver implementations (031–034) + GateApprovalCard (036); main-session execution to preserve contract decisions for downstream parallel work</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Define the canonical `IGateResolver` interface (LAVERN Pattern #5 / reference §10.3) and the 5 gate-type enum (`EthicsCritical`, `MeaningCritical`, `FinalDelivery`, `Manual`, `Conditional`) under `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/`. Define request/outcome DTOs (`GateRequest`, `GateOutcome`, `GateDecision` enum). Register the gates feature in `AddActionEngineModule()` so the four implementations (tasks 031–034) and the timeout service (task 035) plug into a uniform contract. Add audit hooks per ADR-015 on every gate decision. This is the canonical approval primitive across Spaarke — no per-surface reimplementation.
+  </prompt>
+
+  <role>
+    Senior Spaarke BFF engineer. You design contracts with minimum surface area, audit hooks baked in, and clear extension seams. You favor sealed enums + immutable record DTOs. You write XML doc comments that explain WHY at the contract level so resolver implementers do not invent their own semantics.
+  </role>
+
+  <goal>
+    Concrete deliverables:
+    1. **`IGateResolver` interface** with a single async resolution method that accepts a `GateRequest` and returns a `GateOutcome` (or pending sentinel for async resolution paths like Dataverse queue + Webhook).
+    2. **`GateType` enum** with 5 values (`EthicsCritical`, `MeaningCritical`, `FinalDelivery`, `Manual`, `Conditional`) — exhaustive per design §5; no `Custom` in MVP (deferred).
+    3. **`GateRequest` record** carrying `GateType`, `ActionRunId`, `ToolDispatchId`, `RequestedByUserId`, `AuthorizedApproverRoles[]`, `SurfaceHint`, `Payload` (typed `object` with `JsonElement` shape for resolver-specific data), `TimeoutSeconds` (default 300).
+    4. **`GateOutcome` record** carrying `GateDecision` enum (`Approved | Rejected | TimedOut | Pending`), `ResolvedAtUtc`, `ResolvedByUserId?`, `Reason?`, `ApprovalRecordId?`.
+    5. **DI registration** through `AddActionEngineModule()` extension — gates feature module slot; ≤2 new registrations at this stage (interface + enum). Resolvers register in their own tasks.
+    6. **XML doc comments** on the interface explaining semantics and audit obligation per ADR-015.
+
+    Deliverable location: `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/IGateResolver.cs`, `GateType.cs`, `GateRequest.cs`, `GateOutcome.cs`.
+  </goal>
+
+  <context>
+    <background>
+      Per design §5 ("Approval queue — implemented via `IGateResolver`") and spec FR-17, the Action Engine MVP implements the canonical approval primitive across Spaarke. Insights Engine consumes (not defines) this. Self-Service Registration and Email Wizard adopt over time. The contract MUST be:
+
+      - **Uniform across 4 implementations** (Dataverse queue, in-chat, webhook, auto-approve) — no per-implementation parameter explosion.
+      - **Async-friendly**: Dataverse queue + Webhook return `Pending`, then resume on external callback. In-chat + auto-approve return synchronously.
+      - **Audit-first**: every decision MUST be loggable per ADR-015 (Tier 2 hash + Tier 3 work history). The contract defines the audit fields; resolver implementations call the audit hook.
+      - **5-min timeout uniform**: every resolver MUST honor `GateRequest.TimeoutSeconds` (default 300). Task 035 implements the background sweep that flips Pending → TimedOut after timeout.
+
+      LAVERN reference §10.3 is the inspiration but is NOT a Spaarke ADR — patterns are formalized inline per spec.md "Owner Clarifications" 2026-05-29.
+    </background>
+    <relevant-files>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/plan.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/IGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateType.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateOutcome.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService. No Azure Functions for gate resolution. Async-friendly contract.</constraint>
+    <constraint source="ADR-008">Endpoint-filter authorization. Gate resolution endpoints (added by resolvers in 031–034) MUST use `.AddEndpointFilter&lt;&gt;()`.</constraint>
+    <constraint source="ADR-010">Feature-module DI: `AddActionEngineModule()`. ≤15 non-framework registrations across all of ActionEngine.</constraint>
+    <constraint source="ADR-013">AI Architecture (refined 2026-05-20). BFF placement; CRUD-side consumers reach `IGateResolver` via `PublicContracts/` facade only.</constraint>
+    <constraint source="ADR-015">Audit per gate decision: Tier 2 hash + Tier 3 work history. Contract defines audit fields (`ActionRunId`, `ToolDispatchId`, `GateType`, `GateDecision`, `RequestedByUserId`, `ResolvedByUserId?`, `ResolvedAtUtc`, `Reason?`).</constraint>
+    <constraint source="ADR-019">ProblemDetails (RFC 7807) for any HTTP surface added by resolvers.</constraint>
+    <constraint source="ADR-029">Publish-size delta ≤ 5 MB compressed (NFR-10). This task adds ≤200 LoC of interface + DTOs; expected delta &lt; 0.1 MB.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist: placement decision = BFF (no facade leakage); no new NuGet packages; ADRs cited; publish-size impact verified.</constraint>
+    <constraint source="project">5-min default timeout uniform across resolvers; configurable per-Action via `GateRequest.TimeoutSeconds`.</constraint>
+    <constraint source="project">`GateType.Custom` deferred to R2 — 5 enum values only in MVP.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-authorization.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-audit-middleware.md</file>
+      <file>.claude/adr/ADR-019-problem-details.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Feature-module DI" location=".claude/patterns/api/service-registration.md">`AddActionEngineModule()` extension; gates registered as a sub-feature with `AddGatesFeature()` private helper.</pattern>
+      <pattern name="Endpoint filters" location=".claude/patterns/api/endpoint-filters.md">Used by resolvers (031–034); not by this task directly.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch `work/ai-spaarke-action-engine-r1`, baseline build passes. Load knowledge files. Declare RIGOR LEVEL: FULL.</step>
+    <step order="1">Read spec.md FR-17, design.md §5 ("Approval queue"), and `bff-extensions.md`. Confirm `GateType.Custom` is OUT of MVP per spec.</step>
+    <step order="2">Create `Gates/GateType.cs` — 5-value enum with XML doc comments explaining each gate-type's semantics + when to use it.</step>
+    <step order="3">Create `Gates/GateRequest.cs` — immutable `record` carrying all 8 fields enumerated in `&lt;goal&gt;`. Use `IReadOnlyCollection&lt;string&gt;` for `AuthorizedApproverRoles`. Use `JsonElement?` for `Payload`. Default `TimeoutSeconds = 300`.</step>
+    <step order="4">Create `Gates/GateOutcome.cs` — immutable `record` carrying `GateDecision` enum + 4 supporting fields. Decision enum: `Approved | Rejected | TimedOut | Pending`.</step>
+    <step order="5">Create `Gates/IGateResolver.cs` — single async method `Task&lt;GateOutcome&gt; ResolveAsync(GateRequest request, CancellationToken ct)`. XML doc explains audit obligation per ADR-015 and timeout uniformity.</step>
+    <step order="6">Add `AddGatesFeature()` private helper inside `AddActionEngineModule.cs` (or create if not yet existing per task 014). Register only the contract scaffold here; resolver impls register in their own tasks via `.TryAddKeyedScoped&lt;IGateResolver, ...&gt;(GateType.X, ...)` pattern (decision: keyed-DI with `GateType` as the key, so the orchestrator can resolve the right impl per Action).</step>
+    <step order="7">Update `Services/Ai/PublicContracts/IActionEngineFacade.cs` (created by task 015) IF needed to expose a `RequestGateAsync(GateRequest)` method for CRUD-side consumers. If facade does not yet handle gates in MVP, skip this step and add a deferred-to-Phase-4 note in `current-task.md`.</step>
+    <step order="8">Build: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0. Run any existing ActionEngine unit tests; add a minimal contract test that asserts `IGateResolver` is keyed-resolvable by `GateType` and that DI registration count stays within ADR-010 budget (≤15 non-framework).</step>
+    <step order="9">Measure publish-size delta: `dotnet publish --configuration Release --runtime linux-x64 --self-contained false` before and after; record delta in `notes/measurements/030-publish-size-delta.md`. Expected &lt; 0.1 MB.</step>
+    <step order="9.5">Run quality gates: `code-review` (substantive — check XML doc comments, immutability, ADR-015 audit hook semantics), `adr-check` (verify ADR-001/008/010/013/015/019/029 satisfied).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 030 ✅. Update `current-task.md`: 030 complete; next pending = parallel Group D (031, 032, 033, 034) + 036 (parallel-safe with Group D).</step>
+    <step order="11">Commit + push branch update. Document any contract decisions in `notes/decisions/030-gateresolver-contract.md` for resolver implementers (031–034) to reference.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and measure publish-size delta</tool>
+    <tool name="git">Commit and push</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/IGateResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateType.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/GateOutcome.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (extended)</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/measurements/030-publish-size-delta.md</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/decisions/030-gateresolver-contract.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IGateResolver.cs`, `GateType.cs`, `GateRequest.cs`, `GateOutcome.cs` exist under `Services/Ai/ActionEngine/Gates/` and compile.</criterion>
+    <criterion testable="true">`GateType` enum has exactly 5 values: `EthicsCritical`, `MeaningCritical`, `FinalDelivery`, `Manual`, `Conditional`. No `Custom`.</criterion>
+    <criterion testable="true">`GateRequest` is an immutable `record` with default `TimeoutSeconds = 300`.</criterion>
+    <criterion testable="true">`GateOutcome.GateDecision` enum has exactly 4 values: `Approved | Rejected | TimedOut | Pending`.</criterion>
+    <criterion testable="true">`AddActionEngineModule.AddGatesFeature()` registers `IGateResolver` keyed-DI scaffold; no concrete resolver registered yet (deferred to 031–034).</criterion>
+    <criterion testable="true">ADR-010 budget honored: ≤15 non-framework DI registrations across full `AddActionEngineModule()`. Verified by reflection-based test.</criterion>
+    <criterion testable="true">Publish-size delta &lt; 0.1 MB compressed; recorded in `notes/measurements/030-publish-size-delta.md`.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` exits 0; new contract test asserts keyed-DI resolution works.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass at Step 9.5; ADR-001/008/010/013/015/019/029 cited in PR description.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Keyed-DI (`AddKeyedScoped&lt;IGateResolver, X&gt;(GateType.X)`) is the chosen registration shape — the orchestrator resolves `IServiceProvider.GetRequiredKeyedService&lt;IGateResolver&gt;(action.GateType)`. This avoids a strategy-factory layer and keeps DI flat.
+
+    The contract intentionally has only ONE method — `ResolveAsync`. Pending vs synchronous resolution is encoded in `GateOutcome.GateDecision = Pending` (resolver returns immediately; task 035 sweeps Pending outcomes and timeouts them). DO NOT add a second `WaitAsync` method — the orchestrator stores `Pending` runs and resumes on external signals (Dataverse update, webhook callback, in-chat user click).
+
+    The `GateRequest.Payload` is intentionally `JsonElement?` — resolver-specific data (e.g., Webhook URL config, in-chat card layout hint) lives there. Strongly-typed payload variants would couple the contract to resolver implementations.
+
+    Audit obligation: every resolver MUST call `IAuditService.LogGateDecision(...)` per ADR-015 — explicit in XML doc comment on `IGateResolver.ResolveAsync`. This is the canonical audit choke point; orchestrator does NOT also log (no double-write).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5.
+    </protocol>
+  </execution>
+</task>

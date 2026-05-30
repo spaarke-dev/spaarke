@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Meta-tool — FindResources (semantic search over Tool Registry)</title>
+    <phase>Phase 2: Tool Registry + Discovery</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>020, 016</dependencies>
+    <blocks>052, 064</blocks>
+    <tags>bff-api, ai, azure-search, meta-tools</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF code implementation; latency-critical (NFR-01 p95 &lt; 200ms); semantic search wiring; tags include bff-api + ai</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group C with 023, 024. All three meta-tools depend on task 020 (data model) but each touches a distinct file under `Services/Ai/ActionEngine/MetaTools/` with no shared service state. Parallelizable per task-create §3.8.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement the `FindResources(string userIntent, int topK = 5)` meta-tool — a Semantic Kernel function registered with every Assistant session that performs semantic search over the `spaarke-resource-registry-index` (provisioned in task 016) and returns ranked `ResourceCandidate[]` results respecting the caller's authorization filter. This meta-tool is the discovery primitive used by the Builder Agent and conversational paths when a Tool is not already in the always-on registered set.
+  </prompt>
+
+  <role>
+    Senior .NET 8 / Azure AI Search engineer with familiarity with `Azure.Search.Documents` SDK, Semantic Kernel `[KernelFunction]` registration patterns, and the existing AI feature module under `Services/Ai/`. Latency-budget aware (NFR-01: p95 &lt; 200ms).
+  </role>
+
+  <goal>
+    Three concrete outcomes:
+    1. **`FindResourcesTool.cs` implementation** — `[KernelFunction]` decorated async method `FindResources(string userIntent, int topK)`. Calls `SearchClient.SearchAsync` against `spaarke-resource-registry-index` with semantic-search configuration; result mapping to `ResourceCandidate[]` (id, displayName, semanticDescription, parameterSchema summary, confidenceScore).
+    2. **Authorization filter** — caller's permissions narrow result set before return. A Tool the caller cannot dispatch MUST NOT appear in candidates. Implemented via OData filter on the `requiredPermissions` field of the index, or a post-filter pass if expressible without filter.
+    3. **Latency telemetry** — Application Insights custom metric `action_engine.metatool.latency` emitted with `metatool=findResources` dimension; verified in load test (task 064) for NFR-01 p95 &lt; 200ms.
+
+    Deliverable: `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/MetaTools/FindResourcesTool.cs` + tests; SK registration wired in task 025; latency metric wired here.
+  </goal>
+
+  <context>
+    <background>
+      Spec.md FR-10 + NFR-01 + design.md §7.4.1 worked example all converge: `FindResources("send email to outside counsel about Matter X")` should return ranked candidates including matter-email Tools.
+
+      Existing infrastructure:
+      - Task 016 provisioned `spaarke-resource-registry-index` with `semanticDescription` configured as the semantic-search field
+      - Task 020 produced `ToolRegistryEntry` (response shape)
+      - `Azure.Search.Documents` client is the existing semantic-search SDK already in use elsewhere in BFF (avoid adding new packages)
+
+      Latency budget: `FindResources` p95 &lt; 200ms over the registry index (NFR-01 / G5). Verified by load test in task 064 + App Insights metric. Always-on Tools dispatch budget is &lt; 100ms; this meta-tool is the fallback path for resources NOT in the always-on set.
+
+      Authorization model: caller's permissions narrow the result set. The index entry includes a `requiredPermissions` field; the SearchClient OData filter applies `requiredPermissions/any(p: p eq '&lt;caller-permission&gt;')` semantics. Audit middleware logs the search invocation per ADR-015.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/MetaTools/FindResourcesTool.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/ToolRegistryModel.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/MetaTools/FindResourcesToolTests.cs</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService. Meta-tool runs in-proc within the BFF Chat agent. No Azure Functions.</constraint>
+    <constraint source="ADR-008">Endpoint-filter auth applies at the calling endpoint (`/api/chat/`); this meta-tool method receives the authenticated caller via DI / kernel context. Caller authorization is consumed for the result-set filter.</constraint>
+    <constraint source="ADR-010">DI minimalism. `SearchClient` registered once via `AddActionEngineModule()` (singleton keyed by index name). Telemetry client via `[FromServices]`.</constraint>
+    <constraint source="ADR-013">PublicContracts boundary. `FindResources` is NOT exposed via the PublicContracts facade — it's an internal SK function. CRUD-side callers MUST NOT inject `IFindResourcesTool` directly.</constraint>
+    <constraint source="ADR-015">Audit Tier 2 hash applies to the meta-tool invocation (search query + caller). Tier 3 Cosmos work history written via existing `AuditEnrichmentMiddleware`.</constraint>
+    <constraint source="ADR-019">Errors returned via ProblemDetails at the calling endpoint; internal exceptions from `SearchClient` wrapped + rethrown with context.</constraint>
+    <constraint source="ADR-029">Use existing `Azure.Search.Documents` (already in BFF). No new NuGet packages.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge: placement justification (in BFF — latency-coupled to Chat agent invocation). Publish-size delta from this task = 0 if `Azure.Search.Documents` already transitively present.</constraint>
+    <constraint source="NFR-01">`FindResources` p95 &lt; 200ms over semantic index. Verified by load test in task 064. This task emits the App Insights metric required for that verification.</constraint>
+    <constraint source="project">spec.md FR-10: semantic search over `spaarke-resource-registry-index` filtered by caller's authorization. Acceptance: returns `ResourceCandidate[]` with id, descriptions, parameter schema.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-auth.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-audit-middleware.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Semantic Kernel function registration" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs">`[KernelFunction]` decoration + descriptive `[Description]` for LLM tool selection; XML-doc parameters with descriptions; typed return value.</pattern>
+      <pattern name="App Insights custom metric" location="src/server/api/Sprk.Bff.Api/">Existing `TelemetryClient.GetMetric(name).TrackValue(value)` pattern for latency metrics.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm baseline build passes; tasks 020 + 016 merged or branch-loadable; `spaarke-resource-registry-index` provisioned + accessible (verify via `az search` or existing service principal).</step>
+    <step order="1">Read all files in `&lt;knowledge&gt;&lt;files&gt;`. Pay close attention to spec.md FR-10 + NFR-01, design.md §7.4.1 worked example, and SprkChatAgent.cs for the existing `[KernelFunction]` pattern.</step>
+    <step order="2">Sketch the public signature: `[KernelFunction, Description("Search the Spaarke Tool Registry for resources matching the user's intent. Returns ranked candidates.")]` `Task&lt;ResourceCandidate[]&gt; FindResourcesAsync(string userIntent, int topK = 5)`. Document the response shape `ResourceCandidate` (id, displayName, semanticDescription, parameterSchemaSummary, confidenceScore).</step>
+    <step order="3">Implement `FindResourcesTool.cs`. Inject `SearchClient` (keyed by index name `spaarke-resource-registry-index`), `ICallerContext` (or equivalent for caller principal), `TelemetryClient`. Build `SearchOptions` with semantic configuration, `QueryType.Semantic`, `QueryLanguage.EnUs`, `Size = topK`.</step>
+    <step order="4">Implement authorization filter. Either (a) build OData filter against `requiredPermissions` collection field with caller's effective permissions, OR (b) execute search + post-filter results. Prefer (a) for latency. Document trade-off in code comments.</step>
+    <step order="5">Map `SearchResults&lt;ToolRegistryEntry&gt;` (or the search-projection DTO) into `ResourceCandidate[]`. Trim to top-K. Include semantic-search reranker score in confidenceScore.</step>
+    <step order="6">Wire App Insights custom metric `action_engine.metatool.latency` with dimension `metatool=findResources`. Use `Stopwatch` around the `SearchAsync` call; emit on every invocation including failures.</step>
+    <step order="7">Write unit tests: (a) happy path returns ranked candidates, (b) empty intent returns empty array (or ProblemDetails-friendly error), (c) topK respected, (d) authorization filter excludes Tools the caller lacks permission for, (e) latency metric emitted. Use `Azure.Search.Documents` SDK in-memory mock or testable interface around `SearchClient`.</step>
+    <step order="8">Verify build + tests + format: `dotnet build`, `dotnet test --filter "FindResources"`, `dotnet format`. Manual smoke: run BFF locally with a registered Tool in the dev index and confirm `FindResources("send email")` returns sane candidates.</step>
+    <step order="9">Verify NFR-10 (no new packages) + NFR-01 readiness. Local latency smoke under representative load (single-shot via Postman or curl) is not the formal verification — task 064 load-tests p95 over the full index. Confirm metric emission shows in App Insights live metrics during smoke.</step>
+    <step order="9.5">Run quality gates: `code-review` on `FindResourcesTool.cs`; `adr-check` for ADR-008 (caller auth respected), ADR-010 (DI minimalism), ADR-013 (NOT exposed via PublicContracts), ADR-015 (audit auto-applies via middleware), ADR-019 (errors propagate cleanly to endpoint ProblemDetails), ADR-029 (zero new packages).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 022 ✅. Update `current-task.md`. Note any latency observations for task 064 awareness.</step>
+    <step order="11">Document deviations + latency observations in `projects/ai-spaarke-action-engine-r1/notes/handoffs/`. Commit with brief recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, format</tool>
+    <tool name="git">State + commit</tool>
+    <tool name="az">CLI for Search service verification (optional)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/MetaTools/FindResourcesTool.cs</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/MetaTools/FindResourcesToolTests.cs</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`FindResourcesAsync(string userIntent, int topK = 5)` exists, decorated with `[KernelFunction]` + `[Description]` for SK tool selection.</criterion>
+    <criterion testable="true">Returns `ResourceCandidate[]` with id, displayName, semanticDescription, parameterSchemaSummary, confidenceScore — verified by unit test.</criterion>
+    <criterion testable="true">Authorization filter applied: Tools the caller cannot dispatch do NOT appear in candidates — verified by unit test with mocked caller principal.</criterion>
+    <criterion testable="true">App Insights custom metric `action_engine.metatool.latency` emitted with `metatool=findResources` dimension on every invocation — verified by unit test on `TelemetryClient` mock.</criterion>
+    <criterion testable="true">FindResources p95 &lt; 200ms over semantic index (verified by load test in task 064 — NFR-01). This task wires the latency metric; the load test gates the SLO.</criterion>
+    <criterion testable="true">No new NuGet packages added (NFR-10 preserved). `Azure.Search.Documents` already transitively present.</criterion>
+    <criterion testable="true">NOT exposed via `PublicContracts/IActionEngineFacade.cs` — verified by grep (ADR-013 boundary).</criterion>
+    <criterion testable="true">Supports spec gate G2 (conversational invocation resolves intent → Tool) and G5 (FindResources p95 SLO).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Authorization filter implementation choice (OData vs post-filter) directly affects p95 latency. OData filter pushes work to the Search service; post-filter pulls more rows then filters in-proc. Default to OData; fall back to post-filter only if the index schema makes OData filtering impractical.
+
+    The `requiredPermissions` index field is established by task 016 (index provisioning) + task 020 (model) + the indexer pipeline. If this task discovers the field shape is awkward for OData filtering, escalate to coordinate a schema adjustment in 016 — DO NOT silently shift logic to post-filter.
+
+    Task 064 (load test) will validate p95 with realistic index size. This task should aim for &lt;100ms p95 locally under light load to leave headroom for production scaling.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with reason from `&lt;rigor-reason&gt;`. Follow task-execute skill for checkpoint protocol every 3 steps and quality gates at Step 9.5.
+    </protocol>
+  </execution>
+</task>

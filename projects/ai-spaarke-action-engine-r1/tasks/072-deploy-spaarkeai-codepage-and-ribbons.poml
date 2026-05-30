@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Deploy SpaarkeAi code page + ribbon launchers via `code-page-deploy` + `Deploy-AllWebResources.ps1`</title>
+    <phase>Phase 6: Quality Gates + Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>050, 051, 071</dependencies>
+    <blocks>073, 090</blocks>
+    <tags>deploy, frontend, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with explicit ADR-026 (Code Page Vite + singlefile) governance; invokes code-page-deploy skill; Phase 6 mandatory</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential deploy: must follow BFF (070) + Dataverse (071); precedes post-deploy validation (073)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the SpaarkeAi code page (with `ChatLaunchContext` URL parsing + default-playbook hookup) and ribbon launcher web resources (Matter/Project/Account/Contact) to dev Dataverse. Use the `code-page-deploy` skill for the code page; `Deploy-AllWebResources.ps1` for the ribbon scripts.
+  </prompt>
+
+  <role>
+    Senior Spaarke frontend engineer with Vite + React 18 Code Page deployment expertise and Dataverse web-resource familiarity. Comfortable with the singlefile build pattern and ribbon launcher conventions.
+  </role>
+
+  <goal>
+    Dev Dataverse environment has:
+    - SpaarkeAi code page (`sprk_spaarkeai`) deployed with Action Engine extensions (`ChatLaunchContext` URL parsing + default-playbook hookup + result tiles)
+    - Ribbon launcher web resource (`sprk_openActionEngine.js`) deployed
+    - Ribbon button(s) visible on Matter / Project / Account / Contact entity forms
+    - Clicking a ribbon button opens SpaarkeAi as `Xrm.App.sidePanes` with the entity context pre-populated
+
+    Deploy log at `projects/ai-spaarke-action-engine-r1/notes/deployments/codepage-deploy-{date}.md`.
+  </goal>
+
+  <context>
+    <background>
+      This is the third and final deploy in Phase 6 (BFF → Dataverse → Code Page). The Code Page consumes the seeded playbook + Templates (from task 071) and calls the BFF surface (from task 070). All three must be live for the post-deploy validation (task 073) to pass.
+
+      Two deploy artifacts:
+      1. SpaarkeAi code page (Vite build + singlefile) via `code-page-deploy` skill
+      2. Ribbon launcher script + customizations via `Deploy-AllWebResources.ps1` (mirrors existing `sprk_openSprkChatPane.js` pattern per CLAUDE.md Implementation Notes)
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/</file>
+      <file>src/client/webresources/js/sprk_openActionEngine.js</file>
+      <file>scripts/Deploy-AllWebResources.ps1</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/deployments/codepage-deploy-{date}.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-026">Code Page uses Vite + singlefile inline pattern (HTML web resource). NOT a separate JS web resource.</constraint>
+    <constraint source="code-page-deploy skill">Clear build cache before EVERY build; deploy the inlined single HTML file (`sprk_{pagename}.html`); never deploy intermediate `bundle.js` alone.</constraint>
+    <constraint source="ADR-006">UI Surface Architecture — Code Page for SpaarkeAi (existing); ribbon scripts are minimal (invocation only, no business logic).</constraint>
+    <constraint source="project">Ribbon launcher mirrors existing `sprk_openSprkChatPane.js` pattern — minimal script invoking `Spaarke.ActionEngine.openPane(...)` to open SpaarkeAi as a side pane with `ChatLaunchContext` URL params.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-006-ui-surface-architecture.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/code-pages-architecture.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Code Page singlefile inline" location=".claude/skills/code-page-deploy/SKILL.md">Vite build → inline → deploy as HTML web resource.</pattern>
+      <pattern name="Ribbon launcher minimal" location="src/client/webresources/js/sprk_openSprkChatPane.js">Existing pattern; invoke pane open with ChatLaunchContext URL params.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Pre-deploy check: tasks 050 (SpaarkeAi extensions) + 051 (ribbon launcher script) + 071 (Dataverse seed) ✅ in TASK-INDEX.md.</step>
+    <step order="1">Read `code-page-deploy` skill; review the singlefile build pattern; clear any stale build cache in `src/solutions/SpaarkeAi/`.</step>
+    <step order="2">Invoke `code-page-deploy` skill for SpaarkeAi: build via Vite (`npm run build`); inline via build script; deploy the resulting `sprk_spaarkeai.html` HTML web resource.</step>
+    <step order="3">Run `Deploy-AllWebResources.ps1` to deploy `sprk_openActionEngine.js` ribbon launcher + any updated ribbon customizations (XML for Matter/Project/Account/Contact forms).</step>
+    <step order="4">Publish all customizations: `pac solution publish`.</step>
+    <step order="5">Browser smoke test: navigate to a Matter record in dev; verify the new ribbon button is visible; click it; verify SpaarkeAi opens as a side pane with the Matter id in the URL `ChatLaunchContext`.</step>
+    <step order="6">Browser smoke test 2: navigate to SpaarkeAi code page directly (no entity context); verify the page loads, the default playbook hydrates, and the chat surface is ready.</step>
+    <step order="7">Write deploy log at `projects/ai-spaarke-action-engine-r1/notes/deployments/codepage-deploy-{YYYY-MM-DD}.md`: build output, deploy result, smoke test results.</step>
+    <step order="8">If smoke tests fail (e.g., ribbon button not visible, code page errors): inspect Browser DevTools console; check ribbon XML loaded; check web resource publication state.</step>
+    <step order="9.5">Quality gates skipped per rigor STANDARD (deploy task).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 072 status ✅. Update `current-task.md`: Code Page deployed; ready for post-deploy validation (073).</step>
+    <step order="11">Document deviations under `projects/ai-spaarke-action-engine-r1/notes/handoffs/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Vite build for Code Page</tool>
+    <tool name="powershell">Deploy-AllWebResources.ps1 execution</tool>
+    <tool name="pac">PAC CLI for web resource deploy + publish</tool>
+    <tool name="browser">Smoke tests in dev environment</tool>
+    <tool name="terminal">Shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/deployments/codepage-deploy-{date}.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SpaarkeAi code page (`sprk_spaarkeai`) deployed and loads in browser without console errors.</criterion>
+    <criterion testable="true">Ribbon launcher (`sprk_openActionEngine.js`) deployed and ribbon button(s) visible on Matter / Project / Account / Contact forms.</criterion>
+    <criterion testable="true">Clicking ribbon button on a Matter record opens SpaarkeAi as side pane with entity context in URL.</criterion>
+    <criterion testable="true">SpaarkeAi direct navigation (no entity context) loads with the seeded default playbook hydrated.</criterion>
+    <criterion testable="true">Deploy log written at `notes/deployments/codepage-deploy-{date}.md`.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Final deploy of Phase 6. Task 073 (post-deploy validation) is the last gate before project wrap-up (090).
+
+    The ribbon button visibility is a common failure mode — check ribbon XML is in the imported solution + published.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load knowledge files. Declare RIGOR LEVEL: STANDARD. Invoke `code-page-deploy` skill for the Code Page deploy.
+    </protocol>
+  </execution>
+</task>
