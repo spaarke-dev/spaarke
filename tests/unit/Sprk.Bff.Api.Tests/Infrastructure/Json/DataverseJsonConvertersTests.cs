@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Infrastructure.Json;
 
+[Trait("status", "repaired")]
 public class DataverseJsonConvertersTests
 {
     [Fact]

@@ -134,4 +134,250 @@ Remove the `Skip = "..."` attribute on `GetExposedPlaybookIdsAsync_RespectsCance
 
 ---
 
+## RB-T050-01 — `SourcePaneSseEventData.CitationId` missing `JsonIgnoreCondition.WhenWritingNull`; emits `citationId: null` instead of omitting the field
+
+| Field | Value |
+|---|---|
+| **Bug ID** | RB-T050-01 |
+| **Date filed** | 2026-05-31 |
+| **Filing task** | Task 050 (P23.M1 — `Services/Ai/Chat` batch 1 + `Services/Ai/Feedback`/`RagService`/`WorkingDocumentService` extension) |
+| **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SseEventTypes/SourcePaneSseEvent.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SseEventTypes/SourcePaneSseEvent.cs) |
+| **Affected members** | `SourcePaneSseEventData.CitationId` (line 51) — `JsonPropertyName("citationId")` attribute is present, but no `JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)` accompanies it. |
+| **Tests Skip'd** | (1) `ChatSseEventFactoryTests.CreateSourcePaneEvent_WithNullCitationId_OmitsCitationIdField` (`Fact`) — line 197 of [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SseEventTypes/ChatSseEventFactoryTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SseEventTypes/ChatSseEventFactoryTests.cs). |
+| **Fix-by date** | 2026-07-31 (60-day target — non-blocking; frontend SSE consumer tolerates `null` citationId values, so wire-format bloat is the only observable effect) |
+| **Severity** | LOW (functional contract preserved — frontend ignores `null` citation IDs; only adds ~16 bytes per source_pane SSE event without citation) |
+| **Owner** | TBD (AI Chat SSE feature owner; coordinate with frontend Spaarke.UI.Components ChatPane consumers if the contract is tightened) |
+
+### Bug detail
+
+**Documented contract** (from the XML doc comment at `SourcePaneSseEvent.cs:43-46`):
+> Optional citation ID linking this source pane content to a citation marker in the response text (e.g., "[1]", "[2]"). When present, the frontend can establish a cross-pane link between the response text and the source.
+
+The matching test assertion (correct, per documented contract):
+
+```csharp
+json.Should().NotContain("\"citationId\"",
+    "citationId should be omitted when null per JsonIgnoreCondition.WhenWritingNull");
+```
+
+**Implementation** (line 48-51):
+
+```csharp
+public record SourcePaneSseEventData(
+    [property: JsonPropertyName("widgetType")] string WidgetType,
+    [property: JsonPropertyName("widgetData")] JsonElement WidgetData,
+    [property: JsonPropertyName("citationId")] string? CitationId = null);
+```
+
+**Bug**: `CitationId` is nullable and has a default of `null`, with `JsonPropertyName("citationId")` — but no `JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)`. The default `System.Text.Json` writer policy emits `"citationId": null` for null reference types. Production output:
+
+```json
+{"widgetType":"web_reference","widgetData":{"url":"https://example.com"},"citationId":null}
+```
+
+Expected per documented contract + test:
+
+```json
+{"widgetType":"web_reference","widgetData":{"url":"https://example.com"}}
+```
+
+### Proposed fix
+
+Add the property-level `JsonIgnore` attribute alongside the existing `JsonPropertyName`:
+
+```csharp
+public record SourcePaneSseEventData(
+    [property: JsonPropertyName("widgetType")] string WidgetType,
+    [property: JsonPropertyName("widgetData")] JsonElement WidgetData,
+    [property: JsonPropertyName("citationId")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? CitationId = null);
+```
+
+### Why this didn't surface in production
+
+The SSE event is consumed by the frontend `ChatPane` source-rendering code, which checks `if (event.data.citationId)` before linking — so a literal `null` value is treated identically to a missing field. The wire-format bloat is small (~16 bytes per source_pane event without citation) and was not noticed in observability metrics. The unit test that asserts the documented contract surfaces the bug; the frontend's defensive null-check masks it from end-to-end behavioral tests.
+
+### Verification after fix
+
+Remove the `Skip = "..."` attribute on `CreateSourcePaneEvent_WithNullCitationId_OmitsCitationIdField` and the per-test `[Trait("status", "real-bug-pending-fix")]` (inherits class-level `[Trait("status", "repaired")]`). Run the test; should pass. Update this ledger row to "Resolved" with the fix-commit SHA + date. Remove the row at the next phase exit review.
+
+---
+
+## RB-T044-01 — `ConversationHistorySanitizer.StripRetrievedContent` `fromTurnIndex` semantics inverted
+
+| Field | Value |
+|---|---|
+| **Bug ID** | RB-T044-01 |
+| **Date filed** | 2026-05-31 |
+| **Filing task** | Task 044 (P23.H5 — Ai/Safety) |
+| **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Safety/CrossMatter/ConversationHistorySanitizer.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Safety/CrossMatter/ConversationHistorySanitizer.cs) |
+| **Affected method** | `StripRetrievedContent(IReadOnlyList<ChatMessage> history, int fromTurnIndex)` (line 55) |
+| **Tests Skip'd** | 5 in [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/PrivilegeLeakageTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/PrivilegeLeakageTests.cs): `MatterPivot_StripsRetrievalContent_PreservesUserAndAssistantMessages`, `MatterPivot_NoPrivilegedTextInSanitizedOutput`, `MatterPivot_StripsOnlyWithinWindow_PreservesNewMatterContent`, `MatterPivot_PreservesNonRetrievalSystemMessages`, `Sanitizer_OnlyReturnsDocs_FromActiveMatter`. |
+| **Fix-by date** | 2026-07-31 (60-day target — HIGH severity per design.md §3.3 HIGH-tier safety; cross-matter privilege leakage protection is currently inverted) |
+| **Severity** | HIGH (cross-matter privilege content protection is the intended outcome; the inversion means stale retrieval content from previous matters may leak to new-matter turns) |
+| **Owner** | TBD (AI safety / cross-matter feature owner) |
+
+### Bug detail
+
+**Documented contract** (XML doc, line 41 of `ConversationHistorySanitizer.cs`):
+> When the user switches from Matter A to Matter B, any tool_result messages that contain retrieved document passages from Matter A are replaced with a privacy placeholder.
+
+**Implementation** (lines 62-90): the loop passes through messages where `i > fromTurnIndex` and only strips retrieval messages where `i <= fromTurnIndex`.
+
+**Bug**: `MatterContextDetector.DetectChange` returns `ChangeDetectedAtTurnIndex = i` where `i` is the index of the PREVIOUS matter marker — the START of the previous-matter window. The sanitizer interprets this as "strip from index 0 up to and including the pivot index, pass through everything after." That is the OPPOSITE of the intended behavior. With history `[markerA(0), user(1), retrievalA(2), assistantA(3), user(4)]` and `fromTurnIndex=0`, only index 0 is in the strip window — but index 0 is the matter marker (not a retrieval message), so nothing gets stripped. The retrieval at index 2 leaks into the new-matter context.
+
+### Why this didn't surface in production
+
+The full end-to-end matter-pivot integration test path was not previously exercised in CI (this HIGH-tier batch is the first that covers the Sanitizer at the boundary). Live traffic would silently leak privileged content from a previous matter into the model's context window for any subsequent turn — a serious safety regression that requires HIGH-tier prioritization.
+
+### Recommended production fix (out of scope for this project)
+
+Invert the index check at line 68: change `if (i > fromTurnIndex)` to `if (i < fromTurnIndex)`. Re-verify all 5 Skip'd tests pass + existing passing tests (`Sanitizer_StripsRetrievalBlocks_PreservesConclusions`, etc.) remain green.
+
+### Verification after fix
+
+Remove the 5 `Skip = "..."` attributes + per-test `[Trait("status", "real-bug-pending-fix")]`. Run `dotnet test --filter "FullyQualifiedName~PrivilegeLeakageTests"`; all 5 must pass. Update this row to "Resolved" with fix-commit SHA + date.
+
+---
+
+## RB-T044-02 — `CitationExtractor.NormalizeCaseLaw` over-strips trailing period of reporter abbreviation
+
+| Field | Value |
+|---|---|
+| **Bug ID** | RB-T044-02 |
+| **Date filed** | 2026-05-31 |
+| **Filing task** | Task 044 (P23.H5 — Ai/Safety) |
+| **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs) |
+| **Affected method** | `NormalizeCaseLaw(Match m)` (line 163) |
+| **Tests Skip'd** | `ExtractCitations_CaseLaw_MatchedAndNormalized` Theory (4 InlineData cases) in [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs). |
+| **Fix-by date** | 2026-07-31 (60-day target — MEDIUM severity) |
+| **Severity** | MEDIUM (citation normalization affects downstream verification provider lookups + UI display) |
+| **Owner** | TBD (AI citations/verification feature owner) |
+
+### Bug detail
+
+**Documented canonical form** (test InlineData expectations + the class XML doc table at line 11): canonical key for `Smith v. Jones, 542 U.S. 296 (2004)` is `"542 U.S. 296"` — preserving the trailing period of the reporter abbreviation `U.S.`.
+
+**Implementation** (line 167):
+
+```csharp
+var reporter = m.Groups["reporter"].Value.Trim().TrimEnd('.');
+```
+
+**Bug**: `TrimEnd('.')` strips the trailing `.` of the reporter token. The regex captures `U.S.` (with trailing period), and the normalizer strips it to `U.S`, yielding the non-canonical key `542 U.S 296`.
+
+### Recommended production fix
+
+Remove `.TrimEnd('.')` from line 167 (the reporter capture group already excludes the trailing year-court parenthetical; no other trim is needed).
+
+### Verification after fix
+
+Remove the `Skip = "..."` attribute on `ExtractCitations_CaseLaw_MatchedAndNormalized` Theory; remove per-Theory `[Trait("status", "real-bug-pending-fix")]`. Run; all 4 InlineData cases must pass.
+
+---
+
+## RB-T044-03 — `CitationExtractor.NormalizeStatute` does not trim subsections from canonical section
+
+| Field | Value |
+|---|---|
+| **Bug ID** | RB-T044-03 |
+| **Date filed** | 2026-05-31 |
+| **Filing task** | Task 044 (P23.H5 — Ai/Safety) |
+| **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs) |
+| **Affected** | `StatutePattern()` regex (line 44) + `NormalizeStatute(Match m)` (line 172) |
+| **Tests Skip'd** | `ExtractCitations_Statute_StripsSubsectionsInNormalizedKey` (`Fact`) — split from original Theory by task 044 — in `CitationExtractorTests.cs`. |
+| **Fix-by date** | 2026-07-31 (60-day target — LOW severity) |
+| **Severity** | LOW (affects only statutes cited with subsection parentheticals; canonical `§ 101`-style cites unaffected) |
+| **Owner** | TBD (AI citations/verification feature owner) |
+
+### Bug detail
+
+**Documented canonical form**: `See 17 U.S.C. § 512(c)(1)(A).` → canonical key `17 U.S.C. § 512`. The regex captures `(?<section>\d[\d\-\.]*[a-z]?(?:\([a-z0-9]+\))*)` — INCLUDING the subsection parentheticals. The normalizer concatenates verbatim, yielding `17 U.S.C. § 512(c)(1)(A)` instead of `17 U.S.C. § 512`.
+
+### Recommended production fix
+
+Strip the parenthetical in the normalizer:
+
+```csharp
+var section = m.Groups["section"].Value.Trim();
+var parenStart = section.IndexOf('(');
+if (parenStart >= 0) section = section[..parenStart];
+return $"{title} U.S.C. § {section}";
+```
+
+### Verification after fix
+
+Remove `Skip` + trait on `ExtractCitations_Statute_StripsSubsectionsInNormalizedKey`. Run; must pass. Verify other Statute Theory cases still pass.
+
+---
+
+## RB-T044-04 — `CitationExtractor.NormalizePatent` double-prefixes EP/WO country codes
+
+| Field | Value |
+|---|---|
+| **Bug ID** | RB-T044-04 |
+| **Date filed** | 2026-05-31 |
+| **Filing task** | Task 044 (P23.H5 — Ai/Safety) |
+| **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs) |
+| **Affected method** | `NormalizePatent(Match m)` (line 180), EP + WO branches |
+| **Tests Skip'd** | `ExtractCitations_Patent_NonUS_MatchedAndNormalized` Theory (2 InlineData: EP, WO) — split from original Theory by task 044 — in `CitationExtractorTests.cs`. |
+| **Fix-by date** | 2026-07-31 (60-day target — MEDIUM severity) |
+| **Severity** | MEDIUM (100% regression for non-US patent normalization: `EP3456789` → `EPEP3456789`) |
+| **Owner** | TBD (AI citations/verification feature owner) |
+
+### Bug detail
+
+The regex's `ep` and `wo` capture groups include the country-code prefix in the captured value. The normalizer then PREPENDS the literal `"EP"` (or `"WO"`) again. Result: `EP3456789` becomes `EPEP3456789`. The US branch is correct because the regex `(?<us>[\d,]{5,15})` captures digits-only.
+
+### Recommended production fix
+
+Drop the literal prefix in the EP and WO branches of the normalizer:
+
+```csharp
+if (m.Groups["ep"].Success)
+    return Regex.Replace(m.Groups["ep"].Value, @"[^\dA-Za-z]", "");
+
+if (m.Groups["wo"].Success)
+    return Regex.Replace(m.Groups["wo"].Value, @"[^\dA-Za-z/]", "");
+```
+
+### Verification after fix
+
+Remove `Skip` + trait on `ExtractCitations_Patent_NonUS_MatchedAndNormalized`. Run; both EP and WO InlineData cases must pass. Verify US Patent Theory cases still pass.
+
+---
+
+## RB-T044-05 — `CitationExtractor.RegulationPattern` does not accept documented `CFR` (no-period) form
+
+| Field | Value |
+|---|---|
+| **Bug ID** | RB-T044-05 |
+| **Date filed** | 2026-05-31 |
+| **Filing task** | Task 044 (P23.H5 — Ai/Safety) |
+| **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs) |
+| **Affected method** | `RegulationPattern()` regex (line 74) |
+| **Tests Skip'd** | `ExtractCitations_Regulation_NoPeriodForm_MatchedAndNormalized` (`Fact`) — split from original Theory by task 044 — in `CitationExtractorTests.cs`. |
+| **Fix-by date** | 2026-07-31 (60-day target — LOW severity) |
+| **Severity** | LOW (LLM outputs commonly use the period form `C.F.R.`; no-period `CFR` form is the corner case) |
+| **Owner** | TBD (AI citations/verification feature owner) |
+
+### Bug detail
+
+Class XML doc line 15 explicitly lists `21 CFR Part 312` as a supported example. The regex requires the literal `C.F.R.` form (only the trailing period is optional). Input `21 CFR Part 312` does not match, contradicting the documented contract.
+
+### Recommended production fix
+
+Loosen the inter-letter periods to optional:
+
+```csharp
+@"\b(?<title>\d{1,3})\s+C\.?F\.?R\.?(?:\s+(?:Part|§)\s*)(?<part>\d[\d\-\.]*)"
+```
+
+### Verification after fix
+
+Remove `Skip` + trait on `ExtractCitations_Regulation_NoPeriodForm_MatchedAndNormalized`. Run; must pass. Verify the original Regulation Theory cases still pass.
+
+---
+
 *This ledger is required at Phase 2+3 exit gate (per [`design.md`](../design.md) §6.2 line 240 + §10.5 line 560). Each entry must have a fix-by date or an owner sign-off.*

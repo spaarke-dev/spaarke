@@ -120,7 +120,7 @@ public class RecordSyncJobTests
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task ReadWatermarkAsync_WhenCacheEmpty_ReturnsDateTimeMinValue()
+    public async Task ReadWatermarkAsync_WhenCacheEmpty_ReturnsDataverseSafeMinWatermark()
     {
         // Arrange
         var (job, cache, _) = CreateJob();
@@ -132,8 +132,12 @@ public class RecordSyncJobTests
         var watermark = await job.ReadWatermarkAsync("sprk_matter", CancellationToken.None);
 
         // Assert
-        watermark.Should().Be(DateTimeOffset.MinValue,
-            "a missing watermark should default to epoch so a full initial sync is triggered");
+        // Production returns 1900-01-01 (DataverseSafeMinWatermark), not DateTime.MinValue,
+        // because Dataverse's CrmDateTime rejects year 0001 with error 0x80040239.
+        // See RecordSyncJob.DataverseSafeMinWatermark for full rationale.
+        var expected = new DateTimeOffset(1900, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        watermark.Should().Be(expected,
+            "a missing watermark should default to the Dataverse-safe minimum (1900-01-01) so a full initial sync is triggered without violating CrmDateTime bounds");
     }
 
     [Fact]

@@ -1,7 +1,7 @@
 <task id="044" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.H5 — Ai/Safety tests (groundedness, citations, prompt shield)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2-4 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, high-tier, p23-h, bff-api, testing, ai, safety</tags>
@@ -120,5 +120,16 @@
       All fall within existing relevant-files glob `Services/Ai/Safety/*.cs` — no scope change,
       annotation only. See `notes/handoffs/phase23-scope-delta-2026-05-31.md`.
     </scope-extension>
+    <completion-note date="2026-05-31">
+      All 19 baseline failures cleared. Final state: 0 Failed / 205 Passed / 9 Skipped / 214 Total
+      (`dotnet test --filter "FullyQualifiedName~Services.Ai.Safety"`). Disposition: 6 `repaired`
+      (assertion/test-math updates) + 13 `real-bug-pending-fix` covering 5 production bugs filed
+      as RB-T044-01 (HIGH — sanitizer fromTurnIndex inverted), RB-T044-02 (MED — caselaw reporter
+      over-trim), RB-T044-03 (LOW — statute subsection in key), RB-T044-04 (MED — EP/WO double
+      prefix), RB-T044-05 (LOW — CFR no-period form unsupported). All ledger entries in
+      `ledgers/real-bug-ledger.md`. Per-file diffs <21% (NFR-02 ✓); no production changes (NFR-01 ✓);
+      no factory edits (§4.5 ✓); 0 `Failed` traits (§4.3 ✓); class-level `repaired` traits on all
+      5 files (§6.2 ✓). Build clean (0 errors / 17 pre-existing warnings).
+    </completion-note>
   </notes>
 </task>

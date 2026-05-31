@@ -1,7 +1,7 @@
 <task id="046" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.H7 — Infrastructure/Resilience tests (Polly retry/circuit-breaker)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2-3 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, high-tier, p23-h, bff-api, testing, resilience, polly</tags>

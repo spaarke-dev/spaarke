@@ -1,7 +1,7 @@
 <task id="042" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.H3 — Finance signal evaluation tests (~780 LOC)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2-4 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, high-tier, p23-h, bff-api, testing, finance</tags>

@@ -134,17 +134,17 @@ All 5 Wave 1 agents completed. Build verification skipped: no `.cs` files modifi
 |---|---|---|---|---|---|---|
 | 040 | Workspace scoring (PriorityScoringService, EffortScoring) | ✅ NO-OP 2026-05-31 (Services.Workspace.* not in post-018 failure inventory; 196 tests pass; zero edits needed) | 23-H | ✅ Yes | FULL | 014 |
 | 041 | Scorecard tests (4 files) | ✅ 2026-05-31 (4 files trait-tagged repaired; 44 pass / 0 fail; <1% diff; cluster already healthy pre-task) | 23-H | ✅ Yes | FULL | 014 |
-| 042 | Finance signal evaluation (780 LOC) | 🔲 | 23-H | ✅ Yes | FULL | 014 |
-| 043 | Email association (863 LOC; Communications coord) | 🔲 | 23-H | ✅ Yes | FULL | 014 |
-| 044 | Ai/Safety (groundedness, citations, prompt shield) | 🔲 | 23-H | ✅ Yes | FULL | 014 |
-| 045 | Filters + Infrastructure/Json | 🔲 | 23-H | ✅ Yes | FULL | 014 |
-| 046 | Infrastructure/Resilience | 🔲 | 23-H | ✅ Yes | FULL | 014 |
+| 042 | Finance signal evaluation (780 LOC) | ✅ NO-OP 2026-05-31 (1 file SignalEvaluation / 26 tests pass; not in inventory; trait-only) | 23-H | ✅ Yes | FULL | 014 |
+| 043 | Email association (863 LOC; Communications coord) | ✅ NO-OP 2026-05-31 (67 tests pass; not in inventory; kept stable transitively by Wave 1.1a 011) | 23-H | ✅ Yes | FULL | 014 |
+| 044 | Ai/Safety (groundedness, citations, prompt shield) | ✅ 2026-05-31 (5 files / 19 repaired / 205 pass / **5 real-bugs filed RB-T044-01..05 incl. RB-T044-01 HIGH cross-matter privilege leak** / max 20.3% diff) | 23-H | ✅ Yes | FULL | 014 |
+| 045 | Filters + Infrastructure/Json | ✅ 2026-05-31 (6 files trait-tagged; 136 tests pass; <0.33% diff; pure §6.2 compliance) | 23-H | ✅ Yes | FULL | 014 |
+| 046 | Infrastructure/Resilience | ✅ 2026-05-31 (3 files / 54 tests pass / 1 test-stale fix RecordSyncJob DateTimeOffset.MinValue → 1900-01-01 SafeMin watermark / max 1.7% diff) | 23-H | ✅ Yes | FULL | 014 |
 
 ### P23.M — MEDIUM-tier long tail (~70 files)
 
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
-| 050 | Ai/Chat batch 1 (10 files) | 🔲 | 23-M | ✅ Yes | FULL | 014 |
+| 050 | Ai/Chat batch 1 (10 files) | ✅ 2026-05-31 (7 files / **13 in-scope failures repaired** / 156 pass + 1 skip / RB-T050-01 SourcePaneSseEventData null-emit; cancellation/markdown/Moq/literal/observability fixes; max 7.6% diff) | 23-M | ✅ Yes | FULL | 014 |
 | 051 | Ai/Chat batch 2 (10 files) | 🔲 | 23-M | ✅ Yes | FULL | 014 |
 | 052 | Ai/Chat batch 3 (10 files) | 🔲 | 23-M | ✅ Yes | FULL | 014 |
 | 053 | Ai/Capabilities | 🔲 | 23-M | ✅ Yes | FULL | 014 |

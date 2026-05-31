@@ -1,7 +1,7 @@
 <task id="043" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.H4 — Email association tests (~863 LOC) — COORD with x-email-communication-solution-r2</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3-5 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, high-tier, p23-h, bff-api, testing, email, communications-coord</tags>

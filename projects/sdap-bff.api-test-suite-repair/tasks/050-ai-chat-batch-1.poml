@@ -1,7 +1,7 @@
 <task id="050" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.M1 — Ai/Chat batch 1 (10 named files, 1st third)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2-4 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, medium-tier, p23-m, bff-api, testing, ai, chat</tags>
@@ -164,5 +164,36 @@
       Rigor stays FULL; effort estimate revised downward by ~30 minutes.
       See `notes/handoffs/phase23-scope-delta-post-018-2026-05-31.md`.
     </scope-updated>
+    <completion-note date="2026-05-31" wave="Phase-2+3 Wave 2.2">
+      All 13 in-scope failures repaired (pre→post: 13 Failed → 0 Failed + 1 expected Skip).
+      Per-file disposition:
+        - DirectOpenAiAgentTests.cs (1 → 0): test-stale → repaired (added try/catch for
+          OperationCanceledException — cooperative-cancellation contract per
+          DirectOpenAiAgent.cs:176; ADR-019 reserved for non-cancellation errors)
+        - OrchestratorPromptBuilderTests.cs (1 → 0): test-stale → repaired (EndWith
+          assertion now uses full.TrimEnd() to accommodate Markdown trailing-newline)
+        - PlaybookChatContextProviderEnrichmentIntegrationTests.cs (1 → 0): test-stale →
+          repaired (default-prompt assertion updated from "You are an AI assistant" to
+          "You are Spaarke AI" — production prompt identity tightening)
+        - ChatSseEventFactoryTests.cs (1 → 0 Failed; 1 Skipped): production-bug →
+          real-bug-pending-fix RB-T050-01 (SourcePaneSseEventData.CitationId missing
+          JsonIgnoreCondition.WhenWritingNull; ledgered with severity LOW, fix-by 2026-07-31)
+        - FeedbackServiceTests.cs (4 → 0): test-stale → repaired (removed Moq attempt to
+          stub extension method Enumerable.FirstOrDefault — invalid; GetEnumerator setup
+          is sufficient)
+        - RagServiceTests.cs (3 → 0): test-stale → repaired (extended
+          SetupMockSearchClientForIndexing helper to stub SearchClient.Endpoint and
+          IKnowledgeDeploymentService.GetDeploymentConfigAsync to cover new
+          observability log call at RagService.cs:533)
+        - WorkingDocumentServiceTests.cs (2 → 0): test-stale → repaired (assertions
+          updated from Phase-1 stub literals to no-SPE-container fallback expectations;
+          DriveId/ItemId/WebUrl now correctly assert BeEmpty)
+      Diff scope: 7 test files, +83/-19 lines total. No file exceeds NFR-02's 50% threshold
+      (max 7.6% on WorkingDocumentServiceTests.cs). Zero production code changes. Zero new
+      DI registrations. CustomWebAppFactory.cs untouched. Ledger entry RB-T050-01 added.
+      Step 9.5 Quality Gates: code-review PASSED (0 findings), adr-check PASSED (0 violations).
+      TRX: tests/unit/Sprk.Bff.Api.Tests/TestResults/batch1-post-edit.trx (156 Passed,
+      0 Failed, 1 Skipped, 157 Total, 317 ms).
+    </completion-note>
   </notes>
 </task>

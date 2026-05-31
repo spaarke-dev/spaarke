@@ -14,6 +14,7 @@ namespace Sprk.Bff.Api.Tests.Filters;
 /// Unit tests for PlaybookAuthorizationFilter - authorization for Playbook endpoints.
 /// Tests owner-only and shared access modes.
 /// </summary>
+[Trait("status", "repaired")]
 public class PlaybookAuthorizationFilterTests
 {
     private readonly Mock<IPlaybookService> _playbookServiceMock;
