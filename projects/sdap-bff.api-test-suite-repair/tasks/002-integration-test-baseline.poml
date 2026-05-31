@@ -1,7 +1,7 @@
 <task id="002" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>Capture Spe.Integration.Tests baseline TRX — FR-01 integration portion</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>30-60 minutes</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-0, baseline, integration-test, testing</tags>
@@ -89,4 +89,34 @@
     <criterion testable="true">Passed / Failed / Skipped counts recorded in current-task.md</criterion>
     <criterion testable="true">No files in `src/`, `power-platform/`, `infra/`, `scripts/` modified</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion date="2026-05-31">
+      Completed via compile-broken fallback path (POML Step 2 fallback).
+
+      Spe.Integration.Tests does NOT build under -c Release: 4 × CS1739 errors, all in
+      ExternalAccess/ExternalAccessIntegrationTests.cs (lines 113, 378, 398, 420). Single
+      root cause: InviteExternalUserRequest no longer has a parameter named ContactId.
+      Mechanical signature drift matching design.md §3.2 CS1739 pattern.
+
+      Fallback artifact captured at:
+        projects/sdap-bff.api-test-suite-repair/baseline/integration-build-errors-2026-05-31.txt
+        (5,875 bytes, dotnet build output, exit=1)
+
+      No TRX produced — dotnet test was never invoked because the project does not compile.
+      No measured Passed/Failed/Skipped counts available; downstream FR-13 (Phase 1 P1.E
+      triage) MUST handle compile recovery before producing integration-test-triage.md.
+
+      Suggested re-run: after the 4 CS1739 callsites in ExternalAccessIntegrationTests.cs
+      are repaired (estimated 15-30 min per design.md §3.2), re-execute task 002 to capture
+      a true runtime TRX baseline.
+
+      Acceptance criteria: #1 satisfied via fallback file; #2 N/A; #3 recorded as
+      "N/A - compile broken; 0 tests run" in current-task.md; #4 verified (only baseline/
+      and current-task.md touched).
+
+      Constraints respected: NFR-01 (no src/ changes), NFR-02 (no test rewrites — read-only
+      build attempt), NFR-09 (repair-not-rewrite declared in metadata).
+    </completion>
+  </notes>
 </task>

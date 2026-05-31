@@ -1,7 +1,7 @@
 <task id="006" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>Capture D-02..D-06 decision files (§5 locked decisions audit trail)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>45-60 minutes</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-0, decision-capture, audit-trail</tags>

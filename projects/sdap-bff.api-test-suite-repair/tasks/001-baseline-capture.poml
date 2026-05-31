@@ -1,7 +1,7 @@
 <task id="001" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>Capture full test baseline (TRX, compile errors, CI gate snapshot) — FR-01</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1-2 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-0, baseline, bff-api, testing</tags>

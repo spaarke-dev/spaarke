@@ -1,7 +1,7 @@
 <task id="007" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>Commit 3 in-progress namespace fixes per §5.6 (project's first body of work)</title>
-    <status>not-started</status>
+    <status>completed-noop</status>
     <estimated-effort>20-30 minutes</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-0, commit, namespace-fixes, testing</tags>

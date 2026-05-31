@@ -1,7 +1,7 @@
 <task id="003" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>Researcher verdict on Microsoft.Extensions.AI.Testing maturity — FR-02</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>30-45 minutes</estimated-effort>
     <assigned>AI agent (invokes `researcher` subagent)</assigned>
     <tags>phase-0, decision, ai-testing, researcher</tags>
@@ -100,4 +100,11 @@
     <criterion testable="true">File contains at least 2 evidence URLs (NuGet OR Microsoft Learn OR GitHub)</criterion>
     <criterion testable="true">File specifies implication for P1.B1 (which approach the helper-build task should take)</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-05-31 (Phase 0 Wave 1, parallel with tasks 001, 002, 006, 007).
+    Verdict: BUILD LOCAL — no Microsoft.Extensions.AI.Testing NuGet package exists; the Microsoft `TestChatClient` class (`test/Libraries/Microsoft.Extensions.AI.Abstractions.Tests/TestChatClient.cs`) is internal to the dotnet/extensions repo and not redistributed. P1.B1 mirrors the Microsoft callback-property pattern locally.
+    Reassessment trigger: any STABLE `Microsoft.Extensions.AI.Testing` package on NuGet, OR BFF bumps Microsoft.Extensions.AI past v12.x, OR floor date 2027-05-31.
+    Researcher subagent was NOT dispatched via Task tool (no Agent subagent tool available in this execution context). Investigation followed the same protocol from `.claude/agents/researcher.md` (knowledge/ first → Microsoft Learn → dotnet/extensions GitHub via gh CLI → NuGet). Evidence captured in D-01 §"Evidence".
+  </notes>
 </task>

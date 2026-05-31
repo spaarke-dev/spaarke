@@ -23,15 +23,36 @@
 
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
-| 001 | Capture full test baseline | 🔲 | 0-A | ✅ Yes | STANDARD | none |
-| 002 | Capture Spe.Integration.Tests baseline | 🔲 | 0-A | ✅ Yes | STANDARD | none |
-| 003 | Researcher verdict on Microsoft.Extensions.AI.Testing → D-01 | 🔲 | 0-A | ✅ Yes | MINIMAL | none |
-| 006 | Capture D-02..D-06 decisions | 🔲 | 0-A | ✅ Yes | MINIMAL | none |
-| 007 | Commit 3 in-progress namespace fixes per §5.6 | 🔲 | 0-A | ✅ Yes | STANDARD | none |
+| 001 | Capture full test baseline | ✅ 2026-05-31 (deviation: see Wave 1 outcomes) | 0-A | ✅ Yes | STANDARD | none |
+| 002 | Capture Spe.Integration.Tests baseline | ✅ 2026-05-31 (compile-broken fallback) | 0-A | ✅ Yes | STANDARD | none |
+| 003 | Researcher verdict on Microsoft.Extensions.AI.Testing → D-01 | ✅ 2026-05-31 (verdict: BUILD LOCAL) | 0-A | ✅ Yes | MINIMAL | none |
+| 006 | Capture D-02..D-06 decisions | ✅ 2026-05-31 | 0-A | ✅ Yes | MINIMAL | none |
+| 007 | Commit 3 in-progress namespace fixes per §5.6 | ✅ 2026-05-31 (NO-OP — no in-progress fixes in worktree) | 0-A | ✅ Yes | STANDARD | none |
 | 004 | Refine project CLAUDE.md after Phase 0 decisions | 🔲 | 0-B | ✅ Yes | FULL | 001, 002, 003 |
 | 005 | Create priority-order.md with sibling sign-offs | 🔲 | 0-B | ✅ Yes | STANDARD | 001 |
 
 **Phase 0 exit gate**: All baseline artifacts in `baseline/`; D-01..D-06 in `decisions/`; CLAUDE.md refined; priority-order.md signed off.
+
+### Wave 1 outcomes (2026-05-31) — MATERIAL DEVIATION FLAGGED
+
+All 5 Wave 1 agents completed. Build verification skipped: no `.cs` files modified (007 was NO-OP; others wrote only baseline artifacts + decision docs).
+
+**Material deviation from design.md §3 baseline** (captured in `baseline/test-baseline-2026-05-31.trx` + `baseline/README.md`):
+
+| Metric | design.md §3 (2026-05-30) | measured (2026-05-31) | Δ |
+|---|---|---|---|
+| Total tests | 5,215 | **6,021** | +806 |
+| Passed | 4,844 | **5,572** | +728 |
+| Failed | 269 | **342** | +73 |
+| Skipped | 102 | 107 | +5 |
+| Compile-broken files | **17 (138 errors)** | **0** | **−17 / −138** |
+| CI gate `enforce_admins` | `false` (hypothesis) | `false` (confirmed) | — |
+
+**Implication**: Phase 1 P1.A (compile recovery — tasks 010–014) may be largely or entirely absorbed. Hypothesis: §5.6 namespace fixes + downstream compile-recovery were applied to the worktree between 2026-05-30 design baseline and 2026-05-31 project init (consistent with task 007's NO-OP outcome). The +73 net failures are NEW repair work to be absorbed into Phase 2+3 tier counts.
+
+**`Spe.Integration.Tests` is still compile-broken** (4 × CS1739 in `ExternalAccessIntegrationTests.cs`, `InviteExternalUserRequest.ContactId` renamed). FR-13 / task 024 (P1.E1) must repair this before integration triage can be authored.
+
+**Decision needed before dispatching Wave 2 (004, 005)**: re-scope Phase 1 P1.A now, or proceed with 004/005 as-is and let task 004 (CLAUDE.md refinement) capture the re-scope. Reflected back to user.
 
 ---
 
