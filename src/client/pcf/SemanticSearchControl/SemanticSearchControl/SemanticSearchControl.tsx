@@ -804,13 +804,11 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // is still computed once so the selection filter is O(n) over a
   // stable identity-array.
   //
-  // fileSizeBytes is intentionally omitted here — the BFF
-  // SearchResult contract doesn't currently expose file size. See
-  // v1.1.63 commit notes: a BFF SearchResult.fileSize addition is
-  // queued as v1.1.64 + BFF redeploy to enable the > 25 MB warning
-  // banner in the DocumentEmailWizard. Without it, the wizard
-  // reports "size unknown" and the warning never triggers (which is
-  // current behavior — no regression).
+  // fileSizeBytes flows from BFF SearchResult.fileSize (sprk_filesize via Dataverse
+  // enrichment, added in BFF PR #310). Drives the DocumentEmailWizard's 25 MB
+  // attachment-cap warning. Null/undefined values mean "size unknown" — the wizard
+  // falls back gracefully (warning won't fire on unknown sizes; "—" rendered in the
+  // size column).
   const emailWizardItemsAll: IDocumentEmailWizardItem[] = useMemo(
     () =>
       results.map(r => ({
@@ -820,6 +818,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         tldr: r.tldr ?? undefined,
         driveId: r.driveId ?? undefined,
         itemId: r.speFileId ?? undefined,
+        fileSizeBytes: r.fileSize ?? undefined,
       })),
     [results]
   );
@@ -1796,7 +1795,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.69 • Built 2026-05-29</Text>
+        <Text size={100}>v1.1.71 • Built 2026-05-30</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so

@@ -11,6 +11,13 @@
  *   - Iframe preview with Spinner during load, error + retry on failure
  *   - Toolbar: Open File, Open Record, Copy Link, Add/Remove Workspace
  *   - Open File: lazy-fetch open links, cascade desktop -> web -> download
+ *
+ * @deprecated Prefer `RichFilePreviewDialog` from this same folder. The rich
+ * version has a 2-column body with metadata pane, prev/next navigation, 3-dot
+ * row-action menu, and a callback-based prop API (no `services` injection
+ * bundle). This simpler version is retained only because `FindSimilarResultsStep`
+ * still consumes it (and would cascade-affect many downstream consumers if
+ * migrated). New surfaces should use `RichFilePreviewDialog`.
  */
 
 import * as React from 'react';

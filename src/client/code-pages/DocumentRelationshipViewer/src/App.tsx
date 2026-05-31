@@ -808,6 +808,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
       {previewDocumentId && (
         <FilePreviewDialog
           open={isPreviewOpen}
+          documentId={previewDocumentId}
           documentName={previewDocumentName}
           onClose={handlePreviewClose}
           fetchPreviewUrl={fetchPreviewUrl}
