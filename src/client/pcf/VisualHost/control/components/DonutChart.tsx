@@ -19,7 +19,13 @@ import * as React from 'react';
 import { useRef, useState, useEffect } from 'react';
 import { DonutChart as FluentDonutChart, IChartDataPoint, IChartProps } from '@fluentui/react-charting';
 import { makeStyles, shorthands, tokens, Text } from '@fluentui/react-components';
-import type { DrillInteraction, IAggregatedDataPoint, ICardConfig, IColorThreshold } from '../types';
+import type {
+  DrillInteraction,
+  IAggregatedDataPoint,
+  ICardConfig,
+  IChartLegendConfig,
+  IColorThreshold,
+} from '../types';
 import { formatValue } from '../utils/valueFormatters';
 import { getTokenSetColors } from '../utils/tokenSetColors';
 
@@ -83,8 +89,10 @@ const useStyles = makeStyles({
     height: '100%',
     color: tokens.colorNeutralForeground3,
   },
-  // matrixRight layout — donut on the left, breakdown rows on the right
-  matrixContainer: {
+  // v1.4.4 — placement-driven container styles. One of these is selected by
+  // `effectiveLegend.placement` at render time. All produce a CSS grid with
+  // a donut cell + a legend cell; only the track orientation/order differs.
+  layoutRight: {
     display: 'grid',
     gridTemplateColumns: 'auto 1fr',
     columnGap: tokens.spacingHorizontalL,
@@ -94,7 +102,46 @@ const useStyles = makeStyles({
     minHeight: '200px',
     boxSizing: 'border-box',
   },
-  matrixDonutCell: {
+  layoutLeft: {
+    display: 'grid',
+    gridTemplateColumns: '1fr auto',
+    columnGap: tokens.spacingHorizontalL,
+    alignItems: 'center',
+    width: '100%',
+    height: '100%',
+    minHeight: '200px',
+    boxSizing: 'border-box',
+  },
+  layoutTop: {
+    display: 'grid',
+    gridTemplateRows: 'auto 1fr',
+    rowGap: tokens.spacingVerticalM,
+    justifyItems: 'center',
+    width: '100%',
+    height: '100%',
+    minHeight: '200px',
+    boxSizing: 'border-box',
+  },
+  layoutBottom: {
+    display: 'grid',
+    gridTemplateRows: '1fr auto',
+    rowGap: tokens.spacingVerticalM,
+    justifyItems: 'center',
+    width: '100%',
+    height: '100%',
+    minHeight: '200px',
+    boxSizing: 'border-box',
+  },
+  layoutHidden: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
+    minHeight: '200px',
+    boxSizing: 'border-box',
+  },
+  donutCell: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -102,19 +149,29 @@ const useStyles = makeStyles({
     // Position context for the absolute-positioned center letter-grade overlay.
     position: 'relative',
   },
-  // v1.4.3 — Breakdown rows use a 3-column CSS grid (swatch, label, value).
-  // All three columns are `auto`-sized to their content, so the value column
-  // ends just to the right of the widest label — not pushed to the far edge
-  // by a `flex-grow: 1` label. Whole grid sits left-aligned in the parent
-  // cell, which keeps the column of category names left-flush.
-  matrixRowsCell: {
+  // v1.4.4 — Legend cell. `legendRows` is a CSS grid whose columns are
+  // computed at render time per (itemFormat, valueAlignment); see
+  // `computeLegendGridColumns()`. `legendInline` is a wrapping flex row.
+  legendRows: {
     display: 'grid',
-    gridTemplateColumns: 'auto auto auto',
     columnGap: tokens.spacingHorizontalM,
     rowGap: tokens.spacingVerticalS,
     alignItems: 'baseline',
     justifyContent: 'start',
     minWidth: 0,
+  },
+  legendInline: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    columnGap: tokens.spacingHorizontalL,
+    rowGap: tokens.spacingVerticalXS,
+    alignItems: 'baseline',
+    minWidth: 0,
+  },
+  legendInlineItem: {
+    display: 'inline-flex',
+    alignItems: 'baseline',
+    columnGap: tokens.spacingHorizontalXS,
   },
   // Small filled square in column 1, color-matched to the corresponding
   // donut segment for visual cross-reference.
@@ -206,6 +263,73 @@ function resolveSegmentColor(value: number, thresholds: IColorThreshold[] | unde
  *
  * Defaults to `"score"` when no format is supplied.
  */
+/**
+ * Resolve the effective legend configuration for a render.
+ *
+ * Priority:
+ *   1. `cardConfig.legend` (explicit v1.4.4 schema) — defaults applied per-field.
+ *   2. Legacy back-compat: `donutLayout === 'matrixRight'` + `showBreakdownRows === true`
+ *      → derive `{ placement: 'right', orientation: 'rows', itemFormat: 'swatchLabelValue',
+ *      valueAlignment: 'near', swatchSize: 10 }` so every pre-v1.4.4 chart def
+ *      renders identically (NFR-05).
+ *   3. Otherwise: `undefined` — no legend, donut renders alone.
+ */
+function resolveLegendConfig(
+  legend: IChartLegendConfig | undefined,
+  donutLayout: string | undefined,
+  showBreakdownRows: boolean | undefined
+): Required<IChartLegendConfig> | undefined {
+  if (legend) {
+    const placement = legend.placement ?? 'right';
+    return {
+      placement,
+      orientation:
+        legend.orientation ??
+        (placement === 'top' || placement === 'bottom' ? 'inline' : 'rows'),
+      itemFormat: legend.itemFormat ?? 'swatchLabelValue',
+      valueAlignment: legend.valueAlignment ?? 'near',
+      swatchSize: legend.swatchSize ?? 10,
+    };
+  }
+  if (donutLayout === 'matrixRight' && showBreakdownRows === true) {
+    return {
+      placement: 'right',
+      orientation: 'rows',
+      itemFormat: 'swatchLabelValue',
+      valueAlignment: 'near',
+      swatchSize: 10,
+    };
+  }
+  return undefined;
+}
+
+/**
+ * Compute the CSS `grid-template-columns` value for the rows-orientation
+ * legend based on what each item shows + how the value column aligns.
+ *
+ *   swatch + label + value, near → 'auto auto auto'  (value sits next to label)
+ *   swatch + label + value, far  → 'auto 1fr auto'   (label grows, value flush right)
+ *   swatch + label, _            → 'auto auto'
+ *   label + value, near          → 'auto auto'
+ *   label + value, far           → '1fr auto'
+ *   label only, _                → 'auto'
+ */
+function computeLegendGridColumns(
+  itemFormat: IChartLegendConfig['itemFormat'],
+  valueAlignment: IChartLegendConfig['valueAlignment']
+): string {
+  const showSwatch = itemFormat === 'swatchLabelValue' || itemFormat === 'swatchLabel';
+  const showValue = itemFormat === 'swatchLabelValue' || itemFormat === 'labelValue';
+  if (showSwatch && showValue) {
+    return valueAlignment === 'far' ? 'auto 1fr auto' : 'auto auto auto';
+  }
+  if (showSwatch && !showValue) return 'auto auto';
+  if (!showSwatch && showValue) {
+    return valueAlignment === 'far' ? '1fr auto' : 'auto auto';
+  }
+  return 'auto';
+}
+
 function formatBreakdownValue(value: number, format: ICardConfig['breakdownValueFormat']): string {
   switch (format) {
     case 'scoreOver100':
@@ -333,78 +457,164 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
     chartTitle: title,
   };
 
-  // ===== matrixRight layout =====
-  // Donut on the left + breakdown rows on the right. Used by FR-DV-01 once
-  // the Matter Health chart def authors `donutLayout: "matrixRight"`.
-  if (donutLayout === 'matrixRight') {
-    // For the matrix layout, size the donut against the available height rather
-    // than the (much larger) container width so the rows column has room.
-    const donutSize = Math.max(120, Math.min(containerWidth * 0.45, height));
-    const showRows = cardConfig?.showBreakdownRows ?? false;
+  // ===== v1.4.4 — placement-driven layout with legend =====
+  // Resolved legend config: explicit `cardConfig.legend` wins; legacy
+  // `donutLayout: "matrixRight"` + `showBreakdownRows: true` derive
+  // `placement: "right"` defaults so every pre-v1.4.4 chart def renders
+  // identically. When undefined, falls through to standard layout below.
+  const effectiveLegend = resolveLegendConfig(
+    cardConfig?.legend,
+    donutLayout,
+    cardConfig?.showBreakdownRows
+  );
+
+  if (effectiveLegend) {
+    const placement = effectiveLegend.placement;
     const breakdownFormat = cardConfig?.breakdownValueFormat;
-    // Center overlay font size: 36% of the donut diameter, capped at 96px.
-    // Empirically large enough for a 1-2 char letter grade to read clearly.
+    // Donut size: for side-by-side placements (right/left/hidden) cap at 45%
+    // container width so the legend has room. For top/bottom, take more width
+    // (75%) since the legend stacks vertically. Always honor `height` cap.
+    const widthFraction = (placement === 'top' || placement === 'bottom') ? 0.75 : 0.45;
+    const donutSize = Math.max(120, Math.min(containerWidth * widthFraction, height));
     const centerFontSize = `${Math.min(Math.round(donutSize * 0.36), 96)}px`;
+    const showSwatch =
+      effectiveLegend.itemFormat === 'swatchLabelValue' ||
+      effectiveLegend.itemFormat === 'swatchLabel';
+    const showValue =
+      effectiveLegend.itemFormat === 'swatchLabelValue' ||
+      effectiveLegend.itemFormat === 'labelValue';
+
+    const layoutClass =
+      placement === 'right' ? styles.layoutRight :
+      placement === 'left' ? styles.layoutLeft :
+      placement === 'top' ? styles.layoutTop :
+      placement === 'bottom' ? styles.layoutBottom :
+      styles.layoutHidden;
+
+    const donutNode = (
+      <div className={styles.donutCell}>
+        <FluentDonutChart
+          data={{ chartData }}
+          width={donutSize}
+          height={donutSize}
+          hideLegend
+          hideTooltip={false}
+          innerRadius={innerRadius * (donutSize / 2)}
+          {...chartProps}
+        />
+        {centerOverlayValue !== undefined && (
+          <span
+            className={styles.centerOverlay}
+            style={{ fontSize: centerFontSize }}
+            aria-live="polite"
+          >
+            {centerOverlayValue}
+          </span>
+        )}
+      </div>
+    );
+
+    const legendNode = placement === 'hidden' ? null : (
+      effectiveLegend.orientation === 'inline' ? (
+        <div
+          className={styles.legendInline}
+          role="list"
+          aria-label="Legend"
+        >
+          {data.map((dp, idx) => {
+            const swatchColor = chartData[idx]?.color;
+            const rowValue =
+              dp.value == null
+                ? cardConfig?.nullDisplay ?? '—'
+                : formatBreakdownValue(dp.value, breakdownFormat);
+            return (
+              <span
+                key={`${dp.label}-${idx}`}
+                className={styles.legendInlineItem}
+                role="listitem"
+              >
+                {showSwatch && swatchColor && (
+                  <span
+                    className={styles.breakdownSwatch}
+                    style={{
+                      backgroundColor: swatchColor,
+                      width: `${effectiveLegend.swatchSize}px`,
+                      height: `${effectiveLegend.swatchSize}px`,
+                    }}
+                    aria-hidden={true}
+                  />
+                )}
+                <Text className={styles.breakdownLabel}>{dp.label}</Text>
+                {showValue && (
+                  <Text className={styles.breakdownValue} aria-live="polite">
+                    {rowValue}
+                  </Text>
+                )}
+              </span>
+            );
+          })}
+        </div>
+      ) : (
+        <div
+          className={styles.legendRows}
+          style={{
+            gridTemplateColumns: computeLegendGridColumns(
+              effectiveLegend.itemFormat,
+              effectiveLegend.valueAlignment
+            ),
+          }}
+          role="list"
+          aria-label="Legend"
+        >
+          {data.map((dp, idx) => {
+            const swatchColor = chartData[idx]?.color;
+            const rowValue =
+              dp.value == null
+                ? cardConfig?.nullDisplay ?? '—'
+                : formatBreakdownValue(dp.value, breakdownFormat);
+            return (
+              <React.Fragment key={`${dp.label}-${idx}`}>
+                {showSwatch && (
+                  swatchColor ? (
+                    <span
+                      className={styles.breakdownSwatch}
+                      style={{
+                        backgroundColor: swatchColor,
+                        width: `${effectiveLegend.swatchSize}px`,
+                        height: `${effectiveLegend.swatchSize}px`,
+                      }}
+                      aria-hidden={true}
+                    />
+                  ) : (
+                    <span aria-hidden={true} />
+                  )
+                )}
+                <Text className={styles.breakdownLabel} role="listitem">
+                  {dp.label}
+                </Text>
+                {showValue && (
+                  <Text className={styles.breakdownValue} aria-live="polite">
+                    {rowValue}
+                  </Text>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      )
+    );
 
     return (
       <div className={styles.container} ref={containerRef}>
         {title && <Text className={styles.title}>{title}</Text>}
-        <div className={styles.matrixContainer}>
-          <div className={styles.matrixDonutCell}>
-            <FluentDonutChart
-              data={{ chartData }}
-              width={donutSize}
-              height={donutSize}
-              hideLegend
-              hideTooltip={false}
-              innerRadius={innerRadius * (donutSize / 2)}
-              {...chartProps}
-            />
-            {centerOverlayValue !== undefined && (
-              <span
-                className={styles.centerOverlay}
-                style={{ fontSize: centerFontSize }}
-                aria-live="polite"
-              >
-                {centerOverlayValue}
-              </span>
-            )}
-          </div>
-          {showRows && (
-            <div
-              className={styles.matrixRowsCell}
-              role="list"
-              aria-label="Breakdown by category"
-            >
-              {data.map((dp, idx) => {
-                const rowValue =
-                  dp.value == null
-                    ? cardConfig?.nullDisplay ?? '—'
-                    : formatBreakdownValue(dp.value, breakdownFormat);
-                const swatchColor = chartData[idx]?.color;
-                // 3 grid items per row (swatch, label, value) so they align
-                // into vertical columns within `matrixRowsCell`'s auto-sized
-                // grid. The wrapper Fragment carries the per-row key.
-                return (
-                  <React.Fragment key={`${dp.label}-${idx}`}>
-                    {swatchColor ? (
-                      <span
-                        className={styles.breakdownSwatch}
-                        style={{ backgroundColor: swatchColor }}
-                        aria-hidden={true}
-                      />
-                    ) : (
-                      <span aria-hidden={true} />
-                    )}
-                    <Text className={styles.breakdownLabel} role="listitem">{dp.label}</Text>
-                    <Text className={styles.breakdownValue} aria-live="polite">
-                      {rowValue}
-                    </Text>
-                  </React.Fragment>
-                );
-              })}
-            </div>
-          )}
+        <div className={layoutClass}>
+          {/* DOM order: legend before donut for left/top placement so
+              screen readers + tab order make sense; donut before legend
+              for right/bottom. Visual placement is controlled by the
+              grid track layout regardless of DOM order. */}
+          {(placement === 'left' || placement === 'top') && legendNode}
+          {donutNode}
+          {(placement === 'right' || placement === 'bottom') && legendNode}
         </div>
       </div>
     );

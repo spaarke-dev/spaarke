@@ -15,6 +15,7 @@ import {
   type IChartDefinition,
   type ICardConfig,
   type IBadgeConfig,
+  type IChartLegendConfig,
   type BadgeTone,
   type DescriptionColorValue,
   type ValueFormatType,
@@ -263,6 +264,23 @@ export function resolveCardConfig(
   // resolves to the same token, also byte-identical.
   const descriptionColor = parseDescriptionColor(json.descriptionColor);
 
+  // --- Chart legend configuration (v1.4.4) ---
+  // Generic addition. Backward compat (NFR-05): when `legend` is absent,
+  // DonutChart derives a `placement: "right"` default from the existing
+  // `donutLayout: "matrixRight"` + `showBreakdownRows: true` keys, so every
+  // existing chart def renders identically.
+  const legend = parseLegend(json.legend);
+
+  // --- AI Summary field (v1.4.4) ---
+  // Chart-def-driven mapping for the toolbar's sparkle icon. When set,
+  // VisualHostRoot wires the `AiSummaryPopover` to read this Dataverse column
+  // from the parent record. Takes precedence over the PCF `aiSummaryField`
+  // property (placement-level override stays available for ad-hoc forms).
+  const aiSummaryField =
+    typeof json.aiSummaryField === 'string' && json.aiSummaryField.length > 0
+      ? json.aiSummaryField
+      : undefined;
+
   return {
     valueFormat,
     colorSource,
@@ -293,6 +311,8 @@ export function resolveCardConfig(
     breakdownValueFormat,
     badge,
     descriptionColor,
+    legend,
+    aiSummaryField,
   };
 }
 
@@ -327,4 +347,66 @@ function parseDescriptionColor(raw: unknown): DescriptionColorValue | undefined 
     return undefined;
   }
   return raw;
+}
+
+/**
+ * Parse + validate an opaque `legend` config object from `sprk_optionsjson`
+ * (v1.4.4). Each subfield is independently whitelisted; unknown values are
+ * dropped (set to undefined) so DonutChart's per-field defaults apply.
+ *
+ * Backward compat (NFR-05): when `legend` is absent or every subfield is
+ * invalid, the returned object is undefined and DonutChart derives a
+ * `placement: "right"` default from the existing `donutLayout: "matrixRight"`
+ * + `showBreakdownRows: true` keys, so every existing chart def renders
+ * identically.
+ */
+function parseLegend(raw: unknown): IChartLegendConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as Record<string, unknown>;
+
+  const placement =
+    obj.placement === 'right' ||
+    obj.placement === 'left' ||
+    obj.placement === 'top' ||
+    obj.placement === 'bottom' ||
+    obj.placement === 'hidden'
+      ? obj.placement
+      : undefined;
+
+  const orientation =
+    obj.orientation === 'rows' || obj.orientation === 'inline'
+      ? obj.orientation
+      : undefined;
+
+  const itemFormat =
+    obj.itemFormat === 'swatchLabelValue' ||
+    obj.itemFormat === 'swatchLabel' ||
+    obj.itemFormat === 'labelValue' ||
+    obj.itemFormat === 'labelOnly'
+      ? obj.itemFormat
+      : undefined;
+
+  const valueAlignment =
+    obj.valueAlignment === 'near' || obj.valueAlignment === 'far'
+      ? obj.valueAlignment
+      : undefined;
+
+  const swatchSize =
+    typeof obj.swatchSize === 'number' && obj.swatchSize > 0 && obj.swatchSize < 100
+      ? obj.swatchSize
+      : undefined;
+
+  // Skip the object entirely if every field is invalid/absent — caller
+  // falls back to the legacy `matrixRight`/`showBreakdownRows` derivation.
+  if (
+    placement === undefined &&
+    orientation === undefined &&
+    itemFormat === undefined &&
+    valueAlignment === undefined &&
+    swatchSize === undefined
+  ) {
+    return undefined;
+  }
+
+  return { placement, orientation, itemFormat, valueAlignment, swatchSize };
 }
