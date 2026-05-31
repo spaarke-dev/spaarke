@@ -72,4 +72,66 @@ When production is fixed, remove the `Skip = "..."` attributes on the 2 Skip'd t
 
 ---
 
+## RB-T034-01 — `AgentConfigurationService.GetExposedPlaybookIdsAsync` does not honor cancellation token
+
+| Field | Value |
+|---|---|
+| **Bug ID** | RB-T034-01 |
+| **Date filed** | 2026-05-31 |
+| **Filing task** | Task 034 (P23.B2 — factory-dependent config-path batch 2) |
+| **Production file** | [`src/server/api/Sprk.Bff.Api/Api/Agent/AgentConfigurationService.cs`](../../../src/server/api/Sprk.Bff.Api/Api/Agent/AgentConfigurationService.cs) |
+| **Affected method** | `GetExposedPlaybookIdsAsync(string tenantId, CancellationToken cancellationToken = default)` (line 44) |
+| **Tests Skip'd** | (1) `AgentConfigurationServiceTests.GetExposedPlaybookIdsAsync_RespectsCancellationToken` (`Fact`) — line 444 in [`tests/unit/Sprk.Bff.Api.Tests/Api/Agent/AgentConfigurationServiceTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Api/Agent/AgentConfigurationServiceTests.cs). |
+| **Fix-by date** | 2026-07-31 (60-day target — LOW severity; tests-only impact since callers in production currently always pass `CancellationToken.None`) |
+| **Severity** | LOW (no production caller passes a non-default token; the cancellation contract is unobserved in live traffic) |
+| **Owner** | TBD (M365 Copilot agent feature owner) |
+
+### Bug detail
+
+**Documented test contract** (test name + Assert): a pre-cancelled `CancellationToken` passed to `GetExposedPlaybookIdsAsync` must surface as `OperationCanceledException` before the method completes.
+
+**Implementation** (lines 44-65 of `AgentConfigurationService.cs`):
+
+```csharp
+public async Task<IReadOnlyList<Guid>> GetExposedPlaybookIdsAsync(
+    string tenantId,
+    CancellationToken cancellationToken = default)
+{
+    var cacheKey = $"{CacheKeyPrefix}{tenantId}:exposed-playbooks";
+    var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
+    // ...
+}
+```
+
+**Bug**: The method does NOT call `cancellationToken.ThrowIfCancellationRequested()` before invoking the cache. The injected `MemoryDistributedCache` (used in tests; in production it is a Redis-backed `IDistributedCache`) returns synchronously on the first lookup when the value is absent / already in-process. For an already-cancelled token, neither the service nor the in-memory cache implementation raises `OperationCanceledException`. The test fails with `Assert.Throws() Failure: No exception was thrown`.
+
+Sibling methods on the same service (`IsCapabilityEnabledAsync`, `IsRolePermittedAsync`, `InvalidateCacheAsync`) have the same defensive-cancellation gap, but only `GetExposedPlaybookIdsAsync` is asserted by a `RespectsCancellationToken` test.
+
+### Why this didn't surface in production
+
+The single in-process caller of `AgentConfigurationService` is the M365 Copilot agent endpoint, which currently does not flow a `CancellationToken` derived from the HTTP request — it passes `CancellationToken.None`. The defensive cancellation pattern is therefore exercised only by this unit test. Live traffic never hits the broken path.
+
+### Recommended production fix (out of scope for this project)
+
+Add `cancellationToken.ThrowIfCancellationRequested();` as the FIRST statement inside `GetExposedPlaybookIdsAsync` (and, defensively, on the three sibling public methods). This honors the documented `CancellationToken` parameter contract and matches the canonical .NET pattern for async public APIs.
+
+Single-line minimal fix in `AgentConfigurationService.GetExposedPlaybookIdsAsync` (line 47):
+
+```csharp
+public async Task<IReadOnlyList<Guid>> GetExposedPlaybookIdsAsync(
+    string tenantId,
+    CancellationToken cancellationToken = default)
+{
+    cancellationToken.ThrowIfCancellationRequested();  // <-- add
+    var cacheKey = $"{CacheKeyPrefix}{tenantId}:exposed-playbooks";
+    // ...
+}
+```
+
+### Verification after fix
+
+Remove the `Skip = "..."` attribute on `GetExposedPlaybookIdsAsync_RespectsCancellationToken` and the per-test `[Trait("status", "real-bug-pending-fix")]` (inherits class-level `[Trait("status", "repaired")]`). Run the test; should pass. Update this ledger row to "Resolved" with the fix-commit SHA + date. Remove the row at the next phase exit review.
+
+---
+
 *This ledger is required at Phase 2+3 exit gate (per [`design.md`](../design.md) §6.2 line 240 + §10.5 line 560). Each entry must have a fix-by date or an owner sign-off.*

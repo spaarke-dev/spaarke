@@ -1,7 +1,7 @@
 <task id="041" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.H2 — Scorecard tests (4 files)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2-3 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, high-tier, p23-h, bff-api, testing, scorecard</tags>

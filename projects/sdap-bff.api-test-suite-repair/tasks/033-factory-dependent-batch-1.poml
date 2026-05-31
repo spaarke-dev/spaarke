@@ -1,7 +1,7 @@
 <task id="033" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.B1 — Repair factory-dependent cluster batch 1 (auth/startup-path tests)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2-4 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, factory-dependent, p23-b, bff-api, testing</tags>

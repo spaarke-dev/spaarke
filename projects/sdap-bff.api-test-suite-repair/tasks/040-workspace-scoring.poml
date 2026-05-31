@@ -1,7 +1,7 @@
 <task id="040" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.H1 — Workspace scoring tests (PriorityScoringService, EffortScoring, WorkspaceMatcher)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3-5 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, high-tier, p23-h, bff-api, testing, workspace, scoring</tags>
@@ -124,4 +124,29 @@
     <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
     <criterion testable="true">Any production bugs identified are filed in `real-bug-ledger.md` with fix-by date</criterion>
   </acceptance-criteria>
+
+  <notes>
+## 2026-05-31 — Task 040 completion (Wave 2.1)
+
+**Outcome**: NO-OP. All 3 in-scope files pass with zero failures.
+
+**Targeted measurement**: `dotnet test --filter "FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Workspace"` → Passed: 196 / Failed: 0 / Skipped: 0 (TRX: `tests/unit/Sprk.Bff.Api.Tests/TestResults/task-040-baseline.trx`).
+
+**Cross-check against failure inventory**: `baseline/failure-inventory-post-018-2026-05-31.md` confirms NONE of the 33 failing classes are in the `Services.Workspace.*` namespace. The HIGH-tier defect-prevention thesis from design.md §3.3 holds — pure-logic scoring tests are factory-independent and assert against currently-correct production formulas.
+
+**File inventory clarification**: POML target-3 names `WorkspaceMatcherTests.cs` (does not exist). The actual third file in `Services/Workspace/` is `TodoGenerationServiceTests.cs` (685 LOC). Substituted and verified passing.
+
+**Acceptance criteria**:
+- ✅ Zero `Failed` end-state (0 of 196 tests failing)
+- ✅ Per-file diff <50% (no edits = 0%)
+- ✅ Every touched test has §6.2 trait — vacuously true (zero touched tests)
+- ✅ `git status --short` empty (no `src/`, `power-platform/`, `infra/`, `scripts/` changes)
+- ✅ No production bugs surfaced (no ledger entries needed)
+
+**Build**: `dotnet build tests/unit/Sprk.Bff.Api.Tests/ -c Release` → 0 errors / 1 pre-existing Kiota NU1903 warning (unchanged from baseline).
+
+**Disposition recorded in**: `projects/sdap-bff.api-test-suite-repair/current-task.md` (appended).
+
+**TASK-INDEX.md**: NOT updated per execution-prompt instruction (orchestrator will reconcile).
+  </notes>
 </task>

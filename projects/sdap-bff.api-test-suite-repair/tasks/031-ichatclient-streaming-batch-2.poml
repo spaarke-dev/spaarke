@@ -1,7 +1,7 @@
 <task id="031" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.A2 — Migrate IChatClient streaming tests batch 2 (Services/Ai/Capabilities/Streaming*)</title>
-    <status>not-started</status>
+    <status>completed-noop</status>
     <estimated-effort>2-3 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, ichatclient, p23-a, bff-api, testing, streaming</tags>

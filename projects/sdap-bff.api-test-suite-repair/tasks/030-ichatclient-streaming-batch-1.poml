@@ -1,7 +1,7 @@
 <task id="030" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.A1 — Migrate IChatClient streaming tests batch 1 (Services/Ai/Chat/Streaming*)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2-3 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, ichatclient, p23-a, bff-api, testing, streaming</tags>
@@ -126,4 +126,43 @@
     <criterion testable="true">`CustomWebAppFactory.cs` is NOT modified</criterion>
     <criterion testable="true">No new DI registrations added (NFR-03 preserved)</criterion>
   </acceptance-criteria>
+
+  <notes added="2026-05-31" author="task-execute Wave 2.1">
+    Executed 2026-05-31 at FULL rigor.
+
+    Scope reality: POML pattern `Services/Ai/Chat/Streaming*` matches exactly ONE file
+    (`StreamingWriteIntegrationTests.cs`, 1100 LOC, 28 test methods). Per
+    `baseline/failure-inventory-post-018-2026-05-31.md`, this file had 0 failing tests
+    pre-task — all 28 already passed against existing local async-enumerable helpers and
+    NSubstitute `.Returns(IAsyncEnumerable&lt;&gt;)` setup. The repair focus was therefore
+    §6.2 trait taxonomy compliance + canonical-helper convergence per FR-06 / D-01
+    BUILD LOCAL verdict, NOT broken-test repair.
+
+    Edits applied (additive + line-level rename):
+    - Added `using Sprk.Bff.Api.Tests.Mocks;`
+    - Added `[Trait("status", "repaired")]` at class level + 3-line xmldoc note explaining migration
+    - Replaced 4 `.Returns(...)` arg sites: local `ToAsyncEnumerable` / `ToAsyncEnumerableThenThrow`
+      → `AsyncEnumerableHelpers.ToAsyncEnumerable` / `AsyncEnumerableHelpers.ThrowingAsyncEnumerable`
+    - Removed obsolete local helpers (21 LOC: 8 + 13)
+
+    `git diff --stat`: +20 / -32 = 52 lines of 1100 (4.7%) — well below 50% NFR-02 threshold.
+
+    Test results (Step 8 / Step 9):
+    - `dotnet test --filter "FullyQualifiedName~Services.Ai.Chat.Streaming"`: 28 passed, 0 failed.
+    - `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 17 pre-existing warnings unchanged.
+
+    Quality gates (Step 9.5): code-review PASS (surgical 4.7% diff, zero behavior change);
+    adr-check PASS (no ADR surface touched; ADR-013 refined honored — uses framework SDK
+    `IChatClient`, NOT internal `IOpenAiClient`/`IPlaybookService`); lint PASS (implicit via build).
+
+    No §4.8 escalations filed. No `real-bug-pending-fix` ledger entries (all tests pass against
+    current production). No new DI registrations. CustomWebAppFactory.cs untouched.
+
+    Trait outcome:
+    - `Services/Ai/Chat/StreamingWriteIntegrationTests.cs`: 28 passed, 0 skipped, 0 real-bug-tagged,
+      class-level `[Trait("status", "repaired")]` applied.
+
+    Per caller instructions: did NOT mark complete in TASK-INDEX (orchestrator coordinates wave-exit);
+    did NOT `git commit` (orchestrator coordinates Phase 2+3 commit cadence).
+  </notes>
 </task>

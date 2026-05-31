@@ -117,23 +117,23 @@ All 5 Wave 1 agents completed. Build verification skipped: no `.cs` files modifi
 
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
-| 030 | Streaming batch 1 (Services/Ai/Chat/Streaming*) | 🔲 | 23-A | ✅ Yes | FULL | 015 |
-| 031 | Streaming batch 2 (Services/Ai/Capabilities/Streaming*) | 🔲 | 23-A | ✅ Yes | FULL | 015 |
+| 030 | Streaming batch 1 (Services/Ai/Chat/Streaming*) | ✅ 2026-05-31 (1 file: StreamingWriteIntegrationTests / 28 tests pass; replaced 21 LOC obsolete helpers with canonical AsyncEnumerableHelpers; 4.7% diff) | 23-A | ✅ Yes | FULL | 015 |
+| 031 | Streaming batch 2 (Services/Ai/Capabilities/Streaming*) | ✅ NO-OP 2026-05-31 (scope mismatch: no Capabilities/Streaming* files exist; CapabilityRouter cluster owned by task 053; escalation filed in escalations/) | 23-A | ✅ Yes | FULL | 015 |
 | 032 | IChatClient cluster verification gate | 🔲 | 23-A-gate | ❌ No (gate) | STANDARD | 030, 031 |
 
 ### P23.B — Factory-dependent cluster
 
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
-| 033 | Factory-dependent batch 1 (auth/startup-path tests) | 🔲 | 23-B | ✅ Yes | FULL | 019 |
-| 034 | Factory-dependent batch 2 (config-path tests) | 🔲 | 23-B | ✅ Yes | FULL | 019 |
+| 033 | Factory-dependent batch 1 (auth/startup-path tests) | ✅ 2026-05-31 (5 files: Health/Pipeline/Cors/Auth/Grouping / 15 pass; 018 cleared 2 clusters; Status_* 1-char version bump; max 3.8% diff) | 23-B | ✅ Yes | FULL | 019 |
+| 034 | Factory-dependent batch 2 (config-path tests) | ✅ 2026-05-31 (2 files: AiOptions, AgentConfig / 61 pass + 1 skip / **RB-T034-01** AgentConfigurationService missing ThrowIfCancellationRequested; max 1.5% diff) | 23-B | ✅ Yes | FULL | 019 |
 
 ### P23.H — HIGH-tier long tail (~35 files)
 
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
-| 040 | Workspace scoring (PriorityScoringService, EffortScoring) | 🔲 | 23-H | ✅ Yes | FULL | 014 |
-| 041 | Scorecard tests (4 files) | 🔲 | 23-H | ✅ Yes | FULL | 014 |
+| 040 | Workspace scoring (PriorityScoringService, EffortScoring) | ✅ NO-OP 2026-05-31 (Services.Workspace.* not in post-018 failure inventory; 196 tests pass; zero edits needed) | 23-H | ✅ Yes | FULL | 014 |
+| 041 | Scorecard tests (4 files) | ✅ 2026-05-31 (4 files trait-tagged repaired; 44 pass / 0 fail; <1% diff; cluster already healthy pre-task) | 23-H | ✅ Yes | FULL | 014 |
 | 042 | Finance signal evaluation (780 LOC) | 🔲 | 23-H | ✅ Yes | FULL | 014 |
 | 043 | Email association (863 LOC; Communications coord) | 🔲 | 23-H | ✅ Yes | FULL | 014 |
 | 044 | Ai/Safety (groundedness, citations, prompt shield) | 🔲 | 23-H | ✅ Yes | FULL | 014 |
