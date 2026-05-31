@@ -1,7 +1,7 @@
 <task id="014" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P1.A5 — Verify all 17 compile + capture post-compile runtime failure delta</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>30-45 minutes</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-1, compile-fix, verification, bff-api, testing, p1-a</tags>
@@ -111,5 +111,19 @@
       Cross-reference: `baseline/README.md`, `baseline/test-baseline-2026-05-31.trx`,
       `notes/handoffs/phase23-scope-delta-2026-05-31.md` (from task 008).
     </scope-revision>
+    <completion date="2026-05-31" source="Phase 1 Wave 1.2 task 014 execution">
+      Build verified: 0 errors / 17 warnings (unchanged from Wave 1 baseline). Unit-test run
+      complete: 284 failed / 5,627 passed / 109 skipped / 6,020 total in 1m 14s.
+      Delta vs. 342 baseline: -58 failures (-17.0%); +55 passed; +2 skipped (RB-T012-01).
+      Primary repair source: task 011 cleared Services.Communication.* cluster (-53).
+      Artifacts:
+      - baseline/post-wave1.1a-runtime-2026-05-31.trx
+      - baseline/post-wave1.1a-delta-2026-05-31.md
+      Project CLAUDE.md "Decisions Made" appended with 2026-05-31 post-Wave-1.1a entry.
+      Top-5 remaining hot clusters (78.9% of 284): Api.Ai.* (89), Integration.Workspace.* (54),
+      Top-level *EndpointTests (39), Services.Ai.* non-Safety (23), Services.Ai.Safety.* (19).
+      All five already mapped to absorbing Phase 2+3 tasks per task 008 reconciliation.
+      P1.A track complete. TASK-INDEX.md NOT updated by this agent (parent directive); git NOT committed.
+    </completion>
   </notes>
 </task>
