@@ -1,0 +1,125 @@
+<task id="074" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.L5 — LOW-tier closeout + archive-ledger reconciliation</title>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, low-tier, p23-l, bff-api, testing, verification-gate, closeout</tags>
+    <parallel-group>23-L-gate</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Verification gate for tasks 070, 071, 072, 073; must run AFTER all 4 batches complete to reconcile cumulative archive count and document tier completion</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Verify the LOW-tier P23.L track is fully closed out by reconciling the work of tasks
+    070, 071, 072, and 073. This task is a gate: it runs ONLY after all 4 batches complete and
+    validates the tier-level zero-failure state per FR-19.
+
+    Steps:
+    1. Confirm tasks 070, 071, 072, 073 are all status=completed in TASK-INDEX.md
+    2. Run LOW-tier filter: zero failures across all triaged files
+    3. Tally cumulative archive count across all 4 batches
+    4. If cumulative archive count exceeds owner's pre-approved batch ceiling (per NFR-04
+       per-batch enforcement already done in 070-073), reconcile cumulative totals against
+       any owner escalations filed during execution
+    5. Reconcile `ledgers/archive-ledger.md` — verify every archived file has a complete entry
+       (file path, justification, date)
+    6. Document tier completion in `ledgers/repair-ledger.md` with tier metrics
+
+    Per project CLAUDE.md NFR-02: this task does NOT modify test files; it verifies and records.
+    If failures remain in the LOW-tier, file an escalation per §4.8 documenting which tests
+    remain Failed — do NOT mark the tier closed until zero failures.
+
+    Per §6.2, EVERY test in the LOW-tier must end in `repaired`, `real-bug-pending-fix`,
+    `flaky-quarantined`, OR be archived via `*.cs.archived-2026-MM-DD` rename. `Failed` is
+    FORBIDDEN at close.
+  </prompt>
+
+  <role>Senior test orchestrator running tier-level verification + ledger reconciliation.</role>
+
+  <goal>
+    LOW-tier is verified zero-failure across the union of tasks 070-073. `archive-ledger.md` is
+    fully reconciled with all entries present + justified. `repair-ledger.md` records tier completion
+    as canonical artifact for Phase 4 exit-ledger reconciliation (FR-27).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="archive-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/archive-ledger.md</file>
+    <file purpose="repair-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/repair-ledger.md</file>
+    <file purpose="batch-1-output">(task 070 output: Api/* batch 1 triaged)</file>
+    <file purpose="batch-2-output">(task 071 output: Api/* batch 2 triaged)</file>
+    <file purpose="batch-3-output">(task 072 output: Api/* batch 3 triaged)</file>
+    <file purpose="batch-4-output">(task 073 output: top-level *EndpointTests triaged)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-19">All LOW-tier tests must end in §6.2 final end-state (zero failures)</constraint>
+    <constraint source="NFR-01">No production code changes</constraint>
+    <constraint source="NFR-02">No file edits beyond ledger reconciliation; verification-only</constraint>
+    <constraint source="NFR-04">Per-batch &gt;10 archives ceiling already enforced in 070-073; this task documents cumulative count</constraint>
+    <constraint source="§4.3">No test left in `Failed` state at tier close</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      LOW-tier (~88 files) is the largest tier by file count and has the highest archive ratio.
+      Per NFR-04, &gt;10 archives per batch trigger escalation — that was enforced per-batch in
+      tasks 070-073. This task reconciles cumulative archive counts across all 4 batches against
+      any owner escalations filed during execution, and documents tier-level completion in
+      `repair-ledger.md`.
+    </background>
+    <dependencies>
+      <dependency task="070" status="not-started">LOW-tier Api/* batch 1</dependency>
+      <dependency task="071" status="not-started">LOW-tier Api/* batch 2</dependency>
+      <dependency task="072" status="not-started">LOW-tier Api/* batch 3</dependency>
+      <dependency task="073" status="not-started">LOW-tier top-level endpoint tests</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/archive-ledger.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/repair-ledger.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Confirm tasks 070, 071, 072, 073 are status=completed in `tasks/TASK-INDEX.md`. If any incomplete, HALT and report.</step>
+    <step order="2">Run LOW-tier filter: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Api|FullyQualifiedName~EndpointTests" -c Release`. Capture TRX output. Verify zero failures.</step>
+    <step order="3">If non-zero failures remain, identify each and file escalation per §4.8 OR document as `real-bug-pending-fix` / `flaky-quarantined`. Do NOT mark tier closed if any remain Failed.</step>
+    <step order="4">Tally cumulative archive count across batches 070-073. Cross-reference with per-batch escalations (`escalations/archive-approval-T-07{0,1,2,3}.md`) — confirm all owner approvals are recorded.</step>
+    <step order="5">Verify `ledgers/archive-ledger.md` has one entry per archived file with: file path, justification (synthetic-smoke equivalence cited), date.</step>
+    <step order="6">Append tier section to `projects/sdap-bff.api-test-suite-repair/ledgers/repair-ledger.md`: tier name (LOW-tier), date, task IDs (070-073), metrics (files triaged, files repaired, files archived, tests now Passing).</step>
+    <step order="7">Mark P23.L complete in `current-task.md`. Verify `git status` shows only ledger updates — no production code changes.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test (LOW-tier filter verification)</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/repair-ledger.md (LOW-tier section appended)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/archive-ledger.md (reconciled and complete)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/current-task.md (P23.L marked complete)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`dotnet test --filter "FullyQualifiedName~Api|FullyQualifiedName~EndpointTests"` returns zero failures</criterion>
+    <criterion testable="true">`ledgers/repair-ledger.md` contains a dated section for LOW-tier with tier metrics</criterion>
+    <criterion testable="true">`ledgers/archive-ledger.md` has one complete entry per archived file (path, justification, date)</criterion>
+    <criterion testable="true">All per-batch &gt;10-archive escalations (if any) have owner approval recorded</criterion>
+    <criterion testable="true">No LOW-tier test is in `Failed` state</criterion>
+    <criterion testable="true">`git status` shows only ledger + current-task.md modifications; no production code changes</criterion>
+  </acceptance-criteria>
+</task>

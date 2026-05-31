@@ -1,0 +1,122 @@
+<task id="010" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P1.A1 — Repair compile-broken files batch 1 (Workspace, EmailWebhook, ExternalAccess, Email)</title>
+    <status>not-started</status>
+    <estimated-effort>1.5-2 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-1, compile-fix, bff-api, testing, p1-a</tags>
+    <parallel-group>1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>4 disjoint test files in different folders (Workspace, Api/EmailWebhook, Api/ExternalAccess, Services/Email); no shared file targets with sibling batches 011, 012, 013, 015, 017, 020, 021, 022, 024</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Repair 4 of the 17 compile-broken test files identified in design.md §3.2. All errors are
+    mechanical signature drift: constructor argument mismatches (CS7036), argument type mismatches
+    (CS1503), or missing members (CS1061). Fix by reading the current production type signature
+    and updating the test's constructor call / argument list to match. DO NOT rewrite the test
+    body, DO NOT change assertions, DO NOT change test method signatures.
+
+    Per project CLAUDE.md NFR-02 + design.md §4.1: this is repair, NOT rewrite. If ANY of these
+    4 files requires &gt;50% line replacement to compile, HALT and escalate per §4.8 — file a
+    `rewrite-request-T-010-{FileName}.md` in `projects/sdap-bff.api-test-suite-repair/escalations/`
+    BEFORE continuing.
+
+    NO production code changes (NFR-01). If a constructor signature change reveals a production
+    bug, log it but do NOT touch `src/`.
+  </prompt>
+
+  <role>Senior .NET test repair specialist following repair-not-rewrite discipline.</role>
+
+  <goal>
+    The 4 listed test files compile cleanly with `dotnet build` AND `dotnet build -warnaserror`.
+    Per-file diff is &lt;50% line replacement (NFR-02). Every touched test has
+    `[Trait("status", "repaired")]` per project CLAUDE.md §6.2 taxonomy.
+
+    Build error count for `tests/unit/Sprk.Bff.Api.Tests/` drops by approximately 30 errors
+    (from baseline 138).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/compile-errors-2026-MM-DD.txt</file>
+    <file purpose="target-1">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/TodoGenerationServiceTests.cs</file>
+    <file purpose="target-2">tests/unit/Sprk.Bff.Api.Tests/Api/EmailWebhookEndpointTests.cs</file>
+    <file purpose="target-3">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalAccessEndpointTests.cs</file>
+    <file purpose="target-4">tests/unit/Sprk.Bff.Api.Tests/Services/Email/EmailAttachmentExtractionTests.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code in `src/`, `power-platform/`, `infra/`, `scripts/`</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation BEFORE work proceeds</constraint>
+    <constraint source="NFR-11">Compile-broken files must compile under `-warnaserror` after repair</constraint>
+    <constraint source="§6.2">Every touched test gets `[Trait("status", "repaired")]`</constraint>
+    <constraint source="§4.5">MUST NOT touch `CustomWebAppFactory.cs` (factory is isolated track P1.C)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.2 the 17 compile-broken files have 138 errors total dominated by CS7036
+      (62 missing constructor args, mostly ILogger&lt;T&gt; / TokenCredential) and CS1503 (48 type
+      mismatches). This batch picks 4 files spread across distinct folders to maximize wave-1
+      parallelism with sibling batches 011, 012, 013. The 17 files were temporarily excluded
+      from the test run to allow the 5,215-test baseline; restoring them is the gateway to
+      Phase 2+3 cluster work.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Baseline TRX + compile-errors log produced</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/TodoGenerationServiceTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Api/EmailWebhookEndpointTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalAccessEndpointTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Email/EmailAttachmentExtractionTests.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read the 4 target test files. For each, identify the System Under Test (SUT) and inspect the SUT's current production constructor signature.</step>
+    <step order="2">For each file, classify each compile error from baseline log: CS7036 (missing arg) → add the arg with appropriate fake/mock; CS1503 (type mismatch) → cast/wrap to expected type; CS1061 (missing member) → check for rename in production and update call site.</step>
+    <step order="3">Compute pre-edit line count per file. If any planned edit exceeds 50% of file lines → HALT, file `escalations/rewrite-request-T-010-{FileName}.md`, await owner approval before proceeding on that file.</step>
+    <step order="4">Apply edits one file at a time. After each file, run `dotnet build tests/unit/Sprk.Bff.Api.Tests/ -c Release` and verify error count drops.</step>
+    <step order="5">Add `[Trait("status", "repaired")]` to every touched test class (or test method if class-level is impractical) per §6.2.</step>
+    <step order="6">Final compile gate: `dotnet build tests/unit/Sprk.Bff.Api.Tests/ -c Release -warnaserror` — verify 0 errors AND 0 warnings on the 4 target files.</step>
+    <step order="7">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with file list + per-file LOC delta + new total error count.</step>
+    <step order="8">Verify `git status` shows NO modifications under `src/`, `power-platform/`, `infra/`, `scripts/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build (per-file iterative + final -warnaserror gate)</tool>
+    <tool name="git">status (verify NFR-01)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/TodoGenerationServiceTests.cs (repaired)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Api/EmailWebhookEndpointTests.cs (repaired)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalAccessEndpointTests.cs (repaired)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Email/EmailAttachmentExtractionTests.cs (repaired)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 files compile cleanly under `dotnet build -c Release -warnaserror`</criterion>
+    <criterion testable="true">Build error count for `tests/unit/Sprk.Bff.Api.Tests/` drops by ~30 vs Phase 0 baseline (138 errors)</criterion>
+    <criterion testable="true">Per-file diff is &lt;50% line replacement (NFR-02); if exceeded, escalation file exists in `escalations/`</criterion>
+    <criterion testable="true">Every touched test class has `[Trait("status", "repaired")]`</criterion>
+    <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">`CustomWebAppFactory.cs` is NOT modified (factory-edit isolation guard)</criterion>
+  </acceptance-criteria>
+</task>

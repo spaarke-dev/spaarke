@@ -1,0 +1,125 @@
+<task id="007" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>Commit 3 in-progress namespace fixes per §5.6 (project's first body of work)</title>
+    <status>not-started</status>
+    <estimated-effort>20-30 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-0, commit, namespace-fixes, testing</tags>
+    <parallel-group>0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches 3 specific test files in `tests/unit/Sprk.Bff.Api.Tests/` (if present); these are NAMESPACE-only changes already in working tree. Zero intersection with tasks 001-006 which write only to projects/.../baseline/, decisions/, CLAUDE.md, priority-order.md.</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Per §5.6 (KEEP the 3 in-progress namespace fixes — owner decision recorded in design.md
+    Owner Clarifications + project CLAUDE.md Decisions Made), commit the 3 in-progress
+    namespace fix edits as the project's first body of work.
+
+    These are LEGITIMATE drift fixes from prior work. Reverting them would be process theater.
+    Committing them now saves the re-discovery cost during Phase 1.
+
+    If `git status` shows NO in-progress fixes at task execution time, this task is a NO-OP:
+    record "no in-progress fixes existed; §5.6 lock-in is operationally N/A" in current-task.md
+    and mark complete. Do NOT invent fixes to satisfy the task title.
+
+    NO production code changes (test-file namespace updates are within `tests/`; preserves NFR-01).
+  </prompt>
+
+  <role>AI agent performing the project's first commit per §5.6 owner directive.</role>
+
+  <goal>
+    Either:
+    (a) 3 namespace fix files committed with message "fix(tests): namespace updates per §5.6 lock-in" + `dotnet build tests/unit/Sprk.Bff.Api.Tests/` passes on the 3 touched files; OR
+    (b) NO-OP path: no in-progress fixes found; current-task.md records "§5.6 lock-in operationally N/A — no in-progress fixes present at execution time".
+
+    Either way, current-task.md is updated and TASK-INDEX.md status changes to complete.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="§5.6">3 namespace fixes are KEEP — first commit of project. If absent, document as N/A.</constraint>
+    <constraint source="NFR-01">No production code changes — only `tests/` files touched</constraint>
+    <constraint source="NFR-02">Repair, not rewrite — namespace updates are surgical, NOT rewrites; if diff exceeds 50% of any file's lines, HALT and escalate per §4.8</constraint>
+    <constraint source="NFR-11">After fixes, the touched files MUST compile cleanly under `-warnaserror`</constraint>
+    <constraint source="NFR-09">`repair-not-rewrite: true` declared in metadata</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/skills/push-to-github/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per spec.md Owner Clarifications (2026-05-31): "Namespace fixes (3 files) — Keep. They're
+      legitimate fixes; reverting would be process theater. First commit of project." Per §5.6:
+      "the three in-progress namespace fix edits are kept in working tree and become the
+      project's first commit." This task executes that owner directive.
+
+      Note: this task was generated at project-pipeline time. The 3 files may or may not actually
+      be present in working tree when the task runs (depending on intervening session activity).
+      The NO-OP path handles the absence case gracefully without polluting git history with
+      placeholder commits.
+    </background>
+    <dependencies>
+      <dependency task="none" status="n/a">No upstream; this is independent of baseline capture</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <!-- Up to 3 specific test files in tests/unit/Sprk.Bff.Api.Tests/ with namespace-only changes.
+         Exact paths determined at execution time by `git status`. -->
+    <file>tests/unit/Sprk.Bff.Api.Tests/* (3 files with namespace-only changes; paths discovered at runtime)</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Run `git status --short` to identify modified files in `tests/unit/Sprk.Bff.Api.Tests/`. If 0 files modified there, jump to step 7 (NO-OP path).</step>
+    <step order="2">Run `git diff tests/unit/Sprk.Bff.Api.Tests/` to inspect the actual diff. Verify each modified file's changes are NAMESPACE-only: lines starting with `namespace `, `using `, or whitespace adjustments. NO assertion changes. NO method body changes.</step>
+    <step order="3">If any file's diff exceeds 50% of its line count OR contains non-namespace edits, HALT. File a §4.8 rewrite escalation request in `projects/sdap-bff.api-test-suite-repair/escalations/rewrite-request-T-007-{filename}.md` and STOP. (This protects NFR-02 even on the project's first commit.)</step>
+    <step order="4">Verify the touched files compile: `dotnet build tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Release`. If the 17 known compile-broken files (per baseline) cause failures unrelated to the 3 namespace fixes, that's expected — verify the 3 specific touched files are NOT among the failures (grep error output for the 3 filenames).</step>
+    <step order="5">Stage the 3 files explicitly by name: `git add tests/unit/Sprk.Bff.Api.Tests/{file1} tests/unit/Sprk.Bff.Api.Tests/{file2} tests/unit/Sprk.Bff.Api.Tests/{file3}`. Do NOT use `git add -A` or `git add .` (avoids accidentally staging baseline TRX files from task 001).</step>
+    <step order="6">Commit with HEREDOC message: `git commit -m "$(cat &lt;&lt;'EOF'
+fix(tests): namespace updates per §5.6 lock-in
+
+Three in-progress namespace fix edits committed as the project's first
+body of work per design.md §5.6 owner decision. These are legitimate
+drift fixes; reverting would be process theater (per spec.md Owner
+Clarifications 2026-05-31).
+
+Phase 0 / task 007 / project sdap-bff.api-test-suite-repair
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+EOF
+)"`. Verify commit succeeded with `git log -1`.</step>
+    <step order="7">NO-OP PATH (executed only when step 1 found 0 modified files in `tests/unit/Sprk.Bff.Api.Tests/`): write to `projects/sdap-bff.api-test-suite-repair/current-task.md`: "Task 007 NO-OP: §5.6 lock-in is operationally N/A — no in-progress namespace fixes were present in working tree at execution time (YYYY-MM-DD). The §5.6 owner decision is documented in design.md and decisions/D-06; no commit is needed because the fixes do not exist locally."</step>
+    <step order="8">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with completion summary (commit hash OR N/A note).</step>
+  </steps>
+
+  <tools>
+    <tool name="git">status, diff, add (specific files), commit</tool>
+    <tool name="dotnet">build (verify touched files compile)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/ (3 files with namespace updates — IF present at runtime)</output>
+    <output type="decision">git commit on `work/sdap-bff.api-test-suite-repair` (IF non-NO-OP path)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Either: 3 files committed with message containing "§5.6" — verifiable via `git log -1 --name-only`; OR: current-task.md explicitly records NO-OP path with date</criterion>
+    <criterion testable="true">If commit path: no files outside `tests/unit/Sprk.Bff.Api.Tests/` are in the commit (verify with `git show --name-only HEAD`)</criterion>
+    <criterion testable="true">If commit path: the 3 files compile cleanly (`dotnet build` does not list the 3 filenames in error output)</criterion>
+    <criterion testable="true">No `.env`, `appsettings.local.json`, or credential files included in the commit</criterion>
+    <criterion testable="true">current-task.md records outcome path (commit hash OR N/A note)</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,139 @@
+<task id="070" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.L1 — LOW-tier Api/* batch 1 (triage repair vs archive, ~22 files)</title>
+    <status>not-started</status>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, low-tier, p23-l, bff-api, testing, triage</tags>
+    <parallel-group>23-L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Named Api/* test files (1st quarter of ~88) are disjoint from sibling batches 071, 072, 073</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Triage and repair OR archive the LOW-tier Api/* tests — batch 1 of 4 (~22 files in
+    `tests/unit/Sprk.Bff.Api.Tests/Api/*.cs`, 1st quarter alphabetically of the ~88-file LOW-tier
+    set per design.md §3.3). Per design.md §3.3 LOW-tier rationale: most tests duplicate synthetic
+    smoke coverage; per-file judgment required — repair if unique response-shape contract,
+    archive if duplicate of synthetic smoke.
+
+    Per FR-20 P23.L START GATE: this batch MUST NOT start until P23.H (tasks 040-046) AND P23.M
+    (tasks 050-056) are each ≥50% complete. Verify upstream progress before starting.
+
+    For each test file:
+    1. Determine: is this test a unique response-shape contract test (KEEP, repair), OR is it
+       a route-registration / auth-check / smoke-style test duplicated by synthetic smoke (ARCHIVE)?
+    2. If KEEP: repair assertions; apply `[Trait("status", "repaired")]`; verify Pass
+    3. If ARCHIVE: rename file to `&lt;OldName&gt;.cs.archived-2026-MM-DD` per §6.5; add entry to
+       `ledgers/archive-ledger.md` with justification (cite synthetic-smoke equivalence)
+
+    ESCALATION TRIGGER: If archive count in this batch exceeds 10 files → ESCALATE per NFR-04
+    BEFORE proceeding. File owner-approval request in `escalations/archive-approval-T-070.md`.
+
+    Per project CLAUDE.md NFR-02 + design.md §4.1: this is repair, NOT rewrite. If ANY repaired
+    file's diff would exceed 50% line replacement, HALT and file
+    `projects/sdap-bff.api-test-suite-repair/escalations/rewrite-request-T-070-{FileName}.md`
+    per §4.8 escalation procedure. Do NOT proceed without owner approval.
+
+    NO production code changes (NFR-01). NO silent deletion — archive via rename only (NFR-06).
+    Per §6.2, every touched test ends in `repaired`, `real-bug-pending-fix`, `flaky-quarantined`,
+    OR is archived. `Failed` is FORBIDDEN at close.
+  </prompt>
+
+  <role>Senior .NET test repair specialist with API endpoint testing + smoke-test coverage judgment.</role>
+
+  <goal>
+    ~22 Api/* test files triaged. Repaired files Pass. Archived files renamed with archive-ledger
+    entries. Zero Failed.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+    <file purpose="archive-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/archive-ledger.md</file>
+    <file purpose="archive-precedent">tests/unit/Sprk.Bff.Api.Tests/JobProcessorTests.cs.archived-2025-10-14</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code in `src/`, `power-platform/`, `infra/`, `scripts/`</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation</constraint>
+    <constraint source="NFR-04">Archive count &gt;10 in this batch triggers owner escalation</constraint>
+    <constraint source="NFR-06">MUST NOT silently delete tests; archive via rename to `*.cs.archived-2026-MM-DD`</constraint>
+    <constraint source="§6.2">Every touched test gets a §6.2 final end-state (or archived)</constraint>
+    <constraint source="§4.5">MUST NOT touch `CustomWebAppFactory.cs`</constraint>
+    <constraint source="FR-19">All LOW-tier tests must end in §6.2 final end-state</constraint>
+    <constraint source="FR-20">Start gate: P23.H and P23.M each ≥50% complete</constraint>
+    <constraint source="batch-partition">Batch 1 covers 1st quarter of Api/* files alphabetically; respect partition</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.3 LOW-tier (~88 files) is mostly endpoint route-registration / auth-check /
+      status-code tests. Most are duplicates of synthetic smoke coverage. Triage default: archive
+      if duplicate, KEEP if response-shape contract. NFR-04 enforces &gt;10-archives-per-batch escalation.
+    </background>
+    <dependencies>
+      <dependency task="040" status="not-started">P23.H1 Workspace scoring</dependency>
+      <dependency task="041" status="not-started">P23.H2 Scorecard</dependency>
+      <dependency task="042" status="not-started">P23.H3 Finance signals</dependency>
+      <dependency task="043" status="not-started">P23.H4 Email association</dependency>
+      <dependency task="044" status="not-started">P23.H5 Ai/Safety</dependency>
+      <dependency task="045" status="not-started">P23.H6 Filters + Json</dependency>
+      <dependency task="046" status="not-started">P23.H7 Resilience (≥50% of P23.H complete required)</dependency>
+      <dependency task="050" status="not-started">P23.M1 Ai/Chat batch 1</dependency>
+      <dependency task="051" status="not-started">P23.M2 Ai/Chat batch 2</dependency>
+      <dependency task="052" status="not-started">P23.M3 Ai/Chat batch 3</dependency>
+      <dependency task="053" status="not-started">P23.M4 Ai/Capabilities (≥50% of P23.M complete required)</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Api/&lt;first quarter of files alphabetically, excluding subdirectories already covered&gt;</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Verify FR-20 start gate: confirm ≥50% of tasks 040-046 (P23.H) AND ≥50% of tasks 050-056 (P23.M) are status=completed in TASK-INDEX.md. If not, HALT and report.</step>
+    <step order="2">List all `tests/unit/Sprk.Bff.Api.Tests/Api/*.cs` files (excluding subdirectories already covered by other tasks). Sort alphabetically. Take first quarter (~22 files) → this is batch 1.</step>
+    <step order="3">From Phase 0 baseline TRX, identify failing tests within this batch.</step>
+    <step order="4">For each file: determine REPAIR vs ARCHIVE via per-test judgment. Read the test; does it assert a unique response shape (KEEP), or does it duplicate route-registration / status-code checking already in synthetic smoke (ARCHIVE)?</step>
+    <step order="5">Track archive count as you go. If approaching 10 → STOP triaging more for archive; file `escalations/archive-approval-T-070.md` per NFR-04 BEFORE proceeding past 10.</step>
+    <step order="6">For REPAIR cases: compute pre-edit line count; if &gt;50% replacement → escalate per §4.8. Otherwise apply minimal edits; mark `[Trait("status", "repaired")]`.</step>
+    <step order="7">For ARCHIVE cases: rename file to `&lt;OldName&gt;.cs.archived-2026-MM-DD`; add entry to `ledgers/archive-ledger.md` with file path, justification (cite synthetic-smoke equivalence path), and date.</step>
+    <step order="8">After each file: `dotnet test --filter "FullyQualifiedName~Api"` (intersected with batch) verify outcome.</step>
+    <step order="9">Update `current-task.md` with disposition table (file | REPAIR/ARCHIVE | reason).</step>
+    <step order="10">Verify `git status` shows NO modifications under `src/`, `power-platform/`, `infra/`, `scripts/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test</tool>
+    <tool name="git">status + mv (for archive rename)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">~22 Api/* test files (repaired or archived)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/archive-ledger.md (entries for any archived files)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All batch-1 LOW-tier tests Pass, Skip-with-reason, or are archived; zero Failed</criterion>
+    <criterion testable="true">FR-20 start gate verified before work began (50% P23.H + 50% P23.M complete)</criterion>
+    <criterion testable="true">Per-file repair diff &lt;50% line replacement (NFR-02); archived files renamed per §6.5</criterion>
+    <criterion testable="true">Archive count ≤10 in this batch, OR `escalations/archive-approval-T-070.md` exists with owner approval (NFR-04)</criterion>
+    <criterion testable="true">Every touched test has a §6.2 final end-state trait OR is archived with ledger entry</criterion>
+    <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">No overlap with batches 071, 072, 073 files</criterion>
+  </acceptance-criteria>
+</task>

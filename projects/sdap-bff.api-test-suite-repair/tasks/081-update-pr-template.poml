@@ -1,0 +1,102 @@
+<task id="081" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P4.A2 — Update `.github/pull_request_template.md` with test-update question (FR-23)</title>
+    <status>not-started</status>
+    <estimated-effort>20-30 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-4, governance, anti-drift, pr-template</tags>
+    <parallel-group>4-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Agent-safe — `.github/` is writable by sub-agents. Disjoint from tasks 082 (`docs/`), 084 (baseline runs), 085 (`ledgers/`). Touches a single file; no overlap with other parallel-group tasks.</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Update `.github/pull_request_template.md` to add ONE question per FR-23: "If this PR modifies `src/server/api/Sprk.Bff.Api/Services/`, has a corresponding test been added/updated? (Yes / No / Not applicable — explain)".
+
+    Per design.md §5.5 anti-drift enforcement (locked decision 2026-05-30), the PR template question is the second of three coordinated mechanisms: (1) the `.claude/constraints/bff-extensions.md` "Test update obligation" section (task 080), (2) THIS PR template question (task 081), (3) the code review checklist line in `docs/procedures/testing-and-code-quality.md` (task 082). All three reference each other.
+
+    Soft dependency on task 080: this PR template question CAN cite the constraint section once it exists. If task 080 has not yet shipped at execution time, this task ships the question as a self-contained checklist item; task 080 cross-references back later.
+
+    NO production code changes. Single line addition (plus surrounding markdown to fit existing template structure).
+  </prompt>
+
+  <role>AI agent adding a single PR-template checklist question to enforce anti-drift governance.</role>
+
+  <goal>
+    `.github/pull_request_template.md` updated with ONE new question matching FR-23 exact text:
+    "If this PR modifies `src/server/api/Sprk.Bff.Api/Services/`, has a corresponding test been added/updated? (Yes / No / Not applicable — explain)".
+
+    The question is placed in a location that aligns with the existing template's structure (likely in a checklist section or testing section). Existing template sections preserved unchanged. The question references `.claude/constraints/bff-extensions.md` "Test update obligation" section as the canonical reference.
+  </goal>
+
+  <inputs>
+    <file purpose="target-file">.github/pull_request_template.md</file>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="constraint-canonical">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-23">`.github/pull_request_template.md` adds one question with the exact text specified in spec.md FR-23</constraint>
+    <constraint source="design.md §5.5">Anti-drift via code review + PR template + constraint cross-reference; NO CI script</constraint>
+    <constraint source="NFR-01">No production code changes (`.github/` is workflow configuration, not `src/`)</constraint>
+    <constraint source="NFR-09">Task POML metadata declares `repair-not-rewrite: true`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.github/pull_request_template.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §5.5, the PR template question is one of three coordinated anti-drift mechanisms (the constraint section in task 080 and the code review checklist line in task 082 are the other two). The question is intentionally a single line — owner direction was "do not over-burden PR process" — and a more elaborate question would push reviewers to skim. The Yes/No/N-A format makes the reviewer make the call explicitly and forces an explanation if "N/A" is claimed. This is the same pattern the predecessor `sdap-bff-api-remediation-fix` project used for its ADR-013 facade migration (PR template gained Justification section per G3 task 074).
+    </background>
+    <dependencies>
+      <dependency task="080" status="not-started">Soft — PR template can reference `.claude/constraints/bff-extensions.md` section once it exists; if 080 hasn't shipped, this task lands the question self-contained and 080 cross-references back later</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>.github/pull_request_template.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read `.github/pull_request_template.md` in full. Identify the most appropriate location for the new question (likely in an existing "Testing" or "Checklist" section; if no such section exists, add a new one).</step>
+    <step order="2">Draft the new question per FR-23 exact wording:
+      ```
+      - [ ] **Test update obligation** — If this PR modifies `src/server/api/Sprk.Bff.Api/Services/`, has a corresponding test been added/updated? (Yes / No / Not applicable — explain)
+        See [`.claude/constraints/bff-extensions.md`](../.claude/constraints/bff-extensions.md) "Test update obligation" section.
+      ```
+    </step>
+    <step order="3">Apply the edit via the Edit tool. Insert the new question; preserve existing template structure.</step>
+    <step order="4">Verify `git status` shows ONLY `.github/pull_request_template.md` modified.</step>
+    <step order="5">Commit message: "docs(.github): add test-update obligation question to PR template (FR-23)".</step>
+    <step order="6">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with completion + cite the new question's location in the template.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">`.github/pull_request_template.md` for current structure</tool>
+    <tool name="Edit">Insert new test-update-obligation question</tool>
+    <tool name="Bash">`git status` for boundary verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.github/pull_request_template.md (updated with test-update obligation question)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File diff shows new test-update obligation question in `.github/pull_request_template.md`</criterion>
+    <criterion testable="true">Question text matches FR-23 exact wording: "If this PR modifies `src/server/api/Sprk.Bff.Api/Services/`, has a corresponding test been added/updated? (Yes / No / Not applicable — explain)"</criterion>
+    <criterion testable="true">Question references `.claude/constraints/bff-extensions.md` "Test update obligation" section (canonical reference)</criterion>
+    <criterion testable="true">Existing PR template sections preserved unchanged (verified via diff)</criterion>
+    <criterion testable="true">`git status` shows ONLY `.github/pull_request_template.md` modified</criterion>
+  </acceptance-criteria>
+</task>

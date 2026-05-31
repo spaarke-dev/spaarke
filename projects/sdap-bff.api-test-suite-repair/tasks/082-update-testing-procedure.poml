@@ -1,0 +1,99 @@
+<task id="082" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P4.A3 — Update `docs/procedures/testing-and-code-quality.md` (FR-24)</title>
+    <status>not-started</status>
+    <estimated-effort>20-30 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-4, governance, anti-drift, docs, code-review-checklist</tags>
+    <parallel-group>4-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Agent-safe — `docs/` is writable by sub-agents. Disjoint from tasks 081 (`.github/`), 084 (baseline runs), 085 (`ledgers/`). Touches a single file; no overlap with other parallel-group tasks.</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Update `docs/procedures/testing-and-code-quality.md` to add ONE line in the code review checklist section per FR-24: "Verify test-update obligation per `.claude/constraints/bff-extensions.md`."
+
+    Per design.md §5.5 anti-drift enforcement (locked decision 2026-05-30), the code review checklist line is the third of three coordinated mechanisms: (1) `.claude/constraints/bff-extensions.md` "Test update obligation" section (task 080), (2) PR template question (task 081), (3) THIS code review checklist line (task 082). All three reference each other.
+
+    Soft dependency on task 080: the checklist line cites the constraint document section. If task 080 has not yet shipped at execution time, this task ships the checklist line self-contained and task 080 fulfills the reference later.
+
+    NO production code changes. Single line addition to an existing procedure document.
+  </prompt>
+
+  <role>AI agent adding a single code-review-checklist line to enforce anti-drift governance.</role>
+
+  <goal>
+    `docs/procedures/testing-and-code-quality.md` updated with ONE new line in the code review checklist section: "Verify test-update obligation per `.claude/constraints/bff-extensions.md`."
+
+    The line is placed in the existing code review checklist section (likely a bullet list). Existing procedure sections preserved unchanged. The line is a single bullet, not a sub-section — owner direction was "do not over-burden PR process."
+  </goal>
+
+  <inputs>
+    <file purpose="target-file">docs/procedures/testing-and-code-quality.md</file>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="constraint-canonical">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-24">`docs/procedures/testing-and-code-quality.md` (or the code review checklist within it) gains one line: "Verify test-update obligation per `.claude/constraints/bff-extensions.md`."</constraint>
+    <constraint source="design.md §5.5">Anti-drift via code review + PR template + constraint cross-reference; NO CI script</constraint>
+    <constraint source="NFR-01">No production code changes (`docs/` is documentation, not `src/`)</constraint>
+    <constraint source="NFR-09">Task POML metadata declares `repair-not-rewrite: true`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §5.5 and §6.6 (existing test conventions honored), the code review checklist line is one of three coordinated anti-drift mechanisms. The line is intentionally a single bullet — owner direction was "do not over-burden PR process" — and a more elaborate addition would diffuse the rule. Reviewers check this line per PR; the heavy lifting (what the obligation IS) lives in the constraint file referenced by the line. The existing `docs/procedures/testing-and-code-quality.md` likely has a "code review" or "checklist" section; the new line drops there.
+    </background>
+    <dependencies>
+      <dependency task="080" status="not-started">Soft — checklist line cites `.claude/constraints/bff-extensions.md` "Test update obligation" section. If 080 hasn't shipped, this task lands self-contained; task 080 fulfills the reference target later.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>docs/procedures/testing-and-code-quality.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read `docs/procedures/testing-and-code-quality.md` in full. Identify the code review checklist section (most likely heading: "Code Review", "Code Review Checklist", or similar).</step>
+    <step order="2">If a checklist section exists, add the FR-24 line as a new bullet. If no checklist section exists, add a brief "Code Review" subsection containing this single bullet. The exact line:
+      ```
+      - [ ] Verify test-update obligation per [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md).
+      ```
+    </step>
+    <step order="3">Apply the edit via the Edit tool. Preserve existing procedure sections.</step>
+    <step order="4">Verify `git status` shows ONLY `docs/procedures/testing-and-code-quality.md` modified.</step>
+    <step order="5">Commit message: "docs(procedures): add test-update obligation to code review checklist (FR-24)".</step>
+    <step order="6">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with completion + cite the new line's location.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">`docs/procedures/testing-and-code-quality.md` for current structure</tool>
+    <tool name="Edit">Insert new test-update obligation checklist line</tool>
+    <tool name="Bash">`git status` for boundary verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/procedures/testing-and-code-quality.md (updated with test-update obligation checklist line)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File diff shows new line "Verify test-update obligation per `.claude/constraints/bff-extensions.md`." in `docs/procedures/testing-and-code-quality.md`</criterion>
+    <criterion testable="true">Line is in the code review checklist section (existing or newly-created brief subsection)</criterion>
+    <criterion testable="true">Existing procedure sections preserved unchanged (verified via diff)</criterion>
+    <criterion testable="true">`git status` shows ONLY `docs/procedures/testing-and-code-quality.md` modified</criterion>
+  </acceptance-criteria>
+</task>

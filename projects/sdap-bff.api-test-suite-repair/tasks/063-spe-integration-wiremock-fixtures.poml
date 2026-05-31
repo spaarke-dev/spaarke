@@ -1,0 +1,117 @@
+<task id="063" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.I4 — Spe.Integration.Tests WireMock fixture updates (wiremock-drift category)</title>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, integration-tier, p23-i, integration-test, spe, wiremock, testing</tags>
+    <parallel-group>23-I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>WireMock JSON fixture files under tests/integration/Spe.Integration.Tests/Fixtures/ are disjoint from .cs source repaired in task 062; also disjoint from BFF Integration batches (060/061)</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Update WireMock JSON fixture files in `tests/integration/Spe.Integration.Tests/Fixtures/`
+    (or equivalent location per project structure) per the wiremock-drift category in the Phase 1
+    integration-test triage (`projects/sdap-bff.api-test-suite-repair/integration-test-triage.md`).
+    Per design.md §7 Phase 2+3 section: WireMock fixture updates are explicitly test-only changes
+    permitted under NFR-01.
+
+    For each fixture identified in the wiremock-drift category:
+    1. Identify the Graph API endpoint stubbed by the fixture
+    2. Compare the fixture's stubbed response against the current Graph SDK contract
+       (response shape, headers, status codes)
+    3. Update the JSON to match current contract
+    4. Verify the consuming test now Passes
+    5. Apply `[Trait("status", "repaired")]` to consuming test class
+
+    Per project CLAUDE.md NFR-02 + design.md §4.1: this is repair, NOT rewrite. If a fixture file
+    requires &gt;50% line replacement (more than half the JSON nodes change), HALT and file
+    `projects/sdap-bff.api-test-suite-repair/escalations/rewrite-request-T-063-{FixtureName}.md`
+    per §4.8 escalation procedure. Do NOT proceed without owner approval.
+
+    NO production code changes (NFR-01). Per §6.2, every consuming test ends in `repaired`,
+    `real-bug-pending-fix`, `flaky-quarantined`, or archived. `Failed` is FORBIDDEN at close.
+  </prompt>
+
+  <role>Senior integration-test specialist with WireMock + Microsoft Graph contract expertise.</role>
+
+  <goal>
+    All WireMock fixture files identified in the Phase 1 triage as wiremock-drift are updated to
+    match current Graph contract. Consuming tests Pass. §6.2 traits applied.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="triage">projects/sdap-bff.api-test-suite-repair/integration-test-triage.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/integration-test-baseline-2026-MM-DD.trx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code in `src/`, `power-platform/`, `infra/`, `scripts/`</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation (applies to fixture JSON)</constraint>
+    <constraint source="§6.2">Every consuming test gets a §6.2 final end-state trait</constraint>
+    <constraint source="FR-18">All INTEGRATION-tier tests must end in §6.2 final end-state</constraint>
+    <constraint source="triage-scope">Only handle wiremock-drift category; compile/signature drift is task 062</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      WireMock fixtures stub Graph API responses for integration tests. When Graph SDK upgrades
+      or Graph API contracts evolve, fixtures drift. Phase 1 task 024 categorizes which failures
+      are wiremock-drift; this task updates those fixtures. Disjoint from task 062 (which handles
+      compile/signature drift in .cs source).
+    </background>
+    <dependencies>
+      <dependency task="024" status="not-started">Spe.Integration.Tests baseline triage complete</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/integration/Spe.Integration.Tests/Fixtures/*.json (those classified as wiremock-drift in triage)</file>
+    <file>tests/integration/Spe.Integration.Tests/**/*.json (any WireMock-format fixture)</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read `integration-test-triage.md` produced by task 024. Identify all WireMock fixtures classified as wiremock-drift.</step>
+    <step order="2">For each fixture: identify the Graph endpoint stubbed (request URL pattern); identify the consuming test class(es).</step>
+    <step order="3">Look up current Graph SDK contract for that endpoint (response shape, status codes, headers).</step>
+    <step order="4">Compute pre-edit JSON node count per fixture. If any planned edit would exceed 50% of nodes → HALT, file `escalations/rewrite-request-T-063-{FixtureName}.md`, await owner approval.</step>
+    <step order="5">Update fixture JSON to match current contract. Preserve test data values where possible (change shape, not test semantics).</step>
+    <step order="6">Apply `[Trait("status", "repaired")]` to consuming test class(es).</step>
+    <step order="7">After each fixture update: `dotnet test tests/integration/Spe.Integration.Tests/ --filter "FullyQualifiedName~&lt;ConsumingClassName&gt;"` verify Pass.</step>
+    <step order="8">Update `current-task.md` with disposition (fixtures updated, consuming tests now Passing).</step>
+    <step order="9">Verify `git status` shows NO modifications under `src/`, `power-platform/`, `infra/`, `scripts/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test (Spe.Integration.Tests project)</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/integration/Spe.Integration.Tests/Fixtures/*.json (WireMock fixtures, updated)</output>
+    <output type="code">Consuming test classes (trait applied)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All wiremock-drift fixtures updated to current Graph contract; consuming tests Pass</criterion>
+    <criterion testable="true">Per-fixture JSON diff &lt;50% node replacement (NFR-02)</criterion>
+    <criterion testable="true">Every consuming test has a §6.2 final end-state trait</criterion>
+    <criterion testable="true">No overlap with task 062 (.cs source files)</criterion>
+    <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,92 @@
+<task id="002" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>Capture Spe.Integration.Tests baseline TRX — FR-01 integration portion</title>
+    <status>not-started</status>
+    <estimated-effort>30-60 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-0, baseline, integration-test, testing</tags>
+    <parallel-group>0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes only to projects/.../baseline/integration-test-baseline-*.trx; disjoint from tasks 001, 003, 006, 007</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Capture the `Spe.Integration.Tests` baseline TRX. Per design.md §5.3, integration tests
+    are IN SCOPE for this project. This task captures the starting state for the
+    `tests/integration/Spe.Integration.Tests/` project so Phase 1 P1.E (task to be generated)
+    can classify failures by pattern (compile drift / signature drift / real Graph regression /
+    wiremock drift) into `integration-test-triage.md`.
+
+    NO source-code changes. NO test changes. Pure data capture.
+  </prompt>
+
+  <role>AI agent capturing integration-test baseline TRX for sequenced Phase 2+3 repair work.</role>
+
+  <goal>
+    `projects/sdap-bff.api-test-suite-repair/baseline/integration-test-baseline-2026-MM-DD.trx` exists,
+    is parseable, and contains explicit Passed/Failed/Skipped counts. Counts documented in
+    `projects/sdap-bff.api-test-suite-repair/current-task.md` upon completion.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="test-project">tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-01">Integration TRX must exist + be parseable</constraint>
+    <constraint source="§5.3">Integration tests IN SCOPE — baseline now, repair in Phase 2+3</constraint>
+    <constraint source="NFR-01">No production code changes</constraint>
+    <constraint source="NFR-09">`repair-not-rewrite: true` declared in metadata</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §5.3 (locked decision), integration tests are in scope. The baseline run
+      here informs FR-13 (Phase 1 P1.E triage classification) and FR-18 (Phase 2+3 P23.I repair).
+      Integration tests use real Graph + wiremock; failure modes differ from unit tests.
+    </background>
+    <dependencies>
+      <dependency task="none" status="n/a">No upstream — Phase 0 task</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/baseline/integration-test-baseline-2026-MM-DD.trx</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Resolve today's date (YYYY-MM-DD).</step>
+    <step order="2">Verify `tests/integration/Spe.Integration.Tests/` exists and builds. If it does not build, capture the build error log as `projects/sdap-bff.api-test-suite-repair/baseline/integration-build-errors-{date}.txt` and STOP — note in current-task.md that the integration project is compile-broken; downstream FR-13 must handle compile recovery first.</step>
+    <step order="3">If build succeeds, run `dotnet test tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj -c Release --logger "trx;LogFileName=integration-test-baseline-{date}.trx" --results-directory projects/sdap-bff.api-test-suite-repair/baseline/`. Allow up to 30 min runtime.</step>
+    <step order="4">Verify TRX file is parseable XML; extract `&lt;ResultSummary&gt;` outcome counts.</step>
+    <step order="5">Document Passed / Failed / Skipped / Aborted counts in `projects/sdap-bff.api-test-suite-repair/current-task.md` along with full TRX path.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test (TRX logger), build (compile verification)</tool>
+  </tools>
+
+  <outputs>
+    <output type="baseline">projects/sdap-bff.api-test-suite-repair/baseline/integration-test-baseline-2026-MM-DD.trx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Integration baseline TRX exists with today's date suffix (OR compile-errors fallback file exists with explicit note in current-task.md)</criterion>
+    <criterion testable="true">If TRX exists: parseable XML with `&lt;ResultSummary&gt;` element present</criterion>
+    <criterion testable="true">Passed / Failed / Skipped counts recorded in current-task.md</criterion>
+    <criterion testable="true">No files in `src/`, `power-platform/`, `infra/`, `scripts/` modified</criterion>
+  </acceptance-criteria>
+</task>

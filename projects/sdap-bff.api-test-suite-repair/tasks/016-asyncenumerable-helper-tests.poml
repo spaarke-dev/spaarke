@@ -1,0 +1,109 @@
+<task id="016" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P1.B2 — Unit test the IAsyncEnumerable helper</title>
+    <status>not-started</status>
+    <estimated-effort>30 min - 1 hour (skipped if Microsoft path)</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-1, async-enumerable, bff-api, testing, p1-b</tags>
+    <parallel-group>1-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Single new test file `Mocks/AsyncEnumerableHelpersTests.cs` (hand-rolled path) or confirmation note (Microsoft path); disjoint from sibling tasks 014 (baseline write) and 023 (CI gate negative-path verification)</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Verify the `IAsyncEnumerable&lt;T&gt;` helper produced by task 015 works correctly before the
+    Phase 2+3 P23.A cluster migration consumes it. Path depends on D-01 verdict:
+
+    - **IF Microsoft package**: NO new tests authored — Microsoft tests the package. Add a short
+      confirmation note to `current-task.md` citing the Microsoft test coverage source (release
+      notes, Microsoft GitHub repo path), and skip steps 3-5.
+
+    - **IF hand-rolled**: Author 3-5 unit tests in `tests/unit/Sprk.Bff.Api.Tests/Mocks/AsyncEnumerableHelpersTests.cs`
+      covering: ToAsyncEnumerable (preserves order, empty input), EmptyAsyncEnumerable (yields
+      zero items), ThrowingAsyncEnumerable (throws on enumeration, not on construction).
+
+    Per project CLAUDE.md NFR-01: tests are infrastructure, NOT production. Per design.md §7
+    Phase 1 P1.B exit note: "Unit tests for the helper itself (this IS new test code; out-of-scope
+    rule doesn't apply since the helper is infrastructure, not behavior)."
+  </prompt>
+
+  <role>AI agent verifying test helper correctness before Phase 2+3 consumption.</role>
+
+  <goal>
+    Helper has its own verification. Either:
+    - 3-5 unit tests in `Mocks/AsyncEnumerableHelpersTests.cs` (hand-rolled path) all pass, OR
+    - Confirmation note in `current-task.md` citing Microsoft's test source (Microsoft path).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="verdict">projects/sdap-bff.api-test-suite-repair/decisions/D-01-async-enumerable-helper.md</file>
+    <file purpose="helper">tests/unit/Sprk.Bff.Api.Tests/Mocks/AsyncEnumerableHelpers.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">No production code modifications</constraint>
+    <constraint source="NFR-02">Test file is BRAND NEW; repair-not-rewrite rule does not apply (no existing file to compare to)</constraint>
+    <constraint source="NFR-11">Helper test file compiles under `-warnaserror`</constraint>
+    <constraint source="§6.2">Tests in this file are `[Trait("status", "repaired")]` only if they end up exercising existing tests; here they are infrastructure verification, so the trait is acceptable but not required for the helper-internal tests</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      P1.B Track exit per design.md §7 requires: "helper compiles, has its own tests, is ready
+      for cluster migration." This task ships the "has its own tests" requirement. The Microsoft
+      path skips authoring (Microsoft owns the tests upstream); the hand-rolled path authors
+      focused unit tests so Phase 2+3 P23.A migration tasks can rely on the helper's contract.
+    </background>
+    <dependencies>
+      <dependency task="015" status="not-started">Helper exists (Microsoft package OR hand-rolled file)</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Mocks/AsyncEnumerableHelpersTests.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read D-01 verdict + check whether task 015 went Microsoft or hand-rolled path.</step>
+    <step order="2">Branch:
+      - IF Microsoft package: add confirmation note to `current-task.md` Decisions section citing Microsoft's test coverage source (NuGet description, Microsoft Learn link, or upstream Microsoft GitHub test folder). Skip to step 6.
+      - IF hand-rolled: proceed to step 3.</step>
+    <step order="3">[Hand-rolled path] Create `tests/unit/Sprk.Bff.Api.Tests/Mocks/AsyncEnumerableHelpersTests.cs` with 3-5 xUnit `[Fact]` tests:
+      - `ToAsyncEnumerable_PreservesOrder` — verify 3 items come back in order
+      - `ToAsyncEnumerable_EmptyInput_YieldsZero` — verify empty params produces zero iterations
+      - `EmptyAsyncEnumerable_YieldsZero` — verify EmptyAsyncEnumerable produces zero iterations
+      - `ThrowingAsyncEnumerable_ThrowsOnEnumeration_NotOnConstruction` — verify exception fires inside the await foreach, not at the static factory call</step>
+    <step order="4">[Hand-rolled path] Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~AsyncEnumerableHelpersTests"`. All tests must pass.</step>
+    <step order="5">[Hand-rolled path] Run `dotnet build tests/unit/Sprk.Bff.Api.Tests/ -warnaserror` to confirm 0 errors / 0 warnings.</step>
+    <step order="6">Update `current-task.md` declaring P1.B Track exit gate (helper compiles + has tests + ready for P23.A consumption).</step>
+    <step order="7">Verify `git status` shows changes ONLY under `tests/unit/Sprk.Bff.Api.Tests/Mocks/` (hand-rolled path) or no code changes (Microsoft path).</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test (filtered), build (-warnaserror)</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="code-or-note">tests/unit/Sprk.Bff.Api.Tests/Mocks/AsyncEnumerableHelpersTests.cs (hand-rolled path) OR confirmation note in current-task.md (Microsoft path)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">EITHER 3-5 helper tests pass via `dotnet test --filter` (hand-rolled), OR confirmation note in current-task.md cites Microsoft's test source (Microsoft path)</criterion>
+    <criterion testable="true">`dotnet build tests/unit/Sprk.Bff.Api.Tests/ -warnaserror` returns 0 errors</criterion>
+    <criterion testable="true">No modifications to `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">P1.B Track exit gate declared in `current-task.md`</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,114 @@
+<task id="045" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.H6 — Filters + Infrastructure/Json tests</title>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, high-tier, p23-h, bff-api, testing, filters, json</tags>
+    <parallel-group>23-H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Filters/* and Infrastructure/Json/* test directories are disjoint from other H-track batches</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Repair the HIGH-tier Filters and Infrastructure/Json tests under
+    `tests/unit/Sprk.Bff.Api.Tests/Filters/*` and `tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Json/*`.
+    Per design.md §3.3 these are HIGH-tier: filters enforce auth/validation pipelines (silent bypass
+    is a security risk); JSON infrastructure (custom converters, polymorphic deserialization) is
+    a contract surface that silently corrupts API responses if broken.
+
+    For each failing test:
+    1. Identify failure (filter rule change, JSON contract change, converter behavior change)
+    2. Determine: `test-stale` (update assertion) vs `production-bug` (mark `real-bug-pending-fix` + ledger)
+    3. Apply §6.2 trait
+    4. Verify Pass
+
+    Per project CLAUDE.md NFR-02 + design.md §4.1: this is repair, NOT rewrite. If ANY file's diff
+    would exceed 50% line replacement, HALT and file
+    `projects/sdap-bff.api-test-suite-repair/escalations/rewrite-request-T-045-{FileName}.md`
+    per §4.8 escalation procedure. Do NOT proceed without owner approval.
+
+    NO production code changes (NFR-01). Per §6.2, every touched test ends in `repaired`,
+    `real-bug-pending-fix`, `flaky-quarantined`, or archived. `Failed` is FORBIDDEN at close.
+  </prompt>
+
+  <role>Senior .NET test repair specialist with ASP.NET filter pipeline + System.Text.Json expertise.</role>
+
+  <goal>
+    All Filters and Infrastructure/Json test files end in §6.2 final end-state. Zero Failed.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+    <file purpose="real-bug-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation</constraint>
+    <constraint source="§6.2">Every touched test gets a §6.2 final end-state trait</constraint>
+    <constraint source="§4.5">MUST NOT touch `CustomWebAppFactory.cs`</constraint>
+    <constraint source="FR-16">HIGH-tier tests must end in §6.2 final end-state</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.3, Filters + Infrastructure/Json tests are HIGH-tier. Filters enforce
+      auth/validation pipelines; JSON infrastructure is the API contract serialization layer.
+      Disjoint from other H-track folders enables parallel execution.
+    </background>
+    <dependencies>
+      <dependency task="014" status="not-started">Compile health verified</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Filters/*.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Json/*.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">List test files in both target folders. From Phase 0 baseline TRX, identify failing tests.</step>
+    <step order="2">For each file: compute pre-edit line count; read failing tests + production filter/JSON code.</step>
+    <step order="3">If any planned file edit would exceed 50% of file lines → HALT, file `escalations/rewrite-request-T-045-{FileName}.md`, await owner approval.</step>
+    <step order="4">Classify each failure: `test-stale` vs `production-bug`.</step>
+    <step order="5">Apply traits per §6.2; file ledger entries as needed.</step>
+    <step order="6">After each file: `dotnet test --filter "FullyQualifiedName~Filters|FullyQualifiedName~Infrastructure.Json"` verify outcome.</step>
+    <step order="7">Update `current-task.md` with disposition.</step>
+    <step order="8">Verify `git status` shows NO production changes.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Filters/*.cs (repaired)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Json/*.cs (repaired)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (entries if bugs found)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All Filters + Infrastructure/Json tests Pass or Skip-with-reason; zero Failed</criterion>
+    <criterion testable="true">Per-file diff &lt;50% line replacement (NFR-02)</criterion>
+    <criterion testable="true">Every touched test has a §6.2 final end-state trait</criterion>
+    <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">`CustomWebAppFactory.cs` is NOT modified</criterion>
+  </acceptance-criteria>
+</task>

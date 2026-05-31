@@ -1,0 +1,143 @@
+<task id="090" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>Project wrap-up: lessons-learned, archive baseline, update README, run /repo-cleanup</title>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>wrap-up, lessons-learned, repo-cleanup, project-close</tags>
+    <parallel-group>wrap-up</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task — runs sequentially after task 086 verification passes. Touches multiple project files (`notes/lessons-learned.md`, `README.md`, `current-task.md`) + invokes `/repo-cleanup` skill which is itself a sequential audit. No other tasks to parallelize with at this point.</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Close out the `sdap-bff.api-test-suite-repair` project. This task is the final task — it does NOT add new functional work; it captures lessons, marks the project complete, and ensures the repo is hygienic for follow-on projects (per design.md §11.1, Projects 2-5: test architecture, coverage, quality, rigor).
+
+    Five wrap-up actions:
+    1. Write `notes/lessons-learned.md` with what went well, what was harder than expected, escalations summary, sibling-coordination outcomes, recommendations for follow-on projects 2-5
+    2. Update `README.md` status header from "Planning" (or whatever current state) to "Complete" with closure date
+    3. Invoke `/repo-cleanup` skill for repo hygiene audit (per skill: validates structure compliance, removes ephemeral files)
+    4. Set `current-task.md` status to "none — project closed"
+    5. Final commit: "chore: close sdap-bff.api-test-suite-repair project"
+
+    Hard dependency: task 086 (final verification) MUST have passed all 4 verifications and stamped exit-ledger.md as "Final Verification Complete". If 086 has not, this task HALTS.
+
+    NO production code changes. NO test changes. Project hygiene + closure only.
+  </prompt>
+
+  <role>AI agent closing out the project with lessons-learned + README update + repo-cleanup + current-task reset.</role>
+
+  <goal>
+    Project formally closed. Five outputs:
+    - `notes/lessons-learned.md` (new) — written per design §11.1 follow-on-project guidance with sections per design.md §10 effort estimate vs actual, §2.3 sibling coordination outcomes, §4.8 escalation count, and recommendations for Projects 2-5
+    - `README.md` (updated) — status header changed from "Planning" or "In Progress" to "Complete" with closure date stamped
+    - `/repo-cleanup` skill executed — output documented; any ephemeral files removed
+    - `current-task.md` (updated) — status set to "none — project closed"; phase set to "✅ Complete"
+    - Final commit message: "chore: close sdap-bff.api-test-suite-repair project"
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="readme">projects/sdap-bff.api-test-suite-repair/README.md</file>
+    <file purpose="current-task">projects/sdap-bff.api-test-suite-repair/current-task.md</file>
+    <file purpose="exit-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/exit-ledger.md</file>
+    <file purpose="task-index">projects/sdap-bff.api-test-suite-repair/tasks/TASK-INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="Success criteria § (closure)">Project ships when all 14 success criteria green (verified by task 086); wrap-up records closure</constraint>
+    <constraint source="design.md §11.1">Lessons-learned doc references follow-on Projects 2-5 with calibration for what THIS project taught about scoping them</constraint>
+    <constraint source="design.md §2.3">Sibling-coordination outcomes documented (Action Engine, Insights Phase 2, Communications) — what coordination happened, what follow-up commitments persist</constraint>
+    <constraint source="root CLAUDE.md §7">After task complete: update `.poml` status; update TASK-INDEX (this task: 🔲 → ✅); reset `current-task.md`</constraint>
+    <constraint source="NFR-01">No production code changes</constraint>
+    <constraint source="NFR-09">Task POML metadata declares `repair-not-rewrite: true`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/spec.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/CLAUDE.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The wrap-up follows the pattern established by `projects/sdap-bff-api-remediation-fix/` close (CLAUDE.md notes "✅ Complete — all in-scope phases delivered; project formally closed 2026-05-26"). The lessons-learned doc is the most important deliverable here — design.md §11.1 explicitly names Projects 2-5 as future work; this project's lessons calibrate the scoping for those (e.g., if rewrite ratio was 4.8% — close to the 5% ceiling — that signals Project 2 architecture split is more urgent than scheduling assumes).
+
+      The `/repo-cleanup` skill validates structure compliance and removes ephemeral files (temp baseline runs that shouldn't survive, scratch markdown files in the project root, etc.). Per the skill, it produces an audit report; this task captures the report's recommendations.
+
+      `current-task.md` reset to "none — project closed" is the canonical signal that no further task work is queued. Future sessions opening this project see the status and either (a) re-open for an additional task per owner direction or (b) move on to a new project.
+    </background>
+    <dependencies>
+      <dependency task="086" status="not-started">HARD — final verification MUST have passed (exit ledger stamped "Final Verification Complete")</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/README.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/current-task.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/TASK-INDEX.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Verify task 086 passed: read `projects/sdap-bff.api-test-suite-repair/ledgers/exit-ledger.md` and confirm "Final Verification Complete" section is present with all 4 verifications ✅ PASS. If absent or any FAIL, HALT.</step>
+    <step order="2">Read `exit-ledger.md` in full to extract closure data for the lessons-learned doc: per-§6.2-state counts, per-tier disposition, sibling-coordination outcomes, actual vs estimated effort.</step>
+    <step order="3">Write `projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md` (NEW file) with these sections:
+      (a) **Header**: project name, closure date, total person-hours actual vs design.md §10 estimate (80-124h), wall-clock actual vs estimate (16-27 days).
+      (b) **What went well**: e.g., parallelism executed as designed; triple-run gate caught X flaky tests; sibling-coordination model avoided merge conflicts; etc.
+      (c) **What was harder than expected**: e.g., specific cluster surprises; researcher verdict requiring helper fallback; particular test files needing more time than estimated.
+      (d) **Escalations summary**: count of §4.8 rewrite escalations; outcome (approved / denied / re-routed); list of files with rewrite-request links.
+      (e) **Sibling-coordination outcomes**: per design.md §2.3 (Action Engine, Insights Phase 2, Communications) — what happened; what follow-up commitments persist post-close.
+      (f) **Recommendations for follow-on Projects 2-5** (per design.md §11.1):
+         - Project 2 (test architecture split): what THIS project learned about factory coupling, in-process HTTP via `WebApplicationFactory`, and which cluster patterns suggest the architecture split is now-urgent vs can-wait.
+         - Project 3 (coverage): which areas have weak coverage that should be Project 3's first targets.
+         - Project 4 (test quality): which mocked-orchestration tests are low-value candidates for rewrite.
+         - Project 5 (mutation testing): readiness signal — is the suite stable enough for Stryker.NET runs?
+      (g) **Carry-forward items**: anything that was intentionally NOT done (e.g., NFR-08 anti-parallelism guard worked but cost X hours of synchronization; consider for future projects).
+    </step>
+    <step order="4">Update `projects/sdap-bff.api-test-suite-repair/README.md`: change the status header from "Planning" or "In Progress" to "Complete (closed YYYY-MM-DD)". Add a closure note: "Outcomes A-D delivered: zero-failure baseline; CI gate operational; anti-drift governance shipped. See `ledgers/exit-ledger.md` for evidence + `notes/lessons-learned.md` for retrospective."</step>
+    <step order="5">Invoke `/repo-cleanup` skill (per the skill SKILL.md instructions). The skill validates structure compliance and removes ephemeral files. Capture its output — any deletions/cleanups go in the commit summary.</step>
+    <step order="6">Update `projects/sdap-bff.api-test-suite-repair/current-task.md`:
+      - "Phase: ✅ Complete — project closed YYYY-MM-DD"
+      - "Last Updated: YYYY-MM-DD by task 090 (wrap-up)"
+      - "Current Task: none — project closed"
+      - "Next Action: none — see `notes/lessons-learned.md` for follow-on Project 2-5 guidance"
+    </step>
+    <step order="7">Update `projects/sdap-bff.api-test-suite-repair/tasks/TASK-INDEX.md`: mark task 090 as ✅. Confirm all other tasks (001-086) are also ✅.</step>
+    <step order="8">Verify `git status` shows only files in `projects/sdap-bff.api-test-suite-repair/` modified (or any cleanup artifacts from `/repo-cleanup`).</step>
+    <step order="9">Final commit: "chore: close sdap-bff.api-test-suite-repair project". Push to remote per `push-to-github` skill. Do NOT merge to master from this task — merge is a separate owner-driven decision per project convention.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">exit-ledger.md, README.md, current-task.md, TASK-INDEX.md</tool>
+    <tool name="Write">notes/lessons-learned.md (new)</tool>
+    <tool name="Edit">README.md, current-task.md, TASK-INDEX.md</tool>
+    <tool name="Skill">/repo-cleanup</tool>
+    <tool name="Bash">`git status` for boundary verification; final commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md (new)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/README.md (status header updated)</output>
+    <output type="state">projects/sdap-bff.api-test-suite-repair/current-task.md (status = "none — project closed")</output>
+    <output type="state">projects/sdap-bff.api-test-suite-repair/tasks/TASK-INDEX.md (task 090 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/lessons-learned.md` exists with all 7 sections (header, what-went-well, what-was-harder, escalations summary, sibling-coordination, Project 2-5 recommendations, carry-forward items)</criterion>
+    <criterion testable="true">`README.md` status header shows "Complete (closed YYYY-MM-DD)"</criterion>
+    <criterion testable="true">`/repo-cleanup` skill executed; output captured in commit message or in the lessons-learned doc</criterion>
+    <criterion testable="true">`current-task.md` status = "none — project closed"; phase = "✅ Complete"</criterion>
+    <criterion testable="true">`tasks/TASK-INDEX.md` shows task 090 ✅; all other tasks ✅</criterion>
+    <criterion testable="true">Final commit lands with message "chore: close sdap-bff.api-test-suite-repair project"</criterion>
+    <criterion testable="true">No files outside `projects/sdap-bff.api-test-suite-repair/` modified (verified via `git status`); cleanup artifacts allowed per `/repo-cleanup` skill output</criterion>
+  </acceptance-criteria>
+</task>

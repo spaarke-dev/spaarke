@@ -1,0 +1,125 @@
+<task id="055" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.M6 — Communications tests batch 1 — COORD with x-email-communication-solution-r2</title>
+    <status>not-started</status>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, medium-tier, p23-m, bff-api, testing, communications, communications-coord</tags>
+    <parallel-group>23-M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Named Communications test files (1st half) are disjoint from sibling batch 056 (2nd half); also disjoint from already-compile-fixed Communications files (handled by Phase 1 task 011)</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Repair the MEDIUM-tier Communications tests — batch 1 of 2 (first half of
+    `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/*.cs` files, EXCLUDING files already
+    compile-fixed in Phase 1 task 011 which handled ArchivalFlow, AssociationMapping,
+    AttachmentValidation, CommunicationService, DataverseRecordCreation per design.md §3.2).
+
+    HIGHEST COORDINATION RISK: Per design.md §2.3 and project CLAUDE.md, Communications-related
+    test files have the HIGHEST sibling-coordination risk because the `x-email-communication-solution-r2`
+    project is actively modifying nearby production code. BEFORE non-trivial edits:
+    1. Post sync to x-email-communication-solution-r2 owner
+    2. Confirm no Communications production code changes are in-flight on their side this iteration
+    3. Get explicit ack before proceeding
+
+    For each failing test:
+    1. Identify failure (orchestration assertion drift, response-shape change, validation rule change)
+    2. Determine: `test-stale` vs `production-bug`
+    3. Apply §6.2 trait
+    4. Verify Pass
+
+    Per project CLAUDE.md NFR-02 + design.md §4.1: this is repair, NOT rewrite. If ANY file's diff
+    would exceed 50% line replacement, HALT and file
+    `projects/sdap-bff.api-test-suite-repair/escalations/rewrite-request-T-055-{FileName}.md`
+    per §4.8 escalation procedure. Do NOT proceed without owner approval.
+
+    NO production code changes (NFR-01). Per §6.2, every touched test ends in `repaired`,
+    `real-bug-pending-fix`, `flaky-quarantined`, or archived. `Failed` is FORBIDDEN at close.
+  </prompt>
+
+  <role>Senior .NET test repair specialist with email/communications domain knowledge.</role>
+
+  <goal>
+    ~8 Communications test files (1st half, excluding Phase 1 task 011 compile-fixed set) end in
+    §6.2 final end-state. Zero Failed. Coordination outcome with x-email-communication-solution-r2
+    owner recorded.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+    <file purpose="real-bug-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation</constraint>
+    <constraint source="§6.2">Every touched test gets a §6.2 final end-state trait</constraint>
+    <constraint source="§4.5">MUST NOT touch `CustomWebAppFactory.cs`</constraint>
+    <constraint source="FR-17">All MEDIUM-tier tests must end in §6.2 final end-state</constraint>
+    <constraint source="§2.3 coordination">Daily sync with x-email-communication-solution-r2 owner; explicit ack before non-trivial edits</constraint>
+    <constraint source="batch-partition">Batch 1 covers first half of Communications files (excluding already compile-fixed); respect partition</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §2.3 + project CLAUDE.md, Communications is the highest sibling-coordination
+      risk area. Phase 1 task 011 already compile-fixed the 5-6 files in this folder that needed
+      P1.A compile recovery. This batch covers runtime-failing Communications tests in the first
+      half of the remaining file set.
+    </background>
+    <dependencies>
+      <dependency task="014" status="not-started">Compile health verified</dependency>
+      <dependency task="011" status="not-started">Communications compile fixes complete (Phase 1)</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/&lt;first half, excluding Phase 1 task 011 set&gt;</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Post sync note to x-email-communication-solution-r2 owner — confirm no Communications production code changes are in-flight. Wait for explicit ack.</step>
+    <step order="2">List `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/*.cs`. Exclude files already touched by Phase 1 task 011 (ArchivalFlow, AssociationMapping, AttachmentValidation, CommunicationService, DataverseRecordCreation). Sort remaining alphabetically; take first half → this is batch 1.</step>
+    <step order="3">For each file: compute pre-edit line count; read failing tests + production code.</step>
+    <step order="4">If any planned file edit would exceed 50% of file lines → HALT, file `escalations/rewrite-request-T-055-{FileName}.md`, await owner approval.</step>
+    <step order="5">Classify each failure: `test-stale` vs `production-bug`.</step>
+    <step order="6">Apply traits per §6.2; file ledger entries as needed.</step>
+    <step order="7">After each file: `dotnet test --filter "FullyQualifiedName~Communication"` (intersected with batch file list) verify outcome.</step>
+    <step order="8">Update `current-task.md` with disposition + sibling-coordination outcome.</step>
+    <step order="9">Verify `git status` shows NO production changes.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">~8 Communications test files (1st half, repaired)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (entries if bugs found)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/current-task.md (sibling-coordination outcome)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All batch-1 Communications tests Pass or Skip-with-reason; zero Failed</criterion>
+    <criterion testable="true">Per-file diff &lt;50% line replacement (NFR-02)</criterion>
+    <criterion testable="true">Every touched test has a §6.2 final end-state trait</criterion>
+    <criterion testable="true">No overlap with batch 2 (task 056) or Phase 1 task 011 file set</criterion>
+    <criterion testable="true">x-email-communication-solution-r2 owner explicit ack documented before non-trivial edits</criterion>
+    <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+  </acceptance-criteria>
+</task>

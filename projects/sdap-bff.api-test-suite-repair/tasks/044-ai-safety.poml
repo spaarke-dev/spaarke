@@ -1,0 +1,114 @@
+<task id="044" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.H5 — Ai/Safety tests (groundedness, citations, prompt shield)</title>
+    <status>not-started</status>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, high-tier, p23-h, bff-api, testing, ai, safety</tags>
+    <parallel-group>23-H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Services/Ai/Safety/* test files are disjoint from other H-track batches and from M-track Ai/Chat batches</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Repair the HIGH-tier Ai/Safety tests under `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/*`
+    covering groundedness checks, citations, and prompt shield. Per design.md §3.3 these are
+    HIGH-tier — safety code that prevents hallucinations and prompt injection; silent failure
+    here directly affects user-facing AI output integrity.
+
+    For each failing test:
+    1. Identify failure (groundedness threshold change, citation extraction format change,
+       prompt-shield rule change)
+    2. Determine: `test-stale` (update assertion) vs `production-bug` (mark `real-bug-pending-fix` + ledger)
+    3. Apply §6.2 trait
+    4. Verify Pass
+
+    Per project CLAUDE.md NFR-02 + design.md §4.1: this is repair, NOT rewrite. If ANY file's diff
+    would exceed 50% line replacement, HALT and file
+    `projects/sdap-bff.api-test-suite-repair/escalations/rewrite-request-T-044-{FileName}.md`
+    per §4.8 escalation procedure. Do NOT proceed without owner approval.
+
+    NO production code changes (NFR-01). Per §6.2, every touched test ends in `repaired`,
+    `real-bug-pending-fix`, `flaky-quarantined`, or archived. `Failed` is FORBIDDEN at close.
+  </prompt>
+
+  <role>Senior .NET test repair specialist with AI safety/groundedness expertise.</role>
+
+  <goal>
+    All Ai/Safety test files end in §6.2 final end-state. Zero Failed.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+    <file purpose="real-bug-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation</constraint>
+    <constraint source="§6.2">Every touched test gets a §6.2 final end-state trait</constraint>
+    <constraint source="§4.5">MUST NOT touch `CustomWebAppFactory.cs`</constraint>
+    <constraint source="FR-16">HIGH-tier tests must end in §6.2 final end-state</constraint>
+    <constraint source="HIGH-tier rationale">Safety tests have especially high defect-prevention value — prefer repair over archive</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.3, Ai/Safety tests cover groundedness (LLM response grounded in retrieved
+      context), citations (output references preserved), and prompt shield (injection defense).
+      These are HIGH-tier because the risks of silent regression are reputational/legal, not just
+      financial. Sibling H-track batches touch other folders, so this is parallel-safe.
+    </background>
+    <dependencies>
+      <dependency task="014" status="not-started">Compile health verified</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/*.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">List Ai/Safety test files in scope. From Phase 0 baseline TRX, identify failing tests.</step>
+    <step order="2">For each file: compute pre-edit line count; read failing tests + production safety code.</step>
+    <step order="3">If any planned file edit would exceed 50% of file lines → HALT, file `escalations/rewrite-request-T-044-{FileName}.md`, await owner approval.</step>
+    <step order="4">Classify each failure: `test-stale` vs `production-bug`. For safety bugs prefer flagging `real-bug-pending-fix` over best-guess repair.</step>
+    <step order="5">Apply traits per §6.2; file ledger entries for any safety-relevant production bugs.</step>
+    <step order="6">After each file: `dotnet test --filter "FullyQualifiedName~Ai.Safety"` verify outcome.</step>
+    <step order="7">Update `current-task.md` with disposition.</step>
+    <step order="8">Verify `git status` shows NO production changes.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/*.cs (repaired)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (entries if safety bugs found)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All Ai/Safety tests Pass or Skip-with-reason; zero Failed</criterion>
+    <criterion testable="true">Per-file diff &lt;50% line replacement (NFR-02)</criterion>
+    <criterion testable="true">Every touched test has a §6.2 final end-state trait</criterion>
+    <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">Any safety-relevant production bugs filed in `real-bug-ledger.md`</criterion>
+  </acceptance-criteria>
+</task>

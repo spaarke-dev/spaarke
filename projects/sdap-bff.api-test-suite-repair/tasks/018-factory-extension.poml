@@ -1,0 +1,129 @@
+<task id="018" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P1.C2 — Extend CustomWebAppFactory.cs (ISOLATED per NFR-07)</title>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-1, factory-ext, bff-api, testing, p1-c, isolated</tags>
+    <parallel-group>1-C-isolated</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Factory edits have GLOBAL BLAST RADIUS across all 4,844 baseline tests. NFR-07 anti-parallelism guard MANDATES isolation — no other task in flight during this work. Wave 1-A AND Wave 1-B must be drained before this runs; verification gate task 019 follows.</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Extend `tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs` (171 LOC) by adding the missing
+    fake config dictionary entries identified in task 017's gap inventory. Optionally add
+    `services.RemoveAll&lt;IHostedService&gt;()` calls for any background workers that crash on startup
+    in tests.
+
+    🚨 CRITICAL — design.md §4.5 binding rule: This factory may be EXTENDED but NEVER RESTRUCTURED.
+    Specifically:
+      - ✅ ALLOWED: Add new key/value pairs to the existing in-memory config dictionary
+      - ✅ ALLOWED: Add `services.RemoveAll&lt;IHostedService&gt;()` lines
+      - ❌ FORBIDDEN: Change any existing method signature
+      - ❌ FORBIDDEN: Rename any existing method
+      - ❌ FORBIDDEN: Move or refactor existing logic
+      - ❌ FORBIDDEN: Add new methods that introduce a parallel pattern
+
+    Diff MUST be additive only. Code review will reject any structural change.
+
+    🚨 CRITICAL — NFR-07 anti-parallelism guard: This task runs in COMPLETE ISOLATION. NO other
+    repair task may be in flight while this task is executing. The TASK-INDEX.md wave structure
+    enforces this — task 018 sits in its own dedicated Wave 1-C-isolated.
+
+    Per CLAUDE.md NFR-01: NO production code changes; this is test infrastructure ONLY.
+  </prompt>
+
+  <role>Senior .NET test-infrastructure specialist applying additive-only factory extension under anti-parallelism guard.</role>
+
+  <goal>
+    `CustomWebAppFactory.cs` extended with the gap-inventory entries from task 017. Diff is
+    additive only — no method signatures changed, no logic restructured. Verification of
+    baseline preservation runs in task 019.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="gap-inventory">projects/sdap-bff.api-test-suite-repair/notes/spikes/factory-config-gaps.md</file>
+    <file purpose="factory">tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code</constraint>
+    <constraint source="NFR-03">MUST NOT add new BFF DI registrations via test scaffolding</constraint>
+    <constraint source="NFR-07">MUST run in isolation; no other repair task in flight</constraint>
+    <constraint source="design.md §4.5">MUST NOT restructure factory; additive-only changes; no method signatures touched</constraint>
+    <constraint source="design.md §6.4">MUST run full suite BEFORE the change (baseline) AND verify AFTER (task 019)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.4 the WebApplicationFactory startup cluster is ~50-100 tests. Repair is
+      adding the missing config values to the factory's existing in-memory config — bounded
+      change (factory grows from 171 → ~200 LOC per design §3.4 estimate). The anti-parallelism
+      guard exists because ANY factory change has global blast radius: even a benign-looking
+      additive change can shift behavior in tests that previously coexisted with the absence of
+      the key. Isolation ensures we can detect that immediately via task 019's regression check.
+    </background>
+    <dependencies>
+      <dependency task="017" status="not-started">Gap inventory produced</dependency>
+      <dependency task="010" status="not-started">P1.A compile-fix batches complete (factory edit assumes 17 files compile)</dependency>
+      <dependency task="011" status="not-started">P1.A batch 2 complete</dependency>
+      <dependency task="012" status="not-started">P1.A batch 3 complete</dependency>
+      <dependency task="013" status="not-started">P1.A batch 4 complete</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Verify NO other repair task is in flight. Read `projects/sdap-bff.api-test-suite-repair/current-task.md` + `tasks/TASK-INDEX.md` to confirm. If another P1 task is active → HALT.</step>
+    <step order="2">Read existing `CustomWebAppFactory.cs` (171 LOC). Note the dictionary structure for the in-memory config, the `ConfigureServices` callback, and any existing `RemoveAll` calls.</step>
+    <step order="3">Read `notes/spikes/factory-config-gaps.md` and confirm each gap maps to: (a) a NEW dictionary entry (NOT a modification of an existing entry), or (b) a NEW `RemoveAll&lt;IHostedService&gt;()` line.</step>
+    <step order="4">Apply edits as PURELY ADDITIVE diff:
+      - New `[KEY] = VALUE` entries in the existing config dictionary
+      - New `services.RemoveAll&lt;HostedServiceType&gt;();` lines in the existing `ConfigureServices` callback
+      - NO changes to method signatures
+      - NO renames
+      - NO logic restructuring</step>
+    <step order="5">Verify diff is additive only: run `git diff tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs` and confirm every removed line is a non-functional whitespace adjustment (ideally NONE).</step>
+    <step order="6">Run `dotnet build tests/unit/Sprk.Bff.Api.Tests/ -c Release -warnaserror`. Verify 0 errors / 0 warnings.</step>
+    <step order="7">Add `[Trait("status", "repaired")]` — N/A here (factory is infrastructure, not a test). Skip but note in commit message.</step>
+    <step order="8">Update `current-task.md`: cite each gap closed + the additive-only verification + handoff to task 019.</step>
+    <step order="9">Verify `git status` shows changes ONLY to `tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs` — nothing else.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build (-warnaserror)</tool>
+    <tool name="git">diff (additive-only verification), status</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs (extended; additive-only)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`git diff CustomWebAppFactory.cs` shows additive-only changes (no method signatures touched; removed lines are zero or whitespace-only)</criterion>
+    <criterion testable="true">`dotnet build tests/unit/Sprk.Bff.Api.Tests/ -warnaserror` returns 0 errors</criterion>
+    <criterion testable="true">All gap-inventory entries from task 017 are present in the factory</criterion>
+    <criterion testable="true">`git status` shows ONLY `CustomWebAppFactory.cs` modified — no other files</criterion>
+    <criterion testable="true">No other repair task was concurrent with this task (NFR-07; verify via `current-task.md` history)</criterion>
+    <criterion testable="true">Task 019 runs next to verify 4,844 baseline preserved</criterion>
+  </acceptance-criteria>
+</task>

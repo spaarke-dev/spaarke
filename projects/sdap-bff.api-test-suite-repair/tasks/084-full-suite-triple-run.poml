@@ -1,0 +1,128 @@
+<task id="084" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P4.B1 — Full suite triple-run validation (FR-26)</title>
+    <status>not-started</status>
+    <estimated-effort>2-4 hours (3 × ~30-45 min test runs per project + verification)</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-4, validation, triple-run, baseline, zero-failure-verification</tags>
+    <parallel-group>4-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Agent-safe — produces only `baseline/final-run-*.trx` artifacts (new files in `projects/sdap-bff.api-test-suite-repair/baseline/`). Disjoint from tasks 080/081/082/083 (constraint + governance edits), task 085 (`ledgers/` files), and task 083 (root CLAUDE.md). Read-only against `src/` and `tests/`.</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Run the full BFF test suite (Sprk.Bff.Api.Tests + Spe.Integration.Tests) THREE consecutive times per FR-26. Each run produces a TRX file in `projects/sdap-bff.api-test-suite-repair/baseline/`. All 3 runs MUST show `Failed: 0` for BOTH test projects.
+
+    This is the load-bearing validation gate for the project. Per design.md §9 success criterion #2 ("ZERO failing tests across `Sprk.Bff.Api.Tests` AND `Spe.Integration.Tests`"), the triple-run requirement guards against test order non-determinism, environmental flakiness, and timing-dependent passes. A single run could be lucky; three consecutive zero-failure runs are evidence the suite is genuinely stable.
+
+    Triple-run is a hard gate. If any run shows ANY failures, task 086 (final verification) cannot ship until the failures are triaged: (a) repair the test (if drift); (b) trait-tag as `flaky-quarantined` with fix-by date in `ledgers/flaky-ledger.md` (if environmental); (c) trait-tag as `real-bug-pending-fix` (if production bug). Re-run all 3 after any taxonomy change. Per §6.2, `Failed` is FORBIDDEN at project close.
+
+    NO production code changes. NO test changes. Validation runs only.
+
+    Hard dependency: ALL Phase 2+3 repair tasks (030-074) must be complete before this task runs.
+  </prompt>
+
+  <role>AI agent executing the triple-run validation gate to prove zero-failure stability.</role>
+
+  <goal>
+    6 TRX files exist in `projects/sdap-bff.api-test-suite-repair/baseline/`:
+    - `final-run-1-{date}.trx` — Sprk.Bff.Api.Tests run 1
+    - `final-run-1-integration-{date}.trx` — Spe.Integration.Tests run 1
+    - `final-run-2-{date}.trx` — Sprk.Bff.Api.Tests run 2
+    - `final-run-2-integration-{date}.trx` — Spe.Integration.Tests run 2
+    - `final-run-3-{date}.trx` — Sprk.Bff.Api.Tests run 3
+    - `final-run-3-integration-{date}.trx` — Spe.Integration.Tests run 3
+
+    ALL 6 TRX files MUST show `Failed: 0` in their summary lines. Any single failure invalidates the gate.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="unit-test-project">tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj</file>
+    <file purpose="integration-test-project">tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj</file>
+    <file purpose="phase-0-baseline">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-26">Full test suite runs 3 consecutive times with ZERO failures across `Sprk.Bff.Api.Tests` AND `Spe.Integration.Tests`. 3 TRX files showing `Failed: 0` in summary line</constraint>
+    <constraint source="§4.3">No test in `Failed` state at project close. Triple-run gate enforces this empirically</constraint>
+    <constraint source="§6.2">If ANY run surfaces failures, re-triage per taxonomy: repaired / real-bug-pending-fix / flaky-quarantined / archived. NEVER ignore. Re-run all 3 after retriage.</constraint>
+    <constraint source="NFR-01">No production code changes; validation is read-only against `src/`</constraint>
+    <constraint source="NFR-09">Task POML metadata declares `repair-not-rewrite: true`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/spec.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The triple-run pattern guards against the three failure modes that single-run validation cannot catch:
+      1. **Test order non-determinism** — xUnit parallelizes tests within a collection; ordering effects (shared static state, file-system races) can produce intermittent failures that pass on retry. Three runs make this visible.
+      2. **Environmental flakiness** — timing-dependent assertions, network jitter for integration tests, async-await race conditions. Three runs surface these as "Pass / Fail / Pass" patterns rather than uniform Pass.
+      3. **Cumulative-state leaks** — tests that mutate shared state (in-memory cache, static fields) that survives between tests in the same run. Run-to-run variance proves cleanliness.
+
+      Per design.md §10 effort estimate, the triple-run is the load-bearing Phase 4 validation. Without 3 consecutive zero-failure runs, claiming "the suite is repaired" is theater — a single lucky run is not sufficient evidence. The pattern was established in the predecessor `sdap-bff-api-remediation-fix` Phase 3 BASELINE work; this task applies the same discipline to the suite's exit gate.
+
+      Hard dependency: ALL Phase 2+3 repair tasks (030-074) must be complete. If any repair task is still in-progress, this task HALTS and waits.
+    </background>
+    <dependencies>
+      <dependency task="030-074" status="must-be-complete">All Phase 2+3 repair tasks complete (HIGH-tier, MEDIUM-tier, INTEGRATION-tier, LOW-tier all show §6.2 final end-states)</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/baseline/final-run-1-2026-MM-DD.trx</file>
+    <file>projects/sdap-bff.api-test-suite-repair/baseline/final-run-1-integration-2026-MM-DD.trx</file>
+    <file>projects/sdap-bff.api-test-suite-repair/baseline/final-run-2-2026-MM-DD.trx</file>
+    <file>projects/sdap-bff.api-test-suite-repair/baseline/final-run-2-integration-2026-MM-DD.trx</file>
+    <file>projects/sdap-bff.api-test-suite-repair/baseline/final-run-3-2026-MM-DD.trx</file>
+    <file>projects/sdap-bff.api-test-suite-repair/baseline/final-run-3-integration-2026-MM-DD.trx</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Resolve today's date (YYYY-MM-DD format). Use as suffix on all 6 TRX file names.</step>
+    <step order="2">Verify all Phase 2+3 repair tasks (030-074) are marked complete in `tasks/TASK-INDEX.md`. If any are 🔲 (not started) or 🔄 (in-progress), HALT and request completion before proceeding.</step>
+    <step order="3">RUN 1 (Sprk.Bff.Api.Tests): `dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Release --logger "trx;LogFileName=final-run-1-{date}.trx" --results-directory projects/sdap-bff.api-test-suite-repair/baseline/`. Verify TRX is produced; parse the ResultSummary; confirm `Failed: 0`.</step>
+    <step order="4">RUN 1 (Spe.Integration.Tests): `dotnet test tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj -c Release --logger "trx;LogFileName=final-run-1-integration-{date}.trx" --results-directory projects/sdap-bff.api-test-suite-repair/baseline/`. Same verification.</step>
+    <step order="5">RUN 2 (both projects): repeat steps 3 + 4 with file names `final-run-2-{date}.trx` and `final-run-2-integration-{date}.trx`.</step>
+    <step order="6">RUN 3 (both projects): repeat steps 3 + 4 with file names `final-run-3-{date}.trx` and `final-run-3-integration-{date}.trx`.</step>
+    <step order="7">Aggregate verification: for all 6 TRX files, parse `<ResultSummary>` and extract `failed` attribute. ALL must equal 0. Record observed counts (passed / failed / skipped) for each run in a one-line-per-run summary at the top of `projects/sdap-bff.api-test-suite-repair/baseline/final-runs-summary.md`.</step>
+    <step order="8">If ANY run shows `failed > 0`: HALT. Document the failing test(s) + cluster pattern. The fix path is per §6.2: repaired / real-bug-pending-fix / flaky-quarantined / archived. After any retriage, ALL 3 runs must be redone (the triple-run gate is non-cumulative — re-running 1 of 3 invalidates the gate).</step>
+    <step order="9">Verify no source file changes occurred during the test runs (`git status` shows ONLY new TRX files + summary markdown).</step>
+    <step order="10">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with completion + cite all 6 TRX paths + per-run counts + the aggregated zero-failure confirmation.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test (TRX logger) — both test projects, 3 times each</tool>
+    <tool name="Bash">`git status` for boundary verification; TRX parsing if needed</tool>
+    <tool name="Read">TRX files for ResultSummary parsing</tool>
+  </tools>
+
+  <outputs>
+    <output type="baseline">projects/sdap-bff.api-test-suite-repair/baseline/final-run-1-2026-MM-DD.trx</output>
+    <output type="baseline">projects/sdap-bff.api-test-suite-repair/baseline/final-run-1-integration-2026-MM-DD.trx</output>
+    <output type="baseline">projects/sdap-bff.api-test-suite-repair/baseline/final-run-2-2026-MM-DD.trx</output>
+    <output type="baseline">projects/sdap-bff.api-test-suite-repair/baseline/final-run-2-integration-2026-MM-DD.trx</output>
+    <output type="baseline">projects/sdap-bff.api-test-suite-repair/baseline/final-run-3-2026-MM-DD.trx</output>
+    <output type="baseline">projects/sdap-bff.api-test-suite-repair/baseline/final-run-3-integration-2026-MM-DD.trx</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/baseline/final-runs-summary.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">6 TRX files exist in `projects/sdap-bff.api-test-suite-repair/baseline/` with today's date suffix (3 per test project)</criterion>
+    <criterion testable="true">All 6 TRX files are parseable as XML and contain `&lt;ResultSummary&gt;` with `total`, `passed`, `failed`, `skipped`</criterion>
+    <criterion testable="true">ALL 6 TRX files show `Failed: 0` in their summary lines</criterion>
+    <criterion testable="true">`final-runs-summary.md` exists with per-run counts for all 6 runs + aggregated zero-failure confirmation</criterion>
+    <criterion testable="true">`git status` shows only new files in `projects/sdap-bff.api-test-suite-repair/baseline/`; no `src/`, `power-platform/`, `infra/`, `scripts/`, or `tests/` modifications</criterion>
+  </acceptance-criteria>
+</task>

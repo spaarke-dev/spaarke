@@ -1,0 +1,118 @@
+<task id="050" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.M1 — Ai/Chat batch 1 (10 named files, 1st third)</title>
+    <status>not-started</status>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, medium-tier, p23-m, bff-api, testing, ai, chat</tags>
+    <parallel-group>23-M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>10 named Ai/Chat test files (1st third) are disjoint from sibling batches 051 (2nd third) and 052 (3rd third); also disjoint from streaming batch 030 which covers Streaming*.cs files only</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Repair the MEDIUM-tier Ai/Chat tests — batch 1 of 3 (10 specific files in
+    `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/`, 1st third of the ~30-file folder per
+    design.md §3.3). EXCLUDE files starting with `Streaming*` (those are handled by tasks 030/031).
+    The exact file set is identified from the Phase 0 baseline failure list, partitioned
+    alphabetically: batch 1 takes the first 10 non-Streaming Chat test files; batch 2 takes the
+    next 10; batch 3 takes the remainder.
+
+    For each failing test:
+    1. Identify failure (orchestration assertion drift, response-shape change, error-path change)
+    2. Determine: `test-stale` (update assertion) vs `production-bug` (mark `real-bug-pending-fix` + ledger)
+    3. Apply §6.2 trait
+    4. Verify Pass
+
+    Per project CLAUDE.md NFR-02 + design.md §4.1: this is repair, NOT rewrite. If ANY file's diff
+    would exceed 50% line replacement, HALT and file
+    `projects/sdap-bff.api-test-suite-repair/escalations/rewrite-request-T-050-{FileName}.md`
+    per §4.8 escalation procedure. Do NOT proceed without owner approval.
+
+    NO production code changes (NFR-01). Per §6.2, every touched test ends in `repaired`,
+    `real-bug-pending-fix`, `flaky-quarantined`, or archived. `Failed` is FORBIDDEN at close.
+  </prompt>
+
+  <role>Senior .NET test repair specialist with Microsoft.Extensions.AI + IChatClient orchestration expertise.</role>
+
+  <goal>
+    10 Ai/Chat test files (1st third, excluding Streaming*) end in §6.2 final end-state. Zero Failed.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+    <file purpose="real-bug-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation</constraint>
+    <constraint source="§6.2">Every touched test gets a §6.2 final end-state trait</constraint>
+    <constraint source="§4.5">MUST NOT touch `CustomWebAppFactory.cs`</constraint>
+    <constraint source="FR-17">All MEDIUM-tier tests must end in §6.2 final end-state</constraint>
+    <constraint source="batch-partition">Batch 1 covers first 10 non-Streaming Ai/Chat files alphabetically; respect partition to maintain parallel-safety</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.3, MEDIUM-tier Ai/Chat is ~30 files. Streaming tests are split off into
+      P23.A (tasks 030/031). The remaining files are partitioned alphabetically across 3 batches
+      (M1/M2/M3) to enable parallel-safe execution within Phase 2+3 waves. Per design.md §3.3
+      these are service orchestration (mocked-dep) tests — verify the orchestration shape, not
+      end-to-end behavior.
+    </background>
+    <dependencies>
+      <dependency task="014" status="not-started">Compile health verified</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/&lt;first 10 non-Streaming files alphabetically&gt;</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">List all `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/*.cs` files excluding any `Streaming*` files. Sort alphabetically. Take the first 10 → this is batch 1.</step>
+    <step order="2">From Phase 0 baseline TRX, identify failing tests within this batch.</step>
+    <step order="3">For each file: compute pre-edit line count; read failing tests + production orchestration code.</step>
+    <step order="4">If any planned file edit would exceed 50% of file lines → HALT, file `escalations/rewrite-request-T-050-{FileName}.md`, await owner approval.</step>
+    <step order="5">Classify each failure: `test-stale` vs `production-bug`.</step>
+    <step order="6">Apply traits per §6.2; file ledger entries as needed.</step>
+    <step order="7">After each file: `dotnet test --filter "FullyQualifiedName~&lt;ClassName&gt;"` verify Pass.</step>
+    <step order="8">Update `current-task.md` with file list and disposition.</step>
+    <step order="9">Verify `git status` shows NO production changes.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">10 Ai/Chat test files (1st third, non-Streaming, repaired)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (entries if bugs found)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All batch-1 Ai/Chat tests Pass or Skip-with-reason; zero Failed</criterion>
+    <criterion testable="true">Per-file diff &lt;50% line replacement (NFR-02)</criterion>
+    <criterion testable="true">Every touched test has a §6.2 final end-state trait</criterion>
+    <criterion testable="true">No overlap with batch 2 (task 051) or batch 3 (task 052) files</criterion>
+    <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">`CustomWebAppFactory.cs` is NOT modified</criterion>
+  </acceptance-criteria>
+</task>

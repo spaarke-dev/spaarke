@@ -1,0 +1,120 @@
+<task id="024" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P1.E1 — Spe.Integration.Tests classify failures (FR-13)</title>
+    <status>not-started</status>
+    <estimated-effort>1.5-2 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-1, integration-triage, bff-api, testing, p1-e</tags>
+    <parallel-group>1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only against `baseline/integration-test-baseline-*.trx`; writes only to `projects/.../integration-test-triage.md`; disjoint from all sibling Wave 1-A tasks (010, 011, 012, 013, 015, 017, 020, 021, 022)</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Classify the `Spe.Integration.Tests` failures from the Phase 0 baseline TRX into the design.md
+    §6.2 triage taxonomy. Per FR-13 the classification must distinguish:
+      - **compile drift** — file does not compile (signature change against current production)
+      - **signature drift** — file compiles but uses a deprecated/changed API at runtime
+      - **real Graph regression** — production calls Microsoft Graph differently; either Graph
+        changed or production changed; needs verification before Phase 2+3 plan
+      - **wiremock drift** — WireMock fixture no longer matches the request shape production sends
+
+    Classification informs Phase 2+3 P23.I task scope. Each classified failure links to a
+    target P23.I sub-task in the resulting triage document.
+
+    READ-ONLY against `baseline/`. NO code changes. NO production changes. Output is the
+    structured triage document only.
+  </prompt>
+
+  <role>AI agent classifying integration test failures into a taxonomy that drives Phase 2+3 planning.</role>
+
+  <goal>
+    `projects/sdap-bff.api-test-suite-repair/integration-test-triage.md` exists with: (a) total
+    Spe.Integration.Tests failure count from Phase 0 baseline, (b) per-failure classification
+    (compile drift / signature drift / real Graph regression / wiremock drift), (c) suggested
+    fix scope per failure, (d) dependency on Phase 1 helpers (e.g., P1.B AsyncEnumerable helper
+    if applicable), (e) target Phase 2+3 P23.I sub-task per failure.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/integration-test-baseline-2026-MM-DD.trx</file>
+    <file purpose="integration-project">tests/integration/Spe.Integration.Tests/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">No source/production code modifications; classification only</constraint>
+    <constraint source="FR-13">Each failure has a classification from the 4-category taxonomy</constraint>
+    <constraint source="§5.3">Spe.Integration.Tests are IN SCOPE; Phase 2+3 P23.I absorbs the repair work</constraint>
+    <constraint source="§6.2">Use the project's triage taxonomy; final end-states `repaired` / `real-bug-pending-fix` / `flaky-quarantined` / archived</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §5.3 the Spe.Integration.Tests project is in scope (Option A "robust over
+      easy") because integration tests catch real Graph/SPE behavior unit tests cannot. The
+      2026-05-29 BFF audit identified Graph drift as a recurring incident source. Per §7 P1.E,
+      Phase 1 produces the baseline + classified failure list; Phase 2+3 P23.I executes the
+      repair. This task is the classification half of P1.E (Phase 0 task 002 captured the
+      baseline TRX).
+    </background>
+    <dependencies>
+      <dependency task="002" status="not-started">Integration test baseline TRX captured in Phase 0</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/integration-test-triage.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read `projects/sdap-bff.api-test-suite-repair/baseline/integration-test-baseline-2026-MM-DD.trx`. Parse `&lt;UnitTestResult outcome="Failed"&gt;` entries.</step>
+    <step order="2">For each failure, capture: test name, stack trace head, error message. Inspect the corresponding source file under `tests/integration/Spe.Integration.Tests/` to confirm classification context.</step>
+    <step order="3">Classify each failure into ONE of the 4 categories:
+      - `compile-drift` — error references missing namespace/type/method that exists in newer production signature
+      - `signature-drift` — runtime API mismatch (e.g., `MissingMethodException` at execution)
+      - `graph-regression` — Microsoft Graph SDK call shape changed OR production now sends a different request shape; needs deeper investigation
+      - `wiremock-drift` — WireMock stub no longer matches request (request path / headers / body assertion fails)</step>
+    <step order="4">For each failure, suggest a fix-scope size: `S` (single-file mechanical), `M` (cross-file signature update + WireMock update), `L` (likely production-bug suspicion needs investigation; flag for `real-bug-pending-fix`).</step>
+    <step order="5">Identify Phase 1 helper dependencies: e.g., if a failure uses `IAsyncEnumerable&lt;T&gt;`, flag P1.B helper as prerequisite for repair.</step>
+    <step order="6">Map each failure to a target Phase 2+3 P23.I sub-task (group similar failures together for batching efficiency).</step>
+    <step order="7">Write `projects/sdap-bff.api-test-suite-repair/integration-test-triage.md` with sections:
+      - `## Summary` — total Spe.Integration.Tests failures, per-category counts
+      - `## Per-failure classification` — table: Test name | Category | Suggested fix scope (S/M/L) | Phase 1 helper dependency | Target P23.I sub-task ID
+      - `## Real-bug suspicions` — failures classified `graph-regression` warranting `real-bug-pending-fix` triage in Phase 2+3
+      - `## Phase 2+3 input` — bulleted handoff to P23.I task generation</step>
+    <step order="8">Update `current-task.md` declaring P1.E Track exit gate.</step>
+    <step order="9">Verify `git status` shows ONLY `projects/sdap-bff.api-test-suite-repair/integration-test-triage.md` as new file.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/integration-test-triage.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`integration-test-triage.md` exists with all 4 named sections</criterion>
+    <criterion testable="true">Per-failure classification table has 1 row per Spe.Integration.Tests failure from baseline TRX</criterion>
+    <criterion testable="true">Each failure assigned to ONE of the 4 categories</criterion>
+    <criterion testable="true">Each failure has fix-scope size (S/M/L)</criterion>
+    <criterion testable="true">Each failure mapped to a target P23.I sub-task ID</criterion>
+    <criterion testable="true">No modifications to `src/`, `tests/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">P1.E Track exit gate declared in `current-task.md`</criterion>
+  </acceptance-criteria>
+</task>

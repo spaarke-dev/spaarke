@@ -1,0 +1,100 @@
+<task id="014" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P1.A5 — Verify all 17 compile + capture post-compile runtime failure delta</title>
+    <status>not-started</status>
+    <estimated-effort>30-45 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-1, compile-fix, verification, bff-api, testing, p1-a</tags>
+    <parallel-group>1-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Verification gate after batches 010+011+012+013; depends on aggregate compile state — must run after all 4 batches</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Verify that batches 010 + 011 + 012 + 013 collectively repaired all 17 design.md §3.2
+    compile-broken files. Capture the POST-COMPILE runtime failure delta — failure count is
+    expected to RISE above 269 because previously-uncompilable test files now contribute their
+    runtime failures to the count.
+
+    This is the AUTHORITATIVE post-Phase-1 P1.A baseline that Phase 2+3 cluster work and long-tail
+    work measure against.
+
+    NO source-code changes. Pure measurement.
+  </prompt>
+
+  <role>AI agent capturing the post-compile delta as authoritative input to Phase 2+3 planning.</role>
+
+  <goal>
+    `projects/sdap-bff.api-test-suite-repair/baseline/post-compile-delta-2026-MM-DD.txt` exists
+    documenting: (a) `dotnet build -warnaserror` returns 0 errors on the test project,
+    (b) post-compile failure count, (c) delta vs Phase 0 baseline (269), (d) confirmation that
+    delta increase is from the 17 previously-excluded files now running.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline-phase-0">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">No source/production code modifications; this is measurement only</constraint>
+    <constraint source="FR-05">`dotnet build -warnaserror` returns 0 errors on test project</constraint>
+    <constraint source="§6.3">Cite design.md §3 numbers (5,215 / 4,844 / 269 / 17); do NOT cite overview's stale "283"</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 0 baseline (design.md §3.1) was 5,215 tests / 4,844 passing / 269 failing — but
+      excluded the 17 compile-broken files. Now that batches 010-013 have repaired those files,
+      the test universe grows. The new failure count will be 269 + N (where N is the runtime
+      failures from the 17 restored files). This delta is the TRUE Phase 2+3 starting point.
+    </background>
+    <dependencies>
+      <dependency task="010" status="not-started">Batch 1 (Workspace/EmailWebhook/ExternalAccess/Email) complete</dependency>
+      <dependency task="011" status="not-started">Batch 2 (Communications) complete</dependency>
+      <dependency task="012" status="not-started">Batch 3 (Ai/Tools, Sessions) complete</dependency>
+      <dependency task="013" status="not-started">Batch 4 (Ai/Other, Jobs, Integration) complete</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/baseline/post-compile-delta-2026-MM-DD.txt</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Run `dotnet build tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Release -warnaserror`. Verify exit code 0 and NO `error CS` lines in output. If non-zero → HALT and report which batch(es) regressed.</step>
+    <step order="2">Run full test suite: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ -c Release --logger "trx;LogFileName=post-compile-2026-MM-DD.trx" --results-directory projects/sdap-bff.api-test-suite-repair/baseline/`. Allow up to 30 min runtime; failures expected.</step>
+    <step order="3">Parse TRX summary: extract total / passed / failed / skipped counts.</step>
+    <step order="4">Compute delta vs Phase 0 baseline (269 failures): new failure count, delta sign + magnitude, expected positive delta (~30-80 new failures from the restored 17 files).</step>
+    <step order="5">Write `projects/sdap-bff.api-test-suite-repair/baseline/post-compile-delta-2026-MM-DD.txt` with: (a) `dotnet build -warnaserror` result line, (b) total/passed/failed/skipped counts, (c) delta vs 269, (d) per-file approximate contribution if available, (e) note that this is the AUTHORITATIVE Phase 2+3 starting baseline.</step>
+    <step order="6">Update `current-task.md`: declare P1.A track complete; cite delta file path.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build (-warnaserror gate), test (TRX logger)</tool>
+  </tools>
+
+  <outputs>
+    <output type="baseline">projects/sdap-bff.api-test-suite-repair/baseline/post-compile-delta-2026-MM-DD.txt</output>
+    <output type="baseline">projects/sdap-bff.api-test-suite-repair/baseline/post-compile-2026-MM-DD.trx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`dotnet build tests/unit/Sprk.Bff.Api.Tests/ -warnaserror` exits 0 with NO `error CS` lines</criterion>
+    <criterion testable="true">post-compile-delta-*.txt exists with new total/passed/failed/skipped + delta vs 269</criterion>
+    <criterion testable="true">post-compile-*.trx exists and is parseable</criterion>
+    <criterion testable="true">No modifications to `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">No modifications to `tests/` (this is measurement only)</criterion>
+  </acceptance-criteria>
+</task>

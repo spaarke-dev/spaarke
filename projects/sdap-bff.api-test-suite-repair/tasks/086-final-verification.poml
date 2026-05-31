@@ -1,0 +1,135 @@
+<task id="086" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P4.B3 — Final verification: rewrite escalations ≤5% (FR-29) + CI runs SUCCESS (FR-30)</title>
+    <status>not-started</status>
+    <estimated-effort>45-90 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-4, verification, gate, exit-ledger, success-criteria, ci-gate</tags>
+    <parallel-group>4-gate</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Verification gate — depends on tasks 085 (ledgers) + Phase 1 P1.D (CI gate restoration tasks 020-023). MUST be the last validation task before wrap-up; cannot run in parallel with 085 because it reads 085's outputs. Single sequential gate, then wrap-up (task 090) follows.</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Perform the final verification gate before project wrap-up. Verify TWO independent success criteria per FR-29 + FR-30:
+
+    1. **FR-29 — Rewrite ceiling (≤5%)**: `rewrite-ledger.md` count divided by total touched-files count is ≤ 0.05 (5%). If this ratio is exceeded, per NFR-05 + §4.8 hard limit, the project pauses for design-review with owner (signals the repair-not-rewrite thesis is wrong). Does NOT proceed to wrap-up.
+
+    2. **FR-30 — CI gate runs SUCCESS**: last 5 `sdap-ci.yml` runs on master are SUCCESS; last 3 `deploy-bff-api.yml` runs are SUCCESS (or N/A if no deploys in window). This verifies that Phase 1 P1.D CI gate restoration (`enforce_admins: true` + remove `skip-tests`) is actually operational and that the test suite hasn't introduced regression that would prevent green builds.
+
+    After both verifications pass, stamp `exit-ledger.md` with a "Final Verification Complete" section that records the verification timestamp + the ratios + the gh run list outputs.
+
+    This is the LAST verification before task 090 (wrap-up). If EITHER verification fails: HALT, document the failure mode, escalate to owner. Do NOT proceed to wrap-up under any circumstances if EITHER verification is failing.
+
+    NO production code changes. NO test changes. Verification + exit-ledger stamping only.
+
+    Hard dependencies: task 085 (exit-ledger published) + Phase 1 P1.D (tasks 020-023, CI gate restoration).
+  </prompt>
+
+  <role>AI agent performing the final two verifications before project close.</role>
+
+  <goal>
+    All 4 verifications below pass; `exit-ledger.md` is stamped with a "Final Verification Complete" section.
+
+    Verification 1 (FR-29): `rewrite-ledger.md count / touched-files count ≤ 0.05`
+    Verification 2 (FR-30a): `gh run list --workflow=sdap-ci.yml --branch=master --limit=5` shows all 5 runs as SUCCESS
+    Verification 3 (FR-30b): `gh run list --workflow=deploy-bff-api.yml --limit=3` shows all 3 runs as SUCCESS or N/A (no deploys in window)
+    Verification 4 (cross-check): `final-runs-summary.md` (task 084 output) reaffirmed; no test-suite regression since triple-run.
+
+    `exit-ledger.md` "Final Verification Complete" section captures all 4 with timestamps + observed values.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="exit-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/exit-ledger.md</file>
+    <file purpose="rewrite-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/rewrite-ledger.md</file>
+    <file purpose="repair-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/repair-ledger.md</file>
+    <file purpose="final-runs">projects/sdap-bff.api-test-suite-repair/baseline/final-runs-summary.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-29">Total rewrite count (escalations approved per §4.8) is ≤ 5% of touched files. `rewrite-ledger.md` count / touched-files count ≤ 0.05</constraint>
+    <constraint source="FR-30">Last 5 `sdap-ci.yml` runs on master are SUCCESS; last 3 `deploy-bff-api.yml` runs are SUCCESS or N/A</constraint>
+    <constraint source="NFR-05">If escalated rewrite count exceeds 5%, project PAUSES for design-review with owner (signals repair-not-rewrite thesis is wrong, design needs revisiting)</constraint>
+    <constraint source="§9 success criteria #4">CI gate is operational — verified by FR-30 + (separately) by Phase 1 task 023 negative-path test</constraint>
+    <constraint source="§9 success criteria #12">Rewrite escalations stayed under 5% of touched files</constraint>
+    <constraint source="NFR-01">No production code changes; verification is read-only</constraint>
+    <constraint source="NFR-09">Task POML metadata declares `repair-not-rewrite: true`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/spec.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The 5% rewrite ceiling is the project's most important quality signal beyond zero-failure. Per design.md §4.8 ("Hard limit: If escalated rewrites exceed 5% of touched test files, project pauses for design-review with owner — that signals the 'repair not rewrite' thesis is wrong and the design needs revisiting"), exceeding 5% means the project's load-bearing assumption (the 92.9% passing baseline is real signal worth preserving) was wrong. We do NOT ship if this is the case; we pause and re-design.
+
+      The CI gate run verification (FR-30) is the operational verification of Phase 1 P1.D's restoration work. Per design.md §3.5 baseline, the gate was fictional before this project (10/10 recent runs failed but code shipped anyway). Tasks 020-023 in Phase 1 restored the gate via `enforce_admins: true` + removing `skip-tests`. FR-30 verifies that the gate now actually gates — by observing that 5 consecutive CI runs are SUCCESS (proving the test suite is genuinely passing CI, not bypassing it).
+
+      The exit-ledger "Final Verification Complete" section is the artifact that closes the audit chain. Future audits (or follow-on projects 2-5 per design.md §11.1) reference this section to confirm the project's exit was earned, not asserted.
+    </background>
+    <dependencies>
+      <dependency task="085" status="not-started">HARD — exit ledger + rewrite ledger must be finalized</dependency>
+      <dependency task="020-023" status="not-started">HARD — Phase 1 P1.D CI gate restoration tasks; FR-30 verifies their operational effect</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/exit-ledger.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Verify task 085 completed: read `projects/sdap-bff.api-test-suite-repair/ledgers/exit-ledger.md` and confirm it has all 7 sections per task 085's acceptance criteria. If missing or incomplete, HALT and request task 085 fulfill its criteria.</step>
+    <step order="2">Verify tasks 020-023 completed (Phase 1 P1.D CI gate restoration): check `tasks/TASK-INDEX.md` shows ✅ for those task IDs. If any are 🔲 or 🔄, HALT.</step>
+    <step order="3">VERIFICATION 1 (FR-29 — rewrite ceiling):
+      (a) Count `rewrite-ledger.md` entries: parse the ledger; count rows (excluding header + reconciliation footer).
+      (b) Count touched-files: sum of `repair-ledger.md` count + `archive-ledger.md` count + `real-bug-ledger.md` count + `flaky-ledger.md` count + `rewrite-ledger.md` count. Cite as "touched-files".
+      (c) Compute ratio: `rewrite_count / touched_files_count`. If `&gt; 0.05` (5%), HALT and report: this is a NFR-05 escalation — project pauses for design-review with owner.
+      (d) Record observed ratio + numerator + denominator.
+    </step>
+    <step order="4">VERIFICATION 2 (FR-30a — sdap-ci.yml runs): execute `gh run list --workflow=sdap-ci.yml --branch=master --limit=5 --json conclusion,headSha,createdAt`. Parse: all 5 entries' `conclusion` MUST equal `"success"`. If any are `"failure"` or `"cancelled"` or pending, HALT and report; do NOT proceed.</step>
+    <step order="5">VERIFICATION 3 (FR-30b — deploy-bff-api.yml runs): execute `gh run list --workflow=deploy-bff-api.yml --limit=3 --json conclusion,headSha,createdAt`. Parse: all 3 entries' `conclusion` MUST equal `"success"`, OR the list MUST be empty (no deploys in window — N/A). If any are `"failure"`, HALT.</step>
+    <step order="6">VERIFICATION 4 (cross-check, defensive): re-confirm `baseline/final-runs-summary.md` from task 084 still shows 6/6 runs at zero failures. If the file is missing or any run shows non-zero failures, HALT.</step>
+    <step order="7">Stamp `exit-ledger.md` with a new section "Final Verification Complete" containing:
+      (a) Timestamp (ISO 8601).
+      (b) FR-29 ratio: `{rewrite_count} / {touched_files_count} = {ratio}` — status: ✅ PASS or ❌ FAIL.
+      (c) FR-30a `sdap-ci.yml` last 5: list of (headSha, conclusion, createdAt) tuples — status: ✅ PASS or ❌ FAIL.
+      (d) FR-30b `deploy-bff-api.yml` last 3: same format — status: ✅ PASS or ❌ FAIL.
+      (e) FR cross-check: `final-runs-summary.md` reconfirmed at zero failures — status: ✅ PASS or ❌ FAIL.
+      (f) Owner sign-off placeholder + date.
+    </step>
+    <step order="8">If ALL 4 verifications pass: append the "Final Verification Complete" section to `exit-ledger.md`. Commit with message "docs(ledgers): final verification complete (FR-29 + FR-30)".</step>
+    <step order="9">If ANY verification fails: do NOT stamp the exit-ledger as complete. Instead, append a "Verification Failed" section recording WHICH verification failed + observed values. Escalate to owner. Do NOT proceed to task 090 (wrap-up).</step>
+    <step order="10">Verify `git status` shows ONLY `projects/sdap-bff.api-test-suite-repair/ledgers/exit-ledger.md` modified (no `src/`, `tests/`, etc.).</step>
+    <step order="11">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with completion + cite the 4 verification outcomes + observed ratios + observed CI run conclusions.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">All 6 ledger files; `final-runs-summary.md`; `TASK-INDEX.md`</tool>
+    <tool name="Edit">Append "Final Verification Complete" section to `exit-ledger.md`</tool>
+    <tool name="Bash">`gh run list` (FR-30a + FR-30b); `git status` for boundary verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="ledger">projects/sdap-bff.api-test-suite-repair/ledgers/exit-ledger.md (stamped with "Final Verification Complete" section)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-29 ratio: `rewrite_count / touched_files_count ≤ 0.05` — verified and recorded</criterion>
+    <criterion testable="true">FR-30a: last 5 `sdap-ci.yml` runs on master all show `conclusion: success`</criterion>
+    <criterion testable="true">FR-30b: last 3 `deploy-bff-api.yml` runs all show `conclusion: success` OR no deploys in window (N/A)</criterion>
+    <criterion testable="true">Cross-check: `baseline/final-runs-summary.md` still confirms zero failures across all 6 triple-runs</criterion>
+    <criterion testable="true">`exit-ledger.md` has "Final Verification Complete" section with timestamp + per-verification status + observed values + owner sign-off placeholder</criterion>
+    <criterion testable="true">If any verification fails: project HALTS; task 090 (wrap-up) NOT started; owner escalation invoked</criterion>
+    <criterion testable="true">`git status` shows ONLY `projects/sdap-bff.api-test-suite-repair/ledgers/exit-ledger.md` modified</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,125 @@
+<task id="015" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P1.B1 — Build IAsyncEnumerable helper per D-01 verdict</title>
+    <status>not-started</status>
+    <estimated-effort>2-4 hours (depends on D-01 verdict)</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-1, async-enumerable, bff-api, testing, p1-b</tags>
+    <parallel-group>1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Either a NuGet reference to test csproj OR a new file in Mocks/ — disjoint from compile-fix batches 010-013 and from factory work 018; sibling tasks 011, 012, 013, 017, 020, 021, 022, 024 do not touch Mocks/ or the test csproj</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Build the `IAsyncEnumerable&lt;T&gt;` test helper the IChatClient streaming cluster (~30-50 tests)
+    needs to repair. The implementation path branches on the D-01 verdict (Phase 0 task 003):
+
+    - **IF verdict = "use Microsoft"**: Add the Microsoft-shipped NuGet package reference to
+      `tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj`. Document usage in the test
+      project README (or add a brief comment block). NO new helper code.
+
+    - **IF verdict = "hand-roll"**: Create `tests/unit/Sprk.Bff.Api.Tests/Mocks/AsyncEnumerableHelpers.cs`
+      with at minimum these helpers:
+        - `ToAsyncEnumerable&lt;T&gt;(params T[] items)` — wraps a fixed sequence
+        - `EmptyAsyncEnumerable&lt;T&gt;()` — empty sequence
+        - `ThrowingAsyncEnumerable&lt;T&gt;(Exception)` — sequence that throws on enumeration
+      Follow the existing fake pattern in `tests/unit/Sprk.Bff.Api.Tests/Mocks/FakeGraphClientFactory.cs`
+      for style + naming conventions.
+
+    Per project CLAUDE.md NFR-01: this is TEST-ONLY infrastructure; do not touch production
+    code. Per NFR-03: do NOT add new DI registrations to BFF — this helper is consumed directly
+    by tests, not registered.
+  </prompt>
+
+  <role>Senior .NET test infrastructure engineer; either NuGet package wiring or focused helper authoring.</role>
+
+  <goal>
+    The `IAsyncEnumerable&lt;T&gt;` test helper is available for consumption by Phase 2+3 P23.A
+    migration tasks. Either:
+    - Microsoft package referenced in test csproj AND documented for downstream consumers, OR
+    - `tests/unit/Sprk.Bff.Api.Tests/Mocks/AsyncEnumerableHelpers.cs` exists with 3+ helper
+      methods + matches existing Mocks/ fake-pattern style.
+
+    Compile passes; helper is ready to use.
+  </prompt>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="verdict">projects/sdap-bff.api-test-suite-repair/decisions/D-01-async-enumerable-helper.md</file>
+    <file purpose="pattern">tests/unit/Sprk.Bff.Api.Tests/Mocks/FakeGraphClientFactory.cs</file>
+    <file purpose="csproj">tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code</constraint>
+    <constraint source="NFR-03">MUST NOT increase BFF DI registration count via test scaffolding</constraint>
+    <constraint source="NFR-11">Helper compiles cleanly under `-warnaserror`</constraint>
+    <constraint source="§5.1">Microsoft-first if D-01 verdict positive; hand-rolled only as fallback</constraint>
+    <constraint source="design.md §4.5">MUST NOT touch `CustomWebAppFactory.cs`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Mocks/FakeGraphClientFactory.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.4 the IChatClient streaming / `IAsyncEnumerable` mocking cluster is the
+      largest single failure cluster (~30-50 tests). NSubstitute's auto-mock does not handle
+      `IAsyncEnumerable` returns, producing the cluster's signature failure mode. The Phase 0
+      researcher (task 003) decides Microsoft helper vs hand-rolled per §5.1 decision criteria;
+      this task implements the chosen path. Phase 2+3 P23.A then migrates the affected tests
+      using whichever helper this task ships.
+    </background>
+    <dependencies>
+      <dependency task="003" status="not-started">D-01 verdict file produced</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Mocks/AsyncEnumerableHelpers.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read `decisions/D-01-async-enumerable-helper.md` for verdict + rationale. If file does NOT exist → HALT; report task 003 incomplete.</step>
+    <step order="2">Branch on verdict:
+      - IF "use Microsoft": go to step 3.
+      - IF "hand-roll": go to step 5.
+      - IF unclear: surface in `current-task.md` Decisions section, request owner clarification, halt.</step>
+    <step order="3">[Microsoft path] Add the recommended NuGet `&lt;PackageReference&gt;` to `tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj` at the version cited in D-01. Verify `dotnet restore` succeeds.</step>
+    <step order="4">[Microsoft path] Add a short comment block in `Mocks/` README (or create one if absent) documenting which helper to call for `ToAsyncEnumerable` / Empty / Throwing scenarios. Skip to step 7.</step>
+    <step order="5">[Hand-rolled path] Read `tests/unit/Sprk.Bff.Api.Tests/Mocks/FakeGraphClientFactory.cs` to confirm style conventions (namespace, file-scoped namespace vs traditional, XML doc style).</step>
+    <step order="6">[Hand-rolled path] Create `tests/unit/Sprk.Bff.Api.Tests/Mocks/AsyncEnumerableHelpers.cs` with: `public static class AsyncEnumerableHelpers` containing `ToAsyncEnumerable&lt;T&gt;(params T[] items)`, `EmptyAsyncEnumerable&lt;T&gt;()`, `ThrowingAsyncEnumerable&lt;T&gt;(Exception)`. Use `async IAsyncEnumerable&lt;T&gt;` syntax with `[EnumeratorCancellation]` where appropriate. XML doc each public method.</step>
+    <step order="7">Run `dotnet build tests/unit/Sprk.Bff.Api.Tests/ -c Release -warnaserror`. Must succeed with 0 errors / 0 warnings on the helper.</step>
+    <step order="8">Update `current-task.md` with chosen path, file/package added, and downstream consumer reference (P23.A migration in Phase 2+3).</step>
+    <step order="9">Verify `git status` shows changes ONLY under `tests/unit/Sprk.Bff.Api.Tests/Mocks/` and/or the test csproj — NOT under `src/`, `power-platform/`, `infra/`, `scripts/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">restore, build (-warnaserror)</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="code-or-package">tests/unit/Sprk.Bff.Api.Tests/Mocks/AsyncEnumerableHelpers.cs (hand-rolled path) OR tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj (Microsoft path)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">D-01 verdict file consulted; chosen path documented in `current-task.md`</criterion>
+    <criterion testable="true">EITHER Microsoft package reference added to test csproj AND documented, OR `Mocks/AsyncEnumerableHelpers.cs` exists with 3+ helper methods</criterion>
+    <criterion testable="true">`dotnet build tests/unit/Sprk.Bff.Api.Tests/ -warnaserror` returns 0 errors</criterion>
+    <criterion testable="true">No modifications to `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">`CustomWebAppFactory.cs` NOT modified</criterion>
+    <criterion testable="true">No new DI registrations added to BFF (NFR-03)</criterion>
+  </acceptance-criteria>
+</task>

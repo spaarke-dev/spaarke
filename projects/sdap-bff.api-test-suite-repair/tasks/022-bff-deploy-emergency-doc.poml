@@ -1,0 +1,117 @@
+<task id="022" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P1.D3 — Author docs/procedures/bff-deploy-emergency.md (FR-11)</title>
+    <status>not-started</status>
+    <estimated-effort>45-90 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-1, ci-gate, governance, p1-d, documentation</tags>
+    <parallel-group>1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New documentation file at `docs/procedures/bff-deploy-emergency.md`; disjoint from all sibling Wave 1-A tasks (010, 011, 012, 013, 015, 017, 020, 021, 024)</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Author `docs/procedures/bff-deploy-emergency.md` documenting the BFF emergency-deploy
+    procedure. This document replaces the removed `skip-tests` workflow_dispatch input (task 021)
+    as the formal emergency escape path.
+
+    Per design.md §5.2 the document MUST cover:
+      - When emergency deploy is justified (criteria for declaring an emergency)
+      - Approver allowlist — currently ONLY the project owner (ralph.schroeder@hotmail.com)
+      - 5-business-day follow-up-fix clause
+      - Required incident-issue template (GitHub issue format / labels / required fields)
+
+    Per CLAUDE.md NFR-01: documentation files in `docs/` are NOT in `src/` / `power-platform/`
+    / `infra/` / `scripts/`, so this is permitted.
+
+    Reference: root CLAUDE.md §10 (BFF Hygiene) — task 084 (Phase 4) updates §10 to point to
+    this document.
+  </prompt>
+
+  <role>AI agent authoring a focused procedural document for BFF deploys under emergency conditions.</role>
+
+  <goal>
+    `docs/procedures/bff-deploy-emergency.md` exists with all 4 required sections + named owner
+    + emergency criteria + 5-day follow-up clause + incident-issue template.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="reference">CLAUDE.md</file>
+    <file purpose="reference">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">No source modifications; `docs/` is the correct location</constraint>
+    <constraint source="FR-11">Owner named (ralph.schroeder@hotmail.com); 5-day clause present; incident-issue template included</constraint>
+    <constraint source="design.md §5.2">No CI script bypass; the document IS the emergency path</constraint>
+    <constraint source="root CLAUDE.md §10">Reference root §10 BFF Hygiene; the document is part of the BFF binding workflow</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>docs/procedures/production-release.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §5.2 the emergency procedure must be one page and minimal — over-engineering
+      would defeat its purpose. The acceptable use case is true emergencies (security CVE
+      requiring same-day deploy, production outage requiring revert) NOT "we don't have time to
+      fix tests this sprint." The 5-business-day follow-up clause ensures emergency uses get a
+      mandatory remediation issue. Single-approver model (owner-only) matches the project's
+      operator-only governance pattern documented in predecessor `sdap-bff-api-remediation-fix`.
+    </background>
+    <dependencies>
+      <dependency task="none" status="n/a">No upstream</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>docs/procedures/bff-deploy-emergency.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Confirm `docs/procedures/` exists. List sibling docs to match style/format (`testing-and-code-quality.md`, `production-release.md`).</step>
+    <step order="2">Author `docs/procedures/bff-deploy-emergency.md` with the following sections:
+      - `# BFF Emergency Deploy Procedure` (H1)
+      - `## When emergency deploy is justified` — define criteria: (a) security CVE actively exploited, (b) production outage requiring rollback, (c) data-integrity incident. EXPLICITLY NOT acceptable: "tests are broken and we don't want to fix them."
+      - `## Approver allowlist` — sole approver: ralph.schroeder@hotmail.com (project owner). No backup approver currently (per spec.md Unresolved Questions § "Owner-unavailability backup"); revisit after first emergency surfaces the gap.
+      - `## Procedure` — step-by-step: (1) declare incident in GitHub issue using template below, (2) obtain owner approval (recorded in incident issue), (3) deploy via `Deploy-BffApi.ps1` (canonical path; do NOT recreate the removed `skip-tests` mechanism), (4) auto-file follow-up-fix issue within 5 business days.
+      - `## 5-business-day follow-up-fix clause` — every emergency deploy creates a follow-up issue, labeled `bff-emergency-followup`, due 5 business days from deploy timestamp. The follow-up must close the test gap that necessitated the emergency.
+      - `## Incident-issue template` — fenced markdown block with required fields: Title, Severity, Impact, Justification (matched to "When emergency deploy is justified"), Approver, Deploy timestamp, Follow-up issue link.
+      - `## References` — root CLAUDE.md §10, `.claude/constraints/bff-extensions.md`, project spec.md FR-11.</step>
+    <step order="3">Add a final `## Maintenance` line stating that any change to the approver allowlist requires updating this file + announcing in the spaarke-dev repo.</step>
+    <step order="4">Verify file is 1-1.5 pages of markdown (per design.md §5.2 "one page"). Trim if longer.</step>
+    <step order="5">Update `current-task.md` with file path + cite §5.2 rationale.</step>
+    <step order="6">Verify `git status` shows ONLY `docs/procedures/bff-deploy-emergency.md` as new file.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/procedures/bff-deploy-emergency.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`docs/procedures/bff-deploy-emergency.md` exists</criterion>
+    <criterion testable="true">Owner named: ralph.schroeder@hotmail.com (sole approver)</criterion>
+    <criterion testable="true">Emergency criteria explicitly defined (security CVE / outage / data-integrity)</criterion>
+    <criterion testable="true">5-business-day follow-up-fix clause present</criterion>
+    <criterion testable="true">Incident-issue template included as fenced markdown</criterion>
+    <criterion testable="true">References root CLAUDE.md §10 + `.claude/constraints/bff-extensions.md`</criterion>
+    <criterion testable="true">No modifications to `src/`, `tests/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+  </acceptance-criteria>
+</task>

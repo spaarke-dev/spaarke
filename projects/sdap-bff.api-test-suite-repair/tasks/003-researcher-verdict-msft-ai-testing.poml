@@ -1,0 +1,103 @@
+<task id="003" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>Researcher verdict on Microsoft.Extensions.AI.Testing maturity — FR-02</title>
+    <status>not-started</status>
+    <estimated-effort>30-45 minutes</estimated-effort>
+    <assigned>AI agent (invokes `researcher` subagent)</assigned>
+    <tags>phase-0, decision, ai-testing, researcher</tags>
+    <parallel-group>0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes only to decisions/D-01-async-enumerable-helper.md; disjoint from tasks 001, 002, 006, 007</parallel-reason>
+    <rigor>MINIMAL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Invoke the `researcher` subagent (per `.claude/agents/researcher.md`) to investigate whether
+    `Microsoft.Extensions.AI.Testing` (or an equivalent Microsoft-shipped companion package to
+    `Microsoft.Extensions.AI` v10.3.0) exists as a STABLE NuGet package providing `IChatClient`
+    streaming mocks for `IAsyncEnumerable&lt;T&gt;`.
+
+    The verdict drives Phase 1 P1.B1 (the `AsyncEnumerableHelpers` task — to be generated later):
+    - "use Microsoft" → P1.B1 adds package reference to test csproj + thin shim
+    - "hand-roll" → P1.B1 builds `Mocks/AsyncEnumerableHelpers.cs` from scratch
+
+    Capture the verdict + supporting evidence to `decisions/D-01-async-enumerable-helper.md`.
+    Apply design.md §5.1 decision criteria explicitly in the verdict.
+
+    NO source-code or test changes. Pure investigation + decision capture.
+  </prompt>
+
+  <role>AI agent coordinating researcher subagent investigation; captures structured verdict.</role>
+
+  <goal>
+    `projects/sdap-bff.api-test-suite-repair/decisions/D-01-async-enumerable-helper.md` exists with:
+    - Explicit verdict: "use Microsoft" OR "hand-roll" OR "escalate to owner"
+    - Evidence: NuGet package names + versions checked, Microsoft Learn URLs, Microsoft.Extensions.AI GitHub sample paths or test-code paths inspected
+    - Decision-criteria mapping per design.md §5.1 (stable version? streaming-mock-specific? sample-referenced? NSubstitute/Moq compatible?)
+    - Implication for P1.B1 task acceptance criteria
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="researcher-agent">.claude/agents/researcher.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-02">Verdict file exists with explicit "use Microsoft" / "hand-roll" / "escalate" decision + evidence</constraint>
+    <constraint source="§5.1">Apply Microsoft-first preference per owner direction "use the most robust available"</constraint>
+    <constraint source="NFR-01">No production code or test code changes — investigation only</constraint>
+    <constraint source="NFR-09">`repair-not-rewrite: true` declared in metadata</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/agents/researcher.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §5.1, this resolves a pre-spec open question: do we hand-roll the
+      `IAsyncEnumerable` test helper or consume a Microsoft-shipped one? The 30-min researcher
+      check costs less than the wrong P1.B1 plan. The 2026-05-31 project initialization deferred
+      this verdict to task execution (per owner decision recorded in project CLAUDE.md Decisions
+      Made) rather than running it during pipeline.
+    </background>
+    <dependencies>
+      <dependency task="none" status="n/a">No upstream — Phase 0 task</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/decisions/D-01-async-enumerable-helper.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read `.claude/agents/researcher.md` to confirm invocation protocol and knowledge-repository-first lookup order.</step>
+    <step order="2">Invoke the `researcher` subagent with the prompt: "Investigate whether `Microsoft.Extensions.AI.Testing` (or an equivalent Microsoft-shipped companion to `Microsoft.Extensions.AI` v10.3.0) exists as a STABLE NuGet package providing `IChatClient` streaming mocks consuming `IAsyncEnumerable&lt;T&gt;`. Apply these decision criteria from design.md §5.1: (a) stable, not preview; (b) provides IChatClient streaming mocks specifically; (c) referenced in Microsoft samples or Microsoft.Extensions.AI test code; (d) integrates with NSubstitute/Moq without conflict. Return: explicit verdict (use Microsoft / hand-roll / escalate) + evidence (NuGet versions, Microsoft Learn URLs, GitHub sample paths)."</step>
+    <step order="3">Receive subagent response. Validate it explicitly maps each of the 4 §5.1 criteria (✅ / ⚠️ / ❌ for each).</step>
+    <step order="4">Write `projects/sdap-bff.api-test-suite-repair/decisions/D-01-async-enumerable-helper.md` with sections: Context (1 paragraph), Verdict (1 sentence), §5.1 Criteria Mapping (table), Evidence (bullets with URLs), Implication for P1.B1 (1 paragraph specifying which approach the to-be-generated task should take).</step>
+    <step order="5">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with completion + the verdict summary line.</step>
+  </steps>
+
+  <tools>
+    <tool name="researcher-subagent">Investigates external NuGet/Microsoft Learn/GitHub state</tool>
+  </tools>
+
+  <outputs>
+    <output type="decision">projects/sdap-bff.api-test-suite-repair/decisions/D-01-async-enumerable-helper.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`decisions/D-01-async-enumerable-helper.md` exists</criterion>
+    <criterion testable="true">File contains explicit verdict line: "use Microsoft" / "hand-roll" / "escalate"</criterion>
+    <criterion testable="true">File maps all 4 §5.1 criteria (✅ / ⚠️ / ❌ markers visible)</criterion>
+    <criterion testable="true">File contains at least 2 evidence URLs (NuGet OR Microsoft Learn OR GitHub)</criterion>
+    <criterion testable="true">File specifies implication for P1.B1 (which approach the helper-build task should take)</criterion>
+  </acceptance-criteria>
+</task>
