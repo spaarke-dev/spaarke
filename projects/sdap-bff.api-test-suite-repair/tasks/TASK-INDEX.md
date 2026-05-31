@@ -88,8 +88,8 @@ All 5 Wave 1 agents completed. Build verification skipped: no `.cs` files modifi
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
 | 017 | Factory config inventory (READ-ONLY) | ✅ 2026-05-31 (3 RemoveAll calls + 37 config keys inventoried; **7 missing keys identified as root cause of all 342 unit-test startup failures**: `CosmosPersistence:Endpoint/DatabaseName` + `AgentService:Enabled/Endpoint/AgentId/MaxConcurrency/ThreadCacheExpiryMinutes`) | 1-A | ✅ Yes | STANDARD | 001 |
-| 018 | Extend CustomWebAppFactory.cs (ISOLATED — NFR-07) — **SCOPE-CONFIRMED 2026-05-31: add the 7 specific keys per task 017 inventory; both 017 and 024 identified `CosmosPersistence:Endpoint` as overlapping root cause across unit + integration suites** | 🔲 | 1-C-isolated | ❌ **No (NFR-07)** | FULL | 017 |
-| 019 | Verify 4,844 baseline preserved after factory change | 🔲 | 1-C-isolated | ❌ No (gate) | STANDARD | 018 |
+| 018 | Extend CustomWebAppFactory.cs (ISOLATED — NFR-07) — **SCOPE-CONFIRMED 2026-05-31: add the 7 specific keys per task 017 inventory** | ✅ 2026-05-31 (17 LOC added; **Δ −112 failures (−39.4%)**; zero regressions; Api.Ai.* cluster −71, *EndpointTests −38; §4.5 extend-only verified at 9.9% growth) | 1-C-isolated | ❌ **No (NFR-07)** | FULL | 017 |
+| 019 | Verify factory baseline preserved after factory change | ✅ 2026-05-31 (test counts match 018 exactly: 6,034 / 5,753 / 172 / 109; all 7 keys present; zero regressions; **P1.C track CLOSED; NFR-07 isolation envelope CLOSED**) | 1-C-isolated | ❌ No (gate) | STANDARD | 018 |
 
 ### Track P1.D — CI gate hardening
 

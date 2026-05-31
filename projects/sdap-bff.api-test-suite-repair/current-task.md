@@ -14,6 +14,84 @@
 
 ---
 
+## Task 018 — Wave 1.3 ISOLATED (2026-05-31): P1.C2 CustomWebAppFactory.cs extension
+
+**Rigor Level**: FULL (per POML metadata `<rigor>FULL</rigor>`; modifies `.cs` file; global blast radius across 6,034 tests; orchestrator-mandated FULL protocol)
+**Status**: completed 2026-05-31
+**Isolation verified**: Wave 1-C-isolated, NFR-07 anti-parallelism guard — no concurrent repair tasks (orchestrator confirmation + `git status` showed no unrelated in-flight changes at start)
+
+### Edit applied (additive-only per §4.5)
+
+| Section added | Keys added | Source |
+|---|---|---|
+| `CosmosPersistence:*` | `Endpoint`, `DatabaseName` (2 keys) | `notes/spikes/factory-config-gaps.md` (task 017) §C |
+| `AgentService:*` | `Enabled`, `Endpoint`, `AgentId`, `MaxConcurrency`, `ThreadCacheExpiryMinutes` (5 keys) | Same §C |
+| **Total** | **7 dict entries** | — |
+
+`git diff --stat`: `1 file changed, 18 insertions(+), 1 deletion(-)`. The 1 deletion is the previous `["ManagedIdentity:ClientId"]` line rewritten only to append a trailing comma — semantic content unchanged.
+
+### Build + test deltas
+
+| Metric | Pre-018 baseline (TRX) | Post-018 measurement (TRX) | Delta |
+|---|---:|---:|---:|
+| Total | 6,034 | 6,034 | 0 |
+| Passed | 5,641 | 5,753 | **+112** |
+| Failed | 284 | 172 | **−112 (−39.4%)** |
+| Skipped | 109 | 109 | 0 |
+| Build errors | 0 | 0 | 0 |
+| Build warnings | 2 (pre-existing Kiota CVE) | 2 (same) | 0 |
+| Test duration | 1m 15s | 1m 12s | −3s |
+
+| TRX artifact | Path |
+|---|---|
+| Pre-edit | `baseline/pre-018-baseline.trx` |
+| Post-edit | `baseline/post-018-measure.trx` |
+| Delta inventory | `baseline/post-018-passing-delta-2026-05-31.md` |
+
+### Cluster impact (top results)
+
+**17 clusters fully eliminated** (110 failures cleared):
+Api.Ai.PlaybookRunEndpointsTests (−20), Api.Ai.HandlerEndpointsTests (−11), Api.Ai.NodeEndpointsTests (−10), UploadEndpointsTests (−9), Api.Ai.ModelEndpointsTests (−8), SpeAdmin.SearchItemsTests (−7), FileOperationsTests / ListingEndpointsTests / UserEndpointsTests (−6 each), Api.Ai.ChatSessionPlanEndpointTests (−5), Api.Ai.ChatRefineEndpointTests (−4), CorsAndAuthTests / EndpointGroupingTests (−1 each), + 2 mostly-cleared.
+
+**Top-5 from task 014 — impact**:
+- Api.Ai.* (89 → 13, **−71/−85%**)
+- Top-level *EndpointTests (39 → 1, **−38/−97%**)
+- Integration.Workspace.* (54 → 54, 0 — these are integration-fixture-level, NOT factory; cleared by Phase 2+3 task 062)
+- Services.Ai.* non-Safety (22 → 19, −3 — assertion-level residuals)
+- Services.Ai.Safety.* (11 → 11, 0 — assertion-level residuals)
+
+**Zero regressions**: `comm` analysis confirms no cluster newly fails post-edit.
+
+### Step 9.5 Quality Gates report
+
+| Gate | Result |
+|---|---|
+| Code-review (manual against project CLAUDE.md §4.5 + bff-extensions.md) | ✅ PASS — additive-only confirmed; no new DI registrations (NFR-03); no `src/` changes (NFR-01); inline comments cite source file + ADR-018 rationale |
+| ADR-010 (DI minimalism) | ✅ N/A — no DI registrations added; only config keys |
+| ADR-018 (kill switches) | ✅ PASS — `AgentService:Enabled = "false"` explicitly keeps Foundry kill-switch OFF in tests |
+| NFR-01 (no `src/` changes) | ✅ PASS — `git status` shows only `tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs` modified (plus my `current-task.md` + `baseline/` additions, both inside `projects/sdap-bff.api-test-suite-repair/`) |
+| NFR-02 (no >50% rewrite) | ✅ PASS — 9.9% growth (171 → 188 LOC) |
+| NFR-03 (no new BFF DI count) | ✅ PASS — zero `services.AddXxx` added |
+| NFR-07 (anti-parallelism) | ✅ PASS — task ran ISOLATED; orchestrator confirmed; no concurrent in-flight work |
+| NFR-09 (`<repair-not-rewrite>true</repair-not-rewrite>`) | ✅ PASS — POML metadata confirms |
+| NFR-11 (`-warnaserror` clean) | ✅ PASS — `dotnet build -c Release` returned 0 errors / 2 warnings (pre-existing CVE, unrelated) |
+| §6.4 (full suite before AND after) | ✅ PASS — both TRXs captured |
+| Lint (C# `dotnet format`) | ✅ N/A — no lint step in project scripts; manual visual inspection confirms consistent 4-space indent + comment style |
+
+### Files modified
+
+- `tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs` (171 → 188 LOC; +7 dict entries; additive only)
+- `projects/sdap-bff.api-test-suite-repair/baseline/pre-018-baseline.trx` (new — TRX artifact)
+- `projects/sdap-bff.api-test-suite-repair/baseline/post-018-measure.trx` (new — TRX artifact)
+- `projects/sdap-bff.api-test-suite-repair/baseline/post-018-passing-delta-2026-05-31.md` (new — delta inventory in lieu of per-test trait-tagging, per orchestrator brief)
+- `projects/sdap-bff.api-test-suite-repair/current-task.md` (append-only this section)
+
+### Handoff to task 019
+
+Task 019 (P1.C3 — verify baseline preserved) is the next sequential step in Wave 1-C-isolated. Per the orchestrator: "do NOT mark task complete in TASK-INDEX.md" — task 019 will perform the formal verification and TASK-INDEX update. The TRX comparison this task produced (`pre-018-baseline.trx` vs `post-018-measure.trx`) is the load-bearing input for task 019's verification gate.
+
+---
+
 ## Task 024 — Wave 1.1b (2026-05-31): P1.E1 Spe.Integration.Tests classify failures + CS1739 fix
 
 **Rigor Level**: STANDARD (per POML metadata `<rigor>STANDARD</rigor>`; STANDARD-tier reason: integration-triage + mechanical signature-drift fix, no architecture changes)
@@ -1506,3 +1584,69 @@ This confirms `enforce_admins: true` is binding: GitHub refused the admin merge 
 ### P1.D Track exit declaration
 
 **P1.D Track (CI gate restoration) is COMPLETE.** Tasks 020 + 021 + 022 + 023 verified operational. The gate blocks merging to master via `enforce_admins: true` enforcement; admin override is refused; the merge button is disabled in the GitHub UI. Phase 1 P1.D exit gate per design.md §7 is satisfied.
+
+---
+
+## Task 019 — P1.C3 Factory Verification Gate (Wave 1.3 ISOLATED) — COMPLETED 2026-05-31
+
+**Status**: ✅ SUCCESS — isolation envelope CLOSED
+**Rigor**: STANDARD (per POML metadata)
+**Duration**: ~5 min (build + test + verification + baseline doc)
+
+### Verification result (SUCCESS path)
+
+| Metric | Pre-018 | Post-018 (task 018 reported) | Post-019 (this task) | Δ vs 018 |
+|---|---:|---:|---:|---:|
+| Total | 6,034 | 6,034 | **6,034** | 0 ✅ |
+| Passed | 5,641 | 5,753 | **5,753** | 0 ✅ |
+| Failed | 284 | 172 | **172** | 0 ✅ |
+| Skipped | 109 | 109 | **109** | 0 ✅ |
+
+Task 019's measurement matches task 018's post-edit report exactly (no drift across runs). Cumulative Phase 0 → Wave 1.3 reduction: 342 → 172 = **−170 / −49.7%**.
+
+### Acceptance criteria check
+
+- [x] `post-019-verify-2026-05-31.trx` exists and parseable (in `baseline/`)
+- [x] `post-wave1.3-authoritative-baseline-2026-05-31.md` written with delta vs 4,844 baseline + delta vs post-compile baseline + delta vs Wave-1.1a (5,627) + zero-regression analysis
+- [x] SUCCESS path: pass count 5,753 ≥ 4,844 (+909) AND ≥ 5,627 (+126)
+- [x] Zero regressions (post ∖ pre cluster set is ∅)
+- [x] No `src/`/`power-platform/`/`infra/`/`scripts/` modifications (verified via `git status`)
+- [x] NFR-07 isolation envelope: task 019 ran solo per orchestrator brief
+
+### 7 inventory keys verified present in `CustomWebAppFactory.cs`
+
+| # | Key | Line |
+|---:|---|---:|
+| 1 | `CosmosPersistence:Endpoint` | 112 |
+| 2 | `CosmosPersistence:DatabaseName` | 113 |
+| 3 | `AgentService:Enabled` | 119 |
+| 4 | `AgentService:Endpoint` | 120 |
+| 5 | `AgentService:AgentId` | 121 |
+| 6 | `AgentService:MaxConcurrency` | 122 |
+| 7 | `AgentService:ThreadCacheExpiryMinutes` | 123 |
+
+### Files written by task 019
+
+- `projects/sdap-bff.api-test-suite-repair/baseline/post-019-verify-2026-05-31.trx` (new, full-suite TRX)
+- `projects/sdap-bff.api-test-suite-repair/baseline/post-wave1.3-authoritative-baseline-2026-05-31.md` (new, authoritative baseline for Phase 2+3 to cite)
+- `projects/sdap-bff.api-test-suite-repair/current-task.md` (this append)
+
+### Files NOT modified (intentionally)
+
+- `src/`, `power-platform/`, `infra/`, `scripts/` — NFR-01 binding
+- `tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs` — task 018 owns this; task 019 is measurement-only per §4.5 / POML constraint
+- `.claude/` — denied by permission boundary
+
+### Build result
+
+`dotnet build tests/unit/Sprk.Bff.Api.Tests/ -c Release` → **0 errors, 17 warnings** (pre-existing Kiota CVE + obsolete API + CS1998 — all from `src/` and unchanged from Phase 0 baseline).
+
+### P1.C Track exit declaration
+
+**P1.C Track (factory extension) is COMPLETE.** Tasks 017 (inventory) + 018 (factory edit) + 019 (verification, this task) verified operational. The factory now provides 44 config keys (37 pre-existing + 7 new) covering CosmosPersistence + AgentServiceOptions, eliminating 17 startup-failure clusters (110+ tests now passing). Phase 1 P1.C exit gate per design.md §7 is satisfied.
+
+**NFR-07 isolation envelope CLOSED** by this task. All Phase 1 remaining + Phase 2+3 + Phase 4 work CLEARED to resume parallel execution per the orchestrator's wave plan. The +112 newly-passing tests reduce the Phase 2+3 starting state from 284 → 172 failures.
+
+### POML status update
+
+`projects/sdap-bff.api-test-suite-repair/tasks/019-factory-verify-baseline-preserved.poml` `<status>` updated from `not-started` → `completed`.

@@ -1,7 +1,7 @@
 <task id="018" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P1.C2 — Extend CustomWebAppFactory.cs (ISOLATED per NFR-07)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1-2 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-1, factory-ext, bff-api, testing, p1-c, isolated</tags>
