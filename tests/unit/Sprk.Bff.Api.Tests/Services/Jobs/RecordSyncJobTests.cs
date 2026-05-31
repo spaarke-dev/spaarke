@@ -29,6 +29,7 @@ namespace Sprk.Bff.Api.Tests.Services.Jobs;
 ///   (g) Missing configuration short-circuits cleanly.
 ///   (h) MapToSearchDocument produces correct field values.
 /// </summary>
+[Trait("status", "repaired")]
 public class RecordSyncJobTests
 {
     // ─────────────────────────────────────────────────────────────────────────

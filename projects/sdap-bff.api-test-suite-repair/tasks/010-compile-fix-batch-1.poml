@@ -1,7 +1,7 @@
 <task id="010" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P1.A1 — Repair compile-broken files batch 1 (Workspace, EmailWebhook, ExternalAccess, Email)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1.5-2 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-1, compile-fix, bff-api, testing, p1-a</tags>

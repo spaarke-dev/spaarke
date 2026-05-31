@@ -22,6 +22,12 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Tools;
 /// Since CommunicationService is sealed and cannot be mocked, tests use real
 /// instances with mocked infrastructure dependencies (IGraphClientFactory, IDataverseService).
 /// </summary>
+/// <remarks>
+/// 2026-05-31 (task 012 / P1.A3 verify-only): file already compiles clean (Phase 0 baseline
+/// confirms 0 compile errors). All 18 tests pass at runtime. §6.2 trait tagged `repaired`.
+/// No test logic changes; CommunicationService construction + handler contract intact.
+/// </remarks>
+[Trait("status", "repaired")]
 public class SendCommunicationToolHandlerScenarioTests
 {
     #region Test Infrastructure

@@ -1,7 +1,7 @@
 <task id="012" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P1.A3 — Repair Ai/Tools + Ai/Sessions compile-broken files</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1-1.5 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-1, compile-fix, bff-api, testing, p1-a, ai</tags>

@@ -20,6 +20,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 /// missing/not-found IDs, and mixed found/not-found scenarios.
 /// Uses mocked HttpMessageHandler to intercept Dataverse Web API calls.
 /// </summary>
+[Trait("status", "repaired")]
 public class ScopeResolverServiceResolveScopesTests : IDisposable
 {
     private readonly Mock<IDataverseService> _dataverseServiceMock;
@@ -556,6 +557,7 @@ public class ScopeResolverServiceResolveScopesTests : IDisposable
 /// <summary>
 /// Unit tests for ScopeResolverService - stub action lookup and search functionality.
 /// </summary>
+[Trait("status", "repaired")]
 public class ScopeResolverServiceTests : IDisposable
 {
     private readonly Mock<IDataverseService> _dataverseServiceMock;
@@ -1089,6 +1091,7 @@ public class ScopeResolverServiceTests : IDisposable
 /// <summary>
 /// Tests for scope resolution model types.
 /// </summary>
+[Trait("status", "repaired")]
 public class ScopeModelsTests
 {
     [Fact]
@@ -1163,6 +1166,7 @@ public class ScopeModelsTests
 /// Tests for Dataverse Web API-based scope resolution methods (GetSkillAsync, GetKnowledgeAsync, GetActionAsync).
 /// Uses mocked HttpClient to test Web API query behavior.
 /// </summary>
+[Trait("status", "repaired")]
 public class ScopeResolverServiceDataverseWebApiTests : IDisposable
 {
     private readonly Mock<IDataverseService> _dataverseServiceMock;

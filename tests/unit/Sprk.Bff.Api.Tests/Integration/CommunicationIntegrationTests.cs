@@ -39,6 +39,7 @@ namespace Sprk.Bff.Api.Tests.Integration;
 /// - Status query: Dataverse retrieval and OptionSetValue/DateTime mapping
 /// - Error paths: Graph failures, Dataverse failures, unauthorized senders
 /// </summary>
+[Trait("status", "repaired")]
 public class CommunicationIntegrationTests
 {
     #region Test Infrastructure

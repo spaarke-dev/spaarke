@@ -70,17 +70,17 @@ All 5 Wave 1 agents completed. Build verification skipped: no `.cs` files modifi
 
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
-| 010 | Compile-fix batch 1 (Workspace, EmailWebhook, ExternalAccess, Email) — **SCOPE-REVISED 2026-05-31: compile clean already; verify + test-level repair** | 🔲 | 1-A | ✅ Yes | FULL | none |
-| 011 | Compile-fix batch 2 (Communications — 5 files) — **SCOPE-REVISED 2026-05-31: compile clean already; verify + test-level repair** | 🔲 | 1-A | ✅ Yes | FULL | none |
-| 012 | Compile-fix batch 3 (Ai/Tools, Ai/Sessions) — **SCOPE-REVISED 2026-05-31: compile clean already; verify + test-level repair** | 🔲 | 1-A | ✅ Yes | FULL | none |
-| 013 | Compile-fix batch 4 (Ai/Scope, Visualization, WorkingDocument, Jobs, Integration) — **SCOPE-REVISED 2026-05-31: compile clean already; verify + test-level repair** | 🔲 | 1-A | ✅ Yes | FULL | none |
+| 010 | Compile-fix batch 1 (Workspace, EmailWebhook, ExternalAccess, Email) — **SCOPE-REVISED 2026-05-31: compile clean already; verify + test-level repair** | ✅ 2026-05-31 (4 files / 118 tests pass / 0 escalations) | 1-A | ✅ Yes | FULL | none |
+| 011 | Compile-fix batch 2 (Communications — 5 files) — **SCOPE-REVISED 2026-05-31: compile clean already; verify + test-level repair** | ✅ 2026-05-31 (5 files / 53 prev-failing tests now pass via ISP refactor mock swap / 0 escalations) | 1-A | ✅ Yes | FULL | none |
+| 012 | Compile-fix batch 3 (Ai/Tools, Ai/Sessions) — **SCOPE-REVISED 2026-05-31: compile clean already; verify + test-level repair** | ✅ 2026-05-31 (3 files / 48 pass + 2 skip / **RB-T012-01** real-bug filed in SessionRestoreService) | 1-A | ✅ Yes | FULL | none |
+| 013 | Compile-fix batch 4 (Ai/Scope, Visualization, WorkingDocument, Jobs, Integration) — **SCOPE-REVISED 2026-05-31: compile clean already; verify + test-level repair** | ✅ 2026-05-31 (5 files / 9 trait additions / 0 escalations) | 1-A | ✅ Yes | FULL | none |
 | 014 | Verify all 17 compile + capture runtime delta — **SCOPE-REVISED 2026-05-31: compile verification trivial; runtime-delta capture is the meaningful work** | 🔲 | 1-B | ❌ No (gate) | STANDARD | 010, 011, 012, 013 |
 
 ### Track P1.B — IAsyncEnumerable helper
 
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
-| 015 | Build IAsyncEnumerable helper per D-01 | 🔲 | 1-A | ✅ Yes | FULL | 003 |
+| 015 | Build IAsyncEnumerable helper per D-01 | ✅ 2026-05-31 (Mocks/AsyncEnumerableHelpers.cs, ~270 LOC, 9 public members incl. FakeChatClient; ADR-010/013/029 compliant) | 1-A | ✅ Yes | FULL | 003 |
 | 016 | Unit test the helper | 🔲 | 1-B | ✅ Yes | STANDARD | 015 |
 
 ### Track P1.C — CustomWebAppFactory extension (ISOLATED per NFR-07)

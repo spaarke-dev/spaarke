@@ -1,7 +1,7 @@
 <task id="015" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P1.B1 — Build IAsyncEnumerable helper per D-01 verdict</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2-4 hours (depends on D-01 verdict)</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-1, async-enumerable, bff-api, testing, p1-b</tags>

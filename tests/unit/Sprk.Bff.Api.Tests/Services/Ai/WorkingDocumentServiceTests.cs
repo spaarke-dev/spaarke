@@ -14,6 +14,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 /// Unit tests for WorkingDocumentService - working document state management.
 /// Tests Phase 1 stub behavior and version tracking.
 /// </summary>
+[Trait("status", "repaired")]
 public class WorkingDocumentServiceTests
 {
     private readonly Mock<IGenericEntityService> _genericEntityServiceMock;
@@ -284,6 +285,7 @@ public class WorkingDocumentServiceTests
 /// <summary>
 /// Tests for SavedDocumentResult model.
 /// </summary>
+[Trait("status", "repaired")]
 public class SavedDocumentResultTests
 {
     [Fact]
