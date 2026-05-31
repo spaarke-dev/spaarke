@@ -135,5 +135,54 @@ public enum ActionType
     QueryDataverse = 51,
 
     /// <summary>Routes the playbook node to Azure AI Foundry Agent Service (Phase 2).</summary>
-    AgentService = 60
+    AgentService = 60,
+
+    /// <summary>
+    /// Mechanical zero-LLM citation verification — checks that quoted evidence from prior
+    /// AI nodes matches the source chunks. Wraps <c>IGroundingVerifier</c> per D-P9 / D-47 /
+    /// LAVERN ADR 10.6. Used in Insights synthesis playbooks (D-P14) and the ingest pipeline.
+    /// </summary>
+    GroundingVerify = 70,
+
+    /// <summary>
+    /// Resolves a deterministic Live Fact about a Dataverse subject (e.g.,
+    /// <c>matter:M-1234.totalSpend</c>) via <c>ILiveFactResolver</c> and emits a
+    /// <see cref="Models.Insights.FactArtifact"/> per design.md §2.1. Confidence is always 1.0.
+    /// Used in Insights synthesis playbooks (D-P14) and the ingest pipeline per D-P12.
+    /// </summary>
+    LiveFact = 80,
+
+    /// <summary>
+    /// Retrieves Observations and Precedents from <c>spaarke-insights-index</c> via filter +
+    /// vector search per D-P12 / SPEC §3.4.3 worked-example queries. Returns the retrieved
+    /// artifacts in <c>NodeOutput.StructuredData</c> for downstream synthesis nodes
+    /// (typically <see cref="AiCompletion"/>). Per D-A23 / D-48, validates non-empty result
+    /// at runtime when the playbook config marks the retrieval as evidence-bearing.
+    /// </summary>
+    IndexRetrieve = 90,
+
+    /// <summary>
+    /// Reads prior node outputs and applies a configured evidence rule
+    /// (e.g., <c>{minComparableMatters: 12}</c>); emits <c>sufficient</c> / <c>insufficient</c>
+    /// verdict + structured gap analysis per D-P12 + D-49 (LAVERN Pattern #7). Used as the
+    /// pre-condition gate before a <see cref="DeclineToFind"/> branch in synthesis playbooks.
+    /// </summary>
+    EvidenceSufficiency = 100,
+
+    /// <summary>
+    /// Deterministic exit that emits a structured <see cref="Models.Insights.DeclineResponse"/>
+    /// (typed, not freely-composed prose) per D-49 / D-P12. Invoked when
+    /// <see cref="EvidenceSufficiency"/> returns insufficient. Zero LLM — composes the response
+    /// from upstream gap analysis + a config-driven template.
+    /// </summary>
+    DeclineToFind = 110,
+
+    /// <summary>
+    /// Final node of an Insights synthesis playbook. Serializes upstream node outputs into an
+    /// <see cref="Models.Insights.InsightArtifact"/> envelope (typically an
+    /// <see cref="Models.Insights.InferenceArtifact"/>) per D-P12 / D-P1 / design.md §2.2.
+    /// Validates non-empty evidence (D-A23 / D-48 EvidenceGuard) before return — throws
+    /// <c>EvidenceRequiredException</c> on empty evidence.
+    /// </summary>
+    ReturnInsightArtifact = 120
 }

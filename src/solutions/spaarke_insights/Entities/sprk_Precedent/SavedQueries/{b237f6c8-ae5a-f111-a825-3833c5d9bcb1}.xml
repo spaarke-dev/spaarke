@@ -1,0 +1,51 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{b237f6c8-ae5a-f111-a825-3833c5d9bcb1}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" preview="1" icon="1">
+        <row name="result" id="sprk_precedentid">
+          <cell name="sprk_name" width="220" />
+          <cell name="sprk_status" width="140" />
+          <cell name="sprk_samplesize" width="100" />
+          <cell name="sprk_reviewerby" width="160" />
+          <cell name="sprk_reviewdate" width="120" />
+          <cell name="sprk_producedby" width="160" />
+          <cell name="modifiedon" width="120" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" output-format="xml-platform" mapping="logical" distinct="false">
+        <entity name="sprk_precedent">
+          <attribute name="sprk_name" />
+          <attribute name="sprk_status" />
+          <attribute name="sprk_samplesize" />
+          <attribute name="sprk_reviewerby" />
+          <attribute name="sprk_reviewdate" />
+          <attribute name="sprk_producedby" />
+          <attribute name="modifiedon" />
+          <attribute name="sprk_precedentid" />
+          <order attribute="modifiedon" descending="true" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+            <condition attribute="sprk_status" operator="eq" value="100000000" />
+          </filter>
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Tentative Precedents" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="Precedents awaiting SME review (D-61)." languagecode="1033" />
+    </Descriptions>
+  </savedquery>
+</savedqueries>

@@ -272,4 +272,25 @@ public record AiProcessingOptions
     /// Whether to perform deep analysis.
     /// </summary>
     public bool DeepAnalysis { get; init; }
+
+    /// <summary>
+    /// Whether to dispatch the Spaarke Insights Engine universal ingest pipeline
+    /// (D-P7 + D-P8 — task 050) for this upload. Default <c>false</c> in Phase 1 so
+    /// existing CRUD/Office upload flows are not changed by introducing the consumer;
+    /// the D-P16 smoke test (task 070) flips this on for fixtures, and Phase 1.5+
+    /// production rollout enables it after the per-document $0.10 cost cap +
+    /// per-tenant monthly cap signoff (see
+    /// <c>projects/ai-spaarke-insights-engine-r1/notes/cost-projection-d-p8.md</c>).
+    /// </summary>
+    /// <remarks>
+    /// When set <c>true</c> alongside <see cref="OfficeJobMessage.JobType"/> =
+    /// UploadFinalization with <see cref="UploadFinalizationPayload.TriggerAiProcessing"/>
+    /// = <c>true</c>, <c>UploadFinalizationWorker.QueueNextStageAsync</c> additionally
+    /// enqueues a <c>JobType = "InsightsUniversalIngest"</c> job to <c>sdap-jobs</c>.
+    /// The job is routed to <c>InsightsIngestJobHandler</c> (Zone B per §3.5) which
+    /// dispatches via <c>IInsightsAi.RunIngestAsync</c>. The existing
+    /// <c>AppOnlyDocumentAnalysis</c> queue continues to fire unchanged regardless of
+    /// this flag.
+    /// </remarks>
+    public bool InsightsIngest { get; init; }
 }

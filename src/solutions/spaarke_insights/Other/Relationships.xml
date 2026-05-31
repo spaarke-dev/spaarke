@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<EntityRelationships xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <EntityRelationship Name="lk_sprk_precedent_createdby" />
+  <EntityRelationship Name="lk_sprk_precedent_modifiedby" />
+  <EntityRelationship Name="organization_sprk_precedent" />
+  <EntityRelationship Name="sprk_precedent_matter" />
+  <EntityRelationship Name="sprk_precedent_related" />
+  <EntityRelationship Name="sprk_systemuser_sprk_precedent_reviewerby" />
+</EntityRelationships>

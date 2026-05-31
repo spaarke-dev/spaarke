@@ -16,6 +16,9 @@
     <PackageReference Include="coverlet.collector" Version="6.0.0">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <!-- Task 024: needed for MemoryDistributedCache in DistributedCacheExtensionsTests -->
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.2" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\server\shared\Spaarke.Core\Spaarke.Core.csproj" />

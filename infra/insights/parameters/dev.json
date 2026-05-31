@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "_comment_": "Single-tenant parameter file per D-52. This file == the Spaarke Dev tenant deployment unit. To onboard a new customer: copy this file, set tenantShortName + tenantDisplayName, point the existing-resource params at the customer's shared services, deploy. See infra/insights/README.md.",
+  "parameters": {
+    "tenantShortName": {
+      "value": "spaarkedev"
+    },
+    "tenantDisplayName": {
+      "value": "Spaarke Dev (internal)"
+    },
+    "location": {
+      "value": "westus2"
+    },
+    "environmentName": {
+      "value": "dev"
+    },
+    "resourcePrefix": {
+      "value": "insights"
+    },
+    "searchServiceName": {
+      "value": "spaarke-search-dev"
+    },
+    "searchServiceResourceGroup": {
+      "value": "spe-infrastructure-westus2"
+    },
+    "keyVaultName": {
+      "value": "sprkspaarkedev-aif-kv"
+    },
+    "appInsightsName": {
+      "value": "spe-insights-dev-67e2xz"
+    },
+    "logAnalyticsWorkspaceName": {
+      "value": "spe-logs-dev-67e2xz"
+    },
+    "functionInstanceMemoryMB": {
+      "value": 2048
+    },
+    "functionMaxInstanceCount": {
+      "value": 100
+    },
+    "functionAlwaysReadyInstanceCount": {
+      "value": 1
+    }
+  }
+}

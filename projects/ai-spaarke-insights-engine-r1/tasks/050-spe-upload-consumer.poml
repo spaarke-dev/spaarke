@@ -1,0 +1,93 @@
+<task id="050" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P8 — SPE-upload event consumer (BackgroundService or Function per ADR-001)</title>
+    <status>completed</status>
+    <completion-date>2026-05-28</completion-date>
+    <completion-notes>
+      Implemented as IJobHandler on existing sdap-jobs queue (NO new BackgroundService/Function per ADR-001).
+      Files NEW: Services/Jobs/Insights/{InsightsIngestJobHandler,InsightsIngestPayload}.cs +
+      tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/Insights/InsightsIngestJobHandlerTests.cs (27 tests) +
+      projects/ai-spaarke-insights-engine-r1/notes/cost-projection-d-p8.md (user-authoritative blocker resolutions).
+      Files MODIFIED: Workers/Office/UploadFinalizationWorker.cs (+EnqueueInsightsIngestAsync conditional queue) +
+      Workers/Office/Messages/OfficeJobMessage.cs (+AiProcessingOptions.InsightsIngest opt-in flag, default false) +
+      Infrastructure/DI/JobProcessingModule.cs (+1 IJobHandler scoped registration).
+      Tests: 27/27 PASS (InsightsIngestJobHandlerTests); 236/236 PASS (full Insights subset; no regressions vs prior 209).
+      §3.5.4 strict using-statement grep: ZERO real forbidden imports (only Services.Ai.PublicContracts.IInsightsAi).
+      Acceptance criteria: 6/6 PASS. Quality gates: code-review 0 critical/0 warnings; adr-check 0 violations.
+      Backpressure inherited from existing ServiceBusJobProcessor (MaxConcurrentCalls=5 + peek-lock + DLQ on delivery >= 5);
+      no new infrastructure needed per blocker 1 resolution. Cost cap $0.10/document Phase 1 = observability only
+      (warns + AI metric); per-tenant monthly cap deferred to Phase 1.5 per user signoff.
+    </completion-notes>
+    <wave>6</wave>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>bff-api, consumer, spe-events, jobs, zone-b, dotnet, adr-001</tags>
+    <dependencies>042</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>D-P8</d-p>
+    <first-step-blocker>Confirm SPE-upload event source (mechanism, dispatch shape, auth context) + production live-ingest cost projection</first-step-blocker>
+  </metadata>
+
+  <prompt>
+    Implement new consumer subscribing to SPE-upload events that triggers the universal ingest playbook (D-P7) via `IInsightsAi.RunIngestAsync`. Choose BackgroundService vs Function per ADR-001 based on existing SPE event mechanism. Reads document content from `spaarke-files-index` (already chunked by existing pipeline) — does NOT re-fetch from SPE. Zone B at dispatch boundary; consumes Zone A via facade only.
+  </prompt>
+
+  <role>Senior .NET developer with BackgroundService / Azure Functions familiarity, SPE integration knowledge, and §3.5 facade boundary discipline.</role>
+
+  <goal>
+    On SPE document upload: consumer receives event, extracts {documentId, matterId, tenantId}, calls `IInsightsAi.RunIngestAsync(request, ct)`, logs result. Per-deployment cost projection documented before enabling on production traffic. Backpressure / retry handling per Spaarke patterns. §3.5 facade boundary verified by grep.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P8, §3.5 facade boundary — D-P8 marked Zone B at dispatch boundary)</file>
+    <file purpose="rationale">projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md (§4.3 SPE upload plumbing fork)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md (forbidden imports in Zone B)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">If Function, use Flex Consumption + per-tenant UAMI; if BackgroundService, follow existing Spaarke BackgroundService patterns (PlaybookIndexingBackgroundService template)</constraint>
+    <constraint source="§3.5">Zone B placement at dispatch boundary; must NOT import IPlaybookService / PlaybookExecutionEngine; only IInsightsAi facade allowed</constraint>
+    <constraint source="D-27">DefaultAzureCredential for outbound; no ClientSecretCredential</constraint>
+    <constraint source="D-59">Layer 1 fires on every upload; cost projection MUST be confirmed before production enable</constraint>
+    <constraint source="backpressure">If SPE event mechanism delivers in bursts, implement bounded channel or queue to throttle; retry transient failures per existing patterns</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>azure-functions-isv, background-service, spe-integration, dispatch-boundary</topic>
+    <files>
+      <file>knowledge/azure-functions-isv/INDEX.md</file>
+      <file>docs/adr/ADR-001-minimal-api-and-workers.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="First-step blocker (event source)">Confirm SPE-upload event mechanism: Service Bus subscription? Graph webhook? Existing Spaarke event bus? Pick correct consumer architecture (Function vs BackgroundService)</step>
+    <step order="0.5" name="First-step blocker (cost projection)">Estimate Layer 1 LLM cost at projected production document volumes; admin/finance sign-off required before enabling on production traffic</step>
+    <step order="1" name="Author SpeUploadConsumer">In Services/Jobs/ if BackgroundService; in new project/folder if Function. Implements consumer pattern; injects IInsightsAi (facade only)</step>
+    <step order="2" name="Event handler">Parse event payload → {documentId, matterId, tenantId} → call IInsightsAi.RunIngestAsync</step>
+    <step order="3" name="Backpressure + retry">Bounded channel (Channel&lt;SpeUploadEvent&gt;) with max parallelism setting; transient retry with exponential backoff</step>
+    <step order="4" name="Telemetry">App Insights events: spe_upload_received, insights_ingest_invoked, insights_ingest_succeeded, insights_ingest_failed</step>
+    <step order="5" name="Integration test">Mock SPE event → consumer invokes IInsightsAi.RunIngestAsync (mocked); verify request shape</step>
+    <step order="6" name="§3.5 grep">Run boundary verification grep on Services/Jobs/SpeUploadConsumer*.cs → zero hits expected</step>
+    <step order="7" name="Quality gates">code-review + adr-check; cost projection documented in notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/SpeUploadConsumer.cs (or new Function project)</output>
+    <output type="test">tests/integration/Services/Jobs/SpeUploadConsumerTests.cs</output>
+    <output type="docs">projects/ai-spaarke-insights-engine-r1/notes/cost-projection-d-p8.md (admin sign-off)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SPE-upload event source confirmed and documented (Function vs BackgroundService decision)</criterion>
+    <criterion testable="true">Production live-ingest cost projection signed off by admin</criterion>
+    <criterion testable="true">Consumer receives SPE event and invokes IInsightsAi.RunIngestAsync with correct {documentId, matterId, tenantId}</criterion>
+    <criterion testable="true">§3.5 grep clean — no IPlaybookService/PlaybookExecutionEngine/IChatClient imports in consumer code</criterion>
+    <criterion testable="true">Backpressure mechanism prevents unbounded queue growth (verified by load test or explicit capacity assertion)</criterion>
+    <criterion testable="true">App Insights telemetry emits for each event handled</criterion>
+  </acceptance-criteria>
+</task>

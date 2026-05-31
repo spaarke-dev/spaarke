@@ -374,24 +374,30 @@ public class ExternalAccessEndpointTests
     #region InviteExternalUser — Validation
 
     [Fact]
-    public void InviteExternalUser_EmptyContactId_ShouldFailValidation()
+    public void InviteExternalUser_EmptyEmail_ShouldFailValidation()
     {
         var request = new InviteExternalUserRequest(
-            ContactId: Guid.Empty,
+            Email: string.Empty,
             ProjectId: Guid.NewGuid(),
+            AccessLevel: 100000000,
+            FirstName: null,
+            LastName: "Doe",
             ExpiryDate: null,
             AccountId: null);
 
-        (request.ContactId == Guid.Empty).Should().BeTrue(
-            "handler returns 400 when ContactId is empty GUID");
+        string.IsNullOrWhiteSpace(request.Email).Should().BeTrue(
+            "handler returns 400 when Email is empty");
     }
 
     [Fact]
     public void InviteExternalUser_EmptyProjectId_ShouldFailValidation()
     {
         var request = new InviteExternalUserRequest(
-            ContactId: Guid.NewGuid(),
+            Email: "user@example.com",
             ProjectId: Guid.Empty,
+            AccessLevel: 100000000,
+            FirstName: null,
+            LastName: "Doe",
             ExpiryDate: null,
             AccountId: null);
 
@@ -403,12 +409,15 @@ public class ExternalAccessEndpointTests
     public void InviteExternalUser_ValidRequest_PassesGuards()
     {
         var request = new InviteExternalUserRequest(
-            ContactId: Guid.NewGuid(),
+            Email: "user@example.com",
             ProjectId: Guid.NewGuid(),
+            AccessLevel: 100000000,
+            FirstName: "Jane",
+            LastName: "Doe",
             ExpiryDate: DateOnly.FromDateTime(DateTime.UtcNow.AddDays(14)),
             AccountId: null);
 
-        (request.ContactId == Guid.Empty).Should().BeFalse();
+        string.IsNullOrWhiteSpace(request.Email).Should().BeFalse();
         (request.ProjectId == Guid.Empty).Should().BeFalse();
     }
 
@@ -416,7 +425,7 @@ public class ExternalAccessEndpointTests
     public void InviteExternalUser_NullExpiryDate_DefaultsTo30Days()
     {
         // Handler behaviour: when ExpiryDate is null, default to UtcNow + 30 days.
-        var request = new InviteExternalUserRequest(Guid.NewGuid(), Guid.NewGuid(), null, null);
+        var request = new InviteExternalUserRequest("user@example.com", Guid.NewGuid(), 100000000, null, "Doe", null, null);
 
         // Simulate the handler's default logic.
         const int defaultExpiryDays = 30;
@@ -471,21 +480,23 @@ public class ExternalAccessEndpointTests
     [Fact]
     public void InviteExternalUserResponse_HoldsAllFields()
     {
-        var invitationId = Guid.NewGuid();
-        var code = "ABC-12345";
-        var expiry = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30));
-        var response = new InviteExternalUserResponse(invitationId, code, expiry);
+        var contactId = Guid.NewGuid();
+        var redeemUrl = "https://login.microsoftonline.com/redeem/ABC-12345";
+        var status = "PendingAcceptance";
+        var response = new InviteExternalUserResponse(contactId, redeemUrl, status);
 
-        response.InvitationId.Should().Be(invitationId);
-        response.InvitationCode.Should().Be(code);
-        response.ExpiryDate.Should().Be(expiry);
+        response.ContactId.Should().Be(contactId);
+        response.InviteRedeemUrl.Should().Be(redeemUrl);
+        response.Status.Should().Be(status);
     }
 
     [Fact]
-    public void InviteExternalUserResponse_NullExpiryDate_IsAccepted()
+    public void InviteExternalUserResponse_EmptyRedeemUrl_IsAccepted()
     {
-        var response = new InviteExternalUserResponse(Guid.NewGuid(), "CODE-99", null);
-        response.ExpiryDate.Should().BeNull();
+        // Empty redeem URL signals the user is already in the tenant — no invitation needed.
+        var response = new InviteExternalUserResponse(Guid.NewGuid(), string.Empty, "Completed");
+        response.InviteRedeemUrl.Should().BeEmpty();
+        response.Status.Should().Be("Completed");
     }
 
     #endregion

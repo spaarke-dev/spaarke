@@ -69,8 +69,9 @@ public class AttachmentValidationTests
         return new CommunicationService(
             _graphClientFactoryMock.Object,
             senderValidator,
-            Mock.Of<IDataverseService>(),
-            Mock.Of<IDataverseService>(),
+            Mock.Of<ICommunicationDataverseService>(),
+            Mock.Of<IGenericEntityService>(),
+            Mock.Of<IDocumentDataverseService>(),
             null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here
             null!, // CommunicationAccountService — not tested here

@@ -1721,6 +1721,70 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
     }
 
+    /// <summary>
+    /// Generic N:N associate — used by Insights Engine task 012 (D-P3 admin endpoint)
+    /// to attach supporting matters to a new Precedent. Mirrors the SDK
+    /// <c>ServiceClient.AssociateAsync</c> shape so callers don't need to construct
+    /// SDK message envelopes themselves. Already-existing associations are tolerated.
+    /// </summary>
+    public async Task AssociateAsync(
+        string entityLogicalName,
+        Guid entityId,
+        string relationshipName,
+        IEnumerable<EntityReference> relatedEntities,
+        CancellationToken ct = default)
+    {
+        var references = relatedEntities as ICollection<EntityReference> ?? relatedEntities.ToList();
+        if (references.Count == 0)
+        {
+            _logger.LogDebug(
+                "[DATAVERSE] AssociateAsync({EntityLogicalName}/{EntityId}, {RelationshipName}) called with empty related set — no-op",
+                entityLogicalName, entityId, relationshipName);
+            return;
+        }
+
+        try
+        {
+            var collection = new EntityReferenceCollection();
+            foreach (var reference in references)
+            {
+                collection.Add(reference);
+            }
+
+            await _serviceClient.AssociateAsync(
+                entityLogicalName,
+                entityId,
+                new Relationship(relationshipName),
+                collection,
+                ct);
+
+            _logger.LogInformation(
+                "[DATAVERSE] Associated {RelatedCount} record(s) with {EntityLogicalName}/{EntityId} via {RelationshipName}",
+                references.Count, entityLogicalName, entityId, relationshipName);
+        }
+        catch (Exception ex) when (
+            // Dataverse surfaces "duplicate association" as a FaultException with
+            // message containing "Cannot insert duplicate key" or
+            // "An association already exists". Treat as idempotent success.
+            ex.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) ||
+            ex.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogDebug(
+                "[DATAVERSE] One or more associations already existed on {EntityLogicalName}/{EntityId} via {RelationshipName} — treated as idempotent success",
+                entityLogicalName, entityId, relationshipName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "[DATAVERSE] Error associating records with {EntityLogicalName}/{EntityId} via {RelationshipName}",
+                entityLogicalName, entityId, relationshipName);
+            throw new InvalidOperationException(
+                $"Failed to associate {references.Count} record(s) with {entityLogicalName}/{entityId} via {relationshipName}: {ex.Message}",
+                ex);
+        }
+    }
+
     public async Task BulkUpdateAsync(
         string entityLogicalName,
         List<(Guid id, Dictionary<string, object> fields)> updates,

@@ -1,0 +1,73 @@
+<task id="021" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P10 — Confidence-threshold gating + per-field Observation emission post-processor</title>
+    <status>completed</status>
+    <wave>3</wave>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>bff-api, extraction, gating, observation-emission, zone-a, dotnet</tags>
+    <dependencies>001</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>D-P10</d-p>
+  </metadata>
+
+  <prompt>
+    Implement the deterministic non-LLM post-processor invoked after Layer 2 (D-P6) extraction: applies per-field confidence threshold gating, drops below-threshold fields (with optional logging), and emits each surviving field as its own Observation in `spaarke-insights-index`. Realizes D-63 (gating as mechanical primitive) and D-P10 emission semantics.
+  </prompt>
+
+  <role>Senior .NET developer familiar with post-extraction pipelines, threshold configuration, and AI Search upsert patterns.</role>
+
+  <goal>
+    `IObservationEmitter.EmitFromExtractionAsync(extractionResult, gatingConfig, ct)` produces zero-or-more Observations. Per-field threshold gating per [SPEC-phase-1-minimum.md §3.4](../SPEC-phase-1-minimum.md): outcomeCategory≥0.75, settlementAmount≥0.85, outcomeDate≥0.85, matterDurationDays≥0.75 (admin-tunable via IConfiguration). Each surviving field becomes its own Observation row in `spaarke-insights-index` per D-P10. Below-threshold fields logged to App Insights for review surface drift analysis.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P10, §3.4.1 Observation row worked example)</file>
+    <file purpose="rationale">projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md (§3.4 three mechanical gates; D-63 thresholds)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="D-63">Per-field thresholds admin-tunable via IOptionsMonitor pattern; calibrated against D-P11 review surface</constraint>
+    <constraint source="D-P10">Each surviving field = one Observation row; subject=matter, predicate=field name, value typed</constraint>
+    <constraint source="D-A23">Evidence-bearing emission must populate evidence[] with verbatim quote from extraction + producedBy.version</constraint>
+    <constraint source="§3.5">Zone A placement (under Services/Ai/Insights/Extraction/)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>extraction-pipeline, threshold-gating, observation-emission, ai-search-upsert</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read SPEC-phase-1-minimum.md §3.4">Confirm three mechanical gates ordering: GroundingVerifier (D-P9) → confidence gating → per-field emission</step>
+    <step order="2" name="Author config">ConfidenceThresholdOptions with per-field thresholds + admin-tunable defaults; IConfiguration-bound</step>
+    <step order="3" name="Author IObservationEmitter interface">EmitFromExtractionAsync producing IReadOnlyList&lt;ObservationArtifact&gt;</step>
+    <step order="4" name="Author implementation">Reads extraction JSON (typed schema from D-P6); for each field, checks threshold; if pass, constructs ObservationArtifact with evidence + producedBy; if fail, logs to App Insights</step>
+    <step order="5" name="Author IndexUpserter helper">Uses parameterized ReferenceIndexingService (Wave 3.5 D-P25) to upsert Observation to spaarke-insights-index</step>
+    <step order="6" name="DI registration">Register IObservationEmitter + options in AiModule</step>
+    <step order="7" name="Unit tests">High-confidence field emits; below-threshold field drops + logs; multi-field extraction emits multiple Observations</step>
+    <step order="8" name="Quality gates">code-review + adr-check</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/IObservationEmitter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/ObservationEmitter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/ConfidenceThresholdOptions.cs</output>
+    <output type="test">tests/unit/Services/Ai/Insights/Extraction/ObservationEmitterTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">High-confidence extraction (all fields ≥ threshold) emits N Observations (one per field)</criterion>
+    <criterion testable="true">Below-threshold field is dropped (not persisted) and logged to App Insights with field name + actual confidence</criterion>
+    <criterion testable="true">Thresholds load from IConfiguration; admin can override via appsettings.json</criterion>
+    <criterion testable="true">Each emitted Observation has evidence[] with verbatim quote + producedBy="outcome-extraction@v1"</criterion>
+  </acceptance-criteria>
+</task>
