@@ -556,6 +556,9 @@ public sealed class SemanticSearchService : ISemanticSearchService
                         // earlier AI-Search-sourced ModifiedAt is overwritten here.
                         ModifiedAt = doc.ModifiedOn,
                         ModifiedBy = doc.ModifiedBy,
+                        // FileSize from sprk_filesize — enables the Documents PCF email
+                        // wizard's 25 MB attachment-cap warning.
+                        FileSize = doc.FileSize,
                         Summary = doc.Summary,
                         Tldr = doc.Tldr,
                         // Populate SPE drive + item IDs so the client can invoke AI
@@ -763,6 +766,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
             // authoritative on this code path too.
             ModifiedAt = doc.ModifiedOn,
             ModifiedBy = doc.ModifiedBy,
+            FileSize = doc.FileSize,
             Summary = doc.Summary,
             Tldr = doc.Tldr
         };
