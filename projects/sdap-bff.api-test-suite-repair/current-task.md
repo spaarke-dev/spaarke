@@ -3174,3 +3174,90 @@ git status (Spe.Integration.Tests scope only)
 **Quality gates (Step 9.5)**: NFR-01 ✅ (no `src/` changes), NFR-02 ✅ (<50% per file), NFR-03 ✅ (no DI changes), §4.5 ✅ (factory untouched), §6.2 ✅ (traits applied), ADR-013 ✅ (no facade violations — tests construct AI types directly using public Microsoft.Extensions.AI constructor, not a facade-bypassing inject), ADR-001/-007/-010 unaffected.
 
 **Wave 2.4 outcome contribution**: −9 failures from inventory cluster (8 SSE + 1 Playbook). Aligned with task 008 annotation +/− 0.
+
+---
+
+## Wave 2.4-followup task 027 — Sibling integration fixtures (Cluster B absorption) — 2026-05-31
+
+- **Task**: 027 (Phase 2+3 Wave 2.4-followup — sibling integration fixtures)
+- **Status**: completed 2026-05-31
+- **Rigor**: FULL (POML metadata `<rigor>FULL</rigor>`)
+- **Cluster scope**: 98 Cluster B (SpeAdmin/Cosmos config) failures across 8 sibling fixtures
+- **Disposition**: ROOT-CAUSE-FIRST COPY (additive) — 6 files, +65 lines, 0 production changes.
+
+### Outcome (per `baseline/post-027-delta-2026-05-31.md`)
+
+| Metric | Pre-027 (=post-062) | Post-027 | Delta |
+|---|---:|---:|---:|
+| Total | 422 | 422 | 0 |
+| Passed | 262 | 323 | +61 |
+| **Failed** | **108** | **47** | **−61** |
+| Skipped | 52 | 52 | 0 |
+
+`grep 'KeyVaultUri is not configured'` post-027 = **0** (was 196 mentions in post-062). Cluster B fully cleared.
+
+### Per-fixture decisions (4 cleared, 4 surfaced downstream issues)
+
+| Fixture | Pre-fail | Post-fail (Cluster B) | Post-fail (Downstream) | Decision |
+|---|---:|---:|---:|---|
+| SemanticSearchTestFixture | 22 | 0 | 0 | COPY 2 keys to shared `TestHostConfiguration.cs` |
+| SemanticSearchAuthorizationTestFixture | 14 | 0 | 0 | (covered by helper edit) |
+| RecordSearchTestFixture | 13 | 0 | 0 | (covered by helper edit) |
+| AnalysisTestFixture | 12 | 0 | 0 | COPY 2 keys to dict |
+| KnowledgeBaseTestFixture | 13 | 0 | 13 (param-infer) | COPY 2 UseSetting calls |
+| ChatEndpointsTestFixture | 11 | 0 | 11 (param-infer + Moq) | COPY 2 UseSetting calls |
+| ReAnalysisFlowTestFixture | 8 | 0 | 8 (param-infer + SSE) | COPY 2 UseSetting calls |
+| AuthorizationTestFixture | 5 | 0 | 5 (param-infer) | COPY 2 keys to dict |
+| **TOTAL** | **98** | **0** | **37** | 6 files modified |
+
+**COPY over inheritance**: each sibling has custom auth handlers + conditional-registration stubs + feature flags (`Analysis:Enabled=false`) that inheriting `IntegrationTestFixture` would break. NFR-02 favors minimal additive fix (max 8.5% diff, target ≤2.8% for 5 of 6 files).
+
+### Files modified (per-file diff vs total lines)
+
+| File | Δ | % |
+|---|---|---|
+| `tests/integration/Spe.Integration.Tests/SemanticSearch/TestHostConfiguration.cs` | +10/-0 of 117 | 8.5% |
+| `tests/integration/Spe.Integration.Tests/AnalysisEndpointsIntegrationTests.cs` | +11/-0 of ~750 | 1.5% |
+| `tests/integration/Spe.Integration.Tests/AuthorizationIntegrationTests.cs` | +11/-0 of ~390 | 2.8% |
+| `tests/integration/Spe.Integration.Tests/Api/Ai/KnowledgeBaseEndpointsTests.cs` | +11/-0 of ~720 | 1.5% |
+| `tests/integration/Spe.Integration.Tests/Api/Ai/ReAnalysisFlowTests.cs` | +11/-0 of ~720 | 1.5% |
+| `tests/integration/Spe.Integration.Tests/Api/Ai/ChatEndpointsTests.cs` | +11/-0 of ~480 | 2.3% |
+
+All ≤8.5% — well under 50%. **No §4.8 escalations.**
+
+### §6.2 traits
+
+DEFERRED — residual 37 failures are downstream `Failure to infer one or more parameters` (148 occurrences in TRX), NOT config. They surfaced once the host could boot and must be triaged in Wave 2.5 / P23.L follow-up. Trait-tagging would commit a premature classification.
+
+### Verification
+
+- **Pre-edit build**: 0 errors / 18 pre-existing warnings.
+- **Post-edit build**: 0 errors / 3 pre-existing warnings.
+- **Pre-edit test**: 108 Failed (baseline post-062-2026-05-31.trx, per §6.4 — used as-is to save 15 min and avoid muddying delta).
+- **Post-edit test (`dotnet test`, Release, 23s)**: 47 Failed / 323 Passed / 52 Skipped / 422 Total.
+- **KeyVaultUri config errors**: 196 → 0.
+- **`git status`**: zero changes under `src/`/`power-platform/`/`infra/`/`scripts/`. Confirmed.
+- **`CustomWebAppFactory.cs`**: NOT modified (§4.5 honored).
+- **`IntegrationTestFixture.cs`**: NOT modified (sealed by task 062 per §4.5).
+
+### Real-bug ledger entries
+
+**NONE.** All 98 Cluster B failures classified `test-stale` (fixture config gap, same pattern as tasks 018/060/062). Residual 37 are downstream (param-infer / Moq / assertion) — not production bugs by inspection; require Wave 2.5 follow-up triage to confirm or escalate.
+
+### Quality gates (Step 9.5 — FULL rigor)
+
+- **NFR-01** (no production change): ✅ — `git status` shows 0 modifications under `src/`/`power-platform/`/`infra/`/`scripts/`.
+- **NFR-02** (<50% rewrite per file): ✅ — max 8.5%.
+- **NFR-03** (no new DI in tests): ✅ — pure additive config keys; no `services.Add*` calls.
+- **NFR-09** (repair-not-rewrite): ✅ — set in POML metadata.
+- **NFR-11** (-warnaserror clean): ✅ — 0 errors.
+- **§4.5** (CustomWebAppFactory.cs untouched): ✅
+- **§4.5** (IntegrationTestFixture.cs untouched, sealed by task 062): ✅
+- **§6.2** (final end-state Trait on every touched test class): DEFERRED for residual 37 (justified — downstream non-config root cause requires its own triage task).
+- **§6.4** (full suite before AND after): ✅ — pre-baseline = post-062 TRX (per POML Step 4 allowance); post = post-027-measure.trx.
+- **ADR-001/007/013-refined/028**: respected — no production code, no AI-coupling changes.
+
+### Phase 2+3 integration-tier cumulative reduction
+- Phase 0 baseline (task 002): 198 Failed
+- Post-062 (Wave 2.4): 108 (−90)
+- Post-027 (this task): 47 (−61, cumulative −151 = −76.3%)

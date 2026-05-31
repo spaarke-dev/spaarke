@@ -348,6 +348,16 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
         builder.UseSetting("DocumentIntelligence:RecordMatchingEnabled", "false");
         builder.UseSetting("Analysis:Enabled", "false");
 
+        // SpeAdmin — required by SpeAdminModule (KeyVault SecretClient).
+        // Per sdap-bff.api-test-suite-repair task 027 (sibling-fixture absorption).
+        // Mirrors IntegrationTestFixture.cs line 74 (canonical fix in task 062).
+        builder.UseSetting("SpeAdmin:KeyVaultUri", "https://test-keyvault.vault.azure.net/");
+
+        // CosmosPersistence — required by AiPersistenceModule (raw config read).
+        // Per sdap-bff.api-test-suite-repair task 027 (sibling-fixture absorption).
+        // Mirrors IntegrationTestFixture.cs line 81 (canonical fix in task 062).
+        builder.UseSetting("CosmosPersistence:Endpoint", "https://test.documents.azure.com:443/");
+
         builder.ConfigureTestServices(services =>
         {
             // ---------------------------------------------------------------

@@ -1,7 +1,7 @@
 <task id="027" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>Add factory config keys to 8 sibling integration fixtures — absorb 98 Cluster B failures</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1-2 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, integration, fixture-config, scope-absorption, p23-i</tags>
@@ -180,6 +180,34 @@
   </acceptance-criteria>
 
   <notes>
+    <completion-notes date="2026-05-31">
+      Executed 2026-05-31 (FULL rigor). Delta: 108 → 47 Failed (−61, −56.5%). Cluster B
+      (98 SpeAdmin/Cosmos config failures) fully cleared — `grep 'KeyVaultUri is not configured'`
+      returns 0 in post-027 TRX (was 196 mentions in post-062).
+
+      Decision: COPY (additive) over inheritance. Each sibling has substantial custom logic
+      (auth handlers, conditional stubs, feature flags) that inheriting `IntegrationTestFixture`
+      would break. NFR-02 strongly favors minimal additive 2-LOC fixes (≤8.5% diff per file).
+
+      6 files modified (8 fixtures — 3 share `SemanticSearch/TestHostConfiguration.cs`):
+        1. SemanticSearch/TestHostConfiguration.cs (+10 lines)  — fixes Semantic+SemanticAuth+RecordSearch fixtures
+        2. AnalysisEndpointsIntegrationTests.cs (+11 lines)     — AnalysisTestFixture
+        3. AuthorizationIntegrationTests.cs (+11 lines)         — AuthorizationTestFixture
+        4. Api/Ai/KnowledgeBaseEndpointsTests.cs (+11 lines)    — KnowledgeBaseTestFixture
+        5. Api/Ai/ReAnalysisFlowTests.cs (+11 lines)            — ReAnalysisFlowTestFixture
+        6. Api/Ai/ChatEndpointsTests.cs (+11 lines)             — ChatEndpointsTestFixture
+
+      Residual 37 sibling-cluster Failed are NOT config — they're param-inference / Moq /
+      assertion-level issues SURFACED now that host boots cleanly (was previously masked by
+      `KeyVaultUri is not configured` startup throw). Same anti-drift pattern as `Analysis:Enabled=false`
+      + new services in Program.cs over time. These are Wave 2.5 / P23.L follow-up scope, not this
+      task's. §6.2 trait-tagging DEFERRED to follow-up.
+
+      0 §4.8 escalations. 0 real-bug ledger entries. 0 production-code changes. §4.5 honored
+      (CustomWebAppFactory.cs + IntegrationTestFixture.cs untouched).
+
+      Reference: `baseline/post-027-delta-2026-05-31.md` (full per-file table + residual triage).
+    </completion-notes>
     <origin date="2026-05-31" source="Task 062 discovery + owner directive (absorb deviations)">
       Discovered during Wave 2.4 task 062's Spe.Integration fixture edit: 98 of 108 remaining
       integration failures trace to 8 sibling fixtures that inherit `WebApplicationFactory&lt;Program&gt;`

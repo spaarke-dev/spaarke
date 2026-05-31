@@ -671,6 +671,16 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
                 ["GraphResilience:RetryDelay"] = "00:00:01",
                 ["GraphResilience:CircuitBreakerFailureThreshold"] = "5",
                 ["GraphResilience:CircuitBreakerDuration"] = "00:00:30",
+
+                // SpeAdmin — required by SpeAdminModule (KeyVault SecretClient).
+                // Per sdap-bff.api-test-suite-repair task 027 (sibling-fixture absorption).
+                // Mirrors IntegrationTestFixture.cs line 74 (canonical fix in task 062).
+                ["SpeAdmin:KeyVaultUri"] = "https://test-keyvault.vault.azure.net/",
+
+                // CosmosPersistence — required by AiPersistenceModule (raw config read).
+                // Per sdap-bff.api-test-suite-repair task 027 (sibling-fixture absorption).
+                // Mirrors IntegrationTestFixture.cs line 81 (canonical fix in task 062).
+                ["CosmosPersistence:Endpoint"] = "https://test.documents.azure.com:443/",
             };
             config.AddInMemoryCollection(dict!);
         });
