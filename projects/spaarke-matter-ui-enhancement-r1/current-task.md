@@ -13,12 +13,12 @@
 
 | Field | Value |
 |---|---|
-| **State** | 31/34 tasks merged path-to-master via PR #308 (open); FilePreview promoted to shared lib (refactor branch `refactor/filepreview-shared-promotion`); SemanticSearchControl PCF at **v1.1.70** (same behavior as v1.1.69 — FilePreviewDialog now imports from shared) |
-| **Branch** | `refactor/filepreview-shared-promotion` (off `work/spaarke-matter-ui-enhancement-r1`); v1.1.45..v1.1.49 in master; v1.1.50..v1.1.69 in PR #308; v1.1.70 + FilePreview promotion in new PR |
-| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.70.zip` (~212 KB) — refactor-only: same UI behavior as v1.1.69 |
-| **Pending user actions** | (1) Review + merge PR #308 (v1.1.50..v1.1.69); (2) Review + merge FilePreview promotion PR; (3) UAT v1.1.70 (validates LegalWorkspace + DRV preview migration); (4) Phase 6 form XML; (5) Phase 7 task 074 UAT; (6) Phase 8 task 090 wrap |
-| **Next Action** | Awaiting user UAT feedback on v1.1.69. v1.1.69 addresses 2 root issues UAT exposed via DevTools measurements: (1) **Header/body padding mismatch** — header Pin cell 52×57 (TableCellLayout default 8px horizontal) vs body Pin cell 36×69 (`pinCell` zeroed horizontal). Fix: header render now applies the SAME cell-specific classes the body does via mergeClasses (`selectCell`/`pinCell`/`menuCell`). Pin column now 36px wide in both header AND body, eliminating the 8px-per-column drift across the row. (2) **Responsive MAX_WIDTHS** — Document column max now scales with container width via ResizeObserver: `maxDocument = max(240, containerWidth − 240)`. Produces user-target curve: HD form section ~720 → max 480, 2K ~1120 → max 880, 4K ~2020 → max 1780. Plumbed through columnSizingOptions clamp, handleColumnResize clamp, and v1.1.68 remount counter. Heal-on-read hook ceiling bumped to 1800 (4K target) so legitimate wide-viewport widths aren't over-healed. All prior v1.1.65-v1.1.68 work preserved. |
-| **Compaction handoff** | See [`notes/handoffs/handoff-2026-05-29-pre-compact.md`](notes/handoffs/handoff-2026-05-29-pre-compact.md) — full state for v1.1.50→v1.1.69 (this session). Prior [`handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) covers v1.1.45→v1.1.50 |
+| **State** | All matter-ui-r1 work (v1.1.50..v1.1.71 + FilePreview promotion + BFF fileSize projection) MERGED to master via PRs #308, #309, #310. SemanticSearchControl PCF at **v1.1.71**. BFF dev environment already running v1.1.71's required `fileSize` projection (deployed 2026-05-30). |
+| **Branch** | master = `e1c43f2f` (after #308 + #310 + #309 merges). Working branch state safe — all 3 PR branches' content now in master. |
+| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.71.zip` (208 KB) — has FilePreview shared-lib promotion + fileSize passthrough for 25 MB email warning |
+| **Pending user actions** | (1) UAT v1.1.71 (validates FilePreview rich preview in PCF + fileSize email-wizard warning); (2) Optional: deploy LegalWorkspace + DRV to UAT rich preview in those surfaces (independent of PCF UAT); (3) Phase 6 form XML; (4) Phase 7 task 074 UAT; (5) Phase 8 task 090 wrap |
+| **Next Action** | Awaiting UAT feedback on v1.1.71. Most likely path: new UAT polish round (v1.1.72+) based on whatever the user finds. |
+| **Compaction handoff** | [`notes/handoffs/handoff-2026-05-29-pre-compact.md`](notes/handoffs/handoff-2026-05-29-pre-compact.md) — v1.1.50→v1.1.69 session. [`handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) — v1.1.45→v1.1.50 |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
