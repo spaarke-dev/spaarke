@@ -87,9 +87,14 @@ export const SearchInput: React.FC<ISearchInputProps> = ({
         appearance="outline"
         size="medium"
       />
+      {/* v1.1.51 (Item 8) — Toned-down Search button.
+          Switched from appearance="primary" (saturated brand fill) to
+          appearance="outline" so the button reads as a brand-stroked
+          neutral surface. Lines up with the lighter pill palette adopted
+          in Item 7. Behavior is unchanged. */}
       <Button
         className={styles.searchButton}
-        appearance="primary"
+        appearance="outline"
         disabled={disabled}
         onClick={handleSearchClick}
         icon={disabled ? <Spinner size="tiny" /> : undefined}

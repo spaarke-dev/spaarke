@@ -61,6 +61,152 @@ export class SemanticSearchApiService {
   }
 
   /**
+   * v1.1.49 (Item 8 Part B) — "All Documents" client-side merge.
+   *
+   * Investigation (see SemanticSearchService.cs Step 4 BuildFilter + line 96
+   * SearchAssociatedOnlyAsync): the BFF treats `associatedOnly` as TWO
+   * disjoint paths:
+   *   - `true`  → bypasses Azure AI Search, queries Dataverse directly →
+   *               returns ALL parent-associated docs (no semantic filter)
+   *   - `false` → goes through Azure AI Search WITH entity scope filter →
+   *               returns ONLY indexed docs scoped by entity (recently
+   *               uploaded docs may not be in the index yet)
+   * This is BY DESIGN — the AI-Search path needs an indexed doc to score it.
+   * To deliver the user's expected "All Documents = semantic + associated"
+   * behavior we therefore have to MERGE client-side. We fire both paths in
+   * parallel, dedupe by `documentId`, and sort by combinedScore DESC, then
+   * modifiedAt DESC. The merged result count + paging semantics are
+   * preserved relative to the AI-Search path (the associated-only path
+   * contributes any docs the AI-Search path missed).
+   *
+   * IMPORTANT: only triggered when scope is entity-scoped AND
+   * associatedOnly=false. The associatedOnly=true path is unchanged. When
+   * scope = 'all'/'custom' the union is meaningless (no parent FK) so we
+   * skip it.
+   */
+  async searchUnion(request: SearchRequest): Promise<SearchResponse> {
+    const isEntityScope = ['matter', 'project', 'invoice', 'account', 'contact', 'document', 'entity'].includes(request.scope);
+    const associatedOnly = request.filters?.associatedOnly === true;
+
+    // Not eligible for union — fall back to plain search.
+    if (!isEntityScope || associatedOnly) {
+      return this.search(request);
+    }
+
+    // Build the associatedOnly=true variant. We reuse the request shape but
+    // flip the filter and force offset=0 so the associated path always
+    // returns from the top (it's a small N — direct Dataverse query).
+    const associatedRequest: SearchRequest = {
+      ...request,
+      filters: {
+        ...(request.filters ?? {
+          documentTypes: [],
+          matterTypes: [],
+          dateRange: null,
+          fileTypes: [],
+          threshold: 0,
+          searchMode: 'hybrid',
+        }),
+        associatedOnly: true,
+      },
+      options: { ...request.options, offset: 0 },
+    };
+
+    // Fire both in parallel. If either fails, we still want partial coverage
+    // — wrap in `Promise.allSettled` and fall back to whichever resolved.
+    const [semanticOutcome, associatedOutcome] = await Promise.allSettled([
+      this.search(request),
+      this.search(associatedRequest),
+    ]);
+
+    const semantic =
+      semanticOutcome.status === 'fulfilled' ? semanticOutcome.value : null;
+    const associated =
+      associatedOutcome.status === 'fulfilled' ? associatedOutcome.value : null;
+
+    // Both failed — re-throw the semantic error (the primary path).
+    if (!semantic && !associated) {
+      if (semanticOutcome.status === 'rejected') {
+        throw semanticOutcome.reason;
+      }
+      if (associatedOutcome.status === 'rejected') {
+        throw associatedOutcome.reason;
+      }
+    }
+
+    // Dedupe by documentId.
+    //
+    // v1.1.50 — Each result is tagged with `relationship` so the list view
+    // can render the Relationship + Similarity pills correctly (Items 3 + 5).
+    //
+    // v1.1.51 (Item 2) — Conflict handling changed.
+    //   Before: on conflict, we tagged the row `'associated'` and adopted
+    //   the semantic combinedScore. Result: the Relationship column
+    //   correctly showed "Same Matter", but the Similarity column read the
+    //   tag FIRST and rendered the no-percentage chip → the user lost
+    //   visibility of the semantic match strength on docs that appeared
+    //   in BOTH paths (UAT round 6 Item 2: "results only return 'Same
+    //   matter' not Semantic related").
+    //   Now: on conflict, we tag the row `'both'`. The Relationship column
+    //   still renders "Same Matter" (canonical/stronger label), but the
+    //   Similarity column renders the % chip for `'both'` rows (treated
+    //   as semantic for the similarity readout). Behavior for rows that
+    //   appear in ONLY ONE path is unchanged.
+    //
+    //   Dedupe order: associated first, semantic merges in. When the same
+    //   docId is in both, the SEMANTIC record wins on body+score (it has
+    //   the meaningful combinedScore the user wants to see) but is tagged
+    //   `'both'` so the UI preserves the "Same Matter" relationship label.
+    const byId = new Map<string, typeof semantic extends null ? never : SearchResponse['results'][number]>();
+    if (associated) {
+      for (const r of associated.results) {
+        if (r.documentId) byId.set(r.documentId, { ...r, relationship: 'associated' });
+      }
+    }
+    if (semantic) {
+      for (const r of semantic.results) {
+        if (!r.documentId) continue;
+        const prior = byId.get(r.documentId);
+        if (prior && prior.relationship === 'associated') {
+          // Conflict: tag 'both' so the UI shows "Same Matter" pill AND
+          // the semantic similarity %. Adopt the semantic record's
+          // combinedScore + metadata (it carries the meaningful score).
+          byId.set(r.documentId, { ...r, relationship: 'both' });
+        } else {
+          byId.set(r.documentId, { ...r, relationship: 'semantic' });
+        }
+      }
+    }
+
+    // Sort: combinedScore DESC, then modifiedAt DESC. Stable order so the
+    // user's mental "this is most relevant" + "this is most recent" model
+    // both line up at the top of the list.
+    const merged = Array.from(byId.values()).sort((a, b) => {
+      const scoreDelta = (b.combinedScore ?? 0) - (a.combinedScore ?? 0);
+      if (scoreDelta !== 0) return scoreDelta;
+      const aMod = a.modifiedAt ? new Date(a.modifiedAt).getTime() : 0;
+      const bMod = b.modifiedAt ? new Date(b.modifiedAt).getTime() : 0;
+      return bMod - aMod;
+    });
+
+    // Composite totalCount: prefer the larger of the two reported totals
+    // so the footer reads "N of M" with the user's expected upper bound.
+    const totalCount = Math.max(
+      semantic?.totalCount ?? 0,
+      associated?.totalCount ?? 0,
+      merged.length
+    );
+
+    return {
+      results: merged,
+      totalCount,
+      metadata:
+        semantic?.metadata ??
+        associated?.metadata ?? { searchTimeMs: 0, query: request.query },
+    };
+  }
+
+  /**
    * Execute a semantic search
    * @param request - Search request parameters
    * @returns Search response with results
@@ -68,6 +214,14 @@ export class SemanticSearchApiService {
    */
   async search(request: SearchRequest): Promise<SearchResponse> {
     const endpoint = `${this.apiBaseUrl}/api/ai/search`;
+    // v1.1.50 — tag each result with its relationship origin so the list
+    // view's Relationship + Similarity pills render correctly (Items 3 + 5).
+    // When associatedOnly=true the BFF served the Dataverse-direct path;
+    // every result is 'associated'. Otherwise the BFF returned semantic
+    // (AI-Search) results. Note: `searchUnion` overrides this tagging on
+    // its dedupe step (associated wins on conflict) — see above.
+    const relationshipTag: 'associated' | 'semantic' =
+      request.filters?.associatedOnly === true ? 'associated' : 'semantic';
 
     try {
       // Transform PCF request format to API format
@@ -109,7 +263,7 @@ export class SemanticSearchApiService {
         })),
       });
 
-      return this.validateResponse(data);
+      return this.validateResponse(data, relationshipTag);
     } catch (error) {
       // Re-throw SearchError as-is
       if (this.isSearchError(error)) {
@@ -270,9 +424,18 @@ export class SemanticSearchApiService {
   }
 
   /**
-   * Validate and normalize the API response
+   * Validate and normalize the API response.
+   *
+   * @param data Raw API response payload.
+   * @param relationshipTag v1.1.50 — relationship origin to apply to each
+   *        result (Items 3 + 5). The BFF itself does not yet emit this
+   *        field; we tag client-side based on which BFF path was invoked.
+   *        `searchUnion` may overwrite the tag during dedupe.
    */
-  private validateResponse(data: unknown): SearchResponse {
+  private validateResponse(
+    data: unknown,
+    relationshipTag: 'associated' | 'semantic' = 'semantic'
+  ): SearchResponse {
     // Type guard for response structure
     if (!data || typeof data !== 'object') {
       throw this.createError('Invalid response from search service.', 'INVALID_RESPONSE', true);
@@ -300,6 +463,8 @@ export class SemanticSearchApiService {
         modifiedBy: r.modifiedBy ?? null,
         summary: r.summary ?? null,
         tldr: r.tldr ?? null,
+        // v1.1.50 — relationship origin (Items 3 + 5).
+        relationship: r.relationship ?? relationshipTag,
       })),
       // BFF returns total count in metadata.totalResults, not at top level
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
