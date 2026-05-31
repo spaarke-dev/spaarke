@@ -1,7 +1,7 @@
 <task id="054" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.M5 — Ai/Nodes tests</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2-3 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, medium-tier, p23-m, bff-api, testing, ai, nodes</tags>

@@ -1,7 +1,7 @@
 <task id="052" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.M3 — Ai/Chat batch 3 (~10 named files, 3rd third)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2-4 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, medium-tier, p23-m, bff-api, testing, ai, chat</tags>
@@ -110,4 +110,46 @@
     <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
     <criterion testable="true">`CustomWebAppFactory.cs` is NOT modified</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-note date="2026-05-31" wave="Phase-2+3 Wave 2.3">
+      **NO-OP closure** — the 3-batch alphabetical partition over the 19-file top-level
+      `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/` folder (non-Streaming) leaves
+      batch 3's partition window (positions 21+) empty by construction:
+
+        - Batch 1 (task 050): positions  1–10 (AnalysisChatContextResolverTests → OrchestratorPromptBuilderBudgetTests)
+        - Batch 2 (task 051): positions 11–20, only 9 files at this slice
+                              (OrchestratorPromptBuilderTests → StandaloneChatContextProviderTests)
+        - Batch 3 (this task): positions 21+ — EMPTY
+
+      All 4 remaining Services.Ai.Chat.* failures from `baseline/failure-inventory-post-018-2026-05-31.md`
+      (DirectOpenAi 1, OrchestratorPromptBuilder 1, PlaybookChatContextProviderEnrichmentIntegration 1,
+      SseEventTypes.ChatSseEventFactory 1) were absorbed by task 050's 2026-05-31 scope-extension and
+      are closed at §6.2 final end-state (3 `repaired` + 1 `real-bug-pending-fix` RB-T050-01).
+
+      **Per-file traits + counts**: 0 files touched (partition empty).
+      **§4.8 escalations**: none (no >50% diffs because no diffs).
+      **`real-bug-pending-fix` entries**: none added (RB-T050-01 already on ledger).
+
+      **Targeted verification** (`dotnet test --filter "FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Ai.Chat"`):
+        Failed: 0 / Passed: 555 / Skipped: 3 / Total: 558 — 3 Skips are §6.2 final end-state
+        (2 from `Middleware/AgentMiddlewareTests`, 1 from `SseEventTypes/ChatSseEventFactoryTests`
+        per RB-T050-01).
+
+      **Build outcome**: `dotnet build tests/unit/Sprk.Bff.Api.Tests/ -c Release`
+        → 0 errors / 17 pre-existing warnings (matches `post-wave1.3-authoritative-baseline-2026-05-31.md`).
+
+      **NFR compliance**: NFR-01 ✓ (zero `src/`/`power-platform/`/`infra/`/`scripts/` edits),
+      NFR-02 ✓ (vacuous — 0 files touched), NFR-09 ✓ (`<repair-not-rewrite>true</repair-not-rewrite>` declared),
+      §4.5 ✓ (CustomWebAppFactory.cs untouched), §4.3 ✓ (0 Failed), §6.2 ✓ (all 558 Chat.* tests in §6.2
+      end-state), batch-partition ✓ (positions 21+ empty; no overlap with task 050 or 051).
+
+      **Quality Gates (Step 9.5)**: code-review ✅ self-review (partition re-verified by Glob;
+      failure inventory cross-checked against task 050 completion note; 0 Failed in targeted run);
+      adr-check ✅ self-review (no `src/` changes; no DI changes; no AI public-contract crossings;
+      edits within `projects/...` boundary); build ✅; targeted test ✅.
+
+      Per instructions: TASK-INDEX.md NOT updated by this task; no `git commit` performed.
+    </completion-note>
+  </notes>
 </task>

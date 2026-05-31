@@ -23,6 +23,24 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Capabilities;
 ///   - Layer 1 completes in under 50ms per message (NFR-03)
 ///   - Single-LLM-call invariant: Layer 1 makes zero LLM calls
 /// </summary>
+/// <remarks>
+/// Task 053 (P23.M4 — Ai/Capabilities) repair status:
+///   - 3 tests pass and assert current behavior (latency-under-50ms x2, hit-rate >= 60%):
+///     `Layer1_HitRate_MeetsTargetForKeywordMessages`,
+///     `Layer1_Latency_Under50ms_ForAllCorpusMessages`,
+///     `Layer1_Latency_Under50ms_With50CapabilityManifest`. Marked `repaired` at class level.
+///   - 2 tests assert the documented zero-misroute invariant which the substring-based
+///     Layer 1 keyword classifier cannot honor for adversarial natural-language inputs
+///     (e.g., id=77 "Set the priority of the Henderson case to urgent" hits `case law`
+///     keyword and routes to `legal_research` at confidence 1.0; id=102 "What version of
+///     the AI model are you using?" Layer-3 meta-question hits `document_analysis`).
+///     Per project NFR-01 the production CapabilityRouter cannot be modified in this
+///     repair project. The 2 failing tests are CORRECT — they assert the documented
+///     contract — and the router has a real semantic-gap bug. Per §6.2 both tests are
+///     Skip'd with `real-bug-pending-fix` and filed in ledgers/real-bug-ledger.md
+///     entry RB-T053-01.
+/// </remarks>
+[Trait("status", "repaired")]
 public sealed class CapabilityRouterBenchmarkTests
 {
     private readonly ITestOutputHelper _output;
@@ -144,7 +162,8 @@ public sealed class CapabilityRouterBenchmarkTests
     /// should not produce a confident Layer 1 result. A confident result here would
     /// mean false-positive routing.
     /// </summary>
-    [Fact]
+    [Fact(Skip = "real-bug-pending-fix RB-T053-01: CapabilityRouter Layer 1 substring keyword classifier produces 4 false-positives on the 105-message corpus (id=77 'Henderson case' → legal_research, id=89 'Martinez case' → legal_research, id=91 'amicus curiae' brief → summarize_content, id=102 meta-question 'AI model' → document_analysis). Test asserts the documented zero-false-positive contract; production has a real semantic-gap bug — Layer 1 cannot distinguish keyword presence from keyword-intended meaning without LLM semantic disambiguation. See ledgers/real-bug-ledger.md RB-T053-01.")]
+    [Trait("status", "real-bug-pending-fix")]
     public void Layer1_DoesNotFalsePositive_OnNonKeywordMessages()
     {
         var nonLayer1Messages = _corpus.Where(c => c.ExpectedLayer >= 2).ToList();
@@ -241,7 +260,8 @@ public sealed class CapabilityRouterBenchmarkTests
     /// Runs the full corpus and emits a distribution summary compatible with the
     /// results template in the benchmark report.
     /// </summary>
-    [Fact]
+    [Fact(Skip = "real-bug-pending-fix RB-T053-01: same Layer 1 semantic-gap as Layer1_DoesNotFalsePositive_OnNonKeywordMessages — full-corpus summary asserts confidentWrong == 0 but Layer 1 produces 3 confidently-wrong routes (Henderson case, Martinez case, amicus curiae brief). Distribution-summary diagnostics (hit rate 68.6%, P50/P95 confidence buckets) are valuable observability; the test fails because the documented zero-misroute invariant is also asserted. See ledgers/real-bug-ledger.md RB-T053-01.")]
+    [Trait("status", "real-bug-pending-fix")]
     public void Layer1_FullCorpus_DistributionSummary()
     {
         var confidentCorrect = 0;

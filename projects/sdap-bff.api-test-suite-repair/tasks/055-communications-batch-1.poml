@@ -1,7 +1,7 @@
 <task id="055" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.M6 — Communications tests batch 1 — COORD with x-email-communication-solution-r2</title>
-    <status>not-started</status>
+    <status>completed-noop</status>
     <estimated-effort>2-4 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, medium-tier, p23-m, bff-api, testing, communications, communications-coord</tags>

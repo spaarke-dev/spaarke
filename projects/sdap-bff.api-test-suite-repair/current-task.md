@@ -7,6 +7,88 @@
 
 ## Active Task
 
+- **Task**: 056 (Phase 2+3 Wave 2.3 — P23.M7 Communications batch 2)
+- **Status**: completed-noop 2026-05-31
+- **Rigor**: FULL (POML metadata `<rigor>FULL</rigor>`)
+- **Disposition**: NO-OP verification. Communications cluster (53 failures) cleared by Wave 1.1a task 011; batch-2 file set (EmlGenerationService, GraphAttachmentAdapter, GraphMessageToEmlConverter, InboundPipeline, IncomingAssociationResolver, MailboxVerification) shows zero Failed.
+
+### Task 056 — Wave 2.3 NO-OP verification (2026-05-31)
+
+**Batch-2 partition** (per POML Step 2): alphabetical list of 12 Communications files MINUS Phase 1 task 011 set (ArchivalFlow, AssociationMapping, AttachmentValidation, CommunicationService, DataverseRecordCreation) → 12 files; second half (positions 7-12):
+1. EmlGenerationServiceTests
+2. GraphAttachmentAdapterTests
+3. GraphMessageToEmlConverterTests
+4. InboundPipelineTests
+5. IncomingAssociationResolverTests
+6. MailboxVerificationTests
+
+**No overlap** with task 055 batch 1 (positions 1-6: ApprovedSenderMerge, ApprovedSenderValidator, CommunicationAccountModel, CommunicationAccountService, CommunicationStatusEndpoint, DailySendCount) or task 011 file set.
+
+**Verification command**: `dotnet test ... --filter "FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Communication.{EmlGen|GraphAttach|GraphMessage|InboundPipeline|IncomingAssoc|Mailbox}*"`
+
+**Result**: ✅ **Passed! Failed: 0, Passed: 61, Skipped: 10, Total: 71, Duration: 99 ms**
+
+The 10 skips are all pre-existing `[Fact(Skip = "Graph SDK sealed classes cannot be mocked with Moq - requires IGraphClientWrapper or WireMock")]` in InboundPipelineTests.cs — environmental cause, predate this project, NOT touched by this task.
+
+**Sibling-coordination outcome**: NO-OP → no new code surface for `x-email-communication-solution-r2` owner to review. Explicit ack NOT required because no non-trivial edits occurred (per POML §2.3 sync condition "BEFORE non-trivial edits"). Sibling sign-off remains TBD in coordination registry but is operationally moot.
+
+**Disposition matches `baseline/failure-inventory-post-018-2026-05-31.md`**: Services.Communication.* = 0 failures (was 53; cleared by Wave 1.1a task 011).
+
+**Trait-tagging deferred**: Per §6.2 binding ("every TOUCHED test"), tagging untouched-and-passing tests is NOT in scope for NO-OP verification.
+
+**Build**: Build succeeded (1 NU1903 warning — pre-existing Kiota CVE, unchanged).
+
+**git status**: Clean — zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`, `tests/`.
+
+**Step 9.5 Quality Gates**: N/A — no code changes (verify-only). `adr-check` + `code-review` have nothing to review.
+
+**Per-criterion acceptance**:
+- ✅ Zero Failed (acceptance: all batch-2 tests Pass or Skip-with-reason; zero Failed)
+- ✅ Per-file diff <50% line replacement (no diffs)
+- ✅ §6.2 final end-state — passing tests are inherently `repaired`-equivalent; no failing tests remain
+- ✅ No overlap with batch 1 (055) or Phase 1 task 011 file set (partition documented above)
+- ✅ Sibling-coordination N/A documented above (no non-trivial edits trigger)
+- ✅ `git status` shows zero `src/`/`power-platform/`/`infra/`/`scripts/`/`tests/` changes
+
+---
+
+## Prior Active Task — Task 055 (archived snapshot)
+
+- **Task**: 055 (Phase 2+3 Wave 2.3 — P23.M6 Communications batch 1)
+- **Status**: completed-noop 2026-05-31
+- **Rigor**: FULL (POML metadata)
+- **Disposition**: NO-OP verification per POML `<scope-resolved>` block. Communications cluster (53 failures) cleared by Wave 1.1a task 011.
+
+### Task 055 — Wave 2.3 NO-OP verification (2026-05-31)
+
+**Verification command**: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Services.Communication"`
+
+**Result**: ✅ **Passed! Failed: 0, Passed: 212, Skipped: 11, Total: 223, Duration: 261 ms**
+
+**Sibling-coordination outcome**: NO-OP means no new code surface for `x-email-communication-solution-r2` owner to review. Phase 0 task 005 sign-off NOT required per POML scope-resolved note.
+
+**Disposition matches `baseline/failure-inventory-post-018-2026-05-31.md`**: Services.Communication.* = 0 failures (was 53; cleared by Wave 1.1a task 011).
+
+**Trait-tagging deferred**: 12 of 17 Communication files lack `[Trait("status", ...)]`. Per §6.2 binding ("every TOUCHED test"), tagging untouched-and-passing tests is NOT in scope for this NO-OP verification. Scope-resolved block explicitly directs "mark task completed without per-test edits".
+
+**Build**: Build succeeded (1 NU1903 warning — pre-existing Kiota CVE, unchanged).
+
+**git status**: Clean — zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`, `tests/`.
+
+**Step 9.5 Quality Gates**: N/A — no code changes (verify-only). `adr-check` + `code-review` have nothing to review.
+
+**Per-criterion acceptance**:
+- ✅ Zero Failed (acceptance: zero Failed)
+- ✅ Per-file diff <50% line replacement (no diffs)
+- ✅ §6.2 final end-state — passing tests are inherently `repaired`-equivalent; no failing tests remain
+- ✅ No overlap with batch 2 (056) or task 011 (no edits)
+- ✅ Sibling-coordination N/A documented above
+- ✅ `git status` shows zero `src/`/`power-platform/`/`infra/`/`scripts/` changes
+
+---
+
+## Prior Active Task (archived snapshot, see task 012 entry below)
+
 - **Task**: 012 (Phase 1 Wave 1.1a — P1.A3 Ai/Tools + Ai/Sessions test-level repair)
 - **Status**: in-progress 2026-05-31
 - **Rigor**: FULL (POML metadata `<rigor>FULL</rigor>`; tags `bff-api`, `testing`, `compile-fix`; modifies `.cs` files; 8 steps)
@@ -2571,3 +2653,276 @@ Passed!  - Failed:     0, Passed:   205, Skipped:     9, Total:   214, Duration:
 | `dotnet test --filter ~Ai.Safety` | ✅ | 0 Failed / 205 Passed / 9 Skipped — matches §6.2 final end-state requirement |
 
 **POML status**: flipped `not-started` → `completed` (per instructions: do NOT touch TASK-INDEX.md, do NOT git commit).
+
+---
+
+## Task 054 — P23.M5 Ai/Nodes (2026-05-31)
+
+**Rigor**: FULL. **Status**: completed (status-only; TASK-INDEX/commit out of scope per dispatcher).
+**Scope**: `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/*.cs` — 14 files; only `CreateTaskNodeExecutorTests.cs` had failures (5 per post-018 inventory).
+
+**Disposition**:
+- `CreateTaskNodeExecutorTests.cs` (306 → 359 lines, +53 additive, ~17% additive diff — well under NFR-02 50%): all 5 failures repaired. Classification = **test-stale** (production drift: `CreateTaskNodeExecutor.ExecuteAsync` now POSTs to Dataverse via `IHttpClientFactory.CreateClient("DataverseApi")`; tests pre-dated the HTTP-call addition). Repair = constructor-level `IHttpClientFactory` mock setup returning an `HttpClient` backed by a nested `MockHttpMessageHandler` (canonical pattern mirroring `AttachmentValidationTests`/`AssociationMappingTests`/etc.). `OData-EntityId` header included so `taskId` parses. Trait `[Trait("status", "repaired")]` applied at class level (xUnit auto-inherits to all `[Fact]` members).
+- 13 other Ai/Nodes test files: unchanged (no failures).
+
+**Verification**:
+- `dotnet test --filter "FullyQualifiedName~Services.Ai.Nodes.CreateTaskNodeExecutorTests"`: 12/12 Passed (was 7P/5F).
+- `dotnet test --filter "FullyQualifiedName~Services.Ai.Nodes"`: 203 Passed / 0 Failed / 1 Skipped / 204 Total.
+- `git status`: zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`. `CustomWebAppFactory.cs` untouched (§4.5).
+
+**Files modified**: 1 (`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateTaskNodeExecutorTests.cs`).
+**Real bugs filed**: 0 (pure test-stale; production behavior validated by the repaired tests).
+**Escalations filed**: 0 (NFR-02 ceiling not approached).
+**ADRs touched**: ADR-013 (refined) — followed (no new direct CRUD→AI dep; test mocks `IHttpClientFactory` only; no production change).
+
+---
+
+## Task 052 — P23.M3 Ai/Chat batch 3 (Phase 2+3 Wave 2.3)
+
+**Rigor**: FULL (POML `<rigor>FULL</rigor>`; tags `bff-api`, `testing`, `ai`, `chat`; modifies `.cs` permitted; 9 steps)
+**Status**: completed 2026-05-31 — **NO-OP** (partition empty by construction; pre-state already at §6.2)
+
+### Partition analysis (POML Step 1)
+
+Top-level `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/*.cs` excluding `Streaming*`, sorted alphabetically (19 files total):
+
+- **Batch 1 (task 050)**: positions 1–10 (AnalysisChatContextResolverTests → OrchestratorPromptBuilderBudgetTests)
+- **Batch 2 (task 051)**: positions 11–20 — only 9 files at this slice (OrchestratorPromptBuilderTests → StandaloneChatContextProviderTests)
+- **Batch 3 (task 052)**: positions 21+ — **EMPTY**
+
+POML `<relevant-files>` scope is top-level `Services/Ai/Chat/`, not `Middleware/`, `Tools/`, or `SseEventTypes/` subdirs (out of partition scope).
+
+### Failure-inventory confirmation (POML Steps 2 + 5)
+
+Per `baseline/failure-inventory-post-018-2026-05-31.md`, post-Wave-1.3 Services.Ai.Chat.* failures = 4 (DirectOpenAi 1, OrchestratorPromptBuilder 1, PlaybookChatContextProviderEnrichmentIntegration 1, SseEventTypes.ChatSseEventFactory 1). All 4 were absorbed by **task 050's 2026-05-31 scope-extension** (Services.Ai.Chat.* runtime failures + extended Feedback/Rag/WorkingDocument). Task 050 `<completion-note>` records: 3 repaired + 1 `real-bug-pending-fix` RB-T050-01. **Zero failures remain in batch 3's partition window.**
+
+### Per-file traits + counts
+
+**0 files touched.** Partition is empty; no `.cs` edits required.
+
+### §4.8 escalations
+
+**None.** 0 file edits → 0 diffs → §4.8 not engaged.
+
+### `real-bug-pending-fix` entries
+
+**None added.** All Chat.* production bugs already ledgered by task 050 (RB-T050-01).
+
+### Targeted `dotnet test` result (POML Step 7 — verification)
+
+```
+$ dotnet test tests/unit/Sprk.Bff.Api.Tests/ -c Release --no-build --nologo \
+    --filter "FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Ai.Chat"
+
+Passed!  - Failed: 0, Passed: 555, Skipped: 3, Total: 558, Duration: 470 ms
+```
+
+3 Skips are §6.2 final end-state: 2 from `Middleware/AgentMiddlewareTests` (SafetyPipelineMiddleware/CostControlMiddleware), 1 from `SseEventTypes/ChatSseEventFactoryTests` (per RB-T050-01). All §6.2 closed end-states.
+
+### Build outcome
+
+`dotnet build tests/unit/Sprk.Bff.Api.Tests/ -c Release`: **0 errors / 17 pre-existing warnings** (matches authoritative baseline — Kiota CVE + obsolete `DemoProvisioningOptions` + CS1998/CS8601/CS8604).
+
+### POML status flip
+
+`tasks/052-ai-chat-batch-3.poml` `<metadata><status>` flipped `not-started` → `completed` with `<completion-note>` block (do NOT touch TASK-INDEX.md, do NOT git commit per instructions).
+
+### NFR / binding-rule compliance
+
+| Rule | Verification | Status |
+|---|---|---|
+| NFR-01 | `git status`: only `projects/...` doc + POML updates; zero `src/`/`power-platform/`/`infra/`/`scripts/` | ✅ |
+| NFR-02 | 0 files touched → trivially satisfied | ✅ |
+| NFR-09 | POML declares `<repair-not-rewrite>true</repair-not-rewrite>`; 0 test edits | ✅ |
+| §4.5 | `CustomWebAppFactory.cs` not modified | ✅ |
+| §4.3 | 0 Failed in Services.Ai.Chat filter | ✅ |
+| §6.2 | All 558 Chat.* tests already in §6.2 end-state | ✅ |
+| §4.8 | Not engaged (no >50% diffs) | ✅ |
+| ADR-013 refined | N/A — test-only verification | ✅ |
+| batch-partition | Window 21+ empty; no overlap with batch 1/2 | ✅ |
+
+### Quality Gates (Step 9.5)
+
+| Gate | Status | Notes |
+|---|---|---|
+| `code-review` (judgment-layer) | ✅ self-review | No code touched; partition re-verified by Glob; failure inventory cross-checked against task 050 completion note; targeted test run confirms 0 Failed |
+| `adr-check` (architecture) | ✅ self-review | No `src/` (NFR-01 ✓); no DI changes (NFR-03 ✓); no AI public-contract crossings (ADR-013 refined ✓); edits within `projects/...` boundary |
+| `dotnet build -warnaserror`-equivalent | ✅ | 0 errors / 17 pre-existing warnings (unchanged from post-018 baseline) |
+| `dotnet test --filter ~Services.Ai.Chat` | ✅ | 0 Failed / 555 Passed / 3 Skipped — §6.2 final end-state |
+
+### Acceptance criteria (POML)
+
+| Criterion | Result |
+|---|---|
+| All batch-3 Ai/Chat tests Pass or Skip-with-reason; zero Failed | ✅ (0 Failed across 558 Chat.*) |
+| Per-file diff <50% line replacement (NFR-02) | ✅ (vacuous — 0 files touched) |
+| Every touched test has §6.2 final end-state trait | ✅ (vacuous — 0 tests touched; pre-existing §6.2 preserved) |
+| No overlap with batch 1 (task 050) or batch 2 (task 051) files | ✅ (window 21+ empty) |
+| `git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/` | ✅ |
+| `CustomWebAppFactory.cs` is NOT modified | ✅ |
+
+**Conclusion**: Task 052 closes as **NO-OP**. The 3-batch alphabetical partition over 19 top-level Chat files leaves batch 3's slice (positions 21+) empty by construction. All in-scope Chat.* failures were absorbed by task 050's 2026-05-31 scope-extension. `Services.Ai.Chat` namespace is already §6.2-compliant end-to-end.
+
+---
+
+## Task 051 — P23.M2 Ai/Chat batch 2 (2nd third, 10 named files, non-Streaming) — Phase 2+3 Wave 2.3
+
+🔒 **RIGOR LEVEL: FULL** | 📋 **REASON**: POML `<rigor>FULL</rigor>` + tags `bff-api`/`testing`/`ai`; modifies `.cs` test files (potential); 9-step protocol; FULL non-overridable per project mandate.
+
+### Batch 2 alphabetical partition (files 11-20 of 19 non-Streaming `*.cs` files at Chat folder root)
+
+| # | File | Disposition |
+|---:|---|---|
+| 11 | `OrchestratorPromptBuilderTests.cs` | claimed by task 050 (in-scope failure — repaired) |
+| 12 | `PlaybookChatContextProviderEnrichmentIntegrationTests.cs` | claimed by task 050 (in-scope failure — repaired) |
+| 13 | `PlaybookChatContextProviderEnrichmentTests.cs` | already Passing — §6.2 NO-OP |
+| 14 | `PlaybookChatContextProviderTests.cs` | already Passing — §6.2 NO-OP |
+| 15 | `PlaybookDispatcherIntegrationTests.cs` | already Passing — §6.2 NO-OP |
+| 16 | `SessionCleanupSecurityTests.cs` | already Passing — §6.2 NO-OP |
+| 17 | `SprkChatAgentFactoryTests.cs` | already Passing — §6.2 NO-OP |
+| 18 | `SprkChatAgentTests.cs` | already Passing — §6.2 NO-OP |
+| 19 | `StandaloneChatContextProviderTests.cs` | already Passing — §6.2 NO-OP |
+| 20 | n/a (only 19 files exist) | — |
+
+### In-scope failure inventory (per post-019 TRX, files 13-19)
+
+| Pre (post-019) | Post (this task) | Δ Failed | Notes |
+|---:|---:|---:|---|
+| **0** | **0** | **0** | Zero failures in batch 2 files 13-19; the 4 Services.Ai.Chat.* failures (post-019 TRX) are exclusively in files 6, 11, 12, and SseEventTypes subdir — all claimed by task 050 |
+
+### §4.8 escalations
+
+**None.** No file edits → no >50% rewrite hazard → no rewrite-request escalations filed.
+
+### `real-bug-pending-fix` entries
+
+**None.** Zero new ledger entries from task 051. The `real-bug-ledger.md` row count stands at 8 (RB-T012-01, RB-T034-01, RB-T044-01..05, RB-T050-01) — unchanged by this task.
+
+### Targeted `dotnet test` result
+
+```
+dotnet test --filter "FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Ai.Chat.PlaybookChatContextProvider|
+                     FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Ai.Chat.PlaybookDispatcher|
+                     FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Ai.Chat.SessionCleanup|
+                     FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Ai.Chat.SprkChatAgent|
+                     FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Ai.Chat.StandaloneChatContextProvider"
+                     -c Release --no-restore
+
+Passed!  - Failed: 0, Passed: 117, Skipped: 0, Total: 117, Duration: 156 ms
+```
+
+TRX: `tests/unit/Sprk.Bff.Api.Tests/TestResults/batch2-verify.trx`
+
+### Build outcome
+
+`dotnet build tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Release`: **0 errors / 1 pre-existing NU1903 Kiota CVE warning** (unchanged from project baseline). Clean.
+
+### NFR / binding-rule compliance
+
+| Rule | Verification | Status |
+|---|---|---|
+| NFR-01 (no production changes) | `git status` shows only `current-task.md` + sibling task POMLs + concurrent-wave sibling test edits from tasks 053/054 (disjoint scope); zero `src/`/`power-platform/`/`infra/`/`scripts/` | ✅ |
+| NFR-02 (no >50% rewrite) | 0 files touched → vacuous | ✅ |
+| NFR-09 (repair-not-rewrite) | POML metadata `<repair-not-rewrite>true</repair-not-rewrite>`; verified at protocol start | ✅ |
+| §4.5 (factory untouched) | No `CustomWebAppFactory.cs` changes | ✅ |
+| §4.3 (no Failed) | 0 Failed in scope; 117 Passed | ✅ |
+| §6.2 (final end-state traits) | Pre-existing §6.2 traits preserved; no test moved out of §6.2 end-state | ✅ |
+| FR-17 (MEDIUM-tier §6.2 end-state) | All in-scope tests end in `repaired` (Passing) | ✅ |
+| ADR-013 refined (no CRUD→AI injection) | N/A — test-only NO-OP, no DI scope crossing | ✅ |
+| Helper (`AsyncEnumerableHelpers.cs` + `FakeChatClient`) READ-ONLY | not modified | ✅ |
+
+### Step 9.5 Quality Gates
+
+| Gate | Status | Notes |
+|---|---|---|
+| `code-review` (judgment-layer) | ✅ self-review | Zero changes to review; no diff to evaluate against §6.2 taxonomy, NFR-02 50%-threshold, or trait-tagging compliance. |
+| `adr-check` (architecture) | ✅ self-review | No production code touched (NFR-01 ✓); no DI changes (NFR-03 ✓); no IOpenAiClient/IPlaybookService injection (ADR-013 refined ✓); helper read-only; FluentAssertions + xUnit Trait taxonomy preserved per `tests/CLAUDE.md`. |
+| `dotnet build -warnaserror`-equivalent | ✅ | 0 errors / 1 pre-existing CVE warning (unchanged) |
+| `dotnet test --filter ~Ai.Chat (files 13-19)` | ✅ | 0 Failed / 117 Passed / 0 Skipped — §6.2 final end-state satisfied |
+
+### Acceptance criteria verification
+
+| Criterion | Result |
+|---|---|
+| All batch-2 Ai/Chat tests Pass or Skip-with-reason; zero Failed | ✅ (0 Failed across 117 tests in files 13-19) |
+| Per-file diff <50% line replacement (NFR-02) | ✅ (vacuous — 0 files touched) |
+| Every touched test has §6.2 final end-state trait | ✅ (vacuous — 0 tests touched; pre-existing §6.2 preserved) |
+| No overlap with batch 1 (task 050) or batch 3 (task 052) files | ✅ (files 13-19; 050 covered 6+11+12+subdir; 052 covered 21+ empty window) |
+| `git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/` | ✅ |
+| `CustomWebAppFactory.cs` is NOT modified | ✅ |
+
+**Conclusion**: Task 051 closes as **NO-OP / scope-resolved**. The 3-batch alphabetical partition over 19 top-level Chat files means batch 2's failing-test load was entirely absorbed by task 050 (Wave 2.2) — files 11+12 contained the only batch-2-adjacent failures, and 050 claimed them along with file 6 (DirectOpenAiAgent) and the SseEventTypes subdir extension. Files 13-19 entered Wave 2.3 already Passing; this task verifies and ratifies their §6.2-compliant state without modification. **POML status flipped `not-started` → `completed`.** TASK-INDEX.md not touched; git commit not performed (per orchestrator instructions).
+
+---
+
+## Task 053 (P23.M4 — Ai/Capabilities) — Wave 2.3 — 2026-05-31
+
+**Rigor Level**: FULL (POML `<rigor>FULL</rigor>`; tags `bff-api`, `ai`, `testing`; modifies `.cs`)
+**Scope**: `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Capabilities/*.cs` excluding `Streaming*` (handled by task 031 NO-OP). Per failure inventory post-018: 2 failures in `CapabilityRouterBenchmarkTests`.
+
+### Files in scope (5)
+
+| File | Pre failures | Disposition |
+|---|---:|---|
+| CapabilityRouterBenchmarkTests.cs | 2 | repair (mixed class — see below) |
+| CapabilityRouterTests.cs | 0 | no-op (passing) |
+| CapabilityValidatorTests.cs | 0 | no-op (passing) |
+| DataverseCapabilityManifestLoaderTests.cs | 0 | no-op (passing) |
+| ManifestRefreshServiceTests.cs | 0 | no-op (passing) |
+
+### Failure analysis — CapabilityRouterBenchmarkTests
+
+| Test | Verdict | Rationale |
+|---|---|---|
+| `Layer1_HitRate_MeetsTargetForKeywordMessages` | repaired (pass) | 70/105 confident; hit rate 66.7% ≥ 60% target |
+| `Layer1_Latency_Under50ms_ForAllCorpusMessages` | repaired (pass) | P50=6μs / P99=11μs — well under 50ms |
+| `Layer1_Latency_Under50ms_With50CapabilityManifest` | repaired (pass) | passes stress-test |
+| `Layer1_DoesNotFalsePositive_OnNonKeywordMessages` | **production-bug** | 4 false-positives (id=77/89/91 Layer-2 misroutes; id=102 Layer-3 false-positive); asserts zero-misroute invariant the substring-match classifier cannot honor without semantic disambiguation |
+| `Layer1_FullCorpus_DistributionSummary` | **production-bug** | Same root cause — asserts confidentWrong == 0; actual 3 confidently-wrong on 105-message corpus |
+
+**Classification**: 2 failures are **`real-bug-pending-fix`**. The tests assert the documented zero-false-positive contract (production XML doc line 22-24); the substring-match Layer 1 classifier produces semantic-gap false-positives on bigram-superstring keyword hints (`case law` ⊃ `case`, etc.). Per NFR-01 cannot modify `CapabilityRouter.cs`. Filed as ledger entry [RB-T053-01](ledgers/real-bug-ledger.md#rb-t053-01).
+
+### Edits applied (1 file, 22 insertions, 2 deletions)
+
+| File | Pre-edit lines | Post-edit lines | Diff | NFR-02 (<50%) |
+|---|---:|---:|---|---|
+| CapabilityRouterBenchmarkTests.cs | 454 | 474 | +22 / -2 = 24 line-edits = 5.3% of pre-edit | ✅ well under 50% |
+
+Edits:
+1. Class-level `[Trait("status", "repaired")]` added with `<remarks>` documenting the mixed disposition.
+2. `Layer1_DoesNotFalsePositive_OnNonKeywordMessages` → `[Fact(Skip = "real-bug-pending-fix RB-T053-01: ...")]` + per-test `[Trait("status", "real-bug-pending-fix")]` override.
+3. `Layer1_FullCorpus_DistributionSummary` → same Skip + override Trait pattern.
+
+### Test verification
+
+`dotnet test --filter "FullyQualifiedName~Services.Ai.Capabilities"`:
+- **Pre (Capabilities only)**: 3 Passed / 2 Failed / 0 Skipped / 5 Total (benchmark file only — other 4 files have non-`CapabilityRouter` namespaces but run as a roll-up)
+- **Post (full Capabilities cluster including non-Benchmark)**: **70 Passed / 0 Failed / 2 Skipped / 72 Total** ✅
+
+Note: cluster filter pulls in CapabilityRouterTests / CapabilityValidatorTests / DataverseCapabilityManifestLoaderTests / ManifestRefreshServiceTests which collectively contribute 67 additional passing tests beyond the 3 surviving Benchmark passes.
+
+### Ledger entry created
+
+[RB-T053-01](ledgers/real-bug-ledger.md#rb-t053-01) — `CapabilityRouter` Layer 1 substring keyword classifier semantic-gap false positives. MEDIUM severity, fix-by 2026-07-31. Owner TBD (recommend `ai-spaarke-action-engine-r1` Action Engine team). Three recommended fixes ranked by complexity (word-boundary regex / negative-evidence scoring / confidence-saturation guard).
+
+### Step 9.5 Quality Gates
+
+| Gate | Status | Notes |
+|---|---|---|
+| `code-review` (judgment-layer) | ✅ self-review | 1 file touched; only Trait + Skip metadata + XML doc additions; no production logic; matches RB-T012-01/RB-T050-01 ledger-entry patterns |
+| `adr-check` (architecture) | ✅ self-review | No `src/` change (NFR-01 ✓); no DI changes (NFR-03 ✓); no AI public-contract crossings (ADR-013 refined ✓); CustomWebAppFactory.cs untouched (§4.5 ✓); diff 5.3% of file (NFR-02 ✓ — no §4.8 escalation needed) |
+| `dotnet test --filter ~Capabilities` | ✅ | 0 Failed / 70 Passed / 2 Skipped |
+| `git status` no production changes | ✅ | Only `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Capabilities/CapabilityRouterBenchmarkTests.cs` modified + ledger appended |
+
+### Acceptance criteria (POML)
+
+| Criterion | Result |
+|---|---|
+| All Ai/Capabilities tests (non-Streaming) Pass or Skip-with-reason; zero Failed | ✅ (70 Passed / 2 Skipped / 0 Failed) |
+| Per-file diff <50% line replacement (NFR-02) | ✅ (5.3% on CapabilityRouterBenchmarkTests.cs) |
+| Every touched test has §6.2 final end-state trait | ✅ (class-level `repaired` for 3 passing; per-test `real-bug-pending-fix` override for 2 Skip'd) |
+| No overlap with task 031 (Streaming Capabilities files) | ✅ (touched only `CapabilityRouterBenchmarkTests.cs`; no `Streaming*` file modified) |
+| `git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/` | ✅ |
+| `CustomWebAppFactory.cs` is NOT modified | ✅ |
+
+**Conclusion**: Task 053 closes with 2 Failed → 2 Skipped (`real-bug-pending-fix` ledger RB-T053-01). Project Failed-count delta: **−2** (172 → 170). All 5 Capabilities files end in §6.2 final end-state.

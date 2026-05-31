@@ -145,12 +145,12 @@ All 5 Wave 1 agents completed. Build verification skipped: no `.cs` files modifi
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
 | 050 | Ai/Chat batch 1 (10 files) | ✅ 2026-05-31 (7 files / **13 in-scope failures repaired** / 156 pass + 1 skip / RB-T050-01 SourcePaneSseEventData null-emit; cancellation/markdown/Moq/literal/observability fixes; max 7.6% diff) | 23-M | ✅ Yes | FULL | 014 |
-| 051 | Ai/Chat batch 2 (10 files) | 🔲 | 23-M | ✅ Yes | FULL | 014 |
-| 052 | Ai/Chat batch 3 (10 files) | 🔲 | 23-M | ✅ Yes | FULL | 014 |
-| 053 | Ai/Capabilities | 🔲 | 23-M | ✅ Yes | FULL | 014 |
-| 054 | Ai/Nodes | 🔲 | 23-M | ✅ Yes | FULL | 014 |
-| 055 | Communications batch 1 (sibling coord) | 🔲 | 23-M | ✅ Yes | FULL | 011, 014 |
-| 056 | Communications batch 2 | 🔲 | 23-M | ✅ Yes | FULL | 011, 014 |
+| 051 | Ai/Chat batch 2 (10 files) | ✅ NO-OP 2026-05-31 (117 tests pass; task 050 absorbed boundary files; cluster already green) | 23-M | ✅ Yes | FULL | 014 |
+| 052 | Ai/Chat batch 3 (10 files) | ✅ NO-OP 2026-05-31 (alphabetical partition empty; 050+051 exhaust folder; cluster 555 pass / 3 skip / 0 fail) | 23-M | ✅ Yes | FULL | 014 |
+| 053 | Ai/Capabilities | ✅ 2026-05-31 (1 file CapabilityRouterBenchmark / 2 failures → Skip with **RB-T053-01 (MED)** filed: substring-match classifier false-positives; 70 pass / 2 skip) | 23-M | ✅ Yes | FULL | 014 |
+| 054 | Ai/Nodes | ✅ 2026-05-31 (1 file CreateTaskNodeExecutor / 5 failures repaired via MockHttpMessageHandler factory pattern; 12/12 pass; 17% diff) | 23-M | ✅ Yes | FULL | 014 |
+| 055 | Communications batch 1 (sibling coord) | ✅ NO-OP 2026-05-31 (212 pass / 11 skip / 0 fail; cluster cleared by Wave 1.1a 011; no sibling sign-off needed — zero code surface) | 23-M | ✅ Yes | FULL | 011, 014 |
+| 056 | Communications batch 2 | ✅ NO-OP 2026-05-31 (61 pass / 10 pre-existing Graph SDK Moq skips / 0 fail; no sibling sign-off needed) | 23-M | ✅ Yes | FULL | 011, 014 |
 
 ### P23.I — INTEGRATION tier (~25 files + Spe.Integration failures)
 
