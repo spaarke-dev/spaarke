@@ -102,31 +102,28 @@ const useStyles = makeStyles({
     // Position context for the absolute-positioned center letter-grade overlay.
     position: 'relative',
   },
+  // v1.4.3 — Breakdown rows use a 3-column CSS grid (swatch, label, value).
+  // All three columns are `auto`-sized to their content, so the value column
+  // ends just to the right of the widest label — not pushed to the far edge
+  // by a `flex-grow: 1` label. Whole grid sits left-aligned in the parent
+  // cell, which keeps the column of category names left-flush.
   matrixRowsCell: {
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'center',
+    display: 'grid',
+    gridTemplateColumns: 'auto auto auto',
+    columnGap: tokens.spacingHorizontalM,
     rowGap: tokens.spacingVerticalS,
-    minWidth: 0,
-  },
-  // Single-row breakdown: color swatch + label + value all on one line.
-  // Replaces the prior two-line (label-above-value, all-caps) layout.
-  breakdownRow: {
-    display: 'flex',
-    flexDirection: 'row',
     alignItems: 'baseline',
-    columnGap: tokens.spacingHorizontalS,
+    justifyContent: 'start',
     minWidth: 0,
   },
-  // Small filled square next to each breakdown row, color-matched to the
-  // corresponding donut segment for visual cross-reference.
+  // Small filled square in column 1, color-matched to the corresponding
+  // donut segment for visual cross-reference.
   breakdownSwatch: {
     width: '10px',
     height: '10px',
-    flexShrink: 0,
     ...shorthands.borderRadius(tokens.borderRadiusSmall),
-    // Translate down so the visual center of the swatch aligns with the
-    // baseline-aligned text it sits next to.
+    // alignSelf:center so the swatch sits visually centered next to the
+    // baseline-aligned text in columns 2 and 3.
     alignSelf: 'center',
   },
   breakdownLabel: {
@@ -134,7 +131,6 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightRegular,
     color: tokens.colorNeutralForeground2,
     lineHeight: tokens.lineHeightBase200,
-    flexGrow: 1,
     minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -145,7 +141,6 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
     lineHeight: tokens.lineHeightBase300,
-    flexShrink: 0,
   },
   // Absolute-positioned overlay for the center value (typically a letter
   // grade). Sized as a fraction of the donut diameter — Fluent's built-in
@@ -376,27 +371,36 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
             )}
           </div>
           {showRows && (
-            <div className={styles.matrixRowsCell}>
+            <div
+              className={styles.matrixRowsCell}
+              role="list"
+              aria-label="Breakdown by category"
+            >
               {data.map((dp, idx) => {
                 const rowValue =
                   dp.value == null
                     ? cardConfig?.nullDisplay ?? '—'
                     : formatBreakdownValue(dp.value, breakdownFormat);
                 const swatchColor = chartData[idx]?.color;
+                // 3 grid items per row (swatch, label, value) so they align
+                // into vertical columns within `matrixRowsCell`'s auto-sized
+                // grid. The wrapper Fragment carries the per-row key.
                 return (
-                  <div key={`${dp.label}-${idx}`} className={styles.breakdownRow}>
-                    {swatchColor && (
+                  <React.Fragment key={`${dp.label}-${idx}`}>
+                    {swatchColor ? (
                       <span
                         className={styles.breakdownSwatch}
                         style={{ backgroundColor: swatchColor }}
                         aria-hidden={true}
                       />
+                    ) : (
+                      <span aria-hidden={true} />
                     )}
-                    <Text className={styles.breakdownLabel}>{dp.label}</Text>
+                    <Text className={styles.breakdownLabel} role="listitem">{dp.label}</Text>
                     <Text className={styles.breakdownValue} aria-live="polite">
                       {rowValue}
                     </Text>
-                  </div>
+                  </React.Fragment>
                 );
               })}
             </div>

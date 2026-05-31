@@ -54,6 +54,13 @@ export interface IChartRendererProps {
   showTitle?: boolean;
   /** PCF override: base title font size (v1.2.44) */
   titleFontSize?: string;
+  /**
+   * v1.4.3 — Set by VisualHostRoot when the host (CardChrome OR the legacy
+   * toolbar row above the chart) is rendering the chart name itself. When
+   * true, each chart visual MUST suppress its internal title so the title
+   * isn't double-rendered. Defaults to false (legacy behavior).
+   */
+  hostRenderedTitle?: boolean;
 }
 
 const useStyles = makeStyles({
@@ -153,6 +160,7 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
   columns,
   showTitle: showTitlePcf,
   titleFontSize: titleFontSizePcf,
+  hostRenderedTitle = false,
 }) => {
   const styles = useStyles();
   const { sprk_visualtype, sprk_name, sprk_configurationjson, sprk_groupbyfield } = chartDefinition;
@@ -288,15 +296,14 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
         titleFontSize: titleFontSizePcf || undefined,
       });
 
-      // When the host wraps this chart in CardChrome (showTitlePcf === true),
-      // the chrome owns the title — suppress DonutChart's internal centered
-      // title to avoid double-rendering. Legacy chrome-free chart defs
-      // (showTitlePcf undefined/false) keep their existing inline title.
-      const chromeOwnsTitle = showTitlePcf === true;
+      // v1.4.3 — When the host renders the title itself (CardChrome OR the
+      // legacy toolbar row above the chart), suppress DonutChart's internal
+      // centered title to avoid double-rendering. Falls back to the legacy
+      // inline title only when no host slot is available.
       return (
         <DonutChart
           data={dataPoints}
-          title={chromeOwnsTitle ? undefined : (config.showTitle !== false ? sprk_name : undefined)}
+          title={hostRenderedTitle ? undefined : (config.showTitle !== false ? sprk_name : undefined)}
           innerRadius={config.innerRadius as number | undefined}
           showCenterValue={config.showCenterValue as boolean | undefined}
           centerLabel={config.centerLabel as string | undefined}

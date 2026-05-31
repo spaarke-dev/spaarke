@@ -50,12 +50,31 @@ const useStyles = makeStyles({
   },
   toolbar: {
     display: 'flex',
-    justifyContent: 'flex-end',
+    // v1.4.3 — switched from `flex-end` to `space-between` so the chart name
+    // sits left-aligned in this row while the action icons stay right-aligned.
+    // Matches the CardChrome layout for the chrome-opt-in path.
+    justifyContent: 'space-between',
     alignItems: 'center',
     minHeight: '28px',
     flexShrink: 0,
     marginBottom: '10px',
     gap: '10px',
+  },
+  toolbarTitle: {
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    // Truncate long titles instead of pushing icons off-screen.
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    flexGrow: 1,
+    minWidth: 0,
+  },
+  toolbarIcons: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    flexShrink: 0,
   },
   chartContainer: {
     display: 'flex',
@@ -533,6 +552,21 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
           }
         : undefined;
 
+    // v1.4.3 — Tell ChartRenderer that the host (CardChrome OR the legacy
+    // toolbar above) is rendering the title so each chart visual can suppress
+    // its own internal title and avoid double-rendering.
+    //
+    // Legacy toolbar renders the title when ALL of these are true:
+    //   - showToolbar (PCF property, defaults true)
+    //   - chartDefinition has a sprk_name
+    //   - the toolbar itself is visible (aiSummaryField OR enableDrillThrough)
+    const legacyToolbarTitle =
+      !chromeOptIn &&
+      showToolbar === true &&
+      !!chartDefinition.sprk_name &&
+      (!!aiSummaryField || enableDrillThrough);
+    const hostRenderedTitle = chromeOptIn || legacyToolbarTitle;
+
     return (
       <CardChrome
         title={chromeTitle}
@@ -555,6 +589,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
           columns={columns || undefined}
           showTitle={showTitlePcf ?? undefined}
           titleFontSize={titleFontSizePcf || undefined}
+          hostRenderedTitle={hostRenderedTitle}
         />
       </CardChrome>
     );
@@ -576,35 +611,52 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
 
   return (
     <div className={styles.container} style={containerStyle}>
-      {/* Toolbar row — AI Summary (left) + View Details (right), above the visual */}
+      {/* Toolbar row — Chart name (left) + AI Summary / View Details (right), above the visual.
+          v1.4.3: Title is now rendered here (legacy path) instead of being duplicated inside
+          each chart's centered header. When this toolbar renders, ChartRenderer suppresses
+          the chart's internal title via the `hostRenderedTitle` prop. */}
       {showToolbar && chartDefinition && (aiSummaryField || enableDrillThrough) && (
         <div className={styles.toolbar}>
-          {aiSummaryField && (
-            <AiSummaryPopover
-              trigger={
-                <Tooltip content="AI Summary" relationship="label">
-                  <Button appearance="subtle" icon={<SparkleRegular />} aria-label="View AI summary" />
-                </Tooltip>
-              }
-              onFetchSummary={handleFetchAiSummary}
-              positioning="below"
-            />
+          {chartDefinition.sprk_name ? (
+            <Text
+              size={300}
+              className={styles.toolbarTitle}
+              title={chartDefinition.sprk_name}
+              aria-label={chartDefinition.sprk_name}
+            >
+              {chartDefinition.sprk_name}
+            </Text>
+          ) : (
+            <span aria-hidden={true} style={{ flexGrow: 1 }} />
           )}
-          {enableDrillThrough && (
-            <Tooltip content="View details" relationship="label">
-              <Button
-                appearance="subtle"
-                icon={<OpenRegular />}
-                onClick={handleExpandClick}
-                aria-label="View details in expanded workspace"
+          <div className={styles.toolbarIcons}>
+            {aiSummaryField && (
+              <AiSummaryPopover
+                trigger={
+                  <Tooltip content="AI Summary" relationship="label">
+                    <Button appearance="subtle" icon={<SparkleRegular />} aria-label="View AI summary" />
+                  </Tooltip>
+                }
+                onFetchSummary={handleFetchAiSummary}
+                positioning="below"
               />
-            </Tooltip>
-          )}
+            )}
+            {enableDrillThrough && (
+              <Tooltip content="View details" relationship="label">
+                <Button
+                  appearance="subtle"
+                  icon={<OpenRegular />}
+                  onClick={handleExpandClick}
+                  aria-label="View details in expanded workspace"
+                />
+              </Tooltip>
+            )}
+          </div>
         </div>
       )}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.2 • 2026-05-31</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.3 • 2026-05-31</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>
