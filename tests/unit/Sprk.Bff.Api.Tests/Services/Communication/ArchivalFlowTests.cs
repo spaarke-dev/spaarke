@@ -80,8 +80,9 @@ public class ArchivalFlowTests
         return new CommunicationService(
             _graphClientFactoryMock.Object,
             senderValidator,
-            dvService,
-            dvService,
+            Mock.Of<ICommunicationDataverseService>(),
+            Mock.Of<IGenericEntityService>(),
+            Mock.Of<IDocumentDataverseService>(),
             emlGenerationService ?? null!,
             speFileStore ?? null!,
             null!, // CommunicationAccountService — not tested here

@@ -1,11 +1,163 @@
 # Spaarke Insights Engine Architecture
 
-> **Last Updated**: 2026-05-20
-> **Last Reviewed**: 2026-05-20
-> **Revision**: r2 — adds source data and corpus model (§4), surfacing model (§10), evaluation and quality (§14), external integration via MCP (§15), and future considerations (§22). Refines streaming-verification spec, sync re-fetch backpressure, adjacency-list write amplification, embedding lifecycle, and BFF decomposition signals. Moves historical backfill and the evaluation harness into Phase 1.
-> **Status**: Pre-implementation (Phase 1 SPEC.md is pipeline-ready; design.md is canon)
+> **Last Updated**: 2026-05-28 (refinement callout added — see §0 below; body text unchanged from r2)
+> **Last Reviewed**: 2026-05-20 (r2 body); 2026-05-28 (§0 refinement integration)
+> **Revision**: r2 + 2026-05-28 refinement callout. Original r2 — adds source data and corpus model (§4), surfacing model (§10), evaluation and quality (§14), external integration via MCP (§15), and future considerations (§22). 2026-05-28 callout (new §0) — narrows Phase 1 scope to 17 deliverables (D-P1..D-P17) per [`projects/ai-spaarke-insights-engine-r1/SPEC.md`](../../projects/ai-spaarke-insights-engine-r1/SPEC.md) and decisions D-52..D-63.
+> **Status**: Pre-implementation. Phase 1 [`SPEC.md`](../../projects/ai-spaarke-insights-engine-r1/SPEC.md) is pipeline-ready and canonical for Phase 1 scope. This doc remains Spaarke-wide architecture reference; for project Phase 1 deliverables, read SPEC.md.
 > **Purpose**: Spaarke-wide canonical architecture document for the Insights Engine — the back-end subsystem that produces honestly-grounded organizational context for AI agents and end users.
-> **Note on length**: This document is comprehensive (~1500 lines) by explicit user override of the standard `docs/architecture/` "decisions-only" convention. Project-internal authority remains [`projects/ai-spaarke-insights-engine-r1/design.md`](../../projects/ai-spaarke-insights-engine-r1/design.md); when they disagree, `design.md` wins until this doc is updated.
+> **Note on length**: This document is comprehensive (~1500 lines) by explicit user override of the standard `docs/architecture/` "decisions-only" convention. **Project-internal authority for Phase 1 scope and deliverables is [`projects/ai-spaarke-insights-engine-r1/SPEC.md`](../../projects/ai-spaarke-insights-engine-r1/SPEC.md)**; project-internal authority for comprehensive design is [`projects/ai-spaarke-insights-engine-r1/design.md`](../../projects/ai-spaarke-insights-engine-r1/design.md). When this doc conflicts with either, the project docs win until this doc is updated.
+
+---
+
+## 0. 2026-05-28 refinement integration (READ THIS FIRST)
+
+Phase 1 scope was narrowed twice after this doc was last revised (2026-05-20):
+- **2026-05-27** — [SPEC-phase-1-minimum.md](../../projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md) introduced decisions D-52..D-58 (single-tenant, dual-substrate, questions-as-playbooks, three surfaces, snapshot, catalog routing, signal contract)
+- **2026-05-28** — [SPEC-phase-1-minimum.md](../../projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md) narrowed further to 17 deliverables (D-P1..D-P17), revised D-53 (one index not five), deferred D-55/D-56/D-57, superseded D-58, added D-59..D-63
+
+**Where this doc's r2 body conflicts with the 2026-05-28 direction, the spec wins.** Key deltas to be aware of:
+
+| What this doc describes (r2, 2026-05-20) | Current 2026-05-28 direction | Where to read for canonical |
+|---|---|---|
+| Five new Insight indexes (`insight-matters`, `insight-decisions`, `insight-risks`, `insight-sessions`, `insight-precedents`) — §4.1.3, §8.1 | **ONE** new derived index (`insights-index`) with `artifactType` discriminator holding both Observations and Precedents | SPEC §3.4 |
+| Cosmos NoSQL graph with adjacency-list ships in Phase 1 — §8.2 | **Cosmos implementation deferred to Phase 1.5** (first Phase 1.5 deliverable); `IInsightGraph` interface ships in Phase 1 (D-P17) as design-only stub to preserve swap path | SPEC §3.1 D-P17, §3.3 |
+| Closure-extraction as Phase 2 implementation; Phase 1 ships design doc (D-A12) — §6.5, §21.2 | **Universal layered ingest with cheap-gates-expensive economics ships in Phase 1**: Layer 1 (classification) + Layer 2 (outcome extraction) on every SPE upload via new consumer. Real Observations from real documents end-to-end. | SPEC §3.1 D-P5..D-P10; [SPEC-phase-1-minimum.md §3](../../projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md) |
+| Three rendering patterns + three interaction modes + surface map — §10.1..§10.3 | **All three surfaces deferred to Phase 1.5**. Phase 1 ships programmatic API only (`POST /api/insights/ask`). Surface design returns when surfaces land. | SPEC §3.3, §3.6 |
+| Historical backfill as Phase 1 capability — §4.7, §11.4 | **Admin-triggered only**; no automated backfill in Phase 1; admin owns volume + cost projection before any run | [SPEC-phase-1-minimum.md §3.6](../../projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md) |
+| Evaluation harness as CI gate in Phase 1 — §14 | **Smoke test + small golden dataset + eval harness baseline** (D-P16); CI gate is "baseline pass at permissive thresholds"; harden in Phase 1.5+ | SPEC §3.1 D-P16 |
+| MCP server contract as Phase 1 deliverable (Phase 2 implementation) — §15 | **MCP server contract deferred to Phase 1.5** (not Phase 1) along with other surface-coupled work | SPEC §3.6 |
+| Customer-onboarding workflow design as Phase 1 design — §11.4 | **Deferred to Phase 1.5** (single-tenant Phase 1 has no multi-tenant onboarding need; per-customer onboarding deferred until ingest is stable) | SPEC §3.6 |
+| Synthesis layer = "Insights Agent" with C# tool handlers (`IAiToolHandler`) — §9 | **Insights questions are Spaarke playbooks** executed by existing `PlaybookExecutionEngine` with Insights-mode metadata + caching; the "Insights Agent" concept dissolves into `InsightsOrchestrator` (D-P14 + facade `IInsightsAi`); "tools" are realized as node executors (D-P12), NOT `IAiToolHandler` instances. The honesty primitives become mechanical node executors: `EvidenceSufficiencyNode`, `DeclineToFindNode`, `GroundingVerifyNode`. | decisions.md D-54; SPEC §3.1 D-P12, D-P14, §4 |
+| Tenant-list-as-data control plane for ~10 tenants — §13.2, §21.4 | **Single-tenant Phase 1+2**; control-plane evolution deferred beyond Phase 2 (D-52 + DEF-05 re-deferral); each customer = one Bicep parameter file = one full deployment unit | decisions.md D-52; SPEC §3.1 D-A28 (now D-P canonical infra in SPEC §3.1) |
+| BFF AI facade boundary | **Binding** for Phase 1 — placement table at SPEC §3.5.2 covers all D-P deliverables; `IInsightsAi` facade is the only allowed AI consumption path for Zone B code | SPEC §3.5 |
+
+**What stands unchanged from r2**: four-tier taxonomy (§3.1), `InsightArtifact` envelope shape (§3.2), provenance-as-API-contract (§3.3), Precedent layer concept (§3.4 — but Phase 1 implementation per [SPEC-phase-1-minimum.md §2](../../projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md) is concrete manual-SME-authoring mode only; Phase 1.5+ system-proposed Tentative mode), Live Facts via direct Dataverse queries (§8.3), two-tier memory (§8.4), Functions for sync (§11.1, §11.2), no plugins / no Power Automate (§11.3), auth model (§12), privilege model (§13), Azure resources (§16), packagability (§18).
+
+**Pointer summary**: for any Phase 1 question, the answer-order is:
+1. [SPEC.md §3.1](../../projects/ai-spaarke-insights-engine-r1/SPEC.md) — Phase 1 deliverable list (D-P1..D-P17)
+2. [decisions.md D-52..D-63](../../projects/ai-spaarke-insights-engine-r1/decisions.md) — current decisions; D-01..D-51 carry forward
+3. [SPEC-phase-1-minimum.md](../../projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md) — rationale narrative
+4. [design.md](../../projects/ai-spaarke-insights-engine-r1/design.md) §0 — refinement integration table; rest of design.md is comprehensive design reference
+5. This doc — Spaarke-wide architecture reference; body sections below are r2 (2026-05-20)
+
+---
+
+## 0a. 2026-05-30 Phase 1 completion + Phase 1.5 architectural refinements (READ THIS NEXT)
+
+> **Status**: Phase 1 (ai-spaarke-insights-engine-r1) **plumbing complete + deployed to Spaarke Dev**. Phase 1.5 scope captured in this section; implementation lives in new project **ai-spaarke-insights-engine-r2**. See [`projects/ai-spaarke-insights-engine-r2/design.md`](../../projects/ai-spaarke-insights-engine-r2/design.md) for the Phase 1.5 project plan.
+>
+> **Why a new section**: §0 above captured the 2026-05-28 pre-implementation refinements. This section captures (1) what was actually shipped vs. designed, (2) the architectural framing corrections that emerged during live deploy/verification, and (3) the Phase 1.5 scope agreed with the project owner on 2026-05-30.
+
+### What Phase 1 actually shipped (relative to SPEC.md §3.1 D-P1..D-P17)
+
+All 17 D-P deliverables built + tested + deployed:
+
+| What | State |
+|---|---|
+| 4-tier `InsightArtifact` envelope + `DeclineResponse` (D-P1) | ✅ shipped |
+| `IInsightGraph` interface + stub (D-P17; Cosmos = Phase 1.5 first deliverable) | ✅ shipped |
+| Bicep + `spaarke-insights-index` + Function App shell (D-P2; Function App provisioned but NOT used — see below) | ✅ shipped + deployed |
+| `sprk_precedent` entity + admin endpoint (D-P3) | ✅ shipped + deployed |
+| `sprk_precedent` → `spaarke-insights-index` projection sync (D-P4) | ✅ shipped (not exercised live) |
+| Layer 1 classification + Layer 2 outcome extraction prompts + emitters (D-P5, D-P6) | ✅ shipped (prompts are .txt files in source — Phase 1.5 moves to JPS storage) |
+| Universal-ingest playbook (D-P7) | ⚠️ shipped as **code-defined `IngestOrchestrator`** rather than as a JPS playbook (architectural divergence; Phase 1.5 refactors) |
+| SPE-upload ingest consumer (D-P8) | ⚠️ shipped as `InsightsIngestJobHandler` on existing `sdap-jobs` queue (NOT a Function — better choice). **Producer-side surface to set `InsightsIngest=true` was NOT built** — no upload today triggers Insights ingest in practice |
+| `GroundingVerifier` + `GroundingVerifyNode` (D-P9) | ✅ shipped + tested |
+| Confidence-threshold per-field `ObservationEmitter` (D-P10) | ✅ shipped + tested |
+| `DataverseObservationMirror` + review surface fields + view (D-P11) | ✅ shipped + deployed (mirror dev-safe: skips when config GUID missing) |
+| 5 new Insights-mode node executors + helper (D-P12) | ✅ shipped + tested. **BUT** their dispatch via the existing `PlaybookOrchestrationService` action-lookup model was not fully wired — see "Phase 1.5 Wave B" below |
+| `InsightsPlaybookExecutionCache` (D-P13) | ✅ shipped + extended for decline propagation (task 071) |
+| `predict-matter-cost@v1` synthesis playbook (D-P14) | ✅ shipped + deployed (1 playbook + 8 nodes in Dataverse) |
+| `POST /api/insights/ask` endpoint with friendly-name → GUID resolution (D-P15) | ✅ shipped + deployed |
+| Smoke test + golden dataset + eval harness baseline (D-P16) | ✅ shipped (in-process at 100% on all 4 metrics; live runbook authored but only partially executed) |
+| 4 BFF deploys + Dataverse playbook deploy + App Service config | ✅ live on `spaarke-bff-dev` |
+
+**What works live today**: auth gate, validation, name resolution, DI graph, facade response envelope, cache wrap, playbook load from Dataverse, graph build + batch resolution. A POST to `/api/insights/ask` returns a structurally-honest scaffold `DeclineResponse` (the defensive fallback) — meeting the SPEC §1 acceptance bar contractually.
+
+**What's blocked live**: actual synthesis execution. The engine starts batch 1, fails to dispatch `LiveFactNode` to its executor (Phase 1 deployment didn't wire `sprk_analysisaction` rows for the new ActionTypes — a JPS-convention gap, not an engine bug), halts. Closed in Phase 1.5 Wave B (~½ day).
+
+### Architectural framing corrections (emerged during 2026-05-30 review)
+
+These are NOT new decisions — they are **clarifications of what was already true** that were mis-framed earlier in the project. They inform Phase 1.5 design.
+
+**Correction 1: Insights Engine IS a JPS application — not a parallel architecture.**
+
+Earlier framing said "Insights extends JPS." The correct framing is: Insights Engine IS one of several applications consuming the JPS (JSON Prompt Schema) playbook system that is Spaarke's canonical AI workflow architecture. The Phase 1 deliverables that ARE pure JPS:
+- `predict-matter-cost@v1` is a JPS playbook (deployed via the standard `Deploy-Playbook.ps1` script into the standard `sprk_analysisplaybook` + `sprk_playbooknode` tables)
+- The 6 new node executors (LiveFactNode, IndexRetrieveNode, EvidenceSufficiencyNode, DeclineToFindNode, ReturnInsightArtifactNode, GroundingVerifyNode) implement the JPS `INodeExecutor` interface and are registered in the same DI registry as the 10 pre-existing JPS nodes
+- `InsightsPlaybookExecutionCache` wraps JPS engine calls — does not replace JPS
+- `IInsightsAi` is a thin facade over JPS engine invocation — a stable Zone B contract, not a parallel engine
+
+**The one Phase 1 deviation from JPS canonical pattern**: `IngestOrchestrator` (task 040 / D-P7) was built as a code-defined orchestrator with `Services/Ai/Insights/Playbooks/universal-ingest.v1.json` as documentation-only metadata. This was justified at the time as "ingest sequence is fixed; configurability doesn't apply" — but that justification misses the broader value of JPS (uniform storage, deployment tooling, authoring UX, versioning, future SME calibration, AI-directed authoring). **Phase 1.5 Wave C refactors this to a real JPS playbook.**
+
+**Correction 2: Insight subjects extend beyond Matter to Project, Invoice, and future entities.**
+
+Phase 1 hard-coded `subject: "matter:<guid>"` as the only accepted subject scheme. `DataverseLiveFactResolver` only knows how to query `sprk_matter`. `IndexRetrieveNode` scope filters assume matter-centric context. This was a Phase 1 simplification that doesn't survive the real product:
+
+- Spaarke's data model has `sprk_matter`, `sprk_project`, `sprk_invoice`, and others; each can be the subject of an Insights question
+- Examples:
+  - `subject: "matter:<guid>"` — "predict cost of this matter"
+  - `subject: "project:<guid>"` — "predict project completion date based on similar projects"
+  - `subject: "invoice:<guid>"` — "flag if this invoice's amount is anomalous vs. similar invoices for this matter"
+- **Phase 1.5 must abstract**: subject scheme parsing, the live-fact resolver pattern, the scope shape on `spaarke-insights-index`, and the playbook configuration to support per-subject-type behavior. The 4-tier taxonomy and the JPS playbook engine remain unchanged — what changes is the breadth of the input contract.
+
+**Correction 3: Hybrid playbook + ad-hoc RAG is the consumption model — not playbook-only.**
+
+The conceptual end state (per project owner discussion) is NOT "every question must have a pre-authored playbook." It is:
+
+- **Pre-authored JPS playbooks** for high-value/high-stakes/structured-output questions (cost prediction, success likelihood, financial summary field auto-population, etc.) — 5-30 playbooks expected long-term
+- **Generic RAG** (semantic search of `spaarke-insights-index` + LLM synthesis) as the fallback for open-ended natural-language questions in the Spaarke Assistant
+- **Intent classifier** routes user questions to either: matching playbook OR generic RAG
+- **The Insights index is the durable substrate for BOTH paths** — Observations + Precedents produced by ingest are queried equivalently whether the consumer is a playbook or ad-hoc RAG
+
+Phase 1 only built the playbook path. Phase 1.5 adds the RAG fallback + intent classifier + Assistant integration.
+
+**Correction 4: Document classification must be 2-dimensional — practice-area × document-type — not flat.**
+
+Phase 1's Layer 1 classification uses 8 categories (closing-letter, settlement-agreement, etc.) hard-coded in `Services/Ai/Insights/Prompts/classification.v1.txt`. This taxonomy is biased toward **litigation/dispute** practice and would mis-classify most documents in other practice areas (real estate uses lease/deed/title; patent uses application/declaration/office-action; transactional uses term-sheet/LOI/definitive-agreement). The current `outcomeBearing` gate is specifically tuned for `predict-matter-cost`'s needs — other questions need different signals.
+
+**Phase 1.5 redesigns classification + extraction as 2D**:
+- Practice-area dimension (sprk_practicearea_ref already exists in Dataverse): real-estate, patent, litigation, transactional, etc.
+- Document-type dimension (likely a new `sprk_documenttype_ref` entity): per-practice-area lookup of allowed types
+- Layer 1 prompts: per-practice-area (each knows its own taxonomy)
+- Layer 2 prompts + schemas: per-(practice-area, document-type) — a lease extracts different fields than a settlement agreement
+- The `spaarke-insights-index` carries `scope.practiceArea` + `scope.documentType` for filterable retrieval
+
+### Phase 1.5 scope (agreed 2026-05-30)
+
+Captured as the 6 items + 2 architectural additions; **detailed wave plan in [`projects/ai-spaarke-insights-engine-r2/design.md`](../../projects/ai-spaarke-insights-engine-r2/design.md)**.
+
+| Item | Wave | Notes |
+|---|---|---|
+| 1. Architectural overview docs + operator guide | A (foundations) | This §0a + [`docs/guides/INSIGHTS-ENGINE-GUIDE.md`](../guides/INSIGHTS-ENGINE-GUIDE.md) + r2 design.md |
+| 2. Hybrid playbook + ad-hoc RAG | E (later wave; Phase 2 candidate) | Generic RAG endpoint + intent classifier + Assistant integration |
+| 3. 2D taxonomy (practice-area × document-type) | D | Per-practice-area Layer 1 + Layer 2 prompts; new entity schemas |
+| 4. Wire JPS actions for Insights nodes | B (unblock synthesis) | 6 `sprk_analysisaction` rows + node bindings; ~½ day |
+| 5. Prompts in JPS storage (not source files) | C | Move classification + extraction prompts to Dataverse-managed scope storage |
+| 6. JPS compliance: universal-ingest as JPS playbook | C | Refactor `IngestOrchestrator` → JPS playbook |
+| **+ 7. Canonical ingest with config flexibility** | C | One universal-ingest playbook, parameterized per-invocation (not many ingest playbooks) |
+| **+ 8. Multi-entity subjects** | C+D (spans both) | Subject scheme abstraction; per-entity live-fact resolvers; index scope shape generalization |
+
+### Architectural anchors that stay unchanged
+
+- **4-tier taxonomy** (Fact / Observation / Precedent / Inference) — the data-model spine
+- **§3.5 facade boundary** (Zone A / Zone B; `IInsightsAi` as the one allowed cross-zone seam)
+- **JPS as canonical playbook architecture** (Phase 1.5 brings universal-ingest into compliance)
+- **Honesty contract** (D-04, D-49) — structured `DeclineResponse` over hallucination; `GroundingVerifier` for mechanical citation check
+- **Evidence-sufficiency rules** (D-06) as mandatory gates in synthesis playbooks
+- **Per-tenant deployment** (D-52) — single parameter file = one full deployment unit
+- **`spaarke-insights-index` as the universal durable substrate** for retrieval by both playbooks AND future RAG path
+
+### Pointer summary
+
+For any 2026-05-30+ question about Insights, answer-order is:
+
+1. [`projects/ai-spaarke-insights-engine-r2/design.md`](../../projects/ai-spaarke-insights-engine-r2/design.md) — Phase 1.5 project plan + wave breakdown
+2. This §0a — Phase 1 completion + Phase 1.5 architectural corrections
+3. [`docs/guides/INSIGHTS-ENGINE-GUIDE.md`](../guides/INSIGHTS-ENGINE-GUIDE.md) — operator/developer guide for adding playbooks, prompts, taxonomies
+4. §0 above — 2026-05-28 pre-implementation refinements (historical)
+5. Body sections below — r2 (2026-05-20) Spaarke-wide architecture (historical context)
+6. [`projects/ai-spaarke-insights-engine-r1/SPEC.md`](../../projects/ai-spaarke-insights-engine-r1/SPEC.md) — Phase 1 deliverable contract
 
 ---
 

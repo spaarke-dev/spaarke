@@ -86,8 +86,9 @@ public class AssociationMappingTests
         return new CommunicationService(
             _graphClientFactoryMock.Object,
             senderValidator,
-            _dataverseServiceMock.Object,
-            _dataverseServiceMock.Object,
+            Mock.Of<ICommunicationDataverseService>(),
+            Mock.Of<IGenericEntityService>(),
+            Mock.Of<IDocumentDataverseService>(),
             emlGenerationService,
             speFileStore,
             null!, // CommunicationAccountService — not tested here

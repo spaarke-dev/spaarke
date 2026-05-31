@@ -953,6 +953,15 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         {
             await EnqueueRagIndexingAsync(driveId, itemId, documentId, payload.FileName, cancellationToken);
         }
+
+        // Insights Engine Phase 1 — D-P8 SPE-upload consumer (task 050).
+        // Default OFF for Phase 1; D-P16 smoke test (task 070) flips it on for fixtures.
+        // Production rollout pending per-document cost cap signoff
+        // (see projects/ai-spaarke-insights-engine-r1/notes/cost-projection-d-p8.md).
+        if (aiOptions.InsightsIngest)
+        {
+            await EnqueueInsightsIngestAsync(documentId, payload, cancellationToken);
+        }
     }
 
     private async Task CleanupTempFileAsync(string location, CancellationToken cancellationToken)
@@ -1318,6 +1327,105 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             // Log but don't fail - RAG indexing is non-critical
             _logger.LogWarning(ex,
                 "Failed to enqueue RAG indexing job for document {DocumentId}: {Error}. Processing will continue.",
+                documentId, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Enqueues an Insights Engine universal-ingest job (D-P8, task 050) for a document.
+    /// Resolves the document's Matter lookup via <see cref="IDocumentDataverseService"/>
+    /// and emits a <c>JobType="InsightsUniversalIngest"</c> job to the existing
+    /// <c>sdap-jobs</c> queue. Routed by <see cref="ServiceBusJobProcessor"/> to
+    /// <c>InsightsIngestJobHandler</c> (Zone B per §3.5).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Wrapped in try/catch so an ingest-queue failure does NOT fail the main upload
+    /// finalization path. The existing AppOnlyDocumentAnalysis + RAG indexing jobs are
+    /// already queued at this point; the Insights pipeline is additive and best-effort
+    /// during Phase 1.
+    /// </para>
+    /// <para>
+    /// <b>Phase 1 design notes</b>:
+    /// <list type="bullet">
+    ///   <item>Default-off via <c>AiProcessingOptions.InsightsIngest = false</c>. Caller
+    ///   (Office add-in / API client) must opt in. D-P16 smoke test (task 070) flips it
+    ///   on for fixtures.</item>
+    ///   <item>Skips queuing if MatterId cannot be resolved — the universal ingest
+    ///   pipeline requires a Matter subject for Layer 2 Observations
+    ///   (<c>matter:{MatterId}</c>); a future Phase 1.5 enhancement may relax this
+    ///   for tenant-scoped Observations without a matter.</item>
+    ///   <item>Tenant comes from <c>TENANT_ID</c> / <c>AzureAd:TenantId</c> config
+    ///   (D-52 single-tenant Phase 1) — same pattern as <see cref="EnqueueRagIndexingAsync"/>.</item>
+    /// </list>
+    /// </para>
+    /// </remarks>
+    private async Task EnqueueInsightsIngestAsync(
+        Guid documentId,
+        UploadFinalizationPayload payload,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Resolve MatterId from the Document record. The universal ingest pipeline
+            // (D-P7) requires a Matter subject for Layer 2 Observations.
+            var document = await _documentService.GetDocumentAsync(documentId.ToString(), cancellationToken);
+            if (document is null)
+            {
+                _logger.LogWarning(
+                    "Skipping Insights Engine ingest for document {DocumentId}: document record not found in Dataverse.",
+                    documentId);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(document.MatterId))
+            {
+                _logger.LogInformation(
+                    "Skipping Insights Engine ingest for document {DocumentId} ({FileName}): no Matter lookup on the document record (Phase 1 requires a matter subject).",
+                    documentId, payload.FileName);
+                return;
+            }
+
+            var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+            if (string.IsNullOrWhiteSpace(tenantId))
+            {
+                _logger.LogWarning(
+                    "Skipping Insights Engine ingest for document {DocumentId}: TENANT_ID / AzureAd:TenantId not configured.",
+                    documentId);
+                return;
+            }
+
+            var ingestJob = new JobContract
+            {
+                JobId = Guid.NewGuid(),
+                JobType = Sprk.Bff.Api.Services.Jobs.Insights.InsightsIngestJobHandler.JobTypeName,
+                SubjectId = documentId.ToString(),
+                CorrelationId = Activity.Current?.Id ?? Guid.NewGuid().ToString(),
+                IdempotencyKey = $"insights-ingest-{documentId}-{document.MatterId}",
+                Attempt = 1,
+                MaxAttempts = 3,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new Sprk.Bff.Api.Services.Jobs.Insights.InsightsIngestPayload
+                {
+                    DocumentId = documentId.ToString(),
+                    MatterId = document.MatterId,
+                    TenantId = tenantId,
+                    Source = "OfficeAddinUpload",
+                    EnqueuedAt = DateTimeOffset.UtcNow
+                }))
+            };
+
+            await _jobSubmissionService.SubmitJobAsync(ingestJob, cancellationToken);
+
+            _logger.LogInformation(
+                "Enqueued Insights Engine universal-ingest job {JobId} for document {DocumentId} (matter: {MatterId}, file: {FileName})",
+                ingestJob.JobId, documentId, document.MatterId, payload.FileName);
+        }
+        catch (Exception ex)
+        {
+            // Best-effort dispatch — existing CRUD/AI pipeline must not be impacted.
+            _logger.LogWarning(ex,
+                "Failed to enqueue Insights Engine universal-ingest job for document {DocumentId}: {Error}. Existing AppOnly/RAG pipelines unaffected.",
                 documentId, ex.Message);
         }
     }
