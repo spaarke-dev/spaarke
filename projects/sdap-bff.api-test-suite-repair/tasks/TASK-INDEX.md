@@ -119,7 +119,7 @@ All 5 Wave 1 agents completed. Build verification skipped: no `.cs` files modifi
 |---|---|---|---|---|---|---|
 | 030 | Streaming batch 1 (Services/Ai/Chat/Streaming*) | ✅ 2026-05-31 (1 file: StreamingWriteIntegrationTests / 28 tests pass; replaced 21 LOC obsolete helpers with canonical AsyncEnumerableHelpers; 4.7% diff) | 23-A | ✅ Yes | FULL | 015 |
 | 031 | Streaming batch 2 (Services/Ai/Capabilities/Streaming*) | ✅ NO-OP 2026-05-31 (scope mismatch: no Capabilities/Streaming* files exist; CapabilityRouter cluster owned by task 053; escalation filed in escalations/) | 23-A | ✅ Yes | FULL | 015 |
-| 032 | IChatClient cluster verification gate | 🔲 | 23-A-gate | ❌ No (gate) | STANDARD | 030, 031 |
+| 032 | IChatClient cluster verification gate | ✅ 2026-05-31 (**P23.A track CLOSED**: 015+016+030+031 = 42/42 pass; helper integrity verified; 8 out-of-cluster SSE failures classified for task 061) | 23-A-gate | ❌ No (gate) | STANDARD | 030, 031 |
 
 ### P23.B — Factory-dependent cluster
 
@@ -156,10 +156,10 @@ All 5 Wave 1 agents completed. Build verification skipped: no `.cs` files modifi
 
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
-| 060 | Sprk.Bff.Api.Tests/Integration/ batch 1 | 🔲 | 23-I | ✅ Yes | FULL | 014 |
-| 061 | Sprk.Bff.Api.Tests/Integration/ batch 2 | 🔲 | 23-I | ✅ Yes | FULL | 014 |
-| 062 | Spe.Integration.Tests repairs | 🔲 | 23-I | ✅ Yes | FULL | 024, 014 |
-| 063 | Spe.Integration.Tests WireMock fixture updates | 🔲 | 23-I | ✅ Yes | FULL | 024 |
+| 060 | Sprk.Bff.Api.Tests/Integration/ batch 1 | ✅ 2026-05-31 (**root cause confirmed**: WorkspaceTestFixture.cs missing 7 keys like CustomWebAppFactory; 63 failures repaired = 54 Workspace fixture-gap + 9 CommunicationIntegration assertion-drift; 443 Integration pass / 0 fail; max 7.6% diff) | 23-I | ✅ Yes | FULL | 014 |
+| 061 | Sprk.Bff.Api.Tests/Integration/ batch 2 | ✅ 2026-05-31 (2 files SSE+Playbook / 9 test-stale failures repaired: ChatResponseUpdate.Text non-virtual → constructor; AcquireAsync → AttemptAcquire; Playbook factory mock; 36/36 pass) | 23-I | ✅ Yes | FULL | 014 |
+| 062 | Spe.Integration.Tests repairs | ✅ 2026-05-31 (1 dict entry in IntegrationTestFixture / **-90 integration failures: Cluster A Cosmos 97 + Cluster C Reporting 3 cleared**; Cluster B SpeAdmin found pre-existing at line 74; **8 sibling fixtures discovered hosting remaining 98 failures — task 027 follow-up**) | 23-I | ✅ Yes | FULL | 024, 014 |
+| 063 | Spe.Integration.Tests WireMock fixture updates | ✅ 2026-05-31 (**MERGED into 062**; same-file collision avoided per task 024 recommendation) | 23-I | ✅ Yes | FULL | 024 |
 
 ### P23.L — LOW-tier triage (~88 files; **start gate: P23.H + P23.M each ≥50% per FR-20**)
 

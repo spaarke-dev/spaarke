@@ -1,7 +1,7 @@
 <task id="061" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.I2 — Sprk.Bff.Api.Tests/Integration/ batch 2 (~13 files)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3-5 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, integration-tier, p23-i, bff-api, testing</tags>

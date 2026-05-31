@@ -1,7 +1,7 @@
 <task id="060" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.I1 — Sprk.Bff.Api.Tests/Integration/ batch 1 (~12 files)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3-5 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, integration-tier, p23-i, bff-api, testing</tags>
@@ -118,6 +118,72 @@
   </acceptance-criteria>
 
   <notes>
+    <execution-result date="2026-05-31" wave="2.4" rigor="FULL">
+      OUTCOME: SUCCESS — 63/63 cluster failures cleared with no escalation.
+
+      ROOT-CAUSE INVESTIGATION (per scope-extension hint):
+        - Integration.Workspace.WorkspaceEndpointsTests (31, 100% rate): SINGLE root cause —
+          `WorkspaceTestFixture` configuration dict missing the 7 keys Wave 1.3 task 018
+          added to `CustomWebAppFactory.cs`. AiPersistenceModule threw on
+          `CosmosPersistence:Endpoint is not configured` during `CreateHost`.
+        - Integration.Workspace.WorkspaceLayoutEndpointTests (23, 100% rate): SAME root
+          cause — `WorkspaceLayoutTestFixture` inherits from `WorkspaceTestFixture`.
+        - Integration.CommunicationIntegrationTests (9, 33% rate): SEPARATE root cause —
+          production refactored `CommunicationService.SendAsync` from
+          `_dataverseService.CreateAsync(...)` to `_genericEntityService.CreateAsync(...)`
+          (line 780 of CommunicationService.cs). 9 tests mocked `IDataverseService.CreateAsync`;
+          assertion-level test-stale.
+
+      FIXES (test-only, NFR-01 + NFR-02 compliant):
+        1. WorkspaceTestFixture.cs (+19/-0, 5.6% of 341 lines): added 7 missing config keys
+           (CosmosPersistence:Endpoint, CosmosPersistence:DatabaseName, AgentService:Enabled,
+           AgentService:Endpoint, AgentService:AgentId, AgentService:MaxConcurrency,
+           AgentService:ThreadCacheExpiryMinutes) — mirroring Wave 1.3 task 018's
+           CustomWebAppFactory.cs additions. → 52/54 Workspace failures cleared in ONE edit.
+        2. WorkspaceEndpointsTests.cs (+1/-0, 0.1%): added `[Trait("status","repaired")]`.
+        3. WorkspaceLayoutEndpointTests.cs (+29/-16, 7.6%): added class-level Trait; updated
+           2 assertion-level tests for Wave 2b (task 109) contract change:
+             - GetLayouts_AuthenticatedRequest_Returns200WithSystemAndUserLayouts: now
+               asserts 5 layouts (1 hard-coded + 2 Dataverse-system + 2 user; the
+               WithUserLayouts(2) mock returns the same 2 entities to both queries).
+             - GetDefaultLayout_NoUserDefault_ReturnsCorporateWorkspaceFallback (renamed
+               to ...ReturnsNullBody): production cascade now returns 200 OK with
+               null/empty body when no default exists (per Wave 2b production change).
+        4. CommunicationIntegrationTests.cs (+56/-36, 4.7%): extended `BuildService` to
+           accept optional `Mock<IGenericEntityService>`; updated 7 send-flow tests to
+           wire CreateAsync mock onto `IGenericEntityService` (production redirect) instead
+           of `IDataverseService` (now no-longer-used for Communication record creation).
+
+      §6.2 TRAITS APPLIED:
+        - WorkspaceEndpointsTests → `[Trait("status","repaired")]`
+        - WorkspaceLayoutEndpointTests → `[Trait("status","repaired")]`
+        - CommunicationIntegrationTests → `[Trait("status","repaired")]` (already present)
+
+      ESCALATIONS (§4.8): NONE — all per-file diffs &lt;10% line replacement;
+        largest is WorkspaceLayoutEndpointTests at 7.6%.
+
+      REAL-BUG LEDGER: NO new entries — all 63 failures classified `test-stale`
+        (test-fixture config gap + assertion drift after production-refactor).
+
+      VERIFICATION:
+        Pre-edit: 63 Failed (31 + 23 + 9) in batch scope; 72 Failed across full Integration namespace.
+        Post-edit (targeted): `--filter "FullyQualifiedName~Sprk.Bff.Api.Tests.Integration"` =
+          443 Total / 428 Passed / 15 Skipped / **0 Failed**. (Skips include 4 pre-existing
+          Communication Skips, 11 from sibling batches/clusters; sibling tasks 061/062 also
+          contributed.)
+        Build (`dotnet build -c Release`): **0 errors / 17 pre-existing warnings**.
+        `git status`: zero changes under `src/`/`power-platform/`/`infra/`/`scripts/`.
+        `CustomWebAppFactory.cs`: NOT modified (§4.5 OK).
+
+      QUALITY GATES (Step 9.5):
+        - NFR-01 (no production change): ✅
+        - NFR-02 (&lt;50% rewrite per file): ✅ (max 7.6%)
+        - NFR-03 (no new DI in tests): ✅ (config dict + optional mock parameter only)
+        - NFR-09 (repair-not-rewrite): ✅
+        - §4.5 (CustomWebAppFactory.cs untouched): ✅
+        - §6.2 (final end-state Trait on every touched test class): ✅
+        - ADR-001/007/013-refined/028: respected (no AI-coupling or facade changes).
+    </execution-result>
     <scope-extension date="2026-05-31">
       Wave 1 baseline reconciliation (task 008) — MATERIAL EXPANSION. The Integration tier
       cluster includes 63 failures absorbed into this batch:

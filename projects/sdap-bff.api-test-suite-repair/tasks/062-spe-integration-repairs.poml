@@ -1,7 +1,48 @@
 <task id="062" project="sdap-bff.api-test-suite-repair">
   <metadata>
-    <title>P23.I3 — Spe.Integration.Tests repairs (compile drift / signature drift)</title>
-    <status>not-started</status>
+    <title>P23.I3 — Spe.Integration.Tests repairs (compile drift / signature drift) [merged with 063]</title>
+    <status>completed</status>
+    <completed-date>2026-05-31</completed-date>
+    <completion-summary>
+      Wave 2.4 MERGED task (062+063). Added CosmosPersistence:Endpoint to
+      tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs (+7 lines, additive only,
+      NFR-02 compliant at ~1.6% file delta). SpeAdmin:KeyVaultUri was ALREADY present (line 74)
+      from upstream commit 1b5cf735 (Reporting Wave 6) — no edit needed.
+
+      Pre-edit: 422 total / 88 pass / 198 fail / 136 skip (baseline matches task 024 triage).
+      Post-edit: 422 total / 262 pass / 108 fail / 52 skip.
+      Delta: -90 failures, +174 passes, -84 skips (skipped tests promoted to runnable).
+
+      Cluster A (Cosmos, 97 projected): CLEARED — 0 active CosmosPersistence:Endpoint errors in
+      post-edit TRX. Cluster B (SpeAdmin, 98 projected): 98 active SpeAdmin:KeyVaultUri errors
+      REMAIN — root cause discovered to be 8 SIBLING fixtures (KnowledgeBaseTestFixture,
+      SemanticSearchTestFixture, ChatEndpointsTestFixture, etc.) that inherit
+      WebApplicationFactory&lt;Program&gt; directly rather than IntegrationTestFixture, so they
+      do NOT receive the IntegrationTestFixture config overlay. This is a NEW FINDING outside
+      the scope of task 062 + 063 (which only edit IntegrationTestFixture.cs). Documented in
+      notes/handoffs/integration-fixture-sibling-discovery-2026-05-31.md for follow-up
+      task generation.
+
+      Cluster C (Reporting Skip, 3 projected): CLEARED — all 3
+      GetStatus_ReturnsCorrectPrivilegeLevel_PerRole rows now Pass (uses
+      IntegrationTestFixture.CreateReportingClient which inherits the Cosmos config). No
+      flaky-quarantining needed.
+
+      Per task 024 recommendation, this task absorbed 063 (same file, anti-parallelism risk).
+      Task 063 marked completed-merged-with-062.
+
+      §6.2 trait tagging: deferred — NOT applied per-test in this task because the 108 remaining
+      failures from sibling fixtures will determine the per-test final end-states once the
+      sibling-fixture follow-up task ships. Tagging now would commit prematurely (matches
+      task 024's identical guidance for triage-style tasks).
+
+      Files modified:
+        - tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs (+7 lines)
+      Files created:
+        - projects/sdap-bff.api-test-suite-repair/baseline/pre-062-baseline-2026-05-31.trx
+        - projects/sdap-bff.api-test-suite-repair/baseline/post-062-2026-05-31.trx
+        - projects/sdap-bff.api-test-suite-repair/notes/handoffs/integration-fixture-sibling-discovery-2026-05-31.md
+    </completion-summary>
     <estimated-effort>3-5 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, integration-tier, p23-i, integration-test, spe, testing</tags>

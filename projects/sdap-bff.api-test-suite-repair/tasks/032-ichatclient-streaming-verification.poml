@@ -1,7 +1,7 @@
 <task id="032" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.A3 — IChatClient cluster verification gate</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>0.5-1 hour</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, ichatclient, p23-a, bff-api, testing, verification-gate</tags>

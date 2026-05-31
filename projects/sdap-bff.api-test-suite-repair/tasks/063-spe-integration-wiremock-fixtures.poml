@@ -1,7 +1,33 @@
 <task id="063" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.I4 — Spe.Integration.Tests WireMock fixture updates (wiremock-drift category)</title>
-    <status>not-started</status>
+    <status>completed-merged-with-062</status>
+    <completed-date>2026-05-31</completed-date>
+    <completion-summary>
+      MERGED INTO TASK 062 per task 024 triage recommendation (both tasks edit the same file
+      tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs — anti-parallelism risk
+      analogous to NFR-07 CustomWebAppFactory.cs §4.5). Single agent ran 062+063 together.
+
+      Scope handled by merged 062:
+      - Cluster B (SpeAdmin:KeyVaultUri, 98 projected): KEY ALREADY PRESENT in
+        IntegrationTestFixture.cs line 74 (added by upstream commit 1b5cf735 — Reporting Wave 6).
+        No edit needed in this fixture.
+      - Cluster C (Reporting Skip path, 3 projected): CLEARED transitively by the Cosmos
+        config fix in 062. All 3 GetStatus_ReturnsCorrectPrivilegeLevel_PerRole rows now Pass.
+        No skip-tagging needed; no flaky-quarantine entry required.
+
+      Residual 98 active SpeAdmin:KeyVaultUri errors in the post-062 TRX come from 8 SIBLING
+      fixtures (KnowledgeBaseTestFixture, SemanticSearchTestFixture, etc.) that inherit
+      WebApplicationFactory&lt;Program&gt; directly — OUTSIDE the IntegrationTestFixture.cs scope
+      of tasks 062 + 063. See notes/handoffs/integration-fixture-sibling-discovery-2026-05-31.md
+      for the sibling-fixture follow-up scoping handoff.
+
+      WireMock JSON fixtures (the original framing of task 063): no wiremock-drift category
+      surfaced in task 024 triage — the actual cluster was "fixture-config-drift" satisfied
+      by config dict edits, not WireMock JSON updates. No WireMock JSON files modified.
+
+      See merged completion summary in task 062.
+    </completion-summary>
     <estimated-effort>2-3 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, integration-tier, p23-i, integration-test, spe, wiremock, testing</tags>

@@ -5,6 +5,54 @@
 
 ---
 
+## Wave 2.4 task 060 — Integration batch 1 (Workspace + Communication) — 2026-05-31
+
+- **Task**: 060 (Phase 2+3 Wave 2.4 — P23.I1 BFF Integration batch 1)
+- **Status**: completed 2026-05-31
+- **Rigor**: FULL (POML metadata `<rigor>FULL</rigor>`)
+- **Cluster scope**: 63 failures absorbed (WorkspaceEndpoints 31 + WorkspaceLayoutEndpoint 23 + CommunicationIntegration 9)
+- **Disposition**: ROOT-CAUSE-FIRST repair — 2 distinct root causes; **0 escalations**, **0 real-bug ledger entries** (all `test-stale`).
+
+### Root-cause findings
+1. **Workspace.* (54 failures, 100% rate)** — **SINGLE shared root cause**: `WorkspaceTestFixture.cs` config dict missing 7 keys that Wave 1.3 task 018 added to `CustomWebAppFactory.cs` (`CosmosPersistence:Endpoint`, `CosmosPersistence:DatabaseName`, `AgentService:Enabled/Endpoint/AgentId/MaxConcurrency/ThreadCacheExpiryMinutes`). `AiPersistenceModule.AddAiPersistenceModule` threw `CosmosPersistence:Endpoint is not configured` during `CreateHost`, before any test reached its assertion. One additive edit (19 lines, 5.6% of fixture) cleared 52/54 failures. 2 residual were assertion-level (Wave 2b/task 109 contract: `GetDefaultLayoutAsync` cascade now returns 200+null body; `GetLayoutsAsync` now includes Dataverse-system layouts).
+2. **CommunicationIntegrationTests (9 failures, 33% rate)** — **assertion-level**: production refactored `CommunicationService.SendAsync` to call `_genericEntityService.CreateAsync` (line 780) instead of `_dataverseService.CreateAsync`. Tests still mocked the old method, so `capturedEntity` was null and `CommunicationId` was `Guid.Empty`. Extended `BuildService` with optional `Mock<IGenericEntityService>` parameter and updated 7 tests' mock wiring.
+
+### Files modified (per-file diff vs total lines)
+| File | Δ | % |
+|---|---|---|
+| `tests/unit/Sprk.Bff.Api.Tests/Integration/Workspace/WorkspaceTestFixture.cs` | +19/-0 of 341 | 5.6% |
+| `tests/unit/Sprk.Bff.Api.Tests/Integration/Workspace/WorkspaceEndpointsTests.cs` | +1/-0 of 1069 | 0.1% |
+| `tests/unit/Sprk.Bff.Api.Tests/Integration/Workspace/WorkspaceLayoutEndpointTests.cs` | +29/-16 of 596 | 7.6% |
+| `tests/unit/Sprk.Bff.Api.Tests/Integration/CommunicationIntegrationTests.cs` | +56/-36 of 1951 | 4.7% |
+
+All well under 50% line replacement — **no §4.8 escalations required**.
+
+### §6.2 traits applied
+- `WorkspaceEndpointsTests` → `[Trait("status","repaired")]` (added at class level)
+- `WorkspaceLayoutEndpointTests` → `[Trait("status","repaired")]` (added at class level)
+- `CommunicationIntegrationTests` → `[Trait("status","repaired")]` (already present)
+
+### Verification (targeted)
+- **Pre-edit**: 63 Failed (31 + 23 + 9) in batch scope; 72 Failed across full Integration namespace.
+- **Post-edit (`--filter "FullyQualifiedName~Sprk.Bff.Api.Tests.Integration"`)**: 443 Total / 428 Passed / 15 Skipped / **0 Failed**. (Skips: 4 pre-existing Communication Skips + 11 sibling-cluster Skips). Sibling tasks 061/062 contributed the remaining clearance from other Integration clusters.
+- **Build (`dotnet build -c Release`)**: 0 errors / 17 pre-existing warnings.
+- **`git status`**: zero changes under `src/`/`power-platform/`/`infra/`/`scripts/`.
+- **`CustomWebAppFactory.cs`**: NOT modified (§4.5 honored).
+
+### Real-bug ledger entries
+**NONE.** All 63 failures classified `test-stale` (fixture config gap + production-refactor assertion drift).
+
+### Quality gates (Step 9.5)
+- NFR-01 (no production change): ✅
+- NFR-02 (<50% rewrite per file): ✅ (max 7.6%)
+- NFR-03 (no new DI in tests): ✅ (config dict entries + optional mock parameter only)
+- NFR-09 (repair-not-rewrite): ✅
+- §4.5 (CustomWebAppFactory.cs untouched): ✅
+- §6.2 (final end-state Trait on every touched test class): ✅
+- ADR-001/007/013-refined/028: respected (no AI-coupling or facade changes).
+
+---
+
 ## Active Task
 
 - **Task**: 056 (Phase 2+3 Wave 2.3 — P23.M7 Communications batch 2)
@@ -2926,3 +2974,203 @@ Note: cluster filter pulls in CapabilityRouterTests / CapabilityValidatorTests /
 | `CustomWebAppFactory.cs` is NOT modified | ✅ |
 
 **Conclusion**: Task 053 closes with 2 Failed → 2 Skipped (`real-bug-pending-fix` ledger RB-T053-01). Project Failed-count delta: **−2** (172 → 170). All 5 Capabilities files end in §6.2 final end-state.
+
+---
+
+## Task 061 — Wave 2.4 (P23.I batch 2 — SSE + Playbook clusters)
+
+**Started**: 2026-05-31 — Wave 2.4 dispatch
+**Rigor**: FULL
+**Files in scope**: `tests/unit/Sprk.Bff.Api.Tests/Integration/SseStreamingIntegrationTests.cs`, `tests/unit/Sprk.Bff.Api.Tests/Integration/PlaybookExecutionTests.cs`
+
+### Pre-edit baseline (per-file run)
+- **SseStreamingIntegrationTests**: 10 pass / 8 fail / 0 skip (matches failure-inventory cluster-size 8)
+- **PlaybookExecutionTests**: 17 pass / 1 fail (matches inventory cluster-size 1)
+
+### Failure classifications
+
+| Class | Test | Status | Root cause |
+|---|---|---|---|
+| SseStreamingIntegrationTests | FirstToken_WithinLatencyBudget_P95Under500ms | test-stale | `Substitute.For<ChatResponseUpdate>()` + `.Text.Returns(t)` — `Text` is non-virtual on Microsoft.Extensions.AI.ChatResponseUpdate; NSubstitute throws CouldNotSetReturnDueToMissingInfoAboutLastCallException. Switch to constructor `new ChatResponseUpdate(ChatRole.Assistant, text)` per `AsyncEnumerableHelpers.FromChunks` |
+| SseStreamingIntegrationTests | SseEventSequence_FollowsCorrectOrder_TypingStartTokensTypingEndDone | test-stale | same — uses SetupChatClientTokens |
+| SseStreamingIntegrationTests | Cancellation_CleansUpBffStream_NoEventsAfterCancel | test-stale | same — uses SetupChatClientWithCancellableTokens |
+| SseStreamingIntegrationTests | ErrorEvent_PropagatesCorrectly_WhenModelThrowsMidStream | test-stale | same — SetupChatClientWithError + GenerateTokensThenError |
+| SseStreamingIntegrationTests | ErrorEvent_NotEmitted_WhenClientCancels | test-stale | same — SetupChatClientWithCancellableTokens |
+| SseStreamingIntegrationTests | ConcurrencyLimit_Returns429WhenExceeded_AiStreamPolicy | test-stale | `AcquireAsync(1)` blocks indefinitely on queue (queue limit 2, then waits forever). Switch to `AttemptAcquire(1)` (synchronous non-queueing) to enforce rejection at 12+ |
+| SseStreamingIntegrationTests | StreamingTokens_NotCachedInRedis_DuringStreaming | test-stale | same as Text.Returns |
+| SseStreamingIntegrationTests | HighVolumeStreaming_MaintainsConsistentLatency | test-stale | same as Text.Returns |
+| PlaybookExecutionTests | CreateTaskNodeExecutor_WithValidConfig_CreatesTask | test-stale | Test never set up `IHttpClientFactory.CreateClient("DataverseApi")` mock; production calls `http.PostAsync` on null client → NullRef → catch returns Error. Add `Mock<HttpMessageHandler>` returning 204 NoContent with `OData-EntityId` header |
+
+---
+
+## Task 032 — P23.A3 IChatClient cluster verification gate (2026-05-31, Wave 2.4)
+
+- **Status**: completed 2026-05-31
+- **Rigor**: STANDARD (POML metadata `<rigor>STANDARD</rigor>`)
+- **Disposition**: CLUSTER CONVERGED — IChatClient streaming cluster (tasks 015 + 016 + 030 + 031) declared CLOSED.
+
+### Verification approach
+
+1. ✅ Confirmed tasks 030 + 031 status=completed in TASK-INDEX (030 ✅ 28 tests pass; 031 ✅ NO-OP scope-mismatch)
+2. ✅ Confirmed helper file integrity (`Mocks/AsyncEnumerableHelpers.cs` 363 LOC + `AsyncEnumerableHelpersTests.cs` 305 LOC; git history shows last touch by Wave 1 commits 70e848e1/f13a0d3c; NOT touched by Waves 2.x; `git status` clean)
+3. ✅ Re-ran task 030 file: `StreamingWriteIntegrationTests` → 28/28 Pass (100 ms)
+4. ✅ Re-ran task 016 helper tests: `AsyncEnumerableHelpersTests` → 14/14 Pass (102 ms)
+5. ✅ Ran full streaming-surface filter: `dotnet test --filter "FullyQualifiedName~Streaming|FullyQualifiedName~ChatClient" -c Release --no-build` → 112 total / 104 Pass / 8 Failed / 0 Skipped (~1m)
+6. ✅ Identified all 8 failures as out-of-cluster: `Sprk.Bff.Api.Tests.Integration.SseStreamingIntegrationTests` — separate SSE cluster, last touched by `ai-sprk-chat-r2` (commit 32fa2aa6), NOT by tasks 030/031. Root cause already classified `test-stale` in current-task.md (NSubstitute non-virtual `Returns` on `ChatResponseUpdate.Text`; canonical fix path = migrate to `AsyncEnumerableHelpers.FromChunks` from task 015)
+
+### Cluster scope results (authoritative)
+
+| Asset | Task | Tests | Pass | Failed | Result |
+|---|---|---:|---:|---:|---|
+| `AsyncEnumerableHelpers.cs` (helper) | 015 | n/a (helper) | — | — | ✅ File intact, no edits |
+| `AsyncEnumerableHelpersTests.cs` | 016 | 14 | 14 | 0 | ✅ Pass |
+| `StreamingWriteIntegrationTests.cs` | 030 | 28 | 28 | 0 | ✅ Pass |
+| `Capabilities/Streaming*` (NO-OP) | 031 | 0 | 0 | 0 | ✅ NO-OP |
+| **Cluster total** | — | **42** | **42** | **0** | **✅ CONVERGED** |
+
+### Acceptance criteria (POML)
+
+- ✅ Streaming-surface filter run; TRX captured at `baseline/ichatclient-cluster-2026-05-31.trx`
+- ✅ Zero failures in IChatClient cluster scope (42/42 pass)
+- ✅ The 8 surface-level failures are out-of-cluster (different ownership, already classified test-stale earlier in this file)
+- ✅ Verification report appended at `baseline/ichatclient-cluster-verification-2026-05-31.md`
+- ✅ `git status` shows only baseline doc + current-task.md modifications (NFR-01 + NFR-02 ✅)
+- ✅ No `src/`/`power-platform/`/`infra/`/`scripts/` changes
+
+### NFR compliance
+
+- ✅ **NFR-01**: No production code changes
+- ✅ **NFR-02**: Measurement only; no test edits
+- ✅ **NFR-09**: `<repair-not-rewrite>true</repair-not-rewrite>` (POML metadata)
+- ✅ **§4.3**: Zero IChatClient cluster tests in `Failed` state
+- ✅ **FR-14**: All cluster tests in §6.2 final end-state (`repaired` / Pass)
+- ✅ **FR-21**: Cross-track regression check — zero new failures attributable to 030's canonical-helpers swap (the 8 SseStreamingIntegrationTests failures pre-date Wave 2.x and have a separate root cause)
+
+### P23.A outcome
+
+**CLOSED** for the IChatClient streaming-cluster outcome. Tasks 015 + 016 + 030 + 031 + 032 form a converged, zero-failure unit. The 8 surface-level out-of-cluster failures in `SseStreamingIntegrationTests` are absorbed by Phase 2+3 Integration tier tasks (not P23.A).
+
+### Step 9.5 Quality Gates
+
+N/A — STANDARD rigor + verification-only task (no code changes).
+
+### Artifacts
+
+- `projects/sdap-bff.api-test-suite-repair/baseline/ichatclient-cluster-verification-2026-05-31.md` (verification report)
+- `projects/sdap-bff.api-test-suite-repair/baseline/ichatclient-cluster-2026-05-31.trx` (test run TRX)
+
+---
+
+## Task 062 + 063 MERGED — P23.I3+P23.I4 Spe.Integration.Tests fixture config (2026-05-31, Wave 2.4)
+
+**Rigor Level**: FULL (POMLs declare FULL; integration fixture has shared blast radius)
+**Rationale**: Per task 024 triage §"Recommended P23.I sequencing", tasks 062 + 063 both edit `tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs` → single-agent merged execution to avoid concurrency collision.
+
+### Pre-edit baseline (post-task-024)
+
+- TRX: `projects/sdap-bff.api-test-suite-repair/baseline/pre-062-baseline-2026-05-31.trx`
+- Counts: **422 total / 88 pass / 198 fail / 136 skip** — matches task 024's triage exactly
+- Top failure cluster: `CosmosPersistence:Endpoint is not configured` (200 raw text matches, fires first at host build)
+- Cluster B (`SpeAdmin:KeyVaultUri ... required`) had 196 raw text matches but masked behind Cosmos error
+
+### Edit applied
+
+- File: `tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs`
+- Added 1 dict-entry: `["CosmosPersistence:Endpoint"] = "https://test.documents.azure.com:443/"`
+- **`SpeAdmin:KeyVaultUri` was ALREADY present** at line 74 (added by upstream commit 1b5cf735 — Reporting Wave 6 — outside this project). No edit needed for cluster B's fixture-side scope.
+- Net change: **+7 lines** (1 dict entry + 5 lines of comment + 1 blank), 0 deletions, ~1.6% file delta — NFR-02 compliant.
+
+### Build verification
+
+```
+dotnet build tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj -c Release
+→ Build succeeded. 0 Error(s), 3 Warning(s) (pre-existing: 2× NU1903 Kiota CVE, 1× CS0109 UploadIntegrationTests.cs:550 — all out of scope per NFR-01)
+```
+
+### Post-edit run
+
+- TRX: `projects/sdap-bff.api-test-suite-repair/baseline/post-062-2026-05-31.trx`
+- Counts: **422 total / 262 pass / 108 fail / 52 skip**
+- Delta vs. pre-edit: **-90 failures, +174 passes, -84 skips** (many previously-skipped tests now run real assertions)
+
+### Per-cluster disposition
+
+| Cluster | Pre-projected | Cleared by 062 | Notes |
+|---|---:|---:|---|
+| **A — CosmosPersistence:Endpoint** | 97 | **97 (100%)** | 0 active `CosmosPersistence:Endpoint is not configured` errors in post-062 TRX |
+| **B — SpeAdmin:KeyVaultUri** | 98 | **0 in IntegrationTestFixture scope** | 98 active errors REMAIN from 8 sibling fixtures (KnowledgeBaseTestFixture, SemanticSearchTestFixture, ChatEndpointsTestFixture, etc.) that inherit `WebApplicationFactory<Program>` directly. See discovery handoff. |
+| **C — Reporting Skip path** | 3 | **3 (100%)** | All 3 `GetStatus_ReturnsCorrectPrivilegeLevel_PerRole` rows now Pass via `IntegrationTestFixture.CreateReportingClient` (transitive Cosmos config fix). No flaky-quarantine needed. |
+| **Net Cluster A+C cleared** | **100** | **100 (100%)** | |
+
+### NEW finding — sibling-fixture discovery (out of 062/063 scope)
+
+98 of the 108 remaining failures trace to **8 sibling test fixtures** that re-implement `ConfigureHostConfiguration` without inheriting `IntegrationTestFixture`. Each needs its own config dict update to receive the same `CosmosPersistence:Endpoint` + verify `SpeAdmin:KeyVaultUri`. Full discovery + recommended follow-up task scope in: [`notes/handoffs/integration-fixture-sibling-discovery-2026-05-31.md`](notes/handoffs/integration-fixture-sibling-discovery-2026-05-31.md)
+
+Recommended follow-up: new `P23.I5` task (or scope absorption into existing P23.M/P23.A AI sub-cluster tasks per their `<relevant-files>` overlap with these fixtures).
+
+### §6.2 trait tagging disposition
+
+Per task 024's identical guidance for triage-style tasks: **DEFERRED**. Tagging the 108 residual failures now would commit prematurely to end-states that depend on sibling-fixture follow-up. Per §6.2, the test-by-test tags will be applied when the sibling-fixture task runs and the next failure layer (likely `signature-drift`, `wiremock-drift`, or `real-graph-regression`) becomes visible.
+
+### Real-bug-ledger entries
+
+**None.** No production bugs surfaced. The Cosmos config requirement is correct production code (`AiPersistenceModule.cs:56`); the test fixture was missing it.
+
+### NFR-01 verification
+
+```
+git status (Spe.Integration.Tests scope only)
+→ M tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs
+→ 0 changes under src/, power-platform/, infra/, scripts/
+```
+
+(Note: `tests/unit/Sprk.Bff.Api.Tests/Integration/SseStreamingIntegrationTests.cs` was modified by sibling Wave 2.4 task 061 — not by this task.)
+
+### §4.8 escalations
+
+**None.** ~1.6% file delta on `IntegrationTestFixture.cs` is well under the 50% threshold.
+
+### POML status updates
+
+- Task 062: `not-started` → **`completed`** (with completion-summary)
+- Task 063: `not-started` → **`completed-merged-with-062`** (with completion-summary referencing 062)
+
+### Step 9.5 Quality Gates
+
+- **code-review**: scope is a single additive dict-entry following the identical pattern in 6 sibling test fixtures (CustomWebAppFactory.cs:112, WorkspaceTestFixture.cs:135, etc.); pattern is canonical. No code-review issues.
+- **adr-check**: ADR-007 (SpeFileStore), ADR-010 (DI minimalism), ADR-013 (AI extends BFF), ADR-015 (Cosmos persistence) — config edit is purely value-supply for ADR-015 Cosmos client construction; no architectural changes; no ADR violations.
+- **dotnet build**: 0 errors (project compiles clean under integration-test build profile)
+
+### Note for main session
+
+**MERGED EXECUTION**: tasks 062 + 063 were combined into a single agent run because both POMLs target the same file (`IntegrationTestFixture.cs`). Task 024's triage §"Recommended P23.I sequencing" item 1 anticipated this collapse. The orchestrator should:
+
+1. Flip TASK-INDEX.md for task 062 → ✅ and task 063 → ✅-merged (or equivalent merged-status marker)
+2. Schedule the sibling-fixture follow-up task (see discovery handoff doc)
+3. Do NOT dispatch a separate agent for task 063 — its work is already absorbed into 062's completion record
+
+
+### Task 061 — completion
+
+| Field | Value |
+|---|---|
+| Files repaired | 2 |
+| Tests now passing (target classes) | 36/36 |
+| Pre-edit failure count | 9 (8 SSE + 1 Playbook) — matches inventory |
+| Post-edit failure count | 0 |
+| §6.2 trait applied | `[Trait("status", "repaired")]` on both classes |
+| Per-file diff vs NFR-02 50% ceiling | SseStreaming 6.4%; Playbook 5.5% — both well under |
+| `src/` modifications by this task | none (verified via `git status --short`) |
+| `CustomWebAppFactory.cs` modifications | none (verified via `git diff --stat`) |
+| WireMock fixtures touched | none (failures rooted in helper methods, not fixtures) |
+| Ledger entries (real-bug-pending-fix) | 0 — both classes' failures classified `test-stale` |
+| Escalations filed | 0 — no file approached NFR-02 50% ceiling |
+
+**Root causes**:
+1. `Microsoft.Extensions.AI.ChatResponseUpdate.Text` is non-virtual; NSubstitute cannot stub it. Fixed by constructing `new ChatResponseUpdate(ChatRole.Assistant, text)` directly across 3 helper methods + 2 iterator methods (`SetupChatClientTokens`, `GenerateCancellableTokens`, `GenerateTokensThenError`).
+2. `SlidingWindowRateLimiter.AcquireAsync` blocks indefinitely on queue once `QueueLimit` is reached; the test consumed permits 1-12 then blocked on permit 13. Replaced with `AttemptAcquire` (synchronous, non-queueing) — the semantic match for "429 when exceeded" assertions.
+3. `CreateTaskNodeExecutor_WithValidConfig_CreatesTask` mocked `IHttpClientFactory` but never stubbed `CreateClient("DataverseApi")`. Added a `StubHttpMessageHandler` returning Dataverse-shaped `201 Created + OData-EntityId` header, wired via `httpClientFactoryMock.Setup(...)`.
+
+**Quality gates (Step 9.5)**: NFR-01 ✅ (no `src/` changes), NFR-02 ✅ (<50% per file), NFR-03 ✅ (no DI changes), §4.5 ✅ (factory untouched), §6.2 ✅ (traits applied), ADR-013 ✅ (no facade violations — tests construct AI types directly using public Microsoft.Extensions.AI constructor, not a facade-bypassing inject), ADR-001/-007/-010 unaffected.
+
+**Wave 2.4 outcome contribution**: −9 failures from inventory cluster (8 SSE + 1 Playbook). Aligned with task 008 annotation +/− 0.
