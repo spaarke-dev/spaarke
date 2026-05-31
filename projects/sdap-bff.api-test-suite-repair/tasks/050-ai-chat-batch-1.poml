@@ -140,5 +140,29 @@
       Net new failure absorption: 4 (in-scope) + 14 (extended) = 18 failures.
       If owner directs separate sub-tasks (057/058/059) instead, replace this block with the new tasks.
     </scope-extension>
+    <scope-updated date="2026-05-31" source="task 026 re-reconciliation post-Wave-1.3">
+      Re-parse of `baseline/post-019-verify-2026-05-31.trx` shows the Sessions sub-cluster originally
+      flagged here (Services.Ai.Sessions.SessionRestoreServiceTests, 5 failures) is now empty —
+      resolved by Wave 1.1a task 012 (Ai/Tools+Sessions test-level repair, including 2
+      `real-bug-pending-fix` skip-tags). Refreshed in-scope failure counts:
+
+        - Services.Ai.Chat.* (4 in original glob): UNCHANGED at 4 — DirectOpenAi (1),
+          OrchestratorPromptBuilder (1), PlaybookChatContextProviderEnrichment (1),
+          ChatSseEventFactory (1)
+        - Services.Ai.Sessions.SessionRestoreServiceTests (was 5): **NOW 0 — RESOLVED by task 012**
+        - Services.Ai.Feedback.FeedbackServiceTests (was 4): UNCHANGED at 4
+        - Services.Ai.RagServiceTests (was 3): UNCHANGED at 3
+        - Services.Ai.WorkingDocumentServiceTests (was 2): UNCHANGED at 2
+
+      New net absorption: 18 → 13 failures (−5 from Sessions resolution).
+
+      Extended relevant-files set tightens to (drop Sessions):
+        - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Feedback/*.cs
+        - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagServiceTests.cs
+        - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/WorkingDocumentServiceTests.cs
+
+      Rigor stays FULL; effort estimate revised downward by ~30 minutes.
+      See `notes/handoffs/phase23-scope-delta-post-018-2026-05-31.md`.
+    </scope-updated>
   </notes>
 </task>

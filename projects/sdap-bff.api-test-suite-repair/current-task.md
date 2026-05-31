@@ -1747,3 +1747,66 @@ Verify-PR cleanup: PR #313 closed 20:17:02 UTC. Remote branch `test/sdap-ci-repa
 - **Task 025 (sdap-ci.yml workflow repair): done — gate's underlying signal restored**
 
 The CI gate now BOTH (a) blocks unauthorized merges via `enforce_admins: true` (task 023 verification) AND (b) receives the real pass/fail signal it requires from `sdap-ci.yml` (this task). Master is no longer operationally locked once this fix lands on master. Outcome C (CI gate restoration) is OPERATIONALLY COMPLETE.
+
+---
+
+## Task 026 — Phase 2+3 entry re-reconciliation (2026-05-31)
+
+**Rigor Level**: STANDARD (per POML metadata `<rigor>STANDARD</rigor>`; tags `reconciliation, scope-tightening`; metadata-only POML appends; no `.cs` modifications)
+**Status**: completed 2026-05-31
+
+### Trigger
+
+Phase 1 exit / Phase 2+3 entry handoff. Owner directive: re-reconcile post-Wave-1.3 failure distribution (172) against the Phase 2+3 task scope task 008 originally absorbed (342) BEFORE Wave 2.1 dispatches, to tighten task scope and prevent wasted work.
+
+### Execution
+
+Parsed `baseline/post-019-verify-2026-05-31.trx` via PowerShell `Select-Xml` (script `c:/tmp/parse-trx-026.ps1`). Result: 172 failures across 33 classes — exact match to the authoritative baseline.
+
+### Cluster-level deltas vs. task 008 inventory
+
+- **17 classes fully eliminated** since task 008 (170 failures cleared total):
+  - Wave 1.1a task 011 cleared Services.Communication.* (53)
+  - Wave 1.1a task 012 cleared Services.Ai.Sessions.SessionRestoreServiceTests (5)
+  - Wave 1.3 task 018 cleared 14 host-startup classes + partial reductions (112)
+- **0 new failing classes** (regression hunt clean — re-confirms task 019 verdict)
+- **33 classes with residual failures** (down from 50)
+
+### POML annotations applied
+
+| POML | Action | Pre-Phase-1 absorbed | Post-Wave-1.3 actual | Δ |
+|---|---|---:|---:|---:|
+| 050-ai-chat-batch-1 | `<scope-updated>` | 18 | 13 | −5 |
+| 055-communications-batch-1 | `<scope-resolved>` | 53 | 0 | −53 |
+| 070-low-tier-api-batch-1 | `<scope-updated>` | 97 | 28 | −69 |
+| 073-low-tier-endpoint-tests | `<scope-updated>` | 46 | 2 | −44 |
+| 044, 046, 053, 054, 060, 061, 071, 072 | none (unchanged) | 130 | 130 | 0 |
+| HOLD: Insights.Layer2 | unchanged (still HOLD) | 3 | 3 | 0 |
+| **Total** | — | **347** | **176** | **−171** |
+
+(Total 347 is a re-count slightly higher than task 008's 342 due to ArchivalFlow=1 double-count in 055's `<scope-extension>` block; post-019 measured 172 confirmed.)
+
+### Wave 2.1 task-tightening recommendations (key)
+
+- **055**: dispatch as no-op verification (~15 min, not ~3-5h)
+- **073**: rigor STANDARD → MINIMAL feasible (~30 min, not ~2-4h); SpeAdmin sub-task unnecessary
+- **070**: keep FULL but do NOT split into 1a/1b (28 failures fits comfortably)
+- **050**: FULL retained; Sessions extension dropped from relevant-files
+- 060 unchanged but flag for owner: the Workspace 100% rate is fixture-level (not factory) — analogous integration-fixture edit may clear in one shot, BUT 060 targets unit-suite Integration/* mirror (different file from `Spe.Integration.Tests/IntegrationTestFixture.cs`)
+
+### Outputs
+
+| Artifact | Path |
+|---|---|
+| Failure inventory | `baseline/failure-inventory-post-018-2026-05-31.md` (172 failures × 33 classes) |
+| Delta report | `notes/handoffs/phase23-scope-delta-post-018-2026-05-31.md` (per-task action matrix + Wave 2.1 recommendations) |
+| Task 026 POML status | `completed` (with `<completion>` block) |
+
+### NFR compliance
+
+- NFR-01: no `src/`/`power-platform/`/`infra/`/`scripts/` modifications ✅
+- NFR-02: no test `.cs` modifications (metadata-only) ✅
+- NFR-09: `<repair-not-rewrite>true</repair-not-rewrite>` present ✅
+- Permission boundary `.claude/` denied: never touched ✅
+
+TASK-INDEX.md NOT updated by this task (per orchestrator directive — main session aggregates).

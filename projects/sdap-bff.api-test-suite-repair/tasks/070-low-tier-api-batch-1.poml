@@ -157,5 +157,31 @@
       with 1a as its own wave-2.5 sub-task. Owner may revise wave plan.
       See `notes/handoffs/phase23-scope-delta-2026-05-31.md`.
     </scope-extension>
+    <scope-updated date="2026-05-31" source="task 026 re-reconciliation post-Wave-1.3">
+      Major scope reduction — Wave 1.3 task 018's factory edit resolved 7 of the 11 Api.Ai.*
+      classes originally in scope (all those failing at host-startup level): PlaybookRunEndpoints
+      (was 20 → 0), HandlerEndpoints (11 → 0), NodeEndpoints (10 → 0), ModelEndpoints (8 → 0),
+      ChatSessionPlanEndpoint (5 → 0), ChatRefineEndpoint (4 → 0). Two others partially cleared:
+      StandaloneChatContextEndpoints (18 → 11, −7) + AnalysisChatContextEndpoints (10 → 7, −3).
+
+      **Refreshed in-scope failure counts** per `baseline/failure-inventory-post-018-2026-05-31.md`:
+
+        - Api.Ai.StandaloneChatContextEndpointsTests: 11 (was 18)
+        - Api.Ai.AnalysisChatContextEndpointsTests: 7 (was 10)
+        - Api.Ai.DailyBriefingEndpointsTests: 2 (unchanged)
+        - Api.Ai.R2SseEventEmitterTests: 1 (unchanged)
+        - Api.Agent.AgentConversationServiceTests: 3 (unchanged)
+        - Api.Agent.HandoffUrlBuilderTests: 3 (unchanged)
+        - Api.Agent.AgentConfigurationServiceTests: 1 (unchanged)
+        - **Total: 28 failures (was 97; −69 by task 018)**
+
+      All residual failures are assertion-level (not host-startup), consistent with the task 018
+      analysis. Per-test investigation now feasible at the original LOW-tier triage rigor.
+
+      **Wave plan revision**: the original "split into 1a (Api/Ai/*) and 1b (Api/Agent/*) sub-tasks"
+      suggestion is **NO LONGER NEEDED** — 28 failures across 7 classes fits comfortably in a
+      single batch within the task's original 2-4h estimate. Rigor stays FULL; no split required.
+      See `notes/handoffs/phase23-scope-delta-post-018-2026-05-31.md`.
+    </scope-updated>
   </notes>
 </task>

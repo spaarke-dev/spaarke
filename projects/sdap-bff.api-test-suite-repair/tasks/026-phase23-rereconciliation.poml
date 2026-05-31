@@ -1,7 +1,7 @@
 <task id="026" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>Phase 2+3 entry re-reconciliation — re-parse post-Wave-1.3 TRX + tighten task scope</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>30-45 minutes</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-1-exit, phase-2-3-entry, reconciliation, scope-tightening</tags>
@@ -177,5 +177,25 @@
       Owner directed re-reconciliation before Wave 2.1 dispatch to tighten task scope and reduce
       wasted Wave 2.1 work. Follows the same scope-extension pattern task 008 established.
     </origin>
+    <completion date="2026-05-31" source="task 026 execution">
+      All 8 POML steps executed. Parsed `baseline/post-019-verify-2026-05-31.trx` via PowerShell
+      XPath (172 failures across 33 classes — exact match to authoritative baseline). Outputs:
+        1. `baseline/failure-inventory-post-018-2026-05-31.md` — per-class + namespace-prefix roll-up
+        2. `notes/handoffs/phase23-scope-delta-post-018-2026-05-31.md` — pre→post delta + per-task action matrix
+        3. POML annotation appends to 4 of 12 Phase 2+3 POMLs (the 8 unchanged ones need no edit):
+           - `tasks/050-ai-chat-batch-1.poml` — `<scope-updated>` (18 → 13; Sessions sub-cluster cleared by task 012)
+           - `tasks/055-communications-batch-1.poml` — `<scope-resolved>` (53 → 0; full cluster cleared by Wave 1.1a task 011)
+           - `tasks/070-low-tier-api-batch-1.poml` — `<scope-updated>` (97 → 28; major Api.Ai.* reduction by task 018; split into 1a/1b no longer needed)
+           - `tasks/073-low-tier-endpoint-tests.poml` — `<scope-updated>` (46 → 2; near-trivial residual; SpeAdmin sub-task unnecessary)
+
+      Regression hunt: zero new failing classes. Re-confirms task 019's regression-free verdict.
+      Insights.Layer2 (3 failures) HOLD status unchanged — pending Phase 0 task 005 owner directive.
+
+      No `src/`, `power-platform/`, `infra/`, `scripts/` modifications (NFR-01 satisfied).
+      No test `.cs` files modified (NFR-02 — metadata-only task).
+      `<repair-not-rewrite>true</repair-not-rewrite>` present in this POML metadata (NFR-09 satisfied).
+
+      TASK-INDEX.md not updated by this task per orchestrator directive (main session aggregates).
+    </completion>
   </notes>
 </task>

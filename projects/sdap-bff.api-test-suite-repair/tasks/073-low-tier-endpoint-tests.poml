@@ -147,5 +147,40 @@
       edits. If owner directs separate sub-task (075-low-tier-speadmin), replace this block.
       See `notes/handoffs/phase23-scope-delta-2026-05-31.md`.
     </scope-extension>
+    <scope-updated date="2026-05-31" source="task 026 re-reconciliation post-Wave-1.3">
+      Near-total scope reduction — Wave 1.3 task 018's factory edit (the very root-cause hypothesis
+      noted above — "endpoint pipeline regression... startup") **was** the right hypothesis.
+      The factory edit's `CosmosPersistence:*` + `AgentService:*` config keys cleared the
+      host-startup failures in all but 2 classes.
+
+      **Cleared by task 018** (originally absorbed by this task):
+        - UploadEndpointsTests: 9 → 0 (RESOLVED)
+        - ListingEndpointsTests: 6 → 0 (RESOLVED)
+        - UserEndpointsTests: 6 → 0 (RESOLVED)
+        - FileOperationsTests: 6 → 0 (RESOLVED)
+        - EndpointGroupingTests: 3 → 0 (RESOLVED)
+        - CorsAndAuthTests: 1 → 0 (RESOLVED)
+        - SpeAdmin.SearchItemsTests (extension item 5): 7 → 0 (RESOLVED)
+        - Subtotal cleared: 38
+
+      **Partially cleared** (residual non-startup failures):
+        - HealthAndHeadersTests: 4 → 1 (3 cleared by 018; 1 residual non-startup)
+        - PipelineHealthTests: 4 → 1 (3 cleared by 018; 1 residual non-startup)
+        - Subtotal partial: 8 → 2
+
+      **Refreshed in-scope failure counts**:
+        - HealthAndHeadersTests: 1
+        - PipelineHealthTests: 1
+        - **Total: 2 failures (was 46; −44 by task 018)**
+
+      **Wave plan revision**: this task is now near-trivial. Rigor recommendation drops from
+      FULL to STANDARD or even MINIMAL — 2 failures in 2 classes, both single-test residuals
+      after a known root-cause fix. Effort estimate revises from ~2-4h to <30 minutes.
+
+      Note: SpeAdmin extension is fully resolved; if owner originally planned a separate
+      `075-low-tier-speadmin.poml`, that task is also unnecessary (SearchItems was the only
+      failing SpeAdmin class).
+      See `notes/handoffs/phase23-scope-delta-post-018-2026-05-31.md`.
+    </scope-updated>
   </notes>
 </task>

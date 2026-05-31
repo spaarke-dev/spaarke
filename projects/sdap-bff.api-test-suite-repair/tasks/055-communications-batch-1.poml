@@ -140,5 +140,22 @@
       may split into batch 1a (AssociationMapping 29) + batch 1b (DataverseRecord 23) + retain
       batch 2 (056) for remaining + ArchivalFlow (1).
     </scope-extension>
+    <scope-resolved date="2026-05-31" source="task 026 re-reconciliation post-Wave-1.3">
+      The entire Communications failure cluster originally absorbed by this task (53 failures
+      across 3 classes — AssociationMappingTests 29, DataverseRecordCreationTests 23,
+      ArchivalFlowTests 1) is **now empty** per `baseline/failure-inventory-post-018-2026-05-31.md`.
+      All three classes cleared by Wave 1.1a task 011 (Communications cluster repair, completed
+      2026-05-31; see project CLAUDE.md Decisions Made entry).
+
+      This task's effective scope reduces to the pre-task-008 baseline: the Services/Communication/*
+      glob now contains 0 failing tests. Recommended Wave 2.1 action: dispatch as **no-op
+      verification** (run `dotnet test --filter "FullyQualifiedName~Services.Communication"`,
+      confirm zero failures, mark task `completed` without per-test edits). Sibling project
+      (x-email-communication-solution-r2) Phase 0 task 005 priority-order sign-off NO LONGER
+      gates this task — no edits planned.
+
+      Effort estimate revises from ~3-5h to ~15 minutes (verification only).
+      See `notes/handoffs/phase23-scope-delta-post-018-2026-05-31.md`.
+    </scope-resolved>
   </notes>
 </task>
