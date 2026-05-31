@@ -5,6 +5,76 @@
 
 ---
 
+## Wave 2.5 task 074 — LOW-tier closeout + Phase 2+3 exit gate declaration — 2026-05-31
+
+- **Task**: 074 (Phase 2+3 Wave 2.5 — P23.L5 LOW-tier closeout / verification gate)
+- **Status**: completed 2026-05-31
+- **Rigor**: STANDARD (POML `<rigor>STANDARD</rigor>`)
+- **Scope**: Verify 070/071/072/073 completion; reconcile archive ledger; validate real-bug ledger; capture authoritative post-Phase-2+3 baseline; declare exit gate.
+
+### Per-task verification (070, 071, 072, 073)
+- ✅ 070: 28 failures handled; 3 real-bugs filed (RB-T070-01..03); 117 pass / 13 skip / 0 fail
+- ✅ 071: 10 failures repaired (OfficeTestWebAppFactory + route prefix); 70 pass / 0 fail
+- ✅ 072: 17 failures repaired (Reporting DefaultHttpContext); 85 pass / 0 fail
+- ✅ 073: NO-OP — already cleared by task 033 Wave 2.1
+- **Wave 2.5 cumulative**: 55 in-scope failures dispositioned + 3 new real-bug ledger entries
+
+### Fresh full-suite TRX measurements (this task's primary deliverable)
+- **Unit TRX**: [`baseline/post-phase23-2026-05-31.trx`](baseline/post-phase23-2026-05-31.trx) — **6030 total / 5893 pass (97.7%) / 4 fail (0.07%) / 133 skip** — duration 1m 14s
+- **Integration TRX**: [`baseline/post-phase23-integration-2026-05-31.trx`](baseline/post-phase23-integration-2026-05-31.trx) — **422 total / 323 pass (76.5%) / 47 fail (11.1%) / 52 skip** — duration 29s
+
+### Delta vs prior baselines
+| Suite | Phase 0 | Phase 1 end (post-019) | Phase 2+3 close (this) | Δ vs P0 | Δ vs P1 |
+|---|---:|---:|---:|---:|---:|
+| Unit Failed | 342 | 172 | **4** | **−338 (−98.8%)** | **−168 (−97.7%)** |
+| Integration Failed | 198 | (post-024) 198 | **47** | **−151 (−76.3%)** | — (matches post-027 exactly) |
+
+### Authoritative baseline doc
+- Written: [`baseline/post-phase23-authoritative-2026-05-31.md`](baseline/post-phase23-authoritative-2026-05-31.md) (~250 lines, full delta chain + residual disposition + NFR proof)
+
+### Archive ledger reconciliation
+- Cumulative project archives through Phase 2+3 close: **0** (excluding pre-existing JobProcessorTests.cs.archived-2025-10-14)
+- NFR-04 (≤10/phase): ✅ trivially satisfied across all phases
+- Created [`ledgers/archive-ledger.md`](ledgers/archive-ledger.md) with zero-archives canonical entry + per-phase reconciliation table
+
+### Real-bug ledger validation
+- 12 entries: RB-T012-01 / RB-T034-01 / RB-T044-01..05 / RB-T050-01 / RB-T053-01 / RB-T070-01..03
+- All entries schema-complete: severity (HIGH ×1, MEDIUM ×4, LOW ×7) + fix-by (2026-07-31 ×11, 2026-09-30 ×1) + owner-TBD on all
+
+### Phase 2+3 exit gate declaration
+- **Verdict: PARTIAL CLOSURE**
+  - ✅ 98.8% unit failures eliminated; 76.3% integration failures eliminated
+  - ✅ Wave 2.5 complete; archive ledger reconciled; real-bug ledger valid
+  - ❌ **51 residual `Failed` tests remain** (4 unit + 47 integration) — CANNOT remain at project close per §4.3 / NFR-10
+  - **Deferred to Phase 4 task 084 (triple-run validation) for §6.2 final end-state classification**:
+    - Unit: 3 Insights Layer2 (HOLD on `ai-spaarke-insights-engine-r1` sibling sign-off) + 1 new AnalysisContextBuilder.BuildContinuationPrompt_ExceedsMaxHistory_TruncatesToLimit (triage TBD)
+    - Integration: 37 param-infer (KB 13 + Chat 11 + ReAnalysis 8 + Auth 5) + 9 Upload + 1 PrecedentAdmin — all known per post-027 delta
+
+### Quality gates (STANDARD rigor — no code-review / adr-check required)
+- NFR-01 (no production change): ✅ `git status` clean working tree
+- NFR-02 (verification only): ✅ wrote only `projects/` artifacts
+- NFR-04 (archive ceiling): ✅ trivially (0 / 10)
+- NFR-09 (repair-not-rewrite): ✅ POML metadata
+- §6.3 (cite measured numbers): ✅ all baseline figures sourced from TRX Counters elements
+
+### POML status flip
+- `tasks/074-low-tier-closeout.poml` status: not-started → **completed** with completion-notes block
+
+### Files modified this session
+- `projects/sdap-bff.api-test-suite-repair/baseline/post-phase23-2026-05-31.trx` (created by dotnet test)
+- `projects/sdap-bff.api-test-suite-repair/baseline/post-phase23-integration-2026-05-31.trx` (created by dotnet test)
+- `projects/sdap-bff.api-test-suite-repair/baseline/post-phase23-authoritative-2026-05-31.md` (created)
+- `projects/sdap-bff.api-test-suite-repair/ledgers/archive-ledger.md` (created)
+- `projects/sdap-bff.api-test-suite-repair/tasks/074-low-tier-closeout.poml` (status flip)
+- `projects/sdap-bff.api-test-suite-repair/current-task.md` (this entry)
+
+### Phase 4 forward dependency
+- Phase 4 tasks 080–086 CLEARED TO START
+- Task 084 MUST drive 51 residuals to §6.2 final end-states before task 086 final verification can sign off
+- TASK-INDEX.md will be updated by the orchestrator (not this task — per "Do NOT mark TASK-INDEX" directive)
+
+---
+
 ## Wave 2.5 task 071 — LOW-tier Api batch 2 (Office cluster) — 2026-05-31
 
 - **Task**: 071 (Phase 2+3 Wave 2.5 — P23.L2 LOW-tier Api/* batch 2)

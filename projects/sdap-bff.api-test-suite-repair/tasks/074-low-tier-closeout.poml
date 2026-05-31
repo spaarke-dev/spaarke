@@ -1,7 +1,23 @@
 <task id="074" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.L5 — LOW-tier closeout + archive-ledger reconciliation</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-date>2026-05-31</completed-date>
+    <completion-notes>
+      Fresh full-suite TRX measurements captured for both projects.
+      Unit: 6030 total / 5893 pass / 4 fail / 133 skip (−338 / −98.8% vs Phase 0; −168 / −97.7% vs Phase 1 end).
+      Integration: 422 total / 323 pass / 47 fail / 52 skip (−151 / −76.3% vs Phase 0; matches post-027 exactly).
+      Wave 2.5 cumulative archive count = 0 across tasks 070/071/072/073 (NFR-04 trivially satisfied).
+      Real-bug ledger schema-validated (12 entries; severity + fix-by + owner-TBD complete on all).
+      Authoritative baseline written: `baseline/post-phase23-authoritative-2026-05-31.md`.
+      Archive ledger created with zero-archives canonical entry: `ledgers/archive-ledger.md`.
+      Phase 2+3 exit gate declared **PARTIAL CLOSURE**: 51 residual failures (4 unit + 47 integration)
+      remain and CANNOT remain `Failed` at project close per §4.3 / NFR-10 — DEFERRED to Phase 4 task 084
+      for re-classification to §6.2 final end-states (`real-bug-pending-fix` / `flaky-quarantined` / `repaired`).
+      Insights Layer2 (3) HOLD on sibling sign-off; AnalysisContextBuilder (1) new emergent — both to Phase 4.
+      Integration residuals (37 param-infer + 9 Upload + 1 PrecedentAdmin) carry forward unchanged from post-027.
+      No production code changes (NFR-01 verified clean working tree).
+    </completion-notes>
     <estimated-effort>1-2 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, low-tier, p23-l, bff-api, testing, verification-gate, closeout</tags>
