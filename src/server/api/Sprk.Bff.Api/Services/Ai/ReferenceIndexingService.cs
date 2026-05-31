@@ -5,22 +5,32 @@ using Azure.Search.Documents.Models;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai.Indexing;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
-/// Indexes golden reference knowledge sources into the <c>spaarke-rag-references</c> AI Search index.
-/// Follows the same chunk → embed → index pattern as <see cref="RagIndexingPipeline"/>.
+/// Indexes content into AI Search using a chunk → embed → delete-stale → upsert pipeline.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Pipeline steps per knowledge source:
+/// <b>History (Task 025 W3.5 refactor, 2026-05-28)</b>: this service was originally hard-coded to
+/// the <c>spaarke-rag-references</c> index and the <see cref="KnowledgeDocument"/> schema. Per the Q5
+/// duplication audit it has been parameterized so D-P4 (Precedent projection sync into
+/// <c>spaarke-insights-index</c>) and D-P11 (Observation mirror) can reuse the same pipeline without
+/// re-implementing chunking, embedding, idempotent delete, or batched upsert. Existing callers
+/// (<c>AdminKnowledgeEndpoints</c> and the bulk path) continue to use the original convenience methods,
+/// which now delegate to the generic <see cref="IndexIntoAsync{TDoc}"/> overload via
+/// <see cref="KnowledgeDocumentSchemaMapper"/>. Behavior for the references index is unchanged.
+/// </para>
+/// <para>
+/// Pipeline steps per source:
 /// <list type="ordered">
-///   <item>Delete existing chunks for the source from spaarke-rag-references (idempotency).</item>
-///   <item>Chunk content at 512-token granularity with 100-token overlap.</item>
+///   <item>Delete existing documents for the source from the target index (idempotency).</item>
+///   <item>Chunk content using the supplied <see cref="ChunkingOptions"/> (default: 512-token / 100-token overlap).</item>
 ///   <item>Generate 3072-dim embeddings via <see cref="IOpenAiClient"/>.</item>
-///   <item>Build index documents with all schema fields (knowledgeSourceId, tags, domain).</item>
-///   <item>Upload to spaarke-rag-references index.</item>
+///   <item>Build index documents via the supplied <see cref="ISchemaMapper{TDoc}"/>.</item>
+///   <item>Merge-or-upload to the named index in batches of up to 1000.</item>
 /// </list>
 /// </para>
 /// <para>
@@ -28,7 +38,7 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// <list type="bullet">
 ///   <item>ADR-001: Called via admin endpoints — not wired to Service Bus.</item>
 ///   <item>ADR-010: Registered as concrete singleton in AiModule.cs.</item>
-///   <item>Idempotent: deletes existing chunks before re-indexing.</item>
+///   <item>Idempotent: deletes existing documents for the source before re-indexing.</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -43,6 +53,9 @@ public sealed partial class ReferenceIndexingService
 
     // Maximum number of concurrent embedding API calls (prevents rate-limit errors).
     private const int MaxConcurrentEmbeddings = 16;
+
+    // Maximum number of documents per AI Search upload batch.
+    private const int UploadBatchSize = 1000;
 
     // Reference index: 512 tokens → 2048 chars, 100-token overlap → 400 chars.
     private static readonly ChunkingOptions ReferenceChunkingOptions = new()
@@ -71,57 +84,70 @@ public sealed partial class ReferenceIndexingService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    // -------------------------------------------------------------------------
+    // Generic indexing API (Task 025 W3.5 refactor — added 2026-05-28)
+    // -------------------------------------------------------------------------
+
     /// <summary>
-    /// Indexes a single knowledge source into the spaarke-rag-references index.
-    /// Deletes existing chunks first for idempotency, then chunks, embeds, and uploads.
+    /// Indexes <paramref name="content"/> into <paramref name="indexName"/> using <paramref name="schemaMapper"/>
+    /// to translate chunks + embeddings into the target document type. Idempotent: deletes existing documents
+    /// for <paramref name="sourceId"/> first.
     /// </summary>
-    /// <param name="knowledgeSourceId">The Dataverse knowledge source ID.</param>
-    /// <param name="content">The text content to index.</param>
-    /// <param name="name">Display name of the knowledge source.</param>
-    /// <param name="domain">Domain classification (e.g., "legal", "finance").</param>
-    /// <param name="tags">Tags for categorization and filtering.</param>
+    /// <typeparam name="TDoc">The AI Search document type for the target index (e.g., <see cref="KnowledgeDocument"/>, Observation row).</typeparam>
+    /// <param name="indexName">Name of the AI Search index to upsert into.</param>
+    /// <param name="sourceId">Stable source identifier; used to compose document IDs and for idempotent delete.</param>
+    /// <param name="content">Text content to chunk, embed, and index.</param>
+    /// <param name="schemaMapper">Mapper translating chunks + embeddings into <typeparamref name="TDoc"/> and supplying the source filter.</param>
+    /// <param name="context">Optional display/metadata context (name, domain, tags).</param>
+    /// <param name="chunkingOptions">Optional chunking configuration. Defaults to the reference profile (512-token / 100-token overlap).</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>A result with chunk counts and elapsed time.</returns>
-    public async Task<ReferenceIndexingResult> IndexKnowledgeSourceAsync(
-        string knowledgeSourceId,
+    /// <returns>Counts and duration for the operation.</returns>
+    public async Task<ReferenceIndexingResult> IndexIntoAsync<TDoc>(
+        string indexName,
+        string sourceId,
         string content,
-        string name,
-        string domain,
-        string[] tags,
+        ISchemaMapper<TDoc> schemaMapper,
+        SchemaMappingContext? context = null,
+        ChunkingOptions? chunkingOptions = null,
         CancellationToken ct = default)
+        where TDoc : class
     {
-        ArgumentException.ThrowIfNullOrEmpty(knowledgeSourceId);
+        ArgumentException.ThrowIfNullOrEmpty(indexName);
+        ArgumentException.ThrowIfNullOrEmpty(sourceId);
         ArgumentException.ThrowIfNullOrEmpty(content);
+        ArgumentNullException.ThrowIfNull(schemaMapper);
 
         var stopwatch = Stopwatch.StartNew();
+        var effectiveContext = context ?? SchemaMappingContext.Empty;
+        var effectiveChunking = chunkingOptions ?? ReferenceChunkingOptions;
 
         _logger.LogInformation(
-            "Starting reference indexing for knowledge source {KnowledgeSourceId}, name={Name}, domain={Domain}",
-            knowledgeSourceId, name, domain);
+            "Starting indexing into {IndexName} for sourceId={SourceId}, mapper={Mapper}",
+            indexName, sourceId, typeof(TDoc).Name);
 
         try
         {
-            var searchClient = _searchIndexClient.GetSearchClient(_aiSearchOptions.RagReferencesIndexName);
+            var searchClient = _searchIndexClient.GetSearchClient(indexName);
 
-            // Step 1: Delete existing chunks for this source (idempotency).
-            var deletedCount = await DeleteChunksForSourceAsync(searchClient, knowledgeSourceId, ct);
+            // Step 1: Delete existing documents for this source (idempotency).
+            var deletedCount = await DeleteForSourceAsync(searchClient, schemaMapper, sourceId, ct);
 
             _logger.LogDebug(
-                "Deleted {DeletedCount} existing chunks for knowledge source {KnowledgeSourceId}",
-                deletedCount, knowledgeSourceId);
+                "Deleted {DeletedCount} existing documents for sourceId={SourceId} in {IndexName}",
+                deletedCount, sourceId, indexName);
 
-            // Step 2: Chunk the content (512 tokens, 100-token overlap).
-            var chunks = await _chunkingService.ChunkTextAsync(content, ReferenceChunkingOptions, ct);
+            // Step 2: Chunk the content.
+            var chunks = await _chunkingService.ChunkTextAsync(content, effectiveChunking, ct);
 
             if (chunks.Count == 0)
             {
                 _logger.LogWarning(
-                    "No chunks produced for knowledge source {KnowledgeSourceId} — content may be empty",
-                    knowledgeSourceId);
+                    "No chunks produced for sourceId={SourceId} in {IndexName} — content may be empty",
+                    sourceId, indexName);
 
                 return new ReferenceIndexingResult
                 {
-                    KnowledgeSourceId = knowledgeSourceId,
+                    KnowledgeSourceId = sourceId,
                     ChunksIndexed = 0,
                     ChunksDeleted = deletedCount,
                     DurationMs = stopwatch.ElapsedMilliseconds
@@ -129,35 +155,34 @@ public sealed partial class ReferenceIndexingService
             }
 
             _logger.LogDebug(
-                "Chunked knowledge source {KnowledgeSourceId}: {ChunkCount} chunks",
-                knowledgeSourceId, chunks.Count);
+                "Chunked sourceId={SourceId}: {ChunkCount} chunks",
+                sourceId, chunks.Count);
 
-            // Step 3: Generate 3072-dim embeddings.
+            // Step 3: Generate embeddings.
             var embeddings = await GenerateEmbeddingsInBatchesAsync(
                 chunks.Select(c => c.Content).ToList(), ct);
 
-            // Step 4: Build index documents with all schema fields.
-            var documents = BuildReferenceDocuments(
-                chunks, embeddings, knowledgeSourceId, name, domain, tags);
+            // Step 4: Build typed index documents via the mapper.
+            var documents = schemaMapper.BuildDocuments(chunks, embeddings, sourceId, effectiveContext);
 
-            // Step 5: Upload to spaarke-rag-references index.
+            // Step 5: Upload to the target index.
             var uploadedCount = await UploadDocumentsAsync(searchClient, documents, ct);
 
             stopwatch.Stop();
 
             _logger.LogInformation(
-                "Reference indexing complete for {KnowledgeSourceId}: {ChunksIndexed} chunks indexed in {ElapsedMs}ms",
-                knowledgeSourceId, uploadedCount, stopwatch.ElapsedMilliseconds);
+                "Indexing complete for sourceId={SourceId} in {IndexName}: {ChunksIndexed} documents indexed in {ElapsedMs}ms",
+                sourceId, indexName, uploadedCount, stopwatch.ElapsedMilliseconds);
 
             LogReferenceIndexingCompleted(
-                knowledgeSourceId: knowledgeSourceId,
-                name: name,
+                knowledgeSourceId: sourceId,
+                name: effectiveContext.Name ?? sourceId,
                 chunksIndexed: uploadedCount,
                 elapsedMs: stopwatch.ElapsedMilliseconds);
 
             return new ReferenceIndexingResult
             {
-                KnowledgeSourceId = knowledgeSourceId,
+                KnowledgeSourceId = sourceId,
                 ChunksIndexed = uploadedCount,
                 ChunksDeleted = deletedCount,
                 DurationMs = stopwatch.ElapsedMilliseconds
@@ -168,7 +193,7 @@ public sealed partial class ReferenceIndexingService
             stopwatch.Stop();
 
             LogReferenceIndexingFailed(
-                knowledgeSourceId: knowledgeSourceId,
+                knowledgeSourceId: sourceId,
                 errorType: ex.GetType().Name);
 
             throw;
@@ -176,23 +201,90 @@ public sealed partial class ReferenceIndexingService
     }
 
     /// <summary>
-    /// Deletes all chunks for a knowledge source from the spaarke-rag-references index.
+    /// Deletes all documents for <paramref name="sourceId"/> from <paramref name="indexName"/>
+    /// using the source filter supplied by <paramref name="schemaMapper"/>.
+    /// </summary>
+    public async Task<int> DeleteFromAsync<TDoc>(
+        string indexName,
+        string sourceId,
+        ISchemaMapper<TDoc> schemaMapper,
+        CancellationToken ct = default)
+        where TDoc : class
+    {
+        ArgumentException.ThrowIfNullOrEmpty(indexName);
+        ArgumentException.ThrowIfNullOrEmpty(sourceId);
+        ArgumentNullException.ThrowIfNull(schemaMapper);
+
+        var searchClient = _searchIndexClient.GetSearchClient(indexName);
+        var deletedCount = await DeleteForSourceAsync(searchClient, schemaMapper, sourceId, ct);
+
+        _logger.LogInformation(
+            "Deleted {DeletedCount} documents for sourceId={SourceId} from index {IndexName}",
+            deletedCount, sourceId, indexName);
+
+        return deletedCount;
+    }
+
+    // -------------------------------------------------------------------------
+    // Convenience wrappers — preserve original spaarke-rag-references behavior
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Indexes a single knowledge source into the <c>spaarke-rag-references</c> index.
+    /// Thin wrapper around <see cref="IndexIntoAsync{TDoc}"/> using <see cref="KnowledgeDocumentSchemaMapper"/>;
+    /// behavior is identical to the pre-refactor implementation.
+    /// </summary>
+    /// <param name="knowledgeSourceId">The Dataverse knowledge source ID.</param>
+    /// <param name="content">The text content to index.</param>
+    /// <param name="name">Display name of the knowledge source.</param>
+    /// <param name="domain">Domain classification (e.g., "legal", "finance").</param>
+    /// <param name="tags">Tags for categorization and filtering.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A result with chunk counts and elapsed time.</returns>
+    public Task<ReferenceIndexingResult> IndexKnowledgeSourceAsync(
+        string knowledgeSourceId,
+        string content,
+        string name,
+        string domain,
+        string[] tags,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(knowledgeSourceId);
+        ArgumentException.ThrowIfNullOrEmpty(content);
+
+        var context = new SchemaMappingContext
+        {
+            Name = name,
+            Domain = domain,
+            Tags = tags
+        };
+
+        return IndexIntoAsync(
+            indexName: _aiSearchOptions.RagReferencesIndexName,
+            sourceId: knowledgeSourceId,
+            content: content,
+            schemaMapper: KnowledgeDocumentSchemaMapper.Instance,
+            context: context,
+            chunkingOptions: ReferenceChunkingOptions,
+            ct: ct);
+    }
+
+    /// <summary>
+    /// Deletes all chunks for a knowledge source from the <c>spaarke-rag-references</c> index.
+    /// Thin wrapper around <see cref="DeleteFromAsync{TDoc}"/>.
     /// </summary>
     /// <param name="knowledgeSourceId">The knowledge source ID whose chunks should be deleted.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Number of chunks deleted.</returns>
-    public async Task<int> DeleteKnowledgeSourceAsync(string knowledgeSourceId, CancellationToken ct = default)
+    public Task<int> DeleteKnowledgeSourceAsync(string knowledgeSourceId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(knowledgeSourceId);
 
-        var searchClient = _searchIndexClient.GetSearchClient(_aiSearchOptions.RagReferencesIndexName);
-        var deletedCount = await DeleteChunksForSourceAsync(searchClient, knowledgeSourceId, ct);
-
-        _logger.LogInformation(
-            "Deleted {DeletedCount} chunks for knowledge source {KnowledgeSourceId} from references index",
-            deletedCount, knowledgeSourceId);
-
-        return deletedCount;
+        return DeleteFromAsync(
+            indexName: _aiSearchOptions.RagReferencesIndexName,
+            sourceId: knowledgeSourceId,
+            schemaMapper: KnowledgeDocumentSchemaMapper.Instance,
+            ct: ct);
     }
 
     /// <summary>
@@ -337,53 +429,16 @@ public sealed partial class ReferenceIndexingService
     }
 
     /// <summary>
-    /// Builds <see cref="KnowledgeDocument"/> objects for the reference index from text chunks and embeddings.
+    /// Deletes all documents matching the schema mapper's source filter from <paramref name="searchClient"/>.
     /// </summary>
-    private static IReadOnlyList<KnowledgeDocument> BuildReferenceDocuments(
-        IReadOnlyList<TextChunk> chunks,
-        IReadOnlyList<ReadOnlyMemory<float>> embeddings,
-        string knowledgeSourceId,
-        string name,
-        string domain,
-        string[] tags)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var docs = new List<KnowledgeDocument>(chunks.Count);
-
-        for (int i = 0; i < chunks.Count; i++)
-        {
-            var chunk = chunks[i];
-            docs.Add(new KnowledgeDocument
-            {
-                // Format: {knowledgeSourceId}_ref_{chunkIndex}
-                Id = $"{knowledgeSourceId}_ref_{chunk.Index}",
-                TenantId = "system",
-                KnowledgeSourceId = knowledgeSourceId,
-                KnowledgeSourceName = name,
-                DocumentType = domain,
-                Content = chunk.Content,
-                ChunkIndex = chunk.Index,
-                ChunkCount = chunks.Count,
-                ContentVector = i < embeddings.Count ? embeddings[i] : ReadOnlyMemory<float>.Empty,
-                Tags = tags.Length > 0 ? tags.ToList() : null,
-                FileName = name,
-                CreatedAt = now,
-                UpdatedAt = now
-            });
-        }
-
-        return docs;
-    }
-
-    /// <summary>
-    /// Deletes all existing chunks for <paramref name="knowledgeSourceId"/> from the reference index.
-    /// </summary>
-    private static async Task<int> DeleteChunksForSourceAsync(
+    private static async Task<int> DeleteForSourceAsync<TDoc>(
         SearchClient searchClient,
-        string knowledgeSourceId,
+        ISchemaMapper<TDoc> schemaMapper,
+        string sourceId,
         CancellationToken cancellationToken)
+        where TDoc : class
     {
-        var filter = $"knowledgeSourceId eq '{EscapeOData(knowledgeSourceId)}'";
+        var filter = schemaMapper.BuildSourceFilter(EscapeOData(sourceId));
         var searchOptions = new SearchOptions
         {
             Filter = filter,
@@ -391,14 +446,16 @@ public sealed partial class ReferenceIndexingService
             Select = { "id" }
         };
 
-        var response = await searchClient.SearchAsync<KnowledgeDocument>("*", searchOptions, cancellationToken);
+        // Use the SDK's SearchDocument projection for ID-only retrieval; this keeps the delete path
+        // schema-agnostic (works for any index whose key field is named "id").
+        var response = await searchClient.SearchAsync<SearchDocument>("*", searchOptions, cancellationToken);
         var idsToDelete = new List<string>();
 
         await foreach (var result in response.Value.GetResultsAsync().WithCancellation(cancellationToken))
         {
-            if (!string.IsNullOrEmpty(result.Document?.Id))
+            if (result.Document.TryGetValue("id", out var rawId) && rawId is string id && !string.IsNullOrEmpty(id))
             {
-                idsToDelete.Add(result.Document.Id);
+                idsToDelete.Add(id);
             }
         }
 
@@ -413,24 +470,24 @@ public sealed partial class ReferenceIndexingService
     }
 
     /// <summary>
-    /// Uploads documents to the reference index in batches, returns the number successfully indexed.
+    /// Uploads documents to the target index in batches; returns the number successfully indexed.
     /// </summary>
-    private static async Task<int> UploadDocumentsAsync(
+    private static async Task<int> UploadDocumentsAsync<TDoc>(
         SearchClient searchClient,
-        IReadOnlyList<KnowledgeDocument> documents,
+        IReadOnlyList<TDoc> documents,
         CancellationToken cancellationToken)
+        where TDoc : class
     {
         if (documents.Count == 0)
         {
             return 0;
         }
 
-        const int batchSize = 1000;
         var successCount = 0;
 
-        for (int i = 0; i < documents.Count; i += batchSize)
+        for (int i = 0; i < documents.Count; i += UploadBatchSize)
         {
-            var batch = documents.Skip(i).Take(batchSize).ToList();
+            var batch = documents.Skip(i).Take(UploadBatchSize).ToList();
             var response = await searchClient.MergeOrUploadDocumentsAsync(
                 batch, cancellationToken: cancellationToken);
 
@@ -471,7 +528,7 @@ public sealed partial class ReferenceIndexingService
 /// </summary>
 public record ReferenceIndexingResult
 {
-    /// <summary>The knowledge source ID that was indexed.</summary>
+    /// <summary>The source ID that was indexed (knowledge source, precedent, observation, etc.).</summary>
     public string KnowledgeSourceId { get; init; } = string.Empty;
 
     /// <summary>Number of chunks successfully indexed.</summary>

@@ -1,0 +1,258 @@
+{
+  "_comment_": "Spaarke Insights Engine derived index per SPEC §3.4. Holds Observations and Precedents differentiated by artifactType discriminator. Single index pattern per D-53 (revised). Designed for vectorFilterMode=preFilter retrieval (D-33) over tenant + artifactType + predicate + scope. NOTE: this _comment_ key is stripped by the canonicalizer before deployment (Azure Search rejects unknown properties on IndexDefinition).",
+  "name": "spaarke-insights-index",
+  "fields": [
+    {
+      "name": "id",
+      "type": "Edm.String",
+      "key": true,
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": false
+    },
+    {
+      "name": "tenantId",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": true
+    },
+    {
+      "name": "artifactType",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": true
+    },
+    {
+      "name": "subject",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": true
+    },
+    {
+      "name": "predicate",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": true
+    },
+    {
+      "name": "value",
+      "type": "Edm.ComplexType",
+      "fields": [
+        {
+          "name": "raw",
+          "type": "Edm.ComplexType",
+          "fields": [
+            {
+              "name": "matterType",
+              "type": "Edm.String",
+              "searchable": false,
+              "filterable": true,
+              "retrievable": true,
+              "sortable": false,
+              "facetable": true
+            },
+            {
+              "name": "dealSizeBucket",
+              "type": "Edm.String",
+              "searchable": false,
+              "filterable": true,
+              "retrievable": true,
+              "sortable": false,
+              "facetable": true
+            },
+            {
+              "name": "scope",
+              "type": "Edm.ComplexType",
+              "fields": [
+                {
+                  "name": "matterType",
+                  "type": "Edm.String",
+                  "searchable": false,
+                  "filterable": true,
+                  "retrievable": true,
+                  "sortable": false,
+                  "facetable": true
+                },
+                {
+                  "name": "opposingCounsel",
+                  "type": "Edm.String",
+                  "searchable": false,
+                  "filterable": true,
+                  "retrievable": true,
+                  "sortable": false,
+                  "facetable": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "displayHint",
+          "type": "Edm.String",
+          "searchable": false,
+          "filterable": false,
+          "retrievable": true,
+          "sortable": false,
+          "facetable": false
+        }
+      ]
+    },
+    {
+      "name": "valueJson",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": false,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": false
+    },
+    {
+      "name": "confidence",
+      "type": "Edm.Double",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": true,
+      "facetable": false
+    },
+    {
+      "name": "evidence",
+      "type": "Collection(Edm.ComplexType)",
+      "fields": [
+        {
+          "name": "refType",
+          "type": "Edm.String",
+          "searchable": false,
+          "filterable": true,
+          "retrievable": true,
+          "sortable": false,
+          "facetable": true
+        },
+        {
+          "name": "ref",
+          "type": "Edm.String",
+          "searchable": false,
+          "filterable": true,
+          "retrievable": true,
+          "sortable": false,
+          "facetable": false
+        },
+        {
+          "name": "quote",
+          "type": "Edm.String",
+          "searchable": true,
+          "filterable": false,
+          "retrievable": true,
+          "sortable": false,
+          "facetable": false,
+          "analyzer": "standard.lucene"
+        }
+      ]
+    },
+    {
+      "name": "asOf",
+      "type": "Edm.DateTimeOffset",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": true,
+      "facetable": false
+    },
+    {
+      "name": "producedBy",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": true
+    },
+    {
+      "name": "content",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": false,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": false,
+      "analyzer": "standard.lucene"
+    },
+    {
+      "name": "contentVector",
+      "type": "Collection(Edm.Single)",
+      "searchable": true,
+      "filterable": false,
+      "retrievable": false,
+      "stored": true,
+      "sortable": false,
+      "facetable": false,
+      "dimensions": 3072,
+      "vectorSearchProfile": "insights-vector-profile-3072"
+    },
+    {
+      "name": "status",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": true
+    }
+  ],
+  "similarity": {
+    "@odata.type": "#Microsoft.Azure.Search.BM25Similarity"
+  },
+  "vectorSearch": {
+    "algorithms": [
+      {
+        "name": "hnsw-insights-3072",
+        "kind": "hnsw",
+        "hnswParameters": {
+          "metric": "cosine",
+          "m": 4,
+          "efConstruction": 400,
+          "efSearch": 500
+        }
+      }
+    ],
+    "profiles": [
+      {
+        "name": "insights-vector-profile-3072",
+        "algorithm": "hnsw-insights-3072"
+      }
+    ]
+  },
+  "semantic": {
+    "defaultConfiguration": "insights-semantic-config",
+    "configurations": [
+      {
+        "name": "insights-semantic-config",
+        "prioritizedFields": {
+          "titleField": { "fieldName": "predicate" },
+          "prioritizedContentFields": [
+            { "fieldName": "content" }
+          ],
+          "prioritizedKeywordsFields": [
+            { "fieldName": "artifactType" },
+            { "fieldName": "subject" },
+            { "fieldName": "producedBy" }
+          ]
+        }
+      }
+    ]
+  }
+}

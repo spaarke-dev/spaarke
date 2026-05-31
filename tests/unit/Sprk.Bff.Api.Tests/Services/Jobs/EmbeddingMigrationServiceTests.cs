@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Jobs;
 using Xunit;
 

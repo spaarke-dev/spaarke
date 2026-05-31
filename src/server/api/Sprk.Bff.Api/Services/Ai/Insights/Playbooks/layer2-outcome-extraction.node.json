@@ -1,0 +1,57 @@
+{
+  "$comment": "D-P6 Layer 2 outcome extraction — Spaarke Insights Engine Phase 1. Realized via AiAnalysisNodeExecutor per Q5 audit (no new node executor). Conditional invocation per D-P7 ingest playbook (gated by Layer 1 outcome ∈ {closing_letter, settlement_agreement, opinion_judgment} AND confidence >= 0.7 per D-59). Output feeds three mechanical gates downstream: D-P9 GroundingVerifier -> D-P10 ConfidenceThresholdOptions -> D-P10 ObservationEmitter.",
+  "id": "layer2-outcome-extraction",
+  "name": "Layer 2 — Outcome Extraction",
+  "version": "v1",
+  "producedBy": "playbook://outcome-extraction@v1",
+  "actionType": "AiAnalysis",
+  "executor": "AiAnalysisNodeExecutor",
+  "promptTemplate": "outcome-extraction.v1.txt",
+  "promptVersion": "v1",
+  "outputVariable": "layer2_outcome_extraction",
+  "modelDeploymentId": "gpt-4o",
+  "temperature": 0.0,
+  "maxTokens": 1500,
+  "knowledgeRetrieval": {
+    "mode": "Auto",
+    "topK": 3,
+    "includeDocumentContext": false,
+    "includeEntityContext": false,
+    "$comment-mode": "Auto: retrieves linked RagIndex knowledge sources when present (e.g., extraction-rubric reference docs); skips silently when none linked. L2 document context off (Layer 2 is fact extraction from the single source document, not comparative analysis). L3 entity context off (matter context is supplied via Scope on ExtractionResult downstream by the ingest playbook)."
+  },
+  "outputSchema": {
+    "schemaName": "OutcomeExtractionResponse",
+    "schemaFile": "outcome-extraction.v1.schema.json",
+    "retryOnce": true,
+    "$comment-retry": "Per task 031 acceptance: validator rejects malformed output BEFORE downstream gates; one retry on schema-validation failure (matches IOpenAiClient.GetStructuredCompletionAsync semantics for constrained-decoding fallback)."
+  },
+  "downstreamGates": [
+    {
+      "gate": "GroundingVerifier",
+      "source": "D-P9",
+      "$comment": "Each non-null evidence quote is mechanically verified against the source-document chunks from spaarke-files-index. Unverified quotes drop the corresponding field BEFORE confidence gating runs."
+    },
+    {
+      "gate": "ConfidenceThresholdOptions",
+      "source": "D-P10",
+      "$comment": "Per-field thresholds (Phase 1 starters: outcomeCategory>=0.75, settlementAmount>=0.85, outcomeDate>=0.85, matterDurationDays>=0.75); admin-tunable via IOptionsMonitor without restart per D-63."
+    },
+    {
+      "gate": "ObservationEmitter",
+      "source": "D-P10",
+      "$comment": "Surviving fields are emitted as one ObservationArtifact each with producedBy.Id=playbook://outcome-extraction@v1, version=v1; evidence array carries the verbatim document quote plus the playbook-run ref."
+    }
+  ],
+  "gating": {
+    "$comment-conditional": "Per SPEC-phase-1-minimum.md §3.3 + D-59: Layer 2 fires only when Layer 1 (classification@v1) returned classification in {closing_letter, settlement_agreement, opinion_judgment} AND confidence >= 0.7. The condition is owned by the D-P7 ingest playbook (task 040), not by this node config; documented here as the contract this node assumes.",
+    "requires": {
+      "upstream": "layer1-classification",
+      "classificationIn": ["closing_letter", "settlement_agreement", "opinion_judgment"],
+      "minConfidence": 0.7
+    }
+  },
+  "inputSanitization": {
+    "source": "D-50",
+    "$comment": "Document content MUST pass through ISanitizer (D-A25) before reaching this node. Sanitization is wired at the SpeContentRetrieve stage in the D-P7 ingest playbook (task 040), upstream of this node."
+  }
+}

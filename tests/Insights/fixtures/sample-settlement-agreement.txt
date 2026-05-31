@@ -1,0 +1,78 @@
+SETTLEMENT AGREEMENT AND MUTUAL RELEASE
+
+This Settlement Agreement and Mutual Release ("Agreement") is entered into as of
+August 15, 2024 (the "Effective Date") by and between Acme Corporation, a
+Delaware corporation with its principal place of business at 1500 Industrial
+Parkway, Wilmington, DE ("Acme"), and Northstar Holdings LLC, a Nevada limited
+liability company with its principal place of business at 200 Range Road,
+Reno, NV ("Northstar"). Acme and Northstar are each a "Party" and collectively
+the "Parties."
+
+RECITALS
+
+WHEREAS, on January 14, 2024, Acme filed a complaint in the United States
+District Court for the District of Delaware, Civil Action No. 24-cv-00118-RGA,
+asserting claims against Northstar including breach of the parties' April 2022
+Patent License Agreement (the "License"), tortious interference, and unjust
+enrichment (collectively, the "Litigation");
+
+WHEREAS, the Parties desire to fully and finally resolve all claims and
+counterclaims raised in the Litigation without further proceedings and without
+admission of liability;
+
+NOW, THEREFORE, in consideration of the mutual covenants set forth herein and
+other good and valuable consideration, the receipt and sufficiency of which are
+hereby acknowledged, the Parties agree as follows:
+
+1. SETTLEMENT PAYMENT.
+
+   Northstar shall pay to Acme the total sum of Three Hundred Ten Thousand
+   United States Dollars ($310,000 USD) (the "Settlement Amount") by wire
+   transfer to Acme's designated account within thirty (30) calendar days
+   following the Effective Date.
+
+2. MUTUAL RELEASE.
+
+   Effective upon receipt of the Settlement Amount, each Party, on behalf of
+   itself and its affiliates, officers, directors, employees, agents, successors,
+   and assigns, hereby releases, acquits, and forever discharges the other Party
+   and its affiliates, officers, directors, employees, agents, successors, and
+   assigns from any and all claims, demands, actions, and causes of action,
+   whether known or unknown, arising out of or related to the Litigation or the
+   License through the Effective Date.
+
+3. CURE PERIOD.
+
+   In the event of any alleged breach of this Agreement by either Party, the
+   non-breaching Party shall provide written notice of such alleged breach and
+   the breaching Party shall have forty-five (45) days from receipt of such
+   notice to cure (the "Cure Period"). No action for breach may be commenced
+   until the Cure Period has expired without cure.
+
+4. CONFIDENTIALITY AND NON-DISPARAGEMENT.
+
+   The Parties agree that the existence and terms of this Agreement shall be
+   confidential, except as required by applicable law or for accounting,
+   regulatory, or tax purposes. Neither Party shall make any disparaging
+   statements regarding the other Party for a period of three (3) years from
+   the Effective Date.
+
+5. NO ADMISSION OF LIABILITY.
+
+   This Agreement is a compromise of disputed claims and shall not be construed
+   as an admission of liability by either Party.
+
+6. GOVERNING LAW; ENTIRE AGREEMENT.
+
+   This Agreement shall be governed by Delaware law. This Agreement constitutes
+   the entire agreement between the Parties with respect to the subject matter
+   hereof and supersedes all prior negotiations.
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the
+Effective Date.
+
+ACME CORPORATION                          NORTHSTAR HOLDINGS LLC
+
+By: ___________________________           By: ___________________________
+   Name: Elena Marquez                       Name: David Chen
+   Title: General Counsel                    Title: Managing Member

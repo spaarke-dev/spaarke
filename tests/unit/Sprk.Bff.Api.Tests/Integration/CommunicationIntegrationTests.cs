@@ -152,8 +152,9 @@ public class CommunicationIntegrationTests
         return new CommunicationService(
             graphFactoryMock.Object,
             senderValidator,
-            dataverseMock.Object,
-            dataverseMock.Object,
+            Mock.Of<ICommunicationDataverseService>(),
+            Mock.Of<IGenericEntityService>(),
+            Mock.Of<IDocumentDataverseService>(),
             null!, // EmlGenerationService - not used when ArchiveToSpe=false
             null!, // SpeFileStore - not used when ArchiveToSpe=false
             null!, // CommunicationAccountService — not tested here

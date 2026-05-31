@@ -1,0 +1,85 @@
+SETTLEMENT AND RELEASE AGREEMENT
+
+This Settlement and Release Agreement (the "Agreement") is entered into as of
+May 22, 2024 (the "Effective Date") by and between:
+
+  CLAIMANT: Hawthorne Biologics Inc., a Delaware corporation with its principal
+  place of business at 88 Cambridge Park Drive, Cambridge, MA 02140 ("Claimant");
+  and
+
+  RESPONDENT: NorthernPath Manufacturing GmbH, a Bavarian limited liability
+  company with its principal place of business at Maximilianstrasse 12,
+  80539 Munich, Germany ("Respondent").
+
+Claimant and Respondent are referred to individually as a "Party" and
+collectively as the "Parties."
+
+WHEREAS, on October 4, 2023, Claimant initiated arbitration proceedings under
+the rules of the International Chamber of Commerce (ICC Case No. 28114/MK)
+alleging breach of the parties' Manufacturing Supply Agreement dated March 1,
+2022 (the "MSA"); and
+
+WHEREAS, the Parties have, after extensive negotiation, agreed to settle all
+claims, counterclaims, and disputes arising out of or relating to the MSA and
+the arbitration on the terms set forth below;
+
+NOW, THEREFORE, in consideration of the mutual covenants set forth herein, the
+Parties agree as follows:
+
+1. SETTLEMENT PAYMENT. Respondent shall pay Claimant the sum of EUR 245,000
+   (Two Hundred Forty-Five Thousand Euros) in full and final settlement of all
+   claims (the "Settlement Payment"). The Settlement Payment shall be made by
+   wire transfer to Claimant's designated account no later than thirty (30)
+   days after the Effective Date.
+
+2. KEY COMMERCIAL TERMS. The Parties have agreed to the following commercial
+   terms as part of the consideration for this Agreement:
+
+   a) Exclusivity. Respondent shall not, for a period of three (3) years from
+      the Effective Date, supply identical or substantially similar product
+      lines to any of the named competitors of Claimant listed on Schedule A.
+
+   b) Indemnification cap. Respondent's aggregate indemnification liability
+      under any successor supply arrangement between the Parties shall not
+      exceed two times (2x) the trailing-twelve-month purchase volume,
+      capped at EUR 1,000,000.
+
+   c) Cure-period clause. Either Party shall have a right to cure any
+      alleged material breach of any successor supply arrangement within
+      forty-five (45) days of written notice from the non-breaching Party.
+      The Parties expressly agree that this 45-day cure period replaces the
+      30-day cure period in the prior MSA.
+
+   d) Governing law and venue. This Agreement and any successor supply
+      arrangement shall be governed by the laws of Switzerland; disputes
+      shall be resolved exclusively by ICC arbitration in Geneva.
+
+3. MUTUAL RELEASES. Effective upon Claimant's receipt of the Settlement
+   Payment, each Party releases the other from all claims, known or unknown,
+   arising out of or relating to the MSA, the arbitration, or the conduct
+   underlying either, except for the obligations expressly set forth in this
+   Agreement.
+
+4. WITHDRAWAL OF ARBITRATION. Within five (5) business days of Claimant's
+   receipt of the Settlement Payment, the Parties shall jointly request that
+   the arbitral tribunal terminate the arbitration with prejudice and without
+   any award of costs.
+
+5. CONFIDENTIALITY. The existence and terms of this Agreement are confidential
+   and shall not be disclosed by either Party except (i) as required by law or
+   regulation, (ii) to professional advisors under a duty of confidence, or
+   (iii) with the prior written consent of the other Party.
+
+6. ENTIRE AGREEMENT. This Agreement constitutes the entire understanding of
+   the Parties with respect to its subject matter and supersedes all prior
+   negotiations, representations, and agreements.
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the
+Effective Date.
+
+For HAWTHORNE BIOLOGICS INC.:                For NORTHERNPATH MANUFACTURING GmbH:
+
+_____________________________                _____________________________
+By:    Dr. Anika Petrescu                    By:    Klaus Bergmann
+Title: Chief Executive Officer               Title: Geschäftsführer
+Date:  May 22, 2024                          Date:  May 22, 2024

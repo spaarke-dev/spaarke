@@ -1,0 +1,70 @@
+<task id="041" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P4 — Precedent → spaarke-insights-index projection sync (status → Confirmed)</title>
+    <status>completed</status>
+    <wave>5</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, sync, precedent, ai-search-upsert, zone-b, dotnet</tags>
+    <dependencies>011, 012, 025</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <d-p>D-P4</d-p>
+  </metadata>
+
+  <prompt>
+    Implement small in-process sync job that projects a `sprk_precedent` Dataverse row to `spaarke-insights-index` with `artifactType=precedent` when status transitions to Confirmed. Fires from the admin endpoint flow (or from a future Phase 1.5 SME review queue). Uses Wave 3.5 parameterized `ReferenceIndexingService` to perform the upsert.
+  </prompt>
+
+  <role>Senior .NET developer familiar with Dataverse → AI Search projection patterns (DataverseIndexSyncService template) and idempotent upserts.</role>
+
+  <goal>
+    `PrecedentProjectionSync.ProjectAsync(precedentId, ct)` reads the `sprk_precedent` row, builds a Precedent row per SPEC §3.4.2 worked example, and upserts to `spaarke-insights-index` via parameterized ReferenceIndexingService (task 025). Idempotent (re-running on already-projected Precedent is no-op). Fired from D-P3 admin endpoint when SME promotes to Confirmed; fire-and-forget with error logging.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P4, §3.4.2 Precedent row worked example)</file>
+    <file purpose="rationale">projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md (§2.3 Precedent storage; §4.4 projection mechanism)</file>
+    <file purpose="existing-pattern">src/server/api/Sprk.Bff.Api/Services/RecordMatching/DataverseIndexSyncService.cs (template for projection)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="§3.5">Zone B placement (Services/Insights/Precedents/); calls IDataverseService directly; uses W3.5 ReferenceIndexingService extension</constraint>
+    <constraint source="idempotency">Re-projection on same Precedent is no-op (upsert pattern)</constraint>
+    <constraint source="D-P4">Schema mapping: sprk_precedent fields → SPEC §3.4.2 row shape with artifactType=precedent, content=pattern statement, contentVector=embedding</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse-to-ai-search-projection, precedent-storage, idempotent-upsert</topic>
+    <files>
+      <file>knowledge/dataverse-sync/INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing pattern">DataverseIndexSyncService.cs for projection template</step>
+    <step order="2" name="Author PrecedentProjectionMapper">Maps sprk_precedent → spaarke-insights-index row per SPEC §3.4.2; generates embedding from pattern statement via IOpenAiClient</step>
+    <step order="3" name="Author PrecedentProjectionSync service">ProjectAsync(precedentId, ct); reads via IDataverseService; embedding via IOpenAiClient (in Zone A — Wait — actually this is on a Zone B path; route embedding via IInsightsAi facade extension if needed). NOTE: embedding generation is AI-internal — needs facade method like `IInsightsAi.EmbedTextAsync` OR project embedding generation happens at upsert layer in Zone A. Resolve design at task time.</step>
+    <step order="4" name="Wire to admin endpoint">D-P3 admin endpoint's "promote to Confirmed" flow calls ProjectAsync (fire-and-forget with logging)</step>
+    <step order="5" name="Integration test">Create Precedent via admin endpoint → promote to Confirmed → verify spaarke-insights-index has row with artifactType=precedent</step>
+    <step order="6" name="Quality gates">code-review + adr-check; resolve §3.5 facade boundary for embedding generation</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Insights/Precedents/PrecedentProjectionSync.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Insights/Precedents/PrecedentProjectionMapper.cs</output>
+    <output type="test">tests/integration/Services/Insights/Precedents/PrecedentProjectionSyncTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Confirmed sprk_precedent row projected to spaarke-insights-index with artifactType=precedent</criterion>
+    <criterion testable="true">Projected row matches SPEC §3.4.2 worked example structure</criterion>
+    <criterion testable="true">Re-projection on already-projected Precedent is idempotent (no duplicate rows)</criterion>
+    <criterion testable="true">IndexRetrieveNode (D-P12) query for Precedents returns the projected Precedent (round-trip)</criterion>
+    <criterion testable="true">§3.5 facade boundary respected (embedding generation routes through facade or stays Zone A)</criterion>
+  </acceptance-criteria>
+</task>
