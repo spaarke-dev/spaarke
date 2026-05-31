@@ -122,4 +122,23 @@
     <criterion testable="true">x-email-communication-solution-r2 owner explicit ack documented before non-trivial edits</criterion>
     <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <scope-extension date="2026-05-31">
+      Wave 1 baseline reconciliation (task 008) — MATERIAL EXPANSION. The Communications cluster
+      is now 53 failures across 3 classes (NOT the smaller MEDIUM-tier estimate from design §3.4):
+      AssociationMappingTests (29), DataverseRecordCreationTests (23), ArchivalFlowTests (1).
+      Note: these 3 classes are ALSO in Phase 1 task 011's compile-fix set. The §3.2 framing
+      ("17 compile-broken files") + Wave 1 outcome (compile already clean) means 011 is
+      compile-only; the RUNTIME failures (the 53) are this task's responsibility per design §7.
+      Sibling-coordination caveat (per design §2.3 + NFR-04): Communications has HIGHEST
+      sibling-project risk (x-email-communication-solution-r2). The Phase 0 task 005
+      priority-order sign-off must explicitly cover the increased Communications scope BEFORE
+      this task dispatches. See `notes/handoffs/phase23-scope-delta-2026-05-31.md`.
+
+      Effort impact: ~3-5h additional vs. original 2-3h estimate. If overflow expected, owner
+      may split into batch 1a (AssociationMapping 29) + batch 1b (DataverseRecord 23) + retain
+      batch 2 (056) for remaining + ArchivalFlow (1).
+    </scope-extension>
+  </notes>
 </task>

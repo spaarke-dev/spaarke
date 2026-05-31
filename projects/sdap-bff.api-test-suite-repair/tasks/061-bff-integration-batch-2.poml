@@ -111,4 +111,13 @@
     <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
     <criterion testable="true">`CustomWebAppFactory.cs` is NOT modified</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <scope-extension date="2026-05-31">
+      Wave 1 baseline reconciliation (task 008) confirmed Integration tier (2nd half) failures:
+      SseStreamingIntegrationTests (8 failures, 44% rate), PlaybookExecutionTests (1, 6% rate).
+      Total: 9 failures. Falls within existing relevant-files glob — annotation only.
+      See `notes/handoffs/phase23-scope-delta-2026-05-31.md`.
+    </scope-extension>
+  </notes>
 </task>

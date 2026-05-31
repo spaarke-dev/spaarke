@@ -1,7 +1,7 @@
 <task id="004" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>Refine project CLAUDE.md with Phase 0 outcomes — FR-03</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>45-60 minutes</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-0, claude-md, decision-capture</tags>

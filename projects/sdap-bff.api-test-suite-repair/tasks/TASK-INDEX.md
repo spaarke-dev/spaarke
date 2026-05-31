@@ -28,11 +28,18 @@
 | 003 | Researcher verdict on Microsoft.Extensions.AI.Testing → D-01 | ✅ 2026-05-31 (verdict: BUILD LOCAL) | 0-A | ✅ Yes | MINIMAL | none |
 | 006 | Capture D-02..D-06 decisions | ✅ 2026-05-31 | 0-A | ✅ Yes | MINIMAL | none |
 | 007 | Commit 3 in-progress namespace fixes per §5.6 | ✅ 2026-05-31 (NO-OP — no in-progress fixes in worktree) | 0-A | ✅ Yes | STANDARD | none |
-| 004 | Refine project CLAUDE.md after Phase 0 decisions | 🔲 | 0-B | ✅ Yes | FULL | 001, 002, 003 |
-| 005 | Create priority-order.md with sibling sign-offs | 🔲 | 0-B | ✅ Yes | STANDARD | 001 |
-| 008 | TRX parsing + Phase 2+3 tier reconciliation (absorbs +73 net failures discovered in Wave 1) | 🔲 | 0-B | ✅ Yes | STANDARD | 001 |
+| 004 | Refine project CLAUDE.md after Phase 0 decisions | ✅ 2026-05-31 (Step 9.5 gates clean; 3 drift items flagged for Phase 1 entry audit) | 0-B | ✅ Yes | FULL | 001, 002, 003 |
+| 005 | Create priority-order.md with sibling sign-offs | ✅ 2026-05-31 (per-tier failure counts from TRX; 3 sibling slots TBD) | 0-B | ✅ Yes | STANDARD | 001 |
+| 008 | TRX parsing + Phase 2+3 tier reconciliation (absorbs +73 net failures discovered in Wave 1) | ✅ 2026-05-31 (339 absorbed across 12 POMLs; 3 HOLD for Insights sibling sync; 4 tasks flagged for sub-batching) | 0-B | ✅ Yes | STANDARD | 001 |
 
 **Phase 0 exit gate**: All baseline artifacts in `baseline/`; D-01..D-06 in `decisions/`; CLAUDE.md refined; priority-order.md signed off.
+
+**Phase 0 status (2026-05-31)**: ✅ **COMPLETE** (all 8 tasks closed; 2 commits pushed: `bceb25aa` Wave 1 + `8c822009` scope absorption; Wave 0.2 commit pending). Priority-order sibling sign-offs are TBD per FR-04 (owner action item; non-blocking for Phase 1 dispatch).
+
+**Phase 1 entry items to review** before dispatching Phase 1 Wave 1.1a/1.1b:
+1. ⚠️ Insights Layer2 cluster (3 failures, `Services.Ai.Insights.Layer2.Layer2OutcomeExtractionTests`) — HOLD until `ai-spaarke-insights-engine-r1` owner sign-off (per task 008 delta report)
+2. ⚠️ 4 Phase 2+3 tasks materially expanded by task 008: **055** (53 failures, Communications), **060** (63 failures, Workspace integration at 100% failure rate), **070** (97 failures), **073** (46 failures). Owner review for sub-batching recommended; does NOT block Phase 1 dispatch
+3. ℹ️ Doc-drift items flagged by task 004: CLAUDE.md §6.3 still cites design.md §3 numbers (correct per rule, but a "superseded" note would help); spec.md §Executive Summary cites pre-deviation figures (design-time authoritative per NFR-08); TASK-INDEX 004 Dependencies col understates (also depends on 006)
 
 ### Wave 1 outcomes (2026-05-31) — MATERIAL DEVIATION FLAGGED
 

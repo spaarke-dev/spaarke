@@ -114,4 +114,14 @@
     <criterion testable="true">Any flaky-quarantined tests have a `flaky-ledger.md` entry with fix-by date</criterion>
     <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <scope-extension date="2026-05-31">
+      Wave 1 baseline reconciliation (task 008) — DEFAULT decision item 6 from
+      `notes/handoffs/phase23-scope-delta-2026-05-31.md`. Extended scope to include
+      Services/Jobs/RecordSyncJobTests (+1 failure). Jobs is functionally adjacent to
+      Resilience (background work with retry/Polly characteristics). Pending owner override.
+      Relevant-files extended to include: `tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/RecordSyncJobTests.cs`.
+    </scope-extension>
+  </notes>
 </task>

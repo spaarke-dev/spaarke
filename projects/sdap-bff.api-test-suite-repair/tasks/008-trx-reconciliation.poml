@@ -1,7 +1,7 @@
 <task id="008" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>Parse Wave 1 TRX + reconcile +73 net failures into Phase 2+3 tier scope</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2-3 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-0, baseline, reconciliation, scope-absorption, testing</tags>
@@ -185,4 +185,37 @@
     <criterion testable="true">No test `.cs` files were modified (NFR-02 — this is metadata work only)</criterion>
     <criterion testable="true">Task 008's own `&lt;status&gt;` is updated to `completed` with completion notes</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion date="2026-05-31">
+      Parsed `baseline/test-baseline-2026-05-31.trx` via PowerShell XPath (`<UnitTestResult outcome="Failed">`
+      joined to `<UnitTest><TestMethod>` className lookup). Exact result: 342 failures across 50 test classes
+      (parser sum = 342, matches measured baseline).
+
+      **Artifacts produced (3)**:
+      1. `baseline/failure-inventory-2026-05-31.md` — per-class + per-namespace-prefix failure counts;
+         total 342.
+      2. `notes/handoffs/phase23-scope-delta-2026-05-31.md` — cluster→task mapping with absorbed
+         (320), default-decisioned (19, pending owner override), and HOLD (3, Insights.Layer2 needs
+         sibling-project coord).
+      3. 12 Phase 2+3 POMLs edited with `<notes><scope-extension date="2026-05-31">` blocks:
+         044, 046, 050, 053, 054, 055, 060, 061, 070, 071, 072, 073.
+
+      **Coverage**: 339 / 342 failures explicitly absorbed via POML annotations; 3 (Insights.Layer2)
+      flagged HOLD for owner. All +73 net failures vs design.md §3's 269 are accounted for in the
+      delta report.
+
+      **Material scope expansion in 4 POMLs** (recommend owner review before Wave 2.1 dispatch):
+      - 055 (Communications): 53 failures (vs original ~8 estimate); sibling-coord required
+      - 060 (BFF Integration batch 1): 63 failures with 100% rates on Workspace classes (root-cause first)
+      - 070 (LOW-tier Api batch 1): 97 failures across Api/Ai/* + Api/Agent/*; consider sub-batching
+      - 073 (top-level *EndpointTests): 46 failures incl. SpeAdmin extension (DEFAULT)
+
+      **Phase 2+3 wall-clock impact**: no material change (waves preserve 6-agent cap; existing
+      tasks absorb the +73 without restructuring). Person-hours: +24–48h distributed.
+
+      **Constraints honored**: No production code modified (NFR-01); no test `.cs` files modified
+      (NFR-02 — this was metadata/inventory only). All edits are append-only `<notes>` annotations.
+    </completion>
+  </notes>
 </task>

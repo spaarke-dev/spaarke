@@ -119,4 +119,13 @@
     <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
     <criterion testable="true">No overlap with batches 070, 072, 073 files</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <scope-extension date="2026-05-31">
+      Wave 1 baseline reconciliation (task 008) confirmed Api/Office/* cluster: 10 failures
+      in OfficeEndpointsTests (50% rate). Falls within existing relevant-files glob (2nd
+      quarter alphabetically — O range) — annotation only.
+      See `notes/handoffs/phase23-scope-delta-2026-05-31.md`.
+    </scope-extension>
+  </notes>
 </task>

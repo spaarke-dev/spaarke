@@ -115,4 +115,30 @@
     <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
     <criterion testable="true">`CustomWebAppFactory.cs` is NOT modified</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <scope-extension date="2026-05-31">
+      Wave 1 baseline reconciliation (task 008) added the following to this task's scope per
+      `notes/handoffs/phase23-scope-delta-2026-05-31.md`:
+
+      1. Services.Ai.Chat.* runtime failures (4 failures across 4 classes):
+         PlaybookChatContextProviderEnrichmentIntegrationTests (1), OrchestratorPromptBuilderTests (1),
+         DirectOpenAiAgentTests (1), Chat.SseEventTypes.ChatSseEventFactoryTests (1).
+         These fall within existing glob — no scope change, annotation only.
+
+      2. DEFAULT decisions for items 1, 2, 3 (pending owner override):
+         - Services.Ai.Sessions.SessionRestoreServiceTests (5 failures) — extend relevant-files
+         - Services.Ai.Feedback.FeedbackServiceTests (4 failures) — extend relevant-files
+         - Services.Ai.RagServiceTests + WorkingDocumentServiceTests (5 failures, Services/Ai/ root non-subdir) — extend relevant-files
+
+      Extended relevant-files set:
+        - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/*.cs
+        - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Feedback/*.cs
+        - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagServiceTests.cs
+        - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/WorkingDocumentServiceTests.cs
+
+      Net new failure absorption: 4 (in-scope) + 14 (extended) = 18 failures.
+      If owner directs separate sub-tasks (057/058/059) instead, replace this block with the new tasks.
+    </scope-extension>
+  </notes>
 </task>

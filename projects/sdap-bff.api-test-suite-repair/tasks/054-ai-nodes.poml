@@ -106,4 +106,12 @@
     <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
     <criterion testable="true">`CustomWebAppFactory.cs` is NOT modified</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <scope-extension date="2026-05-31">
+      Wave 1 baseline reconciliation (task 008) confirmed Services/Ai/Nodes/* failure cluster:
+      5 failures in CreateTaskNodeExecutorTests. Falls within existing relevant-files glob —
+      no scope change, annotation only. See `notes/handoffs/phase23-scope-delta-2026-05-31.md`.
+    </scope-extension>
+  </notes>
 </task>

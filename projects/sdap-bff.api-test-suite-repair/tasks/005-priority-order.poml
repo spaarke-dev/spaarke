@@ -1,7 +1,7 @@
 <task id="005" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>Create priority-order.md with sibling-project owner sign-offs — FR-04</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1-2 hours (incl. async sibling-owner outreach)</estimated-effort>
     <assigned>AI agent (drafts) + owner (sibling outreach)</assigned>
     <tags>phase-0, coordination, priority-order, sibling-projects</tags>

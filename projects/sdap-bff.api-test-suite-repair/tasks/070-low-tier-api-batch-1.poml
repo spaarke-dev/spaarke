@@ -136,4 +136,26 @@
     <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
     <criterion testable="true">No overlap with batches 071, 072, 073 files</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <scope-extension date="2026-05-31">
+      Wave 1 baseline reconciliation (task 008) — MATERIAL EXPANSION. This batch (first quarter
+      of Api/*.cs alphabetically) absorbs Api/Ai/* + Api/Agent/* clusters: 97 failures across
+      14 classes. Specifically:
+        - Api/Ai/*: PlaybookRunEndpoints (20), StandaloneChatContextEndpoints (18),
+          HandlerEndpoints (11), AnalysisChatContextEndpoints (10), NodeEndpoints (10),
+          ModelEndpoints (8), ChatSessionPlanEndpoint (5), ChatRefineEndpoint (4),
+          DailyBriefingEndpoints (2), R2SseEventEmitter (1)
+        - Api/Agent/*: AgentConversation (3), HandoffUrlBuilder (3), AgentConfiguration (1)
+      Several classes show 100% failure rate (PlaybookRun, StandaloneChatContext, Handler,
+      Node, Model, ChatSessionPlan, ChatRefine, DailyBriefing) — suggests endpoint-wide
+      regression (auth/route/factory startup), likely one root cause per cluster.
+      Investigate root cause BEFORE per-test edits.
+
+      Effort impact: significantly higher than original STANDARD-rigor estimate. Consider
+      splitting batch 1 into 1a (Api/Ai/* — 10 classes) and 1b (Api/Agent/* — 3 classes)
+      with 1a as its own wave-2.5 sub-task. Owner may revise wave plan.
+      See `notes/handoffs/phase23-scope-delta-2026-05-31.md`.
+    </scope-extension>
+  </notes>
 </task>

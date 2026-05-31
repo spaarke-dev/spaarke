@@ -116,4 +116,21 @@
     <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
     <criterion testable="true">`CustomWebAppFactory.cs` is NOT modified</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <scope-extension date="2026-05-31">
+      Wave 1 baseline reconciliation (task 008) — MATERIAL EXPANSION. The Integration tier
+      cluster includes 63 failures absorbed into this batch:
+        - Integration.Workspace.WorkspaceEndpointsTests (31, 100% failure rate)
+        - Integration.Workspace.WorkspaceLayoutEndpointTests (23, 100% failure rate)
+        - Integration.CommunicationIntegrationTests (9, 33% failure rate; was §3.2 compile-broken)
+      The 100% failure rates on Workspace classes suggest a startup/factory-dependent regression
+      (likely tests don't reach assertion phase) — investigate before per-test edits; one root
+      cause may resolve many. Sibling-coordination check (CommunicationIntegration overlaps with
+      x-email-communication-solution-r2) — coordinate via Phase 0 task 005 priority-order.
+      See `notes/handoffs/phase23-scope-delta-2026-05-31.md`.
+
+      Effort impact: ~3-5h additional vs. original estimate; depends on root-cause finding.
+    </scope-extension>
+  </notes>
 </task>
