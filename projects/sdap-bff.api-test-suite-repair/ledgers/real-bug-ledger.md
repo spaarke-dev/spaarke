@@ -447,4 +447,98 @@ Remove the `Skip = "..."` attributes on both Skip'd tests and the per-test `[Tra
 
 ---
 
+## RB-T070-01 — `AgentConversationService` does not honor `CancellationToken` on its 3 async public methods
+
+| Field | Value |
+|---|---|
+| **Bug ID** | RB-T070-01 |
+| **Date filed** | 2026-05-31 |
+| **Filing task** | Task 070 (P23.L1 — LOW-tier Api/* batch 1) |
+| **Production file** | [`src/server/api/Sprk.Bff.Api/Api/Agent/AgentConversationService.cs`](../../../src/server/api/Sprk.Bff.Api/Api/Agent/AgentConversationService.cs) |
+| **Affected methods** | `GetOrCreateContextAsync` (line 40), `UpdateContextAsync` (line 69), `RemoveContextAsync` (line 121) |
+| **Tests Skip'd** | (1) `AgentConversationServiceTests.GetOrCreateContextAsync_RespectsCancellationToken`, (2) `…UpdateContextAsync_RespectsCancellationToken`, (3) `…RemoveContextAsync_RespectsCancellationToken` — all in [`tests/unit/Sprk.Bff.Api.Tests/Api/Agent/AgentConversationServiceTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Api/Agent/AgentConversationServiceTests.cs). |
+| **Fix-by date** | 2026-07-31 (60-day target — LOW severity; same pattern as RB-T034-01) |
+| **Severity** | LOW (no in-process caller passes a non-default token; cancellation contract is unobserved in live traffic) |
+| **Owner** | TBD (M365 Copilot agent feature owner; same surface as RB-T034-01) |
+
+### Bug detail
+
+Same root-cause pattern as RB-T034-01 (`AgentConfigurationService.GetExposedPlaybookIdsAsync`). The 3 public async methods accept a `CancellationToken` parameter and forward it to `_cache.GetStringAsync` / `SetStringAsync` / `RemoveAsync`, but never call `cancellationToken.ThrowIfCancellationRequested()` themselves. The injected `MemoryDistributedCache` (in tests) and Redis `IDistributedCache` (in production) do not raise `OperationCanceledException` synchronously on already-cancelled tokens for in-process / fast-path operations, so the tests' `Assert.ThrowsAsync<OperationCanceledException>` never fires.
+
+### Recommended production fix (out of scope for this project)
+
+Add `cancellationToken.ThrowIfCancellationRequested();` as the first statement of each of the 3 public methods.
+
+### Verification after fix
+
+Remove the `Skip = "..."` attribute on the 3 tests and the per-test `[Trait("status", "real-bug-pending-fix")]` overrides. Run the tests; all 3 should pass. Update this ledger row to "Resolved".
+
+---
+
+## RB-T070-02 — `R2SseEventEmitter.CapabilityChangePayload` serializes `RetryAfterSeconds` as `null` instead of omitting it
+
+| Field | Value |
+|---|---|
+| **Bug ID** | RB-T070-02 |
+| **Date filed** | 2026-05-31 |
+| **Filing task** | Task 070 (P23.L1 — LOW-tier Api/* batch 1) |
+| **Production file** | [`src/server/api/Sprk.Bff.Api/Api/Ai/R2SseEventEmitter.cs`](../../../src/server/api/Sprk.Bff.Api/Api/Ai/R2SseEventEmitter.cs) |
+| **Affected members** | `CapabilityChangePayload.RetryAfterSeconds` (line 311) — no `JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)` |
+| **Tests Skip'd** | (1) `R2SseEventEmitterTests.EmitCapabilityChangeAsync_OmitsRetryAfterSecondsWhenNull` (`Fact`) — line 270 of [`tests/unit/Sprk.Bff.Api.Tests/Api/Ai/R2SseEventEmitterTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Api/Ai/R2SseEventEmitterTests.cs). |
+| **Fix-by date** | 2026-07-31 (60-day target — non-blocking; identical pattern to RB-T050-01) |
+| **Severity** | LOW (functional contract preserved; frontend reads with `if (event.data.retryAfterSeconds)` so `null` and "missing" are treated identically) |
+| **Owner** | TBD (AI Chat SSE feature owner; coordinate with RB-T050-01 — same family of bugs) |
+
+### Bug detail
+
+Same root-cause pattern as RB-T050-01. `CapabilityChangePayload` is an `internal sealed record` (line 308) with the optional 3rd property `int? RetryAfterSeconds = null`. The default `System.Text.Json` writer policy emits `"retryAfterSeconds": null` for null values. The documented contract — and the unit test — expects the field to be **omitted** when null.
+
+### Recommended production fix (out of scope for this project)
+
+Add `JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)` to the record property, OR set `DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull` on the `JsonSerializerOptions` used by `EmitAsync`.
+
+### Verification after fix
+
+Remove the `Skip = "..."` attribute on the test and the per-test `[Trait("status", "real-bug-pending-fix")]` override. Run the test; should pass.
+
+---
+
+## RB-T070-03 — `AnalysisChatContextResolver` removed the unit-testable stub path; 7 tests assert behavior that no longer exists
+
+| Field | Value |
+|---|---|
+| **Bug ID** | RB-T070-03 |
+| **Date filed** | 2026-05-31 |
+| **Filing task** | Task 070 (P23.L1 — LOW-tier Api/* batch 1) |
+| **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs) |
+| **Affected method** | `ResolveAsync` (line 127) + `ResolveFromDataverseAsync` (line 189) — formerly a stub returning a non-null default; now requires `Guid.TryParse(analysisId)` AND a successful Dataverse retrieval, both of which fail in the in-process `CustomWebAppFactory` |
+| **Tests Skip'd** | 7 tests in `Sprk.Bff.Api.Tests.Api.Ai.AnalysisChatContextEndpointsTests` (`GetAnalysisChatContext_WithAuth_Returns200_WithStubResolver`, `…ResponseDeserializesTo_AnalysisChatContextResponse`, `…ResponseContainsAnalysisId`, `…ResponseHasNonEmptyDefaultPlaybookName`, `…StubResponse_ContainsAllSevenInlineActions`, `…StubResponse_IncludesSelectionReviseWithDiffType`, `…ContentType_IsApplicationJson`) — [`tests/unit/Sprk.Bff.Api.Tests/Api/Ai/AnalysisChatContextEndpointsTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Api/Ai/AnalysisChatContextEndpointsTests.cs) |
+| **Fix-by date** | 2026-09-30 (90-day target — requires test-infrastructure change, possibly a Dataverse mock at integration-test boundary) |
+| **Severity** | MEDIUM (loss of unit-test coverage on a SprkChat path; production correctness is unchanged) |
+| **Owner** | TBD (SprkChat / AnalysisWorkspace feature owner) |
+
+### Bug detail
+
+The tests were written against a stub `AnalysisChatContextResolver` that returned a non-null `AnalysisChatContextResponse` for any string `analysisId`. The current implementation:
+- Calls `Guid.TryParse(analysisId)` and returns `null` (→ HTTP 404) if the ID is not a parseable GUID — so the tests' string IDs (`"analysis-stub-001"`, etc.) all 404.
+- Even with a real GUID, it calls `_entityService.RetrieveAsync("sprk_analysisoutput", …)`, which in the `CustomWebAppFactory` mock returns a default empty Entity, then attempts to assemble a response from missing playbook/scope data — also returns `null` (→ HTTP 404).
+
+The tests' assumption ("stub resolver always returns a non-null response for any analysisId") is now stale; production no longer ships a stub for the unit-test path.
+
+### Two viable fix paths (require owner decision)
+
+1. **Restore a stub for tests**: re-introduce a feature flag or test seam in `AnalysisChatContextResolver` that allows the unit-test factory to inject a fake resolver that returns canned responses for `"analysis-stub-*"` IDs. Preserves the existing 7 tests with minimal change. Effort: ~2-4h.
+
+2. **Wire a real Dataverse mock**: extend `CustomWebAppFactory` (with §4.5 owner approval) to mock `IDataverseEntityService.RetrieveAsync` to return synthetic `sprk_analysisoutput` / `sprk_analysisplaybook` rows that satisfy the assembly. Removes the stub dependency entirely. Effort: ~6-8h.
+
+### Why this didn't surface in production
+
+Production traffic always sends real Dataverse-bound GUIDs against live data; the resolver's GUID + Dataverse path is exercised end-to-end by the `AnalysisWorkspace` Code Page. The stub-resolver tests existed only to spot-check the endpoint mapping and response shape in unit isolation — which the 3 still-passing tests in the class (`MapAnalysisChatContextEndpoints_MethodExists_AndIsStatic`, `GetAnalysisChatContext_WithoutAuth_ReturnsUnauthorized`, `GetAnalysisChatContext_WithAuth_DoesNotReturn404`) continue to cover at a coarser level.
+
+### Verification after fix
+
+Once a fix path is chosen and implemented, remove the `Skip = "..."` attribute on all 7 tests and the per-test `[Trait("status", "real-bug-pending-fix")]` overrides. Run; all 7 should pass.
+
+---
+
 *This ledger is required at Phase 2+3 exit gate (per [`design.md`](../design.md) §6.2 line 240 + §10.5 line 560). Each entry must have a fix-by date or an owner sign-off.*

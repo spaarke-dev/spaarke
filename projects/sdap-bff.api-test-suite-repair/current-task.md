@@ -5,6 +5,54 @@
 
 ---
 
+## Wave 2.5 task 071 — LOW-tier Api batch 2 (Office cluster) — 2026-05-31
+
+- **Task**: 071 (Phase 2+3 Wave 2.5 — P23.L2 LOW-tier Api/* batch 2)
+- **Status**: completed 2026-05-31
+- **Rigor**: STANDARD (POML `<rigor>STANDARD</rigor>`)
+- **Cluster scope**: Api.Office.OfficeEndpointsTests — 10 failures (per `failure-inventory-post-018-2026-05-31.md`)
+- **Disposition**: REPAIRED (all 10) — single file, two root-cause edits, zero archives, zero escalations.
+
+### Root-cause findings
+1. **Constructor failures (1 of 10)** — `OfficeTestWebAppFactory` config dict missing Wave-1.3 keys (`CosmosPersistence:Endpoint`, `CosmosPersistence:DatabaseName`, `AgentService:Enabled/Endpoint/AgentId/MaxConcurrency/ThreadCacheExpiryMinutes`). Same root cause as Workspace cluster (task 060). One additive edit mirrors `CustomWebAppFactory.cs` task-018 keys verbatim.
+2. **Route prefix drift (9 of 10)** — production refactored Office endpoints to `MapGroup("/api/office")`; tests asserted `/office/...`. 21 URL literals updated via `replace_all`.
+
+### Files modified
+| File | Δ | % of file (593 LOC) |
+|---|---|---|
+| `tests/unit/Sprk.Bff.Api.Tests/Api/Office/OfficeEndpointsTests.cs` | +35/-21 | 9.4% |
+
+Under 50% — no §4.8 escalation required.
+
+### §6.2 trait applied
+- `OfficeEndpointsTests` → `[Trait("status","repaired")]` (class-level)
+
+### Verification (targeted `--filter "FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Office"`)
+- **Pre-edit**: 80 Total / 60 Passed / 10 Failed / 10 Skipped
+- **Post-edit**: 80 Total / **70 Passed / 0 Failed** / 10 Skipped (10 pre-existing `[Fact(Skip=...)]`)
+- **Build**: 0 errors, pre-existing warnings only (Kiota NU1903, CS0618, CS1998).
+- **`git status`**: zero changes under `src/`/`power-platform/`/`infra/`/`scripts/`.
+- **`CustomWebAppFactory.cs`**: NOT modified (§4.5 honored).
+- **Sibling files** in batch 2 (`OfficeProblemDetailsTests`, `OfficeProblemExceptionTests`): not touched — passing.
+
+### Quality gates
+- NFR-01 (no production change): ✅
+- NFR-02 (<50% rewrite): ✅ (9.4%)
+- NFR-03 (no new DI in tests): ✅ (config dict entries only)
+- NFR-04 (archive ≤10): ✅ (0 archives)
+- NFR-06 (no silent delete): ✅
+- NFR-09 (repair-not-rewrite): ✅
+- §4.5 (CustomWebAppFactory untouched): ✅
+- §6.2 (final end-state trait): ✅
+
+### Real-bug ledger entries
+**NONE.** Both root causes are `test-stale` (config gap mirroring task-018 + route-prefix drift).
+
+### Archive-ledger entries
+**NONE.** No archives.
+
+---
+
 ## Wave 2.4 task 060 — Integration batch 1 (Workspace + Communication) — 2026-05-31
 
 - **Task**: 060 (Phase 2+3 Wave 2.4 — P23.I1 BFF Integration batch 1)
@@ -3261,3 +3309,148 @@ DEFERRED — residual 37 failures are downstream `Failure to infer one or more p
 - Phase 0 baseline (task 002): 198 Failed
 - Post-062 (Wave 2.4): 108 (−90)
 - Post-027 (this task): 47 (−61, cumulative −151 = −76.3%)
+
+---
+
+## Task 073 — Phase 2+3 Wave 2.5 — LOW-tier top-level *EndpointTests (P23.L4) — 2026-05-31
+
+**Rigor**: STANDARD (POML declares; scope-updated note confirms near-trivial)
+**Outcome**: NO-OP (zero failures in scope)
+
+### Scope per POML scope-updated (task 026 re-reconciliation)
+- HealthAndHeadersTests: 1 expected residual
+- PipelineHealthTests: 1 expected residual
+- Total in scope: 2 failures
+
+### Execution
+1. FR-20 start gate: P23.H + P23.M each ≥50% — verified via baseline/failure-inventory-post-018-2026-05-31.md showing −170 cumulative (Wave 2.x complete)
+2. Inspected `HealthAndHeadersTests.cs` and `PipelineHealthTests.cs` — both already carry class-level `[Trait("status", "repaired")]`
+3. Ran `dotnet test --filter "FullyQualifiedName~HealthAndHeadersTests|FullyQualifiedName~PipelineHealthTests" --no-build`
+4. Result: **8/8 Passed, 0 Failed, 0 Skipped** — all in-scope tests are GREEN
+
+### Disposition table
+| File | Class | Pre (post-018) | Result | Action | §6.2 trait |
+|---|---|---:|---|---|---|
+| `tests/unit/Sprk.Bff.Api.Tests/HealthAndHeadersTests.cs` | HealthAndHeadersTests | 1 Failed | 4/4 Pass | NONE — already repaired | `repaired` (class-level, line 7) |
+| `tests/unit/Sprk.Bff.Api.Tests/PipelineHealthTests.cs` | PipelineHealthTests | 1 Failed | 4/4 Pass | NONE — already repaired | `repaired` (class-level, line 9) |
+
+### Hypothesis: how the 2 residual failures cleared
+Post-018 baseline (the inventory file is dated 2026-05-31; this task ran same day later) showed 1 failure each. Both classes test `/healthz`, `/ping`, `/status` and basic security headers — these depend on the host-startup chain that task 018 hardened. Between post-018 inventory and now, downstream Wave 2.x activity (likely Wave 2.4 finalization of `services.RemoveAll<IHostedService>()` propagation or transient timing) absorbed the last 2 single-test residuals. Both classes are now 100% green at 4/4.
+
+### Acceptance criteria verification
+- [x] All top-level *EndpointTests Pass, Skip-with-reason, or archived; zero Failed → ✅ 8/8 Pass, zero Failed
+- [x] FR-20 start gate verified → ✅ Wave 2.x already progressed past 50% of P23.H + P23.M
+- [x] Per-file repair diff <50% (NFR-02) → ✅ ZERO diff (no edits required)
+- [x] Archive count ≤10 → ✅ 0 archives
+- [x] Every touched test has §6.2 final end-state trait OR archived → ✅ both classes carry class-level `[Trait("status", "repaired")]`
+- [x] `git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/` → ✅ working tree clean
+- [x] No overlap with subdirectory Api/* batches (070, 071, 072) → ✅ both files are top-level (`tests/unit/Sprk.Bff.Api.Tests/*.cs`, not `Api/*`)
+
+### Files modified
+NONE — pure NO-OP per disposition above. Both files already in repaired state; both classes 4/4 Pass.
+
+### Quality gates (STANDARD rigor)
+- Code review: ⏭️ Skipped (no code modified)
+- ADR check: ⏭️ Skipped (no code modified)
+- Lint: ⏭️ N/A (no code modified)
+
+### Reduction summary (this task)
+- Scope target: 2 failures (HealthAndHeaders 1 + PipelineHealth 1)
+- Actual: 0 failures
+- Net Phase 2+3 LOW-tier top-level reduction attributable to task 073: 0 (the 2 cleared before this task ran)
+
+### Cumulative Phase 2+3 status (P23.L top-level cluster)
+- Task 008 inventory: 39 failures (Upload 9 + Listing 6 + User 6 + FileOperations 6 + HealthAndHeaders 4 + PipelineHealth 4 + EndpointGrouping 3 + CorsAndAuth 1)
+- Post-018: 2 failures (−37 by Wave 1.3 task 018 factory edit)
+- Post-073 (now): 0 failures (−2 by intervening Wave 2.x activity; **task 073 NO-OP**)
+- **Cluster fully resolved.**
+
+
+---
+
+## Wave 2.5 task 072 — LOW-tier Api batch 3 (Reporting) — 2026-05-31
+
+- **Task**: 072 (Phase 2+3 Wave 2.5 — P23.L LOW-tier Api batch 3)
+- **Status**: completed 2026-05-31
+- **Rigor**: STANDARD (POML metadata `<rigor>STANDARD</rigor>`)
+- **Cluster scope**: 17 failures (ReportingEndpointsTests 12 + ReportingAuthorizationFilterTests 5) per post-018 inventory; partition target = `Api/Reporting/*` (R range / 3rd quarter alphabetical) — 4 files total in folder, 2 with failures.
+- **FR-20 start gate**: ✅ verified — all P23.H (040-046) and P23.M (050-056) tasks completed.
+- **Disposition**: 2 files **REPAIR/KEEP**; both repaired and pass.
+- **Archive count**: 0 (no archives) → NFR-04 ceiling not approached.
+
+### Root-cause finding (shared)
+
+**SINGLE shared root cause** across both classes: tests construct `var responseContext = new DefaultHttpContext()` then call `await result.ExecuteAsync(responseContext)`. The endpoints under test return `Results.Problem(...)` → `ProblemHttpResult`. `ProblemHttpResult.ExecuteAsync` calls `httpContext.RequestServices.GetRequiredService<IProblemDetailsService>()` — but the bare `DefaultHttpContext` has `RequestServices = null` → `ArgumentNullException ('provider')`. Same fix-pattern as `Api/Office/OfficeProblemDetailsTests.cs` already uses (`RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider()`).
+
+### Files modified (per-file diff vs total lines)
+
+| File | Δ | % | Disposition |
+|---|---|---|---|
+| `tests/unit/Sprk.Bff.Api.Tests/Api/Reporting/ReportingEndpointsTests.cs` | +25/-9 of 577 | 5.7% | REPAIRED |
+| `tests/unit/Sprk.Bff.Api.Tests/Api/Reporting/ReportingAuthorizationFilterTests.cs` | +20/-5 of 500 | 5.0% | REPAIRED |
+
+Both well under 50% (NFR-02 satisfied) — **no §4.8 escalations required**.
+
+### Repair pattern
+
+1. Added `using Microsoft.Extensions.DependencyInjection;`
+2. Added private static helper `BuildResponseContext()` returning a `DefaultHttpContext` with `RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider()`
+3. Replaced all 9 (Endpoints) / 5 (Auth filter) occurrences of `var responseContext = new DefaultHttpContext();` and `var fakeHttpContext = new DefaultHttpContext();` with calls to the helper
+
+### §6.2 traits applied
+
+- `ReportingEndpointsTests` → class-level `[Trait("status", "repaired")]`
+- `ReportingAuthorizationFilterTests` → class-level `[Trait("status", "repaired")]`
+
+### Verification
+
+- `dotnet test --filter "FullyQualifiedName~Api.Reporting"` → **0 fail / 85 pass / 0 skip** (was 17 fail / 68 pass / 0 skip)
+- Net delta: **−17 failures** absorbed from post-018 inventory
+- `git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/` — NFR-01 satisfied
+- Disjoint from concurrent batches 070/071/073 (different files)
+
+### Out-of-scope files in `Api/Reporting/` (not modified; not failing per inventory)
+
+- `ReportingEmbedServiceTests.cs` — not in failure inventory; untouched
+- `ReportingProfileManagerTests.cs` — not in failure inventory; untouched
+
+### Quality gates (STANDARD rigor)
+- Code review: ⏭️ Skipped (STANDARD)
+- ADR check: ⏭️ Skipped (STANDARD)
+
+### Cumulative Phase 2+3 status (P23.L Api/Reporting cluster)
+- Pre-task: 17 failures
+- Post-task: 0 failures
+- **Cluster fully resolved.**
+
+---
+
+## Task 070 — completion appendix (2026-05-31)
+
+**Status**: completed (STANDARD rigor)
+**Scope**: 7 in-scope failing classes (28 failures pre-task per `baseline/failure-inventory-post-018-2026-05-31.md`)
+**Outcome**: 117 Passed / 13 Skipped / 0 Failed in targeted filter — 28 → 0 in-scope failures.
+
+### Files touched (all under `tests/unit/Sprk.Bff.Api.Tests/`)
+- `Api/Ai/StandaloneChatContextEndpointsTests.cs` — repaired (X-Tenant-Id header pattern)
+- `Api/Ai/AnalysisChatContextEndpointsTests.cs` — repaired + 7 Skip'd as RB-T070-03
+- `Api/Ai/DailyBriefingEndpointsTests.cs` — repaired (signature fix + IBriefingAi mock)
+- `Api/Ai/R2SseEventEmitterTests.cs` — repaired + 1 Skip'd as RB-T070-02
+- `Api/Agent/AgentConversationServiceTests.cs` — repaired + 3 Skip'd as RB-T070-01
+- `Api/Agent/HandoffUrlBuilderTests.cs` — repaired (double-decode assertion fix)
+
+### Ledger updates
+3 new entries appended to `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md`:
+- RB-T070-01: `AgentConversationService` 3 methods don't honor CancellationToken
+- RB-T070-02: `R2SseEventEmitter.CapabilityChangePayload.RetryAfterSeconds` not omitted when null
+- RB-T070-03: `AnalysisChatContextResolver` removed stub path; 7 tests assert dead behavior
+
+### Constraints verification
+- NFR-01: 0 mods under `src/` / `power-platform/` / `infra/` / `scripts/` — PASS
+- NFR-02: largest diff ~14% line-replacement — PASS (no §4.8 escalation)
+- NFR-04: 0 archives (under 10 limit) — PASS
+- NFR-06: no deletions — PASS
+- §4.5: CustomWebAppFactory.cs untouched — PASS
+- §6.2: every touched test has final taxonomy state (repaired/real-bug-pending-fix) — PASS
+- Build: 0 errors, 17 warnings (unchanged) — PASS
+

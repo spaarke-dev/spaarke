@@ -1,7 +1,7 @@
 <task id="070" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.L1 — LOW-tier Api/* batch 1 (triage repair vs archive, ~22 files)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3-5 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, low-tier, p23-l, bff-api, testing, triage</tags>
@@ -183,5 +183,36 @@
       single batch within the task's original 2-4h estimate. Rigor stays FULL; no split required.
       See `notes/handoffs/phase23-scope-delta-post-018-2026-05-31.md`.
     </scope-updated>
+    <completion date="2026-05-31">
+      Wave 2.5 Phase 2+3 execution outcome. 7 in-scope failing classes (28 failures
+      pre-task) re-triaged at STANDARD rigor:
+
+      Per-file disposition (all under tests/unit/Sprk.Bff.Api.Tests/):
+        - Api/Ai/StandaloneChatContextEndpointsTests.cs       — REPAIRED (11/11 cleared via X-Tenant-Id header pattern)
+        - Api/Ai/AnalysisChatContextEndpointsTests.cs         — REPAIRED + 7 real-bug-pending-fix (X-Tenant-Id header; 7 stub-resolver tests Skip'd as RB-T070-03)
+        - Api/Ai/DailyBriefingEndpointsTests.cs               — REPAIRED (2/2 cleared via reflection signature fix + IBriefingAi mock)
+        - Api/Ai/R2SseEventEmitterTests.cs                    — REPAIRED + 1 real-bug-pending-fix (RB-T070-02: omit-null-on-serialize)
+        - Api/Agent/AgentConversationServiceTests.cs          — REPAIRED + 3 real-bug-pending-fix (RB-T070-01: token honor; pattern identical to RB-T034-01)
+        - Api/Agent/HandoffUrlBuilderTests.cs                 — REPAIRED (3/3 cleared via assertion fix; ExtractDecodedData double-decodes "+" to " ")
+        - Api/Agent/AgentConfigurationServiceTests.cs         — already had 1 Skip'd via RB-T034-01; no edits needed
+
+      Final test result (targeted): 117 Passed / 13 Skipped / 0 Failed in 1.9s.
+
+      Ledger updates: 3 new entries (RB-T070-01, -02, -03) appended to
+      `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md`.
+
+      Archive count: 0 (no archives — every failing test was either repairable or
+      mappable to a real-bug-pending-fix per §6.2 taxonomy). NFR-04 escalation not triggered.
+
+      Escalation status: §4.8 (>50% rewrite): NOT triggered — largest diff is 54 inserts
+      against ~400 lines (~14% line-replacement). NFR-02 PASSED.
+
+      NFR-01: zero modifications under src/ / power-platform/ / infra/ / scripts/. Verified
+      via git status filter.
+
+      §4.5: CustomWebAppFactory.cs untouched. Verified.
+
+      Build: 0 errors, 17 warnings (unchanged from baseline).
+    </completion>
   </notes>
 </task>

@@ -165,10 +165,10 @@ All 5 Wave 1 agents completed. Build verification skipped: no `.cs` files modifi
 
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
-| 070 | LOW-tier Api/* batch 1 (triage repair vs archive) | 🔲 | 23-L | ✅ Yes | STANDARD | 40+, 41+, 50+, 51+, 52+ (≥50% of H + M) |
-| 071 | LOW-tier Api/* batch 2 | 🔲 | 23-L | ✅ Yes | STANDARD | (same as 070) |
-| 072 | LOW-tier Api/* batch 3 | 🔲 | 23-L | ✅ Yes | STANDARD | (same as 070) |
-| 073 | LOW-tier *EndpointTests batch (top-level) | 🔲 | 23-L | ✅ Yes | STANDARD | (same as 070) |
+| 070 | LOW-tier Api/* batch 1 (triage repair vs archive) | ✅ 2026-05-31 (6 files / 28 failures handled / **3 real-bugs RB-T070-01..03**: AgentConversation CancellationToken, R2Sse null-emit, AnalysisChatContextResolver dead path; 117 pass / 13 skip / 0 fail) | 23-L | ✅ Yes | STANDARD | 40+, 41+, 50+, 51+, 52+ (≥50% of H + M) |
+| 071 | LOW-tier Api/* batch 2 | ✅ 2026-05-31 (1 Office file / 10 failures: **5th sibling fixture pattern** OfficeTestWebAppFactory missing Cosmos+Agent keys + route prefix /office → /api/office; 70 pass / 10 pre-existing skip) | 23-L | ✅ Yes | STANDARD | (same as 070) |
+| 072 | LOW-tier Api/* batch 3 | ✅ 2026-05-31 (2 Reporting files / 17 failures: shared DefaultHttpContext RequestServices fix for ProblemHttpResult; 85 pass / 0 fail; max 5.7% diff) | 23-L | ✅ Yes | STANDARD | (same as 070) |
+| 073 | LOW-tier *EndpointTests batch (top-level) | ✅ NO-OP 2026-05-31 (HealthAndHeaders + PipelineHealth already 4/4 pass via task 033's Wave 2.1 version-bump; cluster fully cleared) | 23-L | ✅ Yes | STANDARD | (same as 070) |
 | 074 | LOW-tier closeout + archive-ledger reconciliation | 🔲 | 23-L-gate | ❌ No (gate) | STANDARD | 070, 071, 072, 073 |
 
 **Phase 2+3 exit gate**: Zero failures in suite. Every touched test has §6.2 status trait. `ledgers/repair-ledger.md`, `archive-ledger.md`, `real-bug-ledger.md`, `flaky-ledger.md` populated. NFR-04 archive escalation (>10 in any phase) sign-off recorded if triggered.

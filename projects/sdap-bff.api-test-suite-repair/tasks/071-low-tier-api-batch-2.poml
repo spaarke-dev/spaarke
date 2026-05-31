@@ -1,7 +1,7 @@
 <task id="071" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.L2 — LOW-tier Api/* batch 2 (triage repair vs archive, ~22 files)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3-5 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, low-tier, p23-l, bff-api, testing, triage</tags>

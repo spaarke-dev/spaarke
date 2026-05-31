@@ -9,6 +9,14 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
 
+// Task 070 (2026-05-31): class-level trait "repaired" reflects the 3 passing tests
+// (MapAnalysisChatContextEndpoints_MethodExists_AndIsStatic, GetAnalysisChatContext_WithoutAuth_ReturnsUnauthorized,
+// GetAnalysisChatContext_WithAuth_DoesNotReturn404) plus the X-Tenant-Id header repair
+// applied to all GET requests expecting 200. The 7 stub-resolver tests carry their own
+// "real-bug-pending-fix" Trait (RB-T070-03) and Skip until either (a) the stub resolver
+// is restored for the unit-test path, or (b) a Dataverse mock is wired into CustomWebAppFactory.
+[Trait("status", "repaired")]
+
 /// <summary>
 /// Tests for the GET /api/ai/chat/context-mappings/analysis/{analysisId} endpoint.
 ///
@@ -33,11 +41,25 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
         PropertyNameCaseInsensitive = true,
     };
 
+    // Task 070 repair: endpoint reads tenantId from `tid` JWT claim OR X-Tenant-Id header.
+    // FakeAuthHandler does not inject `tid`; tests pass tenant via the header fallback path.
+    private const string TestTenantId = "test-tenant-001";
+
     private readonly HttpClient _client;
 
     public AnalysisChatContextEndpointsTests(CustomWebAppFactory factory)
     {
         _client = factory.CreateClient();
+    }
+
+    /// <summary>
+    /// Builds a request with the X-Tenant-Id header set. The endpoint uses this
+    /// when no `tid` claim is available (the FakeAuthHandler does not set `tid`).
+    /// </summary>
+    private static HttpRequestMessage WithTenantHeader(HttpRequestMessage request)
+    {
+        request.Headers.Add("X-Tenant-Id", TestTenantId);
+        return request;
     }
 
     // =========================================================================
@@ -94,21 +116,28 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
     // Successful Resolution Tests (200 OK)
     // =========================================================================
 
-    [Fact]
+    [Fact(Skip = "RB-T070-03: AnalysisChatContextResolver now calls Dataverse directly (the stub " +
+                  "resolver this test was written against no longer exists). Production fix or new " +
+                  "test infrastructure required: either restore a stub for the unit-test path or " +
+                  "wire a Dataverse mock into CustomWebAppFactory. " +
+                  "See projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md.")]
+    [Trait("status", "real-bug-pending-fix")]
     public async Task GetAnalysisChatContext_WithAuth_Returns200_WithStubResolver()
     {
         // Arrange
         _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
 
         // Act — stub Dataverse resolver always returns a non-null response
-        var response = await _client.GetAsync("/api/ai/chat/context-mappings/analysis/analysis-stub-001");
+        var response = await _client.SendAsync(WithTenantHeader(new HttpRequestMessage(HttpMethod.Get,
+            "/api/ai/chat/context-mappings/analysis/analysis-stub-001")));
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK,
             "stub resolver returns a non-null response for any analysisId");
     }
 
-    [Fact]
+    [Fact(Skip = "RB-T070-03: see GetAnalysisChatContext_WithAuth_Returns200_WithStubResolver.")]
+    [Trait("status", "real-bug-pending-fix")]
     public async Task GetAnalysisChatContext_WithAuth_ResponseDeserializesTo_AnalysisChatContextResponse()
     {
         // Arrange
@@ -116,7 +145,8 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
         const string analysisId = "analysis-stub-deserialize";
 
         // Act
-        var response = await _client.GetAsync($"/api/ai/chat/context-mappings/analysis/{analysisId}");
+        var response = await _client.SendAsync(WithTenantHeader(new HttpRequestMessage(HttpMethod.Get,
+            $"/api/ai/chat/context-mappings/analysis/{analysisId}")));
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -128,7 +158,8 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
         context.InlineActions.Should().NotBeNull("response must include InlineActions list");
     }
 
-    [Fact]
+    [Fact(Skip = "RB-T070-03: see GetAnalysisChatContext_WithAuth_Returns200_WithStubResolver.")]
+    [Trait("status", "real-bug-pending-fix")]
     public async Task GetAnalysisChatContext_WithAuth_ResponseContainsAnalysisId()
     {
         // Arrange
@@ -136,7 +167,8 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
         const string analysisId = "analysis-id-roundtrip-test";
 
         // Act
-        var response = await _client.GetAsync($"/api/ai/chat/context-mappings/analysis/{analysisId}");
+        var response = await _client.SendAsync(WithTenantHeader(new HttpRequestMessage(HttpMethod.Get,
+            $"/api/ai/chat/context-mappings/analysis/{analysisId}")));
 
         // Assert — analysisId is echoed back in the AnalysisContext
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -147,14 +179,16 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
             "AnalysisContext.AnalysisId must match the route parameter");
     }
 
-    [Fact]
+    [Fact(Skip = "RB-T070-03: see GetAnalysisChatContext_WithAuth_Returns200_WithStubResolver.")]
+    [Trait("status", "real-bug-pending-fix")]
     public async Task GetAnalysisChatContext_WithAuth_ResponseHasNonEmptyDefaultPlaybookName()
     {
         // Arrange
         _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
 
         // Act
-        var response = await _client.GetAsync("/api/ai/chat/context-mappings/analysis/analysis-stub-playbook");
+        var response = await _client.SendAsync(WithTenantHeader(new HttpRequestMessage(HttpMethod.Get,
+            "/api/ai/chat/context-mappings/analysis/analysis-stub-playbook")));
 
         // Assert — stub returns "Default Analysis Playbook"
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -165,14 +199,16 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
             "DefaultPlaybookName must be present so the AnalysisWorkspace UI can display it");
     }
 
-    [Fact]
+    [Fact(Skip = "RB-T070-03: see GetAnalysisChatContext_WithAuth_Returns200_WithStubResolver.")]
+    [Trait("status", "real-bug-pending-fix")]
     public async Task GetAnalysisChatContext_WithAuth_StubResponse_ContainsAllSevenInlineActions()
     {
         // Arrange
         _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
 
         // Act — stub resolver maps all 7 capabilities to inline actions
-        var response = await _client.GetAsync("/api/ai/chat/context-mappings/analysis/analysis-stub-actions");
+        var response = await _client.SendAsync(WithTenantHeader(new HttpRequestMessage(HttpMethod.Get,
+            "/api/ai/chat/context-mappings/analysis/analysis-stub-actions")));
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -183,14 +219,16 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
             "stub resolver includes all 7 capability actions so the UI can render QuickActionChips during development");
     }
 
-    [Fact]
+    [Fact(Skip = "RB-T070-03: see GetAnalysisChatContext_WithAuth_Returns200_WithStubResolver.")]
+    [Trait("status", "real-bug-pending-fix")]
     public async Task GetAnalysisChatContext_WithAuth_StubResponse_IncludesSelectionReviseWithDiffType()
     {
         // Arrange
         _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
 
         // Act
-        var response = await _client.GetAsync("/api/ai/chat/context-mappings/analysis/analysis-stub-diff");
+        var response = await _client.SendAsync(WithTenantHeader(new HttpRequestMessage(HttpMethod.Get,
+            "/api/ai/chat/context-mappings/analysis/analysis-stub-diff")));
 
         // Assert — selection_revise action must be present with actionType='diff'
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -205,14 +243,16 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
             "selection_revise must be of actionType 'diff' to trigger DiffReviewPanel");
     }
 
-    [Fact]
+    [Fact(Skip = "RB-T070-03: see GetAnalysisChatContext_WithAuth_Returns200_WithStubResolver.")]
+    [Trait("status", "real-bug-pending-fix")]
     public async Task GetAnalysisChatContext_WithAuth_ContentType_IsApplicationJson()
     {
         // Arrange
         _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
 
         // Act
-        var response = await _client.GetAsync("/api/ai/chat/context-mappings/analysis/analysis-stub-ct");
+        var response = await _client.SendAsync(WithTenantHeader(new HttpRequestMessage(HttpMethod.Get,
+            "/api/ai/chat/context-mappings/analysis/analysis-stub-ct")));
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);

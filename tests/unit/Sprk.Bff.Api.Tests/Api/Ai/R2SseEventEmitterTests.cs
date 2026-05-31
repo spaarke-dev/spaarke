@@ -20,7 +20,13 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 ///
 /// The writer delegate captures emitted events into a list so the tests can assert
 /// payload shape without a real HTTP response stream.
+///
+/// Task 070 (2026-05-31): class-level trait "repaired" reflects the passing tests.
+/// `EmitCapabilityChangeAsync_OmitsRetryAfterSecondsWhenNull` carries its own
+/// "real-bug-pending-fix" trait (RB-T070-02) and Skip until production omits
+/// null-valued optional properties from the SSE payload.
 /// </summary>
+[Trait("status", "repaired")]
 public class R2SseEventEmitterTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -267,7 +273,13 @@ public class R2SseEventEmitterTests
         data.GetProperty("retryAfterSeconds").GetInt32().Should().Be(30);
     }
 
-    [Fact]
+    [Fact(Skip = "RB-T070-02: R2SseEventEmitter serializes CapabilityChangePayload with default " +
+                  "System.Text.Json options, which include null-valued optional properties. The " +
+                  "documented contract is that `retryAfterSeconds` is omitted when null. Production " +
+                  "fix required (add JsonIgnoreCondition.WhenWritingNull to CapabilityChangePayload " +
+                  "or set DefaultIgnoreCondition on the serializer used by EmitAsync). " +
+                  "See projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md.")]
+    [Trait("status", "real-bug-pending-fix")]
     public async Task EmitCapabilityChangeAsync_OmitsRetryAfterSecondsWhenNull()
     {
         var captured = new List<ChatSseEvent>();

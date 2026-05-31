@@ -1,7 +1,7 @@
 <task id="073" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P23.L4 — LOW-tier *EndpointTests batch (top-level, ~13 files)</title>
-    <status>not-started</status>
+    <status>completed-noop</status>
     <estimated-effort>2-4 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3, low-tier, p23-l, bff-api, testing, triage, endpoint-tests</tags>

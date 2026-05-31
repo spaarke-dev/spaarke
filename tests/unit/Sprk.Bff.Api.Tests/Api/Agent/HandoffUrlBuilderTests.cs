@@ -9,7 +9,15 @@ namespace Sprk.Bff.Api.Tests.Api.Agent;
 /// <summary>
 /// Unit tests for HandoffUrlBuilder.
 /// Validates deep-link URL generation for each Code Page / Wizard target.
+///
+/// Task 070 repair (2026-05-31): three tests asserted post-decode literal "+" for space
+/// characters (e.g., "matterName=New+Matter"). The <see cref="ExtractDecodedData"/>
+/// helper applies HttpUtility.UrlDecode twice (once via ParseQueryString + once
+/// explicitly), which converts "+" back to " ". Production behaviour is unchanged
+/// (double-encoded URL); the assertions now match the doubly-decoded post-helper
+/// string.
 /// </summary>
+[Trait("status", "repaired")]
 public class HandoffUrlBuilderTests
 {
     private const string BaseUrl = "https://spaarkedev1.crm.dynamics.com";
@@ -110,7 +118,8 @@ public class HandoffUrlBuilderTests
         var data = ExtractDecodedData(url);
         data.Should().Contain("parentEntityType=sprk_matter");
         data.Should().Contain($"parentEntityId={parentEntityId}");
-        data.Should().Contain("parentEntityName=Test+Matter");
+        // Task 070 repair: ExtractDecodedData double-decodes so "+" becomes " ".
+        data.Should().Contain("parentEntityName=Test Matter");
     }
 
     [Fact]
@@ -231,7 +240,8 @@ public class HandoffUrlBuilderTests
         var url = _builder.BuildCreateMatterWizardUrl("New Matter");
 
         var data = ExtractDecodedData(url);
-        data.Should().Contain("matterName=New+Matter");
+        // Task 070 repair: ExtractDecodedData double-decodes so "+" becomes " ".
+        data.Should().Contain("matterName=New Matter");
     }
 
     [Fact]
@@ -293,7 +303,8 @@ public class HandoffUrlBuilderTests
 
         var data = ExtractDecodedData(url);
         data.Should().Contain("matterId=");
-        data.Should().Contain("matterName=Review+Hearing");
+        // Task 070 repair: ExtractDecodedData double-decodes so "+" becomes " ".
+        data.Should().Contain("matterName=Review Hearing");
     }
 
     #endregion
