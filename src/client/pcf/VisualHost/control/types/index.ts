@@ -374,10 +374,11 @@ export interface ICardConfig {
    * - "score": Round to integer (e.g., 85)
    * - "scoreOver100": "85/100" style
    * - "percentage": "85%" (value is 0-1 decimal, multiplied by 100)
+   * - "percentScore": "85%" (value is already on a 0-100 scale, no multiplication)
    * - "ratio": "0.85" (two decimals)
    * Default: "score".
    */
-  breakdownValueFormat?: 'score' | 'scoreOver100' | 'percentage' | 'ratio';
+  breakdownValueFormat?: 'score' | 'scoreOver100' | 'percentage' | 'percentScore' | 'ratio';
 
   // ===== MetricCard badge slot (FR-VH-02 / task 021) =====
   // Generic addition consumed by MetricCard.tsx. Backward compat (NFR-05):

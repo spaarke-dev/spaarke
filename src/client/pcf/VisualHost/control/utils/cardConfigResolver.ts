@@ -245,6 +245,7 @@ export function resolveCardConfig(
     breakdownValueFormatRaw === 'score' ||
     breakdownValueFormatRaw === 'scoreOver100' ||
     breakdownValueFormatRaw === 'percentage' ||
+    breakdownValueFormatRaw === 'percentScore' ||
     breakdownValueFormatRaw === 'ratio'
       ? breakdownValueFormatRaw
       : undefined;

@@ -288,10 +288,15 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
         titleFontSize: titleFontSizePcf || undefined,
       });
 
+      // When the host wraps this chart in CardChrome (showTitlePcf === true),
+      // the chrome owns the title — suppress DonutChart's internal centered
+      // title to avoid double-rendering. Legacy chrome-free chart defs
+      // (showTitlePcf undefined/false) keep their existing inline title.
+      const chromeOwnsTitle = showTitlePcf === true;
       return (
         <DonutChart
           data={dataPoints}
-          title={config.showTitle !== false ? sprk_name : undefined}
+          title={chromeOwnsTitle ? undefined : (config.showTitle !== false ? sprk_name : undefined)}
           innerRadius={config.innerRadius as number | undefined}
           showCenterValue={config.showCenterValue as boolean | undefined}
           centerLabel={config.centerLabel as string | undefined}

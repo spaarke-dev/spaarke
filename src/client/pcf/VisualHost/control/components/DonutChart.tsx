@@ -18,7 +18,7 @@
 import * as React from 'react';
 import { useRef, useState, useEffect } from 'react';
 import { DonutChart as FluentDonutChart, IChartDataPoint, IChartProps } from '@fluentui/react-charting';
-import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens, Text } from '@fluentui/react-components';
 import type { DrillInteraction, IAggregatedDataPoint, ICardConfig, IColorThreshold } from '../types';
 import { formatValue } from '../utils/valueFormatters';
 import { getTokenSetColors } from '../utils/tokenSetColors';
@@ -99,6 +99,8 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'center',
     minWidth: 0,
+    // Position context for the absolute-positioned center letter-grade overlay.
+    position: 'relative',
   },
   matrixRowsCell: {
     display: 'flex',
@@ -107,25 +109,58 @@ const useStyles = makeStyles({
     rowGap: tokens.spacingVerticalS,
     minWidth: 0,
   },
+  // Single-row breakdown: color swatch + label + value all on one line.
+  // Replaces the prior two-line (label-above-value, all-caps) layout.
   breakdownRow: {
     display: 'flex',
-    flexDirection: 'column',
-    rowGap: tokens.spacingVerticalXXS,
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    columnGap: tokens.spacingHorizontalS,
     minWidth: 0,
+  },
+  // Small filled square next to each breakdown row, color-matched to the
+  // corresponding donut segment for visual cross-reference.
+  breakdownSwatch: {
+    width: '10px',
+    height: '10px',
+    flexShrink: 0,
+    ...shorthands.borderRadius(tokens.borderRadiusSmall),
+    // Translate down so the visual center of the swatch aligns with the
+    // baseline-aligned text it sits next to.
+    alignSelf: 'center',
   },
   breakdownLabel: {
     fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
+    fontWeight: tokens.fontWeightRegular,
     color: tokens.colorNeutralForeground2,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
     lineHeight: tokens.lineHeightBase200,
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   breakdownValue: {
-    fontSize: tokens.fontSizeBase400,
+    fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    lineHeight: tokens.lineHeightBase400,
+    lineHeight: tokens.lineHeightBase300,
+    flexShrink: 0,
+  },
+  // Absolute-positioned overlay for the center value (typically a letter
+  // grade). Sized as a fraction of the donut diameter — Fluent's built-in
+  // `valueInsideDonut` prop renders at a fixed-small size that doesn't read
+  // well at a glance.
+  centerOverlay: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    pointerEvents: 'none',
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    textAlign: 'center',
+    lineHeight: 1,
   },
 });
 
@@ -152,7 +187,11 @@ function resolveSegmentColor(value: number, thresholds: IColorThreshold[] | unde
   for (const t of thresholds) {
     const [min, max] = t.range;
     if (value >= min && value <= max) {
-      return getTokenSetColors(t.tokenSet).borderAccent;
+      // Prefer the soft Foreground2-tier `donutSegment` token (matches SSC chip
+      // pattern — saturated but readable, not vibrating). Fall back to the
+      // vibrant `borderAccent` only when the token set has no donutSegment set.
+      const set = getTokenSetColors(t.tokenSet);
+      return set.donutSegment ?? set.borderAccent;
     }
   }
   return undefined;
@@ -160,7 +199,17 @@ function resolveSegmentColor(value: number, thresholds: IColorThreshold[] | unde
 
 /**
  * Format a breakdown row value per the `breakdownValueFormat` key.
- * Defaults to `"score"` (integer rounding) when no format is supplied.
+ *
+ * Format options:
+ *  - `score`         → "85"           (integer round, no suffix)
+ *  - `scoreOver100`  → "85/100"
+ *  - `percentage`    → "85%"          (multiplies 0-1 input by 100)
+ *  - `percentScore`  → "85%"          (treats 0-100 input as already a percent;
+ *                                      use when chart def supplies score values
+ *                                      already on a 0-100 scale)
+ *  - `ratio`         → "0.85"         (2-decimal float)
+ *
+ * Defaults to `"score"` when no format is supplied.
  */
 function formatBreakdownValue(value: number, format: ICardConfig['breakdownValueFormat']): string {
   switch (format) {
@@ -168,6 +217,8 @@ function formatBreakdownValue(value: number, format: ICardConfig['breakdownValue
       return `${Math.round(value)}/100`;
     case 'percentage':
       return `${Math.round(value * 100)}%`;
+    case 'percentScore':
+      return `${Math.round(value)}%`;
     case 'ratio':
       return value.toFixed(2);
     case 'score':
@@ -182,7 +233,10 @@ function formatBreakdownValue(value: number, format: ICardConfig['breakdownValue
 export const DonutChart: React.FC<IDonutChartProps> = ({
   data,
   title,
-  innerRadius = 0.5,
+  // Default thinner ring (0.72 → ~28% of radius is arc width) reads as a
+  // ring/score indicator rather than a heavy pie wedge. Chart defs that
+  // explicitly set `innerRadius` continue to win.
+  innerRadius = 0.72,
   showLegend = true,
   onDrillInteraction,
   drillField,
@@ -268,12 +322,17 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
     centerValueText = total.toLocaleString();
   }
 
-  // Center display string honored by the FluentDonutChart `valueInsideDonut` prop:
+  // Center display string. Resolution priority:
   //   1. donutCenterLabel from cardConfig (FR-VH-01 explicit override)
   //   2. centerLabel prop (legacy, kept for parity)
   //   3. computed centerValueText
+  // matrixRight layout renders this via an absolute-positioned overlay so the
+  // font size scales with the donut diameter (typical use is a letter grade).
+  // Standard layout keeps using Fluent's `valueInsideDonut` for byte-identical
+  // back-compat with every pre-FR-VH-01 chart def (NFR-05).
   const effectiveCenterLabel = cardConfig?.donutCenterLabel ?? centerLabel;
-  const valueInside = showCenterValue ? effectiveCenterLabel || centerValueText : undefined;
+  const centerOverlayValue = showCenterValue ? (effectiveCenterLabel || centerValueText) : undefined;
+  const valueInside = centerOverlayValue;
 
   const chartProps: IChartProps = {
     chartTitle: title,
@@ -288,6 +347,9 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
     const donutSize = Math.max(120, Math.min(containerWidth * 0.45, height));
     const showRows = cardConfig?.showBreakdownRows ?? false;
     const breakdownFormat = cardConfig?.breakdownValueFormat;
+    // Center overlay font size: 36% of the donut diameter, capped at 96px.
+    // Empirically large enough for a 1-2 char letter grade to read clearly.
+    const centerFontSize = `${Math.min(Math.round(donutSize * 0.36), 96)}px`;
 
     return (
       <div className={styles.container} ref={containerRef}>
@@ -301,9 +363,17 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
               hideLegend
               hideTooltip={false}
               innerRadius={innerRadius * (donutSize / 2)}
-              valueInsideDonut={valueInside}
               {...chartProps}
             />
+            {centerOverlayValue !== undefined && (
+              <span
+                className={styles.centerOverlay}
+                style={{ fontSize: centerFontSize }}
+                aria-live="polite"
+              >
+                {centerOverlayValue}
+              </span>
+            )}
           </div>
           {showRows && (
             <div className={styles.matrixRowsCell}>
@@ -312,8 +382,16 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
                   dp.value == null
                     ? cardConfig?.nullDisplay ?? '—'
                     : formatBreakdownValue(dp.value, breakdownFormat);
+                const swatchColor = chartData[idx]?.color;
                 return (
                   <div key={`${dp.label}-${idx}`} className={styles.breakdownRow}>
+                    {swatchColor && (
+                      <span
+                        className={styles.breakdownSwatch}
+                        style={{ backgroundColor: swatchColor }}
+                        aria-hidden={true}
+                      />
+                    )}
                     <Text className={styles.breakdownLabel}>{dp.label}</Text>
                     <Text className={styles.breakdownValue} aria-live="polite">
                       {rowValue}
