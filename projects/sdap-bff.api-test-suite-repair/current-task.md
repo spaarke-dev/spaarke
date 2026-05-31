@@ -1650,3 +1650,100 @@ Task 019's measurement matches task 018's post-edit report exactly (no drift acr
 ### POML status update
 
 `projects/sdap-bff.api-test-suite-repair/tasks/019-factory-verify-baseline-preserved.poml` `<status>` updated from `not-started` → `completed`.
+
+
+---
+
+## Task 025 — Wave 1.4 (2026-05-31): P1.D5 fix broken sdap-ci.yml workflow
+
+**Rigor Level**: FULL (per POML metadata `<rigor>FULL</rigor>`; CI workflow brokenness blocks every merge to master; orchestrator-mandated FULL protocol)
+**Status**: completed 2026-05-31
+
+### Root cause identified
+
+Duplicate `if-no-files-found: warn` mapping key inside the `with:` block of the `Upload ADR test results` step (lines 184 + 186 of pre-fix file). GitHub Actions uses strict YAML parsing; duplicate mapping keys cause workflow load rejection — the exact cause of the observed 0s-failure / no-jobs-created / no-logs pattern on every recent run. Introduced by commit `d9018dea` "chore(ci): clean up CI workflows" which added the key above the existing one without removing the original.
+
+### Fix applied (NFR-09 minimum-viable)
+
+Single deletion of the duplicate line. Net diff: `-1 line` (0.26% of file). Well below §4.8 50% threshold; no escalation required.
+
+```diff
+       - name: Upload ADR test results
+         if: always()
+         uses: actions/upload-artifact@v6
+         with:
+           name: adr-test-results
+-          if-no-files-found: warn
+           path: ./TestResults/adr-results.trx
+           if-no-files-found: warn
+```
+
+### Diagnostic note
+
+Standard `python -c "import yaml; yaml.safe_load(...)"` silently succeeded because Python yaml is lenient about duplicate keys ("last value wins"). A strict-loader script (constructing a custom loader that raises on duplicate mapping keys) reproduced the GH Actions parser behavior and identified the duplicate at line 186. Captured both in evidence doc for the diagnostic patterns audit.
+
+### Verify-PR outcome
+
+| Field | Value |
+|---|---|
+| **PR URL** | https://github.com/spaarke-dev/spaarke/pull/313 |
+| **Verify run ID** | 26723333123 |
+| **State at signal-verification time** | `in_progress` — opposite of pre-fix 0s-failure pattern |
+| **Status checks posted** | `Build & Test (Debug)` (pending), `Build & Test (Release)` (pending), `Client Quality (Prettier + ESLint)` (pending), `Security Scan` (pending) — all 4 visible via `gh pr checks 313` |
+| **Final state** | Cancelled after signal confirmation; PR closed 20:17:02 UTC; remote + local branch deleted |
+
+**Critical evidence**: `gh pr checks 313` showed all 4 named jobs in `pending` state — this is end-to-end proof that the workflow LOADS, the jobs DISPATCH, and the required-status-check names REACH GitHub's branch-protection list (which is what the gate needs to evaluate). `Code Quality` (which `needs: build-test`) would have posted after `build-test` completed.
+
+### Files Created / Modified (this branch — work/)
+
+| File | Action | Purpose |
+|---|---|---|
+| `.github/workflows/sdap-ci.yml` | Edit (-1 line) | Remove duplicate `if-no-files-found: warn` key |
+| `projects/sdap-bff.api-test-suite-repair/baseline/sdap-ci-repair-evidence-2026-05-31.md` | Create | Root cause + diff + verify outcome + cleanup record |
+| `projects/sdap-bff.api-test-suite-repair/tasks/025-fix-sdap-ci-workflow.poml` | Edit (status + notes) | `not-started` → `completed` per task-execute Step 10 |
+| `projects/sdap-bff.api-test-suite-repair/current-task.md` | Edit (append) | This execution log |
+
+### Step 9.5 Quality Gates report
+
+| Gate | Result |
+|---|---|
+| Local YAML validation (strict loader, duplicate-key detection) | PASS — no duplicate keys after fix |
+| Local YAML validation (standard `yaml.safe_load`) | PASS |
+| Live workflow execution verification | PASS — verify run transitioned `in_progress`; 4 named jobs posted |
+| ADR-check (workflow only — no code ADRs applicable) | N/A — workflow YAML is not subject to architectural ADRs (ADR-001 / ADR-010 etc. are runtime-component ADRs) |
+| Manual code review against NFR-01 (no `src/`/`power-platform/`/`infra/`/`scripts/` changes) | PASS — only `.github/workflows/sdap-ci.yml` and `projects/sdap-bff.api-test-suite-repair/` files modified |
+| NFR-09 (`repair-not-rewrite: true`) | PASS — 1-line deletion = 0.26% of file; far below 50% threshold |
+| D-02 binding (branch protection preserved) | PASS — `enforce_admins: true` + 3 required checks NOT touched; workflow fix repairs the SIGNAL feeding those checks |
+
+### Acceptance Criteria Verification
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | `.github/workflows/sdap-ci.yml` parses as valid YAML | PASS — strict + safe loaders both confirm |
+| 2 | `gh workflow view sdap-ci.yml` reports no syntax errors | PASS — workflow loaded and dispatched 4 jobs on verify run |
+| 3 | Workflow runs >0 seconds AND posts the named `Build & Test (Release)` status check | PASS — verify run 26723333123 entered `in_progress`; `Build & Test (Release)` posted to PR check list with job ID 78754226615 |
+| 4 | `baseline/sdap-ci-repair-evidence-2026-05-31.md` documents root cause + fix + verification | PASS — file written |
+| 5 | No modifications to `src/`, `power-platform/`, `infra/`, `scripts/` | PASS — `git status` shows only `.github/workflows/sdap-ci.yml` + `projects/sdap-bff.api-test-suite-repair/` |
+| 6 | If >50% rewrite, escalation file exists | PASS (N/A) — fix is 1 line / 0.26% of file |
+| 7 | D-02 binding preserved | PASS — branch protection untouched |
+
+### Handoff to main session
+
+Working tree state on `work/sdap-bff.api-test-suite-repair`:
+- `.github/workflows/sdap-ci.yml` modified (1-line deletion) — NOT committed per orchestrator brief; main session handles the commit
+- `projects/sdap-bff.api-test-suite-repair/baseline/sdap-ci-repair-evidence-2026-05-31.md` created — NOT staged
+- `projects/sdap-bff.api-test-suite-repair/tasks/025-fix-sdap-ci-workflow.poml` modified (status flip + completion notes) — NOT staged
+- `projects/sdap-bff.api-test-suite-repair/current-task.md` modified (this append) — NOT staged
+
+Verify-PR cleanup: PR #313 closed 20:17:02 UTC. Remote branch `test/sdap-ci-repair-verify-2026-05-31` deleted. Local branch deleted.
+
+### P1.D Track FINAL EXIT declaration
+
+**Phase 1 P1.D Track is FULLY operational:**
+- Task 020 (FR-09 enforce_admins flip): done
+- Task 021 (FR-10 skip-tests removed from deploy-bff-api.yml): done
+- Task 022 (FR-11 emergency procedure documented): done
+- Task 023 (FR-12 CI gate negative-path verified): done — gate operational
+- **Task 025 (sdap-ci.yml workflow repair): done — gate's underlying signal restored**
+
+The CI gate now BOTH (a) blocks unauthorized merges via `enforce_admins: true` (task 023 verification) AND (b) receives the real pass/fail signal it requires from `sdap-ci.yml` (this task). Master is no longer operationally locked once this fix lands on master. Outcome C (CI gate restoration) is OPERATIONALLY COMPLETE.

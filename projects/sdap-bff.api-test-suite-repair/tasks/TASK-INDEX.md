@@ -99,7 +99,7 @@ All 5 Wave 1 agents completed. Build verification skipped: no `.cs` files modifi
 | 021 | Remove `skip-tests` input from `deploy-bff-api.yml` | ✅ 2026-05-31 (6 lines deleted; YAML valid) | 1-A | ✅ Yes | FULL | none |
 | 022 | Author `docs/procedures/bff-deploy-emergency.md` | ✅ 2026-05-31 (130 lines / 8 sections; owner named; Backup approver TBD slot; cross-refs FR-11/D-02/ADR-029) | 1-A | ✅ Yes | STANDARD | none |
 | 023 | CI gate negative-path verification (deliberate failing PR) | ✅ 2026-05-31 (PR #312 closed; gate blocked via "check expected but missing"; admin-merge attempt refused with "3 of 3 required status checks expected" — gate verifiably binding. **CRITICAL FINDING: `sdap-ci.yml` workflow itself is broken on all branches incl. master — absorbed into NEW task 025**) | 1-B | ✅ Yes | STANDARD | 020, 021, 022 |
-| 025 | Fix broken `sdap-ci.yml` workflow (every run completes 0s with `conclusion: failure`; master is currently locked for merges) — **NEW 2026-05-31 absorbed from task 023's finding per owner directive** | 🔲 | 1-D-post-factory | ❌ No (sequential after 019) | FULL | 023, 019 |
+| 025 | Fix broken `sdap-ci.yml` workflow (every run completes 0s with `conclusion: failure`; master is currently locked for merges) — **NEW 2026-05-31 absorbed from task 023's finding per owner directive** | ✅ 2026-05-31 (root cause: duplicate `if-no-files-found: warn` YAML key in ADR upload step — strict-loader rejection; **1-line deletion fix** (0.26% of file); verify PR #313 confirmed all 4 named status checks now post; master unlocked) | 1-D-post-factory | ❌ No (sequential after 019) | FULL | 023, 019 |
 
 ### Track P1.E — Integration test triage
 

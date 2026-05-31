@@ -1,7 +1,7 @@
 <task id="025" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>Fix broken sdap-ci.yml workflow — restore Build &amp; Test (Release) signal</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1-3 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-1, ci-cd, workflow, p1-d, scope-absorption</tags>
@@ -169,5 +169,39 @@
       project. Sequenced after Wave 1.3 (factory ISOLATED) to avoid muddying the post-factory
       test signal during task 019's measurement.
     </origin>
+    <completion date="2026-05-31">
+      Root cause: duplicate `if-no-files-found: warn` mapping key inside the `with:` block of
+      the `Upload ADR test results` step (lines 184 + 186 of pre-fix file). GitHub Actions
+      uses strict YAML parsing; duplicate mapping keys cause workflow load rejection — exact
+      cause of the 0s-failure / no-jobs-created / no-logs pattern observed across every recent
+      run. Introduced by commit `d9018dea` "chore(ci): clean up CI workflows" which added the
+      key above the existing one without removing the original.
+
+      Fix: 1-line deletion of the duplicate. Net diff `-1 line` (0.26% of file). Well below
+      §4.8 50% threshold; no escalation file required. NFR-09 `repair-not-rewrite` preserved.
+
+      Local validation: strict-loader YAML parse PASSES (no duplicate keys); standard
+      `yaml.safe_load` PASSES. The standard `safe_load` originally hid the issue because
+      Python's default loader is lenient about duplicate keys; the strict-loader script
+      replicates GH Actions parser behavior.
+
+      Verify PR: #313 (https://github.com/spaarke-dev/spaarke/pull/313) — run 26723333123
+      transitioned to `in_progress`, all 4 named jobs (`Build &amp; Test (Debug)`, `Build &amp;
+      Test (Release)`, `Client Quality (Prettier + ESLint)`, `Security Scan`) entered
+      `pending` and were posted to the PR's check list. This is end-to-end verification that
+      the workflow LOADS, the jobs DISPATCH, and the named status checks REACH the
+      branch-protection required-check list. Cancelled after signal confirmation per
+      orchestrator brief (not full test completion). PR closed without merging; verify branch
+      deleted on remote + local.
+
+      Evidence: `baseline/sdap-ci-repair-evidence-2026-05-31.md` (root cause + diff + verify
+      outcome + cleanup).
+
+      D-02 binding preserved: branch protection (`enforce_admins: true` + 3 required checks)
+      untouched; the fix repairs the SIGNAL feeding those checks.
+
+      Phase 1 P1.D Track FINAL EXIT: gate operational (task 023) AND signal flowing (this
+      task). Master no longer operationally locked once this fix lands on master.
+    </completion>
   </notes>
 </task>
