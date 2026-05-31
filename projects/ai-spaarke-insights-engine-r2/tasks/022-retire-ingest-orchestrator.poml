@@ -1,0 +1,66 @@
+<task id="022" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>C3 — Retire IngestOrchestrator.cs + orphaned interfaces</title>
+    <status>not-started</status>
+    <wave>C</wave>
+    <estimated-effort>4h</estimated-effort>
+    <tags>refactor, code-removal, jps-compliance, zone-a, bff-api</tags>
+    <dependencies>020, 023</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <wave-item>C3</wave-item>
+  </metadata>
+
+  <prompt>
+    Delete IngestOrchestrator.cs (and any orphaned interfaces / DTOs no longer referenced) once universal-ingest@v1 is live-verified via task 020 + facade re-wired via task 023. This closes the loop on D-P15-01 ("Insights IS a JPS application — no parallel orchestrators") and is the SC-07 acceptance step. After this task, every Insights workflow runs through PlaybookExecutionEngine.
+  </prompt>
+
+  <role>Senior .NET developer + refactoring specialist.</role>
+
+  <goal>
+    IngestOrchestrator.cs removed from source; all referencing interfaces/DTOs removed if unused; DI registration removed; build still passes; existing tests still pass (those that referenced IngestOrchestrator either deleted or updated to test the JPS playbook path). SC-07 verified by grep — no IngestOrchestrator references remain.
+  </prompt>
+
+  <inputs>
+    <file purpose="r1-orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/IngestOrchestrator.cs</file>
+    <file purpose="r1-facade">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInsightsAi.cs (already re-wired in task 023)</file>
+    <file purpose="r1-DI">src/server/api/Sprk.Bff.Api/Infrastructure/DI/InsightsServiceCollectionExtensions.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="bff-extensions.md">Removal of services is part of BFF hygiene — verify no external consumers remain</constraint>
+    <constraint source="ADR-010">DI minimalism — removal helps reduce non-framework registrations</constraint>
+    <constraint source="ADR-013-refined">Facade IInsightsAi is the ONLY entry point for ingest from CRUD/Zone-B code</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Confirm prerequisite tasks complete">020 (JPS playbook live) + 023 (facade re-wired)</step>
+    <step order="2" name="Find all references">grep for IngestOrchestrator across the codebase</step>
+    <step order="3" name="Plan removals">List class + interfaces + DTOs to delete; identify tests to delete/update</step>
+    <step order="4" name="Delete + adjust DI">Remove DI registration; delete IngestOrchestrator.cs + orphans</step>
+    <step order="5" name="Update tests">Tests that exercised IngestOrchestrator directly should now exercise IInsightsAi.RunIngestAsync (which calls the JPS playbook); delete tests that are purely about the obsolete code path</step>
+    <step order="6" name="Build + run all tests">Confirm green</step>
+    <step order="7" name="§3.5 grep verification">Re-run the Zone-B forbidden-imports grep — confirm no regressions</step>
+    <step order="8" name="Quality gates">code-review + adr-check</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test</tool>
+    <tool name="grep">Reference + §3.5 grep</tool>
+    <tool name="git">Delete files + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">IngestOrchestrator.cs DELETED + any orphaned interfaces / DTOs</output>
+    <output type="code">DI registration updated</output>
+    <output type="test">Tests updated to use IInsightsAi.RunIngestAsync path</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep for "IngestOrchestrator" returns 0 hits in source (except possibly historical CHANGELOG / commit messages)</criterion>
+    <criterion testable="true">Build passes; all tests pass</criterion>
+    <criterion testable="true">§3.5 Zone-B forbidden-imports grep still passes</criterion>
+    <criterion testable="true">DI non-framework registration count drops (verify per ADR-010)</criterion>
+    <criterion testable="true">predict-matter-cost end-to-end smoke still works (regression-free)</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,53 @@
+<task id="002" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>B2 — Update predict-matter-cost.playbook.json to reference new Insights action codes</title>
+    <status>not-started</status>
+    <wave>B</wave>
+    <estimated-effort>1h</estimated-effort>
+    <tags>playbook-config, jps, predict-matter-cost, unblock-synthesis</tags>
+    <dependencies>001</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>B2</wave-item>
+  </metadata>
+
+  <prompt>
+    Update predict-matter-cost.playbook.json (the source-of-truth declarative spec consumed by Deploy-Playbook.ps1) so each Insights-mode node references the new sprk_analysisaction action code created in task 001. Today the playbook nodes lack proper action wiring, which is why end-to-end execution returns the defensive scaffold decline.
+  </prompt>
+
+  <role>Playbook author + JPS contract specialist.</role>
+
+  <goal>
+    predict-matter-cost.playbook.json updated with action-code references on every node. Each node's "actionCode" (or equivalent JPS field) points to one of the 6 INSIGHTS.* rows from task 001. Synthesis node (AgentService) action code unchanged from r1 — only Insights-mode nodes need new references.
+  </goal>
+
+  <inputs>
+    <file purpose="r1-playbook-json">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json</file>
+    <file purpose="action-codes">projects/ai-spaarke-insights-engine-r2/notes/drafts/wave-b-action-codes.md (from task 001)</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r2/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="task-001-output">Use the EXACT action codes documented in notes/drafts/wave-b-action-codes.md</constraint>
+    <constraint source="r1">Preserve the existing 8-node graph structure (LiveFact → IndexRetrieve×2 → EvidenceSufficiency → [conditional: AiAnalysis → GroundingVerify | DeclineToFind] → ReturnInsightArtifact)</constraint>
+    <constraint source="r1">Preserve the AgentService synthesis node's existing action code (was working in r1)</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read action codes">Load wave-b-action-codes.md</step>
+    <step order="2" name="Read existing playbook JSON">Confirm current node structure + which nodes lack action refs</step>
+    <step order="3" name="Add action-code references">Set "actionCode" (per JPS schema field convention; verify field name against Deploy-Playbook.ps1) on each Insights-mode node to the matching INSIGHTS.* code</step>
+    <step order="4" name="Validate JSON">Parse with PowerShell ConvertFrom-Json to confirm well-formed</step>
+    <step order="5" name="Commit change">Single commit: "fix(insights-engine-r2): wire action codes in predict-matter-cost.playbook.json (Wave B2)"</step>
+  </steps>
+
+  <outputs>
+    <output type="config">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every Insights-mode node in the playbook has an actionCode field referencing a row from task 001</criterion>
+    <criterion testable="true">JSON parses cleanly via PowerShell ConvertFrom-Json</criterion>
+    <criterion testable="true">No nodes removed/added relative to r1 graph</criterion>
+  </acceptance-criteria>
+</task>

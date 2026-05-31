@@ -1,0 +1,56 @@
+<task id="032" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>D3 — Per-(practice-area, document-type) Layer 2 extraction schemas (3–5 high-value pairs)</title>
+    <status>not-started</status>
+    <wave>D</wave>
+    <estimated-effort>3d</estimated-effort>
+    <tags>prompts, layer2-extraction, schemas, practice-area, document-type, sprk_analysisaction</tags>
+    <dependencies>030, 021</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>D3</wave-item>
+  </metadata>
+
+  <prompt>
+    Author per-(practice-area, document-type) Layer 2 extraction schemas for 3–5 high-value pairs. These define what fields to extract per document type (e.g., for CTRNS × closing-statement: closing date, parties, purchase price, financing terms, contingency-list). Stored per A4 pattern in sprk_analysisaction.sprk_systemprompt.
+  </prompt>
+
+  <role>Prompt curator + SME collaborator + JPS contract specialist.</role>
+
+  <goal>
+    3–5 Layer 2 extraction schemas authored + stored per A4. Each schema specifies: (a) target fields with names + types + descriptions; (b) confidence-threshold gates (per field); (c) Observation emission shape (one Observation per high-confidence field per D-P10 from r1). High-value pairs picked per A3 design (likely 1 per initial area, possibly 2 for the most-active area).
+  </prompt>
+
+  <inputs>
+    <file purpose="a3-design">projects/ai-spaarke-insights-engine-r2/design-a3-2d-taxonomy.md (high-value pairs)</file>
+    <file purpose="a4-design">projects/ai-spaarke-insights-engine-r2/design-a4-prompt-variants.md</file>
+    <file purpose="r1-layer2">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/outcome-extraction.v1.txt (pre-migration legacy)</file>
+    <file purpose="r1-emission">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/ (D-P10 confidence gating + Observation emission)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md PR-1">Stored per A4 pattern in sprk_analysisaction.sprk_systemprompt</constraint>
+    <constraint source="design.md D-P15-09">Per-area-doctype gate logic — Layer 2 schema includes gate semantics</constraint>
+    <constraint source="r1 D-P10">Confidence threshold ≥ 0.7 by default; per-field overrides allowed</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Pick 3–5 high-value (area × type) pairs">Per A3 design + project owner priority</step>
+    <step order="2" name="For each pair: define target fields">SME-driven field list with types + descriptions</step>
+    <step order="3" name="For each pair: author Layer 2 prompt">JPS-formatted; carries extraction schema + per-field confidence guidance</step>
+    <step order="4" name="For each pair: define emission shape">One Observation per high-confidence field; mappings from prompt output → Observation Predicate + Confidence + Evidence</step>
+    <step order="5" name="Store per A4 pattern">sprk_analysisaction rows or variants</step>
+    <step order="6" name="Fixture-verify">Run each schema against fixture documents for that (area, type) pair; Observations emitted match expectation</step>
+  </steps>
+
+  <outputs>
+    <output type="dataverse-data">3–5 new sprk_analysisaction rows for Layer 2 schemas</output>
+    <output type="fixture-tests">Per-pair verification results</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">3–5 (area, type) pairs have Layer 2 schemas authored + stored</criterion>
+    <criterion testable="true">Each schema verified against fixture documents</criterion>
+    <criterion testable="true">Observation emission shape preserves r1 D-P10 contract (confidence ≥ threshold, per-field emission)</criterion>
+  </acceptance-criteria>
+</task>

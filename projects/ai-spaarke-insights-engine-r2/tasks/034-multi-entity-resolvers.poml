@@ -1,0 +1,64 @@
+<task id="034" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>D5 — Multi-entity subject schemes + per-entity ILiveFactResolver (matter, project, invoice)</title>
+    <status>not-started</status>
+    <wave>D</wave>
+    <estimated-effort>2d</estimated-effort>
+    <tags>multi-entity, ILiveFactResolver, subject-parser, di, zone-a, bff-api</tags>
+    <dependencies>015, 023</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <wave-item>D5</wave-item>
+  </metadata>
+
+  <prompt>
+    Implement multi-entity subject support per the A6 design (task 015). Subject parser accepts "&lt;entityType&gt;:&lt;guid&gt;" where entityType ∈ {matter, project, invoice, …}. Per-entity ILiveFactResolver implementations registered in DI. LiveFactNode config extended to dispatch by entity type.
+  </prompt>
+
+  <role>Senior .NET developer + DI specialist.</role>
+
+  <goal>
+    Subject parser validates entity types against a config-driven catalog. Per-entity ILiveFactResolver implementations: DataverseMatterLiveFactResolver (refactor from r1's DataverseLiveFactResolver), DataverseProjectLiveFactResolver (new), DataverseInvoiceLiveFactResolver (new). Registration follows A6's chosen pattern (initial leaning: IDictionary keyed by entityType). LiveFactNode reads subject's entityType and dispatches to the right resolver. Integration tests confirm subject="project:&lt;guid&gt;" and subject="invoice:&lt;guid&gt;" resolve live facts correctly.
+  </prompt>
+
+  <inputs>
+    <file purpose="a6-design">projects/ai-spaarke-insights-engine-r2/design-a6-multi-entity.md (from task 015)</file>
+    <file purpose="r1-resolver">src/server/api/Sprk.Bff.Api/Services/Insights/Graph/DataverseLiveFactResolver.cs (current single-entity matter)</file>
+    <file purpose="r1-live-fact-node">src/server/api/Sprk.Bff.Api/Services/Insights/Graph/LiveFactNode (existing executor)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — multiple resolver registrations must stay within ≤15 non-framework target; consolidate via registry pattern if exceeded</constraint>
+    <constraint source="bff-extensions.md">BFF placement justified (per project CLAUDE.md table); load before adding DI registrations</constraint>
+    <constraint source="ADR-013-refined">Resolvers are Zone A; do not leak to Zone B</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Refactor existing DataverseLiveFactResolver to ILiveFactResolver">Extract interface + abstract base; matter-specific impl is one of three</step>
+    <step order="2" name="Implement DataverseProjectLiveFactResolver">Query sprk_project; return live facts (project state, active tasks, deliverables, …)</step>
+    <step order="3" name="Implement DataverseInvoiceLiveFactResolver">Query sprk_invoice; return live facts (invoice state, due date, amount, …)</step>
+    <step order="4" name="Subject parser">Config-driven scheme catalog; validate entityType; reject unknown schemes with 400</step>
+    <step order="5" name="DI registration">Per A6 pattern (initial: IDictionary keyed by entityType)</step>
+    <step order="6" name="LiveFactNode dispatch">Read subject.entityType → lookup resolver → call</step>
+    <step order="7" name="Integration tests">subject="project:&lt;guid&gt;" + subject="invoice:&lt;guid&gt;" both return live facts; unknown scheme returns 400</step>
+    <step order="8" name="Verify DI count">dotnet test + count non-framework registrations</step>
+    <step order="9" name="Quality gates">code-review + adr-check + §3.5 grep</step>
+  </steps>
+
+  <outputs>
+    <output type="code">Services/Ai/Insights/LiveFactResolvers/ILiveFactResolver.cs + 3 implementations</output>
+    <output type="code">Services/Ai/Insights/SubjectParser.cs</output>
+    <output type="code">DI extension updated</output>
+    <output type="code">LiveFactNode dispatch logic updated</output>
+    <output type="test">tests/integration/Services/Ai/Insights/MultiEntitySubjectTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">subject="matter:&lt;guid&gt;" continues to work (regression-free)</criterion>
+    <criterion testable="true">subject="project:&lt;guid&gt;" returns live facts from sprk_project</criterion>
+    <criterion testable="true">subject="invoice:&lt;guid&gt;" returns live facts from sprk_invoice</criterion>
+    <criterion testable="true">Unknown scheme returns 400 with clear error</criterion>
+    <criterion testable="true">DI count within ADR-010 ≤15 target</criterion>
+    <criterion testable="true">spec.md FR-03 demonstrably met</criterion>
+  </acceptance-criteria>
+</task>

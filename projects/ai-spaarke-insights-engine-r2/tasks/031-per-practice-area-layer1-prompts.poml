@@ -1,0 +1,56 @@
+<task id="031" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>D2 — Per-practice-area Layer 1 classification (3 initial practice areas)</title>
+    <status>not-started</status>
+    <wave>D</wave>
+    <estimated-effort>3d</estimated-effort>
+    <tags>prompts, layer1-classification, practice-area, sprk_analysisaction, jps</tags>
+    <dependencies>030, 021</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>D2</wave-item>
+  </metadata>
+
+  <prompt>
+    Author per-practice-area Layer 1 classification prompts for the 3 initial practice areas confirmed in A3 (task 012). Use the variant pattern from A4 (task 013) — either variant action rows (e.g., INSIGHTS.LAYER1_CLASSIFY.CTRNS) or parametric injection. SMEs draft; developers refine.
+  </prompt>
+
+  <role>Prompt curator + SME collaborator + JPS contract specialist.</role>
+
+  <goal>
+    Three per-practice-area Layer 1 prompts authored, stored per A4 pattern in sprk_analysisaction.sprk_systemprompt, and verified to produce practice-area-appropriate output signals when invoked on fixture documents. For example, for CTRNS: signals like is_closing_statement, is_asset_purchase, is_financing_agreement; for IPPAT: is_patent_application, is_office_action, is_issued_patent; for BNKF: is_loan_agreement, is_security_agreement, is_payoff_letter. (Final initial 3 areas per A3 task 012 output.)
+  </prompt>
+
+  <inputs>
+    <file purpose="a3-design">projects/ai-spaarke-insights-engine-r2/design-a3-2d-taxonomy.md (initial 3 areas)</file>
+    <file purpose="a4-design">projects/ai-spaarke-insights-engine-r2/design-a4-prompt-variants.md (variant pattern)</file>
+    <file purpose="r1-layer1">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/classification.v1.txt (pre-migration; legacy litigation-biased)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md PR-1">Use sprk_analysisaction.sprk_systemprompt — no new entity</constraint>
+    <constraint source="spec.md PA-1">Initial 3 areas per A3 task 012</constraint>
+    <constraint source="design.md D-P15-09">Each area's Layer 1 emits area-appropriate signals (NOT generic outcomeBearing)</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read A3 + A4 designs">Confirm initial 3 areas + variant pattern decision</step>
+    <step order="2" name="Author Area 1 prompt">SME drafts (or interview); developer refines into JPS schema; store per A4 pattern</step>
+    <step order="3" name="Author Area 2 prompt">Same process</step>
+    <step order="4" name="Author Area 3 prompt">Same process</step>
+    <step order="5" name="Fixture-verify">Run each prompt against 3-5 synthetic / real fixture documents for that area; signals emitted correctly</step>
+    <step order="6" name="Version + tag">Per A4 versioning model (initial leaning: new action rows)</step>
+    <step order="7" name="Update universal-ingest playbook routing">If variant rows used, universal-ingest's Layer 1 step resolves the action code from the matter's practice area (per task 033)</step>
+  </steps>
+
+  <outputs>
+    <output type="dataverse-data">3 new sprk_analysisaction rows (or 3 prompt variants on existing rows per A4)</output>
+    <output type="fixture-tests">Synthetic fixture verification results per area</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of the 3 areas has a Layer 1 prompt authored + stored per A4 pattern</criterion>
+    <criterion testable="true">Each prompt verified against fixture documents (output signals match expected)</criterion>
+    <criterion testable="true">Versioning followed per A4</criterion>
+  </acceptance-criteria>
+</task>

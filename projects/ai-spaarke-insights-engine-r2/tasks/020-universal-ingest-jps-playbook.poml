@@ -1,0 +1,80 @@
+<task id="020" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>C1 — Author universal-ingest@v1 JPS playbook in Dataverse</title>
+    <status>not-started</status>
+    <wave>C</wave>
+    <estimated-effort>2d</estimated-effort>
+    <tags>jps-playbook, universal-ingest, dataverse, playbook-authoring, zone-a, bff-api</tags>
+    <dependencies>013, 014</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <wave-item>C1</wave-item>
+  </metadata>
+
+  <prompt>
+    Author universal-ingest@v1 as a JPS playbook in Dataverse following the node breakdown decided in A5 (task 014) and the prompt-variant decisions from A4 (task 013). This refactors the code-defined IngestOrchestrator.cs into JPS data. Includes: (1) Playbook JSON spec checked into repo (mirrors predict-matter-cost.playbook.json convention); (2) Deploy via Deploy-Playbook.ps1; (3) Confirm PlaybookExecutionEngine executes the conditional Layer 1 → Layer 2 branch correctly.
+  </prompt>
+
+  <role>Senior playbook author + JPS contract specialist.</role>
+
+  <goal>
+    universal-ingest@v1 published in Dataverse with N nodes (per A5 design): Sanitize → Layer1Classify → ConditionGate → [optional] Layer2Extract → GroundingVerify → ObservationEmitter → IndexUpsert → Mirror. Playbook JSON spec checked into src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/universal-ingest.playbook.json. Lint check (task 003) passes. PlaybookExecutionEngine builds an N-active-node execution graph and runs end-to-end against a fixture document.
+  </prompt>
+
+  <inputs>
+    <file purpose="a5-design">projects/ai-spaarke-insights-engine-r2/design-a5-universal-ingest-jps.md (from task 014)</file>
+    <file purpose="a4-design">projects/ai-spaarke-insights-engine-r2/design-a4-prompt-variants.md (from task 013)</file>
+    <file purpose="r1-orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/IngestOrchestrator.cs (source for behavioral parity)</file>
+    <file purpose="r1-playbook-template">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json (JPS playbook example)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="bff-extensions.md">Load .claude/constraints/bff-extensions.md before authoring; BFF placement justification stays consistent with r1</constraint>
+    <constraint source="ADR-029">Verify publish-size impact + transitive CVE override (no new HIGH-severity CVE)</constraint>
+    <constraint source="spec.md NFR-04">Stay within ratcheted size baseline</constraint>
+    <constraint source="design.md D-P15-02">ONE canonical universal-ingest playbook — parameterized, not multiplied</constraint>
+    <constraint source="ADR-013-refined">Facade pattern preserved — CRUD code never injects AI-internal types</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>jps-playbook-authoring, universal-ingest, PlaybookExecutionEngine</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/ai-spaarke-insights-engine-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Load A5 + A4 designs">Confirm node count, action-code mapping, parameterization schema, prompt-variant strategy</step>
+    <step order="2" name="Create any missing sprk_analysisaction rows">For ingest-specific nodes not covered by Wave B1 (e.g., Sanitize, IndexUpsert, Mirror, ConditionGate); populate sprk_systemprompt</step>
+    <step order="3" name="Author universal-ingest.playbook.json">N-node graph; parameterSchema for tenant, practice-area, cost-cap, threshold overrides; conditional branching for Layer 2 gate</step>
+    <step order="4" name="Deploy via Deploy-Playbook.ps1">Lint check (task 003) must pass first; Dataverse writes follow</step>
+    <step order="5" name="Smoke test">Invoke via fixture document or mock SPE event; verify all N nodes executed; backward compat with predict-matter-cost downstream (Observations land in spaarke-insights-index)</step>
+    <step order="6" name="Behavior parity check">Compare output (Observations produced) against r1 IngestOrchestrator.cs on the same fixture; differences must be documented + intentional (per refinements)</step>
+    <step order="7" name="Engine-gap remediation">If A5 surfaced PlaybookExecutionEngine gaps, raise as separate task / coordinate with JPS engine maintainers</step>
+    <step order="8" name="Quality gates">code-review + adr-check</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test</tool>
+    <tool name="pwsh">Deploy-Playbook.ps1</tool>
+    <tool name="mcp__dataverse__*">Verify deploy + smoke</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/universal-ingest.playbook.json</output>
+    <output type="dataverse-data">universal-ingest@v1 playbook + N sprk_playbooknode rows in Spaarke Dev</output>
+    <output type="dataverse-data">Any new sprk_analysisaction rows for ingest-specific node types</output>
+    <output type="test">tests/integration/Services/Ai/Insights/UniversalIngestPlaybookTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">universal-ingest@v1 published with N active nodes per A5 design</criterion>
+    <criterion testable="true">Lint check passes (action-code references on every node)</criterion>
+    <criterion testable="true">PlaybookExecutionEngine builds an N-active-node execution graph at invocation</criterion>
+    <criterion testable="true">Smoke test produces Observations from a fixture document end-to-end</criterion>
+    <criterion testable="true">Behavior parity with r1 IngestOrchestrator (differences documented + intentional)</criterion>
+    <criterion testable="true">Quality gates pass (code-review + adr-check)</criterion>
+  </acceptance-criteria>
+</task>

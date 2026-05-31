@@ -1,0 +1,55 @@
+<task id="036" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>D7 — Synthetic test fixtures across practice areas + entity types (LLM-generated)</title>
+    <status>not-started</status>
+    <wave>D</wave>
+    <estimated-effort>2d</estimated-effort>
+    <tags>test-fixtures, synthetic-data, eval-harness, practice-area, multi-entity</tags>
+    <dependencies>031, 032, 034</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>D7</wave-item>
+  </metadata>
+
+  <prompt>
+    Generate synthetic test fixtures across the 3 initial practice areas × 2 entity types (matter, project) per Owner Clarification TF-1 (LLM-generated). Fixtures support the eval harness baseline (spec.md NFR-09: ≥3 practice areas × 2 entity types) and provide a stable test surface for Wave E development.
+  </prompt>
+
+  <role>Test data engineer + prompt-driven content generator.</role>
+
+  <goal>
+    Fixture set committed to projects/ai-spaarke-insights-engine-r2/notes/test-data/ (or a more permanent test fixture location per project convention). Contents: ≥3 documents per (area × type) combo (so ≥18 documents total = 3 areas × 2 entity types × 3 docs each). Each fixture: realistic synthetic content seeded by an LLM with practice-area-appropriate vocabulary + document structure. Fixtures cycle through different sufficient-evidence / insufficient-evidence scenarios for Wave 8-style smoke testing.
+  </prompt>
+
+  <inputs>
+    <file purpose="a3-areas">projects/ai-spaarke-insights-engine-r2/design-a3-2d-taxonomy.md (initial 3 areas + document types)</file>
+    <file purpose="r1-fixtures">projects/ai-spaarke-insights-engine-r1/notes/ (look for any fixture conventions or files)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md TF-1">Synthetic / LLM-generated; no PII concerns; no anonymization pipeline needed</constraint>
+    <constraint source="spec.md NFR-09">≥3 practice areas × 2 entity types (≥6 combinations) for eval harness baseline</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Pick fixture content generator">Likely an Azure OpenAI call with structured prompts per (area, doc-type)</step>
+    <step order="2" name="Generate matter fixtures">3 per area; each ~3-5 page synthetic document with realistic structure</step>
+    <step order="3" name="Generate project fixtures">Same structure for sprk_project entity context</step>
+    <step order="4" name="Add to fixture repository">Ensure they don't bloat the repo; consider .gitignore'd local fixtures if size is an issue (small docs should be fine)</step>
+    <step order="5" name="Update eval harness config">Point to new fixtures</step>
+    <step order="6" name="Smoke run">Eval harness against fixtures produces sensible baseline metrics</step>
+  </steps>
+
+  <outputs>
+    <output type="test-data">projects/ai-spaarke-insights-engine-r2/notes/test-data/{area}/{doctype}/fixture-{N}.{ext}</output>
+    <output type="config">Eval harness pointed at new fixtures</output>
+    <output type="metrics-baseline">Baseline eval scores per (area, type)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">≥18 fixtures across 3 areas × 2 entity types × 3 each</criterion>
+    <criterion testable="true">Each fixture has practice-area-appropriate content + structure</criterion>
+    <criterion testable="true">Eval harness baseline runs without errors</criterion>
+    <criterion testable="true">spec.md NFR-09 ≥6 combinations covered</criterion>
+  </acceptance-criteria>
+</task>

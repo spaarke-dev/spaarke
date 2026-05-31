@@ -1,0 +1,51 @@
+<task id="043" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>E4 — Decision-tree doc: when to author a playbook vs rely on RAG</title>
+    <status>not-started</status>
+    <wave>E</wave>
+    <estimated-effort>4h</estimated-effort>
+    <tags>docs, decision-tree, developer-guide, hybrid-consumption</tags>
+    <dependencies>040, 041</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>MINIMAL</rigor>
+    <wave-item>E4</wave-item>
+  </metadata>
+
+  <prompt>
+    Author the playbook-vs-RAG decision tree. With both consumption paths live (post-E1 + E2), developers + SMEs need clear guidance on when to author a new playbook (for high-value structured questions) versus relying on generic RAG (for open-ended natural-language questions). This is the documentation deliverable supporting Phase 1.5's hybrid model.
+  </prompt>
+
+  <role>Documentation maintainer + developer-guide writer.</role>
+
+  <goal>
+    Decision-tree doc published as a section in docs/guides/INSIGHTS-ENGINE-GUIDE.md (or a dedicated docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md). Covers: (1) Criteria for "author a playbook" (structured output, evidence-sufficiency rules, high-volume question, accuracy SLO); (2) Criteria for "rely on RAG" (open-ended question, low-volume, exploratory, fast iteration); (3) Worked examples from initial 3 practice areas; (4) How to evolve a RAG query into a playbook when usage warrants it.
+  </prompt>
+
+  <inputs>
+    <file purpose="r1-guide">docs/guides/INSIGHTS-ENGINE-GUIDE.md (refreshed in A2)</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r2/spec.md (Wave E4)</file>
+    <file purpose="design">projects/ai-spaarke-insights-engine-r2/design.md (D-P15-06)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="docs-guide skill">Use the skill's conventions for guide structure</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Identify criteria">Through review of design + spec + Wave A4/A5 decisions; brainstorm + structure</step>
+    <step order="2" name="Author decision tree">Flowchart or table; ≤1 page</step>
+    <step order="3" name="Worked examples">3-5 example questions per initial practice area; show which path + why</step>
+    <step order="4" name="Evolution path">When + how to promote a RAG query to a playbook</step>
+    <step order="5" name="Publish">Either inline section in INSIGHTS-ENGINE-GUIDE.md or new dedicated guide</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">docs/guides/INSIGHTS-ENGINE-GUIDE.md (updated section) OR docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Decision tree clear + ≤1 page</criterion>
+    <criterion testable="true">≥3 worked examples per practice area (covering both paths)</criterion>
+    <criterion testable="true">RAG-to-playbook promotion path documented</criterion>
+  </acceptance-criteria>
+</task>

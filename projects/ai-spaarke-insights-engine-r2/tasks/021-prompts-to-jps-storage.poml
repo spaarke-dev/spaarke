@@ -1,0 +1,66 @@
+<task id="021" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>C2 — Migrate prompts from .txt files into sprk_analysisaction.sprk_systemprompt</title>
+    <status>not-started</status>
+    <wave>C</wave>
+    <estimated-effort>1d</estimated-effort>
+    <tags>prompt-migration, sprk_analysisaction, dataverse, retire-txt-files</tags>
+    <dependencies>013</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>C2</wave-item>
+  </metadata>
+
+  <prompt>
+    Migrate Phase 1 prompt content from .txt files in Services/Ai/Insights/Prompts/ into the JPS-formatted sprk_systemprompt field on the corresponding sprk_analysisaction rows (per A4 design — no new entity). Then delete the .txt files. This is the load-bearing acceptance step for SC-08 (zero .txt prompt files) and FR-06 (SMEs can edit prompts without a code deploy).
+  </prompt>
+
+  <role>Prompt curator + Dataverse data migration specialist.</role>
+
+  <goal>
+    Three Phase 1 prompts (classification.v1.txt, outcome-extraction.v1.txt, predict-matter-cost-synthesis.v1.txt) migrated into JPS-formatted sprk_systemprompt JSON on the matching sprk_analysisaction rows. Phase 1.5 ingest action rows (Wave B1 + C1) similarly carry their canonical prompts. .txt files deleted from source. Code that loaded .txt files updated to read from Dataverse (likely already does via existing sprk_analysisaction.sprk_systemprompt load — verify).
+  </prompt>
+
+  <inputs>
+    <file purpose="r1-prompts">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/*.txt (3 files)</file>
+    <file purpose="a4-design">projects/ai-spaarke-insights-engine-r2/design-a4-prompt-variants.md (from task 013)</file>
+    <file purpose="wave-b-actions">Spaarke Dev sprk_analysisaction rows from Wave B1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md SC-08">Zero .txt prompt files in Services/Ai/Insights/Prompts/ after this task</constraint>
+    <constraint source="spec.md NFR-02">All prompt content lives in sprk_analysisaction.sprk_systemprompt (or per-playbook sprk_configjson)</constraint>
+    <constraint source="A4">Use the variant/versioning pattern decided in A4 design</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Audit existing .txt prompts">Confirm all 3 files + their consumers (which actions load them)</step>
+    <step order="2" name="Wrap .txt content in JPS schema">For each prompt, construct sprk_systemprompt JSON ($schema, $version, instruction { role, task, constraints, context }, input, parameters) per A4 pattern</step>
+    <step order="3" name="Update or create sprk_analysisaction rows">For Phase 1 Layer 1, Layer 2, synthesis actions — populate or update sprk_systemprompt</step>
+    <step order="4" name="Verify code path reads from Dataverse">Trace BFF prompt-loading code; if it currently reads .txt, refactor to read sprk_systemprompt</step>
+    <step order="5" name="Smoke test">Re-run predict-matter-cost end-to-end (similar to Wave B5) and confirm same Inference output (no behavior regression)</step>
+    <step order="6" name="Delete .txt files">git rm of the 3 files</step>
+    <step order="7" name="Update DI / config">Remove any prompt-file path config no longer needed</step>
+    <step order="8" name="Quality gates">code-review + adr-check + side-by-side prompt comparison (manual)</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test</tool>
+    <tool name="mcp__dataverse__update_record">Update sprk_systemprompt</tool>
+    <tool name="git">Delete files + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse-data">sprk_systemprompt populated on 3+ existing/new action rows</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/*.txt DELETED</output>
+    <output type="code">Prompt-loading code updated to read sprk_systemprompt (if not already)</output>
+    <output type="test">Behavior parity smoke test results</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero .txt files in src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/</criterion>
+    <criterion testable="true">All Phase 1 prompts present in sprk_analysisaction.sprk_systemprompt rows</criterion>
+    <criterion testable="true">predict-matter-cost smoke test (post-migration) produces same Inference output as pre-migration on the same fixture matter</criterion>
+    <criterion testable="true">No regressions in build / tests</criterion>
+  </acceptance-criteria>
+</task>

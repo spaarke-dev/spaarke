@@ -1,0 +1,57 @@
+<task id="014" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>A5 — Universal-ingest JPS refactor design (node breakdown + parameterization)</title>
+    <status>not-started</status>
+    <wave>A</wave>
+    <estimated-effort>6h</estimated-effort>
+    <tags>design, jps-playbook, universal-ingest, node-breakdown, parameterization</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>A5</wave-item>
+  </metadata>
+
+  <prompt>
+    Author the universal-ingest JPS refactor design. The current IngestOrchestrator.cs has 8 logical steps (Sanitize, Layer1Classify, Layer1Emit, Layer2Trigger, Layer2Extract, Layer2Validate, GroundingVerify, ObservationEmit + Index Upsert + Mirror). The JPS refactor decides: (a) how many JPS playbook nodes (1:1 = 8 nodes, or coalesced to 5-6), (b) parameterization model for runtime config (tenant override, per-practice-area routing hints, cost-cap override), (c) which conditional branches must be supported by PlaybookExecutionEngine (and flag any engine gaps).
+  </prompt>
+
+  <role>Playbook architect + INodeExecutor specialist.</role>
+
+  <goal>
+    Design doc projects/ai-spaarke-insights-engine-r2/design-a5-universal-ingest-jps.md authored with: (1) Node count + breakdown decision; (2) Per-node responsibilities, inputs, outputs, action-code mapping; (3) Conditional branching shape (e.g., Layer 1 confidence ≥ 0.7 → Layer 2; else skip); (4) Parameterization schema (parameters.tenantId, parameters.practiceAreaHint, parameters.costCapOverride, parameters.layer2Threshold); (5) Engine-gap flagging (any PlaybookExecutionEngine patch needed to support Insights conditional semantics).
+  </prompt>
+
+  <inputs>
+    <file purpose="r1-orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/IngestOrchestrator.cs (current code-defined version)</file>
+    <file purpose="r1-playbook-template">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json (JPS playbook example)</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r2/spec.md (Wave C scope; Q-A5-1)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md D-P15-02">One canonical universal-ingest playbook, parameterized — not many variants</constraint>
+    <constraint source="design.md D-P15-01">All Insights workflows execute through PlaybookExecutionEngine — no parallel orchestrators</constraint>
+    <constraint source="spec.md Risk-1">If engine gaps surface for conditional branching, patches stay in PlaybookExecutionEngine (don't fork)</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read IngestOrchestrator.cs in r1">Map current 8 logical steps to candidate node decomposition</step>
+    <step order="2" name="Decision: node count">Pick 1:1 (8 nodes) for max observability OR coalesce some steps (e.g., Layer1Classify+Layer1Emit) for fewer nodes; document rationale</step>
+    <step order="3" name="Per-node design">Action code (mapping to sprk_analysisaction rows), inputs, outputs, side-effects</step>
+    <step order="4" name="Conditional branch shape">Layer 1 → Layer 2 conditional via existing JPS ConditionNodeExecutor or similar pattern; verify engine support</step>
+    <step order="5" name="Parameterization schema">parameters.tenantId, parameters.practiceAreaHint, parameters.costCapOverride, parameters.layer2Threshold — define types + defaults</step>
+    <step order="6" name="Engine-gap analysis">If any conditional / loop / parameter pattern isn't supported by current PlaybookExecutionEngine, file as a gap (with proposed engine patch outline)</step>
+    <step order="7" name="Publish design-a5-universal-ingest-jps.md">In project root; feeds C1</step>
+  </steps>
+
+  <outputs>
+    <output type="design-doc">projects/ai-spaarke-insights-engine-r2/design-a5-universal-ingest-jps.md</output>
+    <output type="notes" ephemeral="true">notes/spikes/engine-gap-analysis.md (if any gaps surface)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Node count + breakdown decided with rationale</criterion>
+    <criterion testable="true">Per-node design (inputs, outputs, action codes) documented</criterion>
+    <criterion testable="true">Parameterization schema defined</criterion>
+    <criterion testable="true">PlaybookExecutionEngine gaps (if any) flagged with proposed patches</criterion>
+  </acceptance-criteria>
+</task>

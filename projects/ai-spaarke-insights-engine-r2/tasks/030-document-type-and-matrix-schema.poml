@@ -1,0 +1,60 @@
+<task id="030" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>D1 — sprk_documenttype_ref entity + sprk_practicearea_documenttype N:N matrix</title>
+    <status>not-started</status>
+    <wave>D</wave>
+    <estimated-effort>1d</estimated-effort>
+    <tags>dataverse-schema, sprk_documenttype_ref, n-n-matrix, 2d-taxonomy</tags>
+    <dependencies>012</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <wave-item>D1</wave-item>
+  </metadata>
+
+  <prompt>
+    Create the sprk_documenttype_ref entity and the sprk_practicearea_documenttype N:N matrix in Dataverse per the A3 design (task 012). This is the second dimension of the 2D classification taxonomy. Schema changes flow through a managed solution per ADR-027.
+  </prompt>
+
+  <role>Dataverse schema engineer.</role>
+
+  <goal>
+    Two new Dataverse entities live in Spaarke Dev (via managed solution): (1) sprk_documenttype_ref — code, name, description, sprk_active, optional sprk_layer2schemaref; (2) sprk_practicearea_documenttype — N:N matrix carrying valid (practice-area × document-type) combinations. Initial document-type rows seeded per A3 design (3-5 per initial practice area).
+  </prompt>
+
+  <inputs>
+    <file purpose="a3-design">projects/ai-spaarke-insights-engine-r2/design-a3-2d-taxonomy.md (from task 012)</file>
+    <file purpose="adr">.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-mgmt.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-027">Managed solution promotion path; not direct unmanaged edits in prod</constraint>
+    <constraint source="dataverse-create-schema skill">Use the skill for entity/relationship creation</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Invoke dataverse-create-schema skill">Create sprk_documenttype_ref entity per A3 field design</step>
+    <step order="2" name="Create N:N matrix">sprk_practicearea_documenttype between sprk_practicearea_ref and sprk_documenttype_ref</step>
+    <step order="3" name="Seed initial rows">Per A3 design, ~3-5 document types per initial practice area; load via MCP create_record</step>
+    <step order="4" name="Add to managed solution">Per ADR-027 — add new entities + N:N to the appropriate solution</step>
+    <step order="5" name="Verify">Query Dataverse — entities + initial rows + N:N relationships visible</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-create-schema skill">Schema creation</tool>
+    <tool name="mcp__dataverse__create_record">Seed rows</tool>
+    <tool name="pac">Solution management</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse-schema">sprk_documenttype_ref entity</output>
+    <output type="dataverse-schema">sprk_practicearea_documenttype N:N matrix</output>
+    <output type="dataverse-data">Seeded document-type rows (per A3 initial set)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_documenttype_ref exists with the A3 field set</criterion>
+    <criterion testable="true">sprk_practicearea_documenttype N:N exists with proper bilateral relationships</criterion>
+    <criterion testable="true">Initial document-type rows seeded for the 3 initial practice areas</criterion>
+    <criterion testable="true">Entities + N:N added to managed solution per ADR-027</criterion>
+  </acceptance-criteria>
+</task>

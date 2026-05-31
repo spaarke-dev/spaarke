@@ -1,0 +1,79 @@
+<task id="040" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>E1 — POST /api/insights/search (generic RAG retrieval endpoint)</title>
+    <status>not-started</status>
+    <wave>E</wave>
+    <estimated-effort>3d</estimated-effort>
+    <tags>endpoint, rag, semantic-search, bff-api, zone-a, ai-search</tags>
+    <dependencies>035</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <wave-item>E1</wave-item>
+  </metadata>
+
+  <prompt>
+    Implement POST /api/insights/search — a generic RAG retrieval endpoint that accepts a natural-language query, filters spaarke-insights-index by subject scope (+ optional artifactType, predicate, etc.), and returns top-N ranked Observations/Precedents with an LLM-synthesized summary and grounded citations. Use for open-ended natural-language questions (complement to /api/insights/ask for high-value structured questions).
+  </prompt>
+
+  <role>Senior .NET developer + RAG specialist + endpoint architect (Zone A).</role>
+
+  <goal>
+    POST /api/insights/search live on Spaarke Dev. Request shape: { query, subject, top? (default 10), filter? (artifactType, predicate, …) }. Response: { results: [{ id, predicate, confidence, evidence, ... }], synthesis: "LLM-generated summary with [1][2] citations", traceId }. Auth filter per ADR-008/ADR-028; ProblemDetails on error per ADR-019; rate-limit per ADR-016. Same spaarke-insights-index substrate as /ask — no duplicate storage.
+  </prompt>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r2/spec.md (FR-04, SC-04)</file>
+    <file purpose="design">projects/ai-spaarke-insights-engine-r2/design.md (D-P15-06)</file>
+    <file purpose="r1-endpoint-pattern">Sprk.Bff.Api/Endpoints (existing /api/insights/ask)</file>
+    <file purpose="r1-facade">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInsightsAi.cs</file>
+    <file purpose="r1-index-client">existing Azure AI Search client wiring in BFF</file>
+    <file purpose="knowledge">knowledge/azure-ai-search/ (vector + hybrid search patterns)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API pattern, no Azure Functions</constraint>
+    <constraint source="ADR-008">Endpoint filter for auth, not global middleware</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2 — function-based contract, named API key scheme</constraint>
+    <constraint source="ADR-019">ProblemDetails on errors</constraint>
+    <constraint source="ADR-013-refined">Facade pattern — extend IInsightsAi; do NOT inject IOpenAiClient or PlaybookExecutionEngine into CRUD code</constraint>
+    <constraint source="ADR-029">Verify publish-size + transitive CVE impact</constraint>
+    <constraint source="bff-extensions.md">Load before adding endpoint; placement justified per project CLAUDE.md</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>RAG, semantic search, hybrid retrieval, Azure AI Search</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-authorization.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>knowledge/azure-ai-search/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Extend IInsightsAi facade">Add SearchAsync method to public contract</step>
+    <step order="2" name="Implement InsightsRagRetriever">Zone A: embeds query, hybrid search of spaarke-insights-index with subject + filter, returns top-N</step>
+    <step order="3" name="Implement synthesis">LLM call with retrieved results as grounded context; output structured summary with [n] citations</step>
+    <step order="4" name="Author endpoint">Sprk.Bff.Api/Endpoints/InsightsSearchEndpoint.cs — minimal API + filter + ProblemDetails + rate-limit</step>
+    <step order="5" name="Register in DI">Per ADR-010 — additions stay within ≤15 non-framework target</step>
+    <step order="6" name="§3.5 grep">Endpoint stays in Zone A; client consumers (Assistant in E3) go through IInsightsAi facade</step>
+    <step order="7" name="Integration tests">(a) Query returns ranked results; (b) Synthesis carries grounded citations; (c) Auth filter rejects unauthorized requests; (d) Unknown subject scheme returns 400</step>
+    <step order="8" name="Quality gates">code-review + adr-check</step>
+  </steps>
+
+  <outputs>
+    <output type="code">Sprk.Bff.Api/Endpoints/InsightsSearchEndpoint.cs</output>
+    <output type="code">Services/Ai/Insights/InsightsRagRetriever.cs (Zone A)</output>
+    <output type="code">IInsightsAi.SearchAsync (facade extension)</output>
+    <output type="test">tests/integration/Services/Ai/Insights/InsightsRagEndpointTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/insights/search live; auth filter applied</criterion>
+    <criterion testable="true">Response carries ranked Observations/Precedents from spaarke-insights-index</criterion>
+    <criterion testable="true">Synthesis includes grounded [n] citations matching results</criterion>
+    <criterion testable="true">spec.md FR-04 + SC-04 demonstrably met</criterion>
+    <criterion testable="true">§3.5 grep clean; publish-size within baseline</criterion>
+  </acceptance-criteria>
+</task>
