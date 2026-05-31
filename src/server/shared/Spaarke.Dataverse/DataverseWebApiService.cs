@@ -2119,6 +2119,25 @@ public class DataverseWebApiService : IDataverseService
             "Configure DI to use ServiceClient implementation.");
     }
 
+    /// <summary>
+    /// Generic N:N associate. The Web API surface stubs this out — the BFF runtime
+    /// resolves <see cref="IGenericEntityService"/> to <c>DataverseServiceClientImpl</c>
+    /// (see <c>GraphModule</c>), which provides the real implementation via the
+    /// ServiceClient SDK. Kept as a NotImplementedException to fail loud if anyone
+    /// ever rewires the Web API service onto the generic interface seam.
+    /// </summary>
+    public Task AssociateAsync(
+        string entityLogicalName,
+        Guid entityId,
+        string relationshipName,
+        IEnumerable<EntityReference> relatedEntities,
+        CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "AssociateAsync is implemented in DataverseServiceClientImpl. " +
+            "Configure DI to use ServiceClient implementation for N:N associations.");
+    }
+
     public Task<Entity> RetrieveByAlternateKeyAsync(
         string entityLogicalName,
         KeyAttributeCollection alternateKeyValues,

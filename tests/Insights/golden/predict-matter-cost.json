@@ -1,0 +1,404 @@
+{
+  "$schema": "./predict-matter-cost.schema.json",
+  "$comment": "Phase 1 golden dataset for the predict-matter-cost synthesis playbook (D-P14). Drives both the in-process eval harness (tests/unit/Sprk.Bff.Api.Tests/Eval/PredictMatterCostEvalHarnessTests.cs) and the live-environment runbook (notes/phase-1-live-smoke-runbook.md). Permissive Phase 1 thresholds: groundedness >= 95% (not 100%), no insufficient miscalls beyond 1/15 (~7% tolerance), LLM-as-judge true Relevance deferred to Phase 1.5 (Phase 1 uses mechanical band-overlap proxy).",
+  "version": "1.0.0",
+  "playbook": "predict-matter-cost",
+  "phase": "Phase 1",
+  "thresholds": {
+    "groundednessPassRateMin": 0.95,
+    "declineCorrectnessMin": 0.93,
+    "bandOverlapMin": 0.80,
+    "cohortSizeToleranceCount": 1
+  },
+  "tuples": [
+    {
+      "id": "golden-001",
+      "scenario": "sufficient-evidence-ip-licensing",
+      "description": "Standard IP-licensing matter with 15 comparable matters in cohort. Layer 2 extraction surfaces settlementAmount + outcomeDate + outcomeCategory + matterDurationDays cleanly.",
+      "parameters": {
+        "matterId": "M-FIXTURE-001",
+        "matterType": "ip-licensing",
+        "lookBackYears": "3"
+      },
+      "fixtureDocumentId": "doc-fixture-001-closing-letter",
+      "mocked": {
+        "cohortSize": 15,
+        "precedentApplied": false,
+        "expectedFacadeResultKind": "artifact"
+      },
+      "expected": {
+        "responseKind": "artifact",
+        "subject": "matter:M-FIXTURE-001",
+        "predicate": "predictedCost",
+        "p50CostBand": { "min": 220000, "max": 320000 },
+        "evidenceRefCountMin": 12,
+        "displayHint": "currency-usd",
+        "confidenceMin": 0.55,
+        "confidenceMax": 0.85
+      }
+    },
+    {
+      "id": "golden-002",
+      "scenario": "sufficient-evidence-settlement-agreement",
+      "description": "International arbitration / settlement agreement matter; 13 comparable matters in cohort.",
+      "parameters": {
+        "matterId": "M-FIXTURE-002",
+        "matterType": "international-arbitration",
+        "lookBackYears": "5"
+      },
+      "fixtureDocumentId": "doc-fixture-002-settlement",
+      "mocked": {
+        "cohortSize": 13,
+        "precedentApplied": false,
+        "expectedFacadeResultKind": "artifact"
+      },
+      "expected": {
+        "responseKind": "artifact",
+        "subject": "matter:M-FIXTURE-002",
+        "predicate": "predictedCost",
+        "p50CostBand": { "min": 180000, "max": 280000 },
+        "evidenceRefCountMin": 12,
+        "displayHint": "currency-usd",
+        "confidenceMin": 0.50,
+        "confidenceMax": 0.80
+      }
+    },
+    {
+      "id": "golden-003",
+      "scenario": "sufficient-evidence-with-applicable-precedent",
+      "description": "Litigation matter with 14 comparable matters AND an applicable Confirmed Precedent (e.g., 'IP-licensing-NA-territory-pattern'). Precedent should be cited in evidence refs alongside the cohort matters.",
+      "parameters": {
+        "matterId": "M-FIXTURE-003",
+        "matterType": "ip-licensing",
+        "lookBackYears": "3"
+      },
+      "fixtureDocumentId": "doc-fixture-003-closing-letter",
+      "mocked": {
+        "cohortSize": 14,
+        "precedentApplied": true,
+        "precedentId": "prec:ip-licensing-na-territory:v1",
+        "expectedFacadeResultKind": "artifact"
+      },
+      "expected": {
+        "responseKind": "artifact",
+        "subject": "matter:M-FIXTURE-003",
+        "predicate": "predictedCost",
+        "p50CostBand": { "min": 250000, "max": 360000 },
+        "evidenceRefCountMin": 13,
+        "displayHint": "currency-usd",
+        "confidenceMin": 0.60,
+        "confidenceMax": 0.90,
+        "evidenceMustIncludePrecedent": true
+      }
+    },
+    {
+      "id": "golden-004",
+      "scenario": "insufficient-evidence-rare-matter-type",
+      "description": "Niche tort matter with only 5 comparable matters — below the playbook's evidenceRule.comparableMatters.min=12 threshold. Must produce a structured DeclineResponse per D-49, not a synthesized Inference.",
+      "parameters": {
+        "matterId": "M-FIXTURE-004",
+        "matterType": "rare-tort",
+        "lookBackYears": "5"
+      },
+      "mocked": {
+        "cohortSize": 5,
+        "precedentApplied": false,
+        "expectedFacadeResultKind": "decline"
+      },
+      "expected": {
+        "responseKind": "decline",
+        "declineReason": "insufficient-evidence",
+        "minimumEvidenceNeeded": {
+          "comparableMatters": { "have": 5, "need": 12 }
+        },
+        "confidenceInDeclineMin": 0.85,
+        "suggestedActionsMin": 1
+      }
+    },
+    {
+      "id": "golden-005",
+      "scenario": "insufficient-evidence-cohort-just-below-threshold",
+      "description": "Matter with 11 comparable matters — exactly one below the threshold of 12. Tests the gate boundary.",
+      "parameters": {
+        "matterId": "M-FIXTURE-005",
+        "matterType": "ip-licensing",
+        "lookBackYears": "2"
+      },
+      "mocked": {
+        "cohortSize": 11,
+        "precedentApplied": false,
+        "expectedFacadeResultKind": "decline"
+      },
+      "expected": {
+        "responseKind": "decline",
+        "declineReason": "insufficient-evidence",
+        "minimumEvidenceNeeded": {
+          "comparableMatters": { "have": 11, "need": 12 }
+        },
+        "confidenceInDeclineMin": 0.85
+      }
+    },
+    {
+      "id": "golden-006",
+      "scenario": "insufficient-evidence-zero-cohort",
+      "description": "Brand-new matter type with zero comparable matters; should decline cleanly without partial-data leakage.",
+      "parameters": {
+        "matterId": "M-FIXTURE-006",
+        "matterType": "novel-quantum-licensing",
+        "lookBackYears": "10"
+      },
+      "mocked": {
+        "cohortSize": 0,
+        "precedentApplied": false,
+        "expectedFacadeResultKind": "decline"
+      },
+      "expected": {
+        "responseKind": "decline",
+        "declineReason": "insufficient-evidence",
+        "minimumEvidenceNeeded": {
+          "comparableMatters": { "have": 0, "need": 12 }
+        },
+        "confidenceInDeclineMin": 0.90
+      }
+    },
+    {
+      "id": "golden-007",
+      "scenario": "sufficient-evidence-decision-memo-context",
+      "description": "Matter where Layer 2 extracted from a court-ruling decision memo (outcome=mixed); cohort produces a wide cost band reflecting outcome uncertainty.",
+      "parameters": {
+        "matterId": "M-FIXTURE-007",
+        "matterType": "energy-litigation",
+        "lookBackYears": "5"
+      },
+      "fixtureDocumentId": "doc-fixture-007-decision-memo",
+      "mocked": {
+        "cohortSize": 12,
+        "precedentApplied": false,
+        "expectedFacadeResultKind": "artifact"
+      },
+      "expected": {
+        "responseKind": "artifact",
+        "subject": "matter:M-FIXTURE-007",
+        "predicate": "predictedCost",
+        "p50CostBand": { "min": 300000, "max": 600000 },
+        "evidenceRefCountMin": 12,
+        "displayHint": "currency-usd",
+        "confidenceMin": 0.40,
+        "confidenceMax": 0.75
+      }
+    },
+    {
+      "id": "golden-008",
+      "scenario": "sufficient-evidence-with-precedent-near-threshold",
+      "description": "Cohort exactly at threshold (12 comparable matters) WITH an applicable Precedent — the Precedent compensates for the thin cohort.",
+      "parameters": {
+        "matterId": "M-FIXTURE-008",
+        "matterType": "manufacturing-dispute",
+        "lookBackYears": "4"
+      },
+      "mocked": {
+        "cohortSize": 12,
+        "precedentApplied": true,
+        "precedentId": "prec:manufacturing-msa-breach:v1",
+        "expectedFacadeResultKind": "artifact"
+      },
+      "expected": {
+        "responseKind": "artifact",
+        "subject": "matter:M-FIXTURE-008",
+        "predicate": "predictedCost",
+        "p50CostBand": { "min": 180000, "max": 320000 },
+        "evidenceRefCountMin": 12,
+        "displayHint": "currency-usd",
+        "confidenceMin": 0.55,
+        "confidenceMax": 0.85,
+        "evidenceMustIncludePrecedent": true
+      }
+    },
+    {
+      "id": "golden-009",
+      "scenario": "sufficient-evidence-large-cohort",
+      "description": "Mature matter type with 30 comparable matters — narrow cost band reflecting high cohort confidence.",
+      "parameters": {
+        "matterId": "M-FIXTURE-009",
+        "matterType": "commercial-contract",
+        "lookBackYears": "5"
+      },
+      "mocked": {
+        "cohortSize": 30,
+        "precedentApplied": false,
+        "expectedFacadeResultKind": "artifact"
+      },
+      "expected": {
+        "responseKind": "artifact",
+        "subject": "matter:M-FIXTURE-009",
+        "predicate": "predictedCost",
+        "p50CostBand": { "min": 80000, "max": 140000 },
+        "evidenceRefCountMin": 12,
+        "displayHint": "currency-usd",
+        "confidenceMin": 0.65,
+        "confidenceMax": 0.92
+      }
+    },
+    {
+      "id": "golden-010",
+      "scenario": "sufficient-evidence-low-confidence-band",
+      "description": "12 comparable matters with high variance in outcome amounts — band overlap should remain wide and confidence should reflect uncertainty (not over-confident given variance).",
+      "parameters": {
+        "matterId": "M-FIXTURE-010",
+        "matterType": "regulatory-investigation",
+        "lookBackYears": "3"
+      },
+      "mocked": {
+        "cohortSize": 12,
+        "precedentApplied": false,
+        "expectedFacadeResultKind": "artifact"
+      },
+      "expected": {
+        "responseKind": "artifact",
+        "subject": "matter:M-FIXTURE-010",
+        "predicate": "predictedCost",
+        "p50CostBand": { "min": 150000, "max": 450000 },
+        "evidenceRefCountMin": 12,
+        "displayHint": "currency-usd",
+        "confidenceMin": 0.40,
+        "confidenceMax": 0.70
+      }
+    },
+    {
+      "id": "golden-011",
+      "scenario": "sufficient-evidence-multi-precedent",
+      "description": "16 comparable matters WITH two applicable Confirmed Precedents (e.g., territory pattern + cure-period pattern). All Precedents must surface in evidence refs.",
+      "parameters": {
+        "matterId": "M-FIXTURE-011",
+        "matterType": "ip-licensing",
+        "lookBackYears": "4"
+      },
+      "mocked": {
+        "cohortSize": 16,
+        "precedentApplied": true,
+        "precedentId": "prec:ip-licensing-na-territory:v1",
+        "secondaryPrecedentId": "prec:cure-period-30day:v1",
+        "expectedFacadeResultKind": "artifact"
+      },
+      "expected": {
+        "responseKind": "artifact",
+        "subject": "matter:M-FIXTURE-011",
+        "predicate": "predictedCost",
+        "p50CostBand": { "min": 240000, "max": 380000 },
+        "evidenceRefCountMin": 14,
+        "displayHint": "currency-usd",
+        "confidenceMin": 0.65,
+        "confidenceMax": 0.92,
+        "evidenceMustIncludePrecedent": true
+      }
+    },
+    {
+      "id": "golden-012",
+      "scenario": "insufficient-evidence-but-precedent-cannot-rescue",
+      "description": "Only 6 comparable matters AND an applicable Precedent — but per playbook rules, Precedent alone cannot satisfy comparableMatters.min. Must still decline (Precedent supplements cohort, does not replace it).",
+      "parameters": {
+        "matterId": "M-FIXTURE-012",
+        "matterType": "specialized-tax-controversy",
+        "lookBackYears": "5"
+      },
+      "mocked": {
+        "cohortSize": 6,
+        "precedentApplied": true,
+        "precedentId": "prec:tax-controversy:v1",
+        "expectedFacadeResultKind": "decline"
+      },
+      "expected": {
+        "responseKind": "decline",
+        "declineReason": "insufficient-evidence",
+        "minimumEvidenceNeeded": {
+          "comparableMatters": { "have": 6, "need": 12 }
+        },
+        "confidenceInDeclineMin": 0.80
+      }
+    },
+    {
+      "id": "golden-013",
+      "scenario": "sufficient-evidence-eur-currency",
+      "description": "European matter — settlement denominated in EUR. Cohort produces EUR-aware cost band; displayHint reflects locale.",
+      "parameters": {
+        "matterId": "M-FIXTURE-013",
+        "matterType": "european-commercial-arbitration",
+        "lookBackYears": "5",
+        "currency": "EUR"
+      },
+      "mocked": {
+        "cohortSize": 14,
+        "precedentApplied": false,
+        "expectedFacadeResultKind": "artifact"
+      },
+      "expected": {
+        "responseKind": "artifact",
+        "subject": "matter:M-FIXTURE-013",
+        "predicate": "predictedCost",
+        "p50CostBand": { "min": 160000, "max": 260000 },
+        "evidenceRefCountMin": 12,
+        "displayHint": "currency-eur",
+        "confidenceMin": 0.55,
+        "confidenceMax": 0.85
+      }
+    },
+    {
+      "id": "golden-014",
+      "scenario": "sufficient-evidence-cohort-with-mixed-outcomes",
+      "description": "12 comparable matters split roughly 50/50 favorable vs adverse outcomes. Cost prediction should reflect outcome heterogeneity (wider band, lower confidence).",
+      "parameters": {
+        "matterId": "M-FIXTURE-014",
+        "matterType": "patent-infringement",
+        "lookBackYears": "5"
+      },
+      "mocked": {
+        "cohortSize": 12,
+        "precedentApplied": false,
+        "expectedFacadeResultKind": "artifact"
+      },
+      "expected": {
+        "responseKind": "artifact",
+        "subject": "matter:M-FIXTURE-014",
+        "predicate": "predictedCost",
+        "p50CostBand": { "min": 200000, "max": 500000 },
+        "evidenceRefCountMin": 12,
+        "displayHint": "currency-usd",
+        "confidenceMin": 0.35,
+        "confidenceMax": 0.65
+      }
+    },
+    {
+      "id": "golden-015",
+      "scenario": "edge-decline-malformed-precedent-still-declines-cleanly",
+      "description": "Cohort size 8 (insufficient) AND a corrupted Precedent payload. Decline path must still produce a clean structured DeclineResponse (no partial-data leakage from broken Precedent).",
+      "parameters": {
+        "matterId": "M-FIXTURE-015",
+        "matterType": "ip-licensing",
+        "lookBackYears": "2"
+      },
+      "mocked": {
+        "cohortSize": 8,
+        "precedentApplied": true,
+        "precedentId": "prec:malformed-precedent:v1",
+        "precedentMalformed": true,
+        "expectedFacadeResultKind": "decline"
+      },
+      "expected": {
+        "responseKind": "decline",
+        "declineReason": "insufficient-evidence",
+        "minimumEvidenceNeeded": {
+          "comparableMatters": { "have": 8, "need": 12 }
+        },
+        "confidenceInDeclineMin": 0.80
+      }
+    }
+  ],
+  "coverage": {
+    "totalTuples": 15,
+    "sufficientPath": 9,
+    "insufficientPath": 6,
+    "withApplicablePrecedent": 4,
+    "withMalformedPrecedent": 1,
+    "eurCurrencyVariant": 1
+  }
+}

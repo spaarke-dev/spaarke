@@ -1,0 +1,83 @@
+PRIVILEGED AND CONFIDENTIAL — ATTORNEY WORK PRODUCT
+
+INTERNAL MEMORANDUM
+
+To:       Litigation Strategy Committee
+From:     Helen Schroeder, Senior Counsel
+Date:     June 28, 2024
+Re:       Matter M-2024-0512 — Coastal Energy Partners v. Vista Resource Group
+          Court ruling on summary judgment motion; strategic disposition options
+Status:   Decision recorded for committee record
+
+EXECUTIVE SUMMARY
+
+On June 26, 2024, the Superior Court of California, San Mateo County, issued
+its ruling on Vista's motion for partial summary judgment in Matter
+M-2024-0512. The court granted the motion in part and denied it in part.
+The ruling materially narrows the scope of Coastal's remaining causes of
+action and shifts the bargaining posture in our client's favor for the
+remaining counts, though it does not deliver a clear win or loss.
+
+Given the mixed outcome, the Committee's chosen disposition is to pursue
+mediated settlement on the surviving counts rather than to either appeal
+the partial grant or push the surviving counts to trial. This memo records
+that decision and the reasoning underlying it.
+
+THE RULING IN DETAIL
+
+The court's order (Case No. CIV-2024-0118-SM) granted summary judgment in
+Vista's favor on Count III (alleged breach of the joint venture exclusivity
+clause) on the ground that the relevant exclusivity language was
+unambiguously territorial and did not extend to the offshore activity
+Coastal challenged. The court denied summary judgment on Counts I and II
+(alleged breach of the JV operating agreement royalty provisions and
+alleged breach of fiduciary duty by the Vista-nominated JV directors),
+holding that material factual disputes precluded judgment as a matter of
+law on those counts.
+
+ANALYSIS
+
+This is a mixed outcome — neither a clear favorable nor unfavorable
+disposition for Coastal at the current procedural stage. The narrowing of
+the case is a strategic shift but not a definitive resolution. Counsel
+notes that the ruling does not address damages, settlement amounts, or
+final disposition; those questions remain open and will be addressed
+through either the recommended mediation or, if mediation fails, through
+continued litigation on the surviving counts.
+
+OPTIONS CONSIDERED
+
+The Committee considered three principal options before reaching its
+decision:
+
+  Option A — Appeal the Count III grant.  Rejected. The appellate posture
+  on contract-interpretation rulings of this kind is weak; California
+  appellate courts give substantial deference to trial-court contract
+  interpretation when the language is found unambiguous. Estimated
+  probability of reversal: 20-25%. Not a productive use of client capital.
+
+  Option B — Push the surviving counts to trial.  Considered but not
+  selected. Trial-readiness costs would exceed $480,000 in fees and expert
+  expense over an estimated 8-month preparation window. Coastal's
+  expressed preference (per meeting with CEO on June 11, 2024) is to
+  conclude the matter within calendar year 2024 if commercially possible.
+
+  Option C — Mediated settlement on the surviving counts.  Selected. The
+  surviving counts retain economic leverage; Vista's appetite for trial
+  on royalty / fiduciary-duty exposure is materially lower than its
+  appetite for the exclusivity defense it has just won. Engaging
+  experienced mediator Hon. Patricia Yoon (Ret.) in late July 2024 gives
+  a realistic 90-day window to reach disposition.
+
+NEXT STEPS
+
+  1. Counsel to circulate a draft mediation engagement letter to Vista's
+     outside counsel at Reed Hawkins LLP by July 5, 2024.
+  2. Internal valuation memo on surviving counts to follow by July 12,
+     2024 (separate cover).
+  3. Status report to Committee at the August 6, 2024 monthly meeting.
+
+This decision is recorded as committee disposition #2024-17 in the
+strategy log.
+
+— H. Schroeder

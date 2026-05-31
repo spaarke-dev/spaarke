@@ -1,0 +1,75 @@
+<task id="030" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P5 — Layer 1 document classification node + prompt template @v1</title>
+    <status>not-started</status>
+    <wave>4</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, ai-analysis, prompt-template, classification, zone-a, extraction-layer</tags>
+    <dependencies>022</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>D-P5</d-p>
+    <first-step-blocker>SME review of document-type taxonomy before committing to v1 prompt</first-step-blocker>
+  </metadata>
+
+  <prompt>
+    Implement Layer 1 (document classification) playbook node + `classification@v1` prompt template per [SPEC-phase-1-minimum.md §3.3](../SPEC-phase-1-minimum.md). Realized via existing `AiAnalysisNodeExecutor` (per Q5 audit — no new node executor needed; it's a config + prompt). Single LLM call returning typed enum; cheap; runs on every SPE upload (D-P7 gates expensive Layer 2 on Layer 1 outcome).
+  </prompt>
+
+  <role>Senior .NET developer + prompt engineer familiar with AiAnalysisNodeExecutor patterns + Spaarke prompt template conventions.</role>
+
+  <goal>
+    `classification@v1` prompt template returns valid JSON with classification ∈ {closing_letter, settlement_agreement, decision_memo, deal_document, pleading, opinion_judgment, correspondence, other} + confidence (0-1) + reasoning. Playbook node config in JSON references this prompt + invokes AiAnalysisNodeExecutor. Unit test against 3-5 fixture documents shows correct classification + confidence.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P5)</file>
+    <file purpose="rationale">projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md (§3.3 Layer 1 prompt specification with starter template)</file>
+    <file purpose="existing-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs (hosts the prompt)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="D-59">Layer 1 economics — cheap LLM call (gpt-4o-mini class); single typed-enum output; gates Layer 2</constraint>
+    <constraint source="D-62">Prompt is versioned; producedBy = "classification@v1" propagates to every Classification Observation</constraint>
+    <constraint source="§3.5">Zone A placement (AiAnalysisNodeExecutor lives in Services/Ai/Nodes/)</constraint>
+    <constraint source="D-50">Input text MUST pass through ISanitizer (D-A25) before LLM — wired at SpeContentRetrieve in D-P7</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>prompt-engineering, document-classification, ai-analysis-node, layered-extraction</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="First-step blocker">SME review of 8-category document taxonomy (closing_letter, settlement_agreement, decision_memo, deal_document, pleading, opinion_judgment, correspondence, other). Adjust before v1 commit.</step>
+    <step order="1" name="Author prompt template">classification@v1 prompt per SPEC-phase-1-minimum.md §3.3 (verbatim starter)</step>
+    <step order="2" name="Author playbook node config JSON">References classification@v1; sets AiAnalysisNodeExecutor with appropriate KnowledgeRetrievalConfig.Mode = Never (no retrieval needed for classification)</step>
+    <step order="3" name="Author emission">Layer 1 output = one Observation row, type=documentClassification, subject=document, predicate=classification, value=enum, confidence=as returned, evidence=document ref</step>
+    <step order="4" name="Author 3-5 fixture documents">Sample closing letter, settlement agreement, correspondence email, etc. — in tests/Insights/fixtures/</step>
+    <step order="5" name="Unit test">Each fixture classified correctly with confidence ≥ 0.7 expected (record actual confidences for threshold tuning data)</step>
+    <step order="6" name="Quality gates">code-review + adr-check; verify prompt template versioning convention</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="prompt">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/classification.v1.txt</output>
+    <output type="config">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/layer1-classification.node.json</output>
+    <output type="test-fixtures">tests/Insights/fixtures/sample-closing-letter.txt + sample-settlement-agreement.txt + sample-correspondence.txt</output>
+    <output type="test">tests/integration/Services/Ai/Insights/Layer1ClassificationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Prompt returns valid JSON with all 3 fields (classification, confidence, reasoning)</criterion>
+    <criterion testable="true">Fixture closing letter classified as closing_letter (confidence ≥ 0.7)</criterion>
+    <criterion testable="true">Fixture correspondence email classified as correspondence (confidence ≥ 0.7)</criterion>
+    <criterion testable="true">Fixture out-of-domain document classified as "other" (no false-positive on outcome-bearing categories)</criterion>
+    <criterion testable="true">producedBy="classification@v1" on every emitted Classification Observation</criterion>
+    <criterion testable="true">Input passes through ISanitizer before LLM (verified via test capture)</criterion>
+  </acceptance-criteria>
+</task>

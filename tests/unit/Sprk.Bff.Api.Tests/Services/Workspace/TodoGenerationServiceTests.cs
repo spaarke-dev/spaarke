@@ -149,7 +149,7 @@ public class TodoGenerationServiceTests
         var existing = BuildEvent(name: title);
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, null, null, 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, null, null, 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { existing }, 1));
 
         // Act
@@ -167,7 +167,7 @@ public class TodoGenerationServiceTests
 
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, null, null, 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, null, null, 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         // Act
@@ -188,7 +188,7 @@ public class TodoGenerationServiceTests
         var existing = BuildEvent(name: storedTitle);
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, null, null, 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, null, null, 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { existing }, 1));
 
         // Act
@@ -214,20 +214,20 @@ public class TodoGenerationServiceTests
         // Rule 1: overdue events query returns the event
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { overdueEvent }, 1));
 
         // Rule 3: deadline proximity — empty
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         // Idempotency check: existing todo found with the same title → skip
         var existingTodo = BuildEvent(name: todoTitle);
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, null, null, 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, null, null, 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { existingTodo }, 1));
 
         // Act
@@ -432,13 +432,13 @@ public class TodoGenerationServiceTests
         // Rule 1 (overdue) — throws
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Dataverse connection failed"));
 
         // Rule 3 (deadline proximity) — returns empty
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         // Act — should NOT throw even though the query failed
@@ -459,19 +459,19 @@ public class TodoGenerationServiceTests
         // Overdue events query
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { event1, event2 }, 2));
 
         // Deadline proximity — empty
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         // Idempotency check: neither todo exists yet
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, null, null, 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, null, null, 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         // First create fails; second succeeds
@@ -507,19 +507,19 @@ public class TodoGenerationServiceTests
         // Overdue events query
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { overdueEvent }, 1));
 
         // Deadline proximity — empty
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         // Idempotency: no existing todo
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, null, null, 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, null, null, 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         // Create succeeds
@@ -555,19 +555,19 @@ public class TodoGenerationServiceTests
         // Overdue events query returns the completed event
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { completedEvent }, 1));
 
         // Deadline proximity — empty
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         // Idempotency queries
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, null, null, 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, null, null, 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         // Act
@@ -596,19 +596,19 @@ public class TodoGenerationServiceTests
         // Overdue query — empty
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         // Deadline proximity query returns the upcoming event
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { upcomingEvent }, 1));
 
         // Idempotency: no existing todo
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, null, null, 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, null, null, 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         _dataverseMock
@@ -649,7 +649,7 @@ public class TodoGenerationServiceTests
         var dismissedTodo = BuildEvent(name: dismissedTitle, statusCode: 3);
         _dataverseMock
             .Setup(d => d.QueryEventsAsync(
-                null, null, null, null, null, null, null, 0, 100, It.IsAny<CancellationToken>()))
+                null, null, null, null, null, null, null, 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { dismissedTodo }, 1));
 
         // Act
