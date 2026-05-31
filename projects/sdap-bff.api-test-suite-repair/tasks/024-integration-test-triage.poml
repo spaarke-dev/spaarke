@@ -117,4 +117,25 @@
     <criterion testable="true">No modifications to `src/`, `tests/`, `power-platform/`, `infra/`, `scripts/`</criterion>
     <criterion testable="true">P1.E Track exit gate declared in `current-task.md`</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <scope-extension date="2026-05-31" source="Wave 1 baseline + owner directive (absorb deviations)">
+      Phase 0 Wave 1 task 002 measured `Spe.Integration.Tests` as STILL COMPILE-BROKEN —
+      4 × CS1739 errors at `tests/integration/Spe.Integration.Tests/ExternalAccess/ExternalAccessIntegrationTests.cs`
+      lines 113, 378, 398, 420. Single root cause: the `InviteExternalUserRequest` constructor
+      no longer accepts a `ContactId` parameter. 4 callsites need updating to match the
+      current signature. NO test logic changes required.
+
+      EXECUTION GUIDANCE: handle this compile fix FIRST (before classifying runtime failures).
+      Estimated 15-30 min per `baseline/integration-build-errors-2026-05-31.txt` evidence.
+      Read the current `InviteExternalUserRequest` type signature, update the 4 callsites to
+      match, build to confirm clean, then proceed with the original POML triage steps.
+      Cross-reference: `baseline/integration-build-errors-2026-05-31.txt`,
+      `decisions/D-03-integration-in-scope.md`.
+
+      Acceptance criterion update: integration test triage output (`integration-test-triage.md`)
+      MUST document that the CS1739 compile fix was applied within this task and account for
+      the 4 lines changed in the deliverable.
+    </scope-extension>
+  </notes>
 </task>

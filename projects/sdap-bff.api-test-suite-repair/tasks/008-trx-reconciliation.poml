@@ -1,0 +1,188 @@
+<task id="008" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>Parse Wave 1 TRX + reconcile +73 net failures into Phase 2+3 tier scope</title>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-0, baseline, reconciliation, scope-absorption, testing</tags>
+    <parallel-group>0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Reads baseline TRX (already committed; no concurrent writer). Writes only to projects/.../baseline/failure-inventory-2026-05-31.md, projects/.../notes/handoffs/phase23-scope-delta-2026-05-31.md, and tasks/030..074 POML metadata (extends notes section only; no metadata field conflicts with concurrent wave-2 agents 004 and 005, which write only to CLAUDE.md and priority-order.md respectively).</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Wave 1 baseline (task 001) measured 6,021 / 5,572 / 342 tests vs. design.md §3's 5,215 /
+    4,844 / 269. The +73 net failures are NEW repair work that does not yet have a home in
+    the Phase 2+3 tier task scope. The owner directive (2026-05-31) is: absorb these into
+    THIS project; do not defer.
+
+    Parse `baseline/test-baseline-2026-05-31.trx`, group failures by namespace/class, then
+    reconcile against the current Phase 2+3 tier task scope (POMLs 030..074). For each new
+    failure cluster, either (a) it falls within an existing task's named area — extend the
+    task's `<relevant-files>` or add a `<notes>` entry; or (b) it falls outside all existing
+    tasks — flag in the delta-report for owner-approved scope extension.
+
+    This is a reconciliation task — NO source/test edits. Outputs are inventory + delta-report +
+    POML metadata extensions.
+  </prompt>
+
+  <role>AI agent reading TRX, classifying failures, updating Phase 2+3 task scope metadata.</role>
+
+  <goal>
+    Three artifacts:
+    1. `baseline/failure-inventory-2026-05-31.md` — per-class failure count from Wave 1 TRX,
+       grouped by namespace prefix (Services/Ai/Chat, Services/Workspace, etc.)
+    2. `notes/handoffs/phase23-scope-delta-2026-05-31.md` — explicit mapping of the +73 net
+       failures (vs. design.md §3's 269) to Phase 2+3 tier tasks (which task absorbs which
+       cluster). Any cluster not absorbable into an existing task is flagged with a proposed
+       new task or scope-extension.
+    3. Edits to `tasks/030..074` POML metadata: `<notes>` section append OR `<relevant-files>`
+       extension for each task whose scope expanded.
+  </goal>
+
+  <inputs>
+    <file purpose="baseline-trx">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-05-31.trx</file>
+    <file purpose="baseline-readme">projects/sdap-bff.api-test-suite-repair/baseline/README.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="task-index">projects/sdap-bff.api-test-suite-repair/tasks/TASK-INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">No production code changes (no `src/`, `power-platform/`, `infra/`, `scripts/`)</constraint>
+    <constraint source="NFR-02">No test file edits — this is a metadata/inventory task only</constraint>
+    <constraint source="NFR-09">`repair-not-rewrite: true` declared in metadata</constraint>
+    <constraint source="design §3">design.md §3 cited numbers (5,215 / 4,844 / 269) are the comparison baseline; deltas vs. measured 6,021 / 5,572 / 342 are the unit of analysis</constraint>
+    <constraint source="owner-2026-05-31">Newly discovered failures absorb into THIS project; deferral to future work is not permitted</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/baseline/README.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/tasks/TASK-INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The Wave 1 baseline diverged materially from design.md §3 because the worktree was
+      already partially-repaired by 2026-05-31 (compile errors: 17 → 0; tests: 5,215 → 6,021;
+      failures: 269 → 342). The 17 named files in design §3.2 compile clean now — Phase 1
+      P1.A tasks 010-013 are absorbed (handled in a separate scope-revision commit).
+      What remains as net-new work: +73 failures (342 − 269) that the design did not name.
+      This task identifies WHICH failures those are and assigns them to existing Phase 2+3
+      tier tasks (030..074) where their test classes already fit, OR flags them for owner
+      review if they fall outside all current task scopes.
+
+      TRX parsing approach: the .trx file is XML; use Read with offset/limit OR a script
+      to extract `&lt;UnitTestResult outcome="Failed"&gt;` elements and their `testName` /
+      `testClass` attributes. Group by namespace prefix (everything before the last segment
+      of the class name). Cross-reference each cluster against the Phase 2+3 task POMLs'
+      `&lt;relevant-files&gt;` lists to find the absorbing task.
+    </background>
+    <dependencies>
+      <dependency task="001" status="completed">Needs baseline/test-baseline-2026-05-31.trx (12M, gitignored, on disk)</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/baseline/failure-inventory-2026-05-31.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/notes/handoffs/phase23-scope-delta-2026-05-31.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/030-streaming-batch-1.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/031-streaming-batch-2.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/033-factory-batch-1.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/034-factory-batch-2.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/040-workspace-scoring.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/041-scorecard.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/042-finance-signal-evaluation.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/043-email-association.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/044-ai-safety.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/045-filters-infrastructure-json.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/046-infrastructure-resilience.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/050-ai-chat-batch-1.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/051-ai-chat-batch-2.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/052-ai-chat-batch-3.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/053-ai-capabilities.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/054-ai-nodes.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/055-communications-batch-1.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/056-communications-batch-2.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/060-integration-batch-1.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/061-integration-batch-2.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/070-low-tier-batch-1.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/071-low-tier-batch-2.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/072-low-tier-batch-3.poml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/tasks/073-low-tier-endpoint-tests.poml</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Parse `baseline/test-baseline-2026-05-31.trx`: extract every `&lt;UnitTestResult outcome="Failed"&gt;` element and its `testName` + `testClass` (or equivalent attribute). Build a frequency table grouped by namespace prefix (`Sprk.Bff.Api.Tests.Services.Ai.Chat.*`, etc.). If TRX parsing via Read is impractical due to file size (12M), write a small PowerShell or Bash command to xpath the failures into a flat list, then group. Cap inventory work at 30 minutes — if parsing is intractable, fall back to running `dotnet test --logger:"console;verbosity=normal" --filter "..."` per namespace to count failures (slower but reliable).</step>
+
+    <step order="2">Write `baseline/failure-inventory-2026-05-31.md` with the per-namespace failure counts, totaling 342 (or as close as parsing yields; document any gap). Format:
+      ```
+      | Namespace prefix | Failures | Total tests | Failure rate |
+      |---|---|---|---|
+      | Sprk.Bff.Api.Tests.Services.Ai.Chat | NN | NN | NN% |
+      | ... | ... | ... | ... |
+      ```
+      Sort descending by failure count.
+    </step>
+
+    <step order="3">Read each Phase 2+3 task POML in `tasks/030..074` and extract its `&lt;relevant-files&gt;` list. Build a reverse-lookup: for each test file/class, which task owns it? Identify the 73 net new failures (those that exist in the measured baseline but were NOT among the 269 design.md §3 failures — pragmatic proxy: any failing class whose namespace prefix is NOT already in any existing task's relevant-files).</step>
+
+    <step order="4">For each new-failure cluster identified in Step 3, choose ONE of:
+      (a) **Absorb into existing task** — the cluster's namespace matches an existing task's scope. Action: append a `&lt;notes&gt;` entry to that task POML stating: "Scope extended 2026-05-31 to include +N net failures discovered in Wave 1 baseline (per `notes/handoffs/phase23-scope-delta-2026-05-31.md`). Files: {list}."
+      (b) **Extend relevant-files** — if the cluster is in a NEW file path not already in the task's `&lt;relevant-files&gt;`, add the file path. Same `&lt;notes&gt;` annotation.
+      (c) **Flag for owner review** — if NO existing task fits the cluster's namespace, log this in the delta-report under a "REQUIRES OWNER DECISION" section. Suggest the most-related existing task as the absorbing candidate.
+    </step>
+
+    <step order="5">Write `notes/handoffs/phase23-scope-delta-2026-05-31.md` with:
+      - **Summary**: 269 (design) → 342 (measured), +73 net failures.
+      - **Absorbed into existing tasks**: table of cluster → absorbing task ID → action taken.
+      - **Requires owner decision**: any unmatched clusters with proposed absorption candidate.
+      - **Phase 2+3 wall-clock impact estimate**: cite per-cluster effort delta only if obvious; otherwise mark "no material change to wave plan" (waves still 6-agent caps; tasks just have slightly larger scope).
+      - **Cross-reference**: list the POMLs edited (with their `&lt;notes&gt;` annotation timestamps) so the delta is reproducible.
+    </step>
+
+    <step order="6">Edit each affected POML in `tasks/030..074` (only those identified in Step 4 as absorbing or extending). Add the `&lt;notes&gt;` element BEFORE the closing `&lt;/task&gt;` tag if not already present, or append to existing notes. Use the format:
+      ```xml
+      &lt;notes&gt;
+        &lt;scope-extension date="2026-05-31"&gt;
+          Wave 1 baseline reconciliation (task 008) extended scope to include +N net failures
+          in classes: {comma-separated short list}. See
+          `notes/handoffs/phase23-scope-delta-2026-05-31.md` for full mapping.
+        &lt;/scope-extension&gt;
+      &lt;/notes&gt;
+      ```
+    </step>
+
+    <step order="7">Update `current-task.md` with completion summary + list of POMLs edited + counts: clusters absorbed, clusters flagged, total +73 accounted for. Verify the cluster-count total matches the +73 delta (within ±5 — small drift OK from skipped/inconclusive tests).</step>
+
+    <step order="8">Update task 008's own `&lt;status&gt;` from `not-started` → `completed` with a brief `&lt;notes&gt;&lt;completion&gt;` block listing the 3 artifact paths and total POMLs modified. Do NOT update TASK-INDEX.md (main session aggregates).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">TRX file, Phase 2+3 POMLs</tool>
+    <tool name="Bash">PowerShell/bash xpath or text extraction from TRX if needed</tool>
+    <tool name="Write">failure inventory + delta report</tool>
+    <tool name="Edit">Phase 2+3 POML `<notes>` sections</tool>
+  </tools>
+
+  <outputs>
+    <output type="inventory">projects/sdap-bff.api-test-suite-repair/baseline/failure-inventory-2026-05-31.md</output>
+    <output type="delta-report">projects/sdap-bff.api-test-suite-repair/notes/handoffs/phase23-scope-delta-2026-05-31.md</output>
+    <output type="poml-metadata-edits">tasks/030..074 (only those whose scope changed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`baseline/failure-inventory-2026-05-31.md` exists with per-namespace failure counts; row total matches measured 342 (±5 acceptable due to skipped/inconclusive)</criterion>
+    <criterion testable="true">`notes/handoffs/phase23-scope-delta-2026-05-31.md` exists with the +73 net failures explicitly accounted for: absorbed (with task IDs) or flagged for owner review</criterion>
+    <criterion testable="true">At least one Phase 2+3 POML has been edited with a `&lt;scope-extension date="2026-05-31"&gt;` notes block (zero edits is acceptable ONLY if the delta-report explicitly states "all +73 fall in existing scope without needing relevant-files extension")</criterion>
+    <criterion testable="true">No `src/`, `power-platform/`, `infra/`, `scripts/` files were modified (NFR-01)</criterion>
+    <criterion testable="true">No test `.cs` files were modified (NFR-02 — this is metadata work only)</criterion>
+    <criterion testable="true">Task 008's own `&lt;status&gt;` is updated to `completed` with completion notes</criterion>
+  </acceptance-criteria>
+</task>

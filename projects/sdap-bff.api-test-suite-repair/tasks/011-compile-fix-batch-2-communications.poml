@@ -120,4 +120,22 @@
     <criterion testable="true">No modifications to `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
     <criterion testable="true">`CustomWebAppFactory.cs` NOT modified</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <scope-revision date="2026-05-31" source="Wave 1 baseline + owner directive (absorb deviations)">
+      Phase 0 Wave 1 task 001 measured 0 compile errors in the unit-test project (down from
+      design.md §3.2's expected 17 files / 138 errors). The 5 Communications files in this
+      batch appear to compile clean at execution time.
+
+      EXECUTION GUIDANCE: do NOT spend time hunting for compile errors that no longer exist.
+      Confirm the build is clean with `dotnet build` filtered to this batch, then proceed
+      directly to test-level repair + trait-tagging (originally Phase 2+3 scope for these
+      files). Any tests that fail at runtime get §6.2 trait tags.
+
+      Communications sibling-coordination with `x-email-communication-solution-r2` owner is
+      still required before merging — that constraint is unchanged. If the build is NOT
+      clean (regression since 2026-05-31), fall back to original POML steps.
+      Cross-reference: `baseline/README.md`, `notes/handoffs/phase23-scope-delta-2026-05-31.md`.
+    </scope-revision>
+  </notes>
 </task>

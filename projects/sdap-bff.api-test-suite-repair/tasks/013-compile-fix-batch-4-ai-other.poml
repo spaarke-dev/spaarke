@@ -118,4 +118,17 @@
     <criterion testable="true">No modifications to `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
     <criterion testable="true">`CustomWebAppFactory.cs` NOT modified</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <scope-revision date="2026-05-31" source="Wave 1 baseline + owner directive (absorb deviations)">
+      Phase 0 Wave 1 task 001 measured 0 compile errors in the unit-test project (down from
+      design.md §3.2's expected 17 files / 138 errors). The 5 files in this batch
+      (Ai/Scope, Visualization, WorkingDocument, Jobs/RecordSync, Integration/Communication)
+      appear to compile clean at execution time.
+
+      EXECUTION GUIDANCE: confirm clean build, then proceed to test-level repair + §6.2
+      trait-tagging. Cross-reference: `baseline/README.md`,
+      `notes/handoffs/phase23-scope-delta-2026-05-31.md` (from task 008).
+    </scope-revision>
+  </notes>
 </task>
