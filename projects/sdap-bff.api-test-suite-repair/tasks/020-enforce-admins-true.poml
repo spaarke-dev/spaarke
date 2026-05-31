@@ -1,7 +1,9 @@
 <task id="020" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P1.D1 — Flip enforce_admins:true on master branch protection (FR-09)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-date>2026-05-31</completed-date>
+    <completion-summary>FR-09 satisfied. `gh api -X POST repos/spaarke-dev/spaarke/branches/master/protection/enforce_admins` returned `{"enabled":true}`. Pre-flip state captured to `baseline/branch-protection-pre-FR09-2026-05-31.json` + `baseline/ci-gate-pre-flip-2026-05-31.json`; post-flip state captured to `baseline/ci-gate-post-flip-2026-05-31.json`. All 3 required status contexts (`Build &amp; Test (Debug)`, `Build &amp; Test (Release)`, `Code Quality`) verified intact. NFR-01 satisfied (only `baseline/` writes). Rollback command for posterity: `gh api -X DELETE repos/spaarke-dev/spaarke/branches/master/protection/enforce_admins` (per D-02 reassessment trigger — NOT a casual operation). See `current-task.md` Task 020 Execution Log for full diff + binding-constraint compliance matrix.</completion-summary>
     <estimated-effort>15-30 minutes</estimated-effort>
     <assigned>AI agent (with operator admin token)</assigned>
     <tags>phase-1, ci-gate, governance, p1-d</tags>

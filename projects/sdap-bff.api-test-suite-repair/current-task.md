@@ -14,6 +14,51 @@
 
 ---
 
+## Task 024 — Wave 1.1b (2026-05-31): P1.E1 Spe.Integration.Tests classify failures + CS1739 fix
+
+**Rigor Level**: STANDARD (per POML metadata `<rigor>STANDARD</rigor>`; STANDARD-tier reason: integration-triage + mechanical signature-drift fix, no architecture changes)
+**Status**: completed 2026-05-31 (P1.E Track exit gate declared)
+
+### Scope-extension Step 1 — CS1739 compile fix
+
+| Action | Result |
+|---|---|
+| File edited | `tests/integration/Spe.Integration.Tests/ExternalAccess/ExternalAccessIntegrationTests.cs` |
+| Callsites fixed | 4 (lines 113, 378, 398, 420) — replaced obsolete `ContactId:` with `Email: + AccessLevel: + FirstName/LastName:` per current `InviteExternalUserRequest` 7-param record |
+| Production signature confirmed | `record InviteExternalUserRequest(string Email, Guid ProjectId, int AccessLevel, string? FirstName, string? LastName, DateOnly? ExpiryDate, Guid? AccountId)` |
+| NFR-02 compliance | ~4% file line delta; no §4.8 escalation needed |
+| Build result | `dotnet build` → **0 errors, 18 warnings (pre-existing)** |
+
+### Step 2-7 — Cluster classification + triage doc
+
+| Metric | Value |
+|---|---|
+| Test run after fix | Total 422 / Passed 88 / Failed 198 / Skipped 136 |
+| Cluster A — `CosmosPersistence:Endpoint` config missing | 97 failures across 7 classes → P23.I task 062 |
+| Cluster B — `SpeAdmin:KeyVaultUri` config missing | 98 failures across 8 classes → P23.I task 063 |
+| Cluster C — `Xunit.SkipException` mis-reported as Failed | 3 failures (ReportingEndpointTests) → P23.I task 063 sub-cluster |
+| §6.2 end-state projections | 195 → `repaired`; 3 → `flaky-quarantined` (env-dependent); 0 → real-bug-pending-fix (deferred to post-fixture-fix re-run) |
+| Triage doc | `projects/sdap-bff.api-test-suite-repair/integration-test-triage.md` |
+| TRX baseline (post-fix) | `projects/sdap-bff.api-test-suite-repair/baseline/integration-test-2026-05-31-postfix.trx` |
+
+### Handoff recommendation to P23.I sequencing
+
+Tasks 062 and 063 both edit the same `IntegrationTestFixture.cs`. **Recommend collapsing into a single P23.I-AB-fixture-config task** to respect §4.5 anti-parallelism (fixture changes have global blast radius across 422 tests).
+
+### Files modified
+
+- `tests/integration/Spe.Integration.Tests/ExternalAccess/ExternalAccessIntegrationTests.cs` (4 callsites)
+- `projects/sdap-bff.api-test-suite-repair/tasks/024-integration-test-triage.poml` (status → completed)
+- `projects/sdap-bff.api-test-suite-repair/integration-test-triage.md` (new — triage deliverable)
+- `projects/sdap-bff.api-test-suite-repair/baseline/integration-test-2026-05-31-postfix.trx` (new — post-fix TRX artifact)
+- `projects/sdap-bff.api-test-suite-repair/current-task.md` (append-only this section)
+
+### P1.E Track exit gate
+
+**DECLARED**: P1.E (Phase 1 P1.E — Integration Test Triage) Track exit gate is satisfied. Downstream Phase 2+3 P23.I (tasks 062, 063) is unblocked with explicit cluster IDs and config-fix scopes documented in `integration-test-triage.md` §"Phase 2+3 input".
+
+---
+
 ## Task 008 — Wave 0.2 (2026-05-31): TRX parsing + Phase 2+3 tier reconciliation
 
 **Rigor Level**: STANDARD (per POML metadata)
@@ -1039,3 +1084,206 @@ The Communications writer was migrated from `IDataverseService` to `IGenericEnti
 
 **TASK-INDEX.md**: NOT updated by this agent (parent directive — main session aggregates).
 **Git commit**: NOT performed by this agent (parent directive).
+
+---
+
+## Task 020 Execution Log (2026-05-31)
+
+### Task 020 Details
+
+**Task**: P1.D1 — Flip enforce_admins:true on master branch protection (FR-09)
+**Rigor Level**: FULL
+**Reason**: POML declares `<rigor>FULL</rigor>`; tags include `ci-gate`, `governance`; load-bearing FR-09 mutation on production master branch protection; `<repair-not-rewrite>true</repair-not-rewrite>` verified.
+**Wave**: 1.1b (Phase 1)
+**Parallel-safe**: true — GitHub API only, disjoint from concurrent agents (017 inventory, 021 workflow file, 022 procedures doc, 024 integration tests)
+**Started**: 2026-05-31
+**Status**: completed
+
+### Knowledge Files Loaded
+
+- `projects/sdap-bff.api-test-suite-repair/CLAUDE.md` (project context + NFR-01/NFR-09 binding)
+- `projects/sdap-bff.api-test-suite-repair/decisions/D-02-ci-gate-strict.md` (full binding decision context for FR-09)
+- `projects/sdap-bff.api-test-suite-repair/tasks/020-enforce-admins-true.poml` (task definition)
+- `projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-snapshot-2026-05-31.json` (pre-existing baseline confirming `enforce_admins: false`)
+
+### Completed Steps
+
+- [x] Step 1: Verified `gh auth status` — logged in as `spaarke-dev` (repo owner) with `repo` scope → admin permission on branch protection confirmed.
+- [x] Step 2: Captured pre-flip snapshots to `baseline/branch-protection-pre-FR09-2026-05-31.json` AND `baseline/ci-gate-pre-flip-2026-05-31.json`. Verified `enforce_admins.enabled: false` pre-mutation.
+- [x] Step 3: Executed `gh api -X POST repos/spaarke-dev/spaarke/branches/master/protection/enforce_admins` → response `{"enabled":true}`. Mutation succeeded.
+- [x] Step 4: Verified all 3 required status contexts present: `["Build & Test (Debug)","Build & Test (Release)","Code Quality"]`. No PATCH needed.
+- [x] Step 5: Captured post-flip snapshot to `baseline/ci-gate-post-flip-2026-05-31.json`. Verified `enforce_admins: true`, `strict: true`, contexts intact.
+- [x] Step 6: This append to current-task.md (Step 6).
+- [x] Step 7: `git status` confirms writes confined to `projects/sdap-bff.api-test-suite-repair/baseline/` only. The modified `.github/workflows/deploy-bff-api.yml` is concurrent task 021's territory (disjoint per parallel-safety contract).
+
+### Pre → Post State Diff
+
+| Property | Pre-flip | Post-flip |
+|---|---|---|
+| `enforce_admins.enabled` | `false` | **`true`** |
+| `required_status_checks.contexts` | `[Build & Test (Debug), Build & Test (Release), Code Quality]` | unchanged (intact) |
+| `required_status_checks.strict` | `true` | unchanged |
+| `required_pull_request_reviews.required_approving_review_count` | `0` | unchanged (NOT modified per binding constraint — no CODEOWNERS changes outside enforce_admins) |
+| `allow_force_pushes.enabled` | `false` | unchanged |
+| `allow_deletions.enabled` | `false` | unchanged |
+
+### Files Created / Modified
+
+| File | Action | Purpose |
+|---|---|---|
+| `projects/sdap-bff.api-test-suite-repair/baseline/branch-protection-pre-FR09-2026-05-31.json` | Create | Rollback-safety snapshot per parent directive |
+| `projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-pre-flip-2026-05-31.json` | Create | Pre-flip snapshot per POML Step 2 |
+| `projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-post-flip-2026-05-31.json` | Create | Post-flip snapshot per POML Step 5 |
+| `projects/sdap-bff.api-test-suite-repair/tasks/020-enforce-admins-true.poml` | Edit (status flip) | `not-started` → `completed` per task-execute Step 10 |
+| `projects/sdap-bff.api-test-suite-repair/current-task.md` | Edit (append) | This execution log |
+
+### Acceptance Criteria Verification
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | `gh api .../branches/master/protection` shows `enforce_admins.enabled: true` | PASS — verified via post-flip `--jq` query: `"enforce_admins":true` |
+| 2 | `required_status_checks.contexts` includes all 3 named checks | PASS — `["Build & Test (Debug)","Build & Test (Release)","Code Quality"]` confirmed |
+| 3 | Pre + post snapshot JSONs exist in `baseline/` | PASS — both files written; rollback-safety snapshot also written |
+| 4 | No modifications to `src/`, `tests/`, `power-platform/`, `infra/`, `scripts/` | PASS — `git status` confirms |
+
+### Binding Constraint Compliance
+
+- **NFR-01** (no `src/`/`power-platform/`/`infra/`/`scripts/` changes): PASS — only `baseline/` writes
+- **NFR-09** (`repair-not-rewrite: true`): PASS — verified in POML metadata before starting
+- **FR-09** (`enforce_admins: true` on 3 named status checks): SATISFIED
+- **D-02 binding** (full `enforce_admins`, no partial enforcement): SATISFIED
+- **CODEOWNERS / required-reviewer rules outside enforce_admins**: UNTOUCHED (`required_pull_request_reviews` unchanged)
+- **Non-master branches**: UNTOUCHED
+
+### Rollback Command (for posterity / incident response)
+
+If FR-09 must be reverted (e.g., real production incident requiring emergency bypass — per D-02 reassessment trigger requires 3+ uses in a quarter):
+
+```
+gh api -X DELETE repos/spaarke-dev/spaarke/branches/master/protection/enforce_admins
+```
+
+This sets `enforce_admins.enabled` back to `false`. Per D-02, this is NOT a casual operation — it requires (a) a filed incident, (b) named approver from the allowlist (Phase 4 task 081 / 082 documents), and (c) auto-creation of a follow-up issue to restore enforce_admins within 5 business days.
+
+### Coordination Notes (Wave 1.1b)
+
+- **Task 021** (concurrent): removes `skip-tests` workflow_dispatch from `deploy-bff-api.yml` — observed `.github/workflows/deploy-bff-api.yml` in modified state during `git status`, consistent with parallel agent in flight. Disjoint write path (no collision).
+- **Task 022** (concurrent): writes emergency-bypass procedure doc (referenced above; D-02 line 17 + FR-11 binding).
+- **Task 086** (Phase 4 verification gate): will re-query branch protection and confirm `enforce_admins: true` persisted; this task's post-flip snapshot is the reference baseline.
+
+### Step 9.5 Quality Gates (FULL rigor)
+
+**code-review**: N/A — no code changes; configuration-only mutation via GitHub API (per Step 9.5 SKIP rule: "Task is configuration-only (no logic changes)").
+**adr-check**: COMPLIANT — no ADRs applicable to GitHub branch-protection configuration; ADR-001/007/010/013/028/029 (project's applicable ADRs) all N/A for this surface.
+**Lint**: N/A — no compilation unit modified.
+
+### Step 10: Update Task Status
+
+POML `<status>` flipped from `not-started` → `completed` (next).
+
+**TASK-INDEX.md**: NOT updated by this agent (parent directive — main session aggregates).
+**Git commit**: NOT performed by this agent (parent directive).
+
+---
+
+## Task 022 — Phase 1 Wave 1.1b (2026-05-31): P1.D3 BFF emergency-deploy procedure
+
+**Rigor Level**: STANDARD (per POML metadata; documentation-only, new file, constraints listed)
+**Status**: completed 2026-05-31
+
+### Artifact produced
+
+| Path | Purpose |
+|---|---|
+| `docs/procedures/bff-deploy-emergency.md` | 130-line markdown procedure replacing the deleted `skip-tests` workflow_dispatch mechanism (FR-10) per D-02 §5.2 |
+
+### Sections (8)
+
+1. Purpose (1 paragraph)
+2. When emergency deploy is justified (criteria a/b/c + explicit not-acceptable list)
+3. Approver allowlist (sole approver: ralph.schroeder@hotmail.com; backup TBD per spec.md Unresolved Questions — slot at line ~49)
+4. Procedure (5 numbered steps)
+5. 5-business-day follow-up-fix clause (label `bff-emergency-followup`, due 5 BD from deploy)
+6. Incident-issue template (fenced GitHub-issue markdown block)
+7. Maintenance (allowlist change procedure + D-02 reassessment-trigger link)
+8. References (root CLAUDE.md §10, `.claude/constraints/bff-extensions.md`, spec.md FR-11, D-02, ADR-029)
+
+### Cross-references included
+
+- **FR-11**: spec.md (linked twice — header + References)
+- **D-02**: `decisions/D-02-ci-gate-strict.md` (linked in header + References + Maintenance)
+- **ADR-029**: `.claude/adr/ADR-029-bff-publish-hygiene.md` (References — informational)
+- **Root CLAUDE.md §10**: linked in header + References
+- **`.claude/constraints/bff-extensions.md`**: linked in header + References
+
+### Acceptance criteria — all 7 verified met
+
+- [x] `docs/procedures/bff-deploy-emergency.md` exists (130 lines)
+- [x] Owner named: ralph.schroeder@hotmail.com (sole approver) — appears at lines 4, 47, 97
+- [x] Emergency criteria explicitly defined (a) security CVE / (b) outage / (c) data-integrity
+- [x] 5-business-day follow-up-fix clause present (section + cross-reference from Procedure step 4)
+- [x] Incident-issue template included as fenced markdown
+- [x] References root CLAUDE.md §10 + `.claude/constraints/bff-extensions.md`
+- [x] No modifications to `src/`, `tests/`, `power-platform/`, `infra/`, `scripts/` — `git status` shows only `docs/procedures/bff-deploy-emergency.md` as new untracked file
+
+### Binding constraints honored
+
+- **NFR-01**: `docs/` is permitted (NOT in `src/` / `power-platform/` / `infra/` / `scripts/`)
+- **NFR-09**: `<repair-not-rewrite>true</repair-not-rewrite>` preserved in POML metadata
+- **D-02 §5.2**: emergency procedure is one-page documentation (130 lines = ~1.5 pages); approver + 5-day clause + incident template all present
+- **Self-contained**: reader does not need to follow another doc to execute the procedure
+
+### Wave 1.1b parallel-safety
+
+Disjoint write path from sibling Wave 1.1b agents (017 factory inventory, 020 GitHub API, 021 workflow file, 024 integration tests). Verified by `<parallel-reason>` in POML.
+
+### Step 10: Update Task Status (task 022)
+
+POML `<status>` flipped `not-started` → `completed`. `<notes>` block added summarizing artifact + acceptance criteria.
+
+**TASK-INDEX.md**: NOT updated by this agent (parent directive).
+**Git commit**: NOT performed by this agent (parent directive).
+
+---
+
+## Task 017 — Wave 1.1b (2026-05-31): P1.C1 factory config inventory (READ-ONLY)
+
+**Rigor Level**: STANDARD (per POML metadata `<rigor>STANDARD</rigor>`; tags `phase-1, factory-ext, bff-api, testing, p1-c, inventory`; READ-ONLY task producing a single markdown deliverable).
+
+**Status**: completed 2026-05-31.
+
+### Artifacts produced
+
+| Path | Purpose |
+|---|---|
+| `projects/sdap-bff.api-test-suite-repair/notes/spikes/factory-config-gaps.md` | TRX-driven inventory of factory config gaps for task 018 (4 named sections A–D + cross-ref section E) |
+
+### Inventory headline numbers
+
+- **Distinct startup-time error signatures in TRX**: **2** (`CosmosPersistence:Endpoint is not configured` × 392 raw-text matches; `OptionsValidationException` for `AgentServiceOptions.{Endpoint,AgentId}` × 76 raw-text matches; net 342 unique failing tests per `<UnitTestResult outcome="Failed">` count)
+- **Current factory `services.RemoveAll<>()` calls**: **3** (lines 155 `IGraphClientFactory`, 162 `IHostedService`, 167 `IDataverseService`)
+- **Current factory config dictionary keys**: **37** across 16 sections + 4 standalone env-style keys
+- **Net new dictionary entries recommended for task 018**: **7** (`CosmosPersistence:Endpoint`, `CosmosPersistence:DatabaseName`, `AgentService:Enabled`, `AgentService:Endpoint`, `AgentService:AgentId`, `AgentService:MaxConcurrency`, `AgentService:ThreadCacheExpiryMinutes`)
+- **Net new `RemoveAll<>()` calls recommended**: **0** — existing broad `RemoveAll<IHostedService>()` is the load-bearing anti-drift guard; no narrowing recommended
+
+### NFR / §-rule compliance
+
+| Rule | Verification |
+|---|---|
+| NFR-01 (no `src/` changes) | Output file lives under `projects/.../notes/spikes/` — verified |
+| NFR-02 (no test rewrites) | N/A — no test edits |
+| NFR-07 (factory anti-parallelism) | `CustomWebAppFactory.cs` READ-ONLY; task 018 (Wave 1.3 ISOLATED) is the editor |
+| NFR-09 (`<repair-not-rewrite>true</repair-not-rewrite>`) | Verified in POML metadata at task start |
+| §4.5 (additive only — applies to task 018) | Recommendations are fully additive (7 net new dictionary lines, 0 modifications) |
+
+### Wave 1.1b parallel-safety
+
+Disjoint write path from sibling Wave 1.1b agents (020 GitHub API, 021 workflow file, 022 docs/procedures, 024 integration tests). This agent wrote only to `projects/sdap-bff.api-test-suite-repair/notes/spikes/factory-config-gaps.md` — zero file overlap with any sibling agent's relevant-files list.
+
+### Step 10: Update Task Status (task 017)
+
+POML `<status>` flipped `not-started` → `completed`. `<notes>` block added summarizing artifact + acceptance criteria.
+
+**TASK-INDEX.md**: NOT updated by this agent (parent directive).
+**Git commit**: NOT performed by this agent (parent directive).
+**CustomWebAppFactory.cs**: NOT modified (NFR-07 / §4.5 — READ-ONLY this task).

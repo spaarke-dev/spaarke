@@ -1,7 +1,7 @@
 <task id="022" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P1.D3 — Author docs/procedures/bff-deploy-emergency.md (FR-11)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>45-90 minutes</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-1, ci-gate, governance, p1-d, documentation</tags>
@@ -114,4 +114,14 @@
     <criterion testable="true">References root CLAUDE.md §10 + `.claude/constraints/bff-extensions.md`</criterion>
     <criterion testable="true">No modifications to `src/`, `tests/`, `power-platform/`, `infra/`, `scripts/`</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-05-31 via Phase 1 Wave 1.1b parallel dispatch.
+    Output: `docs/procedures/bff-deploy-emergency.md` (130 lines, under 200-line ceiling; ~1.5 pages rendered).
+    Sections: Purpose, When emergency deploy is justified, Approver allowlist (TBD slot for backup at line 49), Procedure, 5-business-day follow-up-fix clause, Incident-issue template (fenced markdown), Maintenance, References.
+    Cross-references included: FR-11 (spec.md), D-02 (decisions/D-02-ci-gate-strict.md), ADR-029, root CLAUDE.md §10, `.claude/constraints/bff-extensions.md`.
+    All 7 acceptance criteria verified met. Git status clean (only `docs/procedures/bff-deploy-emergency.md` as untracked addition).
+    No modifications to `src/`, `tests/`, `power-platform/`, `infra/`, `scripts/` per NFR-01.
+    TASK-INDEX.md NOT updated per parent-agent instruction.
+  </notes>
 </task>

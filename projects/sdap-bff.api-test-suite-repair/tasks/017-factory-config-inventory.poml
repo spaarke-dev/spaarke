@@ -1,7 +1,7 @@
 <task id="017" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P1.C1 — Inventory missing fake config values from baseline logs (READ-ONLY)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>45 min - 1.5 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-1, factory-ext, bff-api, testing, p1-c, inventory</tags>
@@ -101,4 +101,28 @@
     <criterion testable="true">No modifications to `tests/`, `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
     <criterion testable="true">`CustomWebAppFactory.cs` NOT modified (NFR-07 prep step)</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion date="2026-05-31">
+      Inventory produced at `projects/sdap-bff.api-test-suite-repair/notes/spikes/factory-config-gaps.md`
+      (4 named sections A–D + cross-ref section E). TRX-driven analysis of `baseline/test-baseline-2026-05-31.trx`.
+
+      Headline findings:
+      - Distinct startup-time error signatures: 2 (`CosmosPersistence:Endpoint` not configured + `AgentServiceOptions` ValidateDataAnnotations).
+      - Current factory `services.RemoveAll&lt;&gt;()` calls: 3 (IGraphClientFactory, IHostedService, IDataverseService) — all keep.
+      - Current factory config dictionary keys: 37 across 16 sections + 4 standalone env-style keys.
+      - Net new dictionary entries recommended for task 018: 7 (2 CosmosPersistence + 5 AgentService fields).
+      - Net new RemoveAll&lt;&gt;() calls recommended: 0 — broad `RemoveAll&lt;IHostedService&gt;()` is the anti-drift guard.
+
+      All acceptance criteria verified:
+      ✅ markdown file exists with 4+ named sections
+      ✅ per-gap detail table has 7 rows
+      ✅ no edits to tests/, src/, power-platform/, infra/, scripts/
+      ✅ CustomWebAppFactory.cs NOT modified (READ-ONLY per §4.5 / NFR-07)
+
+      TASK-INDEX.md NOT updated by this agent (parent directive).
+      Git commit NOT performed by this agent (parent directive).
+      Task 018 (Wave 1.3 ISOLATED) is the consumer; it MUST cite `notes/spikes/factory-config-gaps.md` in its PR description.
+    </completion>
+  </notes>
 </task>

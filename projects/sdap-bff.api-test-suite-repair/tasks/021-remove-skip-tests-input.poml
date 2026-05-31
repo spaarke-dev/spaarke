@@ -1,7 +1,9 @@
 <task id="021" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P1.D2 — Remove skip-tests workflow_dispatch input from deploy-bff-api.yml (FR-10)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-date>2026-05-31</completed-date>
+    <completion-notes>Removed skip-tests workflow_dispatch input (file lines 36-40) and its conditional guard `if: ${{ github.event.inputs.skip-tests != 'true' }}` on test job (file line 104). Diff: 6 deletions, 0 additions. YAML validated (python yaml.safe_load OK; no actionlint/yamllint available locally — CI will validate). git diff --stat confirms single-file change to .github/workflows/deploy-bff-api.yml. Test job now runs unconditionally per FR-10 + D-02 binding decision. Per caller instructions: no `git commit` performed (main session reconciles parallel Wave 1.1b commits); TASK-INDEX.md not modified.</completion-notes>
     <estimated-effort>15-30 minutes</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-1, ci-gate, governance, p1-d</tags>

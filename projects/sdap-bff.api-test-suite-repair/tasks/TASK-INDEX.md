@@ -87,24 +87,24 @@ All 5 Wave 1 agents completed. Build verification skipped: no `.cs` files modifi
 
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
-| 017 | Factory config inventory (READ-ONLY) | 🔲 | 1-A | ✅ Yes | STANDARD | 001 |
-| 018 | Extend CustomWebAppFactory.cs (ISOLATED — NFR-07) | 🔲 | 1-C-isolated | ❌ **No (NFR-07)** | FULL | 017 |
+| 017 | Factory config inventory (READ-ONLY) | ✅ 2026-05-31 (3 RemoveAll calls + 37 config keys inventoried; **7 missing keys identified as root cause of all 342 unit-test startup failures**: `CosmosPersistence:Endpoint/DatabaseName` + `AgentService:Enabled/Endpoint/AgentId/MaxConcurrency/ThreadCacheExpiryMinutes`) | 1-A | ✅ Yes | STANDARD | 001 |
+| 018 | Extend CustomWebAppFactory.cs (ISOLATED — NFR-07) — **SCOPE-CONFIRMED 2026-05-31: add the 7 specific keys per task 017 inventory; both 017 and 024 identified `CosmosPersistence:Endpoint` as overlapping root cause across unit + integration suites** | 🔲 | 1-C-isolated | ❌ **No (NFR-07)** | FULL | 017 |
 | 019 | Verify 4,844 baseline preserved after factory change | 🔲 | 1-C-isolated | ❌ No (gate) | STANDARD | 018 |
 
 ### Track P1.D — CI gate hardening
 
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
-| 020 | Flip `enforce_admins: true` on master branch protection | 🔲 | 1-A | ✅ Yes | FULL | none |
-| 021 | Remove `skip-tests` input from `deploy-bff-api.yml` | 🔲 | 1-A | ✅ Yes | FULL | none |
-| 022 | Author `docs/procedures/bff-deploy-emergency.md` | 🔲 | 1-A | ✅ Yes | STANDARD | none |
+| 020 | Flip `enforce_admins: true` on master branch protection | ✅ 2026-05-31 (`enforce_admins: false → true`; 3 required status contexts preserved; rollback cmd captured) | 1-A | ✅ Yes | FULL | none |
+| 021 | Remove `skip-tests` input from `deploy-bff-api.yml` | ✅ 2026-05-31 (6 lines deleted; YAML valid) | 1-A | ✅ Yes | FULL | none |
+| 022 | Author `docs/procedures/bff-deploy-emergency.md` | ✅ 2026-05-31 (130 lines / 8 sections; owner named; Backup approver TBD slot; cross-refs FR-11/D-02/ADR-029) | 1-A | ✅ Yes | STANDARD | none |
 | 023 | CI gate negative-path verification (deliberate failing PR) | 🔲 | 1-B | ✅ Yes | STANDARD | 020, 021, 022 |
 
 ### Track P1.E — Integration test triage
 
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
-| 024 | Spe.Integration.Tests classify failures + triage doc — **SCOPE-EXTENDED 2026-05-31: absorbs the 4 × CS1739 ExternalAccessIntegrationTests.cs compile fix as Step 1** | 🔲 | 1-A | ✅ Yes | STANDARD | 002 |
+| 024 | Spe.Integration.Tests classify failures + triage doc — **SCOPE-EXTENDED 2026-05-31: absorbs the 4 × CS1739 ExternalAccessIntegrationTests.cs compile fix as Step 1** | ✅ 2026-05-31 (CS1739 fixed; 422 tests / 88 pass / 198 fail / 136 skip; **3 single-root-cause clusters identified: Cosmos 97 / SpeAdmin 98 / Reporting-Skip 3; Cosmos cluster overlaps with task 017's unit-test finding — same root cause across both suites**) | 1-A | ✅ Yes | STANDARD | 002 |
 
 **Phase 1 exit gate**: All 17 compile cleanly; helper available; factory extended without regression; CI gate operational + verified; integration triage written.
 

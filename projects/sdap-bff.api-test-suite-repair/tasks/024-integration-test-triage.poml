@@ -1,7 +1,8 @@
 <task id="024" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P1.E1 — Spe.Integration.Tests classify failures (FR-13)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-date>2026-05-31</completed-date>
     <estimated-effort>1.5-2 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-1, integration-triage, bff-api, testing, p1-e</tags>
