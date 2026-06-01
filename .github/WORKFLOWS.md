@@ -65,7 +65,7 @@ Per FR-08, branch protection on `master` requires these 4 contexts to pass befor
 
 - **Purpose**: dev → staging → prod promotion gate. Downloads deployment artifact from upstream SDAP CI run, redeploys per env with smoke tests. Prod requires reviewer approval via GitHub environment `prod`. Wave-B artifact-contract verification + Wave-D `url:` removal applied (per D-02).
 - **Triggers**: `workflow_dispatch` (env input + artifact run id + skip-smoke-tests bool); `workflow_run` after `SDAP CI` completes on master.
-- **Common failures**: upstream SDAP CI artifact missing or mis-named, OIDC federated credential mismatch for the target env (see [D-11](../projects/github-actions-rationalization-r1/decisions/D-11-deploy-promote-oidc-federated-credential-gap.md) — AADSTS700213 on first post-merge run 2026-06-01; owner action pending), smoke test failure post-deploy.
+- **Common failures**: upstream SDAP CI artifact missing or mis-named, OIDC federated credential mismatch for the target env (see [D-11](../projects/github-actions-rationalization-r1/decisions/D-11-deploy-promote-oidc-federated-credential-gap.md) — AADSTS700213 on first post-merge run 2026-06-01; owner action pending), missing `PROD_APP_NAME` secret + unverified production App Service (see [D-12](../projects/github-actions-rationalization-r1/decisions/D-12-deploy-promote-prod-app-name-secret-and-app-service-gap.md)), smoke test failure post-deploy.
 - **Escalation**: see [`workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md).
 
 ### sdap-ci.yml

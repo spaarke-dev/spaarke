@@ -98,7 +98,7 @@ When owner applies the federated credentials, add a sign-off checkbox here simil
 
 - [ ] Owner added federated credential for `repo:spaarke-dev/spaarke:environment:dev` on YYYY-MM-DD
 - [ ] Owner added federated credential for `repo:spaarke-dev/spaarke:environment:staging` on YYYY-MM-DD
-- [ ] Owner added federated credential for `repo:spaarke-dev/spaarke:environment:prod` on YYYY-MM-DD
+- [ ] Owner added federated credential for `repo:spaarke-dev/spaarke:environment:production` on YYYY-MM-DD (env was renamed `prod` → `production` in this PR to align with the existing GitHub Environment `production` which already has reviewer + wait-timer + branch-policy protections)
 - [ ] Verified by triggering `gh workflow run deploy-promote.yml --ref master` and confirming all 3 deploy jobs reach Azure Login successfully
 
 OR
