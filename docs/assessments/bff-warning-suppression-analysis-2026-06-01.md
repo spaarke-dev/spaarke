@@ -244,6 +244,16 @@ Also: 65 files in `src/server/api/Sprk.Bff.Api/` had pre-existing whitespace dri
 
 **Removal criterion**: if the follow-on cleanup project ever resolves the IDE1006 sites (e.g., by adding `.editorconfig` exemptions for Dataverse-payload anonymous types, or by switching to a payload-builder pattern that uses PascalCase + JSON property mapping), the CI command can be restored to `dotnet format --verify-no-changes` for full coverage. Until then, whitespace-only is the appropriate scope.
 
+## 5e. `Dependencies audit` accepted-risk filter
+
+The `Code Quality > Dependencies audit` step originally treated ANY vulnerable package as a hard fail. With the NU1903 Kiota CVE accepted-risk per ADR-029 (see § 3.6), this caused the gate to fail even though the CVE is explicitly documented as a known-and-deferred issue.
+
+**Change**: the audit step now filters out vulnerable packages whose names start with prefixes in an `$acceptedRiskPackages` list (currently just `Microsoft.Kiota.`). If a vulnerable package is detected that is NOT on the accepted-risk list, the step still hard-fails (preserving the gate). If all detected vulnerabilities match accepted-risk, the step logs an informational message and passes.
+
+The list is intentionally narrow — adding to it requires a corresponding ADR entry or assessment doc.
+
+**Removal criterion**: when the Graph SDK 6.x / Kiota 2.x major-bump project lands and the Kiota 1.x transitive disappears from the lock-file, the `$acceptedRiskPackages` list can be reset to empty, restoring full strictness.
+
 ---
 
 ## 6. Related references

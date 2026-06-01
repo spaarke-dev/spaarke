@@ -214,11 +214,33 @@ jobs:
       - name: Dependencies audit
         shell: pwsh
         run: |
-          # Check for vulnerable packages
-          dotnet list package --vulnerable --include-transitive 2>&1 | Tee-Object -Variable output
+          # Check for vulnerable packages, ignoring those documented as accepted-risk
+          # in ADR-029 (Graph 5.x / Kiota 1.x stack pending major-bump).
+          # See docs/assessments/bff-warning-suppression-analysis-2026-06-01.md § 3.6.
+          $acceptedRiskPackages = @('Microsoft.Kiota.')
+          $output = dotnet list package --vulnerable --include-transitive 2>&1 | Out-String
+          Write-Output $output
           if ($output -match "has the following vulnerable packages") {
-            Write-Error "Vulnerable packages detected"
-            exit 1
+            # Build a regex that filters out accepted-risk packages, then check what remains
+            $lines = $output -split "`n"
+            $unaccepted = $lines | Where-Object {
+              $line = $_
+              # Match the package-name column shape ">" or " > " then a package name
+              if ($line -notmatch '^\s*>\s*([\w\.]+)') { return $false }
+              $pkg = $matches[1]
+              # If this matches any accepted-risk prefix, skip
+              foreach ($prefix in $acceptedRiskPackages) {
+                if ($pkg.StartsWith($prefix)) { return $false }
+              }
+              # It's a real (unaccepted) vulnerable package
+              return $true
+            }
+            if ($unaccepted.Count -gt 0) {
+              Write-Error "Vulnerable packages detected (outside accepted-risk list):`n$($unaccepted -join "`n")"
+              exit 1
+            } else {
+              Write-Output "Vulnerable packages detected, but all match accepted-risk list (ADR-029)."
+            }
           }
 
   integration-readiness:
