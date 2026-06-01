@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Task 050 (Phase 5 — gate verification) ready to start |
-| **Step** | 16/17 done. Phase 0–4 complete ✅. Only Phase 5 + wrap-up remain. |
-| **Status** | not-started (task 050) |
-| **Next Action** | Dispatch task 050 (deliberate-fail PR end-to-end gate verification). After task 030's workflows-validate.yml and Wave D's additions have been pushed, the actionlint check now exists on origin/work too — task 050's smoke test will exercise the direct "actionlint fails the PR" path more clearly than task 032's missing-context path. Then wrap-up via task 090. |
+| **Task** | Task 090 (wrap-up) — final |
+| **Step** | 16/17 done. Phases 0–5 ALL complete ✅. |
+| **Status** | not-started (task 090) |
+| **Next Action** | Dispatch task 090 (project wrap-up): adr-check + code-review (light load), repo-cleanup, lessons-learned.md, README/plan.md → Complete status. Note: FR-11 + FR-14 acceptance verification is post-merge-of-PR-#317 (documented in task 050 evidence + will be noted in lessons-learned). |
 
 ### Files Modified This Session
 - `baseline/workflow-inventory-2026-06-01.md` — Wave A
@@ -44,10 +44,10 @@ Wave B PyYAML validation: both modified workflows parse cleanly with all expecte
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 050 |
-| **Task File** | `tasks/050-verify-branch-protection-gate-end-to-end.poml` |
-| **Title** | Verify branch-protection gate end-to-end (deliberate-fail PR) |
-| **Phase** | 5: Validate the Gate |
+| **Task ID** | 090 |
+| **Task File** | `tasks/090-project-wrap-up.poml` |
+| **Title** | Project wrap-up + lessons learned + repo cleanup |
+| **Phase** | Wrap-up |
 | **Status** | not-started |
 | **Started** | — |
 

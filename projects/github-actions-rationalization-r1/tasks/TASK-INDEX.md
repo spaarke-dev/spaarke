@@ -37,7 +37,7 @@
 | 041 | Author .github/WORKFLOWS.md | 4: Observability + Docs | MINIMAL | ✅ | 022, 030, 040 | D | ✅ |
 | 042 | Author docs/procedures/workflow-incident-response.md | 4: Observability + Docs | MINIMAL | ✅ | 032 | D | ✅ |
 | 043 | Document notification-routing steps (FR-12) | 4: Observability + Docs | MINIMAL | ✅ | 041 | D | ✅ |
-| 050 | Verify branch-protection gate end-to-end | 5: Validate the Gate | STANDARD | 🔲 | 032, 040, 041, 042, 043 | — | ❌ (final verification) |
+| 050 | Verify branch-protection gate end-to-end | 5: Validate the Gate | STANDARD | ✅ | 032, 040, 041, 042, 043 | — | ❌ (final verification) |
 | 090 | Project wrap-up + lessons learned + repo cleanup | Wrap-up | STANDARD | 🔲 | 050 | — | ❌ (final) |
 
 **Total**: 17 tasks (2 in Phase 0 + 3 in Phase 1 + 3 in Phase 2 + 3 in Phase 3 + 4 in Phase 4 + 1 in Phase 5 + 1 wrap-up).
