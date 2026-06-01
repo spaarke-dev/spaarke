@@ -956,4 +956,29 @@ Remove the Skip + Trait override. Run `dotnet test --filter "FullyQualifiedName~
 
 ---
 
+## RB-T013-01 — TrackingIdGenerator unique-IDs assertion: probabilistic birthday-paradox flake — **REPAIRED** 2026-06-01
+
+| Field | Value |
+|---|---|
+| **Bug ID** | RB-T013-01 |
+| **Date filed** | 2026-06-01 |
+| **Filing task** | r2 task 013 (Phase 1 P1-S3 exit triple-run validation gate) — surfaced during 3rd run; not caused by Phase 1 production work |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 task 013 inline fix under owner directive "fix inline + re-run gate") |
+| **Repaired by** | Inline test-only fix in commit forthcoming (see Phase 1 exit triple-run report 2026-06-01) — assertion changed from `HaveCount(100)` to `HaveCountGreaterThanOrEqualTo(99)`; tolerates the expected single birthday-paradox collision pair while still detecting real duplication bugs |
+| **Repaired date** | 2026-06-01 |
+| **Repair mechanism** | Test assertion threshold adjusted; production `TrackingIdGenerator` unchanged. Detailed inline comment in test file documents the math (P(collision) ≈ N²/(2·alphabet_size^id_length) = 100²/(2·30⁴) ≈ 0.6% per run). |
+| **Production file** | (unchanged) — `src/server/api/Sprk.Bff.Api/Services/Registration/TrackingIdGenerator.cs` uses `RandomNumberGenerator.Fill` (cryptographic, no seed control) with 4-char IDs from a 30-char alphabet. The collision rate is correct from a production perspective; the test's prior `HaveCount(100)` assertion was probabilistically weak |
+| **Affected test** | `tests/unit/Sprk.Bff.Api.Tests/Services/Registration/TrackingIdGeneratorTests.cs::Generate_ProducesUniqueIdsAcrossMultipleCalls` |
+| **Severity** | LOW (probabilistic flake; pre-existing; not introduced by r2 Phase 1 production work) |
+| **r1 history** | r1 task 084 (full-suite triple-run) silently survived this with 3 lucky runs; the 0.6% per-run flake rate means r1's gate had ~98.2% chance of clean 3-of-3, which is what they got |
+| **r2 context** | r2 task 013 hit the unlucky 0.6% case on run 3 (1 Failed, the only one); per `dev@spaarke.com` directive "fix inline + re-run gate", repaired here under D-02 cluster exception (gate-passing fix) |
+
+### Notes
+
+- This is a TEST-ONLY repair under D-02 cluster exception for a gate-blocking flake that pre-dates r2.
+- The production code is correct; the test's assertion was overly strict for a probabilistic process.
+- Phase 5 governance update should NOT codify this — it's a one-off probabilistic-flake repair pattern, not a recurring concern.
+
+---
+
 *This ledger is required at Phase 2+3 exit gate (per [`design.md`](../design.md) §6.2 line 240 + §10.5 line 560). Each entry must have a fix-by date or an owner sign-off.*

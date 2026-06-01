@@ -44,6 +44,13 @@ public class TrackingIdGeneratorTests
     [Fact]
     public void Generate_ProducesUniqueIdsAcrossMultipleCalls()
     {
+        // RB-T013-01 flake repair (2026-06-01): the prior assertion `HaveCount(100)`
+        // was probabilistically weak. With 100 IDs from 4-char × 30-char-alphabet ID
+        // space, birthday-paradox collision probability ≈ N²/(2·30⁴) ≈ 0.6% per run.
+        // Task 013 (Phase 1 exit triple-run) surfaced the flake; it pre-dates r2.
+        // The fix tolerates 1 collision pair: still detects real duplication bugs
+        // (which would produce many collisions) while eliminating the probabilistic
+        // tail. See projects/sdap.bff.api-test-suite-repair-r2/baseline/phase1-exit-triple-run-2026-06-01.md.
         var ids = new HashSet<string>();
 
         for (var i = 0; i < 100; i++)
@@ -51,8 +58,10 @@ public class TrackingIdGeneratorTests
             ids.Add(_sut.Generate());
         }
 
-        // With 4 alphanumeric chars from a 30-char alphabet, collision in 100 is extremely unlikely
-        ids.Should().HaveCount(100, "100 generated tracking IDs should all be unique");
+        ids.Should().HaveCountGreaterThanOrEqualTo(99,
+            "100 IDs from a 4-char × 30-char-alphabet space have ~0.6% birthday-paradox " +
+            "collision probability; tolerating 1 collision pair eliminates the flake while " +
+            "still catching real duplication bugs (which would produce many collisions)");
     }
 
     [Fact]

@@ -1,10 +1,10 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-01 (Phase 1d.2 complete — security review request posted; task 011 work essentially complete pending external approval)
+> **Last Updated**: 2026-06-01 (Task 013 Phase 1 P1-S3 exit triple-run executed — verdict FAIL on probabilistic pre-existing flake)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
-> **Last commit (project work)**: `85258885` — `docs(adr): ADR-030 — BFF Null-Object Kill-Switch Pattern (promoted from r2 draft)`
-> **Last PR #318 activity**: issue-comment `4596627823` — Task 011 security review request (RB-T028-06 Auth-collateral)
+> **Last commit (project work)**: `2f25b204` — HEAD at task 013 execution time (pre-existing, no commits this task)
+> **Last PR #318 activity**: tasks 010 (D-08 approved) / 011 (D-10 approved) / 012 (D-07 finalized) — Phase 1 production work complete
 
 ---
 
@@ -12,10 +12,22 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 011 — RB-T028-03/04/05/06 HIGH cluster — **PHASE 1a/1b/1c/1d.1/1d.2 COMPLETE 2026-06-01** (Option B per E-01) |
-| **Step** | All work complete; awaiting external security review approval from `dev@spaarke.com` on PR #318. |
-| **Status** | phase-1d-pending-security-review |
-| **Next Action** | **Wait for external approval** OR dispatch task 013 (Phase 1 P1-S3 exit triple-run) — note task 013 is BLOCKED on security review approval for merge but the test work itself can proceed in parallel. |
+| **Task** | 013 — Phase 1 P1-S3 exit triple-run validation gate — **EXECUTED 2026-06-01 → VERDICT: FAIL (owner triage required)** |
+| **Step** | All 3 runs completed; 3 TRX captured; summary doc authored. Run 3 surfaced 1 pre-existing probabilistic flake. |
+| **Status** | gate-failed-pending-owner-triage |
+| **Next Action** | **Owner decision required**: Option A (file RB-T013-01, fix in Phase 3, re-run gate) / Option B (quarantine + proceed) / Option C (run a 4th time — NOT recommended). See `baseline/phase1-exit-triple-run-2026-06-01.md` §6 for full triage options. **DO NOT dispatch Phase 2 (tasks 020+) until owner decides.** |
+
+### Task 013 outcome (2026-06-01)
+
+- **3 runs completed** at HEAD `2f25b2044cb48ba47664239930562e4b6b849f6b`:
+  - Run 1: 6031 / 5902 / **0 Failed** / 129 Skipped / 1m13s ✅
+  - Run 2: 6031 / 5902 / **0 Failed** / 129 Skipped / 1m13s ✅
+  - Run 3: 6031 / 5901 / **1 Failed** / 129 Skipped / 1m14s ❌
+- **Failed test (run 3 only)**: `Sprk.Bff.Api.Tests.Services.Registration.TrackingIdGeneratorTests.Generate_ProducesUniqueIdsAcrossMultipleCalls`
+- **Root cause**: Pre-existing probabilistic weak assertion. Test asserts 100 random 4-char IDs from 30-char alphabet are all unique. Birthday-paradox collision probability ~0.6% per run. NOT a Phase 1 regression (test + production code untouched by tasks 010/011/012; same flake existed in r1 baseline — r1 task 084 simply got lucky on its 3-run cycle).
+- **Gate verdict**: FAIL per task acceptance criterion ("Each TRX shows Failed: 0 (zero variance across runs)") and NFR-11 ("No test may end in Failed state at any phase exit").
+- **Files created**: `baseline/phase1-run{1,2,3}-2026-06-01.trx` + `baseline/phase1-exit-triple-run-2026-06-01.md` (summary doc with verdict + 3 triage options).
+- **NOT done by sub-agent (per task contract)**: TASK-INDEX 013 row left at 🔲 (NOT flipped to ✅); POML status left at `not-started`; no commit (main session commits the bundle after owner decision).
 
 ### Task 012 — ✅ COMPLETE 2026-06-01 (separate parallel task)
 
@@ -141,7 +153,28 @@ See "Files Modified This Session" above.
 
 ## Next Action
 
-**Next Step**: Dispatch **Task 011 Phase 1b — Tier 1 implementation** (Promote-to-unconditional, ~1.5h, lowest risk). Start here regardless of context budget. After Tier 1 lands cleanly, Tier 2 (~5h) and Tier 3 (~5h) dispatch as their own focused agents.
+**Owner triage required** for task 013 Phase 1 exit gate FAIL. The pre-existing probabilistic flake in `TrackingIdGeneratorTests.Generate_ProducesUniqueIdsAcrossMultipleCalls` (~0.6% per-run collision probability) must be resolved before Phase 2 (tasks 020+) can start.
+
+**Three options** (full analysis in [`baseline/phase1-exit-triple-run-2026-06-01.md`](baseline/phase1-exit-triple-run-2026-06-01.md) §6):
+
+- **Option A (recommended)** — File RB-T013-01 as LOW (production-side: widen alphabet or length; OR relax test assertion), assign to Phase 3 LOW tier, then re-run Phase 1 exit gate. Estimated delay: ~30min fix + ~5min re-validation.
+- **Option B (pragmatic, precedent-setting)** — Add `[Trait("Category", "flaky-quarantined")]` to the test, file RB-T013-01 with quarantine flag, declare gate PASS-with-known-flake, proceed to Phase 2 immediately.
+- **Option C (not recommended)** — Run a 4th time; if it passes, declare 3-of-4 PASS. Violates NFR-05 "3 consecutive".
+
+**Trigger phrase to resume after owner decision**: "execute option A" / "execute option B" / "execute option C" (or "continue with task 013" — the next session will read this file's Quick Recovery to determine the triage state).
+
+**Original task 011/012 next-step content (archived; tasks complete)**:
+
+After owner triage resolves Phase 1 exit gate, the original critical path resumes with Phase 2 P2-W1 dispatch (5-agent parallel wave: tasks 020, 022, 023, 024, 025). See [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) §"Phase 2 — MEDIUM Severity" for the wave plan.
+
+**Pre-conditions for Phase 2 dispatch**:
+- Task 013 gate must PASS (or be explicitly waived by owner per Option B) — currently FAIL
+- All 6 Phase 1 closures still hold (RB-T044-01 + RB-T028-02/03/04/05/06) — confirmed in `baseline/phase1-exit-triple-run-2026-06-01.md` §4
+- Build green: `dotnet build src/server/api/Sprk.Bff.Api/` → 0 errors (verified 2026-06-01 pre-task-013)
+
+**Archived prior next-step (task 011 Phase 1b, now complete — kept for history)**:
+
+Dispatch **Task 011 Phase 1b — Tier 1 implementation** (Promote-to-unconditional, ~1.5h, lowest risk). Start here regardless of context budget. After Tier 1 lands cleanly, Tier 2 (~5h) and Tier 3 (~5h) dispatch as their own focused agents.
 
 **Trigger phrase to resume in any session**: "**continue with task 011 Phase 1b**" or "**continue**" — CLAUDE.md §4 auto-detection will route to `task-execute` against task 011.
 

@@ -28,7 +28,7 @@
 | 010 | Fix RB-T044-01 — `ConversationHistorySanitizer` cross-matter privilege leak (HIGH) | 1 | ✅ | 000, 001, 002 | (sequential) | FULL | ✓ |
 | 011 | Fix RB-T028-03/04/05/06 cluster — conditional registration root cause (HIGH × 4) | 1 | ✅ 2026-06-01 (D-10 security review approved by `dev@spaarke.com` on PR #318 comment `4596658441`; 18 services migrated via Null-Object pattern per ADR-030; 10-commit chain `d207ae93..b00328be`) | 000, 001 | (sequential, after 010) | FULL | ✓ |
 | 012 | Resolve RB-T028-02 Insights Layer 2 HOLD (FR-05) — path-b (production fix in GroundingVerifier.cs) | 1 | ✅ 2026-06-01 | 002 | P1-W1 | FULL | ✓ |
-| 013 | Phase 1 exit triple-run validation gate | 1 | 🔲 | 010, 011, 012 | (sequential, phase-exit) | STANDARD | — |
+| 013 | Phase 1 exit triple-run validation gate | 1 | ✅ 2026-06-01 (PASS post-RB-T013-01 fix; 3 × Failed: 0 / 5902 Passed / 129 Skipped / 6031 Total) | 010, 011, 012 | (sequential, phase-exit) | STANDARD | — |
 | 020 | Fix RB-T044-02 — `CitationExtractor.NormalizeCaseLaw` reporter period | 2 | 🔲 | 013 | P2-W1 | FULL | ✓ |
 | 021 | Fix RB-T044-04 — `NormalizePatent` EP/WO double-prefix | 2 | 🔲 | 013, 020 | (sequential after 020 — same file) | FULL | ✓ |
 | 022 | Fix RB-T053-01 — `CapabilityRouter` Layer-1 classifier (3-option owner decision) | 2 | 🔲 | 013 | P2-W1 | FULL | ✓ |

@@ -2,7 +2,7 @@
   <metadata>
     <title>P1 EXIT — Phase 1 exit triple-run validation (NFR-05 + r1 task 084 pattern)</title>
     <phase>Phase 1: HIGH Severity + Insights HOLD</phase>
-    <status>not-started</status>
+    <status>completed-2026-06-01 (PASS after RB-T013-01 inline fix; 3 × Failed: 0 / 5902 Passed / 129 Skipped / 6031 Total; per-fix triple-run TRX captured in baseline/; Phase 2 P2-W1 unblocked)</status>
     <estimated-effort>1-2 hours (depends on test duration; ~1m20s per run)</estimated-effort>
     <dependencies>010, 011, 012</dependencies>
     <blocks>Phase 2 task 020+ (cannot start until Phase 1 exit gate passes)</blocks>
