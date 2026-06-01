@@ -27,6 +27,9 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     width: '100%',
     minHeight: '80px',
+    // v1.4.12 — visual <body> top padding so the chart content sits below
+    // CardChrome's header with consistent breathing room (per UAT).
+    paddingTop: '20px',
   },
   empty: {
     color: tokens.colorNeutralForeground3,
@@ -55,13 +58,13 @@ function calculateDaysUntilDue(dueDate: Date): {
  * Map a Dataverse event record to EventDueDateCard props
  */
 function mapEventToCardProps(record: Record<string, unknown>): IEventDueDateCardProps {
-  // v1.4.5 — prefer sprk_finalduedate (the canonical date after any extensions
-  // or reassignments) when present; fall back to sprk_duedate (original
-  // planned date) only when finalduedate is null. This matches how dates are
-  // surfaced in other Spaarke event-list contexts.
+  // v1.4.12 — display sprk_duedate (the planned due date users see on the
+  // event form). Falls back to sprk_finalduedate only when duedate is null,
+  // so older events that never had duedate set still show something.
+  // Reverses the v1.4.5 precedence per UAT.
   const dueDateRaw =
-    (record.sprk_finalduedate as string | undefined) ||
-    (record.sprk_duedate as string | undefined);
+    (record.sprk_duedate as string | undefined) ||
+    (record.sprk_finalduedate as string | undefined);
   const dueDate = dueDateRaw ? new Date(dueDateRaw) : new Date();
   const { daysUntilDue, isOverdue } = calculateDaysUntilDue(dueDate);
 

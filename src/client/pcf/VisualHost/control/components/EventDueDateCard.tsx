@@ -101,8 +101,9 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
   },
-  // v1.4.8 — horizontal layout: "Days Left" label LEFT of the pill (was
+  // v1.4.8 — horizontal layout: "Days left" label LEFT of the pill (was
   // stacked vertically). Tighter padding to keep the card compact.
+  // v1.4.12 — gap bumped to 5px per UAT ("add 5px space between label and pill").
   badgeColumn: {
     display: 'flex',
     flexDirection: 'row',
@@ -110,7 +111,7 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
-    gap: tokens.spacingHorizontalXS,
+    gap: '5px',
   },
   badgeLabel: {
     fontSize: tokens.fontSizeBase100,
@@ -213,7 +214,7 @@ export const EventDueDateCard: React.FC<IEventDueDateCardProps> = props => {
         </div>
       ) : (
         <div className={styles.badgeColumn}>
-          <Text className={styles.badgeLabel}>{props.isOverdue ? 'Overdue' : 'Days Left'}</Text>
+          <Text className={styles.badgeLabel}>{props.isOverdue ? 'Overdue' : 'Days left'}</Text>
           <Badge appearance="filled" color={getDueBadgeAppearance(props.daysUntilDue, props.isOverdue)} size="large">
             {getDueBadgeText(props.daysUntilDue, props.isOverdue)}
           </Badge>
