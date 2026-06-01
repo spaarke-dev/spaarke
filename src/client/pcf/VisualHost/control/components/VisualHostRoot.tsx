@@ -426,42 +426,81 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
 
     try {
       if (drillThroughTarget) {
-        // Drill-through target is a web resource name (e.g. "sprk_eventspage.html").
-        // Use pageType "webresource" to open it in a dialog.
-        logger.info('VisualHostRoot', 'Opening web resource drill-through dialog', {
-          webresource: drillThroughTarget,
-          entityName,
-          filterField: filterField || '(none)',
-          filterValue: filterValue || '(none)',
-        });
+        // v1.4.13 — `sprk_drillthroughtarget` may be either:
+        //   (a) a web resource name ending in `.html` / `.htm`
+        //       (e.g., "sprk_eventspage.html") → opens via pageType:'webresource'
+        //   (b) an entity logical name (e.g., "sprk_event", "sprk_invoice",
+        //       "sprk_kpiassessment") → opens via pageType:'entitylist' for that
+        //       entity. This lets a single chart query one entity (sprk_matter)
+        //       but drill into related child records of a different entity
+        //       (sprk_invoice etc.) without authoring a web resource per case.
+        const isWebResource =
+          drillThroughTarget.toLowerCase().endsWith('.html') ||
+          drillThroughTarget.toLowerCase().endsWith('.htm');
 
-        // Build query string to pass context to the web resource
-        const params = new URLSearchParams();
-        if (entityName) params.set('entityName', entityName);
-        if (filterField) params.set('filterField', filterField);
-        if (filterValue) params.set('filterValue', filterValue);
-        if (viewId) params.set('viewId', viewId.replace(/[{}]/g, ''));
-        params.set('mode', 'dialog');
+        if (isWebResource) {
+          logger.info('VisualHostRoot', 'Opening web resource drill-through dialog', {
+            webresource: drillThroughTarget,
+            entityName,
+            filterField: filterField || '(none)',
+            filterValue: filterValue || '(none)',
+          });
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const pageInput: any = {
-          pageType: 'webresource',
-          webresourceName: drillThroughTarget,
-          data: params.toString(),
-        };
+          // Build query string to pass context to the web resource
+          const params = new URLSearchParams();
+          if (entityName) params.set('entityName', entityName);
+          if (filterField) params.set('filterField', filterField);
+          if (filterValue) params.set('filterValue', filterValue);
+          if (viewId) params.set('viewId', viewId.replace(/[{}]/g, ''));
+          params.set('mode', 'dialog');
 
-        const navOptions = {
-          target: 2 as const,
-          position: 1 as const,
-          width: { value: 90, unit: '%' as const },
-          height: { value: 85, unit: '%' as const },
-        };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const pageInput: any = {
+            pageType: 'webresource',
+            webresourceName: drillThroughTarget,
+            data: params.toString(),
+          };
 
-        try {
-          await xrm.Navigation.navigateTo(pageInput, navOptions);
-        } catch {
-          logger.info('VisualHostRoot', 'Dialog not supported, navigating inline');
-          await xrm.Navigation.navigateTo(pageInput, { target: 1 });
+          const navOptions = {
+            target: 2 as const,
+            position: 1 as const,
+            width: { value: 90, unit: '%' as const },
+            height: { value: 85, unit: '%' as const },
+          };
+
+          try {
+            await xrm.Navigation.navigateTo(pageInput, navOptions);
+          } catch {
+            logger.info('VisualHostRoot', 'Dialog not supported, navigating inline');
+            await xrm.Navigation.navigateTo(pageInput, { target: 1 });
+          }
+        } else {
+          // Drill-through target is an entity logical name. Open that entity's
+          // list as a dialog. `sprk_baseviewid` (if set) selects a specific
+          // view — otherwise the entity's default view is used.
+          logger.info('VisualHostRoot', 'Opening entity list dialog for drill-through entity', {
+            drillEntity: drillThroughTarget,
+            viewId: viewId || '(default)',
+          });
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const pageInput: any = {
+            pageType: 'entitylist',
+            entityName: drillThroughTarget,
+          };
+          if (viewId) pageInput.viewId = viewId.replace(/[{}]/g, '');
+
+          try {
+            await xrm.Navigation.navigateTo(pageInput, {
+              target: 2,
+              position: 1,
+              width: { value: 90, unit: '%' },
+              height: { value: 85, unit: '%' },
+            });
+          } catch {
+            logger.info('VisualHostRoot', 'Dialog not supported, navigating full page');
+            await xrm.Navigation.navigateTo(pageInput, { target: 1 });
+          }
         }
       } else {
         // Fallback: entitylist dialog (unfiltered — filterXml not supported by navigateTo)
@@ -729,7 +768,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
       )}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.12 • 2026-06-01</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.13 • 2026-06-01</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>
