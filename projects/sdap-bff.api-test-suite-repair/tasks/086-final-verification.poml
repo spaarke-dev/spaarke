@@ -1,7 +1,7 @@
 <task id="086" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P4.B3 — Final verification: rewrite escalations ≤5% (FR-29) + CI runs SUCCESS (FR-30)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>45-90 minutes</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-4, verification, gate, exit-ledger, success-criteria, ci-gate</tags>
