@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Execute non-deploy workflow dispositions (delete/consolidate)</title>
+    <phase>2: Rationalization</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>none</blocks>
+    <tags>ci-cd, github-actions, devops, workflow-fix</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Execute decisions from 020; deletions or consolidations per ledger; FR-06 acceptance</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Execute the dispositions from task 020's ledger for the four non-deploy untested workflows: `provision-customer.yml`, `weekly-quality.yml`, `insights-eval.yml`, `auto-add-to-project.yml`. Delete those marked DELETE via `git rm`; consolidate those marked CONSOLIDATE (e.g., `weekly-quality` may merge into `nightly-quality`); for KEEPs, do nothing. Each delete commit must reference its decision record.
+  </prompt>
+
+  <role>
+    SPAARKE platform DevOps engineer. Executes pre-approved dispositions for non-deploy workflows.
+  </role>
+
+  <goal>
+    The 4 non-deploy untested workflows are reduced/consolidated per `ledgers/workflow-disposition-ledger.md`. Each removal is a `git rm` commit referencing the decision record.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-06: target ≤8 total workflows. Likely candidates for DELETE: `provision-customer` (manual-only; likely never run), `insights-eval` (Insights Engine eval gate; check if Insights Engine paths still exist). Likely CONSOLIDATE: `weekly-quality` → into `nightly-quality.yml` (post-Phase-1 fix) with cron-conditional cadence. Likely KEEP: `auto-add-to-project` (lightweight automation; even if rarely-triggered, it's cheap and useful).
+    </background>
+    <relevant-files>
+      <file>.github/workflows/provision-customer.yml</file>
+      <file>.github/workflows/weekly-quality.yml</file>
+      <file>.github/workflows/insights-eval.yml</file>
+      <file>.github/workflows/auto-add-to-project.yml</file>
+      <file>.github/workflows/nightly-quality.yml</file>
+      <file>projects/github-actions-rationalization-r1/ledgers/workflow-disposition-ledger.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-06: Workflow count ≤8 after 021 + this task</constraint>
+    <constraint source="spec">NFR-04: Deletions via `git rm`, not comment-out</constraint>
+    <constraint source="spec">NFR-06: Each delete references its decision record</constraint>
+    <constraint source="design">D-04: Consolidate overlapping concerns</constraint>
+    <constraint source="project">MUST run `actionlint` on any retained/modified workflow</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+      <file>projects/github-actions-rationalization-r1/ledgers/workflow-disposition-ledger.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load `ledgers/workflow-disposition-ledger.md` — identify dispositions for the 4 non-deploy workflows.</step>
+    <step order="2">For each DELETE: `git rm .github/workflows/{name}.yml` with commit message referencing decision record.</step>
+    <step order="3">For `weekly-quality.yml` if CONSOLIDATE → `nightly-quality.yml`: add a conditional schedule (e.g., `cron: '0 6 * * 1-5'` for nightly + `cron: '0 22 * * 5'` for weekly summary) and a job condition. Run `actionlint`. Verify the merged workflow still satisfies FR-05.</step>
+    <step order="4">For each KEEP: no action.</step>
+    <step order="5">Verify post-condition: total `.github/workflows/*.yml` count ≤8 after combining with task 021's deletions. Update the ledger with execution results.</step>
+    <step order="6">Update TASK-INDEX.md: change task 022 status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">rm for deletions</tool>
+    <tool name="actionlint">Validate merged workflow</tool>
+    <tool name="Edit">Merge cron schedule into nightly-quality.yml if consolidating</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.github/workflows/ (file count reduced per ledger)</output>
+    <output type="docs">projects/github-actions-rationalization-r1/ledgers/workflow-disposition-ledger.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each non-deploy DELETE in the ledger has a `git rm` commit referencing its decision record.</criterion>
+    <criterion testable="true">Any CONSOLIDATE (e.g., weekly+nightly) merged file passes `actionlint`.</criterion>
+    <criterion testable="true">Final `.github/workflows/*.yml` count ≤8 (FR-06) — verifiable via `ls .github/workflows/*.yml | wc -l`.</criterion>
+    <criterion testable="true">TASK-INDEX.md task 022 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with 021 if disjoint files. If consolidating `weekly-quality` INTO `nightly-quality`, and task 012 also touched `nightly-quality.yml`, sequence after 012 OR coordinate with the 012 commit to avoid merge conflict.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: STANDARD. Parallel-safe with 021.</protocol>
+  </execution>
+</task>

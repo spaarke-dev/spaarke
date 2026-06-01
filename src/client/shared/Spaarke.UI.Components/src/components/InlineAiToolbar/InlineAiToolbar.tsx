@@ -20,12 +20,7 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  mergeClasses,
-  shorthands,
-  tokens,
-} from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
 import { InlineAiToolbarProps } from './inlineAiToolbar.types';
 import { InlineAiActions } from './InlineAiActions';
 
@@ -93,12 +88,7 @@ const useStyles = makeStyles({
  * </div>
  * ```
  */
-export const InlineAiToolbar: React.FC<InlineAiToolbarProps> = ({
-  visible,
-  position,
-  actions,
-  onAction,
-}) => {
+export const InlineAiToolbar: React.FC<InlineAiToolbarProps> = ({ visible, position, actions, onAction }) => {
   const styles = useStyles();
 
   return (

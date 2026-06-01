@@ -145,11 +145,7 @@ function parseCitationResults(raw: object | undefined): Map<string, CitationVeri
 
       const rawStatus = (entry.status ?? '').toLowerCase();
       const status: CitationVerificationStatus =
-        rawStatus === 'verified'
-          ? 'verified'
-          : rawStatus === 'partial'
-          ? 'partial'
-          : 'unverified';
+        rawStatus === 'verified' ? 'verified' : rawStatus === 'partial' ? 'partial' : 'unverified';
 
       const rawConfidence = (entry.confidence ?? '').toLowerCase();
       const confidence: 'high' | 'medium' | 'low' =
@@ -230,11 +226,7 @@ export interface SafetyAnnotationOverlayProps {
  *   messageText={message.content}
  * />
  */
-export const SafetyAnnotationOverlay: React.FC<SafetyAnnotationOverlayProps> = ({
-  turnId,
-  messageText,
-  className,
-}) => {
+export const SafetyAnnotationOverlay: React.FC<SafetyAnnotationOverlayProps> = ({ turnId, messageText, className }) => {
   // -------------------------------------------------------------------------
   // State
   // -------------------------------------------------------------------------
@@ -330,12 +322,7 @@ export const SafetyAnnotationOverlay: React.FC<SafetyAnnotationOverlayProps> = (
 
   if (!annotation) {
     return (
-      <span
-        className={className}
-        data-testid="safety-annotation-overlay"
-        data-annotated="false"
-        data-turn-id={turnId}
-      >
+      <span className={className} data-testid="safety-annotation-overlay" data-annotated="false" data-turn-id={turnId}>
         {messageText}
       </span>
     );
@@ -355,17 +342,8 @@ export const SafetyAnnotationOverlay: React.FC<SafetyAnnotationOverlayProps> = (
   const { segments, citationResults } = annotation;
 
   return (
-    <span
-      className={className}
-      data-testid="safety-annotation-overlay"
-      data-annotated="true"
-      data-turn-id={turnId}
-    >
-      <AnnotatedMessageContent
-        messageText={messageText}
-        segments={segments}
-        citationResults={citationResults}
-      />
+    <span className={className} data-testid="safety-annotation-overlay" data-annotated="true" data-turn-id={turnId}>
+      <AnnotatedMessageContent messageText={messageText} segments={segments} citationResults={citationResults} />
     </span>
   );
 };
@@ -424,13 +402,7 @@ export const AnnotatedMessageContent: React.FC<AnnotatedMessageContentProps> = (
   const nodes = React.useMemo((): React.ReactNode[] => {
     if (citationResults.size === 0) {
       // No citation badges — render GroundednessHighlight over the full text.
-      return [
-        <GroundednessHighlight
-          key="full"
-          text={messageText}
-          segments={segments}
-        />,
-      ];
+      return [<GroundednessHighlight key="full" text={messageText} segments={segments} />];
     }
 
     const result: React.ReactNode[] = [];
@@ -449,7 +421,7 @@ export const AnnotatedMessageContent: React.FC<AnnotatedMessageContentProps> = (
           <GroundednessHighlight
             key={`chunk-${chunkIndex++}`}
             text={chunk}
-            segments={segments.map((s) => ({
+            segments={segments.map(s => ({
               // Remap segment offsets to be relative to this chunk.
               start: s.start - lastIndex,
               end: s.end - lastIndex,
@@ -460,19 +432,12 @@ export const AnnotatedMessageContent: React.FC<AnnotatedMessageContentProps> = (
       }
 
       // The [N] marker itself as plain text.
-      result.push(
-        <span key={`marker-${citationId}-${match.index}`}>{match[0]}</span>
-      );
+      result.push(<span key={`marker-${citationId}-${match.index}`}>{match[0]}</span>);
 
       // Citation badge (if a result exists for this citation).
       const citationResult = citationResults.get(citationId);
       if (citationResult) {
-        result.push(
-          <CitationBadge
-            key={`badge-${citationId}-${match.index}`}
-            result={citationResult}
-          />
-        );
+        result.push(<CitationBadge key={`badge-${citationId}-${match.index}`} result={citationResult} />);
       }
 
       lastIndex = match.index + match[0].length;
@@ -485,7 +450,7 @@ export const AnnotatedMessageContent: React.FC<AnnotatedMessageContentProps> = (
         <GroundednessHighlight
           key={`chunk-${chunkIndex++}`}
           text={trailing}
-          segments={segments.map((s) => ({
+          segments={segments.map(s => ({
             start: s.start - lastIndex,
             end: s.end - lastIndex,
             grounded: s.grounded,

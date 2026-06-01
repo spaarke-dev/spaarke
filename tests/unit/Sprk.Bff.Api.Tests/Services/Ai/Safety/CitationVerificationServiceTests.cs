@@ -102,7 +102,7 @@ public class CitationVerificationServiceTests
     public async Task VerifyAllAsync_MultipleTypes_EachRoutedToCorrectProvider()
     {
         var caseLawProvider = BuildProvider("CourtListener", [CitationType.CaseLaw]);
-        var statuteProvider = BuildProvider("LexisStatute",  [CitationType.Statute]);
+        var statuteProvider = BuildProvider("LexisStatute", [CitationType.Statute]);
 
         var sut = new CitationVerificationService(
             [caseLawProvider.Object, statuteProvider.Object], _logger);

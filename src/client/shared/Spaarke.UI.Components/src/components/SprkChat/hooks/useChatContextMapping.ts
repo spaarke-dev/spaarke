@@ -185,9 +185,7 @@ export interface IUseChatContextMappingResult {
  * });
  * ```
  */
-export function useChatContextMapping(
-  options: UseChatContextMappingOptions
-): IUseChatContextMappingResult {
+export function useChatContextMapping(options: UseChatContextMappingOptions): IUseChatContextMappingResult {
   const { analysisId, playbookId, apiBaseUrl, authenticatedFetch } = options;
 
   const [contextMapping, setContextMapping] = useState<IAnalysisChatContextResponse | null>(null);
@@ -225,9 +223,7 @@ export function useChatContextMapping(
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
-          `Failed to load analysis chat context (${response.status}): ${errorText}`
-        );
+        throw new Error(`Failed to load analysis chat context (${response.status}): ${errorText}`);
       }
 
       const data: IAnalysisChatContextResponse = await response.json();
@@ -252,6 +248,8 @@ export function useChatContextMapping(
     contextMapping,
     isLoading,
     error,
-    refresh: () => { fetchContextMapping(); },
+    refresh: () => {
+      fetchContextMapping();
+    },
   };
 }

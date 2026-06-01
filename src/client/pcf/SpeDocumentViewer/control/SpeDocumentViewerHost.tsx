@@ -19,12 +19,7 @@
 
 import * as React from 'react';
 import { useEffect, useState, useCallback } from 'react';
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-  Spinner,
-} from '@fluentui/react-components';
+import { FluentProvider, webLightTheme, webDarkTheme, Spinner } from '@fluentui/react-components';
 import { initializeAuth } from './authInit';
 import { DocumentViewerApp } from './SpeDocumentViewer';
 import { createLogger } from '@spaarke/ui-components/dist/utils/logger';
@@ -41,7 +36,9 @@ function getUserThemePreference(): ThemePreference {
   try {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
     if (stored === 'light' || stored === 'dark' || stored === 'auto') return stored;
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return 'auto';
 }
 
@@ -77,15 +74,13 @@ function isDesignMode(context: ComponentFramework.Context<unknown>): boolean {
   try {
     if (window.parent !== window) {
       const parentUrl = window.parent.location.href.toLowerCase();
-      if (
-        parentUrl.includes('/designer/') ||
-        parentUrl.includes('/formeditor/') ||
-        parentUrl.includes('appdesigner')
-      ) {
+      if (parentUrl.includes('/designer/') || parentUrl.includes('/formeditor/') || parentUrl.includes('appdesigner')) {
         return true;
       }
     }
-  } catch { /* cross-origin parent — fall through */ }
+  } catch {
+    /* cross-origin parent — fall through */
+  }
   if (ctxAny?.mode?.isAuthoringMode === true) return true;
   return false;
 }
@@ -118,11 +113,21 @@ const DesignModePlaceholder: React.FC<{ isDark: boolean }> = ({ isDark }) => {
   const fg = isDark ? '#ffffff' : '#333333';
   const border = isDark ? '#444' : '#ccc';
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      height: '100%', minHeight: 200, backgroundColor: bg,
-      border: `2px dashed ${border}`, borderRadius: 8, padding: 20, textAlign: 'center',
-    }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100%',
+        minHeight: 200,
+        backgroundColor: bg,
+        border: `2px dashed ${border}`,
+        borderRadius: 8,
+        padding: 20,
+        textAlign: 'center',
+      }}
+    >
       <div style={{ marginTop: 16, color: fg, fontWeight: 600, fontSize: 14 }}>SPE Document Viewer</div>
       <div style={{ marginTop: 8, color: fg, opacity: 0.7, fontSize: 12 }}>Document preview will appear at runtime</div>
     </div>
@@ -136,13 +141,20 @@ const LoadingOverlay: React.FC = () => (
 );
 
 const ErrorPanel: React.FC<{ message: string; correlationId: string }> = ({ message, correlationId }) => (
-  <div style={{
-    padding: 20, border: '2px solid #d32f2f', backgroundColor: '#ffebee',
-    color: '#c62828', borderRadius: 4,
-  }}>
+  <div
+    style={{
+      padding: 20,
+      border: '2px solid #d32f2f',
+      backgroundColor: '#ffebee',
+      color: '#c62828',
+      borderRadius: 4,
+    }}
+  >
     <strong>SpeDocumentViewer Error</strong>
     <p>{message}</p>
-    <p><small>Correlation ID: {correlationId}</small></p>
+    <p>
+      <small>Correlation ID: {correlationId}</small>
+    </p>
   </div>
 );
 
@@ -194,7 +206,9 @@ export const SpeDocumentViewerHost: React.FC<ISpeDocumentViewerHostProps> = ({ c
         // Resolve BFF base URL from Dataverse env var (single source of truth across all clients)
         const resolvedBffUrl = await getApiBaseUrl(ctxAny.webAPI);
         if (!resolvedBffUrl) {
-          throw new Error('sprk_BffApiBaseUrl Dataverse environment variable is not set or empty. Configure it in the SpaarkeCore solution.');
+          throw new Error(
+            'sprk_BffApiBaseUrl Dataverse environment variable is not set or empty. Configure it in the SpaarkeCore solution.'
+          );
         }
         if (cancelled) return;
         setBffApiUrl(resolvedBffUrl);
@@ -208,23 +222,32 @@ export const SpeDocumentViewerHost: React.FC<ISpeDocumentViewerHostProps> = ({ c
         const msg = err instanceof Error ? err.message : String(err);
         logger.logError('SpeDocumentViewer', 'Auth init failed:', err);
         // Treat popup-blocked as design-mode (so the placeholder shows instead of red error).
-        if (msg.toLowerCase().includes('popup') || msg.toLowerCase().includes('blocked') ||
-            msg.toLowerCase().includes('interaction_required')) {
+        if (
+          msg.toLowerCase().includes('popup') ||
+          msg.toLowerCase().includes('blocked') ||
+          msg.toLowerCase().includes('interaction_required')
+        ) {
           if (!cancelled) setAuthReady(true); // fall through; placeholder will handle
           return;
         }
         if (!cancelled) setAuthError(msg);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [tenantId, clientAppId, bffAppId, designMode, ctxAny.webAPI]);
 
   // Theme listener
   useEffect(() => {
     const handle = () => setIsDarkTheme(getEffectiveDarkMode(context));
-    const onStorage = (ev: StorageEvent) => { if (ev.key === THEME_STORAGE_KEY) handle(); };
+    const onStorage = (ev: StorageEvent) => {
+      if (ev.key === THEME_STORAGE_KEY) handle();
+    };
     const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
-    const onMq = (ev: MediaQueryListEvent) => { if (getUserThemePreference() === 'auto') setIsDarkTheme(ev.matches); };
+    const onMq = (ev: MediaQueryListEvent) => {
+      if (getUserThemePreference() === 'auto') setIsDarkTheme(ev.matches);
+    };
     window.addEventListener('storage', onStorage);
     window.addEventListener(THEME_CHANGE_EVENT, handle);
     mq?.addEventListener('change', onMq);
@@ -245,7 +268,11 @@ export const SpeDocumentViewerHost: React.FC<ISpeDocumentViewerHostProps> = ({ c
   }, []);
 
   let documentId = '';
-  try { documentId = extractDocumentId(context); } catch { /* no-op */ }
+  try {
+    documentId = extractDocumentId(context);
+  } catch {
+    /* no-op */
+  }
 
   const content = (() => {
     if (designMode) return <DesignModePlaceholder isDark={isDarkTheme} />;

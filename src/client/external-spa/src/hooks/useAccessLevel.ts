@@ -19,9 +19,9 @@
  * See: docs/architecture/uac-access-control.md
  */
 
-import { useMemo } from "react";
-import { AccessLevel } from "../types";
-import { useExternalContext } from "./useExternalContext";
+import { useMemo } from 'react';
+import { AccessLevel } from '../types';
+import { useExternalContext } from './useExternalContext';
 
 // ---------------------------------------------------------------------------
 // Access level mapping
@@ -37,11 +37,11 @@ import { useExternalContext } from "./useExternalContext";
  */
 function mapAccessLevelString(label: string | undefined | null): AccessLevel {
   switch (label) {
-    case "Collaborate":
+    case 'Collaborate':
       return AccessLevel.Collaborate;
-    case "FullAccess":
+    case 'FullAccess':
       return AccessLevel.FullAccess;
-    case "ViewOnly":
+    case 'ViewOnly':
     default:
       // Default to least-privilege access if label is missing or unrecognised
       return AccessLevel.ViewOnly;
@@ -124,9 +124,7 @@ export function useAccessLevel(projectId: string | undefined | null): UseAccessL
       return AccessLevel.ViewOnly;
     }
 
-    const projectEntry = context.projects.find(
-      (p) => p.projectId === projectId
-    );
+    const projectEntry = context.projects.find(p => p.projectId === projectId);
 
     return mapAccessLevelString(projectEntry?.accessLevel);
   }, [projectId, context]);

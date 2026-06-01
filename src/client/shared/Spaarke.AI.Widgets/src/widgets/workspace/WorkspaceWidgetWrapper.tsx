@@ -216,13 +216,12 @@ export function createWorkspaceWrapper<T = unknown>(
     // Note: we check the prop key presence via arguments length — but since
     // WorkspaceWidgetWrapperProps makes onLink optional, an absent prop arrives
     // as `undefined`. We always default to the built-in handler when absent.
-    const onLink: CitationClickHandler =
-      onLinkProp !== undefined ? onLinkProp : builtInOnLink;
+    const onLink: CitationClickHandler = onLinkProp !== undefined ? onLinkProp : builtInOnLink;
 
     // Lazy-loaded R1 widget component
-    const [WrappedComponent, setWrappedComponent] = useState<React.ComponentType<
-      InnerWidgetWithLinkProps<T>
-    > | null>(null);
+    const [WrappedComponent, setWrappedComponent] = useState<React.ComponentType<InnerWidgetWithLinkProps<T>> | null>(
+      null
+    );
     const [loadError, setLoadError] = useState<string | null>(null);
 
     // Restore state — true while restoreState() is waiting for a re-fetch signal
@@ -348,13 +347,7 @@ export function createWorkspaceWrapper<T = unknown>(
     // when a user clicks a bracketed citation reference. Inner widgets that do
     // not support citation linking safely ignore this extra prop.
     return (
-      <WrappedComponent
-        data={data}
-        isLoading={isLoadingProp}
-        error={errorProp}
-        className={className}
-        onLink={onLink}
-      />
+      <WrappedComponent data={data} isLoading={isLoadingProp} error={errorProp} className={className} onLink={onLink} />
     );
   }
 

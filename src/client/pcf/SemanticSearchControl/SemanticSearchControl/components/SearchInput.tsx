@@ -42,13 +42,7 @@ const useStyles = makeStyles({
 /**
  * SearchInput component with text input, search button, and info icon.
  */
-export const SearchInput: React.FC<ISearchInputProps> = ({
-  value,
-  placeholder,
-  disabled,
-  onValueChange,
-  onSearch,
-}) => {
+export const SearchInput: React.FC<ISearchInputProps> = ({ value, placeholder, disabled, onValueChange, onSearch }) => {
   const styles = useStyles();
   const [infoOpen, setInfoOpen] = useState(false);
 
@@ -101,27 +95,16 @@ export const SearchInput: React.FC<ISearchInputProps> = ({
       >
         {disabled ? 'Searching...' : 'Search'}
       </Button>
-      <Popover
-        open={infoOpen}
-        onOpenChange={(_ev, data) => setInfoOpen(data.open)}
-        positioning="below-end"
-        withArrow
-      >
+      <Popover open={infoOpen} onOpenChange={(_ev, data) => setInfoOpen(data.open)} positioning="below-end" withArrow>
         <PopoverTrigger disableButtonEnhancement>
           <Tooltip content="How semantic search works" relationship="label">
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<Info20Regular />}
-              aria-label="Search info"
-            />
+            <Button appearance="subtle" size="small" icon={<Info20Regular />} aria-label="Search info" />
           </Tooltip>
         </PopoverTrigger>
         <PopoverSurface style={{ maxWidth: '300px', padding: tokens.spacingHorizontalM }}>
           <Text size={200}>
-            Semantic search finds documents by meaning, not just keywords. Results are ranked by
-            similarity to your query. Toggle "Associated Only" in the filter panel to show only
-            documents directly linked to this record.
+            Semantic search finds documents by meaning, not just keywords. Results are ranked by similarity to your
+            query. Toggle "Associated Only" in the filter panel to show only documents directly linked to this record.
           </Text>
         </PopoverSurface>
       </Popover>

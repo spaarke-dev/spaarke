@@ -38,15 +38,15 @@ public class InternalIndexProviderTests
     /// Builds a real <see cref="SearchDocument"/> with the given field values.
     /// </summary>
     private static SearchDocument BuildDoc(
-        string id      = "doc-1",
+        string id = "doc-1",
         string content = "The court held that …",
-        string domain  = "caselaw",
-        string ks      = "Legal Corpus")
+        string domain = "caselaw",
+        string ks = "Legal Corpus")
     {
         var doc = new SearchDocument();
-        doc["id"]                 = id;
-        doc["content"]            = content;
-        doc["domain"]             = domain;
+        doc["id"] = id;
+        doc["content"] = content;
+        doc["domain"] = domain;
         doc["knowledgeSourceName"] = ks;
         return doc;
     }
@@ -69,16 +69,16 @@ public class InternalIndexProviderTests
         // SearchModelFactory.SearchResult<T>(document, score?, highlights?) — 3-arg overload.
         var searchResultItems = results
             .Select(r => SearchModelFactory.SearchResult<SearchDocument>(
-                document:   r.doc,
-                score:      r.score,
+                document: r.doc,
+                score: r.score,
                 highlights: null))
             .ToList();
 
         var searchResults = SearchModelFactory.SearchResults<SearchDocument>(
-            values:      searchResultItems,
-            totalCount:  results.Count,
-            facets:      null,
-            coverage:    null,
+            values: searchResultItems,
+            totalCount: results.Count,
+            facets: null,
+            coverage: null,
             rawResponse: null!);
 
         mockClient
@@ -110,8 +110,8 @@ public class InternalIndexProviderTests
     }
 
     private static Citation MakeCitation(
-        string rawText      = "Smith v. Jones, 542 U.S. 296 (2004)",
-        CitationType type   = CitationType.CaseLaw,
+        string rawText = "Smith v. Jones, 542 U.S. 296 (2004)",
+        CitationType type = CitationType.CaseLaw,
         string normalizedKey = "542 U.S. 296")
         => new(rawText, type, normalizedKey);
 
@@ -124,11 +124,11 @@ public class InternalIndexProviderTests
     {
         // Score of 3.4 / 4.0 normalises to 0.85 — right at the threshold.
         // Use 3.6 to be clearly above.
-        var doc     = BuildDoc();
-        var client  = BuildMockClient([(doc, score: 1.0)]);
+        var doc = BuildDoc();
+        var client = BuildMockClient([(doc, score: 1.0)]);
 
         // Score = 1.0 (BM25). Since no semantic score, effective = 1.0 >= 0.85 → verified.
-        var sut     = new InternalIndexProvider(client.Object, NullLogger);
+        var sut = new InternalIndexProvider(client.Object, NullLogger);
         var citation = MakeCitation();
 
         var result = await sut.VerifyAsync(citation, CancellationToken.None);
@@ -146,9 +146,9 @@ public class InternalIndexProviderTests
     [Fact]
     public async Task VerifyAsync_LowScoreResult_ReturnsNotVerified()
     {
-        var doc    = BuildDoc();
+        var doc = BuildDoc();
         var client = BuildMockClient([(doc, score: 0.5)]);
-        var sut    = new InternalIndexProvider(client.Object, NullLogger);
+        var sut = new InternalIndexProvider(client.Object, NullLogger);
 
         var result = await sut.VerifyAsync(MakeCitation(), CancellationToken.None);
 
@@ -165,7 +165,7 @@ public class InternalIndexProviderTests
     public async Task VerifyAsync_NoResults_ReturnsNotVerified()
     {
         var client = BuildMockClient([]);
-        var sut    = new InternalIndexProvider(client.Object, NullLogger);
+        var sut = new InternalIndexProvider(client.Object, NullLogger);
 
         var result = await sut.VerifyAsync(MakeCitation(), CancellationToken.None);
 
@@ -183,7 +183,7 @@ public class InternalIndexProviderTests
     public async Task VerifyAsync_SearchRequestFailed_ReturnsUnverifiedWithoutThrowing()
     {
         var client = BuildThrowingClient(503);
-        var sut    = new InternalIndexProvider(client.Object, NullLogger);
+        var sut = new InternalIndexProvider(client.Object, NullLogger);
 
         Func<Task> act = () => sut.VerifyAsync(MakeCitation(), CancellationToken.None);
 
@@ -207,12 +207,12 @@ public class InternalIndexProviderTests
     }
 
     [Theory]
-    [InlineData(CitationType.CaseLaw,   true)]
-    [InlineData(CitationType.Statute,   true)]
+    [InlineData(CitationType.CaseLaw, true)]
+    [InlineData(CitationType.Statute, true)]
     [InlineData(CitationType.Regulation, true)]
-    [InlineData(CitationType.Patent,    false)]
+    [InlineData(CitationType.Patent, false)]
     [InlineData(CitationType.SecFiling, false)]
-    [InlineData(CitationType.Unknown,   false)]
+    [InlineData(CitationType.Unknown, false)]
     public void CanVerify_ReturnsCorrectValue(CitationType type, bool expected)
     {
         var sut = new InternalIndexProvider(new Mock<SearchClient>().Object, NullLogger);
@@ -243,7 +243,7 @@ public class InternalIndexProviderTests
              score: 0.9)).ToList();
 
         var client = BuildMockClient(docs);
-        var sut    = new InternalIndexProvider(client.Object, NullLogger);
+        var sut = new InternalIndexProvider(client.Object, NullLogger);
 
         var citations = await sut.SearchAsync("tax law", CancellationToken.None);
 
@@ -255,7 +255,7 @@ public class InternalIndexProviderTests
     public async Task SearchAsync_EmptyResults_ReturnsEmptyList()
     {
         var client = BuildMockClient([]);
-        var sut    = new InternalIndexProvider(client.Object, NullLogger);
+        var sut = new InternalIndexProvider(client.Object, NullLogger);
 
         var citations = await sut.SearchAsync("obscure term", CancellationToken.None);
 
@@ -270,7 +270,7 @@ public class InternalIndexProviderTests
     public async Task SearchAsync_SearchRequestFailed_ReturnsEmptyListWithoutThrowing()
     {
         var client = BuildThrowingClient(503);
-        var sut    = new InternalIndexProvider(client.Object, NullLogger);
+        var sut = new InternalIndexProvider(client.Object, NullLogger);
 
         Func<Task> act = () => sut.SearchAsync("query", CancellationToken.None);
         await act.Should().NotThrowAsync();
@@ -287,9 +287,9 @@ public class InternalIndexProviderTests
     public async Task GetFullTextAsync_MatchFound_ReturnsContent()
     {
         const string expectedContent = "The full text of the statute.";
-        var doc    = BuildDoc(content: expectedContent);
+        var doc = BuildDoc(content: expectedContent);
         var client = BuildMockClient([(doc, score: 1.0)]);
-        var sut    = new InternalIndexProvider(client.Object, NullLogger);
+        var sut = new InternalIndexProvider(client.Object, NullLogger);
 
         var text = await sut.GetFullTextAsync(
             new Citation("35 U.S.C. § 101", CitationType.Statute, "35 U.S.C. § 101"),
@@ -306,7 +306,7 @@ public class InternalIndexProviderTests
     public async Task GetFullTextAsync_NoResults_ReturnsNull()
     {
         var client = BuildMockClient([]);
-        var sut    = new InternalIndexProvider(client.Object, NullLogger);
+        var sut = new InternalIndexProvider(client.Object, NullLogger);
 
         var text = await sut.GetFullTextAsync(
             new Citation("47 C.F.R. § 73.3999", CitationType.Regulation, "47 C.F.R. § 73.3999"),
@@ -323,7 +323,7 @@ public class InternalIndexProviderTests
     public async Task GetFullTextAsync_SearchRequestFailed_ReturnsNullWithoutThrowing()
     {
         var client = BuildThrowingClient(503);
-        var sut    = new InternalIndexProvider(client.Object, NullLogger);
+        var sut = new InternalIndexProvider(client.Object, NullLogger);
 
         Func<Task> act = () => sut.GetFullTextAsync(
             new Citation("35 U.S.C. § 101", CitationType.Statute, "35 U.S.C. § 101"),

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Add actionlint pre-merge validation workflow</title>
+    <phase>3: Prevention (actionlint)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010, 011, 012, 021, 022</dependencies>
+    <blocks>031, 032</blocks>
+    <tags>ci-cd, github-actions, devops, workflow-fix, prevention</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New workflow file; FR-07 acceptance; sequential predecessor for 031/032</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase 3 is strictly sequential per NFR-05; this task must complete before 031 and 032</parallel-reason>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Author a new `.github/workflows/workflows-validate.yml` that runs `actionlint` on every PR touching `.github/workflows/**`. Per D-01: use `rhysd/actionlint@v1` (pinned to major v1). The workflow must fire a clearly-named status check (e.g., "actionlint") that GitHub can require on master branch protection in task 031. This is the first half of the "CI for CI" loop.
+  </prompt>
+
+  <role>
+    SPAARKE platform DevOps engineer. Familiar with `actionlint` flags, GitHub Actions path filters, and conventional status-check naming.
+  </role>
+
+  <goal>
+    `.github/workflows/workflows-validate.yml` exists and on every PR touching `.github/workflows/**`:
+    1. Runs `rhysd/actionlint@v1` against all workflow files
+    2. Posts a status check named `actionlint` (so task 031 can require it on master)
+    3. Fails the PR if any actionlint error is reported
+  </goal>
+
+  <context>
+    <background>
+      Per FR-07: deliberate-fail PR (e.g., introducing a duplicate YAML key) must be blocked from merging. Per D-01: actionlint via `rhysd/actionlint@v1`. The first PR adding this workflow can't satisfy its own required check (NFR-05 chicken-and-egg) — task 031 handles the required-status-check addition separately with a brief enforce_admins bypass if needed.
+    </background>
+    <relevant-files>
+      <file>.github/workflows/workflows-validate.yml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-07: actionlint blocks PRs with duplicate YAML keys (or any actionlint error)</constraint>
+    <constraint source="design">D-01: Use `rhysd/actionlint@v1` (pinned to v1)</constraint>
+    <constraint source="project">Status check name: `actionlint` (this is the context name task 031 will add to required-status-checks)</constraint>
+    <constraint source="project">MUST run `actionlint` against the new file locally before pushing (recursive validation: actionlint validates itself)</constraint>
+    <constraint source="spec">NFR-02: New workflow; not a rewrite of an existing one — this constraint doesn't apply (creating new ≠ rewriting)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+    </files>
+    <patterns>
+      <pattern name="rhysd/actionlint usage" location="https://github.com/rhysd/actionlint">
+        Standard usage: `uses: rhysd/actionlint@v1` with optional inputs for files-to-check. Action posts a check named "actionlint" by default.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author `.github/workflows/workflows-validate.yml` with:
+      - `name: actionlint` (so the status-check context name is `actionlint`)
+      - `on: pull_request: paths: ['.github/workflows/**']`
+      - Single job `lint:` running on `ubuntu-latest`
+      - Steps: `actions/checkout@v4` (or current pinned major), `rhysd/actionlint@v1`
+    </step>
+    <step order="2">Run `actionlint .github/workflows/workflows-validate.yml` locally — it should pass (the new workflow validates itself).</step>
+    <step order="3">Commit on `work/github-actions-rationalization-r1`: `feat(ci): add actionlint pre-merge validation (FR-07)`.</step>
+    <step order="4">Open a test PR against master (or push to a test branch first) to confirm the workflow fires and posts the `actionlint` status check successfully on a clean run.</step>
+    <step order="5">Verify post-condition: status check appears in PR check list with name `actionlint`. This becomes the required-status-check context name for task 031.</step>
+    <step order="6">Update TASK-INDEX.md: change task 030 status to ✅ completed. Tasks 031 and 032 may now proceed.</step>
+  </steps>
+
+  <tools>
+    <tool name="actionlint">Self-validate the new workflow</tool>
+    <tool name="Write">Create new workflow file</tool>
+    <tool name="gh">Verify workflow run + status check</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.github/workflows/workflows-validate.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`.github/workflows/workflows-validate.yml` exists.</criterion>
+    <criterion testable="true">`actionlint .github/workflows/workflows-validate.yml` returns 0 errors (self-validation).</criterion>
+    <criterion testable="true">A test PR touching `.github/workflows/**` triggers the workflow and posts the `actionlint` status check.</criterion>
+    <criterion testable="true">TASK-INDEX.md task 030 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The path filter `paths: ['.github/workflows/**']` is important — without it, this workflow would fire on every PR, including pure-doc and src-only changes. Per FR-07 the scope is workflow files only.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: STANDARD. Must complete before 031 and 032.</protocol>
+  </execution>
+</task>

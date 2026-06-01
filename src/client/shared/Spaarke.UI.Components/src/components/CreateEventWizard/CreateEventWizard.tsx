@@ -27,11 +27,7 @@ import * as React from 'react';
 import { Button, Text, tokens } from '@fluentui/react-components';
 import { CheckmarkCircleFilled } from '@fluentui/react-icons';
 
-import {
-  CreateRecordWizard,
-  type ICreateRecordWizardConfig,
-  type IFinishContext,
-} from '../CreateRecordWizard';
+import { CreateRecordWizard, type ICreateRecordWizardConfig, type IFinishContext } from '../CreateRecordWizard';
 
 import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
@@ -56,7 +52,7 @@ async function searchContactsAsLookup(dataService: IDataService, query: string):
     `&$filter=contains(fullname,'${safeFilter}')` +
     `&$orderby=fullname asc&$top=10`;
   const result = await dataService.retrieveMultipleRecords('contact', options);
-  return result.entities.map((e) => ({
+  return result.entities.map(e => ({
     id: e['contactid'] as string,
     name: (e['fullname'] as string) + (e['emailaddress1'] ? ` (${e['emailaddress1']})` : ''),
   }));
@@ -70,7 +66,7 @@ async function searchOrganizationsAsLookup(dataService: IDataService, query: str
     `&$filter=contains(sprk_name,'${safeFilter}')` +
     `&$orderby=sprk_name asc&$top=10`;
   const result = await dataService.retrieveMultipleRecords('sprk_organization', options);
-  return result.entities.map((e) => ({
+  return result.entities.map(e => ({
     id: e['sprk_organizationid'] as string,
     name: e['sprk_name'] as string,
   }));
@@ -84,7 +80,7 @@ async function searchUsersAsLookup(dataService: IDataService, query: string): Pr
     `&$filter=contains(fullname,'${safeFilter}') and isdisabled eq false` +
     `&$orderby=fullname asc&$top=10`;
   const result = await dataService.retrieveMultipleRecords('systemuser', options);
-  return result.entities.map((e) => ({
+  return result.entities.map(e => ({
     id: e['systemuserid'] as string,
     name: (e['fullname'] as string) + (e['internalemailaddress'] ? ` (${e['internalemailaddress']})` : ''),
   }));
@@ -122,11 +118,7 @@ export interface ICreateEventWizardProps {
 
 function buildWebApiAdapter(dataService: IDataService) {
   return {
-    retrieveMultipleRecords: async (
-      entityLogicalName: string,
-      options?: string,
-      _maxPageSize?: number,
-    ) => {
+    retrieveMultipleRecords: async (entityLogicalName: string, options?: string, _maxPageSize?: number) => {
       const result = await dataService.retrieveMultipleRecords(entityLogicalName, options);
       return { entities: result.entities };
     },
@@ -189,15 +181,14 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
     () => ({
       title: 'Create New Event',
       entityLabel: 'event',
-      filesStepSubtitle:
-        'Upload documents to associate with this event, or click Next to skip.',
+      filesStepSubtitle: 'Upload documents to associate with this event, or click Next to skip.',
       finishingLabel: 'Creating event\u2026',
 
       infoStep: {
         id: 'create-record',
         label: 'Event Details',
         canAdvance: () => formValid,
-        renderContent: (_wizardFiles) => (
+        renderContent: _wizardFiles => (
           <CreateEventStep
             dataService={dataService}
             onValidChange={setFormValid}
@@ -242,10 +233,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
           try {
             const entityService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
 
-            const uploadResult = await entityService.uploadFilesToSpe(
-              context.speContainerId,
-              context.uploadedFiles
-            );
+            const uploadResult = await entityService.uploadFilesToSpe(context.speContainerId, context.uploadedFiles);
 
             if (uploadResult.errors.length > 0) {
               for (const err of uploadResult.errors) {
@@ -278,7 +266,12 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
         }
 
         // Send email (if selected)
-        if (context.selectedActions.includes('send-email') && context.followOn.emailTo.trim() && authFetch && bffBaseUrl) {
+        if (
+          context.selectedActions.includes('send-email') &&
+          context.followOn.emailTo.trim() &&
+          authFetch &&
+          bffBaseUrl
+        ) {
           const emailService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
           const emailResult = await emailService.sendEmail({
             to: context.followOn.emailTo,
@@ -299,18 +292,11 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
         };
 
         return {
-          icon: (
-            <CheckmarkCircleFilled
-              fontSize={64}
-              style={{ color: tokens.colorPaletteGreenForeground1 }}
-            />
-          ),
+          icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
           title: hasWarnings ? 'Event created with warnings' : 'Event created!',
           body: (
             <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-              <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>
-                &ldquo;{eventName}&rdquo;
-              </span>{' '}
+              <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>&ldquo;{eventName}&rdquo;</span>{' '}
               has been created
               {hasWarnings
                 ? ', though some operations could not complete. See details below.'
@@ -319,11 +305,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
           ),
           actions: (
             <>
-              <Button
-                appearance="primary"
-                onClick={viewEvent}
-                aria-label={`View event: ${eventName}`}
-              >
+              <Button appearance="primary" onClick={viewEvent} aria-label={`View event: ${eventName}`}>
                 View Event
               </Button>
               <Button appearance="secondary" onClick={onClose}>
@@ -335,19 +317,26 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
         };
       },
     }),
-    [formValid, formValues, dataService, handleSearchContacts, handleSearchOrganizations, handleSearchUsers, onClose, authFetch, bffBaseUrl, navigationService, resolveSpeContainerId, webApiAdapter]
+    [
+      formValid,
+      formValues,
+      dataService,
+      handleSearchContacts,
+      handleSearchOrganizations,
+      handleSearchUsers,
+      onClose,
+      authFetch,
+      bffBaseUrl,
+      navigationService,
+      resolveSpeContainerId,
+      webApiAdapter,
+    ]
   );
 
   // -- Render ----------------------------------------------------------------
 
   return (
-    <CreateRecordWizard
-      open={open}
-      onClose={onClose}
-      webApi={webApiAdapter}
-      config={config}
-      embedded={embedded}
-    />
+    <CreateRecordWizard open={open} onClose={onClose} webApi={webApiAdapter} config={config} embedded={embedded} />
   );
 };
 

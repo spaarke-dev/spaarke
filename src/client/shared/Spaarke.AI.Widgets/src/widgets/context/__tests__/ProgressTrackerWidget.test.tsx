@@ -113,10 +113,7 @@ describe('ProgressTrackerWidget — step icon states', () => {
 describe('ProgressTrackerWidget — empty step list', () => {
   it('renders a Spinner (not blank) when steps array is empty', () => {
     const bus = new PaneEventBus();
-    renderWidget(
-      makeData({ steps: [], currentStepIndex: 0, totalSteps: 0 }),
-      bus
-    );
+    renderWidget(makeData({ steps: [], currentStepIndex: 0, totalSteps: 0 }), bus);
 
     expect(screen.getByTestId('progress-tracker-empty')).toBeInTheDocument();
     // Spinner is present — not a blank pane
@@ -240,7 +237,7 @@ describe('ProgressTrackerWidget — all-completed stage transition', () => {
     const bus = new PaneEventBus();
     const received: unknown[] = [];
 
-    bus.subscribe('context', (event) => {
+    bus.subscribe('context', event => {
       if (event.type === 'context_update' && event.contextType === 'related-items') {
         received.push(event);
       }
@@ -277,7 +274,7 @@ describe('ProgressTrackerWidget — all-completed stage transition', () => {
     const bus = new PaneEventBus();
     const received: unknown[] = [];
 
-    bus.subscribe('context', (event) => {
+    bus.subscribe('context', event => {
       if (event.type === 'context_update' && event.contextType === 'related-items') {
         received.push(event);
       }
@@ -314,7 +311,7 @@ describe('ProgressTrackerWidget — all-completed stage transition', () => {
     const bus = new PaneEventBus();
     const received: unknown[] = [];
 
-    bus.subscribe('context', (event) => {
+    bus.subscribe('context', event => {
       if (event.type === 'context_update' && event.contextType === 'related-items') {
         received.push(event);
       }
@@ -333,7 +330,7 @@ describe('ProgressTrackerWidget — all-completed stage transition', () => {
     const bus = new PaneEventBus();
     const received: unknown[] = [];
 
-    bus.subscribe('context', (event) => {
+    bus.subscribe('context', event => {
       if (event.type === 'context_update' && event.contextType === 'related-items') {
         received.push(event);
       }
@@ -355,10 +352,7 @@ describe('ProgressTrackerWidget — all-completed stage transition', () => {
       rerender(
         <FluentProvider theme={webLightTheme}>
           <PaneEventBusProvider bus={bus}>
-            <ProgressTrackerWidget
-              data={allDoneData}
-              widgetType="progress-tracker"
-            />
+            <ProgressTrackerWidget data={allDoneData} widgetType="progress-tracker" />
           </PaneEventBusProvider>
         </FluentProvider>
       );
@@ -414,9 +408,7 @@ describe('ProgressTrackerWidget — step detail expand/collapse', () => {
     const user = userEvent.setup();
     const bus = new PaneEventBus();
     const data = makeData({
-      steps: [
-        { id: 's1', label: 'Step One', status: 'active', detail: 'Processing 47 clauses…' },
-      ],
+      steps: [{ id: 's1', label: 'Step One', status: 'active', detail: 'Processing 47 clauses…' }],
       totalSteps: 1,
     });
 
@@ -455,9 +447,7 @@ describe('ProgressTrackerWidget — footer summary', () => {
     const bus = new PaneEventBus();
     renderWidget(
       makeData({
-        steps: [
-          { id: 's1', label: 'Final Step', status: 'active' },
-        ],
+        steps: [{ id: 's1', label: 'Final Step', status: 'active' }],
         currentStepIndex: 4,
         totalSteps: 5,
       }),

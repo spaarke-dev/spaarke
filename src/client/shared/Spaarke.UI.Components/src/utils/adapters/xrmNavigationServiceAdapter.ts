@@ -108,11 +108,7 @@ export function createXrmNavigationService(): INavigationService {
       await navigation.openForm({ entityName, entityId });
     },
 
-    async openDialog(
-      webresourceName: string,
-      data?: string,
-      options?: DialogOptions
-    ): Promise<DialogResult> {
+    async openDialog(webresourceName: string, data?: string, options?: DialogOptions): Promise<DialogResult> {
       const navigation = getNavigation();
 
       // Build the navigateTo page input
@@ -182,17 +178,23 @@ export function createXrmNavigationService(): INavigationService {
       for (const frame of frames) {
         try {
           const closeBtn =
-            frame?.document?.querySelector('[data-id="dialogCloseIconButton"]') as HTMLElement
-            ?? frame?.document?.querySelector('.ms-Dialog-button--close') as HTMLElement;
+            (frame?.document?.querySelector('[data-id="dialogCloseIconButton"]') as HTMLElement) ??
+            (frame?.document?.querySelector('.ms-Dialog-button--close') as HTMLElement);
           if (closeBtn) {
             closeBtn.click();
             return;
           }
-        } catch { /* cross-origin frame */ }
+        } catch {
+          /* cross-origin frame */
+        }
       }
 
       // Fallback: window.close() — works for standalone popups
-      try { window.close(); } catch { /* blocked by browser */ }
+      try {
+        window.close();
+      } catch {
+        /* blocked by browser */
+      }
     },
 
     async openLookup(options: LookupOptions): Promise<LookupResult[]> {
@@ -229,7 +231,7 @@ export function createXrmNavigationService(): INavigationService {
           return [];
         }
 
-        return results.map((r) => ({
+        return results.map(r => ({
           id: r.id,
           name: r.name,
           entityType: r.entityType,

@@ -15,13 +15,13 @@
  * @see .claude/adr/ADR-022-pcf-platform-libraries.md (React 16 Context API)
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   CalendarFilterOutput,
   CalendarFilterSingle,
   CalendarFilterRange,
   IEventDateInfo,
-} from "../components/CalendarSection/CalendarSection";
+} from '../components/CalendarSection/CalendarSection';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -126,31 +126,31 @@ const defaultState: EventsPageState = {
 const defaultContextValue: EventsPageContextValue = {
   ...defaultState,
   setCalendarFilter: () => {
-    console.warn("[EventsPageContext] setCalendarFilter called without provider");
+    console.warn('[EventsPageContext] setCalendarFilter called without provider');
   },
   setAssignedToFilter: () => {
-    console.warn("[EventsPageContext] setAssignedToFilter called without provider");
+    console.warn('[EventsPageContext] setAssignedToFilter called without provider');
   },
   setStatusFilter: () => {
-    console.warn("[EventsPageContext] setStatusFilter called without provider");
+    console.warn('[EventsPageContext] setStatusFilter called without provider');
   },
   setRecordTypeFilter: () => {
-    console.warn("[EventsPageContext] setRecordTypeFilter called without provider");
+    console.warn('[EventsPageContext] setRecordTypeFilter called without provider');
   },
   clearAllFilters: () => {
-    console.warn("[EventsPageContext] clearAllFilters called without provider");
+    console.warn('[EventsPageContext] clearAllFilters called without provider');
   },
   openEvent: () => {
-    console.warn("[EventsPageContext] openEvent called without provider");
+    console.warn('[EventsPageContext] openEvent called without provider');
   },
   closeEvent: () => {
-    console.warn("[EventsPageContext] closeEvent called without provider");
+    console.warn('[EventsPageContext] closeEvent called without provider');
   },
   setEventDates: () => {
-    console.warn("[EventsPageContext] setEventDates called without provider");
+    console.warn('[EventsPageContext] setEventDates called without provider');
   },
   refreshGrid: () => {
-    console.warn("[EventsPageContext] refreshGrid called without provider");
+    console.warn('[EventsPageContext] refreshGrid called without provider');
   },
 };
 
@@ -162,12 +162,10 @@ const defaultContextValue: EventsPageContextValue = {
  * EventsPageContext
  * Use React.createContext (React 16 compatible)
  */
-export const EventsPageContext = React.createContext<EventsPageContextValue>(
-  defaultContextValue
-);
+export const EventsPageContext = React.createContext<EventsPageContextValue>(defaultContextValue);
 
 // Display name for React DevTools
-EventsPageContext.displayName = "EventsPageContext";
+EventsPageContext.displayName = 'EventsPageContext';
 
 // ---------------------------------------------------------------------------
 // Provider Props
@@ -196,8 +194,7 @@ export interface EventsPageProviderProps {
  */
 function computeHasActiveFilters(filters: EventsPageFilters): boolean {
   // Calendar filter is active if set and not "clear" type
-  const hasCalendarFilter =
-    filters.calendarFilter !== null && filters.calendarFilter.type !== "clear";
+  const hasCalendarFilter = filters.calendarFilter !== null && filters.calendarFilter.type !== 'clear';
 
   // Assigned-to filter is active if any users selected
   const hasAssignedToFilter = filters.assignedToUserIds.length > 0;
@@ -208,12 +205,7 @@ function computeHasActiveFilters(filters: EventsPageFilters): boolean {
   // Record type filter is active if set
   const hasRecordTypeFilter = filters.recordType !== null;
 
-  return (
-    hasCalendarFilter ||
-    hasAssignedToFilter ||
-    hasStatusFilter ||
-    hasRecordTypeFilter
-  );
+  return hasCalendarFilter || hasAssignedToFilter || hasStatusFilter || hasRecordTypeFilter;
 }
 
 // ---------------------------------------------------------------------------
@@ -254,9 +246,7 @@ export const EventsPageProvider: React.FC<EventsPageProviderProps> = ({
 
   // Active event state
   const [activeEventId, setActiveEventId] = React.useState<string | null>(null);
-  const [activeEventTypeId, setActiveEventTypeId] = React.useState<string | null>(
-    null
-  );
+  const [activeEventTypeId, setActiveEventTypeId] = React.useState<string | null>(null);
 
   // Event dates for calendar indicators
   const [eventDates, setEventDatesState] = React.useState<IEventDateInfo[]>([]);
@@ -268,10 +258,7 @@ export const EventsPageProvider: React.FC<EventsPageProviderProps> = ({
   // Derived State
   // -------------------------------------------------------------------------
 
-  const hasActiveFilters = React.useMemo(
-    () => computeHasActiveFilters(filters),
-    [filters]
-  );
+  const hasActiveFilters = React.useMemo(() => computeHasActiveFilters(filters), [filters]);
 
   // -------------------------------------------------------------------------
   // Actions (memoized to prevent unnecessary re-renders)
@@ -280,23 +267,20 @@ export const EventsPageProvider: React.FC<EventsPageProviderProps> = ({
   /**
    * Set calendar filter
    */
-  const setCalendarFilter = React.useCallback(
-    (filter: CalendarFilterOutput | null) => {
-      console.log("[EventsPageContext] setCalendarFilter:", filter);
-      setFilters((prev) => ({
-        ...prev,
-        calendarFilter: filter,
-      }));
-    },
-    []
-  );
+  const setCalendarFilter = React.useCallback((filter: CalendarFilterOutput | null) => {
+    console.log('[EventsPageContext] setCalendarFilter:', filter);
+    setFilters(prev => ({
+      ...prev,
+      calendarFilter: filter,
+    }));
+  }, []);
 
   /**
    * Set assigned-to filter
    */
   const setAssignedToFilter = React.useCallback((userIds: string[]) => {
-    console.log("[EventsPageContext] setAssignedToFilter:", userIds);
-    setFilters((prev) => ({
+    console.log('[EventsPageContext] setAssignedToFilter:', userIds);
+    setFilters(prev => ({
       ...prev,
       assignedToUserIds: userIds,
     }));
@@ -306,8 +290,8 @@ export const EventsPageProvider: React.FC<EventsPageProviderProps> = ({
    * Set status filter
    */
   const setStatusFilter = React.useCallback((statusCodes: number[]) => {
-    console.log("[EventsPageContext] setStatusFilter:", statusCodes);
-    setFilters((prev) => ({
+    console.log('[EventsPageContext] setStatusFilter:', statusCodes);
+    setFilters(prev => ({
       ...prev,
       statusCodes: statusCodes,
     }));
@@ -317,8 +301,8 @@ export const EventsPageProvider: React.FC<EventsPageProviderProps> = ({
    * Set record type filter
    */
   const setRecordTypeFilter = React.useCallback((recordType: string | null) => {
-    console.log("[EventsPageContext] setRecordTypeFilter:", recordType);
-    setFilters((prev) => ({
+    console.log('[EventsPageContext] setRecordTypeFilter:', recordType);
+    setFilters(prev => ({
       ...prev,
       recordType: recordType,
     }));
@@ -328,7 +312,7 @@ export const EventsPageProvider: React.FC<EventsPageProviderProps> = ({
    * Clear all filters to default state
    */
   const clearAllFilters = React.useCallback(() => {
-    console.log("[EventsPageContext] clearAllFilters");
+    console.log('[EventsPageContext] clearAllFilters');
     setFilters(defaultFilters);
   }, []);
 
@@ -337,7 +321,7 @@ export const EventsPageProvider: React.FC<EventsPageProviderProps> = ({
    */
   const openEvent = React.useCallback(
     (eventId: string, eventTypeId?: string) => {
-      console.log("[EventsPageContext] openEvent:", eventId, eventTypeId);
+      console.log('[EventsPageContext] openEvent:', eventId, eventTypeId);
       setActiveEventId(eventId);
       setActiveEventTypeId(eventTypeId ?? null);
       // Notify parent if callback provided
@@ -350,7 +334,7 @@ export const EventsPageProvider: React.FC<EventsPageProviderProps> = ({
    * Close the side pane / deselect active event
    */
   const closeEvent = React.useCallback(() => {
-    console.log("[EventsPageContext] closeEvent");
+    console.log('[EventsPageContext] closeEvent');
     setActiveEventId(null);
     setActiveEventTypeId(null);
     onCloseEvent?.();
@@ -367,8 +351,8 @@ export const EventsPageProvider: React.FC<EventsPageProviderProps> = ({
    * Trigger grid refresh
    */
   const refreshGrid = React.useCallback(() => {
-    console.log("[EventsPageContext] refreshGrid");
-    setRefreshTrigger((prev) => prev + 1);
+    console.log('[EventsPageContext] refreshGrid');
+    setRefreshTrigger(prev => prev + 1);
   }, []);
 
   // -------------------------------------------------------------------------
@@ -418,11 +402,7 @@ export const EventsPageProvider: React.FC<EventsPageProviderProps> = ({
   // Render
   // -------------------------------------------------------------------------
 
-  return (
-    <EventsPageContext.Provider value={contextValue}>
-      {children}
-    </EventsPageContext.Provider>
-  );
+  return <EventsPageContext.Provider value={contextValue}>{children}</EventsPageContext.Provider>;
 };
 
 // ---------------------------------------------------------------------------
@@ -445,11 +425,11 @@ export function useEventsPageContext(): EventsPageContextValue {
 
   // The context will have default values if provider is missing,
   // but we should warn in development
-  if (process.env.NODE_ENV === "development") {
+  if (process.env.NODE_ENV === 'development') {
     if (context === defaultContextValue) {
       console.warn(
-        "[useEventsPageContext] Context used without EventsPageProvider. " +
-          "Wrap your component tree with <EventsPageProvider>."
+        '[useEventsPageContext] Context used without EventsPageProvider. ' +
+          'Wrap your component tree with <EventsPageProvider>.'
       );
     }
   }
@@ -507,8 +487,7 @@ export function useStatusFilter() {
  * Selector hook for active event state and actions.
  */
 export function useActiveEvent() {
-  const { activeEventId, activeEventTypeId, openEvent, closeEvent } =
-    useEventsPageContext();
+  const { activeEventId, activeEventTypeId, openEvent, closeEvent } = useEventsPageContext();
   return {
     activeEventId,
     activeEventTypeId,

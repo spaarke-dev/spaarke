@@ -8,11 +8,7 @@
  * This step is skippable (canAdvance always true).
  */
 import * as React from 'react';
-import {
-  Text,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Text, makeStyles, tokens } from '@fluentui/react-components';
 import { FileUploadZone } from '../FileUpload/FileUploadZone';
 import { UploadedFileList } from '../FileUpload/UploadedFileList';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
@@ -54,34 +50,23 @@ const useStyles = makeStyles({
 // Component
 // ---------------------------------------------------------------------------
 
-export const AddFilesStep: React.FC<IAddFilesStepProps> = ({
-  onUploadedFilesChange,
-  initialUploadedFiles,
-}) => {
+export const AddFilesStep: React.FC<IAddFilesStepProps> = ({ onUploadedFilesChange, initialUploadedFiles }) => {
   const styles = useStyles();
 
-  const [uploadedFiles, setUploadedFiles] = React.useState<IUploadedFile[]>(
-    initialUploadedFiles ?? []
-  );
+  const [uploadedFiles, setUploadedFiles] = React.useState<IUploadedFile[]>(initialUploadedFiles ?? []);
 
   // Report uploaded files whenever they change
   React.useEffect(() => {
     onUploadedFilesChange(uploadedFiles);
   }, [uploadedFiles, onUploadedFilesChange]);
 
-  const handleFilesAccepted = React.useCallback(
-    (files: IUploadedFile[]) => {
-      setUploadedFiles((prev) => [...prev, ...files]);
-    },
-    []
-  );
+  const handleFilesAccepted = React.useCallback((files: IUploadedFile[]) => {
+    setUploadedFiles(prev => [...prev, ...files]);
+  }, []);
 
-  const handleRemoveFile = React.useCallback(
-    (fileId: string) => {
-      setUploadedFiles((prev) => prev.filter((f) => f.id !== fileId));
-    },
-    []
-  );
+  const handleRemoveFile = React.useCallback((fileId: string) => {
+    setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
+  }, []);
 
   return (
     <div className={styles.root}>
@@ -90,15 +75,12 @@ export const AddFilesStep: React.FC<IAddFilesStepProps> = ({
           Add Files
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Upload files to include with the work assignment. Documents from the
-          associated record are already available.
+          Upload files to include with the work assignment. Documents from the associated record are already available.
         </Text>
       </div>
 
       <FileUploadZone onFilesAccepted={handleFilesAccepted} onValidationErrors={() => {}} />
-      {uploadedFiles.length > 0 && (
-        <UploadedFileList files={uploadedFiles} onRemove={handleRemoveFile} />
-      )}
+      {uploadedFiles.length > 0 && <UploadedFileList files={uploadedFiles} onRemove={handleRemoveFile} />}
     </div>
   );
 };

@@ -19,7 +19,6 @@ import { logger } from '../utils/logger';
  * environment variable sprk_BffApiAppId.
  */
 export class SdapApiClientFactory {
-
   /**
    * Create SDAP API Client with MSAL authentication
    *

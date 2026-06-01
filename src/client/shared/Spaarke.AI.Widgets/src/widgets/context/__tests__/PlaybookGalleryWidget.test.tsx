@@ -92,12 +92,8 @@ describe('PlaybookGalleryWidget — card rendering', () => {
   it('displays the playbook description', () => {
     renderWidget(PLAYBOOKS);
 
-    expect(
-      screen.getByText('Analyse contracts for risk and compliance issues.')
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText('Compare two versions of a document and highlight differences.')
-    ).toBeInTheDocument();
+    expect(screen.getByText('Analyse contracts for risk and compliance issues.')).toBeInTheDocument();
+    expect(screen.getByText('Compare two versions of a document and highlight differences.')).toBeInTheDocument();
   });
 
   it('renders capability badges for each playbook that has them', () => {
@@ -146,7 +142,7 @@ describe('PlaybookGalleryWidget — playbook selection dispatch', () => {
     const user = userEvent.setup();
     const bus = new PaneEventBus();
     const received: ConversationPaneEvent[] = [];
-    bus.subscribe('conversation', (e) => received.push(e));
+    bus.subscribe('conversation', e => received.push(e));
 
     renderWidget(PLAYBOOKS, { bus });
 
@@ -170,10 +166,10 @@ describe('PlaybookGalleryWidget — playbook selection dispatch', () => {
     const safetyEvents: unknown[] = [];
     const conversationEvents: unknown[] = [];
 
-    bus.subscribe('workspace', (e) => workspaceEvents.push(e));
-    bus.subscribe('context', (e) => contextEvents.push(e));
-    bus.subscribe('safety', (e) => safetyEvents.push(e));
-    bus.subscribe('conversation', (e) => conversationEvents.push(e));
+    bus.subscribe('workspace', e => workspaceEvents.push(e));
+    bus.subscribe('context', e => contextEvents.push(e));
+    bus.subscribe('safety', e => safetyEvents.push(e));
+    bus.subscribe('conversation', e => conversationEvents.push(e));
 
     renderWidget(PLAYBOOKS, { bus });
 
@@ -189,7 +185,7 @@ describe('PlaybookGalleryWidget — playbook selection dispatch', () => {
     const user = userEvent.setup();
     const bus = new PaneEventBus();
     const received: ConversationPaneEvent[] = [];
-    bus.subscribe('conversation', (e) => received.push(e));
+    bus.subscribe('conversation', e => received.push(e));
 
     renderWidget(PLAYBOOKS, { bus });
 
@@ -212,7 +208,7 @@ describe('PlaybookGalleryWidget — playbook selection dispatch', () => {
     const user = userEvent.setup();
     const bus = new PaneEventBus();
     const received: ConversationPaneEvent[] = [];
-    bus.subscribe('conversation', (e) => received.push(e));
+    bus.subscribe('conversation', e => received.push(e));
 
     renderWidget(PLAYBOOKS, { bus });
 
@@ -228,7 +224,7 @@ describe('PlaybookGalleryWidget — playbook selection dispatch', () => {
     const user = userEvent.setup();
     const bus = new PaneEventBus();
     const received: ConversationPaneEvent[] = [];
-    bus.subscribe('conversation', (e) => received.push(e));
+    bus.subscribe('conversation', e => received.push(e));
 
     renderWidget(PLAYBOOKS, { bus });
 
@@ -334,9 +330,7 @@ describe('PlaybookGalleryWidget — empty state', () => {
   it('renders the empty state body text describing next steps', () => {
     renderWidget({ playbooks: [] });
 
-    expect(
-      screen.getByText(/No AI playbooks have been configured/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/No AI playbooks have been configured/i)).toBeInTheDocument();
   });
 
   it('does not render any playbook cards in the empty state', () => {
@@ -360,9 +354,7 @@ describe('PlaybookGalleryWidget — error state', () => {
   it('renders the error message when error prop is provided', () => {
     renderWidget(PLAYBOOKS, { error: 'Failed to load playbooks. Please try again.' });
 
-    expect(
-      screen.getByText('Failed to load playbooks. Please try again.')
-    ).toBeInTheDocument();
+    expect(screen.getByText('Failed to load playbooks. Please try again.')).toBeInTheDocument();
   });
 
   it('error message is in an alert role for screen readers', () => {
@@ -381,10 +373,7 @@ describe('PlaybookGalleryWidget — data edge cases', () => {
     render(
       <FluentProvider theme={webLightTheme}>
         <PaneEventBusProvider bus={new PaneEventBus()}>
-          <PlaybookGalleryWidget
-            data={undefined as unknown as PlaybookGalleryData}
-            widgetType="playbook-gallery"
-          />
+          <PlaybookGalleryWidget data={undefined as unknown as PlaybookGalleryData} widgetType="playbook-gallery" />
         </PaneEventBusProvider>
       </FluentProvider>
     );

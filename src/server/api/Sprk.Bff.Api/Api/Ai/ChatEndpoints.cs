@@ -8,10 +8,9 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
-using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Services.Ai.Safety.CrossMatter;
+using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Telemetry;
-
 // Explicit alias to avoid ChatMessage ambiguity between domain model and AI framework.
 // Sprk.Bff.Api.Models.Ai.Chat.ChatMessage is the Dataverse persistence record.
 // Microsoft.Extensions.AI.ChatMessage is the AI framework conversation message.

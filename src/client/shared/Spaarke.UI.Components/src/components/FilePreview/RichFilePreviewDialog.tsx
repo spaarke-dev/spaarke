@@ -49,15 +49,8 @@ import {
   shorthands,
   tokens,
 } from '@fluentui/react-components';
-import {
-  ChevronLeft20Regular,
-  ChevronRight20Regular,
-} from '@fluentui/react-icons';
-import {
-  DocumentRowMenu,
-  type DocumentRowAction,
-  type IDocumentRowMenuTarget,
-} from '../DocumentRowMenu';
+import { ChevronLeft20Regular, ChevronRight20Regular } from '@fluentui/react-icons';
+import { DocumentRowMenu, type DocumentRowAction, type IDocumentRowMenuTarget } from '../DocumentRowMenu';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -563,12 +556,7 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
       const target = ev.target as HTMLElement | null;
       if (target) {
         const tag = target.tagName;
-        if (
-          tag === 'INPUT' ||
-          tag === 'TEXTAREA' ||
-          tag === 'SELECT' ||
-          target.isContentEditable
-        ) {
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) {
           return;
         }
       }
@@ -665,14 +653,7 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
         }
       }
     },
-    [
-      onOpenFile,
-      onOpenRecord,
-      onEmailDocument,
-      onCopyLink,
-      onToggleWorkspace,
-      onFindSimilar,
-    ]
+    [onOpenFile, onOpenRecord, onEmailDocument, onCopyLink, onToggleWorkspace, onFindSimilar]
   );
 
   // Hide only the actions the dialog cannot service.
@@ -697,10 +678,10 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   // but visibility was the user-requested change for this round.
   const dialogDisabledActions = React.useMemo<DocumentRowAction[]>(() => {
     const hidden: DocumentRowAction[] = [
-      'preview',         // dialog IS the preview surface
-      'aiSummary',       // hidden across all surfaces (Item 6)
+      'preview', // dialog IS the preview surface
+      'aiSummary', // hidden across all surfaces (Item 6)
       'toggleWorkspace', // dialog IS the workspace surface
-      'rename',          // hidden across all surfaces (Item 6)
+      'rename', // hidden across all surfaces (Item 6)
     ];
     if (!onFindSimilar) hidden.push('findSimilar');
     return hidden;
@@ -822,9 +803,7 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
           </DialogTitle>
           <div
             className={styles.titleActions}
-            aria-label={
-              isInWorkspace ? 'Document actions (in workspace)' : 'Document actions'
-            }
+            aria-label={isInWorkspace ? 'Document actions (in workspace)' : 'Document actions'}
           >
             {navigationEnabled && (
               <>
@@ -856,11 +835,7 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
                 <Divider vertical className={styles.titleNavDivider} />
               </>
             )}
-            <DocumentRowMenu
-              document={target}
-              onAction={handleRowAction}
-              disabledActions={dialogDisabledActions}
-            />
+            <DocumentRowMenu document={target} onAction={handleRowAction} disabledActions={dialogDisabledActions} />
           </div>
         </div>
 

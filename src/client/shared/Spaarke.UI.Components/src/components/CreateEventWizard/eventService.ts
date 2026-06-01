@@ -61,7 +61,7 @@ async function _discoverNavProps(entityLogicalName: string): Promise<NavPropEntr
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (json as any).value ?? [];
 
-    const entries: NavPropEntry[] = rels.map((r) => ({
+    const entries: NavPropEntry[] = rels.map(r => ({
       columnName: r.ReferencingAttribute,
       navPropName: r.ReferencingEntityNavigationPropertyName,
       referencedEntity: r.ReferencedEntity,
@@ -75,16 +75,12 @@ async function _discoverNavProps(entityLogicalName: string): Promise<NavPropEntr
   }
 }
 
-function _findNavProp(
-  entries: NavPropEntry[],
-  referencedEntity: string,
-  columnHint?: string,
-): string | undefined {
-  const matches = entries.filter((e) => e.referencedEntity === referencedEntity);
+function _findNavProp(entries: NavPropEntry[], referencedEntity: string, columnHint?: string): string | undefined {
+  const matches = entries.filter(e => e.referencedEntity === referencedEntity);
   if (matches.length === 0) return undefined;
   if (matches.length === 1) return matches[0].navPropName;
   if (columnHint) {
-    const hinted = matches.find((e) => e.columnName.includes(columnHint));
+    const hinted = matches.find(e => e.columnName.includes(columnHint));
     if (hinted) return hinted.navPropName;
   }
   return matches[0].navPropName;
@@ -112,7 +108,7 @@ export class EventService {
 
     try {
       const result = await this._dataService.retrieveMultipleRecords('sprk_eventtype_ref', query);
-      return result.entities.map((e) => ({
+      return result.entities.map(e => ({
         id: e['sprk_eventtype_refid'] as string,
         name: e['sprk_name'] as string,
       }));
@@ -133,10 +129,7 @@ export class EventService {
    *   `formValues.regardingRecordId`, the event is associated via the
    *   N:1 relationship nav-prop resolved through metadata discovery.
    */
-  async createEvent(
-    formValues: ICreateEventFormState,
-    regardingEntityName?: string,
-  ): Promise<ICreateEventResult> {
+  async createEvent(formValues: ICreateEventFormState, regardingEntityName?: string): Promise<ICreateEventResult> {
     const navProps = await _discoverNavProps('sprk_event');
 
     const entity: Record<string, unknown> = {

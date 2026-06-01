@@ -154,7 +154,7 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
             if (frontendStepId && frontendStepId !== activeStepRef.current) {
               const prevStep = activeStepRef.current;
               if (prevStep) {
-                setCompletedStepIds(prev => prev.includes(prevStep) ? prev : [...prev, prevStep]);
+                setCompletedStepIds(prev => (prev.includes(prevStep) ? prev : [...prev, prevStep]));
               }
               activeStepRef.current = frontendStepId;
               setActiveStepId(frontendStepId);
@@ -168,7 +168,7 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
               firstContentChunkRef.current = true;
               const prevStep = activeStepRef.current;
               if (prevStep && prevStep !== 'delivering') {
-                setCompletedStepIds(prev => prev.includes(prevStep) ? prev : [...prev, prevStep]);
+                setCompletedStepIds(prev => (prev.includes(prevStep) ? prev : [...prev, prevStep]));
               }
               activeStepRef.current = 'delivering';
               setActiveStepId('delivering');

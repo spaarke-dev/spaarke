@@ -197,7 +197,7 @@ export const RecordCardShell: React.FC<IRecordCardShellProps> = ({
         onClick(e);
       }
     },
-    [onClick],
+    [onClick]
   );
 
   const handleToolsClick = React.useCallback((e: React.MouseEvent) => {
@@ -206,12 +206,7 @@ export const RecordCardShell: React.FC<IRecordCardShellProps> = ({
 
   return (
     <div
-      className={mergeClasses(
-        styles.root,
-        isInteractive && styles.interactive,
-        showAccent && styles.accent,
-        className,
-      )}
+      className={mergeClasses(styles.root, isInteractive && styles.interactive, showAccent && styles.accent, className)}
       style={showAccent ? { borderLeftColor: effectiveAccent } : undefined}
       role={isInteractive ? 'button' : 'listitem'}
       tabIndex={isInteractive ? 0 : undefined}
@@ -227,9 +222,7 @@ export const RecordCardShell: React.FC<IRecordCardShellProps> = ({
       {/* Content column */}
       <div className={styles.contentColumn}>
         <div className={styles.primaryRow}>{primaryContent}</div>
-        {secondaryContent && (
-          <div className={styles.secondaryRow}>{secondaryContent}</div>
-        )}
+        {secondaryContent && <div className={styles.secondaryRow}>{secondaryContent}</div>}
       </div>
 
       {/* Tools + overflow menu column */}

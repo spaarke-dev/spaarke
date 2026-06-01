@@ -22,13 +22,13 @@
 // These functions call planned BFF routes under /api/v1/external/*
 // that serve project data using managed-identity Dataverse access.
 // Once BFF GET endpoints are added, no changes are needed here.
-import { bffApiCall } from "../auth/bff-client";
+import { bffApiCall } from '../auth/bff-client';
 
 // ---------------------------------------------------------------------------
 // Re-export ApiError for module consumers
 // ---------------------------------------------------------------------------
 
-export { ApiError } from "../types";
+export { ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
 // OData entity type interfaces
@@ -75,7 +75,7 @@ export interface ODataDocument {
   /** ISO date string — record created */
   createdon?: string | null;
   /** Display name of the record creator */
-  "createdby@OData.Community.Display.V1.FormattedValue"?: string | null;
+  'createdby@OData.Community.Display.V1.FormattedValue'?: string | null;
 }
 
 /**
@@ -151,9 +151,9 @@ export interface ODataOrganization {
  * The Web API always wraps collection results in `{ "@odata.context": "...", "value": [...] }`.
  */
 interface ODataCollectionResponse<T> {
-  "@odata.context"?: string;
+  '@odata.context'?: string;
   value: T[];
-  "@odata.nextLink"?: string;
+  '@odata.nextLink'?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +216,7 @@ function buildQueryString(options: ODataQueryOptions): string {
     params.push(`$top=${options.$top}`);
   }
 
-  return params.length > 0 ? `?${params.join("&")}` : "";
+  return params.length > 0 ? `?${params.join('&')}` : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -230,10 +230,7 @@ function buildQueryString(options: ODataQueryOptions): string {
  * @param bffPath  BFF API path (e.g. "/api/v1/external/projects")
  * @param _options OData query options — reserved for future BFF support
  */
-async function getCollection<T>(
-  bffPath: string,
-  _options: ODataQueryOptions = {}
-): Promise<T[]> {
+async function getCollection<T>(bffPath: string, _options: ODataQueryOptions = {}): Promise<T[]> {
   const response = await bffApiCall<ODataCollectionResponse<T>>(bffPath);
   return response.value ?? [];
 }
@@ -245,11 +242,7 @@ async function getCollection<T>(
  * @param id       Record GUID
  * @param _options OData query options — reserved for future BFF support
  */
-async function getById<T>(
-  bffPath: string,
-  id: string,
-  _options: ODataQueryOptions = {}
-): Promise<T> {
+async function getById<T>(bffPath: string, id: string, _options: ODataQueryOptions = {}): Promise<T> {
   return bffApiCall<T>(`${bffPath}/${id}`);
 }
 
@@ -260,12 +253,9 @@ async function getById<T>(
  * @param body     Record payload to create
  * @returns        The created record
  */
-async function createRecord<TBody, TResult = TBody>(
-  bffPath: string,
-  body: TBody
-): Promise<TResult> {
+async function createRecord<TBody, TResult = TBody>(bffPath: string, body: TBody): Promise<TResult> {
   return bffApiCall<TResult>(bffPath, {
-    method: "POST",
+    method: 'POST',
     body: JSON.stringify(body),
   });
 }
@@ -277,13 +267,9 @@ async function createRecord<TBody, TResult = TBody>(
  * @param id       Record GUID to update
  * @param body     Partial record payload with fields to update
  */
-async function updateRecord<TBody>(
-  bffPath: string,
-  id: string,
-  body: Partial<TBody>
-): Promise<void> {
+async function updateRecord<TBody>(bffPath: string, id: string, body: Partial<TBody>): Promise<void> {
   await bffApiCall<void>(`${bffPath}/${id}`, {
-    method: "PATCH",
+    method: 'PATCH',
     body: JSON.stringify(body),
   });
 }
@@ -301,17 +287,15 @@ async function updateRecord<TBody>(
  *
  * @param options  Optional OData query overrides ($filter, $top, etc.)
  */
-export async function getProjects(
-  options: ODataQueryOptions = {}
-): Promise<ODataProject[]> {
+export async function getProjects(options: ODataQueryOptions = {}): Promise<ODataProject[]> {
   const defaults: ODataQueryOptions = {
     $select:
-      "sprk_projectid,sprk_name,sprk_referencenumber,sprk_description,sprk_issecure,sprk_status,createdon,modifiedon",
-    $orderby: "sprk_name asc",
+      'sprk_projectid,sprk_name,sprk_referencenumber,sprk_description,sprk_issecure,sprk_status,createdon,modifiedon',
+    $orderby: 'sprk_name asc',
     $top: 100,
   };
 
-  return getCollection<ODataProject>("/api/v1/external/projects", { ...defaults, ...options });
+  return getCollection<ODataProject>('/api/v1/external/projects', { ...defaults, ...options });
 }
 
 /**
@@ -320,16 +304,13 @@ export async function getProjects(
  * @param projectId  Dataverse GUID of the sprk_project record
  * @param options    Optional OData query overrides ($select, $expand)
  */
-export async function getProjectById(
-  projectId: string,
-  options: ODataQueryOptions = {}
-): Promise<ODataProject> {
+export async function getProjectById(projectId: string, options: ODataQueryOptions = {}): Promise<ODataProject> {
   const defaults: ODataQueryOptions = {
     $select:
-      "sprk_projectid,sprk_name,sprk_referencenumber,sprk_description,sprk_issecure,sprk_status,createdon,modifiedon",
+      'sprk_projectid,sprk_name,sprk_referencenumber,sprk_description,sprk_issecure,sprk_status,createdon,modifiedon',
   };
 
-  return getById<ODataProject>("/api/v1/external/projects", projectId, { ...defaults, ...options });
+  return getById<ODataProject>('/api/v1/external/projects', projectId, { ...defaults, ...options });
 }
 
 // ---------------------------------------------------------------------------
@@ -345,15 +326,11 @@ export async function getProjectById(
  * @param projectId  Dataverse GUID of the parent sprk_project record
  * @param options    Optional OData query overrides
  */
-export async function getDocuments(
-  projectId: string,
-  options: ODataQueryOptions = {}
-): Promise<ODataDocument[]> {
+export async function getDocuments(projectId: string, options: ODataQueryOptions = {}): Promise<ODataDocument[]> {
   const defaults: ODataQueryOptions = {
-    $select:
-      "sprk_documentid,sprk_name,sprk_documenttype,sprk_summary,_sprk_projectid_value,createdon",
+    $select: 'sprk_documentid,sprk_name,sprk_documenttype,sprk_summary,_sprk_projectid_value,createdon',
     $filter: `_sprk_projectid_value eq '${projectId}'`,
-    $orderby: "createdon desc",
+    $orderby: 'createdon desc',
     $top: 200,
   };
 
@@ -380,15 +357,11 @@ export async function getDocuments(
  * @param projectId  Dataverse GUID of the parent sprk_project record
  * @param options    Optional OData query overrides
  */
-export async function getEvents(
-  projectId: string,
-  options: ODataQueryOptions = {}
-): Promise<ODataEvent[]> {
+export async function getEvents(projectId: string, options: ODataQueryOptions = {}): Promise<ODataEvent[]> {
   const defaults: ODataQueryOptions = {
-    $select:
-      "sprk_eventid,sprk_name,sprk_duedate,sprk_status,sprk_todoflag,_sprk_projectid_value,createdon",
+    $select: 'sprk_eventid,sprk_name,sprk_duedate,sprk_status,sprk_todoflag,_sprk_projectid_value,createdon',
     $filter: `_sprk_projectid_value eq '${projectId}'`,
-    $orderby: "sprk_duedate asc",
+    $orderby: 'sprk_duedate asc',
     $top: 200,
   };
 
@@ -418,18 +391,14 @@ export async function getEvents(
  * @param projectId  Dataverse GUID of the sprk_project record
  * @param options    Optional OData query overrides
  */
-export async function getContacts(
-  projectId: string,
-  options: ODataQueryOptions = {}
-): Promise<ODataContact[]> {
+export async function getContacts(projectId: string, options: ODataQueryOptions = {}): Promise<ODataContact[]> {
   const defaults: ODataQueryOptions = {
-    $select:
-      "contactid,fullname,firstname,lastname,emailaddress1,telephone1,jobtitle,_parentcustomerid_value",
+    $select: 'contactid,fullname,firstname,lastname,emailaddress1,telephone1,jobtitle,_parentcustomerid_value',
     // Filter contacts that have an active access record for this project.
     // The relationship is: contact → sprk_externalrecordaccess → sprk_project
     // We filter via the related entity navigation property.
     $filter: `sprk_externalrecordaccess_contact_contactid/any(a:a/_sprk_projectid_value eq '${projectId}' and a/statecode eq 0)`,
-    $orderby: "fullname asc",
+    $orderby: 'fullname asc',
     $top: 100,
   };
 
@@ -460,11 +429,10 @@ export async function getOrganizations(
   options: ODataQueryOptions = {}
 ): Promise<ODataOrganization[]> {
   const defaults: ODataQueryOptions = {
-    $select:
-      "accountid,name,websiteurl,telephone1,address1_city,address1_country",
+    $select: 'accountid,name,websiteurl,telephone1,address1_city,address1_country',
     // Filter accounts that have contacts with access to this project.
     $filter: `contact_customer_accounts/any(c:c/sprk_externalrecordaccess_contact_contactid/any(a:a/_sprk_projectid_value eq '${projectId}' and a/statecode eq 0))`,
-    $orderby: "name asc",
+    $orderby: 'name asc',
     $top: 100,
   };
 
@@ -498,7 +466,7 @@ export interface CreateEventPayload {
    * OData binding syntax to associate the event with a project.
    * Example: "sprk_projects(b1c2d3e4-0000-0000-0000-000000000001)"
    */
-  "sprk_projectid@odata.bind"?: string;
+  'sprk_projectid@odata.bind'?: string;
 }
 
 /**
@@ -528,14 +496,11 @@ export interface UpdateEventPayload {
  * @param payload    Event fields to set on creation
  * @returns          The created ODataEvent record (with system fields populated)
  */
-export async function createEvent(
-  projectId: string,
-  payload: CreateEventPayload
-): Promise<ODataEvent> {
+export async function createEvent(projectId: string, payload: CreateEventPayload): Promise<ODataEvent> {
   const body: CreateEventPayload = {
     ...payload,
     // Bind to the project using OData navigation property syntax
-    "sprk_projectid@odata.bind": `sprk_projects(${projectId})`,
+    'sprk_projectid@odata.bind': `sprk_projects(${projectId})`,
   };
 
   return createRecord<CreateEventPayload, ODataEvent>(`/api/v1/external/projects/${projectId}/events`, body);
@@ -550,11 +515,8 @@ export async function createEvent(
  * @param eventId  Dataverse GUID of the sprk_event record to update
  * @param payload  Partial event fields to update
  */
-export async function updateEvent(
-  eventId: string,
-  payload: UpdateEventPayload
-): Promise<void> {
-  return updateRecord<UpdateEventPayload>("/api/v1/external/events", eventId, payload);
+export async function updateEvent(eventId: string, payload: UpdateEventPayload): Promise<void> {
+  return updateRecord<UpdateEventPayload>('/api/v1/external/events', eventId, payload);
 }
 
 // ---------------------------------------------------------------------------

@@ -163,16 +163,16 @@ public static partial class CitationExtractor
     private static string NormalizeCaseLaw(Match m)
     {
         // Canonical form: "{volume} {reporter} {page}" (strips year/court parenthetical)
-        var volume   = m.Groups["volume"].Value.Trim();
+        var volume = m.Groups["volume"].Value.Trim();
         var reporter = m.Groups["reporter"].Value.Trim().TrimEnd('.');
-        var page     = m.Groups["page"].Value.Trim();
+        var page = m.Groups["page"].Value.Trim();
         return $"{volume} {reporter} {page}";
     }
 
     private static string NormalizeStatute(Match m)
     {
         // Canonical form: "{title} U.S.C. § {section}"
-        var title   = m.Groups["title"].Value.Trim();
+        var title = m.Groups["title"].Value.Trim();
         var section = m.Groups["section"].Value.Trim();
         return $"{title} U.S.C. § {section}";
     }
@@ -200,7 +200,7 @@ public static partial class CitationExtractor
     {
         // Canonical form: "{title} C.F.R. § {part}"
         var title = m.Groups["title"].Value.Trim();
-        var part  = m.Groups["part"].Value.Trim();
+        var part = m.Groups["part"].Value.Trim();
         return $"{title} C.F.R. § {part}";
     }
 }

@@ -66,7 +66,7 @@ export interface ContextWidgetHighlightHandle {
  */
 export type HighlighterFactory<T = unknown> = (
   containerRef: React.RefObject<HTMLDivElement | null>,
-  getLatestData: () => T | undefined,
+  getLatestData: () => T | undefined
 ) => ((citationId: string, selectionRef?: string) => void) | undefined;
 
 // ---------------------------------------------------------------------------
@@ -104,10 +104,8 @@ interface SourceWidgetCompatProps<T> {
  */
 export function createContextWidgetAdapter<T = unknown>(
   InnerWidget: React.ComponentType<SourceWidgetCompatProps<T>>,
-  highlighterFactory?: HighlighterFactory<T>,
-): React.ForwardRefExoticComponent<
-  ContextWidgetProps<T> & React.RefAttributes<ContextWidgetHighlightHandle>
-> {
+  highlighterFactory?: HighlighterFactory<T>
+): React.ForwardRefExoticComponent<ContextWidgetProps<T> & React.RefAttributes<ContextWidgetHighlightHandle>> {
   const AdaptedWidget = forwardRef<ContextWidgetHighlightHandle, ContextWidgetProps<T>>(
     function AdaptedWidget(props, ref) {
       const { data, widgetType: _widgetType, isLoading, error, className } = props;
@@ -122,9 +120,7 @@ export function createContextWidgetAdapter<T = unknown>(
 
       // Build the onHighlight implementation once (via factory) and expose it.
       // Use a null sentinel to distinguish "not yet initialized" from "no-op factory".
-      const highlighterRef = useRef<
-        ((citationId: string, selectionRef?: string) => void) | null | undefined
-      >(null); // null = uninitialized sentinel
+      const highlighterRef = useRef<((citationId: string, selectionRef?: string) => void) | null | undefined>(null); // null = uninitialized sentinel
 
       // Initialise highlighter on first render (factory captures containerRef).
       // null  → not yet initialized; undefined → factory returned no-op.
@@ -141,20 +137,15 @@ export function createContextWidgetAdapter<T = unknown>(
             highlighterRef.current?.(citationId, selectionRef);
           },
         }),
-        [],
+        []
       );
 
       return (
         <div ref={containerRef} style={{ height: '100%', overflow: 'hidden' }}>
-          <InnerWidget
-            data={data as T}
-            isLoading={isLoading}
-            error={error}
-            className={className}
-          />
+          <InnerWidget data={data as T} isLoading={isLoading} error={error} className={className} />
         </div>
       );
-    },
+    }
   );
 
   AdaptedWidget.displayName = `ContextWidgetAdapter(${InnerWidget.displayName ?? InnerWidget.name ?? 'Unknown'})`;
@@ -180,14 +171,12 @@ export function createContextWidgetAdapter<T = unknown>(
  * selectionRef to the embedded viewer via the URL hash or postMessage.
  */
 export function createDocumentViewerHighlighter<T>(): HighlighterFactory<T> {
-  return (containerRef) => (citationId: string, selectionRef?: string) => {
+  return containerRef => (citationId: string, selectionRef?: string) => {
     const container = containerRef.current;
     if (!container) return;
 
     // Attempt to scroll to an element annotated with the citationId.
-    const target = container.querySelector<HTMLElement>(
-      `[data-citation-id="${CSS.escape(citationId)}"]`,
-    );
+    const target = container.querySelector<HTMLElement>(`[data-citation-id="${CSS.escape(citationId)}"]`);
     if (target) {
       target.scrollIntoView({ behavior: 'smooth', block: 'center' });
       target.classList.add('context-citation-highlight');
@@ -200,7 +189,7 @@ export function createDocumentViewerHighlighter<T>(): HighlighterFactory<T> {
       `[ai-widgets] DocumentViewerWidget.onHighlight: citation "${citationId}"` +
         (selectionRef ? ` @ ${selectionRef}` : '') +
         ' — embedded viewer does not support programmatic scroll; ' +
-        'pass selectionRef via URL hash or postMessage to the embed.',
+        'pass selectionRef via URL hash or postMessage to the embed.'
     );
   };
 }
@@ -213,17 +202,13 @@ export function createDocumentViewerHighlighter<T>(): HighlighterFactory<T> {
  * Scrolls the matching item into view and applies a transient highlight ring.
  */
 export function createCitationHighlighter<T>(): HighlighterFactory<T> {
-  return (containerRef) => (citationId: string) => {
+  return containerRef => (citationId: string) => {
     const container = containerRef.current;
     if (!container) return;
 
-    const target = container.querySelector<HTMLElement>(
-      `[data-citation-id="${CSS.escape(citationId)}"]`,
-    );
+    const target = container.querySelector<HTMLElement>(`[data-citation-id="${CSS.escape(citationId)}"]`);
     if (!target) {
-      console.debug(
-        `[ai-widgets] CitationWidget.onHighlight: citation "${citationId}" not found in rendered list.`,
-      );
+      console.debug(`[ai-widgets] CitationWidget.onHighlight: citation "${citationId}" not found in rendered list.`);
       return;
     }
 
@@ -242,7 +227,7 @@ export function createCitationHighlighter<T>(): HighlighterFactory<T> {
  * sub-paragraph navigation in a single-card widget).
  */
 export function createLegalLibraryHighlighter<T>(): HighlighterFactory<T> {
-  return (containerRef) => (citationId: string, selectionRef?: string) => {
+  return containerRef => (citationId: string, selectionRef?: string) => {
     const container = containerRef.current;
     if (!container) return;
 
@@ -256,7 +241,7 @@ export function createLegalLibraryHighlighter<T>(): HighlighterFactory<T> {
 
     console.debug(
       `[ai-widgets] LegalLibraryWidget.onHighlight: citation "${citationId}"` +
-        (selectionRef ? ` @ ${selectionRef}` : ''),
+        (selectionRef ? ` @ ${selectionRef}` : '')
     );
   };
 }

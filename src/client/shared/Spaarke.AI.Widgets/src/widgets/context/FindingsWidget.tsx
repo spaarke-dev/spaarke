@@ -30,21 +30,8 @@
  */
 
 import React, { useState } from 'react';
-import {
-  makeStyles,
-  tokens,
-  Badge,
-  Text,
-  Button,
-  mergeClasses,
-  Divider,
-} from '@fluentui/react-components';
-import {
-  ChevronDownRegular,
-  ChevronUpRegular,
-  LinkRegular,
-  DocumentSearchRegular,
-} from '@fluentui/react-icons';
+import { makeStyles, tokens, Badge, Text, Button, mergeClasses, Divider } from '@fluentui/react-components';
+import { ChevronDownRegular, ChevronUpRegular, LinkRegular, DocumentSearchRegular } from '@fluentui/react-icons';
 import { useDispatchPaneEvent } from '../../events/useDispatchPaneEvent';
 import type { ContextWidgetProps } from '../../types/widget-types';
 
@@ -123,9 +110,7 @@ export interface FindingsData {
  * The token mapping is handled internally by Fluent — we never reference
  * colour tokens directly on the badge (ADR-021: no hard-coded colours).
  */
-function getRiskBadgeColor(
-  riskLevel: RiskLevel
-): 'danger' | 'warning' | 'success' | 'informative' {
+function getRiskBadgeColor(riskLevel: RiskLevel): 'danger' | 'warning' | 'success' | 'informative' {
   switch (riskLevel) {
     case 'high':
       return 'danger';
@@ -328,12 +313,7 @@ function FindingCard({ finding, onCitationClick, styles }: FindingCardProps): Re
     <div className={styles.findingCard} data-testid={`finding-card-${finding.id}`}>
       {/* ── Risk badge + title ── */}
       <div className={styles.cardHeaderRow}>
-        <Badge
-          appearance="filled"
-          color={badgeColor}
-          size="small"
-          data-testid={`risk-badge-${finding.id}`}
-        >
+        <Badge appearance="filled" color={badgeColor} size="small" data-testid={`risk-badge-${finding.id}`}>
           {badgeLabel}
         </Badge>
         <Text className={styles.cardTitle}>{finding.title}</Text>
@@ -352,23 +332,21 @@ function FindingCard({ finding, onCitationClick, styles }: FindingCardProps): Re
               className={styles.detailToggleButton}
               icon={detailExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
               iconPosition="after"
-              onClick={() => setDetailExpanded((prev) => !prev)}
+              onClick={() => setDetailExpanded(prev => !prev)}
               aria-expanded={detailExpanded}
               aria-label={detailExpanded ? 'Collapse detail' : 'Expand detail'}
             >
               {detailExpanded ? 'Less' : 'More'}
             </Button>
           </div>
-          {detailExpanded && (
-            <Text className={styles.detailText}>{finding.detail}</Text>
-          )}
+          {detailExpanded && <Text className={styles.detailText}>{finding.detail}</Text>}
         </>
       )}
 
       {/* ── Citation links ── */}
       {hasCitations && (
         <div className={styles.citationList} aria-label="Citations">
-          {finding.citations!.map((citation) => (
+          {finding.citations!.map(citation => (
             <div key={citation.citationId} className={styles.citationRow}>
               <LinkRegular className={styles.citationIcon} />
               <Button
@@ -413,12 +391,7 @@ function FindingCard({ finding, onCitationClick, styles }: FindingCardProps): Re
  *   - `error`      — optional error message (rendered as an error state)
  *   - `className`  — optional root class name override
  */
-const FindingsWidget: React.FC<ContextWidgetProps<FindingsData>> = ({
-  data,
-  isLoading = false,
-  error,
-  className,
-}) => {
+const FindingsWidget: React.FC<ContextWidgetProps<FindingsData>> = ({ data, isLoading = false, error, className }) => {
   const styles = useStyles();
   const dispatch = useDispatchPaneEvent();
 
@@ -472,13 +445,8 @@ const FindingsWidget: React.FC<ContextWidgetProps<FindingsData>> = ({
 
       {/* ── Findings list or empty state ── */}
       {hasFindings ? (
-        findings.map((finding) => (
-          <FindingCard
-            key={finding.id}
-            finding={finding}
-            onCitationClick={handleCitationClick}
-            styles={styles}
-          />
+        findings.map(finding => (
+          <FindingCard key={finding.id} finding={finding} onCitationClick={handleCitationClick} styles={styles} />
         ))
       ) : (
         <div className={styles.emptyState}>

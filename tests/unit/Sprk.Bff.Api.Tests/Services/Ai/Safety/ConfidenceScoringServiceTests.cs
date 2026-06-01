@@ -253,10 +253,10 @@ public class ConfidenceScoringServiceTests
     // =========================================================================
 
     [Theory]
-    [InlineData(0,  false)]
-    [InlineData(1,  false)]
-    [InlineData(3,  true)]
-    [InlineData(5,  true)]
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(3, true)]
+    [InlineData(5, true)]
     [InlineData(10, true)]
     public void Score_RationaleIsAlwaysNonEmpty(int sourceCount, bool hasGroundedness)
     {

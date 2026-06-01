@@ -16,17 +16,9 @@
  * Standards: ADR-012 (shared component library), ADR-021 (Fluent v9, dark mode)
  */
 
-import * as React from "react";
-import {
-  Text,
-  Badge,
-  Button,
-  makeStyles,
-  shorthands,
-  tokens,
-  mergeClasses,
-} from "@fluentui/react-components";
-import { ChevronDownRegular, ChevronUpRegular } from "@fluentui/react-icons";
+import * as React from 'react';
+import { Text, Badge, Button, makeStyles, shorthands, tokens, mergeClasses } from '@fluentui/react-components';
+import { ChevronDownRegular, ChevronUpRegular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -76,20 +68,20 @@ export interface SectionPanelProps {
 
 const useStyles = makeStyles({
   card: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.borderWidth("1px"),
-    ...shorthands.borderStyle("solid"),
+    ...shorthands.borderWidth('1px'),
+    ...shorthands.borderStyle('solid'),
     ...shorthands.borderColor(tokens.colorNeutralStroke2),
     borderRadius: tokens.borderRadiusMedium,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   titleBar: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
@@ -97,37 +89,37 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   titleArea: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   toolbarRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    borderBottomWidth: "1px" as const,
-    borderBottomStyle: "solid" as const,
+    borderBottomWidth: '1px' as const,
+    borderBottomStyle: 'solid' as const,
     borderBottomColor: tokens.colorNeutralStroke2,
     backgroundColor: tokens.colorNeutralBackground2,
     flexShrink: 0,
-    minHeight: "36px",
+    minHeight: '36px',
   },
   toolbarSpacer: {
-    flex: "1 1 0",
+    flex: '1 1 0',
   },
   content: {
-    display: "flex",
-    flexDirection: "column",
-    flex: "1 1 auto",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1 1 auto',
+    overflow: 'hidden',
   },
   contentCollapsed: {
-    display: "none",
+    display: 'none',
   },
 });
 
@@ -188,10 +180,7 @@ export const SectionPanel: React.FC<SectionPanelProps> = ({
   const showBadge = badgeCount !== undefined && badgeCount > 0;
 
   return (
-    <div
-      className={mergeClasses(styles.card, className)}
-      style={style}
-    >
+    <div className={mergeClasses(styles.card, className)} style={style}>
       {/* Title bar */}
       <div className={styles.titleBar}>
         <div className={styles.titleArea}>
@@ -229,17 +218,11 @@ export const SectionPanel: React.FC<SectionPanelProps> = ({
       )}
 
       {/* Content */}
-      <div
-        className={mergeClasses(
-          styles.content,
-          !isOpen && styles.contentCollapsed
-        )}
-        aria-hidden={!isOpen}
-      >
+      <div className={mergeClasses(styles.content, !isOpen && styles.contentCollapsed)} aria-hidden={!isOpen}>
         {children}
       </div>
     </div>
   );
 };
 
-SectionPanel.displayName = "SectionPanel";
+SectionPanel.displayName = 'SectionPanel';

@@ -295,9 +295,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
   const updateMessageMetadataAt = useCallback(
     (
       index: number,
-      metadataOrUpdater:
-        | IChatMessageMetadata
-        | ((current: IChatMessageMetadata | undefined) => IChatMessageMetadata)
+      metadataOrUpdater: IChatMessageMetadata | ((current: IChatMessageMetadata | undefined) => IChatMessageMetadata)
     ) => {
       setMessages(prev => {
         if (index < 0 || index >= prev.length) {

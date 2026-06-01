@@ -58,10 +58,7 @@ import {
   Delete20Regular,
 } from '@fluentui/react-icons';
 
-import type {
-  DocumentRowAction,
-  IDocumentRowMenuTarget,
-} from '../types/DocumentRowMenu';
+import type { DocumentRowAction, IDocumentRowMenuTarget } from '../types/DocumentRowMenu';
 
 // Re-export the types so consumers can `import { ... } from '@spaarke/ui-components'`
 // once the barrel is updated by task 012.
@@ -180,11 +177,7 @@ export const DocumentRowMenu: React.FC<IDocumentRowMenuProps> = ({
   }, []);
 
   const renderItem = (a: IActionDescriptor): React.ReactElement => (
-    <MenuItem
-      key={a.key}
-      icon={a.icon}
-      onClick={() => onAction(a.key)}
-    >
+    <MenuItem key={a.key} icon={a.icon} onClick={() => onAction(a.key)}>
       {a.label}
     </MenuItem>
   );

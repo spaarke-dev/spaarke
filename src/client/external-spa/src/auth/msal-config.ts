@@ -18,8 +18,8 @@
  * See: notes/auth-migration-b2b-msal.md
  */
 
-import { PublicClientApplication, type Configuration } from "@azure/msal-browser";
-import { MSAL_CLIENT_ID, MSAL_TENANT_ID } from "../config";
+import { PublicClientApplication, type Configuration } from '@azure/msal-browser';
+import { MSAL_CLIENT_ID, MSAL_TENANT_ID } from '../config';
 
 const msalConfig: Configuration = {
   auth: {
@@ -40,7 +40,7 @@ const msalConfig: Configuration = {
      * Appropriate for a portal-hosted SPA where each tab is independent.
      * Do not use localStorage for B2B — avoids token leakage across tabs.
      */
-    cacheLocation: "sessionStorage",
+    cacheLocation: 'sessionStorage',
     storeAuthStateInCookie: false,
   },
 };

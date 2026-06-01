@@ -32,9 +32,7 @@ import { render, screen } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { PaneEventBus } from '../../events/PaneEventBus';
 import { PaneEventBusProvider } from '../../events/PaneEventBusContext';
-import SafetyAnnotationOverlay, {
-  AnnotatedMessageContent,
-} from '../SafetyAnnotationOverlay';
+import SafetyAnnotationOverlay, { AnnotatedMessageContent } from '../SafetyAnnotationOverlay';
 import { CitationBadge } from '../CitationBadge';
 import type { CitationVerificationResult } from '../CitationBadge';
 import { GroundednessHighlight } from '../GroundednessHighlight';
@@ -50,9 +48,7 @@ import type { GroundednessSegment } from '../GroundednessHighlight';
 function renderWithProviders(ui: React.ReactElement, bus: PaneEventBus) {
   return render(
     <FluentProvider theme={webLightTheme}>
-      <PaneEventBusProvider bus={bus}>
-        {ui}
-      </PaneEventBusProvider>
+      <PaneEventBusProvider bus={bus}>{ui}</PaneEventBusProvider>
     </FluentProvider>
   );
 }
@@ -61,11 +57,7 @@ function renderWithProviders(ui: React.ReactElement, bus: PaneEventBus) {
  * Wraps UI in FluentProvider only (no PaneEventBus needed for stateless components).
  */
 function renderWithFluent(ui: React.ReactElement) {
-  return render(
-    <FluentProvider theme={webLightTheme}>
-      {ui}
-    </FluentProvider>
-  );
+  return render(<FluentProvider theme={webLightTheme}>{ui}</FluentProvider>);
 }
 
 /** Minimal verified citation result. */
@@ -110,10 +102,7 @@ describe('SafetyAnnotationOverlay — timing', () => {
     const bus = new PaneEventBus();
 
     renderWithProviders(
-      <SafetyAnnotationOverlay
-        turnId="turn-1"
-        messageText="The contract was signed in 2025. See [1]."
-      />,
+      <SafetyAnnotationOverlay turnId="turn-1" messageText="The contract was signed in 2025. See [1]." />,
       bus
     );
 
@@ -128,9 +117,7 @@ describe('SafetyAnnotationOverlay — timing', () => {
         type: 'safety_annotation',
         groundedness: {
           score: 0.7,
-          ungrounded_segments: [
-            { start: 0, end: 31, grounded: false },
-          ],
+          ungrounded_segments: [{ start: 0, end: 31, grounded: false }],
         },
         citations: {
           '1': {
@@ -145,10 +132,7 @@ describe('SafetyAnnotationOverlay — timing', () => {
     });
 
     // Timer not yet elapsed — still plain.
-    expect(screen.getByTestId('safety-annotation-overlay')).toHaveAttribute(
-      'data-annotated',
-      'false'
-    );
+    expect(screen.getByTestId('safety-annotation-overlay')).toHaveAttribute('data-annotated', 'false');
 
     // Advance 200 ms.
     act(() => {
@@ -156,19 +140,13 @@ describe('SafetyAnnotationOverlay — timing', () => {
     });
 
     // Now annotated.
-    expect(screen.getByTestId('safety-annotation-overlay')).toHaveAttribute(
-      'data-annotated',
-      'true'
-    );
+    expect(screen.getByTestId('safety-annotation-overlay')).toHaveAttribute('data-annotated', 'true');
   });
 
   it('does NOT annotate before 200 ms have elapsed', () => {
     const bus = new PaneEventBus();
 
-    renderWithProviders(
-      <SafetyAnnotationOverlay turnId="turn-2" messageText="Test message." />,
-      bus
-    );
+    renderWithProviders(<SafetyAnnotationOverlay turnId="turn-2" messageText="Test message." />, bus);
 
     act(() => {
       bus.dispatch('safety', {
@@ -182,10 +160,7 @@ describe('SafetyAnnotationOverlay — timing', () => {
       jest.advanceTimersByTime(199);
     });
 
-    expect(screen.getByTestId('safety-annotation-overlay')).toHaveAttribute(
-      'data-annotated',
-      'false'
-    );
+    expect(screen.getByTestId('safety-annotation-overlay')).toHaveAttribute('data-annotated', 'false');
   });
 
   it('(f) timer is cleared on unmount — no state update after unmount', () => {
@@ -237,13 +212,7 @@ describe('SafetyAnnotationOverlay — ungrounded segment highlighting', () => {
   it('(b) renders ungrounded-segment span when annotation has ungrounded segments', () => {
     const bus = new PaneEventBus();
 
-    renderWithProviders(
-      <SafetyAnnotationOverlay
-        turnId="turn-4"
-        messageText="Claim one. Claim two."
-      />,
-      bus
-    );
+    renderWithProviders(<SafetyAnnotationOverlay turnId="turn-4" messageText="Claim one. Claim two." />, bus);
 
     act(() => {
       bus.dispatch('safety', {
@@ -270,13 +239,7 @@ describe('SafetyAnnotationOverlay — ungrounded segment highlighting', () => {
   it('no ungrounded spans when all segments are grounded', () => {
     const bus = new PaneEventBus();
 
-    renderWithProviders(
-      <SafetyAnnotationOverlay
-        turnId="turn-5"
-        messageText="Fully grounded claim."
-      />,
-      bus
-    );
+    renderWithProviders(<SafetyAnnotationOverlay turnId="turn-5" messageText="Fully grounded claim." />, bus);
 
     act(() => {
       bus.dispatch('safety', {
@@ -333,9 +296,7 @@ describe('CitationBadge — variant per status', () => {
     const badgeWrapper = screen.getByTestId('citation-badge-2');
     // The aria-label on the Badge carries the message.
     const badgeEl = badgeWrapper.querySelector('[aria-label]');
-    expect(badgeEl?.getAttribute('aria-label')).toMatch(
-      /not found in available sources/i
-    );
+    expect(badgeEl?.getAttribute('aria-label')).toMatch(/not found in available sources/i);
   });
 
   it('renders the correct test-id per citation id', () => {
@@ -361,10 +322,7 @@ describe('SafetyAnnotationOverlay — missing annotation', () => {
     const bus = new PaneEventBus();
 
     renderWithProviders(
-      <SafetyAnnotationOverlay
-        turnId="turn-6"
-        messageText="Plain message with no annotation."
-      />,
+      <SafetyAnnotationOverlay turnId="turn-6" messageText="Plain message with no annotation." />,
       bus
     );
 
@@ -379,13 +337,7 @@ describe('SafetyAnnotationOverlay — missing annotation', () => {
     jest.useFakeTimers();
     const bus = new PaneEventBus();
 
-    renderWithProviders(
-      <SafetyAnnotationOverlay
-        turnId="turn-7"
-        messageText="Should remain unannotated."
-      />,
-      bus
-    );
+    renderWithProviders(<SafetyAnnotationOverlay turnId="turn-7" messageText="Should remain unannotated." />, bus);
 
     act(() => {
       bus.dispatch('safety', {
@@ -398,10 +350,7 @@ describe('SafetyAnnotationOverlay — missing annotation', () => {
       jest.advanceTimersByTime(500);
     });
 
-    expect(screen.getByTestId('safety-annotation-overlay')).toHaveAttribute(
-      'data-annotated',
-      'false'
-    );
+    expect(screen.getByTestId('safety-annotation-overlay')).toHaveAttribute('data-annotated', 'false');
 
     jest.runOnlyPendingTimers();
     jest.useRealTimers();
@@ -411,13 +360,7 @@ describe('SafetyAnnotationOverlay — missing annotation', () => {
     jest.useFakeTimers();
     const bus = new PaneEventBus();
 
-    renderWithProviders(
-      <SafetyAnnotationOverlay
-        turnId="turn-8"
-        messageText="No segments here."
-      />,
-      bus
-    );
+    renderWithProviders(<SafetyAnnotationOverlay turnId="turn-8" messageText="No segments here." />, bus);
 
     act(() => {
       bus.dispatch('safety', {
@@ -433,10 +376,7 @@ describe('SafetyAnnotationOverlay — missing annotation', () => {
 
     // Empty segments + no citations → annotation has nothing to show.
     // Component stays in plain-text mode (data-annotated="false").
-    expect(screen.getByTestId('safety-annotation-overlay')).toHaveAttribute(
-      'data-annotated',
-      'false'
-    );
+    expect(screen.getByTestId('safety-annotation-overlay')).toHaveAttribute('data-annotated', 'false');
 
     jest.runOnlyPendingTimers();
     jest.useRealTimers();
@@ -453,9 +393,7 @@ describe('AnnotatedMessageContent — unified render', () => {
     { start: 12, end: 35, grounded: false },
   ];
 
-  const citationMap = new Map<string, CitationVerificationResult>([
-    ['1', verifiedResult],
-  ]);
+  const citationMap = new Map<string, CitationVerificationResult>([['1', verifiedResult]]);
 
   it('(g) renders groundedness-highlight and citation badge in a single pass', () => {
     renderWithFluent(
@@ -510,26 +448,17 @@ describe('GroundednessHighlight — segment rendering', () => {
 
   it('(m) grounded segments render as plain text without the ungrounded-segment wrapper', () => {
     renderWithFluent(
-      <GroundednessHighlight
-        text="Grounded claim only."
-        segments={[{ start: 0, end: 20, grounded: true }]}
-      />
+      <GroundednessHighlight text="Grounded claim only." segments={[{ start: 0, end: 20, grounded: true }]} />
     );
 
     expect(screen.queryByTestId('ungrounded-segment')).not.toBeInTheDocument();
-    expect(screen.getByTestId('groundedness-highlight')).toHaveTextContent(
-      'Grounded claim only.'
-    );
+    expect(screen.getByTestId('groundedness-highlight')).toHaveTextContent('Grounded claim only.');
   });
 
   it('(n) renders plain text unchanged when no segments provided', () => {
-    renderWithFluent(
-      <GroundednessHighlight text="No segments at all." />
-    );
+    renderWithFluent(<GroundednessHighlight text="No segments at all." />);
 
-    expect(screen.getByTestId('groundedness-highlight')).toHaveTextContent(
-      'No segments at all.'
-    );
+    expect(screen.getByTestId('groundedness-highlight')).toHaveTextContent('No segments at all.');
     expect(screen.queryByTestId('ungrounded-segment')).not.toBeInTheDocument();
   });
 
@@ -552,9 +481,7 @@ describe('GroundednessHighlight — segment rendering', () => {
   });
 
   it('renders all text as plain when segments array is empty', () => {
-    renderWithFluent(
-      <GroundednessHighlight text="All plain." segments={[]} />
-    );
+    renderWithFluent(<GroundednessHighlight text="All plain." segments={[]} />);
 
     expect(screen.getByTestId('groundedness-highlight')).toHaveTextContent('All plain.');
     expect(screen.queryByTestId('ungrounded-segment')).not.toBeInTheDocument();

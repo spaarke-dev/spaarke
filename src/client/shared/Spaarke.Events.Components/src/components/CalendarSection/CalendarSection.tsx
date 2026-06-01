@@ -28,15 +28,9 @@
  * @see projects/spaarke-ai-platform-unification-r3/tasks/118-calendar-widget-r11-polish.poml
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  shorthands,
-  Text,
-  Button,
-} from "@fluentui/react-components";
-import { DismissRegular, Calendar24Regular } from "@fluentui/react-icons";
+import * as React from 'react';
+import { makeStyles, tokens, shorthands, Text, Button } from '@fluentui/react-components';
+import { DismissRegular, Calendar24Regular } from '@fluentui/react-icons';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -45,17 +39,17 @@ import { DismissRegular, Calendar24Regular } from "@fluentui/react-icons";
 /**
  * Calendar filter output format (matches EventCalendarFilter output)
  */
-export type CalendarFilterType = "single" | "range" | "clear";
+export type CalendarFilterType = 'single' | 'range' | 'clear';
 
 export interface CalendarFilterSingle {
-  type: "single";
+  type: 'single';
   date: string;
   /** Date fields to filter by (e.g., ['sprk_DueDate', 'CreatedOn']) */
   dateFields?: string[];
 }
 
 export interface CalendarFilterRange {
-  type: "range";
+  type: 'range';
   start: string;
   end: string;
   /** Date fields to filter by (e.g., ['sprk_DueDate', 'CreatedOn']) */
@@ -63,13 +57,10 @@ export interface CalendarFilterRange {
 }
 
 export interface CalendarFilterClear {
-  type: "clear";
+  type: 'clear';
 }
 
-export type CalendarFilterOutput =
-  | CalendarFilterSingle
-  | CalendarFilterRange
-  | CalendarFilterClear;
+export type CalendarFilterOutput = CalendarFilterSingle | CalendarFilterRange | CalendarFilterClear;
 
 /**
  * Event date info for calendar indicators
@@ -132,7 +123,7 @@ export interface CalendarSectionProps {
    * Defaults to `'vertical'` so existing CalendarSection consumers render
    * identically without changes.
    */
-  layout?: "vertical" | "horizontal";
+  layout?: 'vertical' | 'horizontal';
 
   /**
    * Controlled selected date (task 118).
@@ -170,33 +161,33 @@ export interface CalendarSectionProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    width: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    ...shorthands.padding("12px", "16px"),
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke1),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shorthands.padding('12px', '16px'),
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
   },
   headerTitle: {
-    display: "flex",
-    alignItems: "center",
-    ...shorthands.gap("8px"),
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('8px'),
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
   calendarContent: {
     flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.padding("8px"),
-    overflowY: "auto",
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.padding('8px'),
+    overflowY: 'auto',
   },
   // Task 116: horizontal layout variant. Row of months, no internal scroll
   // (the consuming widget bounds the width and uses external arrows to
@@ -208,15 +199,15 @@ const useStyles = makeStyles({
   // count at typical workspace widths.
   calendarContentHorizontal: {
     flex: 1,
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "flex-start",
-    ...shorthands.padding("8px"),
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    ...shorthands.padding('8px'),
     columnGap: tokens.spacingHorizontalXL,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   monthContainer: {
-    marginBottom: "16px",
+    marginBottom: '16px',
   },
   // Task 116: in horizontal layout each month is a fixed-min-width column;
   // the bottom margin from `monthContainer` is irrelevant because flex
@@ -231,48 +222,48 @@ const useStyles = makeStyles({
   // month from the next without competing with the day-cell content.
   monthContainerHorizontal: {
     marginBottom: 0,
-    flex: "1 1 0",
-    minWidth: "240px",
+    flex: '1 1 0',
+    minWidth: '240px',
     paddingLeft: tokens.spacingHorizontalL,
     borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
-    ":first-of-type": {
+    ':first-of-type': {
       paddingLeft: 0,
-      borderLeft: "none",
+      borderLeft: 'none',
     },
   },
   monthHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    ...shorthands.padding("8px"),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shorthands.padding('8px'),
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground1,
   },
   weekRow: {
-    display: "grid",
-    gridTemplateColumns: "repeat(7, 1fr)",
-    ...shorthands.gap("2px"),
+    display: 'grid',
+    gridTemplateColumns: 'repeat(7, 1fr)',
+    ...shorthands.gap('2px'),
   },
   dayHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground3,
-    ...shorthands.padding("4px", "0"),
+    ...shorthands.padding('4px', '0'),
   },
   dayCell: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-    minHeight: "36px",
-    ...shorthands.padding("4px"),
-    ...shorthands.borderRadius("4px"),
-    cursor: "pointer",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    minHeight: '36px',
+    ...shorthands.padding('4px'),
+    ...shorthands.borderRadius('4px'),
+    cursor: 'pointer',
     // Task 127 (R13 follow-up #6): removed the base :hover from dayCell.
     // The neutral-background hover now lives on `dayCellNeutralHover` and
     // is applied conditionally only to cells that don't have a stronger
@@ -286,7 +277,7 @@ const useStyles = makeStyles({
   // "regular" cells without competing with event-day / selected / in-range
   // visualizations.
   dayCellNeutralHover: {
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
@@ -296,8 +287,8 @@ const useStyles = makeStyles({
   // preserved but no day number, click handler, or hover effect exists.
   // The eventIndicator dot is also suppressed here (see render loop).
   dayCellEmpty: {
-    minHeight: "36px",
-    ...shorthands.padding("4px"),
+    minHeight: '36px',
+    ...shorthands.padding('4px'),
   },
   dayCellOtherMonth: {
     color: tokens.colorNeutralForeground4,
@@ -317,14 +308,14 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackgroundInverted,
     color: tokens.colorNeutralForegroundInverted,
     boxShadow: `inset 0 0 0 2px ${tokens.colorNeutralStroke1}`,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackgroundInverted,
     },
   },
   dayCellInRange: {
     backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorBrandForeground1,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorBrandBackground2Hover,
     },
   },
@@ -356,27 +347,27 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
   },
   eventIndicator: {
-    position: "absolute",
-    bottom: "2px",
-    width: "4px",
-    height: "4px",
-    ...shorthands.borderRadius("50%"),
+    position: 'absolute',
+    bottom: '2px',
+    width: '4px',
+    height: '4px',
+    ...shorthands.borderRadius('50%'),
     backgroundColor: tokens.colorBrandBackground,
   },
   eventIndicatorSelected: {
     backgroundColor: tokens.colorNeutralForegroundOnBrand,
   },
   footer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    ...shorthands.padding("8px", "16px"),
-    ...shorthands.borderTop("1px", "solid", tokens.colorNeutralStroke1),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shorthands.padding('8px', '16px'),
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
     backgroundColor: tokens.colorNeutralBackground1,
   },
   clearButton: {
     fontSize: tokens.fontSizeBase200,
-    minWidth: "auto",
+    minWidth: 'auto',
   },
   versionText: {
     fontSize: tokens.fontSizeBase100,
@@ -385,9 +376,9 @@ const useStyles = makeStyles({
   selectionInfo: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
-    ...shorthands.padding("8px", "16px"),
+    ...shorthands.padding('8px', '16px'),
     backgroundColor: tokens.colorNeutralBackground2,
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke1),
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
   },
 });
 
@@ -395,10 +386,20 @@ const useStyles = makeStyles({
 // Helper Functions
 // ─────────────────────────────────────────────────────────────────────────────
 
-const DAYS_OF_WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December"
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
 ];
 
 /**
@@ -417,8 +418,8 @@ const MONTHS = [
  */
 function toIsoDateString(date: Date): string {
   const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
 
@@ -426,7 +427,7 @@ function toIsoDateString(date: Date): string {
  * Parse ISO date string to Date
  */
 function parseIsoDate(dateStr: string): Date {
-  const [year, month, day] = dateStr.split("-").map(Number);
+  const [year, month, day] = dateStr.split('-').map(Number);
   return new Date(year, month - 1, day);
 }
 
@@ -484,7 +485,7 @@ function isSameDay(date1: Date, date2: Date): boolean {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-const VERSION = "1.1.0";
+const VERSION = '1.1.0';
 
 export const CalendarSection: React.FC<CalendarSectionProps> = ({
   eventDates = [],
@@ -493,7 +494,7 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
   height,
   viewDate: viewDateProp,
   monthsToShow: monthsToShowProp,
-  layout = "vertical",
+  layout = 'vertical',
   selectedDate: selectedDateProp,
   onSelectDate,
 }) => {
@@ -504,9 +505,7 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
   // parent does NOT pass `viewDate`. When `viewDateProp` is provided the
   // component is CONTROLLED and this internal state is bypassed entirely
   // (per task 116, to support the Calendar widget's external ◀ ▶ arrows).
-  const [internalViewDate, setInternalViewDate] = React.useState<Date>(
-    initialDate ? parseIsoDate(initialDate) : today
-  );
+  const [internalViewDate, setInternalViewDate] = React.useState<Date>(initialDate ? parseIsoDate(initialDate) : today);
   // setInternalViewDate is exposed for backwards compatibility with the
   // original component (no external API change). It's referenced only when
   // the component is in uncontrolled mode — currently no internal callers,
@@ -524,9 +523,7 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
   // When omitted (EventsPage CalendarDrawer), internal state drives the UI
   // and `onFilterChange` carries the day click.
   const isSelectedControlled = onSelectDate !== undefined;
-  const [internalSelectedDate, setInternalSelectedDate] = React.useState<
-    string | null
-  >(initialDate ?? null);
+  const [internalSelectedDate, setInternalSelectedDate] = React.useState<string | null>(initialDate ?? null);
   const selectedDate: string | null = isSelectedControlled
     ? selectedDateProp
       ? toIsoDateString(selectedDateProp)
@@ -569,7 +566,7 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
         setRangeStart(start);
         setRangeEnd(end);
         const filter: CalendarFilterRange = {
-          type: "range",
+          type: 'range',
           start: start < end ? start : end,
           end: start < end ? end : start,
         };
@@ -597,13 +594,13 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
           setInternalSelectedDate(null);
           setRangeStart(null);
           setRangeEnd(null);
-          onFilterChange({ type: "clear" });
+          onFilterChange({ type: 'clear' });
         } else {
           // Select new date
           setInternalSelectedDate(dateStr);
           setRangeStart(null);
           setRangeEnd(null);
-          onFilterChange({ type: "single", date: dateStr });
+          onFilterChange({ type: 'single', date: dateStr });
         }
       }
     },
@@ -622,27 +619,27 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
     }
     setRangeStart(null);
     setRangeEnd(null);
-    onFilterChange({ type: "clear" });
+    onFilterChange({ type: 'clear' });
   }, [onFilterChange, isSelectedControlled, onSelectDate]);
 
   /**
    * Check if a date is selected or in range
    */
   const getDateState = React.useCallback(
-    (date: Date): "selected" | "in-range" | null => {
+    (date: Date): 'selected' | 'in-range' | null => {
       const dateStr = toIsoDateString(date);
 
       if (rangeStart && rangeEnd) {
         const start = parseIsoDate(rangeStart);
         const end = parseIsoDate(rangeEnd);
         if (isSameDay(date, start) || isSameDay(date, end)) {
-          return "selected";
+          return 'selected';
         }
         if (isDateInRange(date, start, end)) {
-          return "in-range";
+          return 'in-range';
         }
       } else if (selectedDate === dateStr) {
-        return "selected";
+        return 'selected';
       }
 
       return null;
@@ -664,9 +661,7 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
     return (
       <div
         key={`${year}-${month}`}
-        className={`${styles.monthContainer} ${
-          layout === "horizontal" ? styles.monthContainerHorizontal : ""
-        }`}
+        className={`${styles.monthContainer} ${layout === 'horizontal' ? styles.monthContainerHorizontal : ''}`}
       >
         <div className={styles.monthHeader}>
           {MONTHS[month]} {year}
@@ -674,7 +669,7 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
 
         {/* Day headers */}
         <div className={styles.weekRow}>
-          {DAYS_OF_WEEK.map((day) => (
+          {DAYS_OF_WEEK.map(day => (
             <div key={day} className={styles.dayHeader}>
               {day}
             </div>
@@ -703,7 +698,7 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
               // user click on a day should highlight more strongly than a
               // passive event-day indicator). Other-month days remain excluded
               // — they're already muted and competing tints would be noisy.
-              const showEventsTint = hasEvents && !isOtherMonth && dateState !== "selected";
+              const showEventsTint = hasEvents && !isOtherMonth && dateState !== 'selected';
 
               // Task 127 (R13 follow-up #6, 2026-05-22): operator wants
               // other-month days completely hidden. Render an empty
@@ -718,27 +713,22 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
               // cross-class :hover cascade fight that caused tasks 125/126
               // to fail. dayWithEvents now has NO :hover at all (the
               // rest-state blue persists since no rule overrides it).
-              const showNeutralHover =
-                !showEventsTint &&
-                dateState !== "selected" &&
-                dateState !== "in-range";
+              const showNeutralHover = !showEventsTint && dateState !== 'selected' && dateState !== 'in-range';
 
               return (
                 <div
                   key={dayIdx}
                   className={`${styles.dayCell} ${
-                    showNeutralHover ? styles.dayCellNeutralHover : ""
-                  } ${isToday ? styles.dayCellToday : ""} ${
-                    showEventsTint ? styles.dayWithEvents : ""
-                  } ${
-                    dateState === "selected" ? styles.dayCellSelected : ""
-                  } ${dateState === "in-range" ? styles.dayCellInRange : ""}`}
-                  onClick={(e) => handleDateClick(day, e.shiftKey)}
+                    showNeutralHover ? styles.dayCellNeutralHover : ''
+                  } ${isToday ? styles.dayCellToday : ''} ${showEventsTint ? styles.dayWithEvents : ''} ${
+                    dateState === 'selected' ? styles.dayCellSelected : ''
+                  } ${dateState === 'in-range' ? styles.dayCellInRange : ''}`}
+                  onClick={e => handleDateClick(day, e.shiftKey)}
                   role="button"
                   tabIndex={0}
-                  aria-label={`${day.toDateString()}${hasEvents ? " - has events" : ""}`}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
+                  aria-label={`${day.toDateString()}${hasEvents ? ' - has events' : ''}`}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
                       handleDateClick(day, e.shiftKey);
                     }
                   }}
@@ -788,7 +778,7 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
   // separator) and footer (clear + version) are visual duplicates here, so
   // we suppress both. The EventsPage CalendarDrawer (vertical layout) is
   // unaffected.
-  const isHorizontal = layout === "horizontal";
+  const isHorizontal = layout === 'horizontal';
 
   return (
     <div className={styles.container} style={{ height }}>
@@ -804,17 +794,11 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
 
       {/* Selection info banner — also suppressed in horizontal layout
           (widget shows date selection via its own filter row + grid). */}
-      {!isHorizontal && selectionInfo && (
-        <div className={styles.selectionInfo}>{selectionInfo}</div>
-      )}
+      {!isHorizontal && selectionInfo && <div className={styles.selectionInfo}>{selectionInfo}</div>}
 
       {/* Calendar content — vertical stack (default, EventsPage drawer) or
           horizontal row (Calendar widget, task 116). */}
-      <div
-        className={
-          isHorizontal ? styles.calendarContentHorizontal : styles.calendarContent
-        }
-      >
+      <div className={isHorizontal ? styles.calendarContentHorizontal : styles.calendarContent}>
         {monthsToShow.map(({ year, month }) => renderMonth(year, month))}
       </div>
 

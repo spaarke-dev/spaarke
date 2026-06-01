@@ -132,7 +132,6 @@ jobs:
     if: needs.plan.outputs.deploy_dev == 'true'
     environment:
       name: dev
-      url: https://${{ secrets.DEV_APP_NAME }}.azurewebsites.net
 
     steps:
       - name: Checkout
@@ -212,7 +211,6 @@ jobs:
     if: needs.plan.outputs.deploy_staging == 'true'
     environment:
       name: staging
-      url: https://${{ secrets.STAGING_APP_NAME }}.azurewebsites.net
 
     steps:
       - name: Checkout
@@ -312,7 +310,6 @@ jobs:
     # Deployment will pause here until an authorized reviewer approves.
     environment:
       name: prod
-      url: https://${{ secrets.PROD_APP_NAME }}.azurewebsites.net
 
     steps:
       - name: Checkout
@@ -400,7 +397,15 @@ jobs:
     name: Promotion Summary
     runs-on: ubuntu-latest
     needs: [plan, deploy-dev, deploy-staging, deploy-prod]
-    if: always()
+    # FR-03 (2026-06-01): Gate summary on the same trigger-conclusion filter as `plan`.
+    # Without this, a failed SDAP CI run still produces a `summary`-only deploy-promote
+    # record (workflow conclusion: failure when needs-chain is skipped). With this filter
+    # in place, a failed workflow_run trigger results in ALL jobs (incl. summary) being
+    # skipped — GitHub records the deploy-promote run as `skipped`, not `failure`.
+    if: >-
+      always() &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'))
 
     steps:
       - name: Generate summary

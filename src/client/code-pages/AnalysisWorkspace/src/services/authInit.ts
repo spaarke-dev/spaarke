@@ -27,12 +27,7 @@ import {
 import type { IRuntimeConfig, UseAuthResult } from '@spaarke/auth';
 
 // Re-export library surface (consumers import from here for namespacing)
-export {
-  initAuth,
-  getAuthProvider,
-  resolveRuntimeConfig,
-  AuthError,
-};
+export { initAuth, getAuthProvider, resolveRuntimeConfig, AuthError };
 export type { IRuntimeConfig, UseAuthResult };
 
 // Re-export the library's useAuth hook directly. Components in AnalysisWorkspace
@@ -49,9 +44,7 @@ let _runtimeConfig: IRuntimeConfig | null = null;
  */
 export function getRuntimeConfig(): IRuntimeConfig {
   if (!_runtimeConfig) {
-    throw new Error(
-      '[AnalysisWorkspace:Auth] Runtime config not resolved. Call initializeAuth() first.'
-    );
+    throw new Error('[AnalysisWorkspace:Auth] Runtime config not resolved. Call initializeAuth() first.');
   }
   return _runtimeConfig;
 }

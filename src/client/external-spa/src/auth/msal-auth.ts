@@ -11,9 +11,9 @@
  * See: notes/auth-migration-b2b-msal.md
  */
 
-import { InteractionRequiredAuthError } from "@azure/msal-browser";
-import { msalInstance } from "./msal-config";
-import { MSAL_BFF_SCOPE } from "../config";
+import { InteractionRequiredAuthError } from '@azure/msal-browser';
+import { msalInstance } from './msal-config';
+import { MSAL_BFF_SCOPE } from '../config';
 
 /**
  * Acquire an access token for the BFF API.
@@ -36,7 +36,7 @@ export async function acquireBffToken(): Promise<string> {
     // No authenticated account — trigger login redirect
     await msalInstance.acquireTokenRedirect({ scopes: [MSAL_BFF_SCOPE] });
     // acquireTokenRedirect navigates away; this throw aborts the current call chain
-    throw new Error("No authenticated account — redirecting to login");
+    throw new Error('No authenticated account — redirecting to login');
   }
 
   try {
@@ -52,7 +52,7 @@ export async function acquireBffToken(): Promise<string> {
         scopes: [MSAL_BFF_SCOPE],
         account: accounts[0],
       });
-      throw new Error("Interaction required — redirecting to login");
+      throw new Error('Interaction required — redirecting to login');
     }
     throw err;
   }

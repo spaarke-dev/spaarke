@@ -26,15 +26,8 @@
  * @see .claude/adr/ADR-021-fluent-design-system.md
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  shorthands,
-  Combobox,
-  Option,
-  Badge,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { makeStyles, tokens, shorthands, Combobox, Option, Badge } from '@fluentui/react-components';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,9 +42,9 @@ export interface IStatusOption {
   /** Display label */
   label: string;
   /** Badge color for visual distinction */
-  color: "brand" | "success" | "warning" | "danger" | "informative" | "subtle";
+  color: 'brand' | 'success' | 'warning' | 'danger' | 'informative' | 'subtle';
   /** Badge appearance */
-  appearance: "filled" | "outline" | "tint" | "ghost";
+  appearance: 'filled' | 'outline' | 'tint' | 'ghost';
   /** Whether this status is considered "actionable" (not terminal) */
   isActionable: boolean;
 }
@@ -83,58 +76,58 @@ export interface StatusFilterProps {
 const STATUS_OPTIONS: IStatusOption[] = [
   {
     value: 0,
-    label: "Draft",
-    color: "subtle",
-    appearance: "tint",
+    label: 'Draft',
+    color: 'subtle',
+    appearance: 'tint',
     isActionable: true,
   },
   {
     value: 1,
-    label: "Open",
-    color: "brand",
-    appearance: "tint",
+    label: 'Open',
+    color: 'brand',
+    appearance: 'tint',
     isActionable: true,
   },
   {
     value: 2,
-    label: "Completed",
-    color: "success",
-    appearance: "filled",
+    label: 'Completed',
+    color: 'success',
+    appearance: 'filled',
     isActionable: false,
   },
   {
     value: 3,
-    label: "Closed",
-    color: "informative",
-    appearance: "ghost",
+    label: 'Closed',
+    color: 'informative',
+    appearance: 'ghost',
     isActionable: false,
   },
   {
     value: 4,
-    label: "On Hold",
-    color: "warning",
-    appearance: "tint",
+    label: 'On Hold',
+    color: 'warning',
+    appearance: 'tint',
     isActionable: true,
   },
   {
     value: 5,
-    label: "Cancelled",
-    color: "danger",
-    appearance: "ghost",
+    label: 'Cancelled',
+    color: 'danger',
+    appearance: 'ghost',
     isActionable: false,
   },
   {
     value: 6,
-    label: "Reassigned",
-    color: "informative",
-    appearance: "tint",
+    label: 'Reassigned',
+    color: 'informative',
+    appearance: 'tint',
     isActionable: false,
   },
   {
     value: 7,
-    label: "Archived",
-    color: "subtle",
-    appearance: "ghost",
+    label: 'Archived',
+    color: 'subtle',
+    appearance: 'ghost',
     isActionable: false,
   },
 ];
@@ -143,9 +136,7 @@ const STATUS_OPTIONS: IStatusOption[] = [
  * Default selection: actionable statuses only
  * (Draft, Open, On Hold - excludes terminal statuses)
  */
-const ACTIONABLE_STATUSES = STATUS_OPTIONS.filter((s) => s.isActionable).map(
-  (s) => s.value
-);
+const ACTIONABLE_STATUSES = STATUS_OPTIONS.filter(s => s.isActionable).map(s => s.value);
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -153,23 +144,23 @@ const ACTIONABLE_STATUSES = STATUS_OPTIONS.filter((s) => s.isActionable).map(
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.gap("4px"),
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap('4px'),
   },
   combobox: {
-    minWidth: "160px",
-    maxWidth: "250px",
+    minWidth: '160px',
+    maxWidth: '250px',
   },
   optionContent: {
-    display: "flex",
-    alignItems: "center",
-    ...shorthands.gap("8px"),
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('8px'),
   },
   statusBadge: {
-    textTransform: "capitalize",
-    minWidth: "70px",
-    justifyContent: "center",
+    textTransform: 'capitalize',
+    minWidth: '70px',
+    justifyContent: 'center',
   },
 });
 
@@ -180,7 +171,7 @@ const useStyles = makeStyles({
 export const StatusFilter: React.FC<StatusFilterProps> = ({
   selectedStatuses,
   onSelectionChange,
-  placeholder = "Status...",
+  placeholder = 'Status...',
   disabled = false,
   autoSelectActionable = true,
 }) => {
@@ -200,36 +191,28 @@ export const StatusFilter: React.FC<StatusFilterProps> = ({
    * Handle combobox selection change
    */
   const handleOptionSelect = React.useCallback(
-    (
-      _event: React.SyntheticEvent,
-      data: { optionValue?: string; selectedOptions: string[] }
-    ) => {
+    (_event: React.SyntheticEvent, data: { optionValue?: string; selectedOptions: string[] }) => {
       // Convert string values back to numbers
-      const selectedCodes = data.selectedOptions.map((v) => parseInt(v, 10));
+      const selectedCodes = data.selectedOptions.map(v => parseInt(v, 10));
       onSelectionChange(selectedCodes);
     },
     [onSelectionChange]
   );
 
   // Convert number[] to string[] for Combobox
-  const selectedOptions = React.useMemo(
-    () => selectedStatuses.map((s) => s.toString()),
-    [selectedStatuses]
-  );
+  const selectedOptions = React.useMemo(() => selectedStatuses.map(s => s.toString()), [selectedStatuses]);
 
   // Get display value for selected statuses
   const selectedValue = React.useMemo(() => {
-    if (selectedStatuses.length === 0) return "";
-    if (selectedStatuses.length === STATUS_OPTIONS.length) return "All statuses";
+    if (selectedStatuses.length === 0) return '';
+    if (selectedStatuses.length === STATUS_OPTIONS.length) return 'All statuses';
     if (
       selectedStatuses.length === ACTIONABLE_STATUSES.length &&
-      ACTIONABLE_STATUSES.every((s) => selectedStatuses.includes(s))
+      ACTIONABLE_STATUSES.every(s => selectedStatuses.includes(s))
     ) {
-      return "Actionable";
+      return 'Actionable';
     }
-    const selectedLabels = STATUS_OPTIONS.filter((s) =>
-      selectedStatuses.includes(s.value)
-    ).map((s) => s.label);
+    const selectedLabels = STATUS_OPTIONS.filter(s => selectedStatuses.includes(s.value)).map(s => s.label);
     if (selectedLabels.length === 1) {
       return selectedLabels[0];
     }
@@ -248,18 +231,10 @@ export const StatusFilter: React.FC<StatusFilterProps> = ({
         disabled={disabled}
         aria-label="Filter by event status"
       >
-        {STATUS_OPTIONS.map((status) => (
-          <Option
-            key={status.value}
-            value={status.value.toString()}
-            text={status.label}
-          >
+        {STATUS_OPTIONS.map(status => (
+          <Option key={status.value} value={status.value.toString()} text={status.label}>
             <div className={styles.optionContent}>
-              <Badge
-                appearance={status.appearance}
-                color={status.color}
-                className={styles.statusBadge}
-              >
+              <Badge appearance={status.appearance} color={status.color} className={styles.statusBadge}>
                 {status.label}
               </Badge>
             </div>

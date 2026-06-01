@@ -22,7 +22,7 @@
  * ADR-013: All AI calls go through the BFF API — no direct Azure AI Search calls.
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -35,7 +35,7 @@ import {
   MessageBarBody,
   Divider,
   Tooltip,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   SearchRegular,
   DocumentRegular,
@@ -43,9 +43,9 @@ import {
   SparkleRegular,
   FolderOpenRegular,
   OpenRegular,
-} from "@fluentui/react-icons";
-import { bffApiCall } from "../auth/bff-client";
-import { AccessLevel } from "../types";
+} from '@fluentui/react-icons';
+import { bffApiCall } from '../auth/bff-client';
+import { AccessLevel } from '../types';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -53,65 +53,65 @@ import { AccessLevel } from "../types";
 
 const useStyles = makeStyles({
   root: {
-    width: "100%",
-    display: "flex",
-    flexDirection: "column",
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   searchRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    width: "100%",
+    width: '100%',
   },
   searchInput: {
-    flex: "1",
+    flex: '1',
   },
   metaRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    flexWrap: "wrap",
+    flexWrap: 'wrap',
   },
   metaText: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
   },
   resultsContainer: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   resultCard: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
-    borderWidth: "1px",
-    borderStyle: "solid",
+    borderWidth: '1px',
+    borderStyle: 'solid',
     borderColor: tokens.colorNeutralStroke2,
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground1,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground2,
       borderColor: tokens.colorNeutralStroke1,
     },
   },
   resultHeader: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
     gap: tokens.spacingHorizontalS,
   },
   resultTitleRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
-    flex: "1",
+    flex: '1',
     minWidth: 0,
   },
   resultIcon: {
@@ -121,38 +121,38 @@ const useStyles = makeStyles({
   resultName: {
     color: tokens.colorNeutralForeground1,
     fontWeight: tokens.fontWeightSemibold,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   resultNameClickable: {
     color: tokens.colorBrandForeground1,
-    cursor: "pointer",
-    ":hover": {
-      textDecoration: "underline",
+    cursor: 'pointer',
+    ':hover': {
+      textDecoration: 'underline',
     },
   },
   resultMeta: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    flexWrap: "wrap",
+    flexWrap: 'wrap',
     flexShrink: 0,
   },
   resultScore: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase100,
     fontFamily: tokens.fontFamilyMonospace,
-    whiteSpace: "nowrap",
+    whiteSpace: 'nowrap',
   },
   highlightList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "4px",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
     paddingLeft: tokens.spacingHorizontalS,
-    borderLeftWidth: "2px",
-    borderLeftStyle: "solid",
+    borderLeftWidth: '2px',
+    borderLeftStyle: 'solid',
     borderLeftColor: tokens.colorBrandStroke1,
   },
   highlightText: {
@@ -160,14 +160,14 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     lineHeight: tokens.lineHeightBase400,
     // Allow line wrapping for excerpt readability
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
   },
   projectName: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: "4px",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: '4px',
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
   },
@@ -175,48 +175,48 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground4,
   },
   emptyState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "200px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '200px',
     gap: tokens.spacingVerticalM,
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
     padding: tokens.spacingHorizontalXL,
   },
   emptyStateIcon: {
-    fontSize: "40px",
+    fontSize: '40px',
     color: tokens.colorNeutralForeground4,
   },
   emptyStateText: {
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
+    textAlign: 'center',
   },
   emptyStateHint: {
     color: tokens.colorNeutralForeground4,
-    textAlign: "center",
+    textAlign: 'center',
     fontSize: tokens.fontSizeBase200,
   },
   loadingContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "160px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '160px',
     gap: tokens.spacingVerticalM,
   },
   idleState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "160px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '160px',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground4,
   },
   idleIcon: {
-    fontSize: "36px",
+    fontSize: '36px',
   },
   actionButton: {
     flexShrink: 0,
@@ -238,7 +238,7 @@ interface SearchRequest {
     limit: number;
     offset: number;
     includeHighlights: boolean;
-    hybridMode: "rrf";
+    hybridMode: 'rrf';
   };
 }
 
@@ -285,7 +285,7 @@ function formatScore(score: number): string {
  * Replaces multiple whitespace runs with a single space and limits to maxLen chars.
  */
 function formatHighlight(text: string, maxLen = 280): string {
-  const cleaned = text.replace(/\s+/g, " ").trim();
+  const cleaned = text.replace(/\s+/g, ' ').trim();
   if (cleaned.length <= maxLen) return cleaned;
   return `${cleaned.substring(0, maxLen)}…`;
 }
@@ -302,14 +302,10 @@ interface SearchResultCardProps {
   projectId: string;
 }
 
-const SearchResultCard: React.FC<SearchResultCardProps> = ({
-  result,
-  canNavigate,
-  projectId,
-}) => {
+const SearchResultCard: React.FC<SearchResultCardProps> = ({ result, canNavigate, projectId }) => {
   const styles = useStyles();
 
-  const documentName = result.name ?? "Untitled Document";
+  const documentName = result.name ?? 'Untitled Document';
   const highlights = (result.highlights ?? []).slice(0, 3);
   const projectName = result.parentEntityName;
   const resultProjectId = result.parentEntityId ?? projectId;
@@ -320,7 +316,7 @@ const SearchResultCard: React.FC<SearchResultCardProps> = ({
     // The hash router path is #/project/:id — the user can then find the document
     // in the Documents tab. We do not have a per-document deep-link in this SPA.
     const projectHash = `#/project/${resultProjectId}`;
-    window.location.hash = projectHash.replace("#", "");
+    window.location.hash = projectHash.replace('#', '');
   };
 
   return (
@@ -330,10 +326,7 @@ const SearchResultCard: React.FC<SearchResultCardProps> = ({
         <div className={styles.resultTitleRow}>
           <DocumentRegular className={styles.resultIcon} fontSize={18} />
           {canNavigate && result.documentId ? (
-            <Tooltip
-              content={`Navigate to project containing "${documentName}"`}
-              relationship="label"
-            >
+            <Tooltip content={`Navigate to project containing "${documentName}"`} relationship="label">
               <Text
                 size={300}
                 className={`${styles.resultName} ${styles.resultNameClickable}`}
@@ -345,12 +338,7 @@ const SearchResultCard: React.FC<SearchResultCardProps> = ({
               </Text>
             </Tooltip>
           ) : (
-            <Text
-              size={300}
-              className={styles.resultName}
-              truncate
-              wrap={false}
-            >
+            <Text size={300} className={styles.resultName} truncate wrap={false}>
               {documentName}
             </Text>
           )}
@@ -367,14 +355,9 @@ const SearchResultCard: React.FC<SearchResultCardProps> = ({
               {result.fileType.toUpperCase()}
             </Badge>
           )}
-          <Text className={styles.resultScore}>
-            {formatScore(result.combinedScore)}
-          </Text>
+          <Text className={styles.resultScore}>{formatScore(result.combinedScore)}</Text>
           {canNavigate && result.documentId && (
-            <Tooltip
-              content={`Go to project containing this document`}
-              relationship="label"
-            >
+            <Tooltip content={`Go to project containing this document`} relationship="label">
               <Button
                 appearance="subtle"
                 size="small"
@@ -399,12 +382,7 @@ const SearchResultCard: React.FC<SearchResultCardProps> = ({
       {highlights.length > 0 && (
         <div className={styles.highlightList}>
           {highlights.map((highlight, index) => (
-            <Text
-              key={index}
-              className={styles.highlightText}
-              size={200}
-              as="p"
-            >
+            <Text key={index} className={styles.highlightText} size={200} as="p">
               …{formatHighlight(highlight)}…
             </Text>
           ))}
@@ -454,18 +432,15 @@ export interface SemanticSearchProps {
  * ADR-021: Fluent UI v9 only. makeStyles + tokens. No hard-coded colors.
  * ADR-013: AI calls go through BFF API — POST /api/ai/search.
  */
-export const SemanticSearch: React.FC<SemanticSearchProps> = ({
-  projectId,
-  accessLevel,
-}) => {
+export const SemanticSearch: React.FC<SemanticSearchProps> = ({ projectId, accessLevel }) => {
   const styles = useStyles();
 
   // ---------------------------------------------------------------------------
   // State
   // ---------------------------------------------------------------------------
 
-  const [query, setQuery] = React.useState<string>("");
-  const [submittedQuery, setSubmittedQuery] = React.useState<string>("");
+  const [query, setQuery] = React.useState<string>('');
+  const [submittedQuery, setSubmittedQuery] = React.useState<string>('');
   const [results, setResults] = React.useState<SearchResult[]>([]);
   const [totalResults, setTotalResults] = React.useState<number>(0);
   const [searchDurationMs, setSearchDurationMs] = React.useState<number | null>(null);
@@ -474,9 +449,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   const [hasSearched, setHasSearched] = React.useState<boolean>(false);
 
   // Collaborate and Full Access users can navigate to the project page for a document
-  const canNavigate =
-    accessLevel === AccessLevel.Collaborate ||
-    accessLevel === AccessLevel.FullAccess;
+  const canNavigate = accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess;
 
   // ---------------------------------------------------------------------------
   // Search handler
@@ -495,20 +468,20 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       const requestBody: SearchRequest = {
         query: trimmed,
         // Scope search to the current project via entity scope
-        scope: "entity",
-        entityType: "project",
+        scope: 'entity',
+        entityType: 'project',
         entityId: projectId,
         options: {
           limit: 20,
           offset: 0,
           includeHighlights: true,
-          hybridMode: "rrf",
+          hybridMode: 'rrf',
         },
       };
 
       try {
-        const response = await bffApiCall<SearchResponse>("/api/ai/search", {
-          method: "POST",
+        const response = await bffApiCall<SearchResponse>('/api/ai/search', {
+          method: 'POST',
           body: JSON.stringify(requestBody),
         });
 
@@ -516,10 +489,8 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         setTotalResults(response.metadata?.totalResults ?? response.results?.length ?? 0);
         setSearchDurationMs(response.metadata?.searchDurationMs ?? null);
       } catch (err) {
-        console.error("[SemanticSearch] Search failed:", err);
-        setError(
-          "Search failed. Please check your connection and try again."
-        );
+        console.error('[SemanticSearch] Search failed:', err);
+        setError('Search failed. Please check your connection and try again.');
         setResults([]);
         setTotalResults(0);
       } finally {
@@ -534,8 +505,8 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   };
 
   const handleClear = () => {
-    setQuery("");
-    setSubmittedQuery("");
+    setQuery('');
+    setSubmittedQuery('');
     setResults([]);
     setTotalResults(0);
     setSearchDurationMs(null);
@@ -544,9 +515,9 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
+    if (e.key === 'Enter') {
       void executeSearch(query);
-    } else if (e.key === "Escape") {
+    } else if (e.key === 'Escape') {
       handleClear();
     }
   };
@@ -590,7 +561,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           aria-label="Run search"
           size="large"
         >
-          {loading ? "Searching…" : "Search"}
+          {loading ? 'Searching…' : 'Search'}
         </Button>
       </div>
 
@@ -600,7 +571,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           <SparkleRegular fontSize={14} style={{ color: tokens.colorBrandForeground2 }} />
           <Text className={styles.metaText}>
             {results.length > 0
-              ? `${totalResults} result${totalResults !== 1 ? "s" : ""} for "${submittedQuery}"`
+              ? `${totalResults} result${totalResults !== 1 ? 's' : ''} for "${submittedQuery}"`
               : `No results for "${submittedQuery}"`}
             {searchDurationMs !== null && ` · ${searchDurationMs}ms`}
           </Text>
@@ -653,11 +624,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           {results.map((result, index) => (
             <React.Fragment key={result.documentId ?? `result-${index}`}>
               {index > 0 && <Divider appearance="subtle" />}
-              <SearchResultCard
-                result={result}
-                canNavigate={canNavigate}
-                projectId={projectId}
-              />
+              <SearchResultCard result={result} canNavigate={canNavigate} projectId={projectId} />
             </React.Fragment>
           ))}
         </div>

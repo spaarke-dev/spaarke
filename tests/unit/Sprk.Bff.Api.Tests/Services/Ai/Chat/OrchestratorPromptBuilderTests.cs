@@ -1,9 +1,9 @@
+using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Services.Ai.Capabilities;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Xunit;
-using FluentAssertions;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 

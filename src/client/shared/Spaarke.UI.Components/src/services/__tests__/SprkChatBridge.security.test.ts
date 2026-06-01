@@ -53,7 +53,7 @@ describe('SprkChatBridge — ADR-015 no-auth-token constraint (R2-066 security a
           if (pattern.test(key)) {
             throw new Error(
               `SECURITY: ${payloadName} contains auth-related field "${key}" matching ${pattern}. ` +
-              `This violates ADR-015: auth tokens MUST NOT flow through BroadcastChannel.`
+                `This violates ADR-015: auth tokens MUST NOT flow through BroadcastChannel.`
             );
           }
         }

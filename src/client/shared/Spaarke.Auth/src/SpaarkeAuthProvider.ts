@@ -45,7 +45,7 @@ export class SpaarkeAuthProvider {
     // Listen for cross-context logout broadcasts. When another tab/iframe logs
     // out, cascade-clear our caches so MSAL state, in-memory state, and the
     // strategy's local state all match the user-intended outcome.
-    this._disposeBroadcastListener = onAuthBroadcast((msg) => {
+    this._disposeBroadcastListener = onAuthBroadcast(msg => {
       if (msg.type === 'logout') {
         console.info('[SpaarkeAuth] Received logout broadcast; cascading clearAllCaches');
         this.clearAllCaches();
@@ -224,4 +224,3 @@ export class SpaarkeAuthProvider {
     }, PROACTIVE_REFRESH_INTERVAL_MS);
   }
 }
-

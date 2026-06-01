@@ -424,9 +424,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
       {successConfig ? (
         <div className={styles.footer}>
           <div className={styles.footerLeft} />
-          <div className={styles.footerRight}>
-            {successConfig.actions}
-          </div>
+          <div className={styles.footerRight}>{successConfig.actions}</div>
         </div>
       ) : (
         <div className={styles.footer}>

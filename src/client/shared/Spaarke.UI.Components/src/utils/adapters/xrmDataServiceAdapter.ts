@@ -57,20 +57,13 @@ export function createXrmDataService(): IDataService {
   }
 
   return {
-    async createRecord(
-      entityName: string,
-      data: Record<string, unknown>
-    ): Promise<string> {
+    async createRecord(entityName: string, data: Record<string, unknown>): Promise<string> {
       const webApi = getWebApi();
       const ref = await webApi.createRecord(entityName, data);
       return ref.id;
     },
 
-    async retrieveRecord(
-      entityName: string,
-      id: string,
-      options?: string
-    ): Promise<Record<string, unknown>> {
+    async retrieveRecord(entityName: string, id: string, options?: string): Promise<Record<string, unknown>> {
       const webApi = getWebApi();
       return webApi.retrieveRecord(entityName, id, options);
     },
@@ -84,11 +77,7 @@ export function createXrmDataService(): IDataService {
       return { entities: result.entities };
     },
 
-    async updateRecord(
-      entityName: string,
-      id: string,
-      data: Record<string, unknown>
-    ): Promise<void> {
+    async updateRecord(entityName: string, id: string, data: Record<string, unknown>): Promise<void> {
       const webApi = getWebApi();
       await webApi.updateRecord(entityName, id, data);
     },

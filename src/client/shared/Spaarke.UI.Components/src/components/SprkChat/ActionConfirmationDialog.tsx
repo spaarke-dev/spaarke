@@ -13,20 +13,8 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  shorthands,
-  tokens,
-  Button,
-  Text,
-  Divider,
-  Spinner,
-} from '@fluentui/react-components';
-import {
-  CheckmarkRegular,
-  DismissRegular,
-  ShieldCheckmarkRegular,
-} from '@fluentui/react-icons';
+import { makeStyles, shorthands, tokens, Button, Text, Divider, Spinner } from '@fluentui/react-components';
+import { CheckmarkRegular, DismissRegular, ShieldCheckmarkRegular } from '@fluentui/react-icons';
 import type { IPendingAction } from './types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -187,12 +175,8 @@ export const ActionConfirmationDialog: React.FC<IActionConfirmationDialogProps> 
       <div className={styles.dialog}>
         {/* Header */}
         <div className={styles.header}>
-          <span className={styles.headerIcon}>
-            {React.createElement(ShieldCheckmarkRegular)}
-          </span>
-          <Text className={styles.title}>
-            Confirm Action: {pendingAction.actionName}
-          </Text>
+          <span className={styles.headerIcon}>{React.createElement(ShieldCheckmarkRegular)}</span>
+          <Text className={styles.title}>Confirm Action: {pendingAction.actionName}</Text>
         </div>
 
         {/* Summary */}

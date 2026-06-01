@@ -38,21 +38,14 @@ import {
 import { CheckmarkCircleFilled, DismissRegular } from '@fluentui/react-icons';
 
 import { WizardShell } from '../Wizard/WizardShell';
-import type {
-  IWizardShellHandle,
-  IWizardStepConfig,
-  IWizardSuccessConfig,
-} from '../Wizard/wizardShellTypes';
+import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
 import { SendEmailStep } from '../EmailStep/SendEmailStep';
 import { extractEmailFromUserName } from '../EmailStep/emailHelpers';
 
 import { searchUsersAndContacts } from '../../services/userLookup';
 import { sendCommunication } from '../../services/communicationApi';
-import type {
-  ICommunicationAssociation,
-  SendCommunicationOptions,
-} from '../../services/communicationApi';
+import type { ICommunicationAssociation, SendCommunicationOptions } from '../../services/communicationApi';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IDataService } from '../../types/serviceInterfaces';
 
@@ -317,11 +310,7 @@ export function buildDefaultSubject(kept: IDocumentEmailWizardItem[]): string {
  *
  * Exported for unit-testing.
  */
-export function buildDefaultBody(
-  kept: IDocumentEmailWizardItem[],
-  includeLinks: boolean,
-  clientUrl: string
-): string {
+export function buildDefaultBody(kept: IDocumentEmailWizardItem[], includeLinks: boolean, clientUrl: string): string {
   if (kept.length === 0) return '';
   const intro =
     kept.length === 1
@@ -330,9 +319,7 @@ export function buildDefaultBody(
   const nameLines = kept.map(d => `  • ${d.name}`).join('\n');
   let body = `${intro}\n\n${nameLines}\n`;
   if (includeLinks) {
-    const linkLines = kept
-      .map(d => `  ${d.name}: ${buildDocumentRecordLink(clientUrl, d.documentId)}`)
-      .join('\n');
+    const linkLines = kept.map(d => `  ${d.name}: ${buildDocumentRecordLink(clientUrl, d.documentId)}`).join('\n');
     body += `\nLinks:\n${linkLines}\n`;
   }
   body += `\nThank you,\n`;
@@ -383,9 +370,7 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
   const shellRef = React.useRef<IWizardShellHandle>(null);
 
   // -- Kept (in-wizard) document state -----------------------------------
-  const [kept, setKept] = React.useState<IDocumentEmailWizardItem[]>(() => [
-    ...selectedDocuments,
-  ]);
+  const [kept, setKept] = React.useState<IDocumentEmailWizardItem[]>(() => [...selectedDocuments]);
 
   // -- Toggles ------------------------------------------------------------
   const [sendLinks, setSendLinks] = React.useState<boolean>(true);
@@ -506,9 +491,7 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
       subject,
       body: finalBody,
       bodyFormat: 'text',
-      attachmentDocumentIds: currentAttach
-        ? currentKept.map(d => d.documentId)
-        : undefined,
+      attachmentDocumentIds: currentAttach ? currentKept.map(d => d.documentId) : undefined,
       associations: associations.length > 0 ? associations : undefined,
       sendMode: 'sharedMailbox',
     };
@@ -517,12 +500,7 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
     onSent?.(result.communicationId);
 
     return {
-      icon: (
-        <CheckmarkCircleFilled
-          fontSize={64}
-          style={{ color: tokens.colorPaletteGreenForeground1 }}
-        />
-      ),
+      icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
       title: 'Email sent',
       body: (
         <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
@@ -562,18 +540,13 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
             onChange={(_, data) => setSendLinks(!!data.checked)}
             label="Send document links"
           />
-          <Checkbox
-            checked={attachFiles}
-            onChange={(_, data) => setAttachFiles(!!data.checked)}
-            label="Attach files"
-          />
+          <Checkbox checked={attachFiles} onChange={(_, data) => setAttachFiles(!!data.checked)} label="Attach files" />
         </div>
 
         {oversized && (
           <MessageBar intent="warning">
             <MessageBarBody>
-              Attachments exceed 25 MB ({formatBytes(total)}) — recipients may reject. Consider
-              links-only.
+              Attachments exceed 25 MB ({formatBytes(total)}) — recipients may reject. Consider links-only.
             </MessageBarBody>
           </MessageBar>
         )}
@@ -628,7 +601,10 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
 
   const runCombinedSummary = React.useCallback(async () => {
     if (kept.length === 0) return;
-    const key = kept.map(d => d.documentId).sort().join(',');
+    const key = kept
+      .map(d => d.documentId)
+      .sort()
+      .join(',');
     if (summaryRanForRef.current === key) return; // already ran for this selection
     summaryRanForRef.current = key;
 
@@ -750,9 +726,8 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
             Combined Summary
           </Text>
           <Text size={200} className={styles.stepSubtitle}>
-            One combined AI analysis of {kept.length} document{kept.length === 1 ? '' : 's'}
-            {' '}via the "Summarize New File(s)" playbook. This is informational only — you
-            can compose the email body on the next step.
+            One combined AI analysis of {kept.length} document{kept.length === 1 ? '' : 's'} via the "Summarize New
+            File(s)" playbook. This is informational only — you can compose the email body on the next step.
           </Text>
         </div>
 
@@ -760,7 +735,14 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
           <Text className={styles.emptyState}>No documents selected.</Text>
         ) : (
           <Card className={styles.summaryCard}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, marginBottom: tokens.spacingVerticalXS }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: tokens.spacingHorizontalS,
+                marginBottom: tokens.spacingVerticalXS,
+              }}
+            >
               <Text size={300} weight="semibold" className={styles.summaryHeader}>
                 Documents: {kept.map(d => d.name).join(', ')}
               </Text>
@@ -775,10 +757,13 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
               <Text size={200} className={styles.summaryBody}>
                 {combinedSummary}
               </Text>
-            ) : !hasError && !isStreaming && (
-              <Text size={200} className={styles.summaryEmpty}>
-                (no summary available)
-              </Text>
+            ) : (
+              !hasError &&
+              !isStreaming && (
+                <Text size={200} className={styles.summaryEmpty}>
+                  (no summary available)
+                </Text>
+              )
             )}
             {!hasError && !combinedSummary && isStreaming && (
               <Text size={200} className={styles.summaryEmpty}>
@@ -854,23 +839,11 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
         renderContent: renderComposeStep,
         canAdvance: () => {
           // Require recipient + subject + non-empty body.
-          return (
-            emailTo.trim() !== '' &&
-            emailSubject.trim() !== '' &&
-            emailBody.trim() !== ''
-          );
+          return emailTo.trim() !== '' && emailSubject.trim() !== '' && emailBody.trim() !== '';
         },
       },
     ],
-    [
-      emailBody,
-      emailSubject,
-      emailTo,
-      kept.length,
-      renderComposeStep,
-      renderConfirmStep,
-      renderSummaryStep,
-    ]
+    [emailBody, emailSubject, emailTo, kept.length, renderComposeStep, renderConfirmStep, renderSummaryStep]
   );
 
   return (

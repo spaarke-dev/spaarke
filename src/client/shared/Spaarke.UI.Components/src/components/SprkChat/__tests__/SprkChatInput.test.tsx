@@ -213,13 +213,10 @@ describe('SprkChatInput', () => {
   describe('Focus restoration on streaming completion', () => {
     it('should restore focus to textarea when disabled flips from true to false', async () => {
       // Render disabled (simulating active stream)
-      const { rerender } = renderWithProviders(
-        <SprkChatInput onSend={mockOnSend} disabled={true} />,
-      );
+      const { rerender } = renderWithProviders(<SprkChatInput onSend={mockOnSend} disabled={true} />);
 
       const textarea = screen.getByTestId('chat-input-textarea');
-      const nativeTextarea = (textarea.querySelector('textarea') ||
-        textarea) as HTMLTextAreaElement;
+      const nativeTextarea = (textarea.querySelector('textarea') || textarea) as HTMLTextAreaElement;
 
       // Initially disabled, so the textarea should not be the active element.
       expect(document.activeElement).not.toBe(nativeTextarea);
