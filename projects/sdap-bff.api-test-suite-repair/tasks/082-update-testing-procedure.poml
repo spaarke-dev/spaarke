@@ -1,7 +1,7 @@
 <task id="082" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P4.A3 — Update `docs/procedures/testing-and-code-quality.md` (FR-24)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>20-30 minutes</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-4, governance, anti-drift, docs, code-review-checklist</tags>

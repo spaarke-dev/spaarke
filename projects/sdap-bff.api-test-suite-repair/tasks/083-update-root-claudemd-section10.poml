@@ -1,7 +1,7 @@
 <task id="083" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P4.A4 — Update root `CLAUDE.md` §10 to reference test-update obligation (FR-25)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>30-45 minutes</estimated-effort>
     <assigned>AI agent (main session only)</assigned>
     <tags>phase-4, governance, anti-drift, root-claude, main-session-only</tags>

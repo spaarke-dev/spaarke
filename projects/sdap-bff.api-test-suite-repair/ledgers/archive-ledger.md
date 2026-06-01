@@ -75,3 +75,14 @@ If Phase 4 introduces archives (unlikely at this point — repair tracks have ab
 ---
 
 *This ledger is required at Phase 2+3 exit gate (per [`design.md`](../design.md) §6.5) and re-verified at Phase 4 task 085 final publishing.*
+
+---
+
+## Finalization (2026-05-31 by task 085)
+
+- **Cumulative project archive count**: 0 (excluding pre-existing `JobProcessorTests.cs.archived-2025-10-14`)
+- **NFR-04 ceiling (≤10/phase)**: ✅ trivially satisfied across Phase 0, Phase 1, Phase 2+3 Waves 2.1–2.5, and Phase 4
+- **NFR-06 (rename-not-delete)**: ✅ trivially satisfied (no archives created)
+- **Owner sign-off escalations filed**: 0 (none required per ceiling)
+- **Reconciliation with `git ls-files`**: ✅ task 074 verified 0 project-era `.archived-2026-*` files
+- **Contribution to exit ledger touched-test sum**: 0

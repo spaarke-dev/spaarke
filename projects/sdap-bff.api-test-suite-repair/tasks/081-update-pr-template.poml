@@ -1,7 +1,7 @@
 <task id="081" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P4.A2 — Update `.github/pull_request_template.md` with test-update question (FR-23)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>20-30 minutes</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-4, governance, anti-drift, pr-template</tags>
@@ -99,4 +99,29 @@
     <criterion testable="true">Existing PR template sections preserved unchanged (verified via diff)</criterion>
     <criterion testable="true">`git status` shows ONLY `.github/pull_request_template.md` modified</criterion>
   </acceptance-criteria>
+
+  <notes>
+**Completed 2026-05-31** (Phase 4 Wave 4.1, parallel with tasks 082/084/085 + main-session 080/083).
+
+**Edit summary**: 2 lines inserted in `## Checklist` section, immediately under the existing "Tests added/updated" line. Additive only — no existing template content modified or removed. `git diff --stat` confirms `1 file changed, 2 insertions(+)`.
+
+**Question wording**: matches FR-23 verbatim — "If this PR modifies `src/server/api/Sprk.Bff.Api/Services/`, has a corresponding test been added/updated? (Yes / No / Not applicable — explain)" with relative reference link to `../.claude/constraints/bff-extensions.md` "Test update obligation" section (canonical anchor authored by parallel task 080).
+
+**Acceptance criteria verification**:
+- ✅ File diff shows new test-update obligation question
+- ✅ Question text matches FR-23 exact wording
+- ✅ Question references `.claude/constraints/bff-extensions.md` "Test update obligation" section
+- ✅ Existing template sections preserved unchanged (only insertion, no removal)
+- ✅ `git status --porcelain` returns ` M .github/pull_request_template.md` only
+
+**Binding rules honored**:
+- NFR-01: no `src/` changes; `.github/` is workflow configuration
+- NFR-02: additive (2 inserted lines / ~31 line file ≈ 6% — well under 50% rewrite threshold)
+- NFR-09: `<repair-not-rewrite>true</repair-not-rewrite>` declared and respected
+- D-05: implements the second of three coordinated anti-drift mechanisms
+
+**Step 9.5 Quality Gates**: SKIPPED per task-execute SKILL.md Step 9.5 rule — "documentation-only (no code changes)". No code-review / adr-check run. Acceptance verified via diff + git status only.
+
+**Per protocol scope**: did NOT mark TASK-INDEX.md (parent-agent responsibility); did NOT `git commit` (parent-agent / push-to-github skill responsibility).
+  </notes>
 </task>

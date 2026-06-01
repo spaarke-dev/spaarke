@@ -40,3 +40,13 @@ If future Phase 4 tasks (e.g., task 084 triple-run validation) surface new non-d
 ---
 
 *This ledger is required at Phase 2+3 exit gate (per [`design.md`](../design.md) §6.2). Empty at task 028 close is a valid state.*
+
+---
+
+## Finalization (2026-05-31 by task 085)
+
+- **Total entries**: 0
+- **FR-28 satisfaction**: ✅ ledger exists with documented zero-entry rationale; schema reference preserved for future entries
+- **§6.2 binding**: ✅ no flaky-quarantined disposition was used; all 51 residual unit Failed tests routed to `real-bug-pending-fix` per task 028's deterministic-cause classification
+- **Task 084 triple-run validation**: did NOT surface any new non-deterministic failures; this ledger remains empty at project close
+- **Reconciliation**: 0 entries contributes 0 to the exit ledger touched-test sum

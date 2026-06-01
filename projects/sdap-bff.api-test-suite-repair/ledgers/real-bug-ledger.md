@@ -3,6 +3,51 @@
 > **Purpose**: Track tests marked `[Trait("status", "real-bug-pending-fix")]` and Skip'd because they assert correct behavior that the production code does not (yet) provide. Per project §6.2 / NFR-01, these tests CANNOT be fixed in this project — a separate PR/project must fix production. The tests remain in the suite (Skip'd) so the bugs are not forgotten.
 >
 > **Schema**: Each row identifies the bug, the test(s) affected, the production file owning the bug, and a fix-by date.
+>
+> **Finalized by**: Task 085 (Phase 4 Wave 4.1 — publish ledgers) on 2026-05-31.
+
+---
+
+## Summary (finalized 2026-05-31 by task 085)
+
+**Total entries**: 20
+
+### Severity breakdown
+
+| Severity | Count | Bug IDs |
+|---|---:|---|
+| HIGH | 5 | RB-T044-01, RB-T028-03, RB-T028-04, RB-T028-05, RB-T028-06 |
+| MEDIUM | 7 | RB-T044-02, RB-T044-04, RB-T053-01, RB-T070-03, RB-T028-01, RB-T028-02, RB-T028-07 |
+| LOW | 8 | RB-T012-01, RB-T034-01, RB-T050-01, RB-T044-03, RB-T044-05, RB-T070-01, RB-T070-02, RB-T028-08 |
+| **TOTAL** | **20** | |
+
+### Entries by filing task
+
+| Filing task | Phase | Entries | Bug IDs |
+|---|---|---:|---|
+| Task 012 | Phase 1 P1.A batch 3 | 1 | RB-T012-01 |
+| Task 034 | Phase 2+3 Wave 2.1 P23.B | 1 | RB-T034-01 |
+| Task 044 | Phase 2+3 Wave 2.2 P23.H | 5 | RB-T044-01..05 |
+| Task 050 | Phase 2+3 Wave 2.2 P23.M | 1 | RB-T050-01 |
+| Task 053 | Phase 2+3 Wave 2.3 P23.M | 1 | RB-T053-01 |
+| Task 070 | Phase 2+3 Wave 2.5 P23.L | 3 | RB-T070-01..03 |
+| Task 028 | Phase 2+3 Wave 2.4 P23.I closeout | 8 | RB-T028-01..08 |
+
+### Sibling-coordination flags
+
+- **RB-T028-02** is on **HOLD** pending `ai-spaarke-insights-engine-r1` owner sign-off (Layer 2 outcome-extraction fixture drift, MEDIUM severity, 3 tests).
+- **RB-T028-03..06** (4 entries, all HIGH) share root cause class: minimal-API endpoint parameter inference fails when feature flags disable AI but endpoint mapping is unconditional. These should be triaged as a single production fix unit.
+- **RB-T044-01** (cross-matter privilege content leak; HIGH severity) is the highest-priority real bug surfaced by this project; recommend owner triage within 30 days.
+
+### Owner sign-off status
+
+All 20 entries have **Owner: TBD** awaiting per-bug owner assignment. The project-close exit ledger (task 085) treats project-wide owner sign-off on the *aggregate* real-bug ledger as the FR-28 ledger satisfaction criterion; per-bug owner triage is a follow-up activity (post-project).
+
+### Reconciliation
+
+- Schema consistency: ✅ all 20 entries have Severity + Date + Filing-task + Test-file + Tests Skip'd + Fix-by date + Owner + Bug detail fields
+- Cross-reference to source TRX: ✅ each entry cites Phase 0/Wave 1/Phase 2+3 TRX files in `baseline/`
+- §6.2 binding rule satisfied: ✅ every entry's tests have `[Trait("status", "real-bug-pending-fix")]` + `[Fact(Skip=...)]` applied per per-task POML completion notes
 
 ---
 

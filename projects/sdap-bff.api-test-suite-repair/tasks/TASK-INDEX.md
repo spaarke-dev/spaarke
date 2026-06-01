@@ -181,17 +181,17 @@ All 5 Wave 1 agents completed. Build verification skipped: no `.cs` files modifi
 
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
-| 080 | Update `.claude/constraints/bff-extensions.md` — test update obligation | 🔲 | 4-main-seq | ❌ **No (main-session-only)** | FULL | P2+3 close |
-| 081 | Update `.github/pull_request_template.md` — test-update question | 🔲 | 4-parallel | ✅ Yes | STANDARD | 080 |
-| 082 | Update `docs/procedures/testing-and-code-quality.md` | 🔲 | 4-parallel | ✅ Yes | STANDARD | 080 |
-| 083 | Update root `CLAUDE.md` §10 — reference test-update obligation | 🔲 | 4-main-seq | ❌ **No (main-session-only)** | FULL | 080 |
+| 080 | Update `.claude/constraints/bff-extensions.md` — test update obligation | ✅ 2026-05-31 (main session; new section F with binding rule + exception + RB-T028-03/04/05/06 citation; cross-refs to PR template + procedure doc + root CLAUDE.md §10) | 4-main-seq | ❌ **No (main-session-only)** | FULL | P2+3 close |
+| 081 | Update `.github/pull_request_template.md` — test-update question | ✅ 2026-05-31 (2-line checklist add referencing bff-extensions.md "Test update obligation") | 4-parallel | ✅ Yes | STANDARD | 080 |
+| 082 | Update `docs/procedures/testing-and-code-quality.md` | ✅ 2026-05-31 (Per-PR reviewer checklist sub-block; single FR-24 bullet) | 4-parallel | ✅ Yes | STANDARD | 080 |
+| 083 | Update root `CLAUDE.md` §10 — reference test-update obligation | ✅ 2026-05-31 (main session; bullet 6 added with RB-T028-03/04/05/06 endpoint/registration alignment finding) | 4-main-seq | ❌ **No (main-session-only)** | FULL | 080 |
 
 ### P4.B — Validation + Exit ledger
 
 | ID | Task | Status | Group | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|---|
-| 084 | Full suite triple-run validation | 🔲 | 4-parallel | ✅ Yes | STANDARD | All P2+3 |
-| 085 | Publish all ledgers (repair, archive, real-bug, flaky, rewrite, exit) | 🔲 | 4-parallel | ✅ Yes | STANDARD | All P2+3 |
+| 084 | Full suite triple-run validation | ✅ 2026-05-31 (**FR-26 satisfied**: 3 unit runs + 3 integration runs all Failed: 0; zero variance; zero flakes) | 4-parallel | ✅ Yes | STANDARD | All P2+3 |
+| 085 | Publish all ledgers (repair, archive, real-bug, flaky, rewrite, exit) | ✅ 2026-05-31 (6 ledgers: repair-ledger NEW, archive-ledger 0, real-bug-ledger 20 entries, flaky 0, rewrite-ledger 1 NO-OP, exit-ledger FR-28 authoritative; rewrite escalation rate 1.23% well under 5%) | 4-parallel | ✅ Yes | STANDARD | All P2+3 |
 | 086 | Verify rewrite escalations ≤5% + last 5 CI runs SUCCESS | 🔲 | 4-gate | ❌ No (gate) | FULL | 085 + 020–023 |
 
 **Phase 4 exit gate**: Owner sign-off; project marked complete; all 14 success criteria met.

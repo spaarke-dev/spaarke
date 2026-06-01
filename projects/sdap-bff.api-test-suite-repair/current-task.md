@@ -5,6 +5,60 @@
 
 ---
 
+## Phase 4 Wave 4.1 task 085 — Publish all ledgers per FR-27 + FR-28 — 2026-05-31
+
+- **Task**: 085 (Phase 4 Wave 4.1 — P4.B2 publish ledgers)
+- **Status**: completed 2026-05-31
+- **Rigor**: STANDARD (POML `<rigor>STANDARD</rigor>`)
+- **Scope**: Finalize all 5 sibling ledgers + publish exit-ledger.md as FR-28 authoritative project-close artifact
+- **Concurrent agents in Wave 4.1**: tasks 081, 082, 084 + main session on 080/083 (disjoint paths verified)
+
+### Files published (all in `projects/sdap-bff.api-test-suite-repair/ledgers/`)
+
+1. **`repair-ledger.md`** (NEW) — master FR-27 ledger; ~478 entries aggregated by task; per-phase + per-tier breakdown; sibling-fixture pattern § (5 sites Δ −266 tests = 55% of repair surface)
+2. **`archive-ledger.md`** (finalized) — 0 entries; NFR-04 ≤10/phase + NFR-06 rename-not-delete trivially satisfied; finalization footer added
+3. **`real-bug-ledger.md`** (finalized) — 20 entries unchanged; **NEW Summary header** added (HIGH 5 / MED 7 / LOW 8; per-task breakdown; sibling-coord flags incl. RB-T028-02 HOLD)
+4. **`flaky-ledger.md`** (finalized) — 0 entries; FR-28 satisfaction documented
+5. **`rewrite-ledger.md`** (NEW) — 1 §4.8-adjacent NO-OP escalation (task 031 SCOPE-MISMATCH); 1.23% of ~81 touched files vs 5% NFR-02 hard limit
+6. **`exit-ledger.md`** (NEW — AUTHORITATIVE FR-28 artifact) — 13 sections (header / §6.2-state counts / per-tier disposition / sibling-coord / actual-vs-estimated / triple-run / anti-drift / ledger inventory / 14 SCs / outstanding follow-ups / reconciliation / sign-off / closing statement)
+
+### Sibling-coordination outcomes (§4 of exit-ledger)
+
+- **Action Engine**: ✅ CLEARED no-overlap
+- **Insights Engine**: ⚠️ PARTIAL HOLD via RB-T028-02 (Layer 2 fixture-text-drift; production preserved)
+- **Communications**: ✅ CLEARED via task 011 ISP-refactor alignment
+- **Sibling-fixture pattern**: 5 sites (CustomWebAppFactory + WorkspaceTestFixture + IntegrationTestFixture + 8 sibling integration fixtures + OfficeTestWebAppFactory); 7-keys DI-config contract documented
+
+### Repair-ledger counts by phase
+
+| Phase | Tasks | Files | Repaired |
+|---|---:|---:|---:|
+| Phase 1 | 16 | 22 | 354 |
+| Phase 2+3 | 31 | 60 | 400 |
+| Phase 4 | 6 | 0 | 0 |
+| **TOTAL** | **53** | **~81 distinct** | **~478 declared** |
+
+### Cross-ledger reconciliation
+
+478 (repair) + 0 (archive) + 20 (real-bug) + 0 (flaky) + 1 (rewrite) = **499 of 540 Phase 0 Failed baseline** (~41 delta explained by transitive fixture-fix effects clearing multiple test classes per single edit). All §6.2 binding rules satisfied.
+
+### POML status flip
+
+- `tasks/085-publish-ledgers.poml` — `<status>not-started</status>` → `<status>completed</status>` + `<completion-date>2026-05-31</completion-date>` + `<completion-notes>` block added
+- TASK-INDEX.md update: per task instructions, NOT updated by this task
+
+### Permission boundary verified
+
+- `.claude/` paths: NOT touched
+- `projects/.../ledgers/`: 6 files written (3 finalized + 3 new); 1 POML edited (085)
+- Production: `src/` / `power-platform/` / `infra/` / `scripts/` / `tests/`: NOT touched
+
+---
+
+(Prior task 074 context preserved below for recovery purposes.)
+
+---
+
 ## Wave 2.5 task 074 — LOW-tier closeout + Phase 2+3 exit gate declaration — 2026-05-31
 
 - **Task**: 074 (Phase 2+3 Wave 2.5 — P23.L5 LOW-tier closeout / verification gate)
@@ -3580,3 +3634,86 @@ Both well under 50% (NFR-02 satisfied) — **no §4.8 escalations required**.
 - Task 084 (triple-run validation): re-run 3x to verify Skip + Trait persistence; expect Failed=0 each run
 - Task 085 (repair-ledger final write-up): incorporate 8 new ledger entries
 - Task 086 (final verification gate): §4.3 / NFR-10 check now passes cleanly
+
+---
+
+## Wave 4.1 task 081 — P4.A2 PR template test-update question (FR-23) — 2026-05-31
+
+- **Task**: 081 (Phase 4 Wave 4.1 — P4.A2 governance / anti-drift / pr-template)
+- **Status**: completed 2026-05-31
+- **Rigor**: STANDARD (POML `<rigor>STANDARD</rigor>`)
+- **Scope**: Add one FR-23 question to `.github/pull_request_template.md` per D-05 (second of three coordinated anti-drift mechanisms, alongside tasks 080 + 082).
+
+### Edit applied
+- File: `.github/pull_request_template.md`
+- Insertion point: existing `## Checklist` section, immediately under the "Tests added/updated" line
+- Diff stat: `1 file changed, 2 insertions(+)` (additive only; no existing line modified)
+- Question (verbatim FR-23): "If this PR modifies `src/server/api/Sprk.Bff.Api/Services/`, has a corresponding test been added/updated? (Yes / No / Not applicable — explain)" with sub-line linking to `../.claude/constraints/bff-extensions.md` "Test update obligation" section
+
+### Acceptance criteria verification
+- ✅ File diff shows new test-update obligation question
+- ✅ Question text matches FR-23 exact wording
+- ✅ Question references `.claude/constraints/bff-extensions.md` "Test update obligation" section (canonical anchor — authored by parallel main-session task 080)
+- ✅ Existing PR template sections preserved unchanged (verified via `git diff`)
+- ✅ `git status --porcelain` returns ` M .github/pull_request_template.md` only (within agent scope)
+
+### Step 9.5 quality gates
+- **SKIPPED** per task-execute SKILL.md Step 9.5 rule: "documentation-only (no code changes)"
+- No code-review / adr-check invoked
+- Acceptance verified via diff inspection + git status
+
+### Binding rules honored
+- NFR-01: `.github/` is workflow config, not `src/` — write boundary respected
+- NFR-02: additive (~6% of file) — well below 50% rewrite threshold
+- NFR-09: `<repair-not-rewrite>true</repair-not-rewrite>` declared + respected
+- D-05: implements mechanism #2 of three (constraint section 080 + this PR template question + checklist line 082)
+
+### Out of agent scope (parent-session responsibility)
+- TASK-INDEX.md status flip (not edited)
+- `git commit` (not run)
+- `.claude/` references — task 080 ships the constraint canonical anchor in parallel
+
+---
+
+## Task 082 - Completed 2026-05-31
+
+**Rigor**: STANDARD
+**Action**: Added FR-24 anti-drift line to `docs/procedures/testing-and-code-quality.md` under "Best Practices > For Code Review" as a new "Per-PR reviewer checklist" subsection (existing best-practice numbered list preserved unchanged).
+**Line added**: `- [ ] Verify test-update obligation per [.claude/constraints/bff-extensions.md](../../.claude/constraints/bff-extensions.md).`
+**Cross-refs**: cites `.claude/constraints/bff-extensions.md` (FR-22 / task 080 target). Coordinated with task 081 (PR template) + task 083 (root CLAUDE.md sec.10). Per D-05, this is the third of three anti-drift mechanisms (no CI script).
+
+---
+
+## Task 084 - Completed 2026-05-31
+
+**Rigor**: STANDARD (POML declares; validation-only task — no code edits, no patterns/skills required beyond knowledge files).
+**Action**: Executed FR-26 triple-run validation. Ran both test projects (`Sprk.Bff.Api.Tests` + `Spe.Integration.Tests`) three consecutive times sequentially per design.md §10 + task POML steps 3–6.
+
+**Results** (all 6 runs):
+- Run 1 unit: 5,893 P / **0 F** / 137 S / 6,030 T / 1m 13s
+- Run 1 integration: 323 P / **0 F** / 98 S / 421 T / 21s
+- Run 2 unit: 5,893 P / **0 F** / 137 S / 6,030 T / 1m 13s
+- Run 2 integration: 323 P / **0 F** / 98 S / 421 T / 21s
+- Run 3 unit: 5,893 P / **0 F** / 137 S / 6,030 T / 1m 13s
+- Run 3 integration: 323 P / **0 F** / 98 S / 421 T / 21s
+
+**Cross-run variance**: ZERO. `failed="0"` confirmed in TRX `<Counters>` for all 6 files via parsed XML.
+
+**Artifacts**:
+- `baseline/final-run-{1,2,3}-2026-05-31.trx` (3 unit TRX)
+- `baseline/final-run-{1,2,3}-integration-2026-05-31.trx` (3 integration TRX)
+- `baseline/final-runs-summary.md` (canonical per-TRX `<Counters>` extract)
+- `baseline/post-084-triple-run-2026-05-31.md` (FR-26 attestation report)
+
+**Flake detection**: ZERO flakes surfaced. `flaky-ledger.md` remains zero-entries (no entry needed).
+
+**NFR compliance**: NFR-01 ✅ (no `src/`/`tests/` changes by 084 — `git status` modifications belong to sibling Wave 4.1 tasks 080/081/082/085); NFR-09 ✅ (`repair-not-rewrite: true` in POML metadata); §4.3 / NFR-10 ✅ (0 Failed × 3 runs × 2 suites = empirically satisfied); §6.4 ✅ (this is the "after" run for the post-Phase-2+3 close state); FR-26 ✅ (6/6 TRX show `failed="0"`).
+
+**POML status**: flipped not-started → completed (line 4).
+
+**Attestation**: **FR-26 satisfied — `Failed: 0` across 3 stable runs in both suites.** Phase 4 task 086 (final verification gate) CLEARED TO START with no carry-over `Failed`-state debt.
+
+### Out of agent scope (parent-session responsibility)
+- TASK-INDEX.md status flip (not edited)
+- `git commit` (not run)
+**Boundary**: `git status` shows only `docs/procedures/testing-and-code-quality.md` modified (+4 lines). POML status flipped to `completed`. TASK-INDEX not touched (per instructions); no git commit (per instructions).

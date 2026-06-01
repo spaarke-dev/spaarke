@@ -1,7 +1,7 @@
 <task id="080" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P4.A1 — Update `.claude/constraints/bff-extensions.md` with "Test update obligation" section (FR-22)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>45-60 minutes</estimated-effort>
     <assigned>AI agent (main session only)</assigned>
     <tags>phase-4, governance, anti-drift, constraint, main-session-only</tags>

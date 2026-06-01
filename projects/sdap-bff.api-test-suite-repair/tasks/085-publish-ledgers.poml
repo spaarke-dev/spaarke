@@ -1,7 +1,9 @@
 <task id="085" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P4.B2 — Publish all ledgers (repair, archive, real-bug, flaky, rewrite, exit) — FR-27, FR-28</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-05-31</completion-date>
+    <completion-notes>All 6 ledgers published in `projects/sdap-bff.api-test-suite-repair/ledgers/`: repair-ledger.md (new — ~478 entries aggregated by task with master totals + sibling-fixture pattern §); archive-ledger.md (finalized — 0 entries; NFR-04/06 trivially satisfied); real-bug-ledger.md (summary header added: 20 entries, HIGH 5 / MED 7 / LOW 8; per-task breakdown; sibling-coord flags incl. RB-T028-02 HOLD); flaky-ledger.md (finalized footer — 0 entries; FR-28 satisfaction documented); rewrite-ledger.md (new — 1 §4.8-adjacent NO-OP escalation for task 031 SCOPE-MISMATCH; 1.23% of touched-files vs 5% NFR-02 hard limit); exit-ledger.md (new AUTHORITATIVE FR-28 project-close artifact — 13 sections incl. per-§6.2-state counts, per-tier disposition, sibling-coord outcomes for Action Engine / Insights / Communications, actual vs estimated effort, triple-run evidence, anti-drift governance, 14 SCs satisfied). Cross-ledger reconciliation: 478+0+20+0+1 = 499 of 540 touched-test baseline; ~41 delta explained by transitive fixture-fix effects. NFR-01 / NFR-02 / NFR-04 / NFR-06 all satisfied.</completion-notes>
     <estimated-effort>2-4 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-4, ledger, exit-ledger, validation, success-criteria</tags>

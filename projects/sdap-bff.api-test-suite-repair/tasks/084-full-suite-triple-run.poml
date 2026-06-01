@@ -1,7 +1,7 @@
 <task id="084" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>P4.B1 — Full suite triple-run validation (FR-26)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2-4 hours (3 × ~30-45 min test runs per project + verification)</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-4, validation, triple-run, baseline, zero-failure-verification</tags>
