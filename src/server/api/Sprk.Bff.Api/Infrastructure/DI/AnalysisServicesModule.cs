@@ -1,5 +1,6 @@
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Insights;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
@@ -71,7 +72,68 @@ public static class AnalysisServicesModule
         }
 
         AddRecordMatchingServices(services, configuration);
+
+        // Unconditional chat-CRUD + notification services (task 011 Phase 1b Tier 1, D-09 §2 B1/B4/B5/L5).
+        // These services have ZERO AI dependencies; their previous conditional registration was
+        // misclassification (they were placed inside compound-gated helpers because AI features
+        // CONSUME them, but their constructor deps are CRUD-only — IGenericEntityService,
+        // IDistributedCache, IFieldMappingDataverseService, all unconditional per GraphModule).
+        // Promotion-to-unconditional eliminates 8 startup metadata-gen abort sites and unblocks
+        // ~36 currently-Skipped integration tests (RB-T028-03/04/05 + collateral RB-T028-06).
+        // See projects/sdap.bff.api-test-suite-repair-r2/decisions/D-09-nullobject-design.md.
+        AddUnconditionalChatAndNotificationServices(services);
+
         return services;
+    }
+
+    /// <summary>
+    /// Registers chat-CRUD + notification services UNCONDITIONALLY (task 011, D-09 §2 B1/B4/B5/L5).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// These 6 services were previously registered inside the compound
+    /// <c>Analysis:Enabled &amp;&amp; DocumentIntelligence:Enabled</c> gate but have ZERO AI
+    /// dependencies in their constructors. Promotion is per ADR-010 (DI minimalism favors
+    /// unconditional registration when feature gating adds no value) and ADR-018 (kill switches
+    /// must not gate CRUD-only services that AI features happen to consume).
+    /// </para>
+    /// <para>
+    /// Items promoted:
+    /// <list type="bullet">
+    /// <item>B1: <see cref="Services.NotificationService"/> — was AnalysisServicesModule.AddPlaybookServices line 108</item>
+    /// <item>B4: <see cref="IChatDataverseRepository"/> + <see cref="ChatDataverseRepository"/> — was AiModule line 230</item>
+    /// <item>B4: <see cref="ChatSessionManager"/> — was AiModule lines 238–242</item>
+    /// <item>B5: <see cref="ChatHistoryManager"/> — was AiModule line 247</item>
+    /// <item>L5: <see cref="AnalysisChatContextResolver"/> — was AiModule line 261</item>
+    /// <item>L5: <see cref="StandaloneChatContextProvider"/> — was AiModule line 266</item>
+    /// </list>
+    /// </para>
+    /// </remarks>
+    private static void AddUnconditionalChatAndNotificationServices(IServiceCollection services)
+    {
+        // B1 — NotificationService (deps: IGenericEntityService, ILogger — both unconditional).
+        services.AddSingleton<Sprk.Bff.Api.Services.NotificationService>();
+
+        // B4 — IChatDataverseRepository + ChatDataverseRepository
+        // (deps: IGenericEntityService, IFieldMappingDataverseService, ILogger — all unconditional).
+        services.AddScoped<IChatDataverseRepository, ChatDataverseRepository>();
+
+        // B4 — ChatSessionManager (deps: IDistributedCache, IChatDataverseRepository,
+        // ILogger, optional ISessionPersistenceService — last is null-tolerant via GetService).
+        services.AddScoped<ChatSessionManager>(sp => new ChatSessionManager(
+            cache:                sp.GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(),
+            dataverseRepository:  sp.GetRequiredService<IChatDataverseRepository>(),
+            logger:               sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChatSessionManager>>(),
+            persistence:          sp.GetService<Sprk.Bff.Api.Services.Ai.Sessions.ISessionPersistenceService>()));
+
+        // B5 — ChatHistoryManager (deps: ChatSessionManager + IChatDataverseRepository + ILogger — all unconditional).
+        services.AddScoped<ChatHistoryManager>();
+
+        // L5 — AnalysisChatContextResolver (deps: IGenericEntityService + IDistributedCache + ILogger).
+        services.AddScoped<AnalysisChatContextResolver>();
+
+        // L5 — StandaloneChatContextProvider (deps: IDistributedCache + ILogger).
+        services.AddScoped<StandaloneChatContextProvider>();
     }
 
     private static void AddAnalysisOrchestrationServices(IServiceCollection services, IConfiguration configuration)
@@ -105,7 +167,8 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutorRegistry, Sprk.Bff.Api.Services.Ai.Nodes.NodeExecutorRegistry>();
         services.AddScoped<IPlaybookOrchestrationService, PlaybookOrchestrationService>();
         services.AddHttpClient<IPlaybookSharingService, PlaybookSharingService>();
-        services.AddSingleton<Sprk.Bff.Api.Services.NotificationService>();
+        // NotificationService promoted to unconditional registration (task 011 Phase 1b Tier 1, D-09 §2 B1).
+        // See AddUnconditionalChatAndNotificationServices below.
         services.AddHostedService<Sprk.Bff.Api.Services.PlaybookSchedulerService>();
     }
 
