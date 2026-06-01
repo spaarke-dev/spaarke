@@ -1,0 +1,130 @@
+<task id="029" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P2.exit — Phase 2 exit triple-run validation gate (MEDIUM tier complete)</title>
+    <phase>Phase 2</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours (3 × ~5 min test runs + analysis + artifact write)</estimated-effort>
+    <dependencies>020,021,022,023,024,025,026</dependencies>
+    <blocks>030</blocks>
+    <tags>phase-2, bff-api, testing, integration-test, phase-exit-gate</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>No production code change — verification + measurement artifact only. STANDARD rigor per CLAUDE.md §8 decision tree (tests/measurement task).</rigor-reason>
+    <parallel-group>P2-Exit</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase exit gate — depends on ALL Wave 1 + Wave 2 Phase 2 tasks (020-026). Sequential after they complete. No concurrent work permitted while this gate is in flight (NFR-05 binding).</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Validate Phase 2 exit per NFR-05: run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` THREE times consecutively. All 3 runs MUST show `Failed: 0`. Mirror the r1 task 084 triple-run validation pattern (predecessor canonical pattern).
+
+    Capture the 3 TRX artifacts in `projects/sdap.bff.api-test-suite-repair-r2/baseline/`:
+    - `phase2-exit-triple-run-N-YYYY-MM-DD.trx` (N = 1, 2, 3)
+
+    Write a delta artifact `baseline/phase2-exit-delta-YYYY-MM-DD.md` with: pre-Phase-2 baseline (Phase 1 exit numbers from task 013), post-Phase-2 numbers (this triple-run), delta (Skip→Pass count, total failed, total passed). Reconcile against Phase 2 task closures: 020, 021, 022, 023, 024, 025, 026 — sum of expected Skip→Pass per ledger entries (≥30 tests).
+
+    Reference: r1 task 084 protocol — 3 consecutive runs, zero variance, any failure or flake aborts the gate. Per NFR-06 each phase produces a delta artifact in `baseline/`.
+
+    This task is the **Phase 2 exit gate**. Phase 3 (LOW tier) does NOT start until this gate passes. No production code change in this task.
+  </prompt>
+
+  <role>Backend AI agent running the Phase 2 exit triple-run validation gate (test-only, measurement, no production change).</role>
+
+  <goal>
+    3 consecutive runs of `tests/unit/Sprk.Bff.Api.Tests/` show `Failed: 0` with zero variance. 3 TRX artifacts + 1 delta markdown artifact in `projects/sdap.bff.api-test-suite-repair-r2/baseline/`. Phase 2 exit gate satisfied; Phase 3 unblocked.
+  </goal>
+
+  <inputs>
+    <file purpose="phase-1-baseline">projects/sdap.bff.api-test-suite-repair-r2/baseline/phase1-exit-*.md (from task 013)</file>
+    <file purpose="phase-2-closures">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (RB-T044-02, RB-T044-04, RB-T053-01, RB-T070-03, RB-T028-01, RB-T028-02, RB-T028-07 — all expected status `repaired` or `archived-as-dead-target` or `skipped-not-applicable`)</file>
+    <file purpose="r1-protocol-reference">projects/sdap-bff.api-test-suite-repair/tasks/084-* (r1 triple-run protocol if present)</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-029">BFF Publish Hygiene — triple-run MUST preserve test-suite baseline; no NuGet/package changes via this task</constraint>
+    <constraint source="NFR-01">Production code IS in scope (r2 inverts r1); this task adds NO production code (verification + artifact only)</constraint>
+    <constraint source="NFR-02"><50% line replacement per file — N/A (no source edits)</constraint>
+    <constraint source="NFR-04">Commit message cites Phase 2 exit gate (no specific ledger entry; gate-task)</constraint>
+    <constraint source="NFR-05">Triple-run validation mandatory before Phase 2 exit; STOP and report if any run shows `Failed: >0`</constraint>
+    <constraint source="NFR-06">Each phase produces a delta artifact in `baseline/`</constraint>
+    <constraint source="D-02">N/A — no ledger entry closure in this task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      r1 task 084 established the triple-run validation pattern: 3 consecutive `dotnet test` invocations, capture TRX per run, reconcile against expected closures, abort on any variance. This task applies the same pattern at Phase 2 exit. Per the r1 lessons-learned: "Triple-run validation pattern (r1 task 084) is canonical".
+
+      Expected Skip→Pass after Phase 2 (per FR-03): 30-40 tests across the 7 MED entries:
+      - RB-T044-02: 4 InlineData
+      - RB-T044-04: 2 InlineData
+      - RB-T053-01: 2 Facts
+      - RB-T070-03: 7 tests (if path 1/2) or 0 (path 3 archived)
+      - RB-T028-01: 1 Fact
+      - RB-T028-02: 3 tests (if outcome b) or 0 (outcomes a, c handled in Phase 1)
+      - RB-T028-07: 9 integration tests (Spe.Integration.Tests)
+
+      Per NFR-11 no test may end in `Failed` state at any phase exit.
+    </background>
+    <dependencies>
+      <dependency task="020" status="required">RB-T044-02 closure</dependency>
+      <dependency task="021" status="required">RB-T044-04 closure</dependency>
+      <dependency task="022" status="required">RB-T053-01 closure</dependency>
+      <dependency task="023" status="required">RB-T070-03 closure</dependency>
+      <dependency task="024" status="required">RB-T028-01 closure</dependency>
+      <dependency task="025" status="required">RB-T028-07 closure</dependency>
+      <dependency task="026" status="required">RB-T028-02 fallback closure (skipped or executed)</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Verify all Phase 2 task closures (020-026) by reading their `current-task.md` updates + the predecessor r1 ledger statuses (`real-bug-ledger.md`). Confirm each task either: closed with mode `repaired` / `archived-as-dead-target` / `skipped-not-applicable` / `repaired-by-cluster`. Block this gate if any Phase 2 task is incomplete.</step>
+    <step order="2">Capture pre-triple-run snapshot: read the Phase 1 exit baseline artifact (from task 013) for the starting numbers (Total, Passed, Failed, Skipped).</step>
+    <step order="3">Run 1: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --logger "trx;LogFileName=phase2-exit-triple-run-1-YYYY-MM-DD.trx"`. Copy TRX to `projects/sdap.bff.api-test-suite-repair-r2/baseline/`. Record outcome.</step>
+    <step order="4">Run 2: same command with `-2-YYYY-MM-DD.trx`. Copy to baseline. Record outcome.</step>
+    <step order="5">Run 3: same command with `-3-YYYY-MM-DD.trx`. Copy to baseline. Record outcome.</step>
+    <step order="6">Compare 3 outcomes: total Passed/Failed/Skipped must match across all 3 runs (zero variance — flakes flag the gate as failed). If any run shows `Failed: >0` OR variance between runs: STOP, write a failure report to `notes/handoffs/phase2-exit-gate-failure-YYYY-MM-DD.md`, and 🔔 **Human Input Required**.</step>
+    <step order="7">If all 3 runs pass with zero variance: compute Skip→Pass delta vs Phase 1 exit baseline. Expected ≥30 net Pass increase + matching Skip decrease per Phase 2 closures.</step>
+    <step order="8">Write delta artifact `projects/sdap.bff.api-test-suite-repair-r2/baseline/phase2-exit-delta-YYYY-MM-DD.md` containing: Phase 1 exit numbers; 3 Phase 2 exit runs (Pass/Fail/Skip per run); aggregate delta; per-closed-entry test counts; reconciliation table.</step>
+    <step order="9">Update `projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md` "Project Status" section: Phase → Phase 3 (LOW tier); Last Updated → today's date.</step>
+    <step order="10">Commit: `chore(test): Phase 2 exit triple-run validation green (gate cleared; 7 MED entries closed)`. NO `RB-*` ledger ID cited (this is a gate task; ledger IDs cited in tasks 020-026). Update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Phase 2 task `current-task.md` snapshots + r1 ledger + Phase 1 exit baseline</tool>
+    <tool name="Bash">3 × `dotnet test ... --logger trx`; capture artifacts</tool>
+    <tool name="Write">`baseline/phase2-exit-delta-YYYY-MM-DD.md` (delta artifact); failure report if Step 6 fails</tool>
+    <tool name="Edit">`projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md` Project Status section</tool>
+  </tools>
+
+  <outputs>
+    <output type="artifact">projects/sdap.bff.api-test-suite-repair-r2/baseline/phase2-exit-triple-run-{1,2,3}-YYYY-MM-DD.trx (3 TRX files)</output>
+    <output type="artifact">projects/sdap.bff.api-test-suite-repair-r2/baseline/phase2-exit-delta-YYYY-MM-DD.md</output>
+    <output type="state">CLAUDE.md Project Status → Phase 3</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">3 TRX files present in `baseline/` named per the pattern `phase2-exit-triple-run-{1,2,3}-YYYY-MM-DD.trx`</criterion>
+    <criterion testable="true">All 3 runs show `Failed: 0` (verified by parsing each TRX)</criterion>
+    <criterion testable="true">Zero variance between the 3 runs (Passed/Failed/Skipped counts match exactly)</criterion>
+    <criterion testable="true">Delta artifact `baseline/phase2-exit-delta-YYYY-MM-DD.md` exists and reconciles Phase 2 closures to Skip→Pass count</criterion>
+    <criterion testable="true">CLAUDE.md Project Status updated to Phase 3</criterion>
+    <criterion testable="true">All 7 MED ledger entries (RB-T044-02, RB-T044-04, RB-T053-01, RB-T070-03, RB-T028-01, RB-T028-02, RB-T028-07) closed with correct resolution mode</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <approach>r1 task 084 pattern — sequential 3-run capture + reconciliation. STANDARD rigor (no code change). Phase exit gate; abort + report on any variance or failure.</approach>
+  </execution>
+</task>

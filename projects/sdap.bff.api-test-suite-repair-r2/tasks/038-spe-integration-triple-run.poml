@@ -1,0 +1,144 @@
+<task id="038" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P3 — Spe.Integration.Tests triple-run validation + flake quarantine (FR-10)</title>
+    <phase>Phase 3: LOW Severity + Integration Stability</phase>
+    <status>not-started</status>
+    <estimated-effort>3-6 hours (3 × ~30-60 min runs + verification + any flake triage)</estimated-effort>
+    <dependencies>030, 031, 032, 033, 034, 035, 036, 037</dependencies>
+    <blocks>039</blocks>
+    <tags>phase-3, testing, integration-test, triple-run, validation</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test execution + reporting. No code change. Per task-execute rigor decision tree: tests / validation tasks = STANDARD; Step 9.5 quality gates skipped.</rigor-reason>
+    <parallel-group>P3-W3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase-exit gate. Hard-depends on every Phase 3 production fix (030-037) being complete. Runs sequentially as a single-agent gate after Wave 1 + Wave 2 finish.</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Run `dotnet test tests/integration/Spe.Integration.Tests/ -c Release --logger trx` THREE consecutive times per FR-10.
+    Each run produces a TRX file in `projects/sdap.bff.api-test-suite-repair-r2/baseline/`.
+    Target: `Failed: 0` across all 3 runs.
+
+    FR-10 acceptance: 3 consecutive integration-suite runs documented; ≤2 flakes; flaky-ledger entries for any quarantined tests.
+
+    Per FR-10 / NFR-05: any test that passes ≥1 run and fails ≥1 run is a FLAKE. Quarantine procedure:
+    - Add `[Trait("status","flaky-quarantined")]` to the test
+    - Mark `[Fact(Skip = "Quarantined — flaky; see ledgers/flaky-ledger.md")]`
+    - Add entry to `projects/sdap.bff.api-test-suite-repair-r2/ledgers/flaky-ledger.md` with fix-by date (30-60 days)
+
+    If >2 flakes surface, the audit task for Phase 4 is triggered (does NOT block Phase 3 close per risk register R6).
+
+    NO production code changes. NO test changes EXCEPT flaky-quarantine trait+Skip additions (which are Skip→quarantine transitions, allowed under FR-10).
+    Mirrors r1 task 084 triple-run pattern.
+
+    Hard dependency: ALL Phase 3 production-fix tasks (030-037) must be complete before this task runs.
+  </prompt>
+
+  <role>Integration-suite stability validator running the triple-run gate at Phase 3 exit.</role>
+
+  <goal>
+    3 TRX files exist in `projects/sdap.bff.api-test-suite-repair-r2/baseline/`:
+    - `phase3-integration-run-1-{date}.trx`
+    - `phase3-integration-run-2-{date}.trx`
+    - `phase3-integration-run-3-{date}.trx`
+
+    All 3 show `Failed: 0` in summary. Any flake (Pass≥1 + Fail≥1) is quarantined per the procedure above with corresponding
+    `flaky-ledger.md` entry. Total flakes ≤2 (per FR-10 acceptance).
+
+    `projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-integration-triple-run-{date}.md` summary doc exists with
+    per-run counts + flake disposition.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="integration-test-project">tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj</file>
+    <file purpose="r1-task-084">projects/sdap-bff.api-test-suite-repair/tasks/084-full-suite-triple-run.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-10">Spe.Integration.Tests triple-run; ≤2 flakes; quarantine any beyond + flaky-ledger entry</constraint>
+    <constraint source="NFR-05">Triple-run validation mandatory before phase exit</constraint>
+    <constraint source="NFR-01">No production code changes; only Skip → flaky-quarantined transitions permitted (test-only)</constraint>
+    <constraint source="NFR-11">No test ends in `Failed` state at phase exit — failures must be triaged to repaired / quarantined / real-bug-pending-fix</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/tasks/084-full-suite-triple-run.poml</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The triple-run pattern guards against the same three failure modes documented in r1 task 084: test order non-determinism, environmental flakiness, cumulative-state leaks. r1 task 084 ran BOTH suites 3× each (6 TRX); r2 task 038 covers integration only (the Phase 3 scope per FR-10). The final Phase 5 task (in r2's plan as 082-final-triple-run-validation) will re-run both suites at project close per FR-15.
+
+      Per spec.md / design.md §5.4 Phase 3 exit gate: this run validates that the Phase 3 LOW-severity production fixes (tasks 030-037) did not destabilize the integration suite, AND that the integration suite is independently stable across consecutive runs (the gap r1 did not validate).
+
+      Hard dependency: ALL Phase 3 production-fix tasks (030-037) must be complete. If any is not yet 🟢, HALT and request completion.
+    </background>
+    <dependencies>
+      <dependency task="030-037" status="must-be-complete">All 8 Phase 3 production-fix tasks complete; ledger entries `repaired`</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-integration-run-1-2026-MM-DD.trx</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-integration-run-2-2026-MM-DD.trx</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-integration-run-3-2026-MM-DD.trx</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-integration-triple-run-2026-MM-DD.md</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/ledgers/flaky-ledger.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Resolve today's date (YYYY-MM-DD). Use as suffix on all 3 TRX file names.</step>
+    <step order="2">Verify all Phase 3 production-fix tasks (030, 031, 032, 033, 034, 035, 036, 037) are marked complete in `tasks/TASK-INDEX.md`. HALT if any is not done.</step>
+    <step order="3">RUN 1: `dotnet test tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj -c Release --logger "trx;LogFileName=phase3-integration-run-1-{date}.trx" --results-directory projects/sdap.bff.api-test-suite-repair-r2/baseline/`. Parse `<ResultSummary>`; record total / passed / failed / skipped.</step>
+    <step order="4">RUN 2: same command, file name `phase3-integration-run-2-{date}.trx`. Record counts.</step>
+    <step order="5">RUN 3: same command, file name `phase3-integration-run-3-{date}.trx`. Record counts.</step>
+    <step order="6">Aggregate analysis: for each test, determine pass/fail vector across the 3 runs. Three categories: (a) `pass / pass / pass` → stable; (b) `fail / fail / fail` → deterministic failure (must triage to `real-bug-pending-fix` or `repaired`); (c) mixed → FLAKE.</step>
+    <step order="7">For each flake: add `[Trait("status","flaky-quarantined")]` + `Skip = "Quarantined — flaky; see ledgers/flaky-ledger.md"` to the test. Add entry to `projects/sdap.bff.api-test-suite-repair-r2/ledgers/flaky-ledger.md` with: test FullyQualifiedName, fix-by date (today + 60 days), observed pass-fail vector, hypothesis on root cause.</step>
+    <step order="8">If total flakes >2: file the Phase 4 audit task (separately; does NOT block this task per risk register R6) — note in summary doc.</step>
+    <step order="9">If deterministic failures exist (case b): HALT — these are NOT flakes; they require triage per §6.2 taxonomy. Cannot exit Phase 3 with deterministic failures.</step>
+    <step order="10">Write `projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-integration-triple-run-{date}.md` with per-run counts + flake count + per-flake disposition + cross-reference to flaky-ledger entries.</step>
+    <step order="11">Verify `git status` shows only new files in `baseline/`, optional Skip-additions in `tests/integration/`, and `ledgers/flaky-ledger.md` updates (no `src/`, no other test repairs).</step>
+    <step order="12">Update `projects/sdap.bff.api-test-suite-repair-r2/current-task.md` with completion + per-run counts + flake count + path to summary doc.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test (TRX logger) — integration suite, 3 times</tool>
+    <tool name="Read">TRX files for ResultSummary parsing</tool>
+    <tool name="Edit">Test file Skip+Trait additions for any flake; flaky-ledger entries</tool>
+    <tool name="Write">Summary markdown in baseline/</tool>
+    <tool name="Bash">`git status` for boundary verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="baseline">projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-integration-run-1-2026-MM-DD.trx</output>
+    <output type="baseline">projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-integration-run-2-2026-MM-DD.trx</output>
+    <output type="baseline">projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-integration-run-3-2026-MM-DD.trx</output>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-integration-triple-run-2026-MM-DD.md</output>
+    <output type="ledger">projects/sdap.bff.api-test-suite-repair-r2/ledgers/flaky-ledger.md (any flake entries)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">3 TRX files exist in `projects/sdap.bff.api-test-suite-repair-r2/baseline/` with today's date suffix</criterion>
+    <criterion testable="true">All 3 TRX files parseable as XML; ResultSummary captured per run</criterion>
+    <criterion testable="true">All 3 runs show `Failed: 0` (deterministic failures HALT this task; flakes get quarantined and counted separately)</criterion>
+    <criterion testable="true">Flake count is ≤2; if exceeded, Phase 4 audit task is filed (note in summary doc)</criterion>
+    <criterion testable="true">Every flake has a `flaky-ledger.md` entry with fix-by date, FQN, observed vector, hypothesis</criterion>
+    <criterion testable="true">Summary markdown `phase3-integration-triple-run-{date}.md` exists with per-run counts + flake disposition</criterion>
+    <criterion testable="true">`git status` shows only new baseline files, Skip+Trait additions for flakes, and flaky-ledger updates — no `src/`, no other test repairs</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Invoke `task-execute` skill with this POML. STANDARD rigor — no Step 9.5 quality gates. Mirrors r1 task 084 pattern; integration-only scope per FR-10.
+  </execution>
+</task>

@@ -1,0 +1,113 @@
+<task id="001" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P0 — Verify all 20 real-bug entries are reproducible (no regression-disguised-as-Skip)</title>
+    <phase>Phase 0: Project Setup + Baseline</phase>
+    <status>not-started</status>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <dependencies>000</dependencies>
+    <blocks>010, 011, 012</blocks>
+    <tags>phase-0, baseline, testing, real-bug-ledger</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test verification + baseline document; no production code or new test logic. Per task-execute rigor decision tree: tests / verification / Phase 0 baseline = STANDARD.</rigor-reason>
+    <parallel-group>P0-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    For each of the 20 real-bug-pending-fix entries in `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md`: locate the Skipped test(s) cited in the entry, remove the `Skip = "..."` attribute locally (DO NOT commit this change), run the test, observe the failure, then restore the `Skip` attribute. Confirm each Skip is still correct (the test fails for the documented reason — production bug not yet fixed) and that no test has been silently regression-disguised (the test passes despite the Skip, meaning the production bug was fixed elsewhere or the test is no longer probative).
+
+    Writes: a single verification artifact at `projects/sdap.bff.api-test-suite-repair-r2/baseline/20-entries-reproducibility-verification.md`. Restores all Skip attributes after measurement — no permanent test changes.
+  </prompt>
+
+  <role>r2 reproducibility analyst — verifies the 20-entry ledger reflects current production-side state before Phase 1 starts.</role>
+
+  <goal>
+    `projects/sdap.bff.api-test-suite-repair-r2/baseline/20-entries-reproducibility-verification.md` exists with one row per ledger entry showing:
+    - Entry ID + severity
+    - Test class + test name(s) cited in the entry
+    - Observed outcome with Skip removed (Failed = bug reproducible / Passed = regression-disguised / Compile error = test path drifted)
+    - Disposition: `reproducible-as-expected` / `passes-without-fix-needs-reclassification` / `compile-broken-needs-investigation`
+    - Per-entry verdict on whether the ledger entry remains accurate for r2 phase scope
+
+    All Skip attributes restored after measurement; `git status` after task completion shows ONLY `projects/sdap.bff.api-test-suite-repair-r2/` paths modified (the verification doc + TASK-INDEX + current-task.md).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="r1-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file purpose="r1-lessons">projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+    <file purpose="phase0-baseline">projects/sdap.bff.api-test-suite-repair-r2/baseline/r1-closeout-2026-06-01.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">No production code changes — Skip-attribute toggles are measurement-only and are reverted before commit</constraint>
+    <constraint source="NFR-06">Phase 0 produces a delta artifact in `baseline/` — this task creates the reproducibility verification</constraint>
+    <constraint source="D-05">Real-bug ledger is source of truth — task confirms its current state matches code reality</constraint>
+    <constraint source="FR-01">All 20 entries must be closeable by 2026-08-31 — this task confirms each entry's starting state is what the ledger claims</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      r1's real-bug-ledger captures 20 entries (5 HIGH / 7 MED / 8 LOW) as of 2026-05-31. Three months elapse between r1 close and r2 Phase 1 start. In that interval, sibling projects (Action Engine, Insights, Communications) or unrelated PRs may have inadvertently fixed (or regressed) some production paths. If a test is silently passing without the documented production fix, the ledger entry is stale and r2 must reclassify (not "fix"). This task is the safety net that catches stale entries before Phase 1 starts production-code changes. Pattern mirrors r1's task 001 baseline-measurement methodology.
+    </background>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/20-entries-reproducibility-verification.md</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/PrivilegeLeakageTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Capabilities/CapabilityRouterBenchmarkTests.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` end-to-end; build an internal list of the 20 entries with: ID, severity, production file path, test file path + test name(s), Skip-reason.</step>
+    <step order="2">For each ledger entry (parallel-walk; preserve order): (a) Read the test file; (b) locate the cited Skipped test(s); (c) remove the `Skip = "..."` attribute LOCALLY (do not commit); (d) run `dotnet test --filter "FullyQualifiedName~{test-name}"`; (e) record outcome (Failed / Passed / CompileError); (f) restore the Skip attribute.</step>
+    <step order="3">For any entry whose test now passes without the Skip: investigate `git log` history of the production file to see if the bug was silently fixed in a sibling project commit. Flag for reclassification in the verification artifact.</step>
+    <step order="4">For any entry whose test has a compile error: flag as `compile-broken-needs-investigation` — likely test or production refactor that orphaned the assertion. May require r2 Phase 1 absorption.</step>
+    <step order="5">Author `projects/sdap.bff.api-test-suite-repair-r2/baseline/20-entries-reproducibility-verification.md` with a per-entry table + summary section listing: total reproducible / total stale / total compile-broken / total still-on-track-for-Phase-1-2-3.</step>
+    <step order="6">After all 20 entries measured: run `git status` to verify ALL Skip attributes restored — no modified test files. If any file shows modified, restore via `git checkout -- <path>`.</step>
+    <step order="7">Update `projects/sdap.bff.api-test-suite-repair-r2/tasks/TASK-INDEX.md` — mark 001 as ✅.</step>
+    <step order="8">Update `projects/sdap.bff.api-test-suite-repair-r2/current-task.md` with completion note + cite per-severity reproducibility counts.</step>
+    <step order="9">Commit message: "docs(projects/r2): verify 20-entry ledger reproducibility (FR-01)" — references FR-01.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Ledger + test files</tool>
+    <tool name="Edit">Toggle Skip attributes LOCALLY (always restore before commit)</tool>
+    <tool name="Bash">`dotnet test --filter`, `git status`, `git checkout --`, `git log`</tool>
+    <tool name="Write">Verification artifact</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/baseline/20-entries-reproducibility-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 20 ledger entries individually measured; per-entry outcome recorded in the verification artifact</criterion>
+    <criterion testable="true">`git status` shows ZERO test files modified after task completion (all Skip attributes restored)</criterion>
+    <criterion testable="true">Verification artifact summary section reports: total reproducible vs. total stale vs. total compile-broken</criterion>
+    <criterion testable="true">Any entry flagged as `passes-without-fix-needs-reclassification` has investigation notes (which sibling commit / unrelated PR closed the production bug)</criterion>
+    <criterion testable="true">Commit references FR-01</criterion>
+    <criterion testable="true">No files modified under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all `<knowledge><files>` before starting. Apply STANDARD protocol. CRITICAL: any local Skip-attribute removal MUST be reverted before commit — verify via `git status`.</protocol>
+  </execution>
+</task>

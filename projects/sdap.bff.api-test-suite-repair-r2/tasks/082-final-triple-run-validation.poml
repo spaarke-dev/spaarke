@@ -1,0 +1,130 @@
+<task id="082" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P5.3 — Final triple-run validation: both projects × 3 runs each (6 TRX artifacts)</title>
+    <phase>Phase 5</phase>
+    <status>not-started</status>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <dependencies>080,081</dependencies>
+    <blocks>083</blocks>
+    <tags>phase-5, testing, validation, triple-run, exit-gate</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Phase-exit validation gate: 6 dotnet test runs + capture TRX artifacts + write summary doc. No `src/` or test logic edits. STANDARD per CLAUDE.md §8.</rigor-reason>
+    <parallel-group>P5-final</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase-exit gate; runs after 080 + 081 complete. Validation of cumulative project state — must observe the post-governance-update state, not concurrent with it.</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Execute the final triple-run validation gate for r2 per FR-15. Both test projects (`Sprk.Bff.Api.Tests` + `Spe.Integration.Tests`), 3 consecutive runs each = 6 TRX artifacts. Acceptance: `Failed: 0` across all 6.
+
+    This task mirrors r1 task 084 (the canonical triple-run pattern). The protocol is unchanged; the surface is expanded (r1 task 084 was unit-only; this is both projects).
+
+    Per NFR-05, triple-run validation is MANDATORY before phase exit. Per FR-15, the project cannot close (task 083 PR + admin-merge) until all 6 runs are green.
+
+    If ANY run produces `Failed: >0`: HALT the wrap-up; investigate; do NOT proceed to task 083. The failure is a regression of Phase 1-4 work that must be resolved before close.
+
+    If ANY run produces transient/flaky failures (passes in 2 of 3 runs): document in `baseline/final-triple-run-2026-08-XX.md` + quarantine the test via `[Trait("status","flaky-quarantined")]` + ledger entry. This is the acceptable transient-flake path.
+  </prompt>
+
+  <role>Validation AI agent executing the final triple-run phase-exit gate; producing 6 TRX artifacts + summary doc.</role>
+
+  <goal>
+    Six TRX artifacts + one summary doc:
+    - **6 TRX files** in `projects/sdap.bff.api-test-suite-repair-r2/baseline/`:
+      - `final-triple-run-unit-1-2026-08-XX.trx`
+      - `final-triple-run-unit-2-2026-08-XX.trx`
+      - `final-triple-run-unit-3-2026-08-XX.trx`
+      - `final-triple-run-integration-1-2026-08-XX.trx`
+      - `final-triple-run-integration-2-2026-08-XX.trx`
+      - `final-triple-run-integration-3-2026-08-XX.trx`
+    - **Summary doc** `baseline/final-triple-run-2026-08-XX.md` with per-run counts (Total / Passed / Failed / Skipped / Duration); flake detection (any test that passes ≥1 + fails ≥1 across 6 runs); cross-reference to TRX artifacts.
+
+    Acceptance gate per FR-15: `Failed: 0` across all 6 runs. If any flake, quarantine + document; failure here HALTS task 083.
+  </goal>
+
+  <inputs>
+    <file purpose="unit-test-project">tests/unit/Sprk.Bff.Api.Tests/</file>
+    <file purpose="integration-test-project">tests/integration/Spe.Integration.Tests/</file>
+    <file purpose="r1-task-084-reference">projects/sdap-bff.api-test-suite-repair/tasks/084-* (if findable; canonical triple-run pattern)</file>
+    <file purpose="r1-task-084-baseline">projects/sdap-bff.api-test-suite-repair/baseline/ (r1's TRX outputs as format reference)</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-05">Triple-run validation required at phase exit (mandatory for FR-15)</constraint>
+    <constraint source="FR-15">Both test projects, 3 consecutive runs each, all `Failed: 0`. 6 TRX artifacts; zero variance reported</constraint>
+    <constraint source="NFR-11">No test may end in `Failed` state at phase exit (predecessor pattern continues)</constraint>
+    <constraint source="r1 task 084 pattern">Same protocol as r1 task 084 (canonical triple-run); 3 consecutive runs per project; capture TRX per run</constraint>
+    <constraint source="NFR-01">No `src/` or test logic modifications — measurement only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The triple-run pattern was canonized in r1 task 084: 3 consecutive runs of the same test project, capturing TRX per run, comparing for flake detection. Any test that varies between Pass and Fail across the 3 runs is flaky-quarantined (Skip + Trait + ledger entry) — NOT left as a sporadic failure.
+
+      r2 expands the scope from r1's unit-only to BOTH projects. The integration suite (`Spe.Integration.Tests`) was triple-run validated at Phase 3 exit (FR-10) but this final gate ensures cumulative Phase 1-5 work hasn't regressed integration stability.
+
+      The 6-TRX artifact set lives in `baseline/` as a permanent record of project close state. This is referenced by task 090 (wrap-up) + the exit-ledger.
+
+      Per NFR-05, failure here is NOT optional — task 083 (PR + admin-merge) cannot proceed until all 6 runs are green. The gate exists because past projects shipped with "almost stable" suites and downstream consumers paid the cost.
+    </background>
+    <dependencies>
+      <dependency task="080" status="not-started">Phase 5 procedure doc update — must complete before validation</dependency>
+      <dependency task="081" status="not-started">Phase 5 constraint extension (conditional) — must complete before validation</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/final-triple-run-*.trx (6 files)</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/final-triple-run-2026-08-XX.md (summary)</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Verify tasks 080 + 081 (and any earlier Phase 5 dependencies) are complete. Read `tasks/TASK-INDEX.md` to confirm.</step>
+    <step order="2">Build verification — `dotnet build tests/unit/Sprk.Bff.Api.Tests/` and `dotnet build tests/integration/Spe.Integration.Tests/`. Both MUST produce 0 errors. If either fails, HALT.</step>
+    <step order="3">Execute `Sprk.Bff.Api.Tests` triple-run: 3 consecutive `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --logger "trx;LogFileName=final-triple-run-unit-N-2026-08-XX.trx" --results-directory projects/sdap.bff.api-test-suite-repair-r2/baseline/` where N = 1, 2, 3. Capture each run's total/passed/failed/skipped + duration.</step>
+    <step order="4">Execute `Spe.Integration.Tests` triple-run: 3 consecutive `dotnet test tests/integration/Spe.Integration.Tests/ --logger "trx;LogFileName=final-triple-run-integration-N-2026-08-XX.trx" --results-directory projects/sdap.bff.api-test-suite-repair-r2/baseline/` where N = 1, 2, 3. Capture each run's total/passed/failed/skipped + duration.</step>
+    <step order="5">Parse all 6 TRX files. Verify: Failed = 0 across ALL 6 runs. Flake detection: any test that passes ≥1 run and fails ≥1 run.</step>
+    <step order="6">If `Failed: 0` across all 6: proceed to summary doc. If any run has Failed > 0: HALT; investigate root cause; report failure mode; do NOT advance to task 083.</step>
+    <step order="7">If flakes detected (Pass ≥1, Fail ≥1): document each flake; apply `[Trait("status","flaky-quarantined")]` + Skip; add entry to a flaky-ledger (new entry); document in summary doc. This is the only allowed exception path.</step>
+    <step order="8">Author `projects/sdap.bff.api-test-suite-repair-r2/baseline/final-triple-run-2026-08-XX.md` with: per-run counts (6 rows: unit 1/2/3, integration 1/2/3); cumulative pass rate; flake detection results; cross-reference to TRX artifacts; verdict (PASS / HALT).</step>
+    <step order="9">Verify `git status` shows: 6 TRX files (likely gitignored per root `.gitignore:58 *.trx` — that's expected); summary doc; potential quarantine commits if flakes found. Commit summary: "test(validation): final triple-run FR-15 — Failed: 0 across 6 runs" (or "test(validation): final triple-run + flake quarantine" if quarantine path).</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">`dotnet build`, `dotnet test` (6 invocations); TRX parsing; `git status`; final commit</tool>
+    <tool name="Read">TASK-INDEX.md; TRX summary parsing</tool>
+    <tool name="Write">summary doc</tool>
+  </tools>
+
+  <outputs>
+    <output type="trx">6 TRX files in `projects/sdap.bff.api-test-suite-repair-r2/baseline/` (likely gitignored per `*.trx` rule)</output>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/baseline/final-triple-run-2026-08-XX.md (summary)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">6 TRX files generated: unit 1/2/3 + integration 1/2/3 — all named `final-triple-run-*-2026-08-XX.trx`</criterion>
+    <criterion testable="true">All 6 runs show `Failed: 0` (HARD requirement per FR-15)</criterion>
+    <criterion testable="true">Summary doc `baseline/final-triple-run-2026-08-XX.md` exists with per-run counts + flake detection + verdict</criterion>
+    <criterion testable="true">Any flakes documented + quarantined + added to flaky-ledger (if applicable)</criterion>
+    <criterion testable="true">Build verification clean: 0 errors on both projects before runs</criterion>
+    <criterion testable="true">No `src/` or test logic modifications (verified via `git status`; quarantine commits are acceptable test-only changes)</criterion>
+    <criterion testable="true">Verdict in summary doc is PASS (otherwise task 083 BLOCKED)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. STANDARD rigor (validation gate; mechanical execution; no Step 9.5 quality gates beyond standard task hygiene).
+  </execution>
+</task>

@@ -1,0 +1,147 @@
+<task id="010" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P1 — Fix RB-T044-01 cross-matter privilege-leak (HIGH; ConversationHistorySanitizer.StripRetrievedContent fromTurnIndex inversion)</title>
+    <phase>Phase 1: HIGH Severity + Insights HOLD</phase>
+    <status>not-started</status>
+    <estimated-effort>4-6 hours (including security review prep)</estimated-effort>
+    <dependencies>000, 001</dependencies>
+    <blocks>013</blocks>
+    <tags>phase-1, bff-api, ai, security, real-bug-ledger, high-severity, production-fix</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>HIGH-severity production-code change in `src/` touching AI safety (cross-matter privilege protection); security-sensitive; tags include `bff-api`, `ai`, `security`; modifying `.cs` file; triggers FULL rigor with Step 9.5 code-review + adr-check + mandatory security review per NFR-03.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Security-sensitive — sequential within Phase 1; must have dedicated security review (NFR-03). Cannot share an agent context with concurrent edits.</parallel-reason>
+    <production-fix-per-ledger>true</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Fix RB-T044-01 — `ConversationHistorySanitizer.StripRetrievedContent` `fromTurnIndex` inverted slicing logic, which currently causes cross-matter privileged content to leak into the new-matter LLM context window. This is the highest-priority real-bug entry surfaced by r1.
+
+    Production file: `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/CrossMatter/ConversationHistorySanitizer.cs`. Affected method: `StripRetrievedContent(IReadOnlyList<ChatMessage> history, int fromTurnIndex)` (line 55). Per the ledger entry: invert the index check at line 68 — change `if (i > fromTurnIndex)` to `if (i < fromTurnIndex)` — so retrieval messages BEFORE the matter-pivot boundary are stripped (not preserved). Add a regression test exercising cross-matter scenarios beyond the 5 currently-Skipped tests in `PrivilegeLeakageTests.cs`.
+
+    🚨 Security review MANDATORY per NFR-03. PR cannot merge without security reviewer approval recorded in PR description. The "obvious" inverted-index nature of this bug is precisely what taught r1's D-03 lesson — apparent triviality cascaded into a cross-matter leak. Treat with full scrutiny.
+
+    5 tests flip Skip → Pass on success: `MatterPivot_StripsRetrievalContent_PreservesUserAndAssistantMessages`, `MatterPivot_NoPrivilegedTextInSanitizedOutput`, `MatterPivot_StripsOnlyWithinWindow_PreservesNewMatterContent`, `MatterPivot_PreservesNonRetrievalSystemMessages`, `Sanitizer_OnlyReturnsDocs_FromActiveMatter`.
+
+    Commit message MUST cite RB-T044-01 (NFR-04).
+  </prompt>
+
+  <role>Senior .NET developer with BFF AI safety experience. Security-aware: cross-matter privilege protection is the load-bearing invariant; the bug is currently inverting it.</role>
+
+  <goal>
+    Six deliverables verified:
+    1. `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/CrossMatter/ConversationHistorySanitizer.cs` — `StripRetrievedContent` index check inverted; method behavior matches XML doc contract (strip retrieval content from PREVIOUS matter window; pass through everything from new-matter window onward).
+    2. `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/PrivilegeLeakageTests.cs` — 5 Skip attributes removed; per-test `[Trait("status","real-bug-pending-fix")]` updated to `[Trait("status","repaired")]`.
+    3. Additional regression test in `PrivilegeLeakageTests.cs` — exercises a cross-matter scenario beyond the 5 documented cases (e.g., 3+ matter pivots in a single conversation; or assistant-tool-result message followed by user-text in the same matter window).
+    4. r1 ledger entry RB-T044-01 in `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` — Status transitions from `real-bug-pending-fix` to `repaired` with fix-commit SHA + date + cross-reference to r2 task 010.
+    5. Security reviewer approval recorded in PR description (NFR-03).
+    6. `dotnet test --filter "FullyQualifiedName~PrivilegeLeakageTests"` — all 5 originally-Skipped tests + new regression test pass; no test in any Failed state.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="r1-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file purpose="r1-lessons">projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+    <file purpose="production-target">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/CrossMatter/ConversationHistorySanitizer.cs</file>
+    <file purpose="test-target">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/PrivilegeLeakageTests.cs</file>
+    <file purpose="related-interface">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/CrossMatter/IConversationHistorySanitizer.cs</file>
+    <file purpose="related-model">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/CrossMatter/SanitizedHistory.cs</file>
+    <file purpose="related-detector">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/CrossMatter/MatterContextChange.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013-refined-2026-05-20">AI extends BFF — production change stays in-process; no extraction to external service</constraint>
+    <constraint source="NFR-01">r2 inverts r1 NFR-01: production code IS in scope; this is the canonical r2 production fix</constraint>
+    <constraint source="NFR-02">Each production code change &lt;50% line replacement per file; if exceeded, escalation via `escalations/rewrite-request-T-010-ConversationHistorySanitizer.md` required BEFORE merge</constraint>
+    <constraint source="NFR-03">HIGH severity requires security review approval recorded in PR before merge — non-negotiable</constraint>
+    <constraint source="NFR-04">Commit message MUST cite RB-T044-01 + resolution mode (`repaired`)</constraint>
+    <constraint source="D-02">One production fix = one ledger entry closed = the 5 Skip→Pass test flips</constraint>
+    <constraint source="D-03">HIGH gets security review; the "obvious" inversion taught the cascade lesson — full scrutiny applied</constraint>
+    <constraint source="FR-02">Phase 1 closes 5 HIGH entries including RB-T044-01 with security review approval recorded</constraint>
+    <constraint source="bff-extensions.md § F">Test update obligation: PR modifying `src/server/api/Sprk.Bff.Api/Services/` MUST include corresponding test additions/updates — satisfied by the new regression test</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/ai/INDEX.md</file>
+      <file>.claude/patterns/ai/text-extraction.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      r1 task 044 (P23.H5 — Ai/Safety) filed RB-T044-01 on 2026-05-31. The documented contract (XML doc line 41 of `ConversationHistorySanitizer.cs`): when the user switches from Matter A to Matter B, any tool_result messages from Matter A are replaced with a privacy placeholder. The implementation does the OPPOSITE: messages where `i > fromTurnIndex` (new matter side) are passed through verbatim, and only `i <= fromTurnIndex` (old matter side) are considered — but since `fromTurnIndex` points to the start of the previous matter window (where the matter marker is, not a retrieval message), nothing in that range gets stripped. Result: retrieval content from the OLD matter leaks into the NEW matter LLM context.
+
+      r1's D-03 lesson: "obvious" fixes still cascade. The inverted-index nature of the bug LOOKS like a one-line fix, but production runtime impact is cross-matter privilege leakage. Security review is non-negotiable. Step 9.5 quality gates run code-review + adr-check; an additional security review pass is required per NFR-03 before PR merge. Identity of named security reviewer is captured in Phase 0 outreach (task 002) — task 010 cannot complete without that name in place.
+
+      Cluster fix considerations: RB-T044-02..05 share `CitationExtractor.cs` as production target — those are Phase 2 entries (MEDIUM severity). Do NOT bundle here. This task closes RB-T044-01 only.
+    </background>
+    <dependencies>
+      <dependency task="000" status="must-complete-first">Baseline must establish entry's current state</dependency>
+      <dependency task="001" status="must-complete-first">Reproducibility verification must confirm entry is still valid</dependency>
+      <dependency task="002" status="must-complete-first">Security reviewer must be named in Phase 0 outreach</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Safety/CrossMatter/ConversationHistorySanitizer.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/PrivilegeLeakageTests.cs</file>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read RB-T044-01 entry in `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` end-to-end; load `ConversationHistorySanitizer.cs` + `PrivilegeLeakageTests.cs` + interface + supporting models.</step>
+    <step order="2">Confirm with the named security reviewer (from task 002) that they are available for this PR's review window; abort task with documented hold if no reviewer is named.</step>
+    <step order="3">Verify the bug by removing the Skip attribute on ONE of the 5 cited tests locally; run; observe failure; restore Skip. (Task 001 already did this in aggregate; this is the per-task confirmation step.)</step>
+    <step order="4">Apply the production fix at `ConversationHistorySanitizer.cs` line ~68: invert the index check per ledger recommendation. Verify the XML doc contract still describes the (now-fixed) behavior; clarify the doc if needed (same-line edit; not a contract change).</step>
+    <step order="5">Build: `dotnet build src/server/api/Sprk.Bff.Api/` — confirm 0 errors.</step>
+    <step order="6">Update the 5 cited tests in `PrivilegeLeakageTests.cs`: remove `Skip = "..."` attributes; change per-test `[Trait("status","real-bug-pending-fix")]` to `[Trait("status","repaired")]`. Run `dotnet test --filter "FullyQualifiedName~PrivilegeLeakageTests"`; confirm all 5 pass.</step>
+    <step order="7">Add ONE new regression test in `PrivilegeLeakageTests.cs` exercising a cross-matter scenario beyond the 5 documented (e.g., 3+ matter pivots; or assistant-tool-result followed by user-text in same window). Confirm it passes. This satisfies bff-extensions.md § F test-update obligation.</step>
+    <step order="8">Run focused test suite: `dotnet test --filter "FullyQualifiedName~Services.Ai.Safety"` — confirm 0 failures + no regressions across the full Safety surface.</step>
+    <step order="9">Run Step 9.5 quality gates: `code-review` + `adr-check` skills (per FULL rigor). Address any findings before proceeding.</step>
+    <step order="10">PR creation: cite RB-T044-01 + resolution mode (`repaired`) in commit message + PR title; in PR description, add a dedicated "Security review" section with the named reviewer + checklist (privilege-leak scenarios covered; XML doc contract verified; new regression test exercises additional cross-matter paths). Wait for named reviewer's approval before merge.</step>
+    <step order="11">After PR merge: update `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` — transition RB-T044-01 Status from `real-bug-pending-fix` (or `assigned-to-r2`/`in-progress`) to `repaired` with fix-commit SHA + date + cross-reference to r2 task 010.</step>
+    <step order="12">Update `projects/sdap.bff.api-test-suite-repair-r2/tasks/TASK-INDEX.md` — mark 010 as ✅; update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Source code inspection — sanitizer, tests, interfaces, models</tool>
+    <tool name="Edit">Apply production fix; update test attributes; add regression test</tool>
+    <tool name="Bash">`dotnet build`, `dotnet test --filter`, `git status`, `git log`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/CrossMatter/ConversationHistorySanitizer.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/PrivilegeLeakageTests.cs</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (RB-T044-01 entry transitioned)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RB-T044-01 ledger entry Status transitions to `repaired` with fix-commit SHA + date</criterion>
+    <criterion testable="true">5 originally-Skipped `PrivilegeLeakageTests` tests now pass; per-test trait changed from `real-bug-pending-fix` to `repaired`</criterion>
+    <criterion testable="true">1 new regression test added in `PrivilegeLeakageTests.cs` exercising additional cross-matter scenario; passes</criterion>
+    <criterion testable="true">Build passes: `dotnet build src/server/api/Sprk.Bff.Api/` 0 errors</criterion>
+    <criterion testable="true">`dotnet test --filter "FullyQualifiedName~Services.Ai.Safety"` shows 0 failures across the Safety surface</criterion>
+    <criterion testable="true">Commit message cites RB-T044-01 + resolution mode `repaired` (NFR-04)</criterion>
+    <criterion testable="true">PR description includes Security review section with named reviewer + approval (NFR-03)</criterion>
+    <criterion testable="true">Production fix is &lt;50% line replacement in `ConversationHistorySanitizer.cs` (NFR-02); no escalation needed</criterion>
+    <criterion testable="true">Step 9.5 quality gates (code-review + adr-check) pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all `<knowledge><files>` before starting. Apply FULL protocol — Step 9.5 code-review + adr-check + dedicated security review per NFR-03. ABORT if security reviewer not named in task 002 output.</protocol>
+  </execution>
+</task>

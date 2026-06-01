@@ -1,0 +1,140 @@
+<task id="013" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P1 EXIT — Phase 1 exit triple-run validation (NFR-05 + r1 task 084 pattern)</title>
+    <phase>Phase 1: HIGH Severity + Insights HOLD</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours (depends on test duration; ~1m20s per run)</estimated-effort>
+    <dependencies>010, 011, 012</dependencies>
+    <blocks>Phase 2 task 020+ (cannot start until Phase 1 exit gate passes)</blocks>
+    <tags>phase-1, testing, validation, triple-run</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Tests + validation + Phase 1 exit-gate measurement; no production code changes; mirrors r1 task 084 pattern (which also ran at STANDARD). Per task-execute rigor decision tree: testing / validation tags = STANDARD.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase-exit gate — runs SEQUENTIALLY after 010 + 011 + 012 complete. Cannot start while Phase 1 work in flight. Mirrors r1 task 084 sequencing.</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Run the Phase 1 exit triple-run validation. Mirrors r1 task 084's pattern: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --logger trx` 3 consecutive times; capture 3 TRX files; verify Failed: 0 across all 3 runs; document any test that passes ≥1 run AND fails ≥1 run as a flake.
+
+    This task is the Phase 1 EXIT GATE per NFR-05. Phase 2 tasks (020+) cannot start until this task confirms a stable green baseline. Captures the post-Phase-1 measurement reference for Phase 2's baseline delta.
+
+    Outputs:
+    - 3 TRX artifacts in `projects/sdap.bff.api-test-suite-repair-r2/baseline/`
+    - 1 summary doc: `projects/sdap.bff.api-test-suite-repair-r2/baseline/phase1-exit-triple-run-{closing-date}.md` (filename uses actual close date; target 2026-06-29)
+
+    NO production code changes. NO test changes (any flake found should be FILED as a ledger entry, NOT silenced).
+  </prompt>
+
+  <role>r2 Phase 1 exit-gate analyst — validates suite stability after the HIGH cluster + RB-T044-01 + Insights HOLD work lands.</role>
+
+  <goal>
+    Phase 1 EXIT GATE passes with documented evidence:
+    1. 3 consecutive `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --logger trx` runs completed.
+    2. Each run shows Failed: 0 (zero variance).
+    3. 3 TRX artifacts saved in `projects/sdap.bff.api-test-suite-repair-r2/baseline/`.
+    4. Summary doc enumerates: per-run total / passed / failed / skipped counts; cumulative confidence statement; any flaky-test candidates (passed ≥1, failed ≥1).
+    5. Post-Phase-1 ledger inventory: RB-T044-01 + 4-entry RB-T028 cluster + RB-T028-02 — all 6 closed (status = `repaired` or `transferred-to-sibling` or `archived-pending-sibling-engagement`); 14 ledger entries remain for Phase 2/3.
+    6. Approval to proceed to Phase 2 documented in `current-task.md`.
+
+    If any run shows Failed > 0 OR any flake detected: Phase 1 exit gate FAILS; raise per-failure ledger entries; defer Phase 2 start until root cause addressed.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="r1-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file purpose="r1-lessons">projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+    <file purpose="r1-triple-run-precedent">projects/sdap-bff.api-test-suite-repair/tasks/084-full-suite-triple-run.poml</file>
+    <file purpose="phase0-baseline">projects/sdap.bff.api-test-suite-repair-r2/baseline/r1-closeout-2026-06-01.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-05">Triple-run validation mandatory before each named phase's exit gate</constraint>
+    <constraint source="NFR-06">Phase 1 produces a delta artifact in `baseline/` — this task is the canonical Phase 1 delta</constraint>
+    <constraint source="NFR-11">No test may end in `Failed` state at any phase exit — if so, gate fails</constraint>
+    <constraint source="NFR-01">r2: production code IS in scope; but this task is measurement-only — no `src/` changes</constraint>
+    <constraint source="FR-02">Phase 1 closes 5 HIGH ledger entries — this task verifies the closure baseline</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/tasks/084-full-suite-triple-run.poml</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      r1's task 084 established the triple-run pattern: 3 consecutive `dotnet test --logger trx` runs of `Sprk.Bff.Api.Tests`, with each run yielding Failed: 0. Variance across runs (e.g., a test passes in run 1, fails in run 2) reveals non-determinism — flakes are filed in `flaky-ledger.md` with quarantine + fix-by dates.
+
+      r2 Phase 1 ships 3 production-code changes (RB-T044-01, RB-T028 cluster, RB-T028-02 if path-b) closing up to 5 ledger entries (RB-T044-01 + RB-T028-03/04/05/06) + 1 conditional entry (RB-T028-02). Each fix touches the BFF host's startup/runtime surface. The risk per design.md §8 R2 ("RB-T028 root-cause fix breaks other endpoint registrations") MUST be validated empirically here before Phase 2 starts.
+
+      r1's lessons-learned emphasizes: "Triple-run validation pattern (r1 task 084) is canonical" — same protocol applied here. Filenames use the actual closing date (target 2026-06-29 per design.md §5).
+    </background>
+    <dependencies>
+      <dependency task="010" status="must-complete-first">RB-T044-01 fix must be in master before Phase 1 exit validation</dependency>
+      <dependency task="011" status="must-complete-first">RB-T028 cluster fix must be in master</dependency>
+      <dependency task="012" status="must-complete-first">RB-T028-02 must be resolved per chosen path</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/phase1-exit-triple-run-{date}.md</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/phase1-run1-{date}.trx</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/phase1-run2-{date}.trx</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/phase1-run3-{date}.trx</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Verify tasks 010 + 011 + 012 are all marked ✅ in TASK-INDEX.md AND merged to master; abort if any are still in flight.</step>
+    <step order="2">Read r1's task 084 POML (`projects/sdap-bff.api-test-suite-repair/tasks/084-full-suite-triple-run.poml`) to confirm the exact protocol (dotnet test command, TRX output path convention, summary doc format).</step>
+    <step order="3">Build clean: `dotnet build src/server/api/Sprk.Bff.Api/` — 0 errors. `dotnet build tests/unit/Sprk.Bff.Api.Tests/` — 0 errors.</step>
+    <step order="4">Run 1: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --logger "trx;LogFileName=phase1-run1-{date}.trx" --results-directory projects/sdap.bff.api-test-suite-repair-r2/baseline/`. Capture stdout/stderr summary.</step>
+    <step order="5">Run 2: same command with `LogFileName=phase1-run2-{date}.trx`.</step>
+    <step order="6">Run 3: same command with `LogFileName=phase1-run3-{date}.trx`.</step>
+    <step order="7">Parse each TRX (XML); extract per-run: total / passed / failed / skipped counts.</step>
+    <step order="8">Cross-run analysis: find any test that passes in ≥1 run AND fails in ≥1 run (flake candidate). Build a flake-candidate table.</step>
+    <step order="9">Author `projects/sdap.bff.api-test-suite-repair-r2/baseline/phase1-exit-triple-run-{date}.md` with sections: (a) Phase 1 work summary; (b) per-run TRX summary table; (c) cross-run flake analysis; (d) ledger inventory post-Phase-1 (5+1 closed, 14 remain); (e) Phase 2 readiness statement.</step>
+    <step order="10">**EXIT GATE**: If any run shows Failed > 0, this task FAILS. File ledger entries for each new failure; document in current-task.md; do NOT mark Phase 1 closed. Owner must triage before Phase 2 starts.</step>
+    <step order="11">**EXIT GATE**: If any flake detected, file entries in `flaky-ledger.md` with quarantine recommendation; reduce confidence statement accordingly; consult owner on whether to proceed to Phase 2 or pause.</step>
+    <step order="12">If gate passes (Failed: 0 × 3 runs, no flakes OR ≤ accepted threshold): document Phase 2 approval in `current-task.md`. Update TASK-INDEX.md — mark 013 as ✅. Commit message: "chore(projects/r2): Phase 1 exit triple-run PASS (NFR-05)" — references NFR-05.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">r1 task 084 POML for protocol; TRX files for parsing</tool>
+    <tool name="Bash">`dotnet build`, `dotnet test --logger trx`, file inspection of TRX</tool>
+    <tool name="Write">Summary doc + ledger entries if failures detected</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/baseline/phase1-exit-triple-run-{date}.md</output>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/baseline/phase1-run1-{date}.trx</output>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/baseline/phase1-run2-{date}.trx</output>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/baseline/phase1-run3-{date}.trx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">3 consecutive `dotnet test` runs completed; 3 TRX files saved in `baseline/`</criterion>
+    <criterion testable="true">Each TRX shows Failed: 0 (zero variance across runs)</criterion>
+    <criterion testable="true">Summary doc enumerates per-run total / passed / failed / skipped + cross-run flake analysis + post-Phase-1 ledger inventory</criterion>
+    <criterion testable="true">Post-Phase-1 ledger inventory shows 5-6 closed (RB-T044-01 + RB-T028-03/04/05/06 + optionally RB-T028-02); 14-15 remain for Phase 2/3</criterion>
+    <criterion testable="true">Phase 2 readiness statement included (PASS / FAIL gate verdict)</criterion>
+    <criterion testable="true">If any failure: ledger entries filed; Phase 1 NOT marked closed</criterion>
+    <criterion testable="true">If gate passes: TASK-INDEX 013 = ✅; current-task.md documents Phase 2 approval</criterion>
+    <criterion testable="true">Commit message references NFR-05 + Phase 1 exit gate outcome</criterion>
+    <criterion testable="true">No files modified under `src/`, `power-platform/`, `infra/`, `scripts/`, `tests/` (measurement task; no edits)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all `<knowledge><files>` before starting. Apply STANDARD protocol per `<rigor-hint>` (Step 9.5 quality gates skipped). This is the Phase 1 EXIT GATE — verdict is binary (PASS to Phase 2 / FAIL → triage); no partial-pass option.</protocol>
+  </execution>
+</task>

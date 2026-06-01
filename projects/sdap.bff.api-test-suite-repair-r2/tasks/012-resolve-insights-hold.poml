@@ -1,0 +1,153 @@
+<task id="012" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P1 — Resolve RB-T028-02 Insights Layer 2 HOLD (FR-05; sibling-takes / r2-takes / archived)</title>
+    <phase>Phase 1: HIGH Severity + Insights HOLD</phase>
+    <status>not-started</status>
+    <estimated-effort>2-6 hours (varies by outcome path: archived=2h, transferred=3h, r2-takes=6h)</estimated-effort>
+    <dependencies>002</dependencies>
+    <blocks>013</blocks>
+    <tags>phase-1, sibling-coordination, real-bug-ledger, medium-severity</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>May include production-code change in `src/` (path-b) touching AI Insights Layer 2 outcome extraction; tags include `bff-api`/`ai` if outcome is path-b; modifying `.cs` file. If outcome is path-a or path-c (no production code change), rigor effectively reduces to STANDARD — but task POML declares FULL to default to the higher gate and let task-execute reduce based on actual outcome chosen.</rigor-reason>
+    <parallel-group>P1-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>If outcome is path-b (r2-takes production fix): different file scope from RB-T028-03/04/05/06 cluster (task 011) and RB-T044-01 (task 010); safe to run in parallel. If path-a or path-c: documentation-only, fully parallel-safe.</parallel-reason>
+    <production-fix-per-ledger>true</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Resolve RB-T028-02 (`Services.Ai.Insights.Layer2.Layer2OutcomeExtractionTests` — 3 tests on HOLD pending `ai-spaarke-insights-engine-r1` owner sign-off). FR-05 specifies 3 outcomes, gated on the response captured in task 002's `decisions/D-07-insights-layer2-resolution-path.md`:
+      (a) sibling-takes: 3 tests transferred to their backlog; close T028-02 here with cross-reference; NO production fix in r2
+      (b) r2-takes: production fix in r2 here; 3 tests flip Skip → Pass; ledger entry transitions to `repaired`
+      (c) archived: 1-week sibling-response timeout reached; ledger entry transitions to `archived-pending-sibling-engagement`
+
+    The chosen path is decided in task 002's D-07. This task EXECUTES the chosen path.
+
+    If path-b is chosen, the production target is whatever `Services/Ai/Insights/Layer2/` file the Layer 2 outcome-extraction LLM-mock fixture drift originates from (verify exact path via Grep at task start). Per-fix triple-run validation required (per design.md §8 R2 mitigation).
+
+    Commit message MUST cite RB-T028-02 + resolution mode per outcome (`repaired` / `transferred-to-sibling` / `archived-as-dead-target`) — NFR-04.
+  </prompt>
+
+  <role>r2 Insights HOLD resolution lead — executes the chosen path-a/b/c per D-07.</role>
+
+  <goal>
+    One of three outcome states realized + recorded:
+
+    **Path-a (sibling-takes)**:
+    - `projects/ai-spaarke-insights-engine-r1/` issue tracker (or equivalent) updated with the 3 tests transferred
+    - RB-T028-02 ledger Status → `transferred-to-sibling` with cross-reference to sibling's tracking ID + r2 task 012
+    - 3 tests in `Layer2OutcomeExtractionTests` remain Skip with trait updated to `transferred-to-sibling`
+    - NO `src/` changes
+
+    **Path-b (r2-takes)**:
+    - Production fix applied to `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Layer2/{file}` (path TBD via Grep)
+    - 3 tests flip Skip → Pass; per-test trait updated to `repaired`
+    - Per-fix triple-run: 3 consecutive `dotnet test` runs with Failed: 0
+    - Security review NOT required (MEDIUM severity per ledger; D-03 requires FULL-rigor code-review + adr-check only)
+    - RB-T028-02 ledger Status → `repaired` with fix-commit SHA
+
+    **Path-c (archived)**:
+    - 1-week sibling-response window confirmed expired in D-07
+    - 3 tests remain Skip; per-test trait updated to `archived-pending-sibling-engagement`
+    - RB-T028-02 ledger Status → `archived-pending-sibling-engagement` with rationale (sibling unresponsive after deadline; cite D-07)
+    - NO `src/` changes
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="r1-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file purpose="r1-lessons">projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+    <file purpose="d-07-decision">projects/sdap.bff.api-test-suite-repair-r2/decisions/D-07-insights-layer2-resolution-path.md</file>
+    <file purpose="insights-sibling">projects/ai-spaarke-insights-engine-r1/</file>
+    <file purpose="test-target">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Layer2/Layer2OutcomeExtractionTests.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-05">RB-T028-02 resolved by one of three paths (sibling-takes / r2-takes / archived) per D-07 decision</constraint>
+    <constraint source="ADR-013-refined-2026-05-20">AI extends BFF — if path-b chosen, production change stays in-process</constraint>
+    <constraint source="NFR-01">r2: production code IS in scope (path-b); test-only modifications still bound to Skip→Pass scope only</constraint>
+    <constraint source="NFR-02">If path-b: production code change &lt;50% line replacement per file</constraint>
+    <constraint source="NFR-04">Commit message MUST cite RB-T028-02 + resolution mode per chosen outcome</constraint>
+    <constraint source="D-02">One production fix = one entry closed (path-b); no cluster exception applies (RB-T028-02 has different root cause from -03/04/05/06)</constraint>
+    <constraint source="D-03">RB-T028-02 is MEDIUM severity — FULL-rigor code-review + adr-check; no separate security review</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>projects/ai-spaarke-insights-engine-r1/README.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      RB-T028-02 (Layer 2 outcome-extraction LLM-mock fixture drift) was filed by r1 with a special HOLD status: r1's repair-not-rewrite mandate could not resolve a sibling-project-owned domain. The 3 affected tests live in `Services.Ai.Insights.Layer2.Layer2OutcomeExtractionTests` and exercise the Insights pipeline Layer-2 boundary. The fix path depends on whether `ai-spaarke-insights-engine-r1` owns the bug or whether r2 (BFF surface) should absorb it.
+
+      Task 002 dispatched outreach to the Insights sibling owner with a 1-week response window. Task 012's outcome path is determined by D-07 (sibling-takes / r2-takes / archived). This task executes whichever path D-07 chose; the choice is NOT made here.
+
+      If path-b is chosen, the production target is likely in `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Layer2/` — but exact file is discovered via Grep at task start (the fixture-drift root cause may be in `OutcomeExtractor.cs` / `LayerCoordinator.cs` / `Layer2Service.cs` or similar; verify before editing).
+    </background>
+    <dependencies>
+      <dependency task="002" status="must-complete-first">D-07 decision must be in place before task 012 executes; if D-07 still draft (response pending), task 012 waits</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/decisions/D-07-insights-layer2-resolution-path.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Layer2/Layer2OutcomeExtractionTests.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Layer2/</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read `projects/sdap.bff.api-test-suite-repair-r2/decisions/D-07-insights-layer2-resolution-path.md`. Confirm the chosen path (a/b/c). If D-07 is still draft (no response received yet), HOLD this task until task 002's 1-week response window closes.</step>
+    <step order="2">Read RB-T028-02 entry in `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` end-to-end; identify the 3 cited Skipped tests in `Layer2OutcomeExtractionTests.cs`.</step>
+    <step order="3">**IF path-a (sibling-takes)**: (a) File the 3 tests as an issue in `ai-spaarke-insights-engine-r1` tracker (or equivalent); capture tracking ID. (b) Update the 3 tests in `Layer2OutcomeExtractionTests.cs`: per-test trait `[Trait("status","real-bug-pending-fix")]` → `[Trait("status","transferred-to-sibling")]`; Skip messages updated to cite sibling tracking ID. (c) RB-T028-02 ledger Status → `transferred-to-sibling`. (d) Skip to step 7.</step>
+    <step order="4">**IF path-c (archived)**: (a) Verify D-07 confirms response window expired. (b) Update the 3 tests: trait → `archived-pending-sibling-engagement`; Skip messages updated to cite rationale. (c) RB-T028-02 ledger Status → `archived-pending-sibling-engagement`. (d) Skip to step 7.</step>
+    <step order="5">**IF path-b (r2-takes)**: Grep `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Layer2/` for outcome-extraction logic; identify the LLM-mock fixture-drift root cause file. Apply the production fix per the ledger entry's recommended fix. Build: `dotnet build src/server/api/Sprk.Bff.Api/` — 0 errors.</step>
+    <step order="6">**IF path-b**: Update the 3 tests in `Layer2OutcomeExtractionTests.cs`: remove Skip; trait → `repaired`. Run `dotnet test --filter "FullyQualifiedName~Layer2OutcomeExtractionTests"`; confirm all 3 pass. Per-fix triple-run: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --logger trx` 3 consecutive runs; Failed: 0 across all 3. RB-T028-02 ledger Status → `repaired` with fix-commit SHA.</step>
+    <step order="7">For all paths: run Step 9.5 quality gates (`code-review` + `adr-check`) if path-b; gates skipped if path-a or path-c (no `src/` change).</step>
+    <step order="8">Commit message: cite RB-T028-02 + resolution mode per chosen path (`repaired` / `transferred-to-sibling` / `archived-as-dead-target`). Reference D-07 + FR-05.</step>
+    <step order="9">Update `projects/sdap.bff.api-test-suite-repair-r2/tasks/TASK-INDEX.md` — mark 012 as ✅ with outcome path annotation; update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">D-07 decision, ledger, test file</tool>
+    <tool name="Grep">If path-b: locate Layer 2 outcome-extraction source file</tool>
+    <tool name="Edit">Update test attributes (all paths); apply production fix (path-b only)</tool>
+    <tool name="Bash">If path-b: `dotnet build`, `dotnet test --filter`, `dotnet test --logger trx` (×3)</tool>
+    <tool name="Write">Update ledger entry status</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Layer2/Layer2OutcomeExtractionTests.cs (3 tests updated per path)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (RB-T028-02 entry transitioned per path)</output>
+    <output type="code" condition="path-b">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Layer2/{file}</output>
+    <output type="docs" condition="path-b">projects/sdap.bff.api-test-suite-repair-r2/baseline/per-fix-triple-run-rb-t028-02-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RB-T028-02 ledger entry Status transitions to one of: `repaired` / `transferred-to-sibling` / `archived-pending-sibling-engagement`</criterion>
+    <criterion testable="true">3 tests in `Layer2OutcomeExtractionTests.cs` per-test trait updated to match chosen path</criterion>
+    <criterion testable="true">If path-b: build passes; 3 tests now Pass; per-fix triple-run shows Failed: 0 across 3 runs</criterion>
+    <criterion testable="true">If path-a: sibling tracking ID captured in commit + ledger entry cross-reference</criterion>
+    <criterion testable="true">If path-c: D-07 confirms 1-week window expiry; rationale in ledger entry</criterion>
+    <criterion testable="true">Commit message cites RB-T028-02 + resolution mode (NFR-04)</criterion>
+    <criterion testable="true">If path-b: production fix &lt;50% line replacement (NFR-02); Step 9.5 gates pass</criterion>
+    <criterion testable="true">No files modified outside path-appropriate scope (e.g., path-c MUST have zero `src/` modifications)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all `<knowledge><files>` before starting. Read D-07 FIRST — task scope branches on chosen path. Apply FULL protocol for path-b (production fix); STANDARD for path-a/path-c (documentation-only).</protocol>
+  </execution>
+</task>
