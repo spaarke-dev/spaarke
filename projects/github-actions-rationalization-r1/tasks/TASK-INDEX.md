@@ -27,7 +27,7 @@
 | 010 | Fix deploy-promote.yml cascade (P2) | 1: Fix Broken Workflows | STANDARD | ✅ | 001 | B | ✅ |
 | 011 | Fix deploy-infrastructure.yml ghost triggers (P3) | 1: Fix Broken Workflows | STANDARD | ✅ | 001 | B | ✅ |
 | 012 | Fix nightly-quality.yml schedule failures (P4) | 1: Fix Broken Workflows | STANDARD | ✅ | 001 | B | ✅ |
-| 020 | Audit untested workflows + draft dispositions | 2: Rationalization | STANDARD | 🔲 | 001 | — | ❌ (single ledger build) |
+| 020 | Audit untested workflows + draft dispositions | 2: Rationalization | STANDARD | ✅ | 001 | — | ❌ (single ledger build) |
 | 021 | Execute deploy-* workflow dispositions | 2: Rationalization | STANDARD | 🔲 | 020 | C | ✅ |
 | 022 | Execute non-deploy workflow dispositions | 2: Rationalization | STANDARD | 🔲 | 020 | C | ✅ |
 | 030 | Add actionlint pre-merge validation workflow | 3: Prevention | STANDARD | 🔲 | 010, 011, 012, 021, 022 | — | ❌ (sequential) |
@@ -78,6 +78,39 @@
 **Task 012 result**: `nightly-quality.yml` failure root cause = **`src/`-regression** (4× CS1739 errors in `tests/integration/Spe.Integration.Tests/ExternalAccess/ExternalAccessIntegrationTests.cs`). NFR-01 forbids `src/` fixes. **DELETE recommended for BOTH `nightly-quality.yml` AND `weekly-quality.yml`** (per D-04 consolidate + D-03 delete-by-default). Decision record at `D-03-nightly-and-weekly-quality-disposition.md`. Execution deferred to Phase 2 task 022. FR-05 satisfied via the delete-with-rationale alternative path.
 
 **No `src/` files modified, no `git rm` executed, no commits made by subagents — main session committed Wave B in single integration commit.**
+
+---
+
+## Task 020 Findings (2026-06-01) — DISPOSITIONS DRIVE WAVE C
+
+**7 decision records produced** (D-04 through D-10) + 1 rollup ledger (`ledgers/workflow-disposition-ledger.md`).
+
+**Final disposition map for all 13 workflows**:
+| Workflow | Disposition | Decision Record |
+|---|---|---|
+| adr-audit.yml | KEEP | n/a |
+| auto-add-to-project.yml | DELETE | D-10 |
+| deploy-bff-api.yml | KEEP (consolidation target) | D-04 |
+| deploy-infrastructure.yml | KEEP (Wave B fix applied) | n/a |
+| deploy-office-addins.yml | KEEP (overridden — real value via 30 successful deploys/mo) | D-07 |
+| deploy-platform.yml | DELETE | D-05 |
+| deploy-promote.yml | KEEP (Wave B fix applied) | D-02 |
+| deploy-slot-swap.yml | CONSOLIDATE → deploy-bff-api (zero-effort `git rm`) | D-06 |
+| insights-eval.yml | DELETE (speak-now flag for 2026-05-28 commit author) | D-09 |
+| nightly-quality.yml | DELETE | D-03 |
+| provision-customer.yml | DELETE | D-08 |
+| sdap-ci.yml | KEEP (Risk R1 DEFERRED per D-01) | D-01 |
+| weekly-quality.yml | DELETE | D-03 |
+
+**Final count math**: 13 (current) − 6 (deletes: D-03×2, D-05, D-08, D-09, D-10) − 1 (consolidation: D-06) + 2 (new in Phase 3+4: workflows-validate, report-workflow-health) = **8 workflows**. **FR-06 ≤8 → ✅ MET EXACTLY**.
+
+**Wave C execution mapping**:
+- **Task 021** (deploy-* + provision-customer): `git rm` deploy-platform.yml (D-05), deploy-slot-swap.yml (D-06), provision-customer.yml (D-08). KEEP no-ops: deploy-bff-api.yml (D-04), deploy-office-addins.yml (D-07).
+- **Task 022** (other non-deploy): `git rm` nightly-quality.yml (D-03), weekly-quality.yml (D-03), insights-eval.yml (D-09), auto-add-to-project.yml (D-10).
+
+**Notable**:
+- deploy-slot-swap.yml consolidation is **zero merge effort** — deploy-bff-api.yml is already a functional superset for the in-use prod-only path. Task 021's CONSOLIDATE is a pure `git rm`.
+- D-09 has a speak-now flag (2026-05-28 commit by spaarke-dev) — task 022's PR description should mention this so the contributor can object before merge.
 
 ---
 

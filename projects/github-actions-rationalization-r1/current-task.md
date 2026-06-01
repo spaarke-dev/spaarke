@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 020 (Phase 2 audit) ready to start |
-| **Step** | Wave A ✅ + Wave B ✅ complete (001, 002, 010, 011, 012) |
-| **Status** | not-started (task 020) |
-| **Next Action** | Dispatch task 020 (Phase 2 audit + draft 8 dispositions). Single-task sequential wave (produces ledger; cannot parallelize). After 020, dispatch Wave C (021, 022) in parallel. |
+| **Task** | Wave C (021, 022) ready to start |
+| **Step** | Wave A ✅ + Wave B ✅ + 020 ✅ complete (001, 002, 010, 011, 012, 020) |
+| **Status** | not-started (Wave C) |
+| **Next Action** | Dispatch Wave C in parallel: tasks 021 (deploy-platform + deploy-slot-swap + provision-customer `git rm`), 022 (nightly-quality + weekly-quality + insights-eval + auto-add-to-project `git rm`). Disjoint file sets → parallel-safe. |
 
 ### Files Modified This Session
 - `baseline/workflow-inventory-2026-06-01.md` — Wave A
@@ -44,9 +44,9 @@ Wave B PyYAML validation: both modified workflows parse cleanly with all expecte
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 020 |
-| **Task File** | `tasks/020-audit-untested-workflows.poml` |
-| **Title** | Audit untested workflows + draft dispositions (8 decision records + ledger) |
+| **Task ID** | Wave C (021, 022) |
+| **Task File** | `tasks/021-execute-deploy-workflow-dispositions.poml`, `tasks/022-execute-non-deploy-workflow-dispositions.poml` |
+| **Title** | Wave C — Execute Phase 2 dispositions (7 file deletions) |
 | **Phase** | 2: Rationalization |
 | **Status** | not-started |
 | **Started** | — |
