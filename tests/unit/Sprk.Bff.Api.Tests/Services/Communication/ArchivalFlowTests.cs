@@ -22,18 +22,25 @@ namespace Sprk.Bff.Api.Tests.Services.Communication;
 /// Verifies that ArchiveToSpe=true triggers .eml generation and upload to SPE,
 /// that ArchiveToSpe=false skips archival, and that archival failures are non-blocking.
 /// </summary>
+/// <remarks>
+/// 2026-05-31 (task 011 / P1.A2 verify+repair): the sprk_communication writer was migrated to
+/// IGenericEntityService.CreateAsync (ISP segregation of IDataverseService). Tests now arrange
+/// the "Dataverse failure" simulation on IGenericEntityService to match. Sibling-coordination
+/// note: production signature in Services/Communication/CommunicationService.cs is unchanged.
+/// </remarks>
+[Trait("status", "repaired")]
 public class ArchivalFlowTests
 {
     #region Test Infrastructure
 
     private readonly Mock<IGraphClientFactory> _graphClientFactoryMock;
-    private readonly Mock<IDataverseService> _dataverseServiceMock;
+    private readonly Mock<IGenericEntityService> _genericEntityServiceMock;
     private readonly Mock<ILogger<CommunicationService>> _loggerMock;
 
     public ArchivalFlowTests()
     {
         _graphClientFactoryMock = new Mock<IGraphClientFactory>();
-        _dataverseServiceMock = new Mock<IDataverseService>();
+        _genericEntityServiceMock = new Mock<IGenericEntityService>();
         _loggerMock = new Mock<ILogger<CommunicationService>>();
 
         // Default: ForApp() returns a mock Graph client that succeeds (202 Accepted)
@@ -59,12 +66,12 @@ public class ArchivalFlowTests
 
     private CommunicationService CreateService(
         CommunicationOptions? options = null,
-        IDataverseService? dataverseService = null,
+        IGenericEntityService? genericEntityService = null,
         EmlGenerationService? emlGenerationService = null,
         SpeFileStore? speFileStore = null)
     {
         var opts = options ?? CreateDefaultOptions();
-        var dvService = dataverseService ?? _dataverseServiceMock.Object;
+        var dvService = genericEntityService ?? _genericEntityServiceMock.Object;
 
         var accountService = new CommunicationAccountService(
             Mock.Of<IDataverseService>(),
@@ -81,7 +88,7 @@ public class ArchivalFlowTests
             _graphClientFactoryMock.Object,
             senderValidator,
             Mock.Of<ICommunicationDataverseService>(),
-            Mock.Of<IGenericEntityService>(),
+            dvService,
             Mock.Of<IDocumentDataverseService>(),
             emlGenerationService ?? null!,
             speFileStore ?? null!,
@@ -164,16 +171,17 @@ public class ArchivalFlowTests
     [Fact]
     public async Task SendAsync_WithArchiveToSpe_WhenDataverseRecordCreationFails_WarnsButDoesNotFail()
     {
-        // Arrange — Dataverse CreateAsync throws to simulate Dataverse failure for communication record.
+        // Arrange — IGenericEntityService.CreateAsync throws to simulate Dataverse failure for
+        // the sprk_communication record (writer migrated to IGenericEntityService per ISP segregation).
         // When the Dataverse record fails, archival is skipped because communicationId is null,
         // but the email is still sent successfully.
-        _dataverseServiceMock
+        _genericEntityServiceMock
             .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
 
         var sut = CreateService(
             options: CreateDefaultOptions(archiveContainerId: "test-container-id"),
-            dataverseService: _dataverseServiceMock.Object);
+            genericEntityService: _genericEntityServiceMock.Object);
 
         var request = CreateValidRequest(archiveToSpe: true);
 
@@ -195,15 +203,15 @@ public class ArchivalFlowTests
     [Fact]
     public async Task SendAsync_WhenArchivalSkippedDueToDataverseFailure_ResponseIncludesArchivalWarning()
     {
-        // Arrange — Dataverse CreateAsync throws so communicationId is null,
+        // Arrange — IGenericEntityService.CreateAsync throws so communicationId is null,
         // causing archival to be skipped when ArchiveToSpe is true.
-        _dataverseServiceMock
+        _genericEntityServiceMock
             .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("Connection timeout"));
 
         var sut = CreateService(
             options: CreateDefaultOptions(archiveContainerId: "test-container"),
-            dataverseService: _dataverseServiceMock.Object);
+            genericEntityService: _genericEntityServiceMock.Object);
 
         var request = CreateValidRequest(archiveToSpe: true);
 

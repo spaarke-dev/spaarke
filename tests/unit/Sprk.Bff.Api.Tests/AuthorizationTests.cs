@@ -12,6 +12,7 @@ namespace Sprk.Bff.Api.Tests;
 /// These tests verify that OperationAccessRule correctly evaluates user permissions
 /// against operations defined in OperationAccessPolicy.
 /// </summary>
+[Trait("status", "repaired")]
 public class AuthorizationTests
 {
     private readonly AuthorizationService _authService;

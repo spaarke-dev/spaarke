@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api;
 
+[Trait("status", "repaired")]
 public class EmailWebhookEndpointTests
 {
     private readonly IOptions<EmailProcessingOptions> _options;

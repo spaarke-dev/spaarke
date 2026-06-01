@@ -25,7 +25,16 @@ namespace Sprk.Bff.Api.Tests.Integration;
 /// - Throttling limits concurrent node execution
 /// - All delivery executors are properly registered
 /// - Full playbook execution end-to-end flow
+///
+/// Task 061 (Wave 2.4 — sdap-bff.api-test-suite-repair): repaired
+/// `CreateTaskNodeExecutor_WithValidConfig_CreatesTask`. The pre-existing test mocked
+/// `IHttpClientFactory` but never stubbed `CreateClient("DataverseApi")` to return a
+/// usable HttpClient — production code received a null and the catch block returned an
+/// Error result. Added a `StubHttpMessageHandler` (Dataverse-shaped 204 + OData-EntityId
+/// header) wired to the mock factory so the test exercises the success path. Test-only
+/// addition; production unchanged (NFR-01 preserved).
 /// </remarks>
+[Trait("status", "repaired")]
 public class PlaybookExecutionTests
 {
     #region Node Executor Registry Tests
@@ -425,6 +434,29 @@ public class PlaybookExecutionTests
         templateEngineMock
             .Setup(t => t.Render(It.IsAny<string>(), It.IsAny<IDictionary<string, object?>>()))
             .Returns((string template, IDictionary<string, object?> _) => template);
+
+        // Task 061: stub the Dataverse HttpClient. Production
+        // `CreateTaskNodeExecutor.ExecuteAsync` calls `_httpClientFactory.CreateClient("DataverseApi")`
+        // then `http.PostAsync("tasks", ...)`. The original test left the factory mock
+        // unconfigured for `CreateClient`, so the call returned null and the catch block
+        // produced Success=false. Wire a stub handler that responds with the canonical
+        // Dataverse "201 Created + OData-EntityId" shape.
+        var newTaskId = Guid.NewGuid();
+        var handler = new StubHttpMessageHandler((req, _) =>
+        {
+            var response = new HttpResponseMessage(System.Net.HttpStatusCode.Created);
+            response.Headers.Add(
+                "OData-EntityId",
+                $"https://example.crm.dynamics.com/api/data/v9.2/tasks({newTaskId})");
+            return Task.FromResult(response);
+        });
+        var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://example.crm.dynamics.com/api/data/v9.2/")
+        };
+        httpClientFactoryMock
+            .Setup(f => f.CreateClient("DataverseApi"))
+            .Returns(httpClient);
 
         var executor = new CreateTaskNodeExecutor(
             templateEngineMock.Object,
@@ -912,6 +944,27 @@ public class PlaybookExecutionTests
         mocks.ScopeResolver
             .Setup(x => x.GetActionAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AnalysisAction { Id = actionId, Name = "Test Action" });
+    }
+
+    /// <summary>
+    /// Test-only HttpMessageHandler that delegates response generation to a callback.
+    /// Used by `CreateTaskNodeExecutor_WithValidConfig_CreatesTask` (task 061) to stub
+    /// the Dataverse Web API call without standing up a real HTTP server.
+    /// </summary>
+    private sealed class StubHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _handler;
+
+        public StubHttpMessageHandler(
+            Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler)
+        {
+            _handler = handler;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+            => _handler(request, cancellationToken);
     }
 
     #endregion

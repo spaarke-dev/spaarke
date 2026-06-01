@@ -1,0 +1,131 @@
+<task id="071" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.L2 — LOW-tier Api/* batch 2 (triage repair vs archive, ~22 files)</title>
+    <status>completed</status>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, low-tier, p23-l, bff-api, testing, triage</tags>
+    <parallel-group>23-L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Named Api/* test files (2nd quarter of ~88) are disjoint from sibling batches 070, 072, 073</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Triage and repair OR archive the LOW-tier Api/* tests — batch 2 of 4 (~22 files, 2nd quarter
+    alphabetically). Per design.md §3.3 LOW-tier: per-file judgment — repair if unique
+    response-shape contract; archive if duplicate of synthetic smoke.
+
+    Per FR-20 P23.L START GATE: this batch MUST NOT start until P23.H AND P23.M are each ≥50%
+    complete. Verify upstream progress before starting.
+
+    For each test file:
+    1. Determine: KEEP (repair) or ARCHIVE (rename per §6.5)
+    2. If KEEP: repair assertions; apply `[Trait("status", "repaired")]`; verify Pass
+    3. If ARCHIVE: rename to `&lt;OldName&gt;.cs.archived-2026-MM-DD`; add `archive-ledger.md` entry
+
+    ESCALATION TRIGGER: If archive count in this batch exceeds 10 files → ESCALATE per NFR-04
+    BEFORE proceeding. File `escalations/archive-approval-T-071.md`.
+
+    Per project CLAUDE.md NFR-02 + design.md §4.1: this is repair, NOT rewrite. If ANY repaired
+    file's diff would exceed 50% line replacement, HALT and file
+    `projects/sdap-bff.api-test-suite-repair/escalations/rewrite-request-T-071-{FileName}.md`
+    per §4.8 escalation procedure. Do NOT proceed without owner approval.
+
+    NO production code changes (NFR-01). NO silent deletion (NFR-06). Per §6.2 every touched test
+    ends in `repaired`, `real-bug-pending-fix`, `flaky-quarantined`, or archived. `Failed` is
+    FORBIDDEN at close.
+  </prompt>
+
+  <role>Senior .NET test repair specialist with API endpoint + smoke-test judgment.</role>
+
+  <goal>
+    ~22 Api/* test files (2nd quarter) triaged. Repaired files Pass. Archived files renamed +
+    ledgered. Zero Failed.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+    <file purpose="archive-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/archive-ledger.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation</constraint>
+    <constraint source="NFR-04">Archive count &gt;10 in this batch triggers owner escalation</constraint>
+    <constraint source="NFR-06">MUST NOT silently delete tests; archive via rename</constraint>
+    <constraint source="§6.2">Every touched test gets a §6.2 final end-state (or archived)</constraint>
+    <constraint source="FR-19">All LOW-tier tests must end in §6.2 final end-state</constraint>
+    <constraint source="FR-20">Start gate: P23.H and P23.M each ≥50% complete</constraint>
+    <constraint source="batch-partition">Batch 2 covers 2nd quarter of Api/* files alphabetically; respect partition</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Second quarter of the LOW-tier Api/* batch. Same triage discipline as batch 1 (task 070).
+    </background>
+    <dependencies>
+      <dependency task="040" status="not-started">≥50% of P23.H required</dependency>
+      <dependency task="050" status="not-started">≥50% of P23.M required</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Api/&lt;second quarter of files alphabetically&gt;</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Verify FR-20 start gate: ≥50% of P23.H + ≥50% of P23.M complete. If not, HALT.</step>
+    <step order="2">List `tests/unit/Sprk.Bff.Api.Tests/Api/*.cs`. Sort alphabetically. Take 2nd quarter (~22 files) → batch 2.</step>
+    <step order="3">From Phase 0 baseline TRX, identify failing tests within batch.</step>
+    <step order="4">For each file: REPAIR vs ARCHIVE judgment per §6.2 + design.md §3.3.</step>
+    <step order="5">Track archive count. If approaching 10 → file `escalations/archive-approval-T-071.md` per NFR-04 BEFORE proceeding past 10.</step>
+    <step order="6">For REPAIR: edit; if &gt;50% replacement → §4.8 escalate. Apply `[Trait("status", "repaired")]`.</step>
+    <step order="7">For ARCHIVE: rename to `*.cs.archived-2026-MM-DD`; add `archive-ledger.md` entry with justification.</step>
+    <step order="8">After each file: verify outcome via `dotnet test --filter`.</step>
+    <step order="9">Update `current-task.md` with disposition table.</step>
+    <step order="10">Verify `git status` shows NO production changes.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test</tool>
+    <tool name="git">status + mv (for archive rename)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">~22 Api/* test files (repaired or archived)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/archive-ledger.md (entries for archived files)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All batch-2 LOW-tier tests Pass, Skip-with-reason, or are archived; zero Failed</criterion>
+    <criterion testable="true">FR-20 start gate verified</criterion>
+    <criterion testable="true">Per-file repair diff &lt;50% (NFR-02); archives renamed per §6.5</criterion>
+    <criterion testable="true">Archive count ≤10, OR `escalations/archive-approval-T-071.md` exists with owner approval (NFR-04)</criterion>
+    <criterion testable="true">Every touched test has §6.2 final end-state trait OR is archived</criterion>
+    <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">No overlap with batches 070, 072, 073 files</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <scope-extension date="2026-05-31">
+      Wave 1 baseline reconciliation (task 008) confirmed Api/Office/* cluster: 10 failures
+      in OfficeEndpointsTests (50% rate). Falls within existing relevant-files glob (2nd
+      quarter alphabetically — O range) — annotation only.
+      See `notes/handoffs/phase23-scope-delta-2026-05-31.md`.
+    </scope-extension>
+  </notes>
+</task>

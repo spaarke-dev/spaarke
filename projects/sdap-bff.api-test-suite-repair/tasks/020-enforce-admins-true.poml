@@ -1,0 +1,105 @@
+<task id="020" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P1.D1 — Flip enforce_admins:true on master branch protection (FR-09)</title>
+    <status>completed</status>
+    <completed-date>2026-05-31</completed-date>
+    <completion-summary>FR-09 satisfied. `gh api -X POST repos/spaarke-dev/spaarke/branches/master/protection/enforce_admins` returned `{"enabled":true}`. Pre-flip state captured to `baseline/branch-protection-pre-FR09-2026-05-31.json` + `baseline/ci-gate-pre-flip-2026-05-31.json`; post-flip state captured to `baseline/ci-gate-post-flip-2026-05-31.json`. All 3 required status contexts (`Build &amp; Test (Debug)`, `Build &amp; Test (Release)`, `Code Quality`) verified intact. NFR-01 satisfied (only `baseline/` writes). Rollback command for posterity: `gh api -X DELETE repos/spaarke-dev/spaarke/branches/master/protection/enforce_admins` (per D-02 reassessment trigger — NOT a casual operation). See `current-task.md` Task 020 Execution Log for full diff + binding-constraint compliance matrix.</completion-summary>
+    <estimated-effort>15-30 minutes</estimated-effort>
+    <assigned>AI agent (with operator admin token)</assigned>
+    <tags>phase-1, ci-gate, governance, p1-d</tags>
+    <parallel-group>1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>GitHub API only; no file system writes; disjoint from all sibling Wave 1-A tasks (010, 011, 012, 013, 015, 017, 021, 022, 024)</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Flip `enforce_admins: true` on the `master` branch protection for the required status checks:
+    `Build & Test (Debug)`, `Build & Test (Release)`, `Code Quality`. This is the load-bearing
+    change that converts the BFF CI gate from "fictional" (10/10 recent runs failed, code shipped
+    anyway) to "operational."
+
+    REQUIRES admin token (operator's GH PAT or `gh auth status` showing admin scope). If the AI
+    agent's environment does NOT have admin scope, HALT and request operator to execute the
+    `gh api` PUT call.
+
+    Per project CLAUDE.md NFR-01: no code changes (this is GitHub API config, not file edits).
+    Per design.md §5.2: full enforce_admins is the only robust option; anything less recreates
+    the rot mechanism.
+  </prompt>
+
+  <role>AI agent (or operator-assisted agent) applying GitHub branch protection via gh CLI.</role>
+
+  <goal>
+    `gh api repos/spaarke-dev/spaarke/branches/master/protection` returns JSON with
+    `enforce_admins.enabled: true`. Required status checks include all three:
+    `Build & Test (Debug)`, `Build & Test (Release)`, `Code Quality`.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline-ci">projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-snapshot-2026-MM-DD.json</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">No source/production code modifications</constraint>
+    <constraint source="FR-09">enforce_admins must be true for all 3 named status checks</constraint>
+    <constraint source="design.md §5.2">No partial enforcement; full enforce_admins is the binding decision</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.5 the current branch protection on master shows `enforce_admins: false`.
+      This is the bypass mechanism that enabled "10 of 10 most recent CI runs failed but code
+      merged and shipped anyway." Restoring the CI gate WITHOUT closing this bypass is theater.
+      Per design.md §5.2, the only robust option is full enforce_admins; partial enforcement
+      (e.g., "enforce only on Code Quality but not on Build & Test") would let the same rot
+      recur on different checks.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Baseline CI gate snapshot exists (shows current enforce_admins: false)</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>(none — GitHub API call only; no file system writes other than verification artifact)</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Verify admin scope: run `gh auth status`. If output does NOT show admin scope (or token belongs to non-admin user), HALT and request operator to run the call.</step>
+    <step order="2">Capture pre-change snapshot: `gh api repos/spaarke-dev/spaarke/branches/master/protection > projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-pre-flip-{date}.json`. Confirm `enforce_admins.enabled` is currently `false`.</step>
+    <step order="3">Flip enforce_admins: `gh api -X POST repos/spaarke-dev/spaarke/branches/master/protection/enforce_admins`. (Note: GitHub's enforce_admins endpoint uses POST to enable / DELETE to disable.)</step>
+    <step order="4">Verify required status checks INCLUDE all three: `gh api repos/spaarke-dev/spaarke/branches/master/protection/required_status_checks` and confirm the `contexts` array contains exactly `Build & Test (Debug)`, `Build & Test (Release)`, `Code Quality`. If any is missing, add via PATCH and re-verify.</step>
+    <step order="5">Capture post-change snapshot: `gh api repos/spaarke-dev/spaarke/branches/master/protection > projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-post-flip-{date}.json`. Confirm `enforce_admins.enabled` now `true`.</step>
+    <step order="6">Update `current-task.md` with pre→post diff summary + cite both snapshot file paths.</step>
+    <step order="7">Verify `git status` shows changes ONLY under `projects/sdap-bff.api-test-suite-repair/baseline/` — no other files.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">api (POST enforce_admins; PATCH required_status_checks if needed; GET verifications)</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="baseline">projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-pre-flip-2026-MM-DD.json</output>
+    <output type="baseline">projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-post-flip-2026-MM-DD.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`gh api .../branches/master/protection` shows `enforce_admins.enabled: true`</criterion>
+    <criterion testable="true">`required_status_checks.contexts` includes `Build &amp; Test (Debug)`, `Build &amp; Test (Release)`, `Code Quality`</criterion>
+    <criterion testable="true">Pre + post snapshot JSONs exist in `baseline/`</criterion>
+    <criterion testable="true">No modifications to `src/`, `tests/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+  </acceptance-criteria>
+</task>

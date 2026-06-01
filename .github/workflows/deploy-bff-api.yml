@@ -33,11 +33,6 @@ on:
           - dev
           - production
         default: 'production'
-      skip-tests:
-        description: 'Skip test execution (emergency deploys only)'
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -101,7 +96,6 @@ jobs:
   test:
     name: Test API
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.skip-tests != 'true' }}
 
     steps:
       - name: Checkout

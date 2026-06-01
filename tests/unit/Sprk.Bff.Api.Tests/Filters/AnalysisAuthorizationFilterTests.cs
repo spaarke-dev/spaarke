@@ -15,6 +15,7 @@ namespace Sprk.Bff.Api.Tests.Filters;
 /// <summary>
 /// Unit tests for AnalysisAuthorizationFilter - authorization for Analysis endpoints.
 /// </summary>
+[Trait("status", "repaired")]
 public class AnalysisAuthorizationFilterTests
 {
     private readonly Mock<IAiAuthorizationService> _authServiceMock;

@@ -1,0 +1,128 @@
+<task id="017" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P1.C1 — Inventory missing fake config values from baseline logs (READ-ONLY)</title>
+    <status>completed</status>
+    <estimated-effort>45 min - 1.5 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-1, factory-ext, bff-api, testing, p1-c, inventory</tags>
+    <parallel-group>1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only against baseline/ logs; writes only to notes/spikes/factory-config-gaps.md; disjoint from all sibling Wave 1-A tasks (010, 011, 012, 013, 015, 020, 021, 022, 024)</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Inventory the missing fake config values that cause `WebApplicationFactory&lt;Program&gt;` startup
+    failures in the baseline test run. Parse the Phase 0 baseline TRX + test output logs for
+    `OptionsValidationException` / `InvalidOperationException` / config-bind failures. Produce
+    a structured gap list that task 018 (factory extension) consumes.
+
+    This task is READ-ONLY against `baseline/` artifacts. It does NOT touch the factory and does
+    NOT touch any production code. Its only output is `notes/spikes/factory-config-gaps.md`.
+
+    Per project CLAUDE.md NFR-07: factory edits (task 018) run in isolation. This task is the
+    SAFE prep step that gathers the input data without touching the factory itself.
+  </prompt>
+
+  <role>AI agent extracting structured config gaps from test failure logs.</role>
+
+  <goal>
+    `projects/sdap-bff.api-test-suite-repair/notes/spikes/factory-config-gaps.md` exists with
+    a structured list of missing config keys, suggested fake values, and affected test counts.
+    Task 018 consumes this directly.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline-trx">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+    <file purpose="factory">tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">No production code modifications</constraint>
+    <constraint source="§4.5">Task 017 is INVENTORY ONLY — MUST NOT edit `CustomWebAppFactory.cs`</constraint>
+    <constraint source="NFR-07">This task is part of the factory-edit anti-parallelism guard sequence; it runs SAFE (no factory write) and lets task 018 execute in isolation</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.4 the WebApplicationFactory startup cluster is ~50-100 tests (one of the
+      three largest failure clusters). Root cause: `Program.cs` runs `Options&lt;T&gt;.ValidateDataAnnotations`
+      / `ValidateOnStart` which require config values the test factory does not provide. This
+      task extracts the exact list from baseline failure traces; task 018 then adds those values
+      as additive dictionary entries to the factory (no restructuring per §4.5).
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Baseline TRX + test output captured</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/notes/spikes/factory-config-gaps.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read `projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx`. Parse stack traces for `OptionsValidationException`, `Microsoft.Extensions.Options`, `Bind`, `Get`, or `Required` failures.</step>
+    <step order="2">For each unique stack trace pattern, identify the options type (e.g., `EmailProcessingOptions`, `OpenAiOptions`, `WorkspaceOptions`) and the failing property/key.</step>
+    <step order="3">Cross-reference against current `CustomWebAppFactory.cs` (171 LOC) to confirm which keys ARE already provided. Only keys NOT in the factory's existing dictionary are gaps.</step>
+    <step order="4">For each gap, propose a fake value: empty-string for strings, `00000000-0000-0000-0000-000000000000` for guids, `https://localhost.test/fake` for URLs, etc. Default to "least-functional valid value" so test paths aren't accidentally exercised.</step>
+    <step order="5">Count affected tests per gap (best-effort grep over baseline TRX for failures referencing that options type).</step>
+    <step order="6">Write `projects/sdap-bff.api-test-suite-repair/notes/spikes/factory-config-gaps.md` with sections:
+      - (a) `## Inventory summary` — gap count, estimated affected test count
+      - (b) `## Per-gap detail` — table with columns: Options type | Missing key | Proposed fake value | Affected test count | Source TRX line(s)
+      - (c) `## Inputs for task 018` — bulleted plain-English instructions on what to add to factory's existing config dictionary
+      - (d) `## Hosted services to remove` — any `IHostedService` that crashes on startup in tests and should be `RemoveAll`'d</step>
+    <step order="7">Update `current-task.md` declaring P1.C1 prep complete; task 018 ready to run in isolation.</step>
+    <step order="8">Verify `git status` shows changes ONLY under `projects/sdap-bff.api-test-suite-repair/notes/` — NOT under `tests/`, NOT under `src/`, etc.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/notes/spikes/factory-config-gaps.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/spikes/factory-config-gaps.md` exists with the 4 named sections</criterion>
+    <criterion testable="true">Per-gap detail table has at least 1 row (factory IS missing config per design.md §3.4)</criterion>
+    <criterion testable="true">No modifications to `tests/`, `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">`CustomWebAppFactory.cs` NOT modified (NFR-07 prep step)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion date="2026-05-31">
+      Inventory produced at `projects/sdap-bff.api-test-suite-repair/notes/spikes/factory-config-gaps.md`
+      (4 named sections A–D + cross-ref section E). TRX-driven analysis of `baseline/test-baseline-2026-05-31.trx`.
+
+      Headline findings:
+      - Distinct startup-time error signatures: 2 (`CosmosPersistence:Endpoint` not configured + `AgentServiceOptions` ValidateDataAnnotations).
+      - Current factory `services.RemoveAll&lt;&gt;()` calls: 3 (IGraphClientFactory, IHostedService, IDataverseService) — all keep.
+      - Current factory config dictionary keys: 37 across 16 sections + 4 standalone env-style keys.
+      - Net new dictionary entries recommended for task 018: 7 (2 CosmosPersistence + 5 AgentService fields).
+      - Net new RemoveAll&lt;&gt;() calls recommended: 0 — broad `RemoveAll&lt;IHostedService&gt;()` is the anti-drift guard.
+
+      All acceptance criteria verified:
+      ✅ markdown file exists with 4+ named sections
+      ✅ per-gap detail table has 7 rows
+      ✅ no edits to tests/, src/, power-platform/, infra/, scripts/
+      ✅ CustomWebAppFactory.cs NOT modified (READ-ONLY per §4.5 / NFR-07)
+
+      TASK-INDEX.md NOT updated by this agent (parent directive).
+      Git commit NOT performed by this agent (parent directive).
+      Task 018 (Wave 1.3 ISOLATED) is the consumer; it MUST cite `notes/spikes/factory-config-gaps.md` in its PR description.
+    </completion>
+  </notes>
+</task>

@@ -14,6 +14,7 @@ namespace Sprk.Bff.Api.Tests.Services;
 /// fast-returning mocks (not actual Dataverse query latency).
 /// Validates acceptance criteria from task 051.
 /// </summary>
+[Trait("status", "repaired")]
 public class ScorecardCalculatorPerformanceTests
 {
     private readonly Mock<IDataverseService> _dataverseServiceMock;

@@ -30,6 +30,7 @@ namespace Sprk.Bff.Api.Tests.Api.Office;
 /// Integration tests for Office endpoints using WebApplicationFactory.
 /// Tests the full HTTP request/response cycle including routing, filters, and serialization.
 /// </summary>
+[Trait("status", "repaired")]
 public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
 {
     private readonly OfficeTestWebAppFactory _factory;
@@ -64,7 +65,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/office/save", request);
+        var response = await _client.PostAsJsonAsync("/api/office/save", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
@@ -73,7 +74,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
         result.Should().NotBeNull();
         result!.Success.Should().BeTrue();
         result.JobId.Should().NotBe(Guid.Empty);
-        result.StatusUrl.Should().Contain("/office/jobs/");
+        result.StatusUrl.Should().Contain("/api/office/jobs/");
         result.StreamUrl.Should().Contain("/stream");
     }
 
@@ -98,7 +99,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
         };
 
         // Act
-        var response = await client.PostAsJsonAsync("/office/save", request);
+        var response = await client.PostAsJsonAsync("/api/office/save", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -115,7 +116,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
         var testJobId = Guid.Parse("00000000-0000-0000-0000-000000000001");
 
         // Act
-        var response = await _client.GetAsync($"/office/jobs/{testJobId}");
+        var response = await _client.GetAsync($"/api/office/jobs/{testJobId}");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -133,7 +134,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
         var unknownJobId = Guid.NewGuid();
 
         // Act
-        var response = await _client.GetAsync($"/office/jobs/{unknownJobId}");
+        var response = await _client.GetAsync($"/api/office/jobs/{unknownJobId}");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
@@ -147,7 +148,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
     public async Task Get_OfficeSearchEntities_ReturnsResults()
     {
         // Act
-        var response = await _client.GetAsync("/office/search/entities?query=Acme");
+        var response = await _client.GetAsync("/api/office/search/entities?query=Acme");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -161,7 +162,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
     public async Task Get_OfficeSearchEntities_WithEntityTypeFilter_FiltersResults()
     {
         // Act
-        var response = await _client.GetAsync("/office/search/entities?query=Acme&entityTypes=Account");
+        var response = await _client.GetAsync("/api/office/search/entities?query=Acme&entityTypes=Account");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -175,7 +176,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
     public async Task Get_OfficeSearchEntities_WithPagination_RespectsSkipTop()
     {
         // Act
-        var response = await _client.GetAsync("/office/search/entities?query=Smith&skip=0&top=2");
+        var response = await _client.GetAsync("/api/office/search/entities?query=Smith&skip=0&top=2");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -193,7 +194,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
     public async Task Get_OfficeSearchDocuments_ReturnsResults()
     {
         // Act
-        var response = await _client.GetAsync("/office/search/documents?query=Contract");
+        var response = await _client.GetAsync("/api/office/search/documents?query=Contract");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -207,7 +208,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
     public async Task Get_OfficeSearchDocuments_WithContentTypeFilter_FiltersResults()
     {
         // Act
-        var response = await _client.GetAsync("/office/search/documents?query=Report&contentType=pdf");
+        var response = await _client.GetAsync("/api/office/search/documents?query=Report&contentType=pdf");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -231,7 +232,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/office/quickcreate/matter", request);
+        var response = await _client.PostAsJsonAsync("/api/office/quickcreate/matter", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Created);
@@ -254,7 +255,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/office/quickcreate/contact", request);
+        var response = await _client.PostAsJsonAsync("/api/office/quickcreate/contact", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Created);
@@ -275,7 +276,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/office/quickcreate/invalid", request);
+        var response = await _client.PostAsJsonAsync("/api/office/quickcreate/invalid", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
@@ -295,7 +296,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/office/share/links", request);
+        var response = await _client.PostAsJsonAsync("/api/office/share/links", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -319,7 +320,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/office/share/links", request);
+        var response = await _client.PostAsJsonAsync("/api/office/share/links", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -345,7 +346,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/office/share/attach", request);
+        var response = await _client.PostAsJsonAsync("/api/office/share/attach", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -367,7 +368,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/office/share/attach", request);
+        var response = await _client.PostAsJsonAsync("/api/office/share/attach", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -385,7 +386,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
     public async Task Get_OfficeRecent_ReturnsRecentItems()
     {
         // Act
-        var response = await _client.GetAsync("/office/recent");
+        var response = await _client.GetAsync("/api/office/recent");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -400,7 +401,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
     public async Task Get_OfficeRecent_WithTopParameter_LimitsResults()
     {
         // Act
-        var response = await _client.GetAsync("/office/recent?top=2");
+        var response = await _client.GetAsync("/api/office/recent?top=2");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -418,7 +419,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
     public async Task Get_OfficeHealth_Returns200()
     {
         // Act
-        var response = await _client.GetAsync("/office/health");
+        var response = await _client.GetAsync("/api/office/health");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -441,7 +442,7 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
 
         // Act
         var response = await _client.GetAsync(
-            $"/office/jobs/{testJobId}/stream",
+            $"/api/office/jobs/{testJobId}/stream",
             HttpCompletionOption.ResponseHeadersRead,
             cts.Token);
 
@@ -513,6 +514,19 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
 
                 // ManagedIdentity options (required by DataverseWebApiClient in SpeAdminModule)
                 ["ManagedIdentity:ClientId"] = "test-managed-identity-client-id",
+
+                // CosmosPersistence options (required by AiPersistenceModule — raw config read,
+                // not bound to Options class). Mirrors CustomWebAppFactory.cs keys (task 018, Wave 1.3).
+                // Repair for task 071 (Api.Office.* cluster, 10 failures, root cause same as Workspace).
+                ["CosmosPersistence:Endpoint"] = "https://test.documents.azure.com:443/",
+                ["CosmosPersistence:DatabaseName"] = "spaarke-ai-test",
+
+                // AgentService options (required by AgentServiceOptions ValidateDataAnnotations + ValidateOnStart)
+                ["AgentService:Enabled"] = "false",
+                ["AgentService:Endpoint"] = "https://test.services.ai.azure.com/api/projects/test-project",
+                ["AgentService:AgentId"] = "test-agent-id",
+                ["AgentService:MaxConcurrency"] = "4",
+                ["AgentService:ThreadCacheExpiryMinutes"] = "60",
             };
             config.AddInMemoryCollection(dict!);
         });
