@@ -15,5 +15,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-      - name: actionlint
-        uses: rhysd/actionlint@v1
+
+      - name: Download actionlint
+        id: get_actionlint
+        run: bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+        shell: bash
+
+      - name: Run actionlint
+        run: ${{ steps.get_actionlint.outputs.executable }} -color
+        shell: bash
