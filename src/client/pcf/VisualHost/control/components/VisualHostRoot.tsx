@@ -43,6 +43,10 @@ const useStyles = makeStyles({
     width: '100%',
     minWidth: 0, // Allow shrinking below intrinsic content width
     padding: '2px',
+    // v1.4.8.1 — breathing room between the form section heading (rendered
+    // by the host form ABOVE this PCF) and the first chart content row.
+    // UAT feedback: the cards sat flush against the section title with no gap.
+    paddingTop: '12px',
     paddingBottom: '14px', // Minimal space for version badge
     boxSizing: 'border-box',
     position: 'relative',
@@ -567,9 +571,14 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
     // caller explicitly sets showTitle=true (Phase 3+ Matter cards), CardChrome
     // takes over both the title bar AND the expand icon.
     const chromeOptIn = showTitlePcf === true;
-    const chromeTitle: string | undefined = chromeOptIn
-      ? (chartDefinition.sprk_name || undefined)
-      : undefined;
+    // v1.4.8.1 — When the chart def opts out of toolbar title rendering
+    // (`showCardTitle: false`), CardChrome ALSO suppresses its title. This
+    // matters for cards where a host form section heading already names the
+    // chart and we want to avoid duplicating it inside CardChrome.
+    const chromeTitle: string | undefined =
+      chromeOptIn && showCardTitleInToolbar
+        ? (chartDefinition.sprk_name || undefined)
+        : undefined;
 
     // Wire expand to existing handleExpandClick so chart-def Drill Through
     // Settings continue to apply (no new ClickActionHandler).
@@ -643,8 +652,13 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
           v1.4.3: Title is now rendered here (legacy path) instead of being duplicated inside
           each chart's centered header. When this toolbar renders, ChartRenderer suppresses
           the chart's internal title via the `hostRenderedTitle` prop. */}
-      {showToolbar && chartDefinition && (aiSummaryField || enableDrillThrough) && (
-        // v1.4.8 — Two render modes:
+      {/* v1.4.8.1 — Toolbar is fully suppressed when CardChrome is active
+          (`showTitlePcf === true`). CardChrome owns its own title row + icons,
+          so any legacy toolbar render here produces stacked duplicate icons.
+          For chart defs without CardChrome opt-in, the toolbar renders in one
+          of two modes (see comment below). */}
+      {showToolbar && chartDefinition && (aiSummaryField || enableDrillThrough) && showTitlePcf !== true && (
+        // Two render modes when CardChrome is NOT active:
         //   showCardTitle:false → float variant. Icons absolutely positioned in
         //     top-right corner; toolbar reserves zero vertical space. Used when
         //     a form section heading already provides the chart name.
@@ -712,7 +726,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
       )}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.8 • 2026-06-01</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.9 • 2026-06-01</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>
