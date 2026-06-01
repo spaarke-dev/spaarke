@@ -1,4 +1,5 @@
 name: ADR Architecture Audit
+name: ADR Architecture Audit (DUPLICATE KEY - DELIBERATE FAIL FOR FR-13 VERIFICATION)
 
 on:
   workflow_dispatch:  # Manual trigger
