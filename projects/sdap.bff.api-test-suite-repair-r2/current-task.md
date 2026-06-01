@@ -10,10 +10,26 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 000 — ready to start (Phase 0 first task) |
-| **Step** | Step 0 of Phase 0 (project setup) |
-| **Status** | not-started (ready for dispatch) |
-| **Next Action** | Dispatch P0-W1 parallel wave: invoke `task-execute` for tasks 000, 001, 002 in a SINGLE message with 3 Skill invocations |
+| **Task** | 010 — RB-T044-01 cross-matter privilege-leak fix — ✅ COMPLETE 2026-06-01 |
+| **Step** | All 12 POML steps complete; PR comment requesting security review from `dev@spaarke.com` pending (Phase 1 P1-S2 task 011 starts after this PR gets approval) |
+| **Status** | completed |
+| **Next Action** | Add security-review comment to PR #318 requesting `dev@spaarke.com` review of latest commits; await approval. Next task in pipeline: 011 (RB-T028-03/04/05/06 cluster). |
+
+### Rigor Decision
+
+- **Level**: FULL
+- **Reason**: HIGH severity production fix in `src/`; security-sensitive (cross-matter privilege leak); tags include `bff-api`, `ai`, `security`; modifying `.cs` file.
+- **Step 9.5 quality gates**: code-review + adr-check MANDATORY; PLUS dedicated security-review request in PR per NFR-03.
+
+### Critical Context — Bug Re-Analysis (2026-06-01)
+
+Ledger's recommended fix (simple inversion `if (i > fromTurnIndex)` → `if (i < fromTurnIndex)`) is INCOMPLETE — it would break the currently-passing test `Sanitizer_StripsRetrievalBlocks_PreservesConclusions` (which uses `fromTurnIndex=3` with no matter markers and expects retrievals at indices 0, 2 to be stripped).
+
+**Correct unified semantic** (verified against all tests):
+- If `history[fromTurnIndex]` is a matter marker (`ExtractMatterId` returns non-null) → **matter-pivot mode**: pass through messages where `i < fromTurnIndex`; from `i >= fromTurnIndex` onward, strip retrieval messages UNTIL a different matter marker is encountered; messages after the new marker pass through.
+- Else → **legacy mode**: strip retrieval messages where `i <= fromTurnIndex`; pass through `i > fromTurnIndex`. (Preserves currently-passing `Sanitizer_StripsRetrievalBlocks_PreservesConclusions` contract.)
+
+This obeys the D-03 lesson: an "obvious" inversion would have introduced a regression. Full scrutiny applied.
 
 ### Files Modified This Session
 
@@ -60,10 +76,11 @@ Phase 0 will take ~1 week of calendar; tasks 000 + 001 are agent-executable; **t
 - [x] **Task 000 (Phase 0 P0-W1)**: r1 close-out baseline captured — `baseline/r1-closeout-2026-06-01.md` (9 sections; 20 ledger entries enumerated with severity/fix-by/r2-phase mapping; branch protection captured — `enforce_admins: true` + 4 required checks observed vs 3 in POML pre-condition; CI gate state confirmed — duplicate-YAML fix in place, Coverlet at lines 85-102, skip-tests removed; 4 anti-drift surfaces verified cross-referenced; 5 owner clarifications captured). r1 final test counts: 6,030 unit + 421 integration = 6,451 total / 0 Failed / 235 Skipped (51 trace to ledger entries). — 2026-06-01
 - [x] **Task 001 (Phase 0 P0-W1)**: 20-entry reproducibility verification — 2026-06-01. All 20 entries verified-reproducible via pragmatic static-inspection methodology (Skip + Trait + production-path-extant). 5/5 HIGH ready for Phase 1 task 010 + task 011. Output: `baseline/20-entries-reproducibility-verification.md`. Zero `needs-investigation` flagged. Three production-path citations had drifted to "equivalent path" (anticipated by ledger): RB-T028-02 (`Layer2OutcomeExtractor.cs` → `Services/Ai/Insights/Extraction/` namespace), RB-T028-05 (no `ReAnalysisFlowEndpoints.cs`; routes through `ChatEndpoints.cs` + `Program.cs`), RB-T028-07 (`Api/Ai/UploadEndpoints.cs` → `Api/UploadEndpoints.cs`).
 - [x] **Task 002 complete** (P0-W1, parallel task 3 of 3): Sibling-coordination consolidated to `dev@spaarke.com`; r1 priority-order.md FR-06 slots populated; D-07 placeholder created; path (c) removed from FR-05 — 2026-06-01
+- [x] **Task 010 complete** (Phase 1 P1-S1, FULL rigor, HIGH severity): RB-T044-01 cross-matter privilege-leak fix — `ConversationHistorySanitizer.StripRetrievedContent` re-implemented with **unified matter-pivot-aware semantic** (ledger's one-line inversion would have broken `Sanitizer_StripsRetrievalBlocks_PreservesConclusions` — D-03 lesson confirmed). Production file: ~42 added lines on 113-line file (~37% — NFR-02 compliant). 5 PrivilegeLeakageTests Skip→Pass + 1 new 3-matter-pivot regression test (`MatterPivot_ThreeMatters_StripsOnlyImmediatelyPreviousMatterContent`) — FR-02 explicit "cross-matter regression test added" requirement satisfied. Per-fix triple-run: 3 × **Failed: 0** / 5,899 Passed / 132 Skipped / 6,031 Total — see [`baseline/per-fix-triple-run-rb-t044-01-2026-06-01.md`](baseline/per-fix-triple-run-rb-t044-01-2026-06-01.md). Step 9.5 quality gates: `code-review` PASS (0 Critical / 0 Warning / 1 cosmetic Suggestion); `adr-check` PASS (7 ADRs compliant: ADR-001, ADR-007, ADR-008, ADR-010, ADR-013 refined, ADR-015, ADR-029); BFF Hygiene § A all 6 rules satisfied. Security review request to `dev@spaarke.com` per NFR-03 pending in PR #318 comment. — 2026-06-01
 
 ### Current Step
 
-Pipeline transitions to Step 5 (autonomous task execution). First wave: Phase 0 P0-W1 (parallel tasks 000, 001, 002).
+Phase 1 P1-S1 (task 010) complete. Awaiting security review on PR #318 before P1-S2 (task 011 cluster) can begin.
 
 ### Files Modified (All Task)
 
@@ -78,6 +95,7 @@ See "Files Modified This Session" above.
   - Phase 4 staffing = Parallel (5 tracks in 1 wave)
   - `github-actions-rationalization-r1` Phase 1 = complete or imminent (no Track D slip)
   - **r3 = NOT planned** (D-06 updated). r2 is comprehensive closure; urgent BFF-development blocker.
+- 2026-06-01 (Task 010): **RB-T044-01 fix DOES NOT follow ledger's one-line-inversion recommendation.** The recommended `if (i > fromTurnIndex)` → `if (i < fromTurnIndex)` would have broken the currently-passing `Sanitizer_StripsRetrievalBlocks_PreservesConclusions` test (no matter markers; `fromTurnIndex=3`; expects indices 0+2 retrievals stripped — simple inversion preserves them, test fails). Vindicates D-03 ("obvious fixes still cascade"). Implemented **unified matter-pivot-aware semantic** instead: matter-pivot mode (anchor is matter marker) strips retrievals from anchor forward until next different matter marker; legacy mode (anchor is not a marker) strips retrievals where i ≤ fromTurnIndex (preserves prior contract). All 30 PrivilegeLeakageTests pass (29 originally + 1 new regression test).
 
 ---
 

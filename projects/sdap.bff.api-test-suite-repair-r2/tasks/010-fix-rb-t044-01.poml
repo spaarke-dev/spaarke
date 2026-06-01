@@ -2,7 +2,7 @@
   <metadata>
     <title>P1 — Fix RB-T044-01 cross-matter privilege-leak (HIGH; ConversationHistorySanitizer.StripRetrievedContent fromTurnIndex inversion)</title>
     <phase>Phase 1: HIGH Severity + Insights HOLD</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4-6 hours (including security review prep)</estimated-effort>
     <dependencies>000, 001</dependencies>
     <blocks>013</blocks>
