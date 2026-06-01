@@ -2,7 +2,9 @@
   <metadata>
     <title>P2.W1 — Fix RB-T028-02 (FALLBACK): Insights Layer 2 outcome-extraction — runs ONLY if task 012 returned "we-take-the-bug"</title>
     <phase>Phase 2</phase>
-    <status>not-started</status>
+    <status>deferred</status>
+    <deferred-date>2026-06-01</deferred-date>
+    <deferred-reason>Subsumed by task 012 path-b — RB-T028-02 production fix was applied at Phase 1 task 012 directly (in src/server/api/Sprk.Bff.Api/Services/Ai/CitationVerification/GroundingVerifier.cs); the conditional Phase 2 fallback this task was designed for is no longer needed. RB-T028-02 ledger entry transitioned to `repaired` at task 012 close (2026-06-01). See decisions/D-07-insights-layer2-resolution.md for the full rationale.</deferred-reason>
     <estimated-effort>0 hours (if task 012 took outcome (a) or (c)); 3-6 hours if outcome (b)</estimated-effort>
     <dependencies>012,013</dependencies>
     <blocks>029</blocks>

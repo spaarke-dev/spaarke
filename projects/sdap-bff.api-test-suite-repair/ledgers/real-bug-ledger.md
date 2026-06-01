@@ -671,35 +671,51 @@ Remove the `Skip = "..."` attribute on `BuildContinuationPrompt_ExceedsMaxHistor
 
 ---
 
-## RB-T028-02 — Insights Layer 2 outcome-extraction LLM-mock fixture drift (3 tests) — HOLD pending sibling sign-off
+## RB-T028-02 — Insights Layer 2 outcome-extraction LLM-mock fixture drift (3 tests) — **REPAIRED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T028-02 |
 | **Date filed** | 2026-05-31 |
 | **Filing task** | Task 028 (Phase 2+3 close — residual classification) |
-| **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/Layer2OutcomeExtractor.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/Layer2OutcomeExtractor.cs) (or path equivalent) — owned by `ai-spaarke-insights-engine-r1` sibling project |
-| **Affected methods** | Outcome-extraction pipeline — `outcome-extraction@v1` prompt + projection + `IObservationEmitter` chain |
-| **Tests Skip'd** | (1) `Layer2OutcomeExtractionTests.ClosingLetterFixture_ExtractsOutcomeAndSettlementAndDate_WithVerbatimQuotes` (`Fact`) — line 127; (2) `…SettlementAgreementFixture_ExtractsSettlementAmount_AndKeyTermsPopulated` (`Fact`) — line 212; (3) `…DecisionMemoFixture_MixedOutcome_ReturnsNullsWithConfidenceZeroAndExplanations` (`Fact`) — line 288. All in [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Layer2/Layer2OutcomeExtractionTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Layer2/Layer2OutcomeExtractionTests.cs). |
-| **Fix-by date** | 2026-09-30 (90-day target — blocked on `ai-spaarke-insights-engine-r1` owner sign-off; HOLD established by Wave 0 task 008) |
-| **Severity** | MEDIUM (Insights extraction is HIGH-impact in production; however, the failures are fixture-text-drift in tests, not a production correctness issue — the documented zero-misroute invariant for Layer 2 is observed end-to-end via sibling integration tests) |
-| **Owner** | TBD (`ai-spaarke-insights-engine-r1` Insights feature owner — coordinate with sibling project before any test or production edit) |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 1 task 012, path-b) |
+| **Resolution commit** | See r2 PR #318 commit "feat(sdap-bff-test-r2): task 012 complete — RB-T028-02 Insights Layer 2 fixed (path b)" (cross-reference: `projects/sdap.bff.api-test-suite-repair-r2/baseline/per-fix-triple-run-rb-t028-02-2026-06-01.md`) |
+| **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/CitationVerification/GroundingVerifier.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/CitationVerification/GroundingVerifier.cs) — fix surface (per actual root cause). r1-cited path `Services/Ai/Insights/Extraction/Layer2OutcomeExtractor.cs` does NOT exist; equivalent code is in `Services/Ai/Insights/Extraction/` (`OutcomeExtractionProjection`, `OutcomeExtractionResponse`, `OutcomeExtractionResponseValidator`, `ObservationEmitter`, etc.) which is correct. The bug is in the test's manual GroundingVerifier mirror, not in the projection layer. |
+| **Affected methods** | Production: `GroundingVerifier.Normalize` (now `public static`) — visibility widening + expanded XML doc documenting CRLF↔LF tolerance as a load-bearing public-API contract. |
+| **Tests Skip'd → Pass** | (1) `Layer2OutcomeExtractionTests.ClosingLetterFixture_ExtractsOutcomeAndSettlementAndDate_WithVerbatimQuotes` (`Fact`) — line 127; (2) `…SettlementAgreementFixture_ExtractsSettlementAmount_AndKeyTermsPopulated` (`Fact`) — line 212; (3) `…DecisionMemoFixture_MixedOutcome_ReturnsNullsWithConfidenceZeroAndExplanations` (`Fact`) — line 288. All 3 Skip attributes removed; per-test trait transitioned `[Trait("status", "real-bug-pending-fix")]` → `[Trait("status", "repaired")]`. All 3 pass; per-fix triple-run Failed: 0 across 3 runs (5902/0/129/6031). |
+| **Fix-by date (original)** | 2026-09-30 (90-day target) — **closed 88 days early** |
+| **Severity** | MEDIUM |
+| **Owner** | `dev@spaarke.com` (resolved via path-b at task 012 per consolidated-sibling-contact decision 2026-06-01) |
 
-### Bug detail
+### Bug detail (CORRECTED 2026-06-01)
 
-All 3 failing tests assert that `Layer2OutcomeExtractor` returns specific extracted-fact values from fixed `tests/Insights/fixtures/*.txt` legal-document fixtures. The TRX failure messages (excerpted 2026-05-31) show `"Expected documentText `...long fixture text...`"` — the assertion is on the document-text round-trip through the mock LLM, not on production behavior.
+All 3 failing tests load a fixture from `tests/Insights/fixtures/{closing-letter|settlement-agreement|decision-memo}-M-2024-*.txt` via `File.ReadAllText`, then assert via FluentAssertions that each evidence quote in the mocked LLM JSON is a verbatim substring of the loaded document text — `documentText.Should().Contain(quote)` — as a manual mirror of `GroundingVerifier`'s production D-P9 grounding check.
 
-**Root cause hypothesis**: The fixtures (`tests/Insights/fixtures/closing-letter.txt`, `settlement-agreement.txt`, `decision-memo.txt`) drifted away from the prompt-template / mock-LLM-response wiring after sibling-project edits to `Layer2OutcomeExtractor` and/or `outcome-extraction@v1.prompt`. Each test loads a fixture, runs it through the production extractor with a mocked LLM response, and asserts the extracted fields match the fixture's documented disposition. The text mismatch suggests the fixture was updated without the prompt OR vice-versa.
+### Actual root cause (corrected from r1's hypothesis)
 
-### Why this is a HOLD
+**The r1 hypothesis ("LLM-mock fixture text drifted from prompt") was incorrect.** Python byte-level inspection on 2026-06-01 confirmed the literal quote strings ARE present in the fixture files. The actual root cause is:
 
-Per Wave 0 task 008 Phase 2+3 tier reconciliation, the `Services/Ai/Insights/Layer2/` test family is **owned by sibling project `ai-spaarke-insights-engine-r1`**. Touching production OR fixtures here would create a merge conflict with active sibling-project work. The disposition is therefore `real-bug-pending-fix` with a sibling-coordination note, NOT a `repaired` outcome.
+1. The 3 fixture files are stored on Windows with **CRLF (`\r\n`) line endings** — 67/85/83 CRLFs per fixture; ZERO LF-only newlines.
+2. C# raw-string literals (`"""..."""`) — used for the mocked LLM JSON in the tests — normalize multi-line content to **LF (`\n`)** at compile time (C# 11 spec).
+3. The tests' manual GroundingVerifier mirror used raw `String.Contains` (byte-exact) against `documentText` (CRLF in memory) with the LF-only evidence quote — `\n` does not match `\r\n`, so the substring check fails on every multi-line quote.
+4. **Production behavior is correct**: `GroundingVerifier.Normalize` (now `public static`, was `internal static`) collapses ALL `char.IsWhiteSpace(ch)` runs (including `\r\n`) into a single space and lowercases. Production grounding verification is line-ending-tolerant. The tests **asserted a stricter invariant than production enforces** — a test-side category error, not a production correctness issue.
 
-### Recommended action
+### Fix applied 2026-06-01
 
-1. Surface this ledger entry to the `ai-spaarke-insights-engine-r1` owner.
-2. The Insights team decides whether (a) fixtures need updating to match the new prompt output, (b) the prompt needs updating to match the documented fixture extraction, or (c) the assertions need re-baselining.
-3. Once a decision is reached, remove the 3 `Skip = "..."` attributes and per-test `[Trait("status", "real-bug-pending-fix")]` overrides; re-run; all 3 must pass.
+**Production change** (`src/server/api/Sprk.Bff.Api/Services/Ai/CitationVerification/GroundingVerifier.cs`):
+- Promoted `Normalize` method from `internal static` → `public static`.
+- Expanded XML doc from 3 lines to 16 lines — documents the canonical grounding-text normalization contract (CRLF↔LF tolerance via whitespace collapsing + lowercase) as a public API surface; explicitly states why raw `String.Contains` against a CRLF document and an LF-normalized quote is a category-error.
+
+**Test change** (`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Layer2/Layer2OutcomeExtractionTests.cs` — in Skip→Pass scope per r2 NFR-01):
+- 3 tests: `[Fact(Skip = "RB-T028-02: …")]` → `[Fact]`; `[Trait("status", "real-bug-pending-fix")]` → `[Trait("status", "repaired")]`.
+- 7 `documentText.Should().Contain(quote)` calls → `GroundingVerifier.Normalize(documentText).Should().Contain(GroundingVerifier.Normalize(quote))`.
+- 3 comment blocks updated to cite RB-T028-02 resolution + 2026-06-01 + production-mirror rationale.
+
+**Why this was NOT a sibling-owned bug**: the bug is in the test's manual GroundingVerifier mirror, not in any sibling-owned production code. The sibling-coordination HOLD was based on r1's mistaken hypothesis that fixtures had drifted; once Python static inspection confirmed quotes ARE in fixtures (after CR strip), the issue collapsed to a unit-test-side normalization gap that r2 owns.
+
+### Why this didn't surface in production
+
+The Layer 2 extraction pipeline is exercised in integration with real LLM responses. Production `GroundingVerifier.VerifyOne` (line 145-195) already normalizes both chunk text AND quote text via `Normalize` (line 152), so the production substring match is line-ending-tolerant. The 3 unit tests in question were fixture-driven contract tests that **failed to mirror this production normalization**, asserting a stricter and incorrect invariant. Production traffic is unaffected; the fix is additive (visibility widening + doc expansion).
 
 ### Why this didn't surface in production
 

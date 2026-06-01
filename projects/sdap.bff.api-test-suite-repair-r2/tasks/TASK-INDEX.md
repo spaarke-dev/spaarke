@@ -27,7 +27,7 @@
 | 002 | Sibling-owner outreach (Action Engine, Insights, Communications) | 0 | ✅ | 000 | P0-W1 | MINIMAL | — |
 | 010 | Fix RB-T044-01 — `ConversationHistorySanitizer` cross-matter privilege leak (HIGH) | 1 | ✅ | 000, 001, 002 | (sequential) | FULL | ✓ |
 | 011 | Fix RB-T028-03/04/05/06 cluster — conditional registration root cause (HIGH × 4) | 1 | 🔲 | 000, 001 | (sequential, after 010) | FULL | ✓ |
-| 012 | Resolve RB-T028-02 Insights Layer 2 HOLD (FR-05) | 1 | 🔲 | 002 | P1-W1 | FULL | ✓ |
+| 012 | Resolve RB-T028-02 Insights Layer 2 HOLD (FR-05) — path-b (production fix in GroundingVerifier.cs) | 1 | ✅ 2026-06-01 | 002 | P1-W1 | FULL | ✓ |
 | 013 | Phase 1 exit triple-run validation gate | 1 | 🔲 | 010, 011, 012 | (sequential, phase-exit) | STANDARD | — |
 | 020 | Fix RB-T044-02 — `CitationExtractor.NormalizeCaseLaw` reporter period | 2 | 🔲 | 013 | P2-W1 | FULL | ✓ |
 | 021 | Fix RB-T044-04 — `NormalizePatent` EP/WO double-prefix | 2 | 🔲 | 013, 020 | (sequential after 020 — same file) | FULL | ✓ |
@@ -35,7 +35,7 @@
 | 023 | Fix RB-T070-03 — `AnalysisChatContextResolver` dead-path (restore-or-delete owner decision) | 2 | 🔲 | 013 | P2-W1 | FULL | ✓ |
 | 024 | Fix RB-T028-01 — `AnalysisContextBuilder` non-deterministic sort | 2 | 🔲 | 013 | P2-W1 | FULL | ✓ |
 | 025 | Fix RB-T028-07 — Upload endpoint binding (verify subsumed by 011 first) | 2 | 🔲 | 011, 013 | P2-W1 | FULL | ✓ |
-| 026 | Fix RB-T028-02 fallback (conditional — only if 012 outcome = "we-take-bug") | 2 | 🔲 | 012 | P2-W1 (conditional) | FULL | ✓ |
+| 026 | Fix RB-T028-02 fallback (conditional — only if 012 outcome = "we-take-bug") | 2 | ⏭ 2026-06-01 (subsumed by task 012 path-b) | 012 | P2-W1 (conditional) | FULL | — |
 | 029 | Phase 2 exit triple-run validation gate | 2 | 🔲 | 020, 021, 022, 023, 024, 025, 026 | (sequential, phase-exit) | STANDARD | — |
 | 030 | Fix RB-T012-01 — `SessionRestoreService` quote handling | 3 | 🔲 | 029 | P3-W1 | FULL | ✓ |
 | 031 | Fix RB-T034-01 — `AgentConfigurationService` CancellationToken | 3 | 🔲 | 029 | P3-W1 | FULL | ✓ |

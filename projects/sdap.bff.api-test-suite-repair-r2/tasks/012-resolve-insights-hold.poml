@@ -2,7 +2,14 @@
   <metadata>
     <title>P1 — Resolve RB-T028-02 Insights Layer 2 HOLD (FR-05; sibling-takes / r2-takes / archived)</title>
     <phase>Phase 1: HIGH Severity + Insights HOLD</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-date>2026-06-01</completed-date>
+    <completed-by>Phase 1 P1-W1 path-b (production fix in GroundingVerifier.cs + Skip-Pass in Layer2OutcomeExtractionTests.cs)</completed-by>
+    <resolution-mode>repaired</resolution-mode>
+    <ledger-entry>RB-T028-02</ledger-entry>
+    <triple-run-result>3 x Failed: 0 / Passed: 5902 / Skipped: 129 / Total: 6031</triple-run-result>
+    <quality-gates>code-review PASS (0 Critical / 0 Warning / 1 cosmetic Suggestion); adr-check PASS (14 ADRs compliant incl. ADR-013 refined + .claude/constraints/ai.md)</quality-gates>
+    <notes>Path-b chosen by dev@spaarke.com 2026-06-01 (same person owns both r2 and Insights sibling per consolidated-sibling-contact-2026-06-01.md). Investigation found r1's "fixture-text-drift" hypothesis was incorrect; actual root cause is CRLF/LF normalization gap between test's manual GroundingVerifier mirror (raw String.Contains) and production GroundingVerifier.Normalize semantics (whitespace-collapse + lowercase, line-ending-tolerant). Production fix: promoted GroundingVerifier.Normalize internal-public + expanded XML doc. Test fix (Skip-Pass scope per NFR-01): 3 tests Skip removed, trait transitioned to "repaired", manual checks now use GroundingVerifier.Normalize on both sides to mirror production. Task 026 (Phase 2 fallback) obsolete - subsumed.</notes>
     <estimated-effort>2-6 hours (varies by outcome path: archived=2h, transferred=3h, r2-takes=6h)</estimated-effort>
     <dependencies>002</dependencies>
     <blocks>013</blocks>

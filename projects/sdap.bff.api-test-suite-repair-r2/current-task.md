@@ -10,16 +10,35 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 010 — RB-T044-01 cross-matter privilege-leak fix — ✅ COMPLETE 2026-06-01 |
-| **Step** | All 12 POML steps complete; PR comment requesting security review from `dev@spaarke.com` pending (Phase 1 P1-S2 task 011 starts after this PR gets approval) |
+| **Task** | 012 — RB-T028-02 Insights Layer 2 HOLD resolution (path-b) — ✅ COMPLETE 2026-06-01 |
+| **Step** | All POML steps complete; production fix applied (GroundingVerifier.Normalize internal→public); 3 tests Skip→Pass; triple-run Failed: 0 × 3; quality gates PASS; ledger RB-T028-02 → `repaired`; D-07 finalized; task 026 deferred (subsumed); committed + pushed. |
 | **Status** | completed |
-| **Next Action** | Add security-review comment to PR #318 requesting `dev@spaarke.com` review of latest commits; await approval. Next task in pipeline: 011 (RB-T028-03/04/05/06 cluster). |
+| **Next Action** | Phase 1 P1-S2 (task 011, RB-T028-03/04/05/06 cluster) is running in parallel; Phase 1 P1-W1 (this task) ✅ done. Next Phase 1 gate is task 013 (exit triple-run validation) — runs after BOTH 011 and 012 complete. |
 
-### Rigor Decision
+### Rigor Decision (Task 012 — current)
 
 - **Level**: FULL
-- **Reason**: HIGH severity production fix in `src/`; security-sensitive (cross-matter privilege leak); tags include `bff-api`, `ai`, `security`; modifying `.cs` file.
-- **Step 9.5 quality gates**: code-review + adr-check MANDATORY; PLUS dedicated security-review request in PR per NFR-03.
+- **Reason**: Path (b) chosen — production code change in `src/server/api/Sprk.Bff.Api/Services/Ai/CitationVerification/GroundingVerifier.cs`; tags include `bff-api`, `ai`; modifying `.cs` file.
+- **Step 9.5 quality gates**: code-review + adr-check MANDATORY (MEDIUM severity per ledger — security review NOT required per D-03).
+
+### Task 012 Root Cause Analysis (2026-06-01)
+
+**The ledger hypothesis was incomplete.** The bug is NOT "LLM-mock fixture text drifted" — Python verification confirms the literal quote strings ARE present in the fixture files (after CR stripping). The actual root cause:
+
+- The 3 fixture files (`closing-letter-M-2024-0341.txt`, `settlement-agreement-M-2024-0188.txt`, `decision-memo-M-2024-0512.txt`) are stored on Windows with **CRLF (`\r\n`) line endings** (67/85/83 CRLFs respectively).
+- C# raw-string literals (`"""..."""`) normalize multi-line content to **LF (`\n`)** at compile time (per C# 11 spec).
+- The test's manual GroundingVerifier mirror at lines 165, 254, 338 uses raw `String.Contains` → `documentText` (CRLF) contains the LF-only quote? **NO.** Fails immediately on all 3 tests.
+- **Production behavior is correct**: `GroundingVerifier.Normalize` (line 266) collapses ALL `char.IsWhiteSpace(ch)` including `\r\n` into a single space — so production substring matching is line-ending-tolerant.
+- **The test failed to mirror production normalization** — it does a stricter, byte-exact check that production never does.
+
+### Fix Design (Task 012)
+
+1. **Production change** (in scope per FR-05 path-b + bff-api tag): Promote `GroundingVerifier.Normalize` from `internal static` → `public static` (+ XML doc clarifying it's the canonical grounding-text normalization). Makes the load-bearing invariant a documented public API surface that tests and other components can mirror precisely. Tiny additive change, <5% line replacement.
+2. **Test change** (in Skip→Pass scope per NFR-01): replace each `documentText.Should().Contain(quote)` call with `GroundingVerifier.Normalize(documentText).Should().Contain(GroundingVerifier.Normalize(quote))` — aligning the test's check with the production mechanic. Plus remove Skip + transition trait `real-bug-pending-fix` → `repaired`.
+
+### Prior Task 010 Rigor Decision (archived; tasks complete)
+
+- HIGH severity production fix in `src/`; security-sensitive (cross-matter privilege leak); modifying `.cs` file; FULL rigor with security review per NFR-03.
 
 ### Critical Context — Bug Re-Analysis (2026-06-01)
 

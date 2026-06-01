@@ -260,10 +260,26 @@ public sealed class GroundingVerifier : IGroundingVerifier
     }
 
     /// <summary>
-    /// Collapses whitespace and lowercases. Preserves substantive characters and punctuation
-    /// (so "$280K" stays "$280k"); ToLowerInvariant() is the only lossy operation.
+    /// Canonical grounding-text normalization — collapses every <see cref="char.IsWhiteSpace(char)"/>
+    /// run (including CR/LF/CRLF, tabs, NBSP, etc.) to a single ASCII space and lowercases via
+    /// <see cref="char.ToLowerInvariant(char)"/>. Preserves substantive characters and punctuation
+    /// (so <c>"$280K"</c> stays <c>"$280k"</c>); <c>ToLowerInvariant()</c> is the only lossy
+    /// operation.
+    /// <para>
+    /// <b>Public API surface (per RB-T028-02 resolution 2026-06-01).</b> Production grounding
+    /// verification (D-P9 GroundingVerifier) MUST treat extracted-quote substring matching as
+    /// line-ending-insensitive — Windows-originated SPE documents arrive with CRLF; LLM
+    /// responses (and C# raw-string literals in tests) use LF. Consumers that need to mirror
+    /// the production grounding mechanic (e.g., Layer 2 outcome-extraction tests asserting
+    /// the "verbatim quote" invariant manually before the real <c>GroundingVerifier</c> sees
+    /// the quote) MUST call <see cref="Normalize"/> on both sides before invoking
+    /// <see cref="string.Contains(string)"/>. Calling raw <c>String.Contains</c> against a
+    /// document text and an LLM-returned (or raw-string-literal) quote is a category-error: it
+    /// asserts a stricter invariant than production enforces, producing false failures on the
+    /// CRLF↔LF boundary.
+    /// </para>
     /// </summary>
-    internal static string Normalize(string input)
+    public static string Normalize(string input)
     {
         if (string.IsNullOrEmpty(input))
             return string.Empty;
