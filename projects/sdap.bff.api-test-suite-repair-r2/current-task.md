@@ -1,10 +1,10 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-01 (milestone checkpoint — Phase 1a complete; ready for /compact)
+> **Last Updated**: 2026-06-01 (Phase 1d.2 complete — security review request posted; task 011 work essentially complete pending external approval)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
-> **Last commit (project work)**: `d2cdce20` — task 011 Phase 1a complete (NullObject inventory + design + ADR-030 draft)
-> **Last commit (this file)**: pending — written by context-handoff session 2026-06-01
+> **Last commit (project work)**: `85258885` — `docs(adr): ADR-030 — BFF Null-Object Kill-Switch Pattern (promoted from r2 draft)`
+> **Last PR #318 activity**: issue-comment `4596627823` — Task 011 security review request (RB-T028-06 Auth-collateral)
 
 ---
 
@@ -12,10 +12,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 011 — RB-T028-03/04/05/06 HIGH cluster — **Phase 1a COMPLETE 2026-06-01** (Option B per E-01) |
-| **Step** | Phase 1a (inventory + design) complete; 3 artifacts written; POML status `phase-1a-complete`. Ready for Phase 1b. |
-| **Status** | phase-1a-complete |
-| **Next Action** | Phase 1b implementation (~15h estimated). Tier 1 (Promote-to-unconditional, 1.5h) → Tier 2 (P3 Null-Objects for facades, 5h) → Tier 3 (concrete-class Null-Objects + B8 refactor, 5h) → triple-runs + quality gates (~3.5h). See [D-09](decisions/D-09-nullobject-design.md) §4 for ordered task list. |
+| **Task** | 011 — RB-T028-03/04/05/06 HIGH cluster — **PHASE 1a/1b/1c/1d.1/1d.2 COMPLETE 2026-06-01** (Option B per E-01) |
+| **Step** | All work complete; awaiting external security review approval from `dev@spaarke.com` on PR #318. |
+| **Status** | phase-1d-pending-security-review |
+| **Next Action** | **Wait for external approval** OR dispatch task 013 (Phase 1 P1-S3 exit triple-run) — note task 013 is BLOCKED on security review approval for merge but the test work itself can proceed in parallel. |
 
 ### Task 012 — ✅ COMPLETE 2026-06-01 (separate parallel task)
 
@@ -88,10 +88,12 @@ Phase 0 will take ~1 week of calendar; tasks 000 + 001 are agent-executable; **t
 
 | Sub-phase | Status | Effort | Notes |
 |---|---|---|---|
-| **1a** Inventory + Design | ✅ COMPLETE 2026-06-01 (`d2cdce20`) | ~4h actual | 44 conditional services audited; 13 in-scope (8 BLOCKING + 5 LATENT); ADR-030 drafted |
-| **1b** Implementation | 🔲 ready | ~15h estimated | Tier 1 (1.5h) → Tier 2 (5h) → Tier 3 (5h) → triple-runs + Step 9.5 gates (3.5h) |
-| **1c** Tests Skip→Pass + per-fix triple-run | 🔲 pending | included in 1b | 36 expected (NOT 37; r1 off-by-one) |
-| **1d** Security review request + ADR-030 promotion | 🔲 pending | ~1-2h | Main-session-only for `.claude/adr/` write |
+| **1a** Inventory + Design | ✅ COMPLETE 2026-06-01 (`d2cdce20`) | ~4h actual | 44 conditional services audited; 13 in-scope; ADR-030 drafted |
+| **1b** Implementation (8 production commits) | ✅ COMPLETE 2026-06-01 | ~12h actual | Tier 1 (`d207ae93`) → Tier 2 (`1cfac08c`) → Tier 3 (`5613b8ad`) → Tier 1.5 r1 (`d932f355`) → Tier 1.5 r2 (`43ca4f9b`) → Tier 1.5 r3 (`dbd3888e`) → Tier 1.5 r4 (`56e74b84`) — 18 services migrated total (10 P3 + 8 P1) |
+| **1c** Tests Skip→Pass + per-fix triple-run + Step 9.5 gates | ✅ COMPLETE 2026-06-01 (`08343e32`) | ~3h | 37 Passed / 0 Failed / 4 Skipped on focused integration; Failed: 0 × 3 on unit triple-run (5,902/129/6,031); ledger entries RB-T028-03/04/05/06 → `repaired`; Step 9.5: code-review PASS-WITH-CONCERNS (4 warnings), adr-check PASS (9 ADRs) |
+| **1d.1** ADR-030 promotion | ✅ COMPLETE 2026-06-01 (`85258885`) | ~30min | Concise (`.claude/adr/`) + full (`docs/adr/`) + 2 INDEX updates |
+| **1d.2** Security review request | ✅ COMPLETE 2026-06-01 (PR #318 comment `4596627823`) | ~15min | RB-T028-06 Auth-collateral; awaiting `dev@spaarke.com` approval |
+| **1d.3** Project state files | 🔄 in-progress | ~10min | This file + TASK-INDEX |
 
 ---
 
