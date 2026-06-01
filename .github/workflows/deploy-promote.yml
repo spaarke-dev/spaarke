@@ -132,7 +132,6 @@ jobs:
     if: needs.plan.outputs.deploy_dev == 'true'
     environment:
       name: dev
-      url: https://${{ secrets.DEV_APP_NAME }}.azurewebsites.net
 
     steps:
       - name: Checkout
@@ -212,7 +211,6 @@ jobs:
     if: needs.plan.outputs.deploy_staging == 'true'
     environment:
       name: staging
-      url: https://${{ secrets.STAGING_APP_NAME }}.azurewebsites.net
 
     steps:
       - name: Checkout
@@ -312,7 +310,6 @@ jobs:
     # Deployment will pause here until an authorized reviewer approves.
     environment:
       name: prod
-      url: https://${{ secrets.PROD_APP_NAME }}.azurewebsites.net
 
     steps:
       - name: Checkout
