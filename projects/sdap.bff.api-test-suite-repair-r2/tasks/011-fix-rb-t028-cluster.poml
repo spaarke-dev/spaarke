@@ -93,6 +93,8 @@
     <background>
       r1 task 027 (clean host boot discovery) and task 028 (cluster classification) surfaced this as a 4-entry cluster sharing one root cause: ASP.NET Core's endpoint-metadata generation aborts at startup when ANY mapped endpoint's parameter binding cannot be resolved. The 4 affected endpoint families (KnowledgeBase, Chat, ReAnalysisFlow, Authorization) all live in the same host. When tests set `Analysis:Enabled=false`, the AI services (e.g., `INotificationService`) are not registered — but the endpoints are still mapped. Startup fails with `notificationService | UNKNOWN` — and all 37 tests across the 4 fixtures fail identically. RB-T028-06 (Auth) is included because Auth endpoints share the metadata-generation surface — once the AI-endpoint binding gap is closed, Auth tests pass without separate edits.
 
+      **Path corrections from Phase 0 task 001 (2026-06-01)**: The r1 ledger's cited file `Api/Ai/ReAnalysisFlowEndpoints.cs` DOES NOT EXIST as a standalone file in the current codebase. ReAnalysis flow routes through `Api/Ai/ChatEndpoints.cs` + `Program.cs`. This STRENGTHENS the cluster root-cause hypothesis: the fix target is `Program.cs` (where endpoints are mapped unconditionally) + the DI module(s) where AI services are conditionally registered. Step 1 must Grep to discover the actual conditional-registration sites — do NOT assume `Infrastructure/DI/AiNotificationModule.cs` exists at that exact path. Task 001's reproducibility doc (`baseline/20-entries-reproducibility-verification.md`) has full path-correction details for RB-T028-02, RB-T028-05, RB-T028-07 — read it during Step 1 context load.
+
       r1's D-02 codifies the cluster-exception rule: ONE production change can close multiple entries when root cause is shared. r1's lessons-learned reinforces: "cluster-level classification scales." This task IS the canonical Phase 1 cluster fix.
 
       Critical risk per design.md §8 R2: "RB-T028 root-cause fix breaks other endpoint registrations." Mitigation: per-fix triple-run + staged rollout (one endpoint family at a time if approach (a) chosen) + automated revert via PR revert if any post-merge regression. Per-fix triple-run is mandatory before PR merge.
@@ -106,21 +108,30 @@
   </context>
 
   <relevant-files>
-    <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiNotificationModule.cs</file>
-    <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiSafetyModule.cs</file>
+    <!-- Path corrections from Phase 0 task 001 reproducibility verification (2026-06-01):
+         - ReAnalysisFlowEndpoints.cs DOES NOT EXIST as a separate file; ReAnalysis flow routes through
+           ChatEndpoints.cs + Program.cs (this STRENGTHENS the cluster root-cause hypothesis: the fix is
+           a single Program.cs unconditional-mapping change).
+         - Verify all DI module file paths via Grep at Step 1 (do not assume AiNotificationModule.cs /
+           AiSafetyModule.cs paths — discover the actual conditional-registration sites first).
+         - Task 001 baseline doc has full path-correction details:
+           projects/sdap.bff.api-test-suite-repair-r2/baseline/20-entries-reproducibility-verification.md
+    -->
+    <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/</file>
     <file>src/server/api/Sprk.Bff.Api/Api/Ai/KnowledgeBaseEndpoints.cs</file>
     <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
-    <file>src/server/api/Sprk.Bff.Api/Api/Ai/ReAnalysisFlowEndpoints.cs</file>
-    <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/Authorization/</file>
     <file>tests/unit/Sprk.Bff.Api.Tests/Integration/KnowledgeBaseIntegrationTests.cs</file>
     <file>tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ChatEndpointsTests.cs</file>
     <file>tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ReAnalysisFlowTests.cs</file>
     <file>tests/unit/Sprk.Bff.Api.Tests/Integration/AuthorizationIntegrationTests.cs</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/20-entries-reproducibility-verification.md</file>
     <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
   </relevant-files>
 
   <steps>
-    <step order="1">Read all 4 ledger entries (RB-T028-03/04/05/06) end-to-end. Grep for `INotificationService` registration site(s) in `src/server/api/Sprk.Bff.Api/Infrastructure/DI/`; identify the exact `if`-guarded registration line. Grep for `MapKnowledgeBaseEndpoints` / `MapChatEndpoints` / `MapReAnalysisFlowEndpoints` / `MapAuthorizationEndpoints` registration site(s) in `Program.cs` or equivalent.</step>
+    <step order="1">Read all 4 ledger entries (RB-T028-03/04/05/06) end-to-end. **Also read** `projects/sdap.bff.api-test-suite-repair-r2/baseline/20-entries-reproducibility-verification.md` for the 2026-06-01 path corrections. Grep for `INotificationService` registration site(s) in `src/server/api/Sprk.Bff.Api/Infrastructure/DI/`; identify the exact `if`-guarded registration line — note: do NOT assume `AiNotificationModule.cs` exists at that path; discover via Grep. Grep for `MapKnowledgeBaseEndpoints` / `MapChatEndpoints` / `MapAuthorizationEndpoints` registration site(s) in `Program.cs` or equivalent. **Note**: there is no `ReAnalysisFlowEndpoints.cs` separate file; ReAnalysis flow is in `ChatEndpoints.cs` + `Program.cs` — confirm via Grep.</step>
     <step order="2">Verify the 4 test fixtures: read `KnowledgeBaseTestFixture`, `ChatEndpointsTestFixture`, `ReAnalysisFlowTestFixture`, `AuthorizationTestFixture`; confirm each sets `Analysis:Enabled=false`. NO test changes — fixtures stay as-is per NFR-01.</step>
     <step order="3">Decision: option-a (registration unconditional) vs option-b (endpoint mapping conditional). Apply ADR-018 judgment: if `Analysis:Enabled` is product-meaningful (a real kill switch), choose option-b (mapping conditional — endpoints disappear when off); if it's internal not-yet-shipped guard, choose option-a (registration unconditional — kept always available). Ledger recommends option-b for consistency across all 4 endpoint families. Document the decision in `projects/sdap.bff.api-test-suite-repair-r2/decisions/D-08-rb-t028-cluster-fix-approach.md`.</step>
     <step order="4">Apply the production fix per the chosen approach. If option-b: wrap each of the 4 endpoint map calls in `if (configuration.GetValue<bool>("Analysis:Enabled")) app.MapXxxEndpoints();`. If option-a: lift `services.AddNotificationService()` (and friends) out of the feature-flag `if` block. Single PR; cluster commit.</step>
