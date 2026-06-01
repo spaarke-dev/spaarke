@@ -13,11 +13,11 @@
  * See: notes/auth-migration-b2b-msal.md
  */
 
-import * as React from "react";
-import { useIsAuthenticated, useMsal } from "@azure/msal-react";
-import { InteractionStatus } from "@azure/msal-browser";
-import { Spinner } from "@fluentui/react-components";
-import { MSAL_BFF_SCOPE } from "../config";
+import * as React from 'react';
+import { useIsAuthenticated, useMsal } from '@azure/msal-react';
+import { InteractionStatus } from '@azure/msal-browser';
+import { Spinner } from '@fluentui/react-components';
+import { MSAL_BFF_SCOPE } from '../config';
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -25,7 +25,7 @@ interface AuthGuardProps {
 
 export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
   // In mock mode, skip MSAL entirely — render children as if authenticated.
-  if (import.meta.env.VITE_DEV_MOCK === "true") {
+  if (import.meta.env.VITE_DEV_MOCK === 'true') {
     return <>{children}</>;
   }
 
@@ -45,7 +45,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
   // While MSAL is processing (startup, redirect callback, silent token refresh, etc.)
   if (inProgress !== InteractionStatus.None) {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: "1 1 auto" }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '1 1 auto' }}>
         <Spinner size="large" label="Signing in..." />
       </div>
     );
@@ -54,7 +54,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
   // Unauthenticated + no interaction in progress → login redirect is being triggered
   if (!isAuthenticated) {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: "1 1 auto" }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '1 1 auto' }}>
         <Spinner size="large" label="Redirecting to sign-in..." />
       </div>
     );

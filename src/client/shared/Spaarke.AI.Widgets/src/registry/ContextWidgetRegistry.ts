@@ -74,10 +74,7 @@ const _registry = new Map<string, ContextWidgetRegistration>();
  * @param type         - Unique string key matching the server-sent widget type.
  * @param registration - Registration object containing the lazy factory.
  */
-export function registerContextWidget(
-  type: string,
-  registration: Pick<ContextWidgetRegistration, 'factory'>
-): void {
+export function registerContextWidget(type: string, registration: Pick<ContextWidgetRegistration, 'factory'>): void {
   if (_registry.has(type)) {
     if (process.env.NODE_ENV !== 'production') {
       console.warn(
@@ -99,10 +96,7 @@ export function registerContextWidget(
  * @param type         - Widget type string to replace.
  * @param registration - New registration record.
  */
-export function replaceContextWidget(
-  type: string,
-  registration: Pick<ContextWidgetRegistration, 'factory'>
-): void {
+export function replaceContextWidget(type: string, registration: Pick<ContextWidgetRegistration, 'factory'>): void {
   _registry.set(type, { factory: registration.factory });
 }
 
@@ -118,9 +112,7 @@ export function replaceContextWidget(
  * @param type - Context widget type string as sent by the server.
  * @returns Promise resolving to the widget component, or null.
  */
-export async function resolveContextWidget(
-  type: string
-): Promise<ContextWidgetComponent | null> {
+export async function resolveContextWidget(type: string): Promise<ContextWidgetComponent | null> {
   const entry = _registry.get(type);
 
   // Unknown type — return null with a warning.
@@ -144,8 +136,7 @@ export async function resolveContextWidget(
     return entry.resolved;
   } catch (err) {
     console.error(
-      `[ai-widgets] ContextWidgetRegistry: failed to load context widget "${type}". ` +
-        'Returning null.',
+      `[ai-widgets] ContextWidgetRegistry: failed to load context widget "${type}". ` + 'Returning null.',
       err
     );
     return null;

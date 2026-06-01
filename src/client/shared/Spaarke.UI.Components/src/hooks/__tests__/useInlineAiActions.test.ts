@@ -15,7 +15,10 @@
 
 import { renderHook, act } from '@testing-library/react';
 import { useInlineAiActions } from '../useInlineAiActions';
-import type { InlineAiAction, InlineActionBroadcastEvent } from '../../components/InlineAiToolbar/inlineAiToolbar.types';
+import type {
+  InlineAiAction,
+  InlineActionBroadcastEvent,
+} from '../../components/InlineAiToolbar/inlineAiToolbar.types';
 
 // ---------------------------------------------------------------------------
 // BroadcastChannel mock
@@ -97,9 +100,7 @@ describe('useInlineAiActions', () => {
 
   describe('handleAction - message shape', () => {
     it('posts_CorrectMessageShape_ForChatAction', () => {
-      const { result } = renderHook(() =>
-        useInlineAiActions({ channelName: 'sprk-inline-action' })
-      );
+      const { result } = renderHook(() => useInlineAiActions({ channelName: 'sprk-inline-action' }));
 
       act(() => {
         result.current.handleAction(summarizeAction, 'selected text here');
@@ -118,9 +119,7 @@ describe('useInlineAiActions', () => {
     });
 
     it('posts_CorrectMessageShape_ForDiffAction', () => {
-      const { result } = renderHook(() =>
-        useInlineAiActions({ channelName: 'sprk-inline-action' })
-      );
+      const { result } = renderHook(() => useInlineAiActions({ channelName: 'sprk-inline-action' }));
 
       act(() => {
         result.current.handleAction(simplifyAction, 'text to simplify');
@@ -138,9 +137,7 @@ describe('useInlineAiActions', () => {
     });
 
     it('posts_NoSessionId_ByDefault', () => {
-      const { result } = renderHook(() =>
-        useInlineAiActions({ channelName: 'sprk-inline-action' })
-      );
+      const { result } = renderHook(() => useInlineAiActions({ channelName: 'sprk-inline-action' }));
 
       act(() => {
         result.current.handleAction(summarizeAction, 'test');
@@ -159,9 +156,7 @@ describe('useInlineAiActions', () => {
 
   describe('channel name', () => {
     it('creates_Channel_WithCorrectName', () => {
-      const { result } = renderHook(() =>
-        useInlineAiActions({ channelName: 'sprk-inline-action' })
-      );
+      const { result } = renderHook(() => useInlineAiActions({ channelName: 'sprk-inline-action' }));
 
       act(() => {
         result.current.handleAction(summarizeAction, 'text');
@@ -174,9 +169,7 @@ describe('useInlineAiActions', () => {
     it('creates_Channel_WithCustomChannelName', () => {
       const customChannel = 'sprk-custom-channel-42';
 
-      const { result } = renderHook(() =>
-        useInlineAiActions({ channelName: customChannel })
-      );
+      const { result } = renderHook(() => useInlineAiActions({ channelName: customChannel }));
 
       act(() => {
         result.current.handleAction(summarizeAction, 'text');
@@ -193,18 +186,14 @@ describe('useInlineAiActions', () => {
 
   describe('lazy channel creation', () => {
     it('doesNotCreate_Channel_BeforeFirstDispatch', () => {
-      renderHook(() =>
-        useInlineAiActions({ channelName: 'sprk-inline-action' })
-      );
+      renderHook(() => useInlineAiActions({ channelName: 'sprk-inline-action' }));
 
       // No actions dispatched — channel should not have been created
       expect(MockBroadcastChannel.instances).toHaveLength(0);
     });
 
     it('creates_Channel_OnFirstDispatch', () => {
-      const { result } = renderHook(() =>
-        useInlineAiActions({ channelName: 'sprk-inline-action' })
-      );
+      const { result } = renderHook(() => useInlineAiActions({ channelName: 'sprk-inline-action' }));
 
       act(() => {
         result.current.handleAction(summarizeAction, 'text');
@@ -214,9 +203,7 @@ describe('useInlineAiActions', () => {
     });
 
     it('reuses_Channel_ForMultipleDispatches', () => {
-      const { result } = renderHook(() =>
-        useInlineAiActions({ channelName: 'sprk-inline-action' })
-      );
+      const { result } = renderHook(() => useInlineAiActions({ channelName: 'sprk-inline-action' }));
 
       act(() => {
         result.current.handleAction(summarizeAction, 'first text');
@@ -237,9 +224,7 @@ describe('useInlineAiActions', () => {
 
   describe('cleanup on unmount', () => {
     it('closes_Channel_OnUnmount_AfterDispatch', () => {
-      const { result, unmount } = renderHook(() =>
-        useInlineAiActions({ channelName: 'sprk-inline-action' })
-      );
+      const { result, unmount } = renderHook(() => useInlineAiActions({ channelName: 'sprk-inline-action' }));
 
       act(() => {
         result.current.handleAction(summarizeAction, 'text');
@@ -254,9 +239,7 @@ describe('useInlineAiActions', () => {
     });
 
     it('doesNotThrow_OnUnmount_WhenChannelWasNeverCreated', () => {
-      const { unmount } = renderHook(() =>
-        useInlineAiActions({ channelName: 'sprk-inline-action' })
-      );
+      const { unmount } = renderHook(() => useInlineAiActions({ channelName: 'sprk-inline-action' }));
 
       // No dispatch before unmount — channel was never created
       expect(() => unmount()).not.toThrow();
@@ -274,9 +257,7 @@ describe('useInlineAiActions', () => {
 
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
 
-      const { result } = renderHook(() =>
-        useInlineAiActions({ channelName: 'sprk-inline-action' })
-      );
+      const { result } = renderHook(() => useInlineAiActions({ channelName: 'sprk-inline-action' }));
 
       expect(() => {
         act(() => {
@@ -294,18 +275,13 @@ describe('useInlineAiActions', () => {
 
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
 
-      const { result } = renderHook(() =>
-        useInlineAiActions({ channelName: 'sprk-inline-action' })
-      );
+      const { result } = renderHook(() => useInlineAiActions({ channelName: 'sprk-inline-action' }));
 
       act(() => {
         result.current.handleAction(summarizeAction, 'text');
       });
 
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('sprk-inline-action'),
-        expect.anything()
-      );
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('sprk-inline-action'), expect.anything());
 
       warnSpy.mockRestore();
     });
@@ -317,9 +293,7 @@ describe('useInlineAiActions', () => {
 
   describe('multiple dispatches', () => {
     it('posts_AllMessages_ToSameChannel', () => {
-      const { result } = renderHook(() =>
-        useInlineAiActions({ channelName: 'sprk-inline-action' })
-      );
+      const { result } = renderHook(() => useInlineAiActions({ channelName: 'sprk-inline-action' }));
 
       act(() => {
         result.current.handleAction(summarizeAction, 'first');

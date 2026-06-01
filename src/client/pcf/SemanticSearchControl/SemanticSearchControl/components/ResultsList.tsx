@@ -10,15 +10,7 @@
 
 import * as React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Spinner,
-  Link,
-  Button,
-  Tooltip,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Text, Spinner, Link, Button, Tooltip } from '@fluentui/react-components';
 import { ArrowClockwise20Regular, Add20Regular, Open20Regular, MailRegular } from '@fluentui/react-icons';
 import { IResultsListProps, SearchResult } from '../types';
 import { ResultCard } from './ResultCard';
@@ -170,12 +162,15 @@ export const ResultsList: React.FC<IResultsListProps> = ({
     if (!onLoadMoreSentinel) return;
     const node = sentinelRef.current;
     if (!node) return;
-    const observer = new IntersectionObserver(entries => {
-      const [entry] = entries;
-      if (entry.isIntersecting) {
-        onLoadMoreSentinel();
-      }
-    }, { threshold: 0.1, rootMargin: '200px' });
+    const observer = new IntersectionObserver(
+      entries => {
+        const [entry] = entries;
+        if (entry.isIntersecting) {
+          onLoadMoreSentinel();
+        }
+      },
+      { threshold: 0.1, rootMargin: '200px' }
+    );
     observer.observe(node);
     return () => observer.disconnect();
   }, [onLoadMoreSentinel]);
@@ -327,9 +322,7 @@ export const ResultsList: React.FC<IResultsListProps> = ({
               onToggleWorkspace={handleToggleWorkspace(result)}
               isInWorkspace={getIsInWorkspace(result)}
               isSelected={selectedIds?.has(result.documentId)}
-              onToggleSelect={
-                onToggleSelect ? () => onToggleSelect(result.documentId) : undefined
-              }
+              onToggleSelect={onToggleSelect ? () => onToggleSelect(result.documentId) : undefined}
               onOpenPreview={onOpenPreview ? () => onOpenPreview(result) : undefined}
               compactMode={compactMode}
             />
@@ -360,9 +353,7 @@ export const ResultsList: React.FC<IResultsListProps> = ({
               (so the observer attaches regardless of current state) but
               the host's `onLoadMoreSentinel` is a no-op when nothing
               more can be loaded. */}
-          {onLoadMoreSentinel && (
-            <div ref={sentinelRef} className={styles.sentinel} aria-hidden="true" />
-          )}
+          {onLoadMoreSentinel && <div ref={sentinelRef} className={styles.sentinel} aria-hidden="true" />}
         </div>
       </div>
     </div>

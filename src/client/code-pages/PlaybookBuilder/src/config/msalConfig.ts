@@ -15,8 +15,13 @@
 import type { Configuration } from '@azure/msal-browser';
 import { LogLevel } from '@azure/msal-browser';
 
-const CLIENT_ID: string = window.__SPAARKE_MSAL_CLIENT_ID__
-  || (() => { throw new Error('[Spaarke] MSAL client ID not configured. Window global __SPAARKE_MSAL_CLIENT_ID__ must be set by resolveRuntimeConfig() before this module loads.'); })();
+const CLIENT_ID: string =
+  window.__SPAARKE_MSAL_CLIENT_ID__ ||
+  (() => {
+    throw new Error(
+      '[Spaarke] MSAL client ID not configured. Window global __SPAARKE_MSAL_CLIENT_ID__ must be set by resolveRuntimeConfig() before this module loads.'
+    );
+  })();
 
 const REDIRECT_URI = window.location.origin;
 

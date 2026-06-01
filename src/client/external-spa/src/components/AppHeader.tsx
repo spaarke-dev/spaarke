@@ -1,59 +1,59 @@
-import * as React from "react";
-import { makeStyles, tokens, Text, Button, Tooltip } from "@fluentui/react-components";
-import { WeatherMoon20Regular, WeatherSunny20Regular, Person20Regular, Settings20Regular } from "@fluentui/react-icons";
-import { SpaarkeLogoSvg } from "./SpaarkeLogoSvg";
-import type { PortalUser } from "../types";
+import * as React from 'react';
+import { makeStyles, tokens, Text, Button, Tooltip } from '@fluentui/react-components';
+import { WeatherMoon20Regular, WeatherSunny20Regular, Person20Regular, Settings20Regular } from '@fluentui/react-icons';
+import { SpaarkeLogoSvg } from './SpaarkeLogoSvg';
+import type { PortalUser } from '../types';
 
 const useStyles = makeStyles({
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalXL}`,
     backgroundColor: tokens.colorNeutralBackground2,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
   },
   left: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalM,
   },
   logoWrapper: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     flexShrink: 0,
   },
   titleDivider: {
-    width: "1px",
-    height: "20px",
+    width: '1px',
+    height: '20px',
     backgroundColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
   },
   right: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
   },
   userButton: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     color: tokens.colorNeutralForeground2,
-    cursor: "pointer",
-    background: "none",
-    border: "none",
+    cursor: 'pointer',
+    background: 'none',
+    border: 'none',
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
     borderRadius: tokens.borderRadiusMedium,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground3,
     },
   },
   appName: {
     color: tokens.colorNeutralForeground1,
-    whiteSpace: "nowrap",
+    whiteSpace: 'nowrap',
   },
 });
 
@@ -80,12 +80,7 @@ interface AppHeaderProps {
  *
  * Styled exclusively with Fluent v9 design tokens (ADR-021).
  */
-export const AppHeader: React.FC<AppHeaderProps> = ({
-  isDark,
-  onToggleDark,
-  portalUser,
-  onSettingsClick,
-}) => {
+export const AppHeader: React.FC<AppHeaderProps> = ({ isDark, onToggleDark, portalUser, onSettingsClick }) => {
   const styles = useStyles();
 
   return (
@@ -93,7 +88,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       <div className={styles.left}>
         {/* Spaarke logo — black for light mode, white for dark mode */}
         <div className={styles.logoWrapper}>
-          <SpaarkeLogoSvg fill={isDark ? "white" : "black"} height={28} />
+          <SpaarkeLogoSvg fill={isDark ? 'white' : 'black'} height={28} />
         </div>
 
         <div className={styles.titleDivider} aria-hidden="true" />
@@ -117,16 +112,13 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           </Tooltip>
         )}
 
-        <Tooltip
-          content={isDark ? "Switch to light mode" : "Switch to dark mode"}
-          relationship="label"
-        >
+        <Tooltip content={isDark ? 'Switch to light mode' : 'Switch to dark mode'} relationship="label">
           <Button
             appearance="subtle"
             size="small"
             icon={isDark ? <WeatherSunny20Regular /> : <WeatherMoon20Regular />}
             onClick={onToggleDark}
-            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
           />
         </Tooltip>
 

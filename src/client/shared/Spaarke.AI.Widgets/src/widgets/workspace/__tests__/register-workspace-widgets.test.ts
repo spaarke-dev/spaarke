@@ -188,15 +188,12 @@ describe('registerWorkspaceWidgets — metadata', () => {
     loadRegistrations();
   });
 
-  it.each(EXPECTED_WIDGETS)(
-    '$type has correct displayName and category',
-    ({ type, displayName, category }) => {
-      const meta = getWorkspaceWidgetMetadata(type);
-      expect(meta).toBeDefined();
-      expect(meta!.displayName).toBe(displayName);
-      expect(meta!.category).toBe(category);
-    }
-  );
+  it.each(EXPECTED_WIDGETS)('$type has correct displayName and category', ({ type, displayName, category }) => {
+    const meta = getWorkspaceWidgetMetadata(type);
+    expect(meta).toBeDefined();
+    expect(meta!.displayName).toBe(displayName);
+    expect(meta!.category).toBe(category);
+  });
 
   it.each(EXPECTED_WIDGETS)(
     '$type has correct allowMultiple and defaultOrder',
@@ -232,14 +229,11 @@ describe('registerWorkspaceWidgets — factory resolution', () => {
     loadRegistrations();
   });
 
-  it.each(EXPECTED_WIDGETS)(
-    '$type resolves to a non-null component (lazy factory works)',
-    async ({ type }) => {
-      const resolved = await resolveWorkspaceWidget(type);
-      expect(resolved).not.toBeNull();
-      expect(resolved).not.toBeUndefined();
-    }
-  );
+  it.each(EXPECTED_WIDGETS)('$type resolves to a non-null component (lazy factory works)', async ({ type }) => {
+    const resolved = await resolveWorkspaceWidget(type);
+    expect(resolved).not.toBeNull();
+    expect(resolved).not.toBeUndefined();
+  });
 
   it('unknown widget type still falls back to GenericTextWidget', async () => {
     loadRegistrations();

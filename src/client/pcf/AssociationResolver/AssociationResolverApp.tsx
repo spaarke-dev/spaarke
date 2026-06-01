@@ -211,7 +211,10 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         const detected = detectPrePopulatedParent();
 
         if (detected) {
-          logger.logInfo('AssociationResolver', `Auto-detected parent: ${detected.entityDisplayName} - ${detected.recordName}`);
+          logger.logInfo(
+            'AssociationResolver',
+            `Auto-detected parent: ${detected.entityDisplayName} - ${detected.recordName}`
+          );
           setIsAutoDetected(true);
           setDetectedParent(detected);
           setSelectedEntityType(detected.entityType);
@@ -274,7 +277,10 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
               if (entityLogicalName) {
                 const config = entityConfigs.find(c => c.logicalName === entityLogicalName);
                 if (config) {
-                  logger.logInfo('AssociationResolver', ` Initialized entity type from Record Type: ${entityLogicalName}`);
+                  logger.logInfo(
+                    'AssociationResolver',
+                    ` Initialized entity type from Record Type: ${entityLogicalName}`
+                  );
                   setSelectedEntityType(config.logicalName);
                 }
               }
@@ -360,7 +366,10 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         // Apply mapped values to the form (skipping user-modified fields)
         const fieldsSetOnForm = fieldMappingHandler.applyToForm(targetRecord, true);
 
-        logger.logInfo('AssociationResolver', `Field mappings applied: ${result.fieldsMapped} mapped, ${fieldsSetOnForm} set on form`);
+        logger.logInfo(
+          'AssociationResolver',
+          `Field mappings applied: ${result.fieldsMapped} mapped, ${fieldsSetOnForm} set on form`
+        );
 
         // Get entity display name for toast message
         const entityConfig = entityConfigs.find(c => c.logicalName === sourceEntity);

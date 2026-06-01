@@ -104,10 +104,7 @@ interface ICombinedState {
   ai: IAiPrefillState;
 }
 
-function combinedReducer(
-  state: ICombinedState,
-  action: FormAction
-): ICombinedState {
+function combinedReducer(state: ICombinedState, action: FormAction): ICombinedState {
   switch (action.type) {
     case 'SET_FIELD': {
       return {
@@ -132,7 +129,7 @@ function combinedReducer(
       const nextForm = { ...state.form };
       const prefilledFields = new Set<keyof ICreateMatterFormState>();
 
-      (Object.keys(fields) as (keyof IAiPrefillFields)[]).forEach((key) => {
+      (Object.keys(fields) as (keyof IAiPrefillFields)[]).forEach(key => {
         const val = fields[key];
         if (val !== undefined && val !== '') {
           (nextForm as Record<string, string>)[key] = val as string;
@@ -187,11 +184,7 @@ function combinedReducer(
  * Derives whether all required fields have values (for Next-button enablement).
  */
 function isFormValid(form: ICreateMatterFormState): boolean {
-  return (
-    form.matterTypeId !== '' &&
-    form.practiceAreaId !== '' &&
-    form.matterName.trim() !== ''
-  );
+  return form.matterTypeId !== '' && form.practiceAreaId !== '' && form.matterName.trim() !== '';
 }
 
 // ---------------------------------------------------------------------------
@@ -342,34 +335,31 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
   }, [form]);
 
   // -- AI Pre-fill via shared hook --
-  const handlePrefillApply = React.useCallback(
-    (resolved: IResolvedPrefillFields, prefilledFieldNames: string[]) => {
-      const fields: IAiPrefillFields = {};
-      for (const [key, value] of Object.entries(resolved)) {
-        if (typeof value === 'string') {
-          (fields as Record<string, string>)[key] = value;
-        } else {
-          // Lookup resolved: set both id and name fields
-          // e.g., matterTypeName -> { id, name } -> set matterTypeId + matterTypeName
-          const idKey = key.replace(/Name$/, 'Id');
-          (fields as Record<string, string>)[idKey] = value.id;
-          (fields as Record<string, string>)[key] = value.name;
-        }
+  const handlePrefillApply = React.useCallback((resolved: IResolvedPrefillFields, prefilledFieldNames: string[]) => {
+    const fields: IAiPrefillFields = {};
+    for (const [key, value] of Object.entries(resolved)) {
+      if (typeof value === 'string') {
+        (fields as Record<string, string>)[key] = value;
+      } else {
+        // Lookup resolved: set both id and name fields
+        // e.g., matterTypeName -> { id, name } -> set matterTypeId + matterTypeName
+        const idKey = key.replace(/Name$/, 'Id');
+        (fields as Record<string, string>)[idKey] = value.id;
+        (fields as Record<string, string>)[key] = value.name;
       }
-      if (Object.keys(fields).length > 0) {
-        dispatch({ type: 'APPLY_AI_PREFILL', fields });
-      }
-      dispatch({ type: 'AI_PREFILL_SUCCESS' });
-    },
-    []
-  );
+    }
+    if (Object.keys(fields).length > 0) {
+      dispatch({ type: 'APPLY_AI_PREFILL', fields });
+    }
+    dispatch({ type: 'AI_PREFILL_SUCCESS' });
+  }, []);
 
   const prefill = useAiPrefill({
     endpoint: PREFILL_PATH,
     uploadedFiles,
     authenticatedFetch,
     bffBaseUrl,
-    fieldExtractor: (data) => ({
+    fieldExtractor: data => ({
       textFields: {
         matterName: data.matterName as string | undefined,
         summary: data.summary as string | undefined,
@@ -384,11 +374,11 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
       },
     }),
     lookupResolvers: {
-      matterTypeName: (v) => searchMatterTypes(dataService, v),
-      practiceAreaName: (v) => searchPracticeAreas(dataService, v),
-      assignedAttorneyName: (v) => searchContactsAsLookup(dataService, v),
-      assignedParalegalName: (v) => searchContactsAsLookup(dataService, v),
-      assignedOutsideCounselName: (v) => searchOrganizationsAsLookup(dataService, v),
+      matterTypeName: v => searchMatterTypes(dataService, v),
+      practiceAreaName: v => searchPracticeAreas(dataService, v),
+      assignedAttorneyName: v => searchContactsAsLookup(dataService, v),
+      assignedParalegalName: v => searchContactsAsLookup(dataService, v),
+      assignedOutsideCounselName: v => searchOrganizationsAsLookup(dataService, v),
     },
     onApply: handlePrefillApply,
     skipIfInitialized: !!hasInitialValues,
@@ -433,78 +423,62 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
 
   // -- Lookup change handlers --
 
-  const handleMatterTypeChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      dispatch({
-        type: 'SET_LOOKUP',
-        idField: 'matterTypeId',
-        nameField: 'matterTypeName',
-        id: item?.id ?? '',
-        name: item?.name ?? '',
-      });
-    },
-    []
-  );
+  const handleMatterTypeChange = React.useCallback((item: ILookupItem | null) => {
+    dispatch({
+      type: 'SET_LOOKUP',
+      idField: 'matterTypeId',
+      nameField: 'matterTypeName',
+      id: item?.id ?? '',
+      name: item?.name ?? '',
+    });
+  }, []);
 
-  const handlePracticeAreaChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      dispatch({
-        type: 'SET_LOOKUP',
-        idField: 'practiceAreaId',
-        nameField: 'practiceAreaName',
-        id: item?.id ?? '',
-        name: item?.name ?? '',
-      });
-    },
-    []
-  );
+  const handlePracticeAreaChange = React.useCallback((item: ILookupItem | null) => {
+    dispatch({
+      type: 'SET_LOOKUP',
+      idField: 'practiceAreaId',
+      nameField: 'practiceAreaName',
+      id: item?.id ?? '',
+      name: item?.name ?? '',
+    });
+  }, []);
 
-  const handleAttorneyChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      dispatch({
-        type: 'SET_LOOKUP',
-        idField: 'assignedAttorneyId',
-        nameField: 'assignedAttorneyName',
-        id: item?.id ?? '',
-        name: item?.name ?? '',
-      });
-    },
-    []
-  );
+  const handleAttorneyChange = React.useCallback((item: ILookupItem | null) => {
+    dispatch({
+      type: 'SET_LOOKUP',
+      idField: 'assignedAttorneyId',
+      nameField: 'assignedAttorneyName',
+      id: item?.id ?? '',
+      name: item?.name ?? '',
+    });
+  }, []);
 
-  const handleParalegalChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      dispatch({
-        type: 'SET_LOOKUP',
-        idField: 'assignedParalegalId',
-        nameField: 'assignedParalegalName',
-        id: item?.id ?? '',
-        name: item?.name ?? '',
-      });
-    },
-    []
-  );
+  const handleParalegalChange = React.useCallback((item: ILookupItem | null) => {
+    dispatch({
+      type: 'SET_LOOKUP',
+      idField: 'assignedParalegalId',
+      nameField: 'assignedParalegalName',
+      id: item?.id ?? '',
+      name: item?.name ?? '',
+    });
+  }, []);
 
-  const handleOutsideCounselChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      dispatch({
-        type: 'SET_LOOKUP',
-        idField: 'assignedOutsideCounselId',
-        nameField: 'assignedOutsideCounselName',
-        id: item?.id ?? '',
-        name: item?.name ?? '',
-      });
-    },
-    []
-  );
+  const handleOutsideCounselChange = React.useCallback((item: ILookupItem | null) => {
+    dispatch({
+      type: 'SET_LOOKUP',
+      idField: 'assignedOutsideCounselId',
+      nameField: 'assignedOutsideCounselName',
+      id: item?.id ?? '',
+      name: item?.name ?? '',
+    });
+  }, []);
 
   // -- Text field change handler --
 
   const handleFieldChange = React.useCallback(
-    (field: keyof ICreateMatterFormState) =>
-      (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-        dispatch({ type: 'SET_FIELD', field, value: e.target.value });
-      },
+    (field: keyof ICreateMatterFormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      dispatch({ type: 'SET_FIELD', field, value: e.target.value });
+    },
     []
   );
 
@@ -530,8 +504,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
   const isLoading = ai.status === 'loading';
   const hasAnyPrefill = ai.prefilledFields.size > 0;
 
-  const isAiField = (field: keyof ICreateMatterFormState): boolean =>
-    ai.prefilledFields.has(field);
+  const isAiField = (field: keyof ICreateMatterFormState): boolean => ai.prefilledFields.has(field);
 
   // Build lookup value objects from form state
   const matterTypeValue: ILookupItem | null = form.matterTypeId
@@ -557,11 +530,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
   /**
    * Renders the label for a text field with optional required mark and AI tag.
    */
-  const renderLabel = (
-    text: string,
-    field: keyof ICreateMatterFormState,
-    required?: boolean
-  ): React.ReactElement => (
+  const renderLabel = (text: string, field: keyof ICreateMatterFormState, required?: boolean): React.ReactElement => (
     <span className={styles.labelRow}>
       {text}
       {required && (
@@ -590,12 +559,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
         </div>
 
         {hasAnyPrefill && (
-          <Badge
-            className={styles.aiBadge}
-            appearance="tint"
-            color="brand"
-            icon={<span aria-hidden="true" />}
-          >
+          <Badge className={styles.aiBadge} appearance="tint" color="brand" icon={<span aria-hidden="true" />}>
             AI Pre-filled
           </Badge>
         )}
@@ -645,11 +609,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
 
           {/* -- Row 2: Matter Name (full width) -- */}
 
-          <Field
-            className={styles.fullWidth}
-            label={renderLabel('Matter Name', 'matterName', true)}
-            required
-          >
+          <Field className={styles.fullWidth} label={renderLabel('Matter Name', 'matterName', true)} required>
             <Input
               value={form.matterName}
               onChange={handleFieldChange('matterName')}

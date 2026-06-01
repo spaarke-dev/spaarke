@@ -17,11 +17,7 @@ import * as React from 'react';
 import { screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
-import type {
-  AttachmentChip,
-  ChatAttachment,
-  IUseChatFileAttachmentResult,
-} from '../hooks/useChatFileAttachment';
+import type { AttachmentChip, ChatAttachment, IUseChatFileAttachmentResult } from '../hooks/useChatFileAttachment';
 
 // ---------------------------------------------------------------------------
 // Mock the attachment hook so we can inject deterministic attachments
@@ -100,12 +96,7 @@ function emptySseResponse(): Response {
   } as unknown as Response;
 }
 
-function makeReadyChip(
-  id: string,
-  filename: string,
-  mimeType: string,
-  textContent: string,
-): AttachmentChip {
+function makeReadyChip(id: string, filename: string, mimeType: string, textContent: string): AttachmentChip {
   return {
     id,
     filename,
@@ -145,9 +136,7 @@ describe('SprkChat — attachments payload wiring (task 026, FR-07)', () => {
         return Promise.resolve(emptySseResponse());
       }
       if (typeof url === 'string' && url.endsWith('/sessions') && init?.method === 'POST') {
-        return Promise.resolve(
-          jsonResponse({ sessionId: 'session-attach-1', createdAt: '2026-05-20T00:00:00Z' }),
-        );
+        return Promise.resolve(jsonResponse({ sessionId: 'session-attach-1', createdAt: '2026-05-20T00:00:00Z' }));
       }
       // Generic fallback for discovery / context-mapping / dynamic-slash GETs.
       return Promise.resolve(jsonResponse({}));
@@ -169,13 +158,11 @@ describe('SprkChat — attachments payload wiring (task 026, FR-07)', () => {
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith(
         'https://api.example.com/api/ai/chat/sessions',
-        expect.objectContaining({ method: 'POST' }),
+        expect.objectContaining({ method: 'POST' })
       );
     });
 
-    const textarea = screen
-      .getByTestId('chat-input-textarea')
-      .querySelector('textarea') as HTMLTextAreaElement;
+    const textarea = screen.getByTestId('chat-input-textarea').querySelector('textarea') as HTMLTextAreaElement;
     const sendButton = screen.getByTestId('chat-send-button');
 
     await act(async () => {
@@ -187,13 +174,13 @@ describe('SprkChat — attachments payload wiring (task 026, FR-07)', () => {
 
     await waitFor(() => {
       const messagesCall = mockFetch.mock.calls.find(
-        ([url]) => typeof url === 'string' && url.includes('/sessions/session-attach-1/messages'),
+        ([url]) => typeof url === 'string' && url.includes('/sessions/session-attach-1/messages')
       );
       expect(messagesCall).toBeDefined();
     });
 
     const messagesCall = mockFetch.mock.calls.find(
-      ([url]) => typeof url === 'string' && url.includes('/sessions/session-attach-1/messages'),
+      ([url]) => typeof url === 'string' && url.includes('/sessions/session-attach-1/messages')
     )!;
     const body = JSON.parse((messagesCall[1] as RequestInit).body as string);
 
@@ -220,13 +207,11 @@ describe('SprkChat — attachments payload wiring (task 026, FR-07)', () => {
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith(
         'https://api.example.com/api/ai/chat/sessions',
-        expect.objectContaining({ method: 'POST' }),
+        expect.objectContaining({ method: 'POST' })
       );
     });
 
-    const textarea = screen
-      .getByTestId('chat-input-textarea')
-      .querySelector('textarea') as HTMLTextAreaElement;
+    const textarea = screen.getByTestId('chat-input-textarea').querySelector('textarea') as HTMLTextAreaElement;
     const sendButton = screen.getByTestId('chat-send-button');
 
     await act(async () => {
@@ -238,13 +223,13 @@ describe('SprkChat — attachments payload wiring (task 026, FR-07)', () => {
 
     await waitFor(() => {
       const messagesCall = mockFetch.mock.calls.find(
-        ([url]) => typeof url === 'string' && url.includes('/sessions/session-attach-1/messages'),
+        ([url]) => typeof url === 'string' && url.includes('/sessions/session-attach-1/messages')
       );
       expect(messagesCall).toBeDefined();
     });
 
     const messagesCall = mockFetch.mock.calls.find(
-      ([url]) => typeof url === 'string' && url.includes('/sessions/session-attach-1/messages'),
+      ([url]) => typeof url === 'string' && url.includes('/sessions/session-attach-1/messages')
     )!;
     const body = JSON.parse((messagesCall[1] as RequestInit).body as string);
 
@@ -257,21 +242,14 @@ describe('SprkChat — attachments payload wiring (task 026, FR-07)', () => {
     // Verify the payload path didn't trigger a separate /documents POST.
     const documentsPosts = mockFetch.mock.calls.filter(
       ([url, init]) =>
-        typeof url === 'string' &&
-        url.includes('/documents') &&
-        (init as RequestInit | undefined)?.method === 'POST',
+        typeof url === 'string' && url.includes('/documents') && (init as RequestInit | undefined)?.method === 'POST'
     );
     expect(documentsPosts).toHaveLength(0);
   });
 
   it('calls clearAll on successful stream completion', async () => {
-    const chips: AttachmentChip[] = [
-      makeReadyChip('a', 'note.txt', 'text/plain', 'content'),
-    ];
-    setHookResult(
-      [{ filename: 'note.txt', contentType: 'text/plain', textContent: 'content' }],
-      chips,
-    );
+    const chips: AttachmentChip[] = [makeReadyChip('a', 'note.txt', 'text/plain', 'content')];
+    setHookResult([{ filename: 'note.txt', contentType: 'text/plain', textContent: 'content' }], chips);
 
     await act(async () => {
       renderWithProviders(<SprkChat {...defaultProps} />);
@@ -280,13 +258,11 @@ describe('SprkChat — attachments payload wiring (task 026, FR-07)', () => {
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith(
         'https://api.example.com/api/ai/chat/sessions',
-        expect.objectContaining({ method: 'POST' }),
+        expect.objectContaining({ method: 'POST' })
       );
     });
 
-    const textarea = screen
-      .getByTestId('chat-input-textarea')
-      .querySelector('textarea') as HTMLTextAreaElement;
+    const textarea = screen.getByTestId('chat-input-textarea').querySelector('textarea') as HTMLTextAreaElement;
     const sendButton = screen.getByTestId('chat-send-button');
 
     await act(async () => {

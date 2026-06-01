@@ -85,7 +85,9 @@ export class SemanticSearchApiService {
    * skip it.
    */
   async searchUnion(request: SearchRequest): Promise<SearchResponse> {
-    const isEntityScope = ['matter', 'project', 'invoice', 'account', 'contact', 'document', 'entity'].includes(request.scope);
+    const isEntityScope = ['matter', 'project', 'invoice', 'account', 'contact', 'document', 'entity'].includes(
+      request.scope
+    );
     const associatedOnly = request.filters?.associatedOnly === true;
 
     // Not eligible for union — fall back to plain search.
@@ -119,10 +121,8 @@ export class SemanticSearchApiService {
       this.search(associatedRequest),
     ]);
 
-    const semantic =
-      semanticOutcome.status === 'fulfilled' ? semanticOutcome.value : null;
-    const associated =
-      associatedOutcome.status === 'fulfilled' ? associatedOutcome.value : null;
+    const semantic = semanticOutcome.status === 'fulfilled' ? semanticOutcome.value : null;
+    const associated = associatedOutcome.status === 'fulfilled' ? associatedOutcome.value : null;
 
     // Both failed — re-throw the semantic error (the primary path).
     if (!semantic && !associated) {
@@ -191,18 +191,12 @@ export class SemanticSearchApiService {
 
     // Composite totalCount: prefer the larger of the two reported totals
     // so the footer reads "N of M" with the user's expected upper bound.
-    const totalCount = Math.max(
-      semantic?.totalCount ?? 0,
-      associated?.totalCount ?? 0,
-      merged.length
-    );
+    const totalCount = Math.max(semantic?.totalCount ?? 0, associated?.totalCount ?? 0, merged.length);
 
     return {
       results: merged,
       totalCount,
-      metadata:
-        semantic?.metadata ??
-        associated?.metadata ?? { searchTimeMs: 0, query: request.query },
+      metadata: semantic?.metadata ?? associated?.metadata ?? { searchTimeMs: 0, query: request.query },
     };
   }
 
@@ -432,10 +426,7 @@ export class SemanticSearchApiService {
    *        field; we tag client-side based on which BFF path was invoked.
    *        `searchUnion` may overwrite the tag during dedupe.
    */
-  private validateResponse(
-    data: unknown,
-    relationshipTag: 'associated' | 'semantic' = 'semantic'
-  ): SearchResponse {
+  private validateResponse(data: unknown, relationshipTag: 'associated' | 'semantic' = 'semantic'): SearchResponse {
     // Type guard for response structure
     if (!data || typeof data !== 'object') {
       throw this.createError('Invalid response from search service.', 'INVALID_RESPONSE', true);

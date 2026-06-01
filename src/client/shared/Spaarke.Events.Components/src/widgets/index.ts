@@ -10,7 +10,5 @@
  *    EventsPageProvider, with event-open routed to
  *    `Xrm.Navigation.navigateTo` modals instead of `Xrm.App.sidePanes`.
  */
-export {
-  CalendarWorkspaceWidget,
-} from "./CalendarWorkspaceWidget";
-export type { CalendarWorkspaceWidgetProps } from "./CalendarWorkspaceWidget";
+export { CalendarWorkspaceWidget } from './CalendarWorkspaceWidget';
+export type { CalendarWorkspaceWidgetProps } from './CalendarWorkspaceWidget';

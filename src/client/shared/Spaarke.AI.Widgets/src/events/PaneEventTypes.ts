@@ -59,7 +59,18 @@ export interface WorkspacePaneEvent {
    *                              infrastructure — no consumers yet, just the foundation for future
    *                              pane coordination)
    */
-  type: 'widget_load' | 'widget_update' | 'widget_action' | 'tab_change' | 'tab_count_change' | 'selection_changed' | 'tabs_clear' | 'wizard_step' | 'entity_resolved' | 'session_reset' | 'active_widget_changed';
+  type:
+    | 'widget_load'
+    | 'widget_update'
+    | 'widget_action'
+    | 'tab_change'
+    | 'tab_count_change'
+    | 'selection_changed'
+    | 'tabs_clear'
+    | 'wizard_step'
+    | 'entity_resolved'
+    | 'session_reset'
+    | 'active_widget_changed';
 
   /** Identifies the widget kind (e.g. `"document-summary"`, `"clause-list"`). */
   widgetType?: string;

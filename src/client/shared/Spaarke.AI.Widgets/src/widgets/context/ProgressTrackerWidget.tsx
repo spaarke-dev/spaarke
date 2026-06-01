@@ -28,17 +28,8 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Spinner,
-  mergeClasses,
-} from '@fluentui/react-components';
-import {
-  CheckmarkCircleRegular,
-  CircleRegular,
-} from '@fluentui/react-icons';
+import { makeStyles, tokens, Text, Spinner, mergeClasses } from '@fluentui/react-components';
+import { CheckmarkCircleRegular, CircleRegular } from '@fluentui/react-icons';
 import { usePaneEvent } from '../../events/usePaneEvent';
 import { useDispatchPaneEvent } from '../../events/useDispatchPaneEvent';
 import type { ContextWidgetProps } from '../../types/widget-types';
@@ -320,14 +311,11 @@ const StepItem: React.FC<StepItemProps> = ({ step, isLast, styles }) => {
     step.status === 'pending' && styles.stepLabelPending
   );
 
-  const rowClass = mergeClasses(
-    styles.stepRow,
-    step.detail !== undefined && styles.stepRowExpandable
-  );
+  const rowClass = mergeClasses(styles.stepRow, step.detail !== undefined && styles.stepRowExpandable);
 
   const handleClick = useCallback(() => {
     if (step.detail !== undefined) {
-      setExpanded((prev) => !prev);
+      setExpanded(prev => !prev);
     }
   }, [step.detail]);
 
@@ -420,7 +408,7 @@ const ProgressTrackerWidget: React.FC<ContextWidgetProps<ProgressTrackerData | u
   useEffect(() => {
     if (!trackerData || trackerData.steps.length === 0) return;
 
-    const allDone = trackerData.steps.every((s) => s.status === 'completed');
+    const allDone = trackerData.steps.every(s => s.status === 'completed');
     if (!allDone) return;
 
     // Guard: don't re-fire if a timer is already running.
@@ -497,12 +485,7 @@ const ProgressTrackerWidget: React.FC<ContextWidgetProps<ProgressTrackerData | u
       {/* Step list */}
       <div className={styles.stepList} role="list" aria-label="Workflow steps">
         {steps.map((step, index) => (
-          <StepItem
-            key={step.id}
-            step={step}
-            isLast={index === steps.length - 1}
-            styles={styles}
-          />
+          <StepItem key={step.id} step={step} isLast={index === steps.length - 1} styles={styles} />
         ))}
       </div>
 

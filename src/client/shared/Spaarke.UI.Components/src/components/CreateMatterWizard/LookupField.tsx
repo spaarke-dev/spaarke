@@ -7,10 +7,7 @@
  */
 
 import * as React from 'react';
-import {
-  LookupField as SharedLookupField,
-  type ILookupFieldProps as ISharedLookupFieldProps,
-} from '../LookupField';
+import { LookupField as SharedLookupField, type ILookupFieldProps as ISharedLookupFieldProps } from '../LookupField';
 import { AiFieldTag } from './AiFieldTag';
 
 // Re-export the shared type for convenience
@@ -21,16 +18,8 @@ export interface ILookupFieldProps extends Omit<ISharedLookupFieldProps, 'labelE
   isAiPrefilled?: boolean;
 }
 
-export const LookupField: React.FC<ILookupFieldProps> = ({
-  isAiPrefilled,
-  ...rest
-}) => {
-  return (
-    <SharedLookupField
-      {...rest}
-      labelExtra={isAiPrefilled ? <AiFieldTag /> : undefined}
-    />
-  );
+export const LookupField: React.FC<ILookupFieldProps> = ({ isAiPrefilled, ...rest }) => {
+  return <SharedLookupField {...rest} labelExtra={isAiPrefilled ? <AiFieldTag /> : undefined} />;
 };
 
 LookupField.displayName = 'LookupField';

@@ -9,15 +9,7 @@
  *   - "Include only short summary" checkbox at top
  */
 import * as React from 'react';
-import {
-  Checkbox,
-  Field,
-  Input,
-  Textarea,
-  Text,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Checkbox, Field, Input, Textarea, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { LookupField } from '../LookupField';
 import type { ILookupItem } from '../../types/LookupTypes';
 
@@ -54,11 +46,7 @@ export function buildSummaryEmailSubject(): string {
   return 'Document Summary';
 }
 
-export function buildSummaryEmailBody(
-  summary: string,
-  shortSummary: string,
-  useShort: boolean,
-): string {
+export function buildSummaryEmailBody(summary: string, shortSummary: string, useShort: boolean): string {
   const summaryContent = useShort ? shortSummary : summary;
 
   return (
@@ -200,26 +188,20 @@ export const SummarizeSendEmailStep: React.FC<ISummarizeSendEmailStepProps> = ({
         />
 
         {/* Subject */}
-        <Field
-          label={renderLabel('Subject', true)}
-          required
-        >
+        <Field label={renderLabel('Subject', true)} required>
           <Input
             value={emailSubject}
-            onChange={(e) => onEmailSubjectChange(e.target.value)}
+            onChange={e => onEmailSubjectChange(e.target.value)}
             placeholder="Email subject"
             aria-label="Subject"
           />
         </Field>
 
         {/* Body */}
-        <Field
-          label={renderLabel('Message', true)}
-          required
-        >
+        <Field label={renderLabel('Message', true)} required>
           <Textarea
             value={emailBody}
-            onChange={(e) => onEmailBodyChange(e.target.value)}
+            onChange={e => onEmailBodyChange(e.target.value)}
             placeholder="Compose your message&hellip;"
             rows={15}
             resize="vertical"

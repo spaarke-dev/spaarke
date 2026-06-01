@@ -12,13 +12,7 @@
  *   - Next is only enabled when a record is selected
  */
 import * as React from 'react';
-import {
-  Text,
-  Dropdown,
-  Option,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Text, Dropdown, Option, makeStyles, tokens } from '@fluentui/react-components';
 import { DataverseLookupField } from '../LookupField/DataverseLookupField';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { INavigationService } from '../../types/serviceInterfaces';
@@ -99,7 +93,9 @@ export const SelectWorkStep: React.FC<ISelectWorkStepProps> = ({
 }) => {
   const styles = useStyles();
 
-  const [recordType, setRecordType] = React.useState<'' | 'matter' | 'project' | 'invoice' | 'event'>(initialValues?.recordType ?? '');
+  const [recordType, setRecordType] = React.useState<'' | 'matter' | 'project' | 'invoice' | 'event'>(
+    initialValues?.recordType ?? ''
+  );
   const [recordValue, setRecordValue] = React.useState<ILookupItem | null>(
     initialValues?.recordId ? { id: initialValues.recordId, name: initialValues.recordName ?? '' } : null
   );
@@ -131,7 +127,7 @@ export const SelectWorkStep: React.FC<ISelectWorkStepProps> = ({
     setRecordValue(item);
   }, []);
 
-  const selectedOption = RECORD_TYPE_OPTIONS.find((o) => o.key === recordType);
+  const selectedOption = RECORD_TYPE_OPTIONS.find(o => o.key === recordType);
   const selectedTypeText = selectedOption?.text ?? '';
 
   return (
@@ -158,7 +154,7 @@ export const SelectWorkStep: React.FC<ISelectWorkStepProps> = ({
             onOptionSelect={handleRecordTypeChange}
             placeholder="Select record type..."
           >
-            {RECORD_TYPE_OPTIONS.map((opt) => (
+            {RECORD_TYPE_OPTIONS.map(opt => (
               <Option key={opt.key} value={opt.key}>
                 {opt.text}
               </Option>
@@ -180,7 +176,8 @@ export const SelectWorkStep: React.FC<ISelectWorkStepProps> = ({
 
       {/* Hint — Skip button in the wizard footer handles the skip flow */}
       <Text size={200} className={styles.skipHint}>
-        You can always link to a record later. Use the Skip button to create the work assignment without a parent record.
+        You can always link to a record later. Use the Skip button to create the work assignment without a parent
+        record.
       </Text>
     </div>
   );

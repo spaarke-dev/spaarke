@@ -443,12 +443,18 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, IRichTextEditorProps
         // This method exists so useDocumentStreamConsumer can type-check against RichTextEditorRef.
         console.warn(
           '[RichTextEditor] beginStreamingInsert called on base editor without StreamingInsertPlugin. ' +
-          `Position: ${position}. Use StreamingInsertPlugin for streaming support.`
+            `Position: ${position}. Use StreamingInsertPlugin for streaming support.`
         );
         return {
-          startStream: () => { /* no-op stub */ },
-          insertToken: () => { /* no-op stub */ },
-          endStream: () => { /* no-op stub */ },
+          startStream: () => {
+            /* no-op stub */
+          },
+          insertToken: () => {
+            /* no-op stub */
+          },
+          endStream: () => {
+            /* no-op stub */
+          },
         };
       },
       appendStreamToken: (_handle: StreamingInsertHandle, _token: string): void => {

@@ -24,10 +24,7 @@ import type { IDataService } from '../../types/serviceInterfaces';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IUploadProgress, AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
-import {
-  applyResolverFields,
-  findNavProp,
-} from '../../services/PolymorphicResolverService';
+import { applyResolverFields, findNavProp } from '../../services/PolymorphicResolverService';
 import type { INavPropEntry } from '../../services/PolymorphicResolverService';
 
 // Re-export shared search helpers for use by step components
@@ -71,13 +68,16 @@ async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEnt
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (json as any).value ?? [];
 
-    const entries: INavPropEntry[] = rels.map((r) => ({
+    const entries: INavPropEntry[] = rels.map(r => ({
       columnName: r.ReferencingAttribute,
       navPropName: r.ReferencingEntityNavigationPropertyName,
       referencedEntity: r.ReferencedEntity,
     }));
 
-    console.info(`[WorkAssignmentService] Nav-props for ${entityLogicalName}:`, entries.map(e => `${e.columnName} -> ${e.navPropName} (${e.referencedEntity})`));
+    console.info(
+      `[WorkAssignmentService] Nav-props for ${entityLogicalName}:`,
+      entries.map(e => `${e.columnName} -> ${e.navPropName} (${e.referencedEntity})`)
+    );
     _navPropCache[entityLogicalName] = entries;
     return entries;
   } catch (err) {
@@ -94,7 +94,7 @@ async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEnt
  * Used when creating sprk_document records linked to a parent entity.
  */
 function _resolveDocNavProp(entries: INavPropEntry[], referencedEntity: string): string {
-  const match = entries.find((e) => e.referencedEntity === referencedEntity);
+  const match = entries.find(e => e.referencedEntity === referencedEntity);
   if (match) {
     console.info(`[WorkAssignmentService] Resolved doc nav-prop: ${match.navPropName} for ${referencedEntity}`);
     return match.navPropName;
@@ -194,7 +194,7 @@ export class WorkAssignmentService {
     try {
       // IDataService.retrieveMultipleRecords has no maxPageSize param
       const result = await this._dataService.retrieveMultipleRecords(cfg.entity, query);
-      return result.entities.map((e) => ({
+      return result.entities.map(e => ({
         id: e[cfg.idField] as string,
         name: e[cfg.nameField] as string,
       }));
@@ -214,14 +214,17 @@ export class WorkAssignmentService {
     recordType: 'matter' | 'project' | 'invoice' | 'event',
     recordId: string
   ): Promise<Partial<ICreateWorkAssignmentFormState>> {
-    const fieldMaps: Record<string, {
-      entity: string;
-      nameField: string;
-      descField?: string;
-      matterTypeField?: string;
-      practiceAreaField?: string;
-      priorityField?: string;
-    }> = {
+    const fieldMaps: Record<
+      string,
+      {
+        entity: string;
+        nameField: string;
+        descField?: string;
+        matterTypeField?: string;
+        practiceAreaField?: string;
+        priorityField?: string;
+      }
+    > = {
       matter: {
         entity: 'sprk_matter',
         nameField: 'sprk_mattername',
@@ -277,7 +280,10 @@ export class WorkAssignmentService {
         if (prioVal) result.priority = prioVal;
       }
     } catch (err) {
-      console.warn(`[WorkAssignmentService] readRecordForPrefill basic fields failed for ${recordType}(${recordId}):`, err);
+      console.warn(
+        `[WorkAssignmentService] readRecordForPrefill basic fields failed for ${recordType}(${recordId}):`,
+        err
+      );
       return result;
     }
 
@@ -285,7 +291,9 @@ export class WorkAssignmentService {
     if (mapping.matterTypeField) {
       try {
         const mtQuery = `?$select=${mapping.matterTypeField}`;
-        console.info(`[WorkAssignmentService] readRecordForPrefill matterType: ${mapping.entity}(${recordId})${mtQuery}`);
+        console.info(
+          `[WorkAssignmentService] readRecordForPrefill matterType: ${mapping.entity}(${recordId})${mtQuery}`
+        );
         const mtRecord = await this._dataService.retrieveRecord(mapping.entity, recordId, mtQuery);
         const mtId = mtRecord[mapping.matterTypeField] as string | undefined;
         if (mtId) {
@@ -294,14 +302,19 @@ export class WorkAssignmentService {
           result.matterTypeName = (mtRecord[formattedKey] as string) ?? '';
         }
       } catch (err) {
-        console.warn(`[WorkAssignmentService] readRecordForPrefill matterType failed for ${recordType}(${recordId}):`, err);
+        console.warn(
+          `[WorkAssignmentService] readRecordForPrefill matterType failed for ${recordType}(${recordId}):`,
+          err
+        );
       }
     }
 
     if (mapping.practiceAreaField) {
       try {
         const paQuery = `?$select=${mapping.practiceAreaField}`;
-        console.info(`[WorkAssignmentService] readRecordForPrefill practiceArea: ${mapping.entity}(${recordId})${paQuery}`);
+        console.info(
+          `[WorkAssignmentService] readRecordForPrefill practiceArea: ${mapping.entity}(${recordId})${paQuery}`
+        );
         const paRecord = await this._dataService.retrieveRecord(mapping.entity, recordId, paQuery);
         const paId = paRecord[mapping.practiceAreaField] as string | undefined;
         if (paId) {
@@ -310,7 +323,10 @@ export class WorkAssignmentService {
           result.practiceAreaName = (paRecord[formattedKey] as string) ?? '';
         }
       } catch (err) {
-        console.warn(`[WorkAssignmentService] readRecordForPrefill practiceArea failed for ${recordType}(${recordId}):`, err);
+        console.warn(
+          `[WorkAssignmentService] readRecordForPrefill practiceArea failed for ${recordType}(${recordId}):`,
+          err
+        );
       }
     }
 
@@ -324,10 +340,7 @@ export class WorkAssignmentService {
    * Search contacts filtered by parent organization.
    * Used for "Law Firm Attorney" lookup, filtered by the selected law firm.
    */
-  async searchContactsByOrganization(
-    orgId: string,
-    nameFilter: string
-  ): Promise<ILookupItem[]> {
+  async searchContactsByOrganization(orgId: string, nameFilter: string): Promise<ILookupItem[]> {
     if (!nameFilter || nameFilter.trim().length < 1) return [];
 
     const safeFilter = nameFilter.trim().replace(/'/g, "''");
@@ -340,7 +353,7 @@ export class WorkAssignmentService {
     try {
       // IDataService.retrieveMultipleRecords has no maxPageSize param
       const result = await this._dataService.retrieveMultipleRecords('contact', query);
-      return result.entities.map((e) => ({
+      return result.entities.map(e => ({
         id: e['contactid'] as string,
         name: (e['fullname'] as string) + (e['emailaddress1'] ? ` (${e['emailaddress1']})` : ''),
       }));
@@ -392,17 +405,14 @@ export class WorkAssignmentService {
     }
 
     // Helper: bind a lookup if the nav-prop exists on the entity
-    const bindLookup = (
-      referencedEntity: string,
-      entitySet: string,
-      guid: string,
-      columnHint?: string
-    ) => {
+    const bindLookup = (referencedEntity: string, entitySet: string, guid: string, columnHint?: string) => {
       const navProp = findNavProp(navProps, referencedEntity, columnHint);
       if (navProp) {
         entity[`${navProp}@odata.bind`] = `/${entitySet}(${guid})`;
       } else {
-        console.warn(`[WorkAssignmentService] No nav-prop found for ${referencedEntity} (hint: ${columnHint}), skipping binding`);
+        console.warn(
+          `[WorkAssignmentService] No nav-prop found for ${referencedEntity} (hint: ${columnHint}), skipping binding`
+        );
       }
     };
 
@@ -438,14 +448,18 @@ export class WorkAssignmentService {
     }
 
     if (form.matterTypeId) bindLookup('sprk_mattertype_ref', 'sprk_mattertype_refs', form.matterTypeId, 'mattertype');
-    if (form.practiceAreaId) bindLookup('sprk_practicearea_ref', 'sprk_practicearea_refs', form.practiceAreaId, 'practicearea');
+    if (form.practiceAreaId)
+      bindLookup('sprk_practicearea_ref', 'sprk_practicearea_refs', form.practiceAreaId, 'practicearea');
 
     // Assign Work lookups (if provided)
     if (assignWork) {
       if (assignWork.assignedAttorneyId) bindLookup('contact', 'contacts', assignWork.assignedAttorneyId, 'attorney');
-      if (assignWork.assignedParalegalId) bindLookup('contact', 'contacts', assignWork.assignedParalegalId, 'paralegal');
-      if (assignWork.assignedLawFirmId) bindLookup('sprk_organization', 'sprk_organizations', assignWork.assignedLawFirmId, 'lawfirm');
-      if (assignWork.assignedLawFirmAttorneyId) bindLookup('contact', 'contacts', assignWork.assignedLawFirmAttorneyId, 'lawfirmattorney');
+      if (assignWork.assignedParalegalId)
+        bindLookup('contact', 'contacts', assignWork.assignedParalegalId, 'paralegal');
+      if (assignWork.assignedLawFirmId)
+        bindLookup('sprk_organization', 'sprk_organizations', assignWork.assignedLawFirmId, 'lawfirm');
+      if (assignWork.assignedLawFirmAttorneyId)
+        bindLookup('contact', 'contacts', assignWork.assignedLawFirmAttorneyId, 'lawfirmattorney');
     }
 
     try {
@@ -476,7 +490,7 @@ export class WorkAssignmentService {
       if (!uploadResult.success) {
         warnings.push(
           `File upload failed (${uploadResult.failureCount} of ${uploadedFiles.length}). ` +
-          'Files can be added from the work assignment record.'
+            'Files can be added from the work assignment record.'
         );
       } else if (uploadResult.uploadedFiles.length > 0) {
         // Discover nav-prop for sprk_document -> sprk_workassignment lookup
@@ -506,7 +520,7 @@ export class WorkAssignmentService {
       if (uploadResult.failureCount > 0 && uploadResult.successCount > 0) {
         warnings.push(
           `${uploadResult.failureCount} file(s) failed to upload: ` +
-          uploadResult.errors.map((e) => e.fileName).join(', ')
+            uploadResult.errors.map(e => e.fileName).join(', ')
         );
       }
     } else if (uploadedFiles.length > 0 && !this._containerId) {

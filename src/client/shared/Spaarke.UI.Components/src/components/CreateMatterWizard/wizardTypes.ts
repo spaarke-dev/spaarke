@@ -8,11 +8,7 @@
 // ---------------------------------------------------------------------------
 
 /** Unique identifiers for each step in the wizard. */
-export type WizardStepId =
-  | 'add-files'
-  | 'create-record'
-  | 'next-steps'
-  | string; // allows dynamic follow-on steps added in task 024
+export type WizardStepId = 'add-files' | 'create-record' | 'next-steps' | string; // allows dynamic follow-on steps added in task 024
 
 /** Status of a wizard step from the sidebar stepper's perspective. */
 export type WizardStepStatus = 'pending' | 'active' | 'completed';

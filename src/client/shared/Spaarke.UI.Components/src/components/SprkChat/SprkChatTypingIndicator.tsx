@@ -78,12 +78,7 @@ export const SprkChatTypingIndicator: React.FC = () => {
   const styles = useStyles();
 
   return (
-    <div
-      className={styles.container}
-      role="status"
-      aria-label="AI is thinking"
-      data-testid="typing-indicator"
-    >
+    <div className={styles.container} role="status" aria-label="AI is thinking" data-testid="typing-indicator">
       <span className={`${styles.dot} ${styles.dot1}`} />
       <span className={`${styles.dot} ${styles.dot2}`} />
       <span className={`${styles.dot} ${styles.dot3}`} />

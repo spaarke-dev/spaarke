@@ -17,16 +17,7 @@
  */
 
 import * as React from 'react';
-import {
-  Card,
-  makeStyles,
-  tokens,
-  Text,
-  Button,
-  Spinner,
-  Input,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { Card, makeStyles, tokens, Text, Button, Spinner, Input, mergeClasses } from '@fluentui/react-components';
 import {
   CheckmarkCircle20Regular,
   DismissCircle20Regular,
@@ -295,10 +286,7 @@ const StepIndicator: React.FC<StepIndicatorProps> = ({ step, order, styles, show
   }
 };
 
-function getDescriptionClass(
-  status: PlanStepStatus,
-  styles: ReturnType<typeof useStyles>
-): string {
+function getDescriptionClass(status: PlanStepStatus, styles: ReturnType<typeof useStyles>): string {
   switch (status) {
     case 'running':
       return mergeClasses(styles.stepDescription, styles.stepDescriptionRunning);
@@ -474,12 +462,7 @@ export const PlanPreviewCard: React.FC<PlanPreviewCardProps> = ({
               Edit Plan
             </Button>
 
-            <Button
-              appearance="subtle"
-              icon={<Dismiss20Regular />}
-              onClick={onCancel}
-              aria-label="Cancel plan"
-            >
+            <Button appearance="subtle" icon={<Dismiss20Regular />} onClick={onCancel} aria-label="Cancel plan">
               Cancel
             </Button>
           </>

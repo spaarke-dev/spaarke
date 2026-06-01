@@ -20,10 +20,7 @@ export { CreateRecordStep } from './CreateRecordStep';
 
 // Task 024 -- matter-specific step components
 export { AssignCounselStep } from './AssignCounselStep';
-export {
-  buildDefaultEmailSubject,
-  buildDefaultEmailBody,
-} from './SendEmailStep';
+export { buildDefaultEmailSubject, buildDefaultEmailBody } from './SendEmailStep';
 
 // Service layer
 export {
@@ -40,12 +37,7 @@ export {
 
 // Types -- wizard (matter-specific only; shared types live in Wizard/index.ts
 // and FileUpload/index.ts)
-export type {
-  IWizardDialogProps,
-  IWizardStep,
-  WizardAction,
-  WizardStepId,
-} from './wizardTypes';
+export type { IWizardDialogProps, IWizardStep, WizardAction, WizardStepId } from './wizardTypes';
 
 // Types -- Step 2 form
 export type {

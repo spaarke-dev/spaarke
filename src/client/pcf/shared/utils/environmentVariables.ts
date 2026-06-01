@@ -69,7 +69,10 @@ interface CachedValue {
  * service constructors should NOT need their own normalization.
  */
 function normalizeBffUrl(raw: string): string {
-  return raw.trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+  return raw
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/api$/i, '');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -246,10 +249,10 @@ export async function getApiBaseUrl(webApi: ComponentFramework.WebApi): Promise<
   const raw = await getEnvironmentVariableOrDefault(webApi, 'sprk_BffApiBaseUrl');
   if (!raw || !raw.trim()) {
     throw new Error(
-      "[Spaarke.EnvVar] sprk_BffApiBaseUrl Dataverse environment variable is not configured. " +
-      "Set it in the SpaarkeCore solution to the host of the target BFF API " +
-      "(e.g., 'https://spaarke-bff-dev.azurewebsites.net'). No hardcoded fallback is " +
-      "supplied (task 024) to prevent silent breakage when the URL changes."
+      '[Spaarke.EnvVar] sprk_BffApiBaseUrl Dataverse environment variable is not configured. ' +
+        'Set it in the SpaarkeCore solution to the host of the target BFF API ' +
+        "(e.g., 'https://spaarke-bff-dev.azurewebsites.net'). No hardcoded fallback is " +
+        'supplied (task 024) to prevent silent breakage when the URL changes.'
     );
   }
   return normalizeBffUrl(raw);

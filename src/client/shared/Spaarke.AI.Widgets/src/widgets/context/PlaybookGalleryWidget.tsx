@@ -285,9 +285,7 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 /** Skeleton placeholder rendered while playbooks are loading. */
-const PlaybookGallerySkeletons: React.FC<{ styles: ReturnType<typeof useStyles> }> = ({
-  styles,
-}) => (
+const PlaybookGallerySkeletons: React.FC<{ styles: ReturnType<typeof useStyles> }> = ({ styles }) => (
   <div className={styles.skeletonGrid} aria-busy="true" aria-label="Loading playbooks">
     {Array.from({ length: 4 }, (_, i) => (
       <div key={i} className={styles.skeletonCard}>
@@ -307,15 +305,12 @@ const PlaybookGallerySkeletons: React.FC<{ styles: ReturnType<typeof useStyles> 
 );
 
 /** Empty state shown when the playbook list is empty (never a blank pane). */
-const PlaybookGalleryEmptyState: React.FC<{ styles: ReturnType<typeof useStyles> }> = ({
-  styles,
-}) => (
+const PlaybookGalleryEmptyState: React.FC<{ styles: ReturnType<typeof useStyles> }> = ({ styles }) => (
   <div className={styles.emptyState} role="status" aria-label="No playbooks available">
     <AppsRegular className={styles.emptyStateIcon} />
     <Text className={styles.emptyStateTitle}>No playbooks available</Text>
     <Text className={styles.emptyStateBody}>
-      No AI playbooks have been configured for your workspace. Contact your administrator to enable
-      playbooks.
+      No AI playbooks have been configured for your workspace. Contact your administrator to enable playbooks.
     </Text>
   </div>
 );
@@ -345,10 +340,7 @@ const PlaybookCard: React.FC<PlaybookCardProps> = ({ playbook, isSelected, onSel
 
   return (
     <Card
-      className={mergeClasses(
-        styles.playbookCard,
-        isSelected && styles.playbookCardSelected
-      )}
+      className={mergeClasses(styles.playbookCard, isSelected && styles.playbookCardSelected)}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       role="button"
@@ -357,24 +349,15 @@ const PlaybookCard: React.FC<PlaybookCardProps> = ({ playbook, isSelected, onSel
       aria-label={`${playbook.name}${isSelected ? ', selected' : ''}`}
     >
       <CardHeader
-        image={
-          <BookOpenRegular
-            className={mergeClasses(
-              styles.cardIcon,
-              isSelected && styles.cardIconSelected
-            )}
-          />
-        }
-        header={
-          <Text className={styles.cardTitle}>{playbook.name}</Text>
-        }
+        image={<BookOpenRegular className={mergeClasses(styles.cardIcon, isSelected && styles.cardIconSelected)} />}
+        header={<Text className={styles.cardTitle}>{playbook.name}</Text>}
       />
 
       <Text className={styles.cardDescription}>{playbook.description}</Text>
 
       {playbook.capabilityBadges.length > 0 && (
         <div className={styles.badgeContainer}>
-          {playbook.capabilityBadges.map((badge) => (
+          {playbook.capabilityBadges.map(badge => (
             <Badge
               key={badge}
               className={styles.badge}
@@ -421,7 +404,7 @@ const PlaybookGalleryWidget: React.FC<ContextWidgetProps<PlaybookGalleryData>> =
   const handlePlaybookSelect = (id: string, name: string) => {
     setSelectedId(id);
     // Find the full playbook summary to include defaultWidgets and isExclusive.
-    const playbook = (data?.playbooks ?? []).find((p) => p.id === id);
+    const playbook = (data?.playbooks ?? []).find(p => p.id === id);
     dispatch('conversation', {
       type: 'playbook-selected',
       playbookId: id,
@@ -438,9 +421,7 @@ const PlaybookGalleryWidget: React.FC<ContextWidgetProps<PlaybookGalleryData>> =
       {/* Header */}
       <div className={styles.header}>
         <Text className={styles.headerTitle}>Choose a Playbook</Text>
-        <Text className={styles.headerSubtitle}>
-          Select an AI playbook to guide your conversation.
-        </Text>
+        <Text className={styles.headerSubtitle}>Select an AI playbook to guide your conversation.</Text>
       </div>
 
       {/* Error state */}
@@ -451,19 +432,15 @@ const PlaybookGalleryWidget: React.FC<ContextWidgetProps<PlaybookGalleryData>> =
       )}
 
       {/* Loading state */}
-      {isLoading && !error && (
-        <PlaybookGallerySkeletons styles={styles} />
-      )}
+      {isLoading && !error && <PlaybookGallerySkeletons styles={styles} />}
 
       {/* Empty state */}
-      {!isLoading && !error && playbooks.length === 0 && (
-        <PlaybookGalleryEmptyState styles={styles} />
-      )}
+      {!isLoading && !error && playbooks.length === 0 && <PlaybookGalleryEmptyState styles={styles} />}
 
       {/* Playbook card grid */}
       {!isLoading && !error && playbooks.length > 0 && (
         <div className={styles.grid} role="list" aria-label="Available playbooks">
-          {playbooks.map((playbook) => (
+          {playbooks.map(playbook => (
             <PlaybookCard
               key={playbook.id}
               playbook={playbook}

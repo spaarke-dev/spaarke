@@ -50,11 +50,7 @@ import {
   Tooltip,
   Badge,
 } from '@fluentui/react-components';
-import {
-  Document48Regular,
-  DocumentPdf32Regular,
-  DocumentText48Regular,
-} from '@fluentui/react-icons';
+import { Document48Regular, DocumentPdf32Regular, DocumentText48Regular } from '@fluentui/react-icons';
 // Deep-path import (not the barrel) — the barrel pulls in RichTextEditor →
 // `@lexical/react` ESM modules that don't resolve `react/jsx-runtime` under
 // React 16's resolution (PCF target per ADR-022). Matches the existing
@@ -515,14 +511,7 @@ export const ResultCard: React.FC<IResultCardProps> = ({
         }
       }
     },
-    [
-      openPreview,
-      onOpenFile,
-      onFindSimilar,
-      onCopyLink,
-      onEmailDocument,
-      onOpenRecord,
-    ]
+    [openPreview, onOpenFile, onFindSimilar, onCopyLink, onEmailDocument, onOpenRecord]
   );
 
   const formattedDate = formatShortDate(result.modifiedAt ?? result.createdAt);
@@ -538,8 +527,7 @@ export const ResultCard: React.FC<IResultCardProps> = ({
   // Relationship pill (was: conditional + right). Layout is consistent
   // across all cards.
   const rel: 'associated' | 'semantic' | 'both' =
-    result.relationship ??
-    ((result.combinedScore ?? 0) === 0 ? 'associated' : 'semantic');
+    result.relationship ?? ((result.combinedScore ?? 0) === 0 ? 'associated' : 'semantic');
   const showRelationshipPill = true;
   const similarityPct = Math.round((result.combinedScore ?? 0) * 100);
 
@@ -603,10 +591,7 @@ export const ResultCard: React.FC<IResultCardProps> = ({
               disabledActions={['aiSummary', 'toggleWorkspace', 'rename']}
             />
           </div>
-          <div
-            className={styles.heroIcon}
-            style={{ color: heroColor(fileKind) }}
-          >
+          <div className={styles.heroIcon} style={{ color: heroColor(fileKind) }}>
             <HeroIcon aria-label={result.fileType || 'Document'} />
           </div>
         </div>

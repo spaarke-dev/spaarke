@@ -41,10 +41,10 @@
  *              is preserved; SpaarkeAi does not need to inject auth.
  */
 
-import * as React from "react";
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import { LegalWorkspaceApp } from "@spaarke/legal-workspace";
-import type { WorkspaceWidgetComponent } from "../../types/widget-types";
+import * as React from 'react';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import { LegalWorkspaceApp } from '@spaarke/legal-workspace';
+import type { WorkspaceWidgetComponent } from '../../types/widget-types';
 
 // ---------------------------------------------------------------------------
 // Widget data contract
@@ -65,18 +65,18 @@ const useStyles = makeStyles({
   root: {
     flex: 1,
     minHeight: 0,
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   emptyState: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     padding: tokens.spacingVerticalXL,
-    textAlign: "center",
+    textAlign: 'center',
     color: tokens.colorNeutralForeground3,
   },
 });
@@ -91,7 +91,7 @@ const useStyles = makeStyles({
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function locateXrm(): any | null {
   // 1. Current window
-  if (typeof window !== "undefined" && (window as any).Xrm?.WebApi) {
+  if (typeof window !== 'undefined' && (window as any).Xrm?.WebApi) {
     return (window as any).Xrm;
   }
   // 2. Parent window (iframe inside Custom Page)
@@ -125,13 +125,13 @@ function getUserIdSafe(): string {
   const xrm = locateXrm();
   if (xrm?.Utility?.getGlobalContext) {
     const ctx = xrm.Utility.getGlobalContext();
-    const raw = ctx.getUserId?.() ?? ctx.userSettings?.userId ?? "";
-    return String(raw).replace(/[{}]/g, "");
+    const raw = ctx.getUserId?.() ?? ctx.userSettings?.userId ?? '';
+    return String(raw).replace(/[{}]/g, '');
   }
   if (xrm?.userSettings?.userId) {
-    return String(xrm.userSettings.userId).replace(/[{}]/g, "");
+    return String(xrm.userSettings.userId).replace(/[{}]/g, '');
   }
-  return "";
+  return '';
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -146,9 +146,7 @@ function getUserIdSafe(): string {
  * the tab's `displayName` is supplied by `WorkspacePaneMenu` (the layout
  * name) so the tab label matches the workspace.
  */
-export const WorkspaceLayoutWidget: WorkspaceWidgetComponent<WorkspaceLayoutWidgetData> = ({
-  data,
-}) => {
+export const WorkspaceLayoutWidget: WorkspaceWidgetComponent<WorkspaceLayoutWidgetData> = ({ data }) => {
   const styles = useStyles();
 
   // Resolve Xrm dependencies once on mount — LegalWorkspaceApp's
@@ -162,9 +160,7 @@ export const WorkspaceLayoutWidget: WorkspaceWidgetComponent<WorkspaceLayoutWidg
     return (
       <div className={styles.root} data-testid="workspace-layout-widget-no-xrm">
         <div className={styles.emptyState}>
-          <Text size={300}>
-            Workspace requires the Dataverse host (Xrm.WebApi unavailable in this context).
-          </Text>
+          <Text size={300}>Workspace requires the Dataverse host (Xrm.WebApi unavailable in this context).</Text>
         </div>
       </div>
     );
@@ -185,4 +181,4 @@ export const WorkspaceLayoutWidget: WorkspaceWidgetComponent<WorkspaceLayoutWidg
   );
 };
 
-WorkspaceLayoutWidget.displayName = "WorkspaceLayoutWidget";
+WorkspaceLayoutWidget.displayName = 'WorkspaceLayoutWidget';

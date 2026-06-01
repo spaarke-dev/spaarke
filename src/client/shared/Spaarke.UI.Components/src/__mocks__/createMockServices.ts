@@ -10,14 +10,10 @@
  * dataService.createRecord.mockResolvedValue("custom-guid");
  * ```
  */
-import type {
-  IDataService,
-  IUploadService,
-  INavigationService,
-} from "../types/serviceInterfaces";
-import { createMockDataService } from "./mockDataService";
-import { createMockUploadService } from "./mockUploadService";
-import { createMockNavigationService } from "./mockNavigationService";
+import type { IDataService, IUploadService, INavigationService } from '../types/serviceInterfaces';
+import { createMockDataService } from './mockDataService';
+import { createMockUploadService } from './mockUploadService';
+import { createMockNavigationService } from './mockNavigationService';
 
 /**
  * Aggregate container for all mock service instances.

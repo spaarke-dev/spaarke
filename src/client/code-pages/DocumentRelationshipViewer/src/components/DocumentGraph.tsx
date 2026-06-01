@@ -119,7 +119,9 @@ const DocumentGraphInner: React.FC<DocumentGraphProps> = ({
     const posMap = new Map(layoutResult.nodes.map(pn => [pn.id, pn]));
 
     // Compute bounding box of force-layout output for relative positioning
-    let minX = Infinity, maxX = -Infinity, minY = Infinity;
+    let minX = Infinity,
+      maxX = -Infinity,
+      minY = Infinity;
     for (const pn of layoutResult.nodes) {
       if (pn.x < minX) minX = pn.x;
       if (pn.x > maxX) maxX = pn.x;

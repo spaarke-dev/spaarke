@@ -194,10 +194,7 @@ export interface UseDocumentListPrefsResult {
  * @param userId - Current user's Dataverse system user ID (from context.userSettings.userId)
  * @param matterId - Current matter/entity ID being viewed (parent form context)
  */
-export function useDocumentListPrefs(
-  userId: string | null,
-  matterId: string | null
-): UseDocumentListPrefsResult {
+export function useDocumentListPrefs(userId: string | null, matterId: string | null): UseDocumentListPrefsResult {
   const viewKey = buildKey(VIEW_KEY_PREFIX, userId, matterId);
   const pinKey = buildKey(PIN_KEY_PREFIX, userId, matterId);
   const colWidthsKey = buildKey(COLWIDTHS_KEY_PREFIX, userId, matterId);

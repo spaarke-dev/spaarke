@@ -39,13 +39,7 @@ import {
   useToastController,
 } from '@fluentui/react-components';
 import { Add20Regular, ArrowClockwise20Regular, Open20Regular } from '@fluentui/react-icons';
-import {
-  ISemanticSearchControlProps,
-  SearchFilters,
-  SearchResult,
-  SearchScope,
-  SummaryData,
-} from './types';
+import { ISemanticSearchControlProps, SearchFilters, SearchResult, SearchScope, SummaryData } from './types';
 import {
   SearchInput,
   ResultsList,
@@ -66,7 +60,10 @@ import { authenticatedFetch, resolveTenantIdSync } from '@spaarke/auth';
 import { initializeAuth } from './authInit';
 import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
 import { FindSimilarDialog } from '@spaarke/ui-components/dist/components/FindSimilarDialog';
-import { DocumentEmailWizard, type IDocumentEmailWizardItem } from '@spaarke/ui-components/dist/components/DocumentEmailWizard';
+import {
+  DocumentEmailWizard,
+  type IDocumentEmailWizardItem,
+} from '@spaarke/ui-components/dist/components/DocumentEmailWizard';
 import { AppInsightsService } from '@spaarke/ui-components/dist/services/AppInsightsService';
 import type { IDataService } from '@spaarke/ui-components/dist/types/serviceInterfaces';
 
@@ -339,8 +336,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // userId from PCF user settings; matterId from the resolved scopeId (the
   // entity ID of the current record form). Both are nullable during the
   // initial auth bootstrap — useDocumentListPrefs handles that gracefully.
-  const userIdForPrefs =
-    (context.userSettings as unknown as { userId?: string } | undefined)?.userId ?? null;
+  const userIdForPrefs = (context.userSettings as unknown as { userId?: string } | undefined)?.userId ?? null;
   // `isPinned` from the hook is unused at this scope — ListView consults `pinnedIds`
   // directly. Keeping the destructure simple by omitting it.
   const { view, setView, pinnedIds, togglePin, columnWidths, setColumnWidth } = useDocumentListPrefs(
@@ -362,9 +358,9 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const HOOK_DEFAULT_VIEW: 'list' | 'card' = 'list';
   const effectiveView: 'list' | 'card' = !showViewToggle
     ? defaultView
-    : (view === HOOK_DEFAULT_VIEW && defaultView !== HOOK_DEFAULT_VIEW
-        ? defaultView
-        : view);
+    : view === HOOK_DEFAULT_VIEW && defaultView !== HOOK_DEFAULT_VIEW
+      ? defaultView
+      : view;
 
   // FR-DOC-07: wrap setView with telemetry. The CommandBar's view toggle and
   // any other caller flow through this wrapper so we observe every change.
@@ -386,13 +382,10 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const [sortColumn, setSortColumn] = useState<ListSortColumn>('modifiedAt');
   const [sortDirection, setSortDirection] = useState<ListSortDirection>('desc');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const handleSortChange = useCallback(
-    (next: { column: ListSortColumn; direction: ListSortDirection }) => {
-      setSortColumn(next.column);
-      setSortDirection(next.direction);
-    },
-    []
-  );
+  const handleSortChange = useCallback((next: { column: ListSortColumn; direction: ListSortDirection }) => {
+    setSortColumn(next.column);
+    setSortDirection(next.direction);
+  }, []);
 
   // ── FR-DOC-05: Tags filter state ────────────────────────────────────────
   const [tagOptions, setTagOptions] = useState<TagFilterOption[]>([]);
@@ -461,10 +454,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     const doAuth = async () => {
       const apiBaseUrlResolved = manifestApiBaseUrl || (await getApiBaseUrl(webApi));
       const tenantId = manifestTenantId || (await getEnvironmentVariable(webApi, 'sprk_TenantId')) || '';
-      const clientAppId =
-        manifestClientAppId || (await getEnvironmentVariable(webApi, 'sprk_MsalClientId')) || '';
-      const bffAppId =
-        manifestBffAppId || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId')) || '';
+      const clientAppId = manifestClientAppId || (await getEnvironmentVariable(webApi, 'sprk_MsalClientId')) || '';
+      const bffAppId = manifestBffAppId || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId')) || '';
 
       await initializeAuth(tenantId, clientAppId, bffAppId, apiBaseUrlResolved, dataverseUrl);
 
@@ -732,7 +723,11 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       const theme = isDarkMode ? 'dark' : 'light';
       const tenantId = resolvedApiBaseUrl ? '' : ''; // tenantId resolved from auth
       let tid = '';
-      try { tid = resolveTenantIdSync(); } catch { /* */ }
+      try {
+        tid = resolveTenantIdSync();
+      } catch {
+        /* */
+      }
 
       const data = `documentId=${targetDocId}&tenantId=${encodeURIComponent(tid)}&theme=${theme}`;
 
@@ -771,9 +766,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const dataService: IDataService = useMemo(
     () => ({
       createRecord: (entityName, data) =>
-        context.webAPI
-          .createRecord(entityName, data as ComponentFramework.WebApi.Entity)
-          .then(r => r.id),
+        context.webAPI.createRecord(entityName, data as ComponentFramework.WebApi.Entity).then(r => r.id),
       retrieveRecord: (entityName, id, options) =>
         context.webAPI.retrieveRecord(entityName, id, options ?? '') as Promise<Record<string, unknown>>,
       retrieveMultipleRecords: (entityName, options) =>
@@ -781,11 +774,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           .retrieveMultipleRecords(entityName, options ?? '')
           .then(r => ({ entities: r.entities as Record<string, unknown>[] })),
       updateRecord: (entityName, id, data) =>
-        context.webAPI
-          .updateRecord(entityName, id, data as ComponentFramework.WebApi.Entity)
-          .then(() => undefined),
-      deleteRecord: (entityName, id) =>
-        context.webAPI.deleteRecord(entityName, id).then(() => undefined),
+        context.webAPI.updateRecord(entityName, id, data as ComponentFramework.WebApi.Entity).then(() => undefined),
+      deleteRecord: (entityName, id) => context.webAPI.deleteRecord(entityName, id).then(() => undefined),
     }),
     [context.webAPI]
   );
@@ -851,21 +841,18 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // simultaneously). On wizard close (Cancel, X, or successful Send),
   // the user lands back on the preview at the same docId, which is the
   // natural mental-model continuation.
-  const handleEmailDocument = useCallback(
-    (result: SearchResult) => {
-      // No setHostPreviewDocId(null) — preview stays open behind wizard.
-      setSingleDocForWizard({
-        documentId: result.documentId ?? '',
-        name: result.name ?? '(untitled)',
-        summary: result.summary ?? undefined,
-        tldr: result.tldr ?? undefined,
-        driveId: result.driveId ?? undefined,
-        itemId: result.speFileId ?? undefined,
-      });
-      setEmailWizardOpen(true);
-    },
-    []
-  );
+  const handleEmailDocument = useCallback((result: SearchResult) => {
+    // No setHostPreviewDocId(null) — preview stays open behind wizard.
+    setSingleDocForWizard({
+      documentId: result.documentId ?? '',
+      name: result.name ?? '(untitled)',
+      summary: result.summary ?? undefined,
+      tldr: result.tldr ?? undefined,
+      driveId: result.driveId ?? undefined,
+      itemId: result.speFileId ?? undefined,
+    });
+    setEmailWizardOpen(true);
+  }, []);
 
   // Handle Copy Link — copies Dataverse record URL to clipboard
   const handleCopyLink = useCallback(
@@ -988,12 +975,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     // Apply optimistic doc-type overrides first so the tag filter (below)
     // sees the post-edit values — otherwise an in-flight bulk doc-type change
     // could hide rows from the user mid-update.
-    const overriddenResults = Object.keys(docTypeOverrides).length === 0
-      ? results
-      : results.map(r => {
-          const override = docTypeOverrides[r.documentId];
-          return override !== undefined ? { ...r, documentType: override } : r;
-        });
+    const overriddenResults =
+      Object.keys(docTypeOverrides).length === 0
+        ? results
+        : results.map(r => {
+            const override = docTypeOverrides[r.documentId];
+            return override !== undefined ? { ...r, documentType: override } : r;
+          });
     if (selectedTags.length === 0) return overriddenResults;
     return overriddenResults.filter(r => selectedTags.includes(r.documentType));
   }, [results, selectedTags, docTypeOverrides]);
@@ -1087,20 +1075,17 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // ── v1.1.49 — Card-view selection helper (Item 1) ─────────────────────
   // Single-id toggle wrapper so each ResultCard can flip its own selection
   // through the parent-owned `selectedIds` set.
-  const handleToggleCardSelect = useCallback(
-    (documentId: string) => {
-      setSelectedIds(prev => {
-        const next = new Set(prev);
-        if (next.has(documentId)) {
-          next.delete(documentId);
-        } else {
-          next.add(documentId);
-        }
-        return next;
-      });
-    },
-    []
-  );
+  const handleToggleCardSelect = useCallback((documentId: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(documentId)) {
+        next.delete(documentId);
+      } else {
+        next.add(documentId);
+      }
+      return next;
+    });
+  }, []);
 
   // ── v1.1.49 — Host-level preview navigation set (Item 6) ───────────────
   // Mirrors ListView's previewNavigationSet logic so list AND card views
@@ -1155,13 +1140,11 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         <Toast>
           <ToastTitle
             action={
-              action
-                ? (
-                  <Button appearance="transparent" size="small" onClick={action.onClick}>
-                    {action.label}
-                  </Button>
-                )
-                : undefined
+              action ? (
+                <Button appearance="transparent" size="small" onClick={action.onClick}>
+                  {action.label}
+                </Button>
+              ) : undefined
             }
           >
             {title}
@@ -1200,19 +1183,16 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       });
 
       if (response.status === 413) {
-        showToast(
-          'Too many documents',
-          'Maximum 500 documents per bulk download.',
-          'error'
-        );
+        showToast('Too many documents', 'Maximum 500 documents per bulk download.', 'error');
         return;
       }
 
       if (!response.ok) {
         // Surface BFF ProblemDetails 4xx (404 "no accessible documents", 403, 401).
-        const detail = response.status === 404
-          ? 'No accessible documents in the current selection.'
-          : `Download failed (${response.status}).`;
+        const detail =
+          response.status === 404
+            ? 'No accessible documents in the current selection.'
+            : `Download failed (${response.status}).`;
         showToast('Download failed', detail, 'error', TOAST_DEFAULT_MS, {
           label: 'Retry',
           onClick: () => {
@@ -1301,11 +1281,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     );
 
     if (failures.length === 0) {
-      showToast(
-        'Deleted',
-        `${ids.length} document${ids.length !== 1 ? 's' : ''} deleted.`,
-        'success'
-      );
+      showToast('Deleted', `${ids.length} document${ids.length !== 1 ? 's' : ''} deleted.`, 'success');
       setSelectedIds(new Set());
       // Refresh the result set so deleted rows disappear.
       void search(queryInput, filters);
@@ -1396,19 +1372,11 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
                   )
                 )
                   .then(() => {
-                    showToast(
-                      'Undo applied',
-                      'Document types reverted.',
-                      'info'
-                    );
+                    showToast('Undo applied', 'Document types reverted.', 'info');
                     void search(queryInput, filters);
                   })
                   .catch(() => {
-                    showToast(
-                      'Undo failed',
-                      'Could not revert document types — please try again.',
-                      'error'
-                    );
+                    showToast('Undo failed', 'Could not revert document types — please try again.', 'error');
                   });
               },
             }
@@ -1471,23 +1439,16 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       return `${r.name ?? '(untitled)'} → ${url}`;
     });
     const body = encodeURIComponent(
-      `Sharing ${items.length} document${items.length !== 1 ? 's' : ''}:\n\n` +
-        lines.join('\n')
+      `Sharing ${items.length} document${items.length !== 1 ? 's' : ''}:\n\n` + lines.join('\n')
     );
     const subject = encodeURIComponent(
-      items.length === 1
-        ? `Document link: ${items[0].name ?? 'document'}`
-        : `${items.length} document links`
+      items.length === 1 ? `Document link: ${items[0].name ?? 'document'}` : `${items.length} document links`
     );
     const href = `mailto:?subject=${subject}&body=${body}`;
     try {
       window.location.href = href;
     } catch {
-      showToast(
-        'Share link failed',
-        'Could not open the email composer.',
-        'error'
-      );
+      showToast('Share link failed', 'Could not open the email composer.', 'error');
     }
   }, [context, selectedResults, showToast]);
 
@@ -1576,11 +1537,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
               // v1.1.50 (Item 1) — Lazy-load sentinel parity with the
               // card view. Same gating as ResultsList: only attach when
               // there's more to load AND we're not already loading.
-              onLoadMoreSentinel={
-                !filters.associatedOnly && hasMore && !isLoadingMore
-                  ? loadMore
-                  : undefined
-              }
+              onLoadMoreSentinel={!filters.associatedOnly && hasMore && !isLoadingMore ? loadMore : undefined}
             />
           </>
         );
@@ -1780,8 +1737,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       {hasSearched && !isLoading && selectedTags.length > 0 && (
         <div className={styles.footerCount}>
           <Text size={200}>
-            Showing {filteredResults.length} of {filteredTotalCount} documents · filtered by{' '}
-            {selectedTags.length} tag{selectedTags.length !== 1 ? 's' : ''}
+            Showing {filteredResults.length} of {filteredTotalCount} documents · filtered by {selectedTags.length} tag
+            {selectedTags.length !== 1 ? 's' : ''}
           </Text>
         </div>
       )}
@@ -1858,10 +1815,15 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           setSingleDocForWizard(null);
         }}
         selectedDocuments={singleDocForWizard ? [singleDocForWizard] : emailWizardItemsSelected}
-        parentEntityType={searchScope === 'matter' ? 'sprk_matter'
-          : searchScope === 'project' ? 'sprk_project'
-          : searchScope === 'invoice' ? 'sprk_invoice'
-          : undefined}
+        parentEntityType={
+          searchScope === 'matter'
+            ? 'sprk_matter'
+            : searchScope === 'project'
+              ? 'sprk_project'
+              : searchScope === 'invoice'
+                ? 'sprk_invoice'
+                : undefined
+        }
         parentEntityId={scopeId ?? undefined}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={apiBaseUrl}

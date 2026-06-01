@@ -14,10 +14,7 @@ export { SummarizeSendEmailStep } from './SummarizeSendEmailStep';
 export { SummarizeCreateProjectStep } from './SummarizeCreateProjectStep';
 export { SummarizeAnalysisStep } from './SummarizeAnalysisStep';
 export { streamSummarize, runSummarize } from './summarizeService';
-export {
-  buildSummaryEmailSubject,
-  buildSummaryEmailBody,
-} from './SummarizeSendEmailStep';
+export { buildSummaryEmailSubject, buildSummaryEmailBody } from './SummarizeSendEmailStep';
 
 export type { ISummarizeFilesDialogProps } from './SummarizeFilesDialog';
 export type { ISummaryResultsStepProps } from './SummaryResultsStep';

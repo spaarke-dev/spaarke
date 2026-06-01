@@ -24,13 +24,7 @@
  */
 
 import React, { useState, useCallback, useId } from 'react';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Tooltip,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Text, Tooltip, mergeClasses } from '@fluentui/react-components';
 import { ChevronDownRegular, ChevronUpRegular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
@@ -88,8 +82,7 @@ const LEVEL_FALLBACK_FILL: Record<ConfidenceLevel, number> = {
 };
 
 /** Disclaimer shown only for low-confidence responses. */
-const LOW_CONFIDENCE_DISCLAIMER =
-  'This response has limited source support. Please verify independently.';
+const LOW_CONFIDENCE_DISCLAIMER = 'This response has limited source support. Please verify independently.';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -249,18 +242,13 @@ function resolveFillPercent(score: number | undefined, level: ConfidenceLevel): 
  *   rationale="Only 1 of 4 cited sources directly supports this claim."
  * />
  */
-export const ConfidenceIndicator: React.FC<ConfidenceIndicatorProps> = ({
-  level,
-  score,
-  rationale,
-  className,
-}) => {
+export const ConfidenceIndicator: React.FC<ConfidenceIndicatorProps> = ({ level, score, rationale, className }) => {
   const styles = useStyles();
   const headerId = useId();
 
   // Expanded state — clicking toggles the detail section.
   const [expanded, setExpanded] = useState(false);
-  const toggle = useCallback(() => setExpanded((prev) => !prev), []);
+  const toggle = useCallback(() => setExpanded(prev => !prev), []);
 
   // Computed values
   const fillPercent = resolveFillPercent(score, level);
@@ -286,19 +274,12 @@ export const ConfidenceIndicator: React.FC<ConfidenceIndicatorProps> = ({
   // ── The bar track + fill (reused with / without tooltip) ──
   const barTrack = (
     <div className={styles.barTrack} aria-hidden="true">
-      <div
-        className={barFillClass}
-        style={{ width: `${fillPercent}%` }}
-      />
+      <div className={barFillClass} style={{ width: `${fillPercent}%` }} />
     </div>
   );
 
   return (
-    <div
-      className={mergeClasses(styles.root, className)}
-      data-testid="confidence-indicator"
-      data-level={level}
-    >
+    <div className={mergeClasses(styles.root, className)} data-testid="confidence-indicator" data-level={level}>
       {/* ── Header row: bar + label + optional chevron ── */}
       <div
         className={styles.headerRow}
@@ -310,7 +291,7 @@ export const ConfidenceIndicator: React.FC<ConfidenceIndicatorProps> = ({
         onClick={hasDetails ? toggle : undefined}
         onKeyDown={
           hasDetails
-            ? (e) => {
+            ? e => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   toggle();
@@ -333,41 +314,22 @@ export const ConfidenceIndicator: React.FC<ConfidenceIndicatorProps> = ({
         {/* Chevron only when there is expandable content */}
         {hasDetails && (
           <span className={styles.chevron} aria-hidden="true">
-            {expanded ? (
-              <ChevronUpRegular fontSize={12} />
-            ) : (
-              <ChevronDownRegular fontSize={12} />
-            )}
+            {expanded ? <ChevronUpRegular fontSize={12} /> : <ChevronDownRegular fontSize={12} />}
           </span>
         )}
       </div>
 
       {/* ── Expanded detail panel ── */}
       {hasDetails && expanded && (
-        <div
-          id={headerId}
-          className={styles.detailPanel}
-          data-testid="confidence-detail"
-        >
-          {score !== undefined && (
-            <Text className={styles.scoreText}>
-              Score: {score}%
-            </Text>
-          )}
-          {rationale && (
-            <Text className={styles.rationaleText}>{rationale}</Text>
-          )}
+        <div id={headerId} className={styles.detailPanel} data-testid="confidence-detail">
+          {score !== undefined && <Text className={styles.scoreText}>Score: {score}%</Text>}
+          {rationale && <Text className={styles.rationaleText}>{rationale}</Text>}
         </div>
       )}
 
       {/* ── Low-confidence disclaimer (always visible for level === 'low') ── */}
       {level === 'low' && (
-        <Text
-          className={styles.disclaimer}
-          role="note"
-          aria-live="polite"
-          data-testid="confidence-disclaimer"
-        >
+        <Text className={styles.disclaimer} role="note" aria-live="polite" data-testid="confidence-disclaimer">
           {LOW_CONFIDENCE_DISCLAIMER}
         </Text>
       )}

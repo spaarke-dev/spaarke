@@ -48,27 +48,14 @@ describe('DocumentViewerContextWidget — rendering', () => {
 
   it('renders the document file name', () => {
     const ref = createRef<ContextWidgetHighlightHandle>();
-    wrap(
-      <DocumentViewerContextWidget
-        ref={ref}
-        data={data}
-        widgetType="DocumentViewer"
-      />
-    );
+    wrap(<DocumentViewerContextWidget ref={ref} data={data} widgetType="DocumentViewer" />);
 
     expect(screen.getByText('annual-report.pdf')).toBeInTheDocument();
   });
 
   it('renders loading state when isLoading is true', () => {
     const ref = createRef<ContextWidgetHighlightHandle>();
-    wrap(
-      <DocumentViewerContextWidget
-        ref={ref}
-        data={data}
-        widgetType="DocumentViewer"
-        isLoading={true}
-      />
-    );
+    wrap(<DocumentViewerContextWidget ref={ref} data={data} widgetType="DocumentViewer" isLoading={true} />);
 
     expect(screen.getByText(/loading document/i)).toBeInTheDocument();
   });
@@ -101,13 +88,7 @@ describe('DocumentViewerContextWidget — onHighlight', () => {
 
   it('exposes an onHighlight handle via ref', () => {
     const ref = createRef<ContextWidgetHighlightHandle>();
-    wrap(
-      <DocumentViewerContextWidget
-        ref={ref}
-        data={data}
-        widgetType="DocumentViewer"
-      />
-    );
+    wrap(<DocumentViewerContextWidget ref={ref} data={data} widgetType="DocumentViewer" />);
 
     expect(ref.current).not.toBeNull();
     expect(typeof ref.current?.onHighlight).toBe('function');
@@ -115,13 +96,7 @@ describe('DocumentViewerContextWidget — onHighlight', () => {
 
   it('calls onHighlight without throwing when no matching element exists', () => {
     const ref = createRef<ContextWidgetHighlightHandle>();
-    wrap(
-      <DocumentViewerContextWidget
-        ref={ref}
-        data={data}
-        widgetType="DocumentViewer"
-      />
-    );
+    wrap(<DocumentViewerContextWidget ref={ref} data={data} widgetType="DocumentViewer" />);
 
     // Should not throw — no [data-citation-id] element in DOM
     expect(() => {
@@ -133,13 +108,7 @@ describe('DocumentViewerContextWidget — onHighlight', () => {
 
   it('scrolls to and highlights a matching [data-citation-id] element', () => {
     const ref = createRef<ContextWidgetHighlightHandle>();
-    wrap(
-      <DocumentViewerContextWidget
-        ref={ref}
-        data={data}
-        widgetType="DocumentViewer"
-      />
-    );
+    wrap(<DocumentViewerContextWidget ref={ref} data={data} widgetType="DocumentViewer" />);
 
     // The adapter wraps the inner widget in a <div> owned by containerRef.
     // We inject a mock overlay element directly into that container div so
@@ -171,13 +140,7 @@ describe('WebSourceContextWidget — rendering', () => {
 
   it('renders the URL in the URL bar input', () => {
     const ref = createRef<ContextWidgetHighlightHandle>();
-    wrap(
-      <WebSourceContextWidget
-        ref={ref}
-        data={data}
-        widgetType="WebSource"
-      />
-    );
+    wrap(<WebSourceContextWidget ref={ref} data={data} widgetType="WebSource" />);
 
     // URL appears in a read-only input
     expect(screen.getByDisplayValue('https://example.com/source')).toBeInTheDocument();
@@ -185,14 +148,7 @@ describe('WebSourceContextWidget — rendering', () => {
 
   it('renders loading state when isLoading is true', () => {
     const ref = createRef<ContextWidgetHighlightHandle>();
-    wrap(
-      <WebSourceContextWidget
-        ref={ref}
-        data={data}
-        widgetType="WebSource"
-        isLoading={true}
-      />
-    );
+    wrap(<WebSourceContextWidget ref={ref} data={data} widgetType="WebSource" isLoading={true} />);
 
     expect(screen.getByText(/loading web source/i)).toBeInTheDocument();
   });
@@ -207,13 +163,7 @@ describe('WebSourceContextWidget — onHighlight (no-op)', () => {
 
   it('exposes an onHighlight handle via ref', () => {
     const ref = createRef<ContextWidgetHighlightHandle>();
-    wrap(
-      <WebSourceContextWidget
-        ref={ref}
-        data={data}
-        widgetType="WebSource"
-      />
-    );
+    wrap(<WebSourceContextWidget ref={ref} data={data} widgetType="WebSource" />);
 
     expect(ref.current).not.toBeNull();
     expect(typeof ref.current?.onHighlight).toBe('function');
@@ -221,13 +171,7 @@ describe('WebSourceContextWidget — onHighlight (no-op)', () => {
 
   it('onHighlight is a safe no-op — does not throw', () => {
     const ref = createRef<ContextWidgetHighlightHandle>();
-    wrap(
-      <WebSourceContextWidget
-        ref={ref}
-        data={data}
-        widgetType="WebSource"
-      />
-    );
+    wrap(<WebSourceContextWidget ref={ref} data={data} widgetType="WebSource" />);
 
     expect(() => {
       act(() => {
@@ -251,13 +195,7 @@ describe('CitationContextWidget — rendering', () => {
 
   it('renders all citation texts', () => {
     const ref = createRef<ContextWidgetHighlightHandle>();
-    wrap(
-      <CitationContextWidget
-        ref={ref}
-        data={data}
-        widgetType="Citation"
-      />
-    );
+    wrap(<CitationContextWidget ref={ref} data={data} widgetType="Citation" />);
 
     expect(screen.getByText('Brown v. Board of Education')).toBeInTheDocument();
     expect(screen.getByText('Roe v. Wade')).toBeInTheDocument();
@@ -265,27 +203,14 @@ describe('CitationContextWidget — rendering', () => {
 
   it('renders loading state when isLoading is true', () => {
     const ref = createRef<ContextWidgetHighlightHandle>();
-    wrap(
-      <CitationContextWidget
-        ref={ref}
-        data={data}
-        widgetType="Citation"
-        isLoading={true}
-      />
-    );
+    wrap(<CitationContextWidget ref={ref} data={data} widgetType="Citation" isLoading={true} />);
 
     expect(screen.getByText(/loading citations/i)).toBeInTheDocument();
   });
 
   it('renders "No citations available" when citation list is empty', () => {
     const ref = createRef<ContextWidgetHighlightHandle>();
-    wrap(
-      <CitationContextWidget
-        ref={ref}
-        data={{ citations: [] }}
-        widgetType="Citation"
-      />
-    );
+    wrap(<CitationContextWidget ref={ref} data={{ citations: [] }} widgetType="Citation" />);
 
     expect(screen.getByText(/no citations available/i)).toBeInTheDocument();
   });
@@ -305,13 +230,7 @@ describe('CitationContextWidget — onHighlight', () => {
 
   it('exposes an onHighlight handle via ref', () => {
     const ref = createRef<ContextWidgetHighlightHandle>();
-    wrap(
-      <CitationContextWidget
-        ref={ref}
-        data={data}
-        widgetType="Citation"
-      />
-    );
+    wrap(<CitationContextWidget ref={ref} data={data} widgetType="Citation" />);
 
     expect(ref.current).not.toBeNull();
     expect(typeof ref.current?.onHighlight).toBe('function');
@@ -319,13 +238,7 @@ describe('CitationContextWidget — onHighlight', () => {
 
   it('scrolls the matching list item into view on onHighlight', () => {
     const ref = createRef<ContextWidgetHighlightHandle>();
-    const { container } = wrap(
-      <CitationContextWidget
-        ref={ref}
-        data={data}
-        widgetType="Citation"
-      />
-    );
+    const { container } = wrap(<CitationContextWidget ref={ref} data={data} widgetType="Citation" />);
 
     // After render the CitationContextWidget adds data-citation-id to <li> elements.
     const listItems = container.querySelectorAll('li');
@@ -345,13 +258,7 @@ describe('CitationContextWidget — onHighlight', () => {
 
   it('does not throw when onHighlight is called with an unknown citationId', () => {
     const ref = createRef<ContextWidgetHighlightHandle>();
-    wrap(
-      <CitationContextWidget
-        ref={ref}
-        data={data}
-        widgetType="Citation"
-      />
-    );
+    wrap(<CitationContextWidget ref={ref} data={data} widgetType="Citation" />);
 
     expect(() => {
       act(() => {

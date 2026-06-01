@@ -103,6 +103,6 @@ export function useCitationLink(): CitationClickHandler {
     (citationId: string, selectionRef?: string): void => {
       handleCitationClick(dispatch, { citationId, selectionRef });
     },
-    [dispatch],
+    [dispatch]
   );
 }
