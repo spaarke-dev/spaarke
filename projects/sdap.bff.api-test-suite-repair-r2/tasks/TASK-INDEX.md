@@ -22,7 +22,7 @@
 
 | ID | Title | Phase | Status | Dependencies | Parallel-Group | Rigor | Prod-Fix |
 |---|---|---|---|---|---|---|---|
-| 000 | Capture r1 close-out baseline | 0 | 🔲 | none | P0-W1 | STANDARD | — |
+| 000 | Capture r1 close-out baseline | 0 | ✅ | none | P0-W1 | STANDARD | — |
 | 001 | Verify 20 real-bug entries reproducible | 0 | ✅ | 000 | P0-W1 | STANDARD | — |
 | 002 | Sibling-owner outreach (Action Engine, Insights, Communications) | 0 | ✅ | 000 | P0-W1 | MINIMAL | — |
 | 010 | Fix RB-T044-01 — `ConversationHistorySanitizer` cross-matter privilege leak (HIGH) | 1 | 🔲 | 000, 001, 002 | (sequential) | FULL | ✓ |

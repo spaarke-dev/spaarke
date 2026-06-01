@@ -2,7 +2,7 @@
   <metadata>
     <title>P0 — Capture r1 close-out state as r2 baseline (FR / NFR-06)</title>
     <phase>Phase 0: Project Setup + Baseline</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1-2 hours</estimated-effort>
     <dependencies>none</dependencies>
     <blocks>001, 002, 010, 011, 012</blocks>
@@ -107,4 +107,16 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all `<knowledge><files>` before starting. Apply STANDARD protocol per `<rigor-hint>` (Step 9.5 quality gates skipped).</protocol>
   </execution>
+
+  <notes>
+    Completed 2026-06-01 by task-execute STANDARD-rigor execution. Output: `projects/sdap.bff.api-test-suite-repair-r2/baseline/r1-closeout-2026-06-01.md` (9 sections, ~340 lines).
+
+    Key findings (deviations from POML pre-conditions):
+    - **Branch protection has 4 required status checks**, NOT 3 (POML stated 3): `Build & Test (Debug)`, `Build & Test (Release)`, `Code Quality`, `actionlint`. The 4th (`actionlint`) is from `github-actions-rationalization-r1` Phase 0 workflow-lint addition — non-blocking; documented in §3 of the baseline file.
+    - **r1 task count is 62 POMLs**, not 58 as initially designed — 4 mid-project absorptions (008, 025, 026, 027/028). r2's 36-POML plan reflects different work shape (per-ledger-entry production fixes vs r1's tier-batch test repair).
+    - **Total tests at r1 close = 6,451** (6,030 unit + 421 integration); 0 Failed across triple-run.
+    - **51 of 235 skipped tests** are tagged `real-bug-pending-fix` and trace to the 20 ledger entries. r2 forward target: 51 Skip → Pass transitions.
+
+    Acceptance criteria (all 6) satisfied; commit references NFR-06.
+  </notes>
 </task>
