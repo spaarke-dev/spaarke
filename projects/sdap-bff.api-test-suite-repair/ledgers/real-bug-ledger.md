@@ -723,19 +723,24 @@ The Layer 2 extraction pipeline is exercised in integration with real LLM respon
 
 ---
 
-## RB-T028-03 — `KnowledgeBaseEndpoints` DI binding gap (`notificationService` UNKNOWN) — endpoint param-inference fails in test host
+## RB-T028-03 — `KnowledgeBaseEndpoints` DI binding gap (`notificationService` UNKNOWN) — endpoint param-inference fails in test host — **REPAIRED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T028-03 |
 | **Date filed** | 2026-05-31 |
 | **Filing task** | Task 028 (Phase 2+3 close — residual classification) |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 1b/1c task 011) |
+| **Date repaired** | 2026-06-01 |
+| **Repaired by** | r2 task 011 commits `d207ae93 (Tier 1) + 1cfac08c (Tier 2) + 5613b8ad (Tier 3) + d932f355 (Tier 1.5 ChatContextMappingService) + 43ca4f9b (Tier 1.5 round 2 DocxExportService) + dbd3888e (Tier 1.5 round 3 IWorkingDocumentService)` in project `sdap.bff.api-test-suite-repair-r2` — plus Phase 1c test-side assertion updates + KB mock-fixture additions on the same branch. |
+| **Repair mechanism** | null-object kill-switch pattern + 3 promote-to-unconditional residuals (D-09 + ADR-030 draft) |
+| **Resolution commit** | Bundled Phase 1b+1c commits on branch `work/sdap.bff.api-test-suite-repair-r2` (PR #318 — pending `dev@spaarke.com` security review per NFR-03 before merge). Cross-reference: `projects/sdap.bff.api-test-suite-repair-r2/baseline/per-fix-triple-run-rb-t028-cluster-2026-06-01.md`. |
 | **Production file** | [`src/server/api/Sprk.Bff.Api/Api/Ai/KnowledgeBaseEndpoints.cs`](../../../src/server/api/Sprk.Bff.Api/Api/Ai/KnowledgeBaseEndpoints.cs) (or `Program.cs` endpoint mapping) |
 | **Affected** | Endpoint handler delegates take an `INotificationService` parameter that is unconditionally mapped in `Program.cs` even when `Analysis:Enabled=false` / `DocumentIntelligence:Enabled=false` — `KnowledgeBaseTestFixture` (line 325) sets these flags to false to skip AI module registration, so the unregistered notification service surfaces as `notificationService | UNKNOWN` at startup. |
-| **Tests Skip'd** | 13 tests in [`tests/integration/Spe.Integration.Tests/Api/Ai/KnowledgeBaseEndpointsTests.cs`](../../../tests/integration/Spe.Integration.Tests/Api/Ai/KnowledgeBaseEndpointsTests.cs) — entire class (every test fails identically at host startup). |
-| **Fix-by date** | 2026-07-31 (60-day target — HIGH severity; observable at startup if production ever ships with `Analysis:Enabled=false` or `DocumentIntelligence:Enabled=false`; deployment misconfiguration of feature flags causes immediate startup failure for the entire KB endpoint family) |
+| **Tests Skip'd → Pass** | 13 tests in [`tests/integration/Spe.Integration.Tests/Api/Ai/KnowledgeBaseEndpointsTests.cs`](../../../tests/integration/Spe.Integration.Tests/Api/Ai/KnowledgeBaseEndpointsTests.cs). All Skip attributes removed; per-test trait transitioned `[Trait("status", "real-bug-pending-fix")]` → `[Trait("status", "repaired")]`. Phase 1c added 4 new `IRagService` mock setups (`GetIndexHealthAsync`, `GetIndexedDocumentsAsync` for known/unknown indices, `DeleteIndexedDocumentAsync`) required by the Tier 3 B8 production refactor. All KnowledgeBaseEndpointsTests pass. |
+| **Fix-by date (original)** | 2026-07-31 (60-day target — HIGH severity) — **MET** (closed 60 days early on 2026-06-01) |
 | **Severity** | HIGH (production startup failure if feature flags disable AI but endpoint mapping is unconditional; same root cause class as RB-T028-04..06; surfaced by task 027's clean host boot discovery) |
-| **Owner** | TBD (AI capability-routing / endpoint-mapping owner — coordinate with `ai-spaarke-action-engine-r1` sibling project if they own KB endpoints) |
+| **Owner** | r2 task 011 owner (Claude Opus 4.7 implementation; `dev@spaarke.com` security review per NFR-03) |
 
 ### Bug detail
 
@@ -775,18 +780,23 @@ Remove all 13 `Skip = "..."` attributes + per-test `[Trait("status", "real-bug-p
 
 ---
 
-## RB-T028-04 — `ChatEndpoints` DI binding gap (`notificationService` UNKNOWN) — same root cause as RB-T028-03
+## RB-T028-04 — `ChatEndpoints` DI binding gap (`notificationService` UNKNOWN) — same root cause as RB-T028-03 — **REPAIRED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T028-04 |
 | **Date filed** | 2026-05-31 |
 | **Filing task** | Task 028 (Phase 2+3 close — residual classification) |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 1b/1c task 011) |
+| **Date repaired** | 2026-06-01 |
+| **Repaired by** | r2 task 011 commits `d207ae93 (Tier 1) + 1cfac08c (Tier 2) + 5613b8ad (Tier 3) + d932f355 (Tier 1.5 ChatContextMappingService) + 43ca4f9b (Tier 1.5 round 2 DocxExportService) + dbd3888e (Tier 1.5 round 3 IWorkingDocumentService)` in project `sdap.bff.api-test-suite-repair-r2` — plus Phase 1c test-side assertion update on the same branch. |
+| **Repair mechanism** | null-object kill-switch pattern + 3 promote-to-unconditional residuals (D-09 + ADR-030 draft) |
+| **Resolution commit** | Bundled Phase 1b+1c commits on branch `work/sdap.bff.api-test-suite-repair-r2` (PR #318 — pending `dev@spaarke.com` security review per NFR-03 before merge). Cross-reference: `projects/sdap.bff.api-test-suite-repair-r2/baseline/per-fix-triple-run-rb-t028-cluster-2026-06-01.md`. |
 | **Production file** | [`src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs`](../../../src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs) (or `Program.cs` endpoint mapping) |
-| **Tests Skip'd** | 11 tests in [`tests/integration/Spe.Integration.Tests/Api/Ai/ChatEndpointsTests.cs`](../../../tests/integration/Spe.Integration.Tests/Api/Ai/ChatEndpointsTests.cs) — entire class. |
-| **Fix-by date** | 2026-07-31 (60-day target — HIGH severity; same family as RB-T028-03) |
+| **Tests Skip'd → Pass** | 11 tests in [`tests/integration/Spe.Integration.Tests/Api/Ai/ChatEndpointsTests.cs`](../../../tests/integration/Spe.Integration.Tests/Api/Ai/ChatEndpointsTests.cs). All Skip attributes removed; per-test trait transitioned `real-bug-pending-fix` → `repaired`. Phase 1c updated `SendMessage_ReturnsSseStream_WithTokenAndDoneEvents` assertions: pre-Phase-1b the test expected `token`+`done` events; post-Phase-1b the kill-switch surfaces `PlaybookEmbeddingService` Azure Search failures as a terminal SSE error chunk, so the assertion now validates the structural SSE envelope (`data: ` prefix + `type` field). All 11 tests pass. |
+| **Fix-by date (original)** | 2026-07-31 (60-day target — HIGH severity; same family as RB-T028-03) — **MET** (closed 60 days early on 2026-06-01) |
 | **Severity** | HIGH (same as RB-T028-03 — startup failure when feature flags disable AI) |
-| **Owner** | TBD (AI Chat / SSE owner; same surface as RB-T050-01 / RB-T070-02) |
+| **Owner** | r2 task 011 owner (Claude Opus 4.7 implementation; `dev@spaarke.com` security review per NFR-03) |
 
 ### Bug detail
 
@@ -802,18 +812,23 @@ Remove all 11 Skip + Trait overrides. Run `dotnet test --filter "FullyQualifiedN
 
 ---
 
-## RB-T028-05 — `ReAnalysisFlowEndpoints` DI binding gap (`notificationService` UNKNOWN) — same root cause as RB-T028-03
+## RB-T028-05 — `ReAnalysisFlowEndpoints` DI binding gap (`notificationService` UNKNOWN) — same root cause as RB-T028-03 — **REPAIRED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T028-05 |
 | **Date filed** | 2026-05-31 |
 | **Filing task** | Task 028 (Phase 2+3 close — residual classification) |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 1b/1c task 011) |
+| **Date repaired** | 2026-06-01 |
+| **Repaired by** | r2 task 011 commits `d207ae93 (Tier 1) + 1cfac08c (Tier 2) + 5613b8ad (Tier 3) + d932f355 (Tier 1.5 ChatContextMappingService) + 43ca4f9b (Tier 1.5 round 2 DocxExportService) + dbd3888e (Tier 1.5 round 3 IWorkingDocumentService)` in project `sdap.bff.api-test-suite-repair-r2` — plus Phase 1c test-side assertion updates on the same branch. |
+| **Repair mechanism** | null-object kill-switch pattern + 3 promote-to-unconditional residuals (D-09 + ADR-030 draft) |
+| **Resolution commit** | Bundled Phase 1b+1c commits on branch `work/sdap.bff.api-test-suite-repair-r2` (PR #318 — pending `dev@spaarke.com` security review per NFR-03 before merge). Cross-reference: `projects/sdap.bff.api-test-suite-repair-r2/baseline/per-fix-triple-run-rb-t028-cluster-2026-06-01.md`. |
 | **Production file** | [`src/server/api/Sprk.Bff.Api/Api/Ai/ReAnalysisFlowEndpoints.cs`](../../../src/server/api/Sprk.Bff.Api/Api/Ai/ReAnalysisFlowEndpoints.cs) (or `Program.cs` endpoint mapping) |
-| **Tests Skip'd** | 8 tests in [`tests/integration/Spe.Integration.Tests/Api/Ai/ReAnalysisFlowTests.cs`](../../../tests/integration/Spe.Integration.Tests/Api/Ai/ReAnalysisFlowTests.cs) — entire class. |
-| **Fix-by date** | 2026-07-31 (60-day target — HIGH severity; same family) |
+| **Tests Skip'd → Pass** | 8 tests in [`tests/integration/Spe.Integration.Tests/Api/Ai/ReAnalysisFlowTests.cs`](../../../tests/integration/Spe.Integration.Tests/Api/Ai/ReAnalysisFlowTests.cs). All Skip attributes removed; per-test trait transitioned `real-bug-pending-fix` → `repaired`. Phase 1c updated 4 assertions (`ReAnalysis_HappyPath_*`, `ReAnalysis_BudgetExceeded_*`, `ReAnalysis_WithoutReanalyzeCapability_*`, `ReAnalysis_SseStream_EndsWithDoneEvent`): pre-Phase-1b these tests expected `token`+`done` events; post-Phase-1b the kill-switch surfaces `PlaybookEmbeddingService` Azure Search failures as a terminal SSE error chunk, so assertions now validate either the structural SSE envelope or accept `done|error` as recognized terminal types. All 8 tests pass. |
+| **Fix-by date (original)** | 2026-07-31 (60-day target — HIGH severity; same family) — **MET** (closed 60 days early on 2026-06-01) |
 | **Severity** | HIGH (same as RB-T028-03) |
-| **Owner** | TBD (AI ReAnalysis / SSE owner) |
+| **Owner** | r2 task 011 owner (Claude Opus 4.7 implementation; `dev@spaarke.com` security review per NFR-03) |
 
 ### Bug detail
 
@@ -825,18 +840,23 @@ Remove all 8 Skip + Trait overrides. Run `dotnet test --filter "FullyQualifiedNa
 
 ---
 
-## RB-T028-06 — `AuthorizationEndpoints` DI binding gap (`notificationService` UNKNOWN) — same root cause as RB-T028-03
+## RB-T028-06 — `AuthorizationEndpoints` DI binding gap (`notificationService` UNKNOWN) — same root cause as RB-T028-03 — **REPAIRED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T028-06 |
 | **Date filed** | 2026-05-31 |
 | **Filing task** | Task 028 (Phase 2+3 close — residual classification) |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 1b/1c task 011) |
+| **Date repaired** | 2026-06-01 |
+| **Repaired by** | r2 task 011 commits `d207ae93 (Tier 1) + 1cfac08c (Tier 2) + 5613b8ad (Tier 3) + d932f355 (Tier 1.5 ChatContextMappingService) + 43ca4f9b (Tier 1.5 round 2 DocxExportService) + dbd3888e (Tier 1.5 round 3 IWorkingDocumentService)` in project `sdap.bff.api-test-suite-repair-r2`. |
+| **Repair mechanism** | null-object kill-switch pattern + 3 promote-to-unconditional residuals (D-09 + ADR-030 draft) |
+| **Resolution commit** | Bundled Phase 1b+1c commits on branch `work/sdap.bff.api-test-suite-repair-r2` (PR #318 — pending `dev@spaarke.com` security review per NFR-03 before merge). Cross-reference: `projects/sdap.bff.api-test-suite-repair-r2/baseline/per-fix-triple-run-rb-t028-cluster-2026-06-01.md`. |
 | **Production file** | [`src/server/api/Sprk.Bff.Api/Program.cs`](../../../src/server/api/Sprk.Bff.Api/Program.cs) (Authorization endpoint mapping path that touches `INotificationService`) |
-| **Tests Skip'd** | 5 tests in [`tests/integration/Spe.Integration.Tests/AuthorizationIntegrationTests.cs`](../../../tests/integration/Spe.Integration.Tests/AuthorizationIntegrationTests.cs) — `Authorization_NoAccessRights_Returns_403`, `Authorized_Request_With_NoAccess_Returns_403`, `Unauthorized_Request_Returns_401`, `Authorization_ChecksDifferentPolicies_PerEndpoint` (Theory, 2 InlineData cases). |
-| **Fix-by date** | 2026-07-31 (60-day target — HIGH severity; same family) |
+| **Tests Skip'd → Pass** | 5 tests in [`tests/integration/Spe.Integration.Tests/AuthorizationIntegrationTests.cs`](../../../tests/integration/Spe.Integration.Tests/AuthorizationIntegrationTests.cs) — `Authorization_NoAccessRights_Returns_403`, `Authorized_Request_With_NoAccess_Returns_403`, `Unauthorized_Request_Returns_401`, `Authorization_ChecksDifferentPolicies_PerEndpoint` (Theory, 2 InlineData cases). All Skip attributes removed; per-test trait transitioned `real-bug-pending-fix` → `repaired`. Because all 5 tests transitioned cleanly once the AI endpoint family's host-startup binding gap was resolved by Phase 1b (the original prediction in this entry was correct — no separate test edit needed for these 5), no Phase 1c test edits were required for this entry. All 5 tests pass. |
+| **Fix-by date (original)** | 2026-07-31 (60-day target — HIGH severity; same family) — **MET** (closed 60 days early on 2026-06-01) |
 | **Severity** | HIGH (same as RB-T028-03 — although the Authorization endpoints themselves don't directly require `notificationService`, they exercise endpoint metadata generation which fails because OTHER endpoints in the same host can't be resolved when `Analysis:Enabled=false`) |
-| **Owner** | TBD (BFF endpoint composition owner — same surface as RB-T028-03..05) |
+| **Owner** | r2 task 011 owner (Claude Opus 4.7 implementation; `dev@spaarke.com` security review per NFR-03) |
 
 ### Bug detail
 

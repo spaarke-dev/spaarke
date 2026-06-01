@@ -66,8 +66,8 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     /// Acceptance criterion: GET /health returns KnowledgeDocCount and DiscoveryDocCount.
     /// The mock SearchIndexClient returns deterministic counts for each index.
     /// </summary>
-    [Fact(Skip = "RB-T028-03: KnowledgeBase endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task GetIndexHealth_ReturnsDocCounts_WhenAuthenticated()
     {
         // Arrange
@@ -88,8 +88,8 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
         content.DiscoveryIndexName.Should().Be(DiscoveryIndexName);
     }
 
-    [Fact(Skip = "RB-T028-03: KnowledgeBase endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task GetIndexHealth_Returns401_WhenUnauthenticated()
     {
         // Arrange — no bearer token
@@ -106,8 +106,8 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     // GET /api/ai/knowledge/indexes/{indexName}/documents — list documents tests
     // -------------------------------------------------------------------------
 
-    [Fact(Skip = "RB-T028-03: KnowledgeBase endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task GetIndexedDocuments_ReturnsOk_WhenAuthenticatedWithValidIndex()
     {
         // Arrange
@@ -127,8 +127,8 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
         content.PageSize.Should().Be(50);
     }
 
-    [Fact(Skip = "RB-T028-03: KnowledgeBase endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task GetIndexedDocuments_Returns404_WhenIndexNameUnknown()
     {
         // Arrange
@@ -141,8 +141,8 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
-    [Fact(Skip = "RB-T028-03: KnowledgeBase endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task GetIndexedDocuments_Returns401_WhenUnauthenticated()
     {
         // Arrange
@@ -163,8 +163,8 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     /// Acceptance criterion: DELETE document removes chunks from index.
     /// The mock IRagService.DeleteBySourceDocumentAsync returns a known chunk count (3).
     /// </summary>
-    [Fact(Skip = "RB-T028-03: KnowledgeBase endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task DeleteIndexedDocument_ReturnsOk_WhenDocumentExists()
     {
         // Arrange — the mock returns 3 chunks deleted for any document
@@ -185,8 +185,8 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
         content.Message.Should().NotBeNullOrEmpty();
     }
 
-    [Fact(Skip = "RB-T028-03: KnowledgeBase endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task DeleteIndexedDocument_Returns404_WhenNoChunksFound()
     {
         // Arrange — use "empty-doc-id" which the mock maps to 0 chunks
@@ -201,8 +201,8 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
-    [Fact(Skip = "RB-T028-03: KnowledgeBase endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task DeleteIndexedDocument_Returns401_WhenUnauthenticated()
     {
         // Arrange
@@ -220,8 +220,8 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     // POST /api/ai/knowledge/indexes/reindex/{documentId}
     // -------------------------------------------------------------------------
 
-    [Fact(Skip = "RB-T028-03: KnowledgeBase endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task ReindexDocument_Returns202Accepted_WhenAuthenticated()
     {
         // Arrange
@@ -243,8 +243,8 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
         content.Message.Should().NotBeNullOrEmpty();
     }
 
-    [Fact(Skip = "RB-T028-03: KnowledgeBase endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task ReindexDocument_Returns401_WhenUnauthenticated()
     {
         // Arrange
@@ -267,8 +267,8 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     /// Acceptance criterion: POST test-search returns results for known indexed document.
     /// The mock IRagService.SearchAsync returns predictable results.
     /// </summary>
-    [Fact(Skip = "RB-T028-03: KnowledgeBase endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task TestSearch_ReturnsResults_WhenAuthenticated()
     {
         // Arrange
@@ -295,8 +295,8 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
         content.SearchDurationMs.Should().BeGreaterOrEqualTo(0);
     }
 
-    [Fact(Skip = "RB-T028-03: KnowledgeBase endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task TestSearch_Returns400_WhenQueryMissing()
     {
         // Arrange — send an empty query body
@@ -310,8 +310,8 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
-    [Fact(Skip = "RB-T028-03: KnowledgeBase endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task TestSearch_Returns401_WhenUnauthenticated()
     {
         // Arrange
@@ -608,6 +608,84 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
 
         MockRagService
             .Setup(r => r.DeleteBySourceDocumentAsync(
+                EmptyDocumentId,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+
+        // ---------------------------------------------------------------
+        // Mock setups added 2026-06-01 (RB-T028-03/04/05/06 repair):
+        // Tier 3 B8 refactor (task 011 Phase 1b) promoted SearchIndexClient direct usage in
+        // KnowledgeBaseEndpoints into 3 new IRagService methods. Tests must set these up
+        // since the fixture replaces IRagService with a mock — without setups, Moq returns
+        // the default value (null for KnowledgeIndexHealth/IndexedDocumentsPage), causing
+        // NullReferenceException → 500 in the endpoint handlers.
+        // ---------------------------------------------------------------
+
+        // GetIndexHealthAsync — returns a non-null KnowledgeIndexHealth with deterministic counts.
+        // Shape mirrors production RagService.GetIndexHealthAsync return at line 752 of RagService.cs.
+        MockRagService
+            .Setup(r => r.GetIndexHealthAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new KnowledgeIndexHealth(
+                KnowledgeDocCount: 42,
+                DiscoveryDocCount: 17,
+                LastUpdated: DateTimeOffset.UtcNow,
+                KnowledgeIndexName: "spaarke-knowledge-index-v2",
+                DiscoveryIndexName: "discovery-index"));
+
+        // GetIndexedDocumentsAsync — for the "nonexistent-index" path, throw ArgumentException
+        // with ParamName="indexName" to preserve the 404 mapping the endpoint catches.
+        // Setup ordering matters in Moq: specific match must come BEFORE the catch-all.
+        MockRagService
+            .Setup(r => r.GetIndexedDocumentsAsync(
+                "nonexistent-index",
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentException("Unknown index 'nonexistent-index'.", "indexName"));
+
+        // GetIndexedDocumentsAsync — for known indices, return a non-null IndexedDocumentsPage.
+        // Shape mirrors production RagService.GetIndexedDocumentsAsync at lines 811-816.
+        MockRagService
+            .Setup(r => r.GetIndexedDocumentsAsync(
+                It.Is<string>(name => name != "nonexistent-index"),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string indexName, string tenantId, int page, int pageSize, CancellationToken _) =>
+                new IndexedDocumentsPage(
+                    IndexName: indexName,
+                    Documents: new List<IndexedDocumentSummary>
+                    {
+                        new IndexedDocumentSummary(
+                            ChunkId: "chunk-001",
+                            DocumentId: "doc-00000000-0000-0001",
+                            FileName: "Employment Contract.pdf",
+                            CreatedAt: DateTimeOffset.UtcNow.AddDays(-2),
+                            UpdatedAt: DateTimeOffset.UtcNow.AddDays(-1))
+                    },
+                    Page: page,
+                    PageSize: pageSize,
+                    TotalCount: 1));
+
+        // DeleteIndexedDocumentAsync — returns >0 chunks for any document except EmptyDocumentId
+        // (preserves the 404 path for that sentinel). Mirrors the DeleteBySourceDocumentAsync
+        // mock convention above.
+        MockRagService
+            .Setup(r => r.DeleteIndexedDocumentAsync(
+                It.IsAny<string>(),
+                It.Is<string>(id => id != EmptyDocumentId),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(3);
+
+        MockRagService
+            .Setup(r => r.DeleteIndexedDocumentAsync(
+                It.IsAny<string>(),
                 EmptyDocumentId,
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
