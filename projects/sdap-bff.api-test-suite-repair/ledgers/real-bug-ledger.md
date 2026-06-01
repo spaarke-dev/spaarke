@@ -254,14 +254,19 @@ Remove the `Skip = "..."` attribute on `CreateSourcePaneEvent_WithNullCitationId
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T044-01 |
+| **Status** | **repaired** (2026-06-01 by r2 task 010 / commit `8b7a905d`) |
 | **Date filed** | 2026-05-31 |
+| **Date repaired** | 2026-06-01 |
+| **Resolution mode** | `repaired` (NFR-04) |
+| **Fix commit** | `8b7a905d` on branch `work/sdap.bff.api-test-suite-repair-r2` (PR #318 — pending `dev@spaarke.com` security review per NFR-03 before merge) |
+| **Cross-reference** | r2 task 010 — [`projects/sdap.bff.api-test-suite-repair-r2/tasks/010-fix-rb-t044-01.poml`](../../sdap.bff.api-test-suite-repair-r2/tasks/010-fix-rb-t044-01.poml); per-fix triple-run report at [`projects/sdap.bff.api-test-suite-repair-r2/baseline/per-fix-triple-run-rb-t044-01-2026-06-01.md`](../../sdap.bff.api-test-suite-repair-r2/baseline/per-fix-triple-run-rb-t044-01-2026-06-01.md) |
 | **Filing task** | Task 044 (P23.H5 — Ai/Safety) |
 | **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Safety/CrossMatter/ConversationHistorySanitizer.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Safety/CrossMatter/ConversationHistorySanitizer.cs) |
 | **Affected method** | `StripRetrievedContent(IReadOnlyList<ChatMessage> history, int fromTurnIndex)` (line 55) |
-| **Tests Skip'd** | 5 in [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/PrivilegeLeakageTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/PrivilegeLeakageTests.cs): `MatterPivot_StripsRetrievalContent_PreservesUserAndAssistantMessages`, `MatterPivot_NoPrivilegedTextInSanitizedOutput`, `MatterPivot_StripsOnlyWithinWindow_PreservesNewMatterContent`, `MatterPivot_PreservesNonRetrievalSystemMessages`, `Sanitizer_OnlyReturnsDocs_FromActiveMatter`. |
-| **Fix-by date** | 2026-07-31 (60-day target — HIGH severity per design.md §3.3 HIGH-tier safety; cross-matter privilege leakage protection is currently inverted) |
+| **Tests** | 5 originally-Skipped tests in [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/PrivilegeLeakageTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/PrivilegeLeakageTests.cs) flipped Skip→Pass with trait `real-bug-pending-fix` → `repaired`: `MatterPivot_StripsRetrievalContent_PreservesUserAndAssistantMessages`, `MatterPivot_NoPrivilegedTextInSanitizedOutput`, `MatterPivot_StripsOnlyWithinWindow_PreservesNewMatterContent`, `MatterPivot_PreservesNonRetrievalSystemMessages`, `Sanitizer_OnlyReturnsDocs_FromActiveMatter`. **NEW regression test** added (FR-02 + `bff-extensions.md` § F): `MatterPivot_ThreeMatters_StripsOnlyImmediatelyPreviousMatterContent` — 3-matter pivot scenario beyond the original 5 documented 2-matter cases. |
+| **Fix-by date** | 2026-07-31 (60-day target — HIGH severity per design.md §3.3 HIGH-tier safety; cross-matter privilege leakage protection is currently inverted) — **MET** (2026-06-01 close, 60 days early) |
 | **Severity** | HIGH (cross-matter privilege content protection is the intended outcome; the inversion means stale retrieval content from previous matters may leak to new-matter turns) |
-| **Owner** | TBD (AI safety / cross-matter feature owner) |
+| **Owner** | r2 task 010 owner (Claude Opus 4.7 implementation; `dev@spaarke.com` security review per NFR-03) |
 
 ### Bug detail
 
@@ -276,13 +281,31 @@ Remove the `Skip = "..."` attribute on `CreateSourcePaneEvent_WithNullCitationId
 
 The full end-to-end matter-pivot integration test path was not previously exercised in CI (this HIGH-tier batch is the first that covers the Sanitizer at the boundary). Live traffic would silently leak privileged content from a previous matter into the model's context window for any subsequent turn — a serious safety regression that requires HIGH-tier prioritization.
 
-### Recommended production fix (out of scope for this project)
+### Recommended production fix — what the ledger originally proposed
 
 Invert the index check at line 68: change `if (i > fromTurnIndex)` to `if (i < fromTurnIndex)`. Re-verify all 5 Skip'd tests pass + existing passing tests (`Sanitizer_StripsRetrievalBlocks_PreservesConclusions`, etc.) remain green.
 
-### Verification after fix
+### Actual fix applied (r2 task 010, 2026-06-01) — DEVIATION FROM RECOMMENDATION
 
-Remove the 5 `Skip = "..."` attributes + per-test `[Trait("status", "real-bug-pending-fix")]`. Run `dotnet test --filter "FullyQualifiedName~PrivilegeLeakageTests"`; all 5 must pass. Update this row to "Resolved" with fix-commit SHA + date.
+**The recommended one-line inversion was INCOMPLETE** and would have broken the currently-passing `Sanitizer_StripsRetrievalBlocks_PreservesConclusions` test (which calls the sanitizer directly with `fromTurnIndex=3` and no matter markers; expects indices 0 + 2 retrievals to be stripped — under simple inversion, all indices are < 3 and would be preserved, failing the test). r2's D-03 lesson ("obvious fixes still cascade") was vindicated.
+
+The applied fix introduces a **unified matter-pivot-aware semantic** based on whether `history[fromTurnIndex]` is a System-role matter marker:
+
+- **Matter-pivot mode** (anchor is a matter marker — the typical caller is `MatterContextDetector.DetectChange`): messages where `i < fromTurnIndex` pass through unchanged; from `i >= fromTurnIndex` onward, retrieval messages are stripped UNTIL a DIFFERENT matter marker is encountered (signalling entry into the new-matter zone); after that new marker, messages pass through unchanged.
+
+- **Legacy mode** (anchor is not a matter marker — direct caller invocation with arbitrary endpoint): strip retrieval messages where `i <= fromTurnIndex`; pass through `i > fromTurnIndex`. Preserves the historical `Sanitizer_StripsRetrievalBlocks_PreservesConclusions` contract.
+
+A new helper `GetPivotMatterId(history, fromTurnIndex)` selects the mode. The interface XML doc was rewritten to document both modes accurately. The change is ~42 added lines on the 113-line file (~37%; NFR-02 <50% compliant).
+
+### Verification confirmed (2026-06-01)
+
+- All 5 originally-Skipped tests Skip→Pass with `[Trait("status","repaired")]`.
+- 1 new regression test added (`MatterPivot_ThreeMatters_StripsOnlyImmediatelyPreviousMatterContent`) exercising a 3-matter pivot beyond the 5 documented 2-matter scenarios — satisfies FR-02 + `bff-extensions.md` § F.
+- 30 of 30 PrivilegeLeakageTests pass (29 originally + 1 new).
+- 211 of 211 `Services.Ai.Safety` tests pass; 4 unrelated Skipped (RB-T044-02/03/05 — separate Phase 2/3 entries).
+- Full unit-test triple-run (NFR-05): 3 × Failed: 0 / 5,899 Passed / 132 Skipped / 6,031 Total — zero variance. See `projects/sdap.bff.api-test-suite-repair-r2/baseline/per-fix-triple-run-rb-t044-01-2026-06-01.md`.
+- Step 9.5 quality gates: `code-review` PASS (0 Critical / 0 Warning); `adr-check` PASS (7 ADRs compliant + BFF Hygiene § A all 6 rules satisfied).
+- Security review request to `dev@spaarke.com` per NFR-03 is opened against PR #318 (the r2 work-branch PR); merge to master gated on that approval.
 
 ---
 
