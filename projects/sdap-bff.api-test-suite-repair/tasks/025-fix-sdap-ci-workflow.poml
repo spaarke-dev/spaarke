@@ -1,0 +1,207 @@
+<task id="025" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>Fix broken sdap-ci.yml workflow — restore Build &amp; Test (Release) signal</title>
+    <status>completed</status>
+    <estimated-effort>1-3 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-1, ci-cd, workflow, p1-d, scope-absorption</tags>
+    <parallel-group>1-D-post-factory</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits `.github/workflows/sdap-ci.yml` — must not run concurrent with task 018 (factory ISOLATED per NFR-07) because the same `dotnet test` outcome feeds both the factory measurement (task 019) AND this workflow run. Sequence: 018 → 019 → 025.</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Task 023 (CI gate negative-path verification) discovered that `sdap-ci.yml` is broken on
+    EVERY recent run, including master. Each run completes in 0 seconds with `conclusion: failure`
+    and `workflow_run_id: 0`. The required `Build &amp; Test (Release)` status check is therefore
+    never POSTED — PRs fail merge with "check expected but missing" rather than a real test result.
+
+    Master is effectively LOCKED for all merges until this is repaired. Outcome C (CI gate
+    restoration) is incomplete without this fix.
+
+    Per owner directive 2026-05-31 (absorb deviations into THIS project; do not defer): this
+    task delivers the workflow repair within Phase 1 P1.D track.
+
+    Investigate the 0-second failure (likely YAML syntax, missing secret, path filter, or
+    `permissions:` gate issue). Repair `sdap-ci.yml`. Confirm via a NEW deliberate-success PR
+    that `Build &amp; Test (Release)` now posts a real pass/fail signal.
+  </prompt>
+
+  <role>AI agent diagnosing GitHub Actions workflow brokenness and applying the minimum-viable repair.</role>
+
+  <goal>
+    `.github/workflows/sdap-ci.yml` runs correctly: completes successfully (or fails for a REAL
+    reason — not 0s with empty conclusion), posts the named `Build &amp; Test (Release)` status
+    check, and unblocks master merges. A deliberate-success PR verifies the signal.
+  </goal>
+
+  <inputs>
+    <file purpose="workflow-target">.github/workflows/sdap-ci.yml</file>
+    <file purpose="task-023-evidence">projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-verification-2026-05-31.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">No `src/`, `power-platform/`, `infra/`, `scripts/` changes — workflow file is in `.github/` which is editable for this project</constraint>
+    <constraint source="NFR-09">`repair-not-rewrite: true` — diagnose + minimum-viable fix; do NOT redesign the workflow</constraint>
+    <constraint source="D-02">Restoration must preserve `enforce_admins: true` + 3 required status checks (`Build &amp; Test (Debug)`, `Build &amp; Test (Release)`, `Code Quality`); do NOT relax branch protection to "fix" CI</constraint>
+    <constraint source="§4.5">N/A (not factory work) — but follow NFR-07 spirit: sequence after Wave 1.3 (018+019) to avoid muddying the test signal</constraint>
+    <constraint source="owner-2026-05-31">Mid-project discoveries absorb into this project; deferral not permitted</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-verification-2026-05-31.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/decisions/D-02-ci-gate-strict.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 023 produced detailed evidence at `baseline/ci-gate-verification-2026-05-31.md`
+      documenting the 0-second-failure pattern. Common root causes for this pattern (in
+      decreasing likelihood):
+
+      1. YAML syntax error introduced by a recent commit (workflow doesn't load at all)
+      2. Missing or expired GitHub Actions secret (e.g., `AZURE_CREDENTIALS`, deploy keys)
+         — the job fails on secret-resolution before any step runs
+      3. `permissions:` block too restrictive — GitHub denies workflow before launch
+      4. Path filter (`on.push.paths` / `paths-ignore`) excludes everything
+      5. `if:` gate on the job evaluates to false on every event
+      6. Self-hosted runner labels reference a runner that doesn't exist
+      7. Concurrency cancellation killing every run before steps execute
+
+      Diagnostic order: read the workflow file, then check the most recent failed runs via
+      `gh run list --workflow=sdap-ci.yml --limit 5 --json status,conclusion,startedAt,headBranch,event`
+      and `gh run view {run-id} --log` to see what (if anything) happened during execution.
+
+      Investigation may surface that the workflow needs a substantive fix vs. a one-line patch.
+      Per NFR-09 + scope: prefer the minimum-viable repair that restores the signal. If the
+      fix requires &gt;50% workflow rewrite, escalate per §4.8 with
+      `escalations/rewrite-request-T-025-sdap-ci.md`.
+    </background>
+    <dependencies>
+      <dependency task="023" status="completed">CI gate verification evidence captured; finding documented</dependency>
+      <dependency task="019" status="not-started">Factory verification gate (Wave 1.3) — sequence after to avoid muddying signal</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>.github/workflows/sdap-ci.yml</file>
+    <file>projects/sdap-bff.api-test-suite-repair/baseline/sdap-ci-repair-evidence-2026-05-31.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read current `.github/workflows/sdap-ci.yml` end-to-end. Note the workflow name, triggers, jobs, and the 3 status-check job names (`Build &amp; Test (Debug)`, `Build &amp; Test (Release)`, `Code Quality`).</step>
+
+    <step order="2">Run `gh run list --workflow=sdap-ci.yml --limit 10 --json status,conclusion,startedAt,headBranch,event,databaseId` to confirm the 0s-failure pattern. Capture the last 3-5 run IDs.</step>
+
+    <step order="3">For each captured run ID: `gh run view {run-id}` and `gh run view {run-id} --log` (full log if available; if empty, that confirms steps never executed). Look for: secret-resolution errors, YAML parse errors at workflow load, `permissions:` denials, runner-not-found errors.</step>
+
+    <step order="4">Diagnose the root cause. Document in `projects/sdap-bff.api-test-suite-repair/baseline/sdap-ci-repair-evidence-2026-05-31.md`:
+      - Run IDs investigated
+      - Log excerpts showing the failure mode (or noting if logs are empty)
+      - Root-cause hypothesis with evidence
+      - Proposed minimum-viable fix (size estimate: how many lines, which sections)
+    </step>
+
+    <step order="5">If the proposed fix is &lt;50% line replacement: apply it. If &gt;50%: HALT and file `escalations/rewrite-request-T-025-sdap-ci.md` per §4.8.</step>
+
+    <step order="6">Validate locally: parse the modified YAML with `python -c "import yaml; yaml.safe_load(open('.github/workflows/sdap-ci.yml'))"` (works because the worktree has Python). Verify `gh workflow view sdap-ci.yml` after pushing reports no syntax errors.</step>
+
+    <step order="7">Open a deliberate-success PR to validate the repair end-to-end:
+      a. Create branch `test/sdap-ci-repair-verify-2026-05-31` from `work/sdap-bff.api-test-suite-repair`
+      b. Push the workflow fix to that branch
+      c. Open a PR with title `[CI repair verify] do not merge`
+      d. Wait for the workflow to run (expected 10-25 min for full unit-test suite)
+      e. Confirm `Build &amp; Test (Release)` posts a REAL pass/fail status (not "missing")
+      f. Confirm the workflow completes in &gt;0 seconds with a real conclusion
+    </step>
+
+    <step order="8">Two outcome paths:
+      - If the workflow now passes: the fix is good. Close the verify PR (without merging — the fix needs to land on `work/sdap-bff.api-test-suite-repair` via the project's normal flow, NOT via this verify branch). Delete the verify branch on remote.
+      - If the workflow now FAILS (real test failure, not 0s): the fix is working — it correctly reports test state. Capture this as evidence; the test failures are Phase 2+3's problem.
+    </step>
+
+    <step order="9">Apply the workflow fix to `work/sdap-bff.api-test-suite-repair` (cherry-pick or re-apply the edit). The fix should be committed normally as part of this project's progression.</step>
+
+    <step order="10">Update `current-task.md` with: workflow fix description, evidence path, verify-PR URL + outcome, deliberate-success branch cleanup status, P1.D track final exit declaration.</step>
+
+    <step order="11">Update task 025 POML status to `completed` with completion notes.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">CLI for run inspection + PR creation</tool>
+    <tool name="Read">workflow YAML + 023 evidence</tool>
+    <tool name="Edit">workflow YAML repair</tool>
+    <tool name="Bash">YAML validation + git branch ops</tool>
+  </tools>
+
+  <outputs>
+    <output type="workflow-fix">.github/workflows/sdap-ci.yml (repaired)</output>
+    <output type="evidence">projects/sdap-bff.api-test-suite-repair/baseline/sdap-ci-repair-evidence-2026-05-31.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`.github/workflows/sdap-ci.yml` parses as valid YAML (`python yaml.safe_load`)</criterion>
+    <criterion testable="true">`gh workflow view sdap-ci.yml` reports no syntax errors</criterion>
+    <criterion testable="true">A new deliberate-success PR (or the work/ branch's own next CI run) shows the workflow runs &gt;0 seconds AND posts the `Build &amp; Test (Release)` status check</criterion>
+    <criterion testable="true">`baseline/sdap-ci-repair-evidence-2026-05-31.md` documents root cause + fix + verification</criterion>
+    <criterion testable="true">No modifications to `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">If the repair required &gt;50% workflow rewrite, `escalations/rewrite-request-T-025-sdap-ci.md` exists</criterion>
+    <criterion testable="true">D-02 binding preserved: `enforce_admins: true` + 3 required status checks still in branch protection</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <origin date="2026-05-31" source="Task 023 CI gate negative-path verification finding">
+      Discovered during Wave 1.2 task 023's deliberate-fail PR test: every `sdap-ci.yml` run
+      across master + all active branches completes in 0 seconds with `conclusion: failure`
+      and no real status check posted. PR #312 was correctly refused merge (gate works), but
+      the gate's signal is broken (every PR fails for "missing check" rather than a real test
+      result). Master is operationally locked for all merges until repaired.
+
+      Per owner directive 2026-05-31 ("absorb deviations, don't defer"), this task delivers
+      the workflow repair within Phase 1 P1.D track instead of escalating to a follow-on
+      project. Sequenced after Wave 1.3 (factory ISOLATED) to avoid muddying the post-factory
+      test signal during task 019's measurement.
+    </origin>
+    <completion date="2026-05-31">
+      Root cause: duplicate `if-no-files-found: warn` mapping key inside the `with:` block of
+      the `Upload ADR test results` step (lines 184 + 186 of pre-fix file). GitHub Actions
+      uses strict YAML parsing; duplicate mapping keys cause workflow load rejection — exact
+      cause of the 0s-failure / no-jobs-created / no-logs pattern observed across every recent
+      run. Introduced by commit `d9018dea` "chore(ci): clean up CI workflows" which added the
+      key above the existing one without removing the original.
+
+      Fix: 1-line deletion of the duplicate. Net diff `-1 line` (0.26% of file). Well below
+      §4.8 50% threshold; no escalation file required. NFR-09 `repair-not-rewrite` preserved.
+
+      Local validation: strict-loader YAML parse PASSES (no duplicate keys); standard
+      `yaml.safe_load` PASSES. The standard `safe_load` originally hid the issue because
+      Python's default loader is lenient about duplicate keys; the strict-loader script
+      replicates GH Actions parser behavior.
+
+      Verify PR: #313 (https://github.com/spaarke-dev/spaarke/pull/313) — run 26723333123
+      transitioned to `in_progress`, all 4 named jobs (`Build &amp; Test (Debug)`, `Build &amp;
+      Test (Release)`, `Client Quality (Prettier + ESLint)`, `Security Scan`) entered
+      `pending` and were posted to the PR's check list. This is end-to-end verification that
+      the workflow LOADS, the jobs DISPATCH, and the named status checks REACH the
+      branch-protection required-check list. Cancelled after signal confirmation per
+      orchestrator brief (not full test completion). PR closed without merging; verify branch
+      deleted on remote + local.
+
+      Evidence: `baseline/sdap-ci-repair-evidence-2026-05-31.md` (root cause + diff + verify
+      outcome + cleanup).
+
+      D-02 binding preserved: branch protection (`enforce_admins: true` + 3 required checks)
+      untouched; the fix repairs the SIGNAL feeding those checks.
+
+      Phase 1 P1.D Track FINAL EXIT: gate operational (task 023) AND signal flowing (this
+      task). Master no longer operationally locked once this fix lands on master.
+    </completion>
+  </notes>
+</task>

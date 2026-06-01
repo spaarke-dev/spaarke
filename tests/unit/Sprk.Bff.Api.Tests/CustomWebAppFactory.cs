@@ -103,7 +103,24 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
                 ["SpeAdmin:KeyVaultUri"] = "https://test.vault.azure.net/",
 
                 // ManagedIdentity options (required by DataverseWebApiClient in SpeAdminModule)
-                ["ManagedIdentity:ClientId"] = "test-managed-identity-client-id"
+                ["ManagedIdentity:ClientId"] = "test-managed-identity-client-id",
+
+                // CosmosPersistence options (required by AiPersistenceModule — raw config read, not bound to Options class)
+                // Missing this key causes InvalidOperationException at Program.cs line 107 during host build
+                // Affects: ALL failing tests using CustomWebAppFactory (fires before any test assertion runs)
+                // Source: projects/sdap-bff.api-test-suite-repair/notes/spikes/factory-config-gaps.md (task 017 inventory)
+                ["CosmosPersistence:Endpoint"] = "https://test.documents.azure.com:443/",
+                ["CosmosPersistence:DatabaseName"] = "spaarke-ai-test",
+
+                // AgentService options (required by AgentServiceOptions ValidateDataAnnotations + ValidateOnStart)
+                // Missing these causes OptionsValidationException at Program.cs line 107 during host build
+                // ADR-018: Enabled=false keeps the kill-switch OFF in tests (no accidental Foundry network calls)
+                // Source: projects/sdap-bff.api-test-suite-repair/notes/spikes/factory-config-gaps.md (task 017 inventory)
+                ["AgentService:Enabled"] = "false",
+                ["AgentService:Endpoint"] = "https://test.services.ai.azure.com/api/projects/test-project",
+                ["AgentService:AgentId"] = "test-agent-id",
+                ["AgentService:MaxConcurrency"] = "4",
+                ["AgentService:ThreadCacheExpiryMinutes"] = "60"
             };
             config.AddInMemoryCollection(dict!);
         });

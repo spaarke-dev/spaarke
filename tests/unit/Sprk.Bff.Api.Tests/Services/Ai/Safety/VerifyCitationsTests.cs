@@ -25,6 +25,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Safety;
 ///     9. Auto-check and groundedness check can run concurrently — both return independently
 ///       (parallel-safety: no shared state, distinct event types)
 /// </summary>
+[Trait("status", "repaired")]
 public class VerifyCitationsTests
 {
     // =========================================================================
@@ -174,9 +175,12 @@ public class VerifyCitationsTests
         // Act
         var json = await sut.VerifyCitationsAsync("some text", CancellationToken.None);
 
-        // Assert: JSON contains all three citations
+        // Assert: JSON contains all three citations.
+        // Note: System.Text.Json default JavaScriptEncoder escapes non-ASCII characters such as
+        // U+00A7 (§) to the Unicode escape sequence §. Assert against the escaped form
+        // to match the serializer output.
         json.Should().Contain("542 U.S. 296");
-        json.Should().Contain("35 U.S.C. § 101");
+        json.Should().Contain("35 U.S.C. \\u00A7 101");
         json.Should().Contain("US9123456");
     }
 

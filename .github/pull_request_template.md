@@ -18,6 +18,8 @@
 
 ## Checklist
 - [ ] Tests added/updated (unit + integration)
+- [ ] **Test update obligation** — If this PR modifies `src/server/api/Sprk.Bff.Api/Services/`, has a corresponding test been added/updated? (Yes / No / Not applicable — explain)
+  See [`.claude/constraints/bff-extensions.md`](../.claude/constraints/bff-extensions.md) "Test update obligation" section.
 - [ ] Protected endpoints have authorization filters (ADR-008)
 - [ ] No Graph SDK types outside SpeFileStore or Infrastructure/Graph (ADR-007)
 - [ ] BFF endpoints in Minimal API (no Functions hosting BFF endpoints); no Durable Functions; any Functions used are out-of-band integration only (ADR-001)

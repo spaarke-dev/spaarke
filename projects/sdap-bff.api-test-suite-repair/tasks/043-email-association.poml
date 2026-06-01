@@ -1,0 +1,120 @@
+<task id="043" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.H4 — Email association tests (~863 LOC) — COORD with x-email-communication-solution-r2</title>
+    <status>completed</status>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, high-tier, p23-h, bff-api, testing, email, communications-coord</tags>
+    <parallel-group>23-H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Services/Email/EmailAssociation* test files are disjoint from other H-track batches and from M-track Communications batches (055/056)</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Repair the HIGH-tier Email association tests under
+    `tests/unit/Sprk.Bff.Api.Tests/Services/Email/EmailAssociation*` (~863 LOC). Per design.md §3.3
+    these are HIGH-tier (pure algorithm; matter association is load-bearing for email→matter routing).
+
+    COORDINATION NOTE: Per design.md §2.3 and project CLAUDE.md, the `x-email-communication-solution-r2`
+    project owner must be aware of any test edits in `Services/Email/*` and `Services/Communication/*`.
+    Before significant edits, post a note in the daily sync channel; align on whether the production
+    Email association code is expected to change in r2.
+
+    For each failing test:
+    1. Identify failure (matcher rule change, scoring change, fallback behavior change)
+    2. Determine: `test-stale` (update assertion) vs `production-bug` (mark `real-bug-pending-fix` + ledger)
+    3. Apply §6.2 trait
+    4. Verify Pass
+
+    Per project CLAUDE.md NFR-02 + design.md §4.1: this is repair, NOT rewrite. If ANY file's diff
+    would exceed 50% line replacement, HALT and file
+    `projects/sdap-bff.api-test-suite-repair/escalations/rewrite-request-T-043-{FileName}.md`
+    per §4.8 escalation procedure. Do NOT proceed without owner approval.
+
+    NO production code changes (NFR-01). Per §6.2, every touched test ends in `repaired`,
+    `real-bug-pending-fix`, `flaky-quarantined`, or archived. `Failed` is FORBIDDEN at close.
+  </prompt>
+
+  <role>Senior .NET test repair specialist with email-to-matter association domain knowledge.</role>
+
+  <goal>
+    All Email association test files end in §6.2 final end-state. Zero Failed. Coordination outcome
+    with x-email-communication-solution-r2 owner recorded.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+    <file purpose="real-bug-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation</constraint>
+    <constraint source="§6.2">Every touched test gets a §6.2 final end-state trait</constraint>
+    <constraint source="§4.5">MUST NOT touch `CustomWebAppFactory.cs`</constraint>
+    <constraint source="FR-16">HIGH-tier tests must end in §6.2 final end-state</constraint>
+    <constraint source="§2.3 coordination">Daily sync with x-email-communication-solution-r2 owner before significant edits</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.3 Email association is HIGH-tier (~863 LOC). It drives email→matter routing,
+      which is a user-visible automation. Per §2.3, Communications-related test files have the
+      HIGHEST sibling-coordination risk in this project — the x-email-communication-solution-r2
+      project is actively modifying nearby code. This task is HIGH-tier so it stays in scope, but
+      coordination is mandatory before non-trivial edits.
+    </background>
+    <dependencies>
+      <dependency task="014" status="not-started">Compile health verified</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Email/EmailAssociation*.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Email/EmailAssociation/*.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Post sync note to x-email-communication-solution-r2 owner — confirm no Email association code changes are in-flight on their side this iteration.</step>
+    <step order="2">List Email association test files in scope. From Phase 0 baseline TRX, identify failing tests.</step>
+    <step order="3">For each file: compute pre-edit line count; read failing tests + production code.</step>
+    <step order="4">If any planned file edit would exceed 50% of file lines → HALT, file `escalations/rewrite-request-T-043-{FileName}.md`, await owner approval.</step>
+    <step order="5">Classify each failure: `test-stale` vs `production-bug`.</step>
+    <step order="6">Apply traits per §6.2; file ledger entries as needed.</step>
+    <step order="7">After each file: `dotnet test --filter "FullyQualifiedName~Email.EmailAssociation"` verify outcome.</step>
+    <step order="8">Update `current-task.md` with disposition + coordination outcome.</step>
+    <step order="9">Verify `git status` shows NO production changes.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Email/EmailAssociation*.cs (repaired)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (entries if bugs found)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/current-task.md (coordination outcome documented)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All Email association tests Pass or Skip-with-reason; zero Failed</criterion>
+    <criterion testable="true">Per-file diff &lt;50% line replacement (NFR-02)</criterion>
+    <criterion testable="true">Every touched test has a §6.2 final end-state trait</criterion>
+    <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">Coordination outcome with x-email-communication-solution-r2 owner documented in `current-task.md`</criterion>
+  </acceptance-criteria>
+</task>

@@ -17,6 +17,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Visualization;
 /// Unit tests for VisualizationService - Document relationship visualization.
 /// Tests graph building, similarity scoring, filtering, and error handling.
 /// </summary>
+[Trait("status", "repaired")]
 public class VisualizationServiceTests
 {
     private readonly Mock<IKnowledgeDeploymentService> _deploymentServiceMock;

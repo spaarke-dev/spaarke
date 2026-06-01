@@ -181,7 +181,6 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: adr-test-results
-          if-no-files-found: warn
           path: ./TestResults/adr-results.trx
           if-no-files-found: warn
 

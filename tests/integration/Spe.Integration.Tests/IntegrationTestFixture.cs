@@ -73,6 +73,13 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
                 // A fake URI is sufficient; SecretClient is replaced by test doubles before any calls.
                 ["SpeAdmin:KeyVaultUri"] = "https://test-keyvault.vault.azure.net/",
 
+                // CosmosPersistence — required by AiPersistenceModule (raw config read, not bound to Options class)
+                // Per project sdap-bff.api-test-suite-repair task 062 + integration-test-triage.md Cluster A
+                // (97 cluster-A failures). Fake URI is sufficient; CosmosClient is constructed lazily
+                // and never contacted during integration test host startup. Mirrors CustomWebAppFactory.cs
+                // pattern applied by task 018 to clear the same cluster in unit tests.
+                ["CosmosPersistence:Endpoint"] = "https://test.documents.azure.com:443/",
+
                 // Graph options (GraphOptions validator)
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",

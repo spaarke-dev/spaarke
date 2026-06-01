@@ -1,0 +1,168 @@
+<task id="030" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.A1 — Migrate IChatClient streaming tests batch 1 (Services/Ai/Chat/Streaming*)</title>
+    <status>completed</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, ichatclient, p23-a, bff-api, testing, streaming</tags>
+    <parallel-group>23-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Named test files under Services/Ai/Chat/Streaming* are disjoint from sibling batch 031 (Services/Ai/Capabilities/Streaming*); no shared file targets</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Migrate the ~15 IChatClient streaming tests under `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Streaming*`
+    from broken NSubstitute auto-mock setups to the `AsyncEnumerableHelpers` infrastructure shipped
+    by Phase 1 task 015 (FR-06). Per design.md §3.4 (failure clustering), the IChatClient streaming
+    cluster is the largest single failure cluster — NSubstitute does not auto-mock `IAsyncEnumerable&lt;T&gt;`
+    returns, so streaming-completion tests fail at the first `await foreach`.
+
+    For each test:
+    1. Identify the broken IChatClient setup (NSubstitute `Returns(...)` against a streaming method)
+    2. Replace with `AsyncEnumerableHelpers.FromValues(...)` (or the Microsoft-shipped equivalent
+       per Phase 0 D-01 verdict) producing the same response sequence
+    3. Apply `[Trait("status", "repaired")]` per project CLAUDE.md §6.2 taxonomy
+    4. Run the affected test class; verify Pass
+
+    Per project CLAUDE.md NFR-02 + design.md §4.1: this is repair, NOT rewrite. If ANY file's diff
+    would exceed 50% line replacement, HALT and file
+    `projects/sdap-bff.api-test-suite-repair/escalations/rewrite-request-T-030-{FileName}.md`
+    per §4.8 escalation procedure. Do NOT proceed without owner approval.
+
+    NO production code changes (NFR-01). Per project CLAUDE.md §6.2, every touched test ends in
+    `[Trait("status", "repaired")]`, `real-bug-pending-fix`, `flaky-quarantined`, OR is archived
+    via rename to `*.cs.archived-2026-MM-DD`. `Failed` is FORBIDDEN at project close.
+  </prompt>
+
+  <role>Senior .NET test repair specialist; expert in IAsyncEnumerable mock patterns and Microsoft.Extensions.AI.</role>
+
+  <goal>
+    ~15 streaming-related test files under `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Streaming*`
+    are migrated to use `AsyncEnumerableHelpers`. All migrated tests Pass. Every touched test has
+    `[Trait("status", "repaired")]`. Cluster verification (task 032) will gate the IChatClient
+    cluster overall.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="decision">projects/sdap-bff.api-test-suite-repair/decisions/D-01-async-enumerable-helper.md</file>
+    <file purpose="helper">tests/unit/Sprk.Bff.Api.Tests/Mocks/AsyncEnumerableHelpers.cs</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code in `src/`, `power-platform/`, `infra/`, `scripts/`</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation BEFORE work proceeds</constraint>
+    <constraint source="§6.2">Every touched test gets `[Trait("status", "repaired")]` (or `real-bug-pending-fix` / `flaky-quarantined` / archive)</constraint>
+    <constraint source="§4.5">MUST NOT touch `CustomWebAppFactory.cs`</constraint>
+    <constraint source="NFR-03">MUST NOT increase BFF DI registration count via test scaffolding</constraint>
+    <constraint source="FR-14">All IChatClient streaming tests must end in §6.2 final end-state</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.4 (failure clustering), the IChatClient streaming / IAsyncEnumerable mocking
+      cluster is ~30-50 tests — the largest single failure cluster in the suite. Root cause:
+      NSubstitute auto-mock returns null/default for IAsyncEnumerable returns instead of an empty
+      sequence, so any `await foreach` in production code throws or hangs. Phase 1 task 015 (P1.B)
+      shipped `AsyncEnumerableHelpers` (or equivalent Microsoft package per D-01). This task
+      consumes that helper to repair batch 1 (Services/Ai/Chat/Streaming*); batch 2 (task 031)
+      handles Services/Ai/Capabilities/Streaming*; task 032 verifies the cluster.
+    </background>
+    <dependencies>
+      <dependency task="015" status="not-started">AsyncEnumerableHelpers shipped + has its own tests</dependency>
+      <dependency task="014" status="not-started">Compile health verified after P1.A batches</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Streaming*.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/*StreamingTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Mocks/AsyncEnumerableHelpers.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read D-01 decision file to confirm whether to use hand-rolled `AsyncEnumerableHelpers` or Microsoft-shipped equivalent.</step>
+    <step order="2">From Phase 0 baseline TRX (`baseline/test-baseline-2026-MM-DD.trx`), identify failing tests under `Services/Ai/Chat/Streaming*`. Expected ~15 tests across multiple files (first batch of the ~30-50 cluster).</step>
+    <step order="3">For each affected test file: read current source; identify the NSubstitute setup of IChatClient streaming method (typically `GetStreamingResponseAsync` or `CompleteStreamingAsync`).</step>
+    <step order="4">Compute pre-edit line count per file. If any planned edit exceeds 50% of file lines → HALT, file `escalations/rewrite-request-T-030-{FileName}.md`, await owner approval before proceeding on that file.</step>
+    <step order="5">Replace the broken setup with `AsyncEnumerableHelpers.FromValues(...)` constructing the expected streaming response. Preserve assertions.</step>
+    <step order="6">Apply `[Trait("status", "repaired")]` at class level (or per-method if class is mixed-status).</step>
+    <step order="7">After each file: run `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~&lt;ClassName&gt;"` and verify Pass.</step>
+    <step order="8">Final batch verification: `dotnet test --filter "FullyQualifiedName~Services.Ai.Chat.Streaming"` shows zero failures for this batch's named files.</step>
+    <step order="9">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with file list + per-file LOC delta + tests-now-passing count.</step>
+    <step order="10">Verify `git status` shows NO modifications under `src/`, `power-platform/`, `infra/`, `scripts/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test (per-file iterative + batch verification)</tool>
+    <tool name="git">status (verify NFR-01)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Streaming*.cs (repaired, ~15 files)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/current-task.md (updated with batch outcome)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All ~15 batch-1 streaming tests Pass under `dotnet test --filter`</criterion>
+    <criterion testable="true">Per-file diff is &lt;50% line replacement (NFR-02); if exceeded, escalation file exists in `escalations/`</criterion>
+    <criterion testable="true">Every touched test has `[Trait("status", "repaired")]` (or another §6.2 final end-state)</criterion>
+    <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">`CustomWebAppFactory.cs` is NOT modified</criterion>
+    <criterion testable="true">No new DI registrations added (NFR-03 preserved)</criterion>
+  </acceptance-criteria>
+
+  <notes added="2026-05-31" author="task-execute Wave 2.1">
+    Executed 2026-05-31 at FULL rigor.
+
+    Scope reality: POML pattern `Services/Ai/Chat/Streaming*` matches exactly ONE file
+    (`StreamingWriteIntegrationTests.cs`, 1100 LOC, 28 test methods). Per
+    `baseline/failure-inventory-post-018-2026-05-31.md`, this file had 0 failing tests
+    pre-task — all 28 already passed against existing local async-enumerable helpers and
+    NSubstitute `.Returns(IAsyncEnumerable&lt;&gt;)` setup. The repair focus was therefore
+    §6.2 trait taxonomy compliance + canonical-helper convergence per FR-06 / D-01
+    BUILD LOCAL verdict, NOT broken-test repair.
+
+    Edits applied (additive + line-level rename):
+    - Added `using Sprk.Bff.Api.Tests.Mocks;`
+    - Added `[Trait("status", "repaired")]` at class level + 3-line xmldoc note explaining migration
+    - Replaced 4 `.Returns(...)` arg sites: local `ToAsyncEnumerable` / `ToAsyncEnumerableThenThrow`
+      → `AsyncEnumerableHelpers.ToAsyncEnumerable` / `AsyncEnumerableHelpers.ThrowingAsyncEnumerable`
+    - Removed obsolete local helpers (21 LOC: 8 + 13)
+
+    `git diff --stat`: +20 / -32 = 52 lines of 1100 (4.7%) — well below 50% NFR-02 threshold.
+
+    Test results (Step 8 / Step 9):
+    - `dotnet test --filter "FullyQualifiedName~Services.Ai.Chat.Streaming"`: 28 passed, 0 failed.
+    - `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 17 pre-existing warnings unchanged.
+
+    Quality gates (Step 9.5): code-review PASS (surgical 4.7% diff, zero behavior change);
+    adr-check PASS (no ADR surface touched; ADR-013 refined honored — uses framework SDK
+    `IChatClient`, NOT internal `IOpenAiClient`/`IPlaybookService`); lint PASS (implicit via build).
+
+    No §4.8 escalations filed. No `real-bug-pending-fix` ledger entries (all tests pass against
+    current production). No new DI registrations. CustomWebAppFactory.cs untouched.
+
+    Trait outcome:
+    - `Services/Ai/Chat/StreamingWriteIntegrationTests.cs`: 28 passed, 0 skipped, 0 real-bug-tagged,
+      class-level `[Trait("status", "repaired")]` applied.
+
+    Per caller instructions: did NOT mark complete in TASK-INDEX (orchestrator coordinates wave-exit);
+    did NOT `git commit` (orchestrator coordinates Phase 2+3 commit cadence).
+  </notes>
+</task>

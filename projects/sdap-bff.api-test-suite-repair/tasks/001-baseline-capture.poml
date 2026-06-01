@@ -1,0 +1,109 @@
+<task id="001" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>Capture full test baseline (TRX, compile errors, CI gate snapshot) — FR-01</title>
+    <status>completed</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-0, baseline, bff-api, testing</tags>
+    <parallel-group>0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes only to projects/.../baseline/* (disjoint from tasks 002, 003, 006, 007 in same wave); does not modify source code or shared config</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Capture the authoritative Phase 0 baseline artifacts for the BFF unit test suite. Produces 3
+    files in `projects/sdap-bff.api-test-suite-repair/baseline/`: the TRX from a full
+    `Sprk.Bff.Api.Tests` run, the compile-error log from `dotnet build`, and a CI gate snapshot
+    (master branch protection + last 30 CI runs).
+
+    These artifacts are the load-bearing input for every subsequent phase. Every Phase 1+ task
+    that cites failure counts MUST cite this baseline TRX, not stale numbers from
+    `bff.api-repair-overview.txt` or design.md §3 prose. (Project CLAUDE.md §6.3 is binding.)
+
+    NO source-code changes. NO test changes. Pure data capture.
+  </prompt>
+
+  <role>AI agent capturing reproducible baseline artifacts for a multi-phase test repair.</role>
+
+  <goal>
+    The 3 files exist in `projects/sdap-bff.api-test-suite-repair/baseline/`:
+    - `test-baseline-2026-MM-DD.trx` — parseable xUnit TRX with Failed/Passed/Skipped counts
+    - `compile-errors-2026-MM-DD.txt` — full `dotnet build` log with per-error file listing
+    - `ci-gate-snapshot-2026-MM-DD.json` — `gh api` branch protection output + last 30 `sdap-ci.yml` runs
+
+    The ci-gate-snapshot MUST show `enforce_admins.enabled: false` (this is the rot we are repairing — design.md §5.2).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="test-project">tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-01">3 files (TRX + compile-errors + ci-gate-snapshot) must exist and be parseable</constraint>
+    <constraint source="NFR-01">No production code changes; baseline capture is read-only against `src/`</constraint>
+    <constraint source="NFR-09">Task POML metadata declares `repair-not-rewrite: true` (this task IS that declaration)</constraint>
+    <constraint source="§6.3">Subsequent tasks MUST cite this baseline, NOT overview's "283 failures" framing</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/spec.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §7 Phase 0, every downstream task depends on the baseline artifact set. The
+      2026-05-30 baseline (from design.md §3) reports 5,215 total tests / 4,844 passing / 269
+      failing / 17 compile-broken files; this task captures the AUTHORITATIVE versions in the
+      project repo. The ci-gate snapshot documents the broken state (admin-bypass merging,
+      10/10 recent runs failed but code shipped anyway) that Phase 1 P1.D will repair.
+    </background>
+    <dependencies>
+      <dependency task="none" status="n/a">No upstream — Phase 0 task</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+    <file>projects/sdap-bff.api-test-suite-repair/baseline/compile-errors-2026-MM-DD.txt</file>
+    <file>projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-snapshot-2026-MM-DD.json</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Resolve today's date (YYYY-MM-DD format). Use as suffix on all 3 file names.</step>
+    <step order="2">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Release --logger "trx;LogFileName=test-baseline-{date}.trx" --results-directory projects/sdap-bff.api-test-suite-repair/baseline/`. Allow up to 30 min runtime; tests may fail (expected) but TRX must be produced.</step>
+    <step order="3">Run `dotnet build tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj 2>&amp;1 | tee projects/sdap-bff.api-test-suite-repair/baseline/compile-errors-{date}.txt`. Capture full stdout+stderr; expected 17 compile errors per design.md §3.2.</step>
+    <step order="4">Run `gh api repos/spaarke-dev/spaarke/branches/master/protection > projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-snapshot-{date}.json`. Then append last 30 sdap-ci runs: `gh run list --workflow=sdap-ci.yml --branch=master --limit=30 --json databaseId,status,conclusion,createdAt,headSha >> projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-snapshot-{date}.json`. (Note: this produces a non-strict JSON concatenation — that is expected; the file is a captured snapshot, not a programmatic input.)</step>
+    <step order="5">Verify all 3 files exist and are non-empty.</step>
+    <step order="6">Verify `enforce_admins` value in the ci-gate-snapshot JSON — record observed value in a one-line summary at the top of `projects/sdap-bff.api-test-suite-repair/baseline/README.md` (create if needed). Confirms the "fictional gate" hypothesis from design.md §5.2.</step>
+    <step order="7">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with completion + cite the 3 artifact paths + observed Passed/Failed/Skipped counts from TRX summary.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test (TRX logger), build (capture stderr)</tool>
+    <tool name="gh">api (branch protection), run list (CI history)</tool>
+  </tools>
+
+  <outputs>
+    <output type="baseline">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</output>
+    <output type="baseline">projects/sdap-bff.api-test-suite-repair/baseline/compile-errors-2026-MM-DD.txt</output>
+    <output type="baseline">projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-snapshot-2026-MM-DD.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">3 files exist in `projects/sdap-bff.api-test-suite-repair/baseline/` with today's date suffix</criterion>
+    <criterion testable="true">TRX file is parseable as XML and contains `&lt;ResultSummary&gt;` with `total`, `passed`, `failed`, `skipped` counts</criterion>
+    <criterion testable="true">compile-errors-*.txt contains at least one `error CS` line (matches design.md §3.2 17-file expectation)</criterion>
+    <criterion testable="true">ci-gate-snapshot-*.json contains `enforce_admins` key; observed value documented in `baseline/README.md`</criterion>
+    <criterion testable="true">No files in `src/`, `power-platform/`, `infra/`, or `scripts/` modified (verify via `git status`)</criterion>
+  </acceptance-criteria>
+</task>

@@ -23,6 +23,7 @@ namespace Sprk.Bff.Api.Tests.Filters;
 /// Uses MemoryDistributedCache instead of Mock&lt;IDistributedCache&gt; because
 /// GetStringAsync/SetStringAsync are extension methods that cannot be mocked.
 /// </summary>
+[Trait("status", "repaired")]
 public class IdempotencyFilterTests
 {
     private static ClaimsPrincipal CreateUser(string userId = "user-123")

@@ -1,0 +1,112 @@
+<task id="032" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.A3 — IChatClient cluster verification gate</title>
+    <status>completed</status>
+    <estimated-effort>0.5-1 hour</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, ichatclient, p23-a, bff-api, testing, verification-gate</tags>
+    <parallel-group>23-A-gate</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Verification gate for tasks 030 and 031; must run AFTER both batches complete to confirm cluster-level zero-failure state and record ledger outcome</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Verify the IChatClient streaming cluster (~30-50 tests per design.md §3.4) is fully closed
+    out by the combined work of tasks 030 + 031. This task is a gate: it runs ONLY after both
+    batches complete and validates the cluster-level zero-failure state per FR-14.
+
+    Run the full streaming cluster filter and verify zero failures:
+    `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Streaming|FullyQualifiedName~ChatClient" -c Release`
+
+    Document cluster outcome in `projects/sdap-bff.api-test-suite-repair/ledgers/repair-ledger.md`
+    with: total tests touched, total now Pass, escalations filed (if any from 030/031), per-file
+    LOC delta summary.
+
+    Per project CLAUDE.md NFR-02: this task does NOT modify any test files; it only verifies and
+    records. If failures remain in the cluster, file an escalation per §4.8 documenting which
+    tests remain Failed and the proposed remediation — do NOT mark the cluster closed until
+    zero failures.
+
+    Per §6.2, EVERY test in the cluster must end in `repaired`, `real-bug-pending-fix`,
+    `flaky-quarantined`, OR be archived via `*.cs.archived-2026-MM-DD` rename. `Failed` is
+    FORBIDDEN at project close.
+  </prompt>
+
+  <role>Senior test orchestrator running cluster-level verification gates.</role>
+
+  <goal>
+    The IChatClient streaming cluster is verified zero-failure across the union of tasks 030 + 031.
+    `ledgers/repair-ledger.md` records the cluster outcome (tests touched, Pass count, escalation
+    count, total LOC change) as the canonical artifact for Phase 4 exit-ledger reconciliation
+    (FR-27).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="ledger">projects/sdap-bff.api-test-suite-repair/ledgers/repair-ledger.md</file>
+    <file purpose="batch-1-output">(task 030 output: streaming batch 1 repaired)</file>
+    <file purpose="batch-2-output">(task 031 output: streaming batch 2 repaired)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-14">All IChatClient streaming cluster tests must end in §6.2 final end-state (zero failures)</constraint>
+    <constraint source="NFR-01">No production code changes</constraint>
+    <constraint source="NFR-02">No file edits in this task beyond the ledger; verification-only</constraint>
+    <constraint source="§4.3">No test left in `Failed` state at cluster close</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.4 the IChatClient streaming cluster contains ~30-50 tests. Tasks 030 + 031
+      split the work across disjoint file sets. This gate confirms the union is zero-failure
+      before declaring P23.A complete. Per FR-21 (cross-track regression check), any new failure
+      in tests not currently being worked HALTS all tracks — this gate makes that explicit for
+      the IChatClient cluster.
+    </background>
+    <dependencies>
+      <dependency task="030" status="not-started">Streaming batch 1 (Services/Ai/Chat/Streaming*)</dependency>
+      <dependency task="031" status="not-started">Streaming batch 2 (Services/Ai/Capabilities/Streaming*)</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/repair-ledger.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Confirm tasks 030 and 031 are status=completed in `tasks/TASK-INDEX.md`. If either is incomplete, HALT and report.</step>
+    <step order="2">Run cluster filter: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Streaming|FullyQualifiedName~ChatClient" -c Release`. Capture TRX output.</step>
+    <step order="3">Verify zero failures. If non-zero, identify each remaining failure and file an escalation per §4.8 OR document as `real-bug-pending-fix` / `flaky-quarantined` per §6.2.</step>
+    <step order="4">Tally cluster metrics: total tests in cluster, Pass count, Skip count (+ reason), files repaired, files archived, escalations filed.</step>
+    <step order="5">Append cluster section to `projects/sdap-bff.api-test-suite-repair/ledgers/repair-ledger.md` with date, task IDs (030/031), cluster name, metrics.</step>
+    <step order="6">Mark P23.A complete in `current-task.md`. Verify `git status` shows ledger update only — no production code changes.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test (cluster filter verification)</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/repair-ledger.md (IChatClient cluster section appended)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/current-task.md (P23.A marked complete)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`dotnet test --filter "FullyQualifiedName~Streaming|FullyQualifiedName~ChatClient"` returns zero failures</criterion>
+    <criterion testable="true">`ledgers/repair-ledger.md` contains a dated section for IChatClient cluster with tests-touched, Pass count, escalations filed</criterion>
+    <criterion testable="true">No test in the cluster is in `Failed` state</criterion>
+    <criterion testable="true">`git status` shows only ledger + current-task.md modifications; no production code changes</criterion>
+  </acceptance-criteria>
+</task>

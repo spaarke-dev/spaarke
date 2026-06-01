@@ -1462,6 +1462,10 @@ Project Complete ✅
 2. **Address warnings before PR** - Avoid accumulating debt
 3. **Document skipped suggestions** - Explain why in task notes
 
+**Per-PR reviewer checklist:**
+
+- [ ] Verify test-update obligation per [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md).
+
 ### For UI Testing
 
 1. **Start Claude with `--chrome`** when working on PCF/frontend
