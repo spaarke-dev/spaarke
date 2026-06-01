@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Author docs/procedures/workflow-incident-response.md</title>
+    <phase>4: Observability + Docs</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>032</dependencies>
+    <blocks>050</blocks>
+    <tags>documentation, ci-cd, github-actions, incident-response</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation-only task; FR-10 acceptance; no code modified</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Author `docs/procedures/workflow-incident-response.md` — a runbook answering "a workflow failed — what now?". Use `docs/guides/INCIDENT-RESPONSE.md` as the structural template. Sections: detect → triage → remediate → postmortem. Specific to GitHub Actions failures; references per-workflow failure modes from `.github/WORKFLOWS.md` (task 041).
+  </prompt>
+
+  <role>
+    SPAARKE technical writer. Writes for the on-call operator who needs to act fast.
+  </role>
+
+  <goal>
+    `docs/procedures/workflow-incident-response.md` exists with: detection guidance (notifications, health-report issue), triage decision tree (loader-failure vs real failure vs flaky vs config), remediation steps, postmortem template. Cross-linked from `.github/WORKFLOWS.md`.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-10: file exists; references current workflow set; cross-linked from `.github/WORKFLOWS.md`. The runbook is THE answer to "I got a notification — what do I do?".
+    </background>
+    <relevant-files>
+      <file>docs/procedures/workflow-incident-response.md</file>
+      <file>docs/guides/INCIDENT-RESPONSE.md</file>
+      <file>.github/WORKFLOWS.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-10: File exists; references current workflow set; cross-linked from `.github/WORKFLOWS.md`</constraint>
+    <constraint source="project">Use `docs/guides/INCIDENT-RESPONSE.md` as the structural template</constraint>
+    <constraint source="project">Specific to GitHub Actions — not generic incident response</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+      <file>docs/guides/INCIDENT-RESPONSE.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `docs/guides/INCIDENT-RESPONSE.md` — extract structure (sections, headings, flow).</step>
+    <step order="2">Author `docs/procedures/workflow-incident-response.md` with these sections:
+      a. **Overview** — when to use this runbook
+      b. **Detection** — notification sources (GitHub email, CI Health Report issue, manual `gh run list`)
+      c. **Triage decision tree** — is it loader-failure (0s, jobs=[]) OR real failure (jobs executed)? If loader-failure → fix YAML. If real → classify (test failure, env, flaky, config)
+      d. **Remediation steps** — for each category: command + decision criterion
+      e. **Escalation** — when to call owner; when to file an issue; when to delete-with-rationale
+      f. **Postmortem template** — for HIGH-impact failures only
+      g. **References** — cross-link to `.github/WORKFLOWS.md`, `docs/procedures/ci-cd-workflow.md`, ADR-029
+    </step>
+    <step order="3">Add cross-link from `.github/WORKFLOWS.md` (task 041) → this file. (If task 041 already added a relative link, no-op here.)</step>
+    <step order="4">Verify all referenced workflows match current `.github/workflows/` set (post-Phase-2).</step>
+    <step order="5">Update TASK-INDEX.md: change task 042 status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Template + workflow files</tool>
+    <tool name="Write">New runbook file</tool>
+    <tool name="Edit">Optional: add cross-link to .github/WORKFLOWS.md if not already present</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/procedures/workflow-incident-response.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`docs/procedures/workflow-incident-response.md` exists.</criterion>
+    <criterion testable="true">Contains the 7 required sections (Overview, Detection, Triage, Remediation, Escalation, Postmortem, References).</criterion>
+    <criterion testable="true">Cross-linked from `.github/WORKFLOWS.md` (relative link works).</criterion>
+    <criterion testable="true">References match current `.github/workflows/` set (no orphaned workflow names).</criterion>
+    <criterion testable="true">TASK-INDEX.md task 042 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The "triage decision tree" is the load-bearing section. Make it scannable (flowchart-like or bulleted). The 0s+jobs=[] loader-failure signature is the most common detection pattern — feature it prominently.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: MINIMAL. Parallel-safe with 040, 041, 043.</protocol>
+  </execution>
+</task>

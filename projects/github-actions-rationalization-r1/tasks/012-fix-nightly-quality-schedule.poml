@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Fix nightly-quality.yml schedule failures (P4)</title>
+    <phase>1: Fix Broken Workflows</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>none</blocks>
+    <tags>ci-cd, github-actions, devops, workflow-fix</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Workflow YAML edit or deletion; FR-05 acceptance criterion (3 consecutive successful runs OR delete-with-rationale)</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Root-cause and fix the `nightly-quality.yml` scheduled-run failure. Per design §2.1 P4: most recent scheduled run (2026-06-01 07:37) = failure; pattern likely recurring nightly. Read the most recent failed run logs to determine if it's a loader-broken file (P1/P3 pattern) OR a real test/coverage failure being reported. Address accordingly.
+  </prompt>
+
+  <role>
+    SPAARKE platform DevOps engineer. Comfortable analyzing scheduled-workflow logs, identifying loader-failure signatures, and applying minimal repair OR delete-with-rationale.
+  </role>
+
+  <goal>
+    Either: (a) `nightly-quality.yml` runs successfully 3 consecutive nights post-fix (FR-05), OR (b) the file is removed via `git rm` with a rationale commit message explaining why nightly-quality is unnecessary.
+  </goal>
+
+  <context>
+    <background>
+      Per design §2.1 P4: scheduled run on 2026-06-01 07:37 UTC failed; pattern likely recurring. Per FR-05 acceptance: 3 consecutive successful nightly runs OR delete-with-rationale. Per D-04 (consolidate liberally): may consolidate into `weekly-quality.yml` with conditional cadence (or vice versa) — but that's a Phase 2 decision; this task focuses on Phase 1 root-cause + fix-or-delete.
+    </background>
+    <relevant-files>
+      <file>.github/workflows/nightly-quality.yml</file>
+      <file>projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-05: 3 consecutive successful nightly runs OR delete with rationale</constraint>
+    <constraint source="spec">NFR-02: &lt;50% line replacement OR delete-with-rationale</constraint>
+    <constraint source="spec">NFR-04: Deletion via `git rm`, not comment-out</constraint>
+    <constraint source="spec">NFR-07: `<repair-not-rewrite>true</repair-not-rewrite>`</constraint>
+    <constraint source="project">MUST run `actionlint` locally BEFORE pushing</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+      <file>projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Get the most recent failed run details: `gh run list --workflow=nightly-quality.yml --status=failure --limit 5 --json databaseId,createdAt,conclusion`. Pick most recent. View logs: `gh run view {id} --log-failed`.</step>
+    <step order="2">Classify failure type:
+      - **Loader-failure** (0s run, jobs=[]): same as P1/P3 pattern. Fix YAML.
+      - **Real failure** (jobs executed, some step failed): determine root cause (test failure, coverage threshold, dependency issue, network timeout).
+    </step>
+    <step order="3">Read `nightly-quality.yml` end-to-end. Run `actionlint`. Identify the failure point.</step>
+    <step order="4">Decision branch:
+      - **If loader-failure**: apply minimal YAML fix (&lt;50% replacement).
+      - **If real failure due to env/deps**: fix the env/dep issue if it's in the workflow itself (NOT in `src/` — that's product backlog).
+      - **If the workflow is fundamentally redundant** (per D-04 — overlaps with weekly-quality or SDAP CI): mark for DELETE in Phase 2, but for THIS task either (a) apply a minimal fix to get one passing run, OR (b) delete now with rationale in commit. Prefer (b) if the workflow has no clear value.
+    </step>
+    <step order="5">Apply chosen action. Run `actionlint` on any modified file. Commit with conventional message.</step>
+    <step order="6">If FIXED: wait for or trigger 3 nightly runs (via `gh workflow run nightly-quality.yml`) and confirm 3 consecutive successes. If DELETED: confirm file removed via `git rm`; commit references rationale.</step>
+    <step order="7">Update TASK-INDEX.md: change task 012 status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">View run logs; trigger manual runs</tool>
+    <tool name="actionlint">Validate YAML</tool>
+    <tool name="Read">Read workflow + logs</tool>
+    <tool name="Edit">Apply minimal fix</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.github/workflows/nightly-quality.yml (modified or deleted)</output>
+    <output type="docs">projects/github-actions-rationalization-r1/decisions/D-NN-nightly-quality-disposition.md (if deleted)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-05 satisfied: either 3 consecutive successful scheduled runs OR `nightly-quality.yml` is removed via `git rm` with rationale in commit message.</criterion>
+    <criterion testable="true">If fixed: `actionlint` returns 0 errors.</criterion>
+    <criterion testable="true">If deleted: decision record exists at `decisions/D-NN-nightly-quality-disposition.md`.</criterion>
+    <criterion testable="true">TASK-INDEX.md task 012 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    If the failure is an actual test regression in `src/` code, do NOT fix the test here (NFR-01). The workflow is the audit target, not the underlying tests. In that case, either skip the failing test cleanly OR delete the workflow if the value isn't worth the maintenance.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: STANDARD. Parallel-safe with 010 and 011.</protocol>
+  </execution>
+</task>
