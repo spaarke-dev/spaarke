@@ -22,8 +22,8 @@
 
 | ID | Title | Phase | Rigor | Status | Dependencies | Parallel Group | Parallel-Safe |
 |----|-------|-------|-------|--------|--------------|----------------|---------------|
-| 001 | Workflow inventory + baseline snapshots | 0: Inventory + Baseline | STANDARD | 🔲 | none | A | ✅ |
-| 002 | Investigate post-PR-#314 master CI failure (run 26755019759) | 0: Inventory + Baseline | STANDARD | 🔲 | none | A | ✅ |
+| 001 | Workflow inventory + baseline snapshots | 0: Inventory + Baseline | STANDARD | ✅ | none | A | ✅ |
+| 002 | Investigate post-PR-#314 master CI failure (run 26755019759) | 0: Inventory + Baseline | STANDARD | ✅ | none | A | ✅ |
 | 010 | Fix deploy-promote.yml cascade (P2) | 1: Fix Broken Workflows | STANDARD | 🔲 | 001 | B | ✅ |
 | 011 | Fix deploy-infrastructure.yml ghost triggers (P3) | 1: Fix Broken Workflows | STANDARD | 🔲 | 001 | B | ✅ |
 | 012 | Fix nightly-quality.yml schedule failures (P4) | 1: Fix Broken Workflows | STANDARD | 🔲 | 001 | B | ✅ |
@@ -41,6 +41,31 @@
 | 090 | Project wrap-up + lessons learned + repo cleanup | Wrap-up | STANDARD | 🔲 | 050 | — | ❌ (final) |
 
 **Total**: 17 tasks (2 in Phase 0 + 3 in Phase 1 + 3 in Phase 2 + 3 in Phase 3 + 4 in Phase 4 + 1 in Phase 5 + 1 wrap-up).
+
+---
+
+## Wave A Findings (2026-06-01) — INFORMS DOWNSTREAM TASKS
+
+**Task 001 inventory recommendations** (`baseline/workflow-inventory-2026-06-01.md`):
+| Recommendation | Count | Workflows |
+|---|---|---|
+| KEEP | 3 | adr-audit (88.5%), sdap-ci (after src/ fix), deploy-slot-swap (75% but no-op trigger) |
+| FIX | 4 | sdap-ci (Risk R1 — DEFERRED per D-01), deploy-promote (P2), deploy-infrastructure (P3), nightly-quality (P4) |
+| DELETE | 4 | auto-add-to-project (broken since 2026-03-13), deploy-platform, provision-customer, insights-eval |
+| CONSOLIDATE | 2 pairs | deploy-bff-api ↔ deploy-slot-swap; weekly-quality ↔ nightly-quality |
+
+**Projected post-rationalization workflow count**: ~6 retained + 2 new (workflows-validate, report-workflow-health) = **8** ✅ (meets FR-06 target ≤8).
+
+**Task 002 disposition** (`decisions/D-01-master-ci-failure-disposition.md`):
+- **DEFERRED** — master CI failure is `src/` drift exposed by PR #314 (17 `-warnaserror` build errors + 330 Prettier-unformatted files), NOT a workflow config issue. Per NFR-01, this project does not fix `src/`.
+- **Phase 5 FR-13 impact**: deliberate-fail verification PR will need a carve-out around `Build & Test (Release)` if a follow-on `src/`-fix project doesn't land first. Task 050 POML to be lightly updated before Phase 5.
+- **Follow-on project suggested**: `sdap-bff-warnaserror-cleanup-r1` (~4–8 h)
+
+**Notable surprises** (inform Phase 1 + Phase 2 tasks):
+1. `deploy-promote.yml` artifact contract is broken (downloads `deployment-packages` but sdap-ci produces `test-results-*`/`coverage-reports-*`). Task 010 must address BOTH cascade AND contract.
+2. `deploy-promote.yml` and `deploy-infrastructure.yml` are **100% loader-failures** (every run has `jobs: []`). Task 011 fix is structural (YAML/path-filter), not retry-the-failing-test.
+3. `deploy-slot-swap.yml`'s 75% "success rate" is a no-op trick — most "success" runs have all real jobs skipped because upstream sdap-ci failed. Workflow is effectively dormant; ideal CONSOLIDATE candidate.
+4. `auto-add-to-project.yml` broken since 2026-03-13 (29 consecutive fails) — likely expired `GH_TOKEN_PROJECT` secret. Task 020's audit should note this as evidence supporting DELETE.
 
 ---
 

@@ -13,17 +13,23 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none |
-| **Step** | — |
-| **Status** | none |
-| **Next Action** | Run `/task-execute projects/github-actions-rationalization-r1/tasks/001-workflow-inventory-and-baseline.poml` (Phase 0). Task 002 (master CI root cause) can run in parallel via a second `task-execute` call in the same message. |
+| **Task** | Wave B (010, 011, 012) ready to start |
+| **Step** | Wave A ✅ complete (001, 002) |
+| **Status** | not-started (Wave B) |
+| **Next Action** | Dispatch Wave B in parallel: tasks 010 (deploy-promote cascade+contract), 011 (deploy-infrastructure ghost triggers), 012 (nightly-quality schedule). Each task touches a different workflow file → parallel-safe. |
 
 ### Files Modified This Session
-<!-- Only files touched in CURRENT session, not all time -->
-- Initial scaffold by project-pipeline — no task files modified yet
+- `projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md` — Created — 13-workflow audit
+- `projects/github-actions-rationalization-r1/baseline/branch-protection-2026-06-01.json` — Created — master branch protection snapshot (3 required checks, enforce_admins=true)
+- `projects/github-actions-rationalization-r1/decisions/D-01-master-ci-failure-disposition.md` — Created — master CI failure DEFERRED to follow-on `src/`-fix project
+- `projects/github-actions-rationalization-r1/tasks/TASK-INDEX.md` — Updated — Wave A marked ✅; findings added
 
 ### Critical Context
-This project rationalizes 13 GitHub Actions workflows. No production code (`src/`) is touched. The first pair of tasks (001 inventory, 002 master CI root cause) can run in parallel. Per the spec, NFR-08 requires every task agent to load `projects/github-actions-rationalization-r1/CLAUDE.md` first.
+Wave A surfaced two consequential findings beyond their direct deliverables:
+1. **Master CI failure is `src/` drift** (17 `-warnaserror` errors + 330 Prettier files), NOT a workflow bug → DEFERRED per NFR-01. Phase 5 FR-13 will need a carve-out around `Build & Test (Release)`.
+2. **`deploy-promote.yml` has a broken artifact contract** in addition to the cascade bug — Wave B task 010 must address BOTH.
+
+Inventory recommendations project to a final count of ~8 workflows (FR-06 target met).
 
 ---
 
@@ -31,11 +37,11 @@ This project rationalizes 13 GitHub Actions workflows. No production code (`src/
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | Pre-Phase 0 (planning complete; task files generated; no work started) |
-| **Status** | none |
+| **Task ID** | Wave B (010, 011, 012) |
+| **Task File** | `tasks/010-fix-deploy-promote-cascade.poml`, `tasks/011-fix-deploy-infrastructure-triggers.poml`, `tasks/012-fix-nightly-quality-schedule.poml` |
+| **Title** | Wave B — Fix P2/P3/P4 broken workflows |
+| **Phase** | 1: Fix Broken Workflows |
+| **Status** | not-started |
 | **Started** | — |
 
 ---
