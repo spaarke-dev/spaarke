@@ -98,7 +98,7 @@ The project is **complete** when all 14 criteria pass:
 | **D-03** | HIGH gets security review; MED + LOW get FULL-rigor code-review + adr-check | design.md §6.D-03 |
 | **D-04** | Phase 4 tracks are pilot-grade; full execution scoped to r3 | design.md §6.D-04 |
 | **D-05** | Real-bug ledger is the source of truth for state transitions | design.md §6.D-05 |
-| **D-06** | r3 is NOT pre-committed at r2 start | design.md §6.D-06 |
+| **D-06** | r3 is NOT planned — r2 is comprehensive closure (resolved 2026-06-01) | design.md §6.D-06 |
 
 ## Risks & Mitigations (top 3)
 
@@ -115,19 +115,19 @@ The project is **complete** when all 14 criteria pass:
 | r1 predecessor merged to master | Internal | ✅ DONE 2026-06-01 (PR #314) |
 | r1 `real-bug-ledger.md` accessible | Internal | ✅ Available |
 | `enforce_admins: true` restored | Internal | ✅ DONE 2026-06-01 |
-| `github-actions-rationalization-r1` Phase 1 | External | 🟡 In flight (affects Phase 4 Track D Coverlet) |
-| `ai-spaarke-insights-engine-r1` owner | External | 🟡 Contact pending (affects FR-05 RB-T028-02) |
-| Security reviewer named | External | 🟡 Pending (blocks Phase 1 merge gates per NFR-03) |
+| `github-actions-rationalization-r1` Phase 1 | External | ✅ Complete or imminent (lands before 2026-08-04; resolved 2026-06-01) |
+| `ai-spaarke-insights-engine-r1` owner | External | ✅ Contact = `dev@spaarke.com` (resolved 2026-06-01) |
+| Security reviewer named | External | ✅ `dev@spaarke.com` (resolved 2026-06-01; NFR-03 unblocked) |
 | Stryker.NET v3.x compatibility | External | 🟡 Validated in Phase 4 Track B |
 
 ## Team
 
 | Role | Name | Responsibilities |
 |---|---|---|
-| Owner | ralph.schroeder@hotmail.com | Overall accountability; owner clarifications; security-reviewer assignment |
+| Owner | ralph.schroeder@hotmail.com | Overall accountability; owner clarifications |
 | Implementer | Claude Code (Opus, via `task-execute` skill) | Task execution at FULL rigor for production fixes |
-| Security Reviewer | TBD (per NFR-03) | HIGH-severity PR review |
-| Sibling Owners | Action Engine / Insights / Communications | FR-06 sign-offs |
+| Security Reviewer | `dev@spaarke.com` (NFR-03) | HIGH-severity PR review (task 010 + cluster task 011) |
+| Sibling Coordination Contact | `dev@spaarke.com` | FR-05 (Insights HOLD) + FR-06 (Action Engine, Insights, Communications sign-offs) |
 
 ## Changelog
 

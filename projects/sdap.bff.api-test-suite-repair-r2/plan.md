@@ -337,9 +337,9 @@ Phase 5: Governance + Close                 (1 week  | 2026-08-25 → 2026-08-31
 
 | Dependency | Status | Risk | Mitigation |
 |---|---|---|---|
-| `github-actions-rationalization-r1` Phase 1 | In flight | MED | Slip Phase 4 Track D to Phase 5; other tracks unaffected |
-| `ai-spaarke-insights-engine-r1` owner | Contact pending | LOW | 1-week timeout → archive RB-T028-02 as `archived-pending-sibling-engagement` |
-| Security reviewer named | Pending | HIGH (blocks Phase 1 merge gates) | Escalate at Phase 0 close if unnamed |
+| `github-actions-rationalization-r1` Phase 1 | ✅ Complete or imminent (resolved 2026-06-01) | LOW | No slip expected; Phase 4 Track D runs as planned |
+| `ai-spaarke-insights-engine-r1` owner | ✅ `dev@spaarke.com` (resolved 2026-06-01) | LOW | Contact known; task 002 + task 012 use this address |
+| Security reviewer named | ✅ `dev@spaarke.com` (resolved 2026-06-01; NFR-03 unblocked) | LOW | task 010 (RB-T044-01) + cluster task 011 merge gates have named reviewer |
 | Stryker.NET v3.x compat | Unvalidated | LOW | Phase 4 Track B validates; version-pin or scope reduction if incompatible |
 
 ### Internal Dependencies

@@ -199,6 +199,11 @@ r1 closed at `Failed: 0` across both BFF test suites but explicitly deferred pro
 | Sequencing | Run r2 first before other BFF-modifying projects? | "we should just run this full project and get it out of the way" (2026-06-01) | r2 Phase 1 leads; Phases 2-5 can run parallel under code-path discipline |
 | Scope coverage | Include all near/mid/long-term items from the post-r1 synopsis? | "single project so that we can address these issues once and for all" (2026-06-01) | All 12 synopsis items in scope; long-term ones are pilot-grade in r2 (D-04) |
 | Deadline | When? | "not drag it out until September 2026" (2026-06-01) | Hard deadline 2026-08-31 (D-01 / FR-16) |
+| Security review | Who reviews HIGH severity? | `dev@spaarke.com` (2026-06-01 resolution) | NFR-03 unblocked; task 010 (RB-T044-01) merge gate has named reviewer |
+| Insights sibling contact | Who is the sibling project owner for RB-T028-02? | `dev@spaarke.com` (2026-06-01 resolution) | FR-05 outreach goes to dev@spaarke.com; task 002 + task 012 use this contact |
+| Phase 4 staffing | Parallel or sequential? | Parallel — 5 tracks in 1 wave (2026-06-01 resolution) | TASK-INDEX P4-W1 correct; 5 agents simultaneous |
+| CI rationalization timing | `github-actions-rationalization-r1` Phase 1 ETA? | Already complete or imminent (2026-06-01 resolution) | Phase 4 Track D (Coverlet) runs as planned in Phase 4; no slip to Phase 5 |
+| r3 commitment | Pre-commit to r3? | **NO** — r3 is NOT planned. r2 is the comprehensive closure (2026-06-01 resolution) | Updates D-06; Phase 4 audit/pilot recommendations inform future quality investments without a follow-on project. r2 is urgent BFF-blocker; no delays. |
 
 ---
 
@@ -212,13 +217,13 @@ r1 closed at `Failed: 0` across both BFF test suites but explicitly deferred pro
 
 ---
 
-## Unresolved Questions
+## Resolved Questions (2026-06-01)
 
-- [ ] **Security reviewer named?** NFR-03 binding requires a security review for HIGH severity. Reviewer identity needed before Phase 1 starts. Blocks: Phase 1 merge gates.
-- [ ] **`ai-spaarke-insights-engine-r1` owner contact** — needed for FR-05. Blocks: RB-T028-02 disposition path decision.
-- [ ] **Phase 4 staffing** — 5 parallel tracks. Run as 5 sequential single-agent tasks (safe, slow) OR 2-3 parallel agents per track (fast, context-heavy). Owner decides based on coordination capacity. Blocks: Phase 4 dispatch model in `/project-pipeline`.
-- [ ] **`github-actions-rationalization-r1` Phase 1 completion date** — affects whether FR-14 (Coverlet) ships in Phase 4 or slips to Phase 5. Blocks: Phase 4 Track D start date.
-- [ ] **r3 commitment** — D-06 explicitly does NOT pre-commit r3. Is owner OK with that, or should r2 reserve r3 budget? Blocks: nothing in r2; affects roadmap discussions.
+- [x] **Security reviewer**: `dev@spaarke.com` (resolves NFR-03; task 010 merge gate has named reviewer)
+- [x] **`ai-spaarke-insights-engine-r1` owner contact**: `dev@spaarke.com` (FR-05 outreach destination; task 002 + task 012 use this contact)
+- [x] **Phase 4 staffing**: Parallel — 5 tracks in 1 wave, 5 agents simultaneous (TASK-INDEX P4-W1 correct)
+- [x] **`github-actions-rationalization-r1` Phase 1 timing**: Already complete or imminent (lands before 2026-08-04); Phase 4 Track D runs as planned
+- [x] **r3 commitment**: **NO — r3 is NOT planned.** r2 is the comprehensive closure. Phase 4 audit/pilot recommendations inform future quality investments without a follow-on project. Project is urgent BFF-development blocker; no delays.
 
 ---
 

@@ -183,11 +183,16 @@ The `task-execute` skill ensures:
 | 2026-06-01 | **D-03**: HIGH gets security review; MED + LOW get FULL-rigor `code-review` + `adr-check` | RB-T044-01 taught: "obvious" fixes still need scrutiny |
 | 2026-06-01 | **D-04**: Phase 4 tracks are pilot-grade; full execution = r3 | Protect 2026-08-31 deadline |
 | 2026-06-01 | **D-05**: Real-bug ledger is source of truth for state transitions | Per-entry lifecycle is auditable |
-| 2026-06-01 | **D-06**: r3 NOT pre-committed | Decision based on r2 findings, not in advance |
+| 2026-06-01 | **D-06**: r3 NOT planned — r2 is comprehensive closure (resolved 2026-06-01) | Owner: "we are not planning on an r3 because all issues should be resolved in this project". r2 treated as urgent BFF-development blocker; no delays. Phase 4 audit/pilot recommendations inform future quality investments without a follow-on project. |
 
 Additional decisions (added during execution):
 
-*None yet*
+| Date | Decision | Rationale |
+|---|---|---|
+| 2026-06-01 | **Security reviewer** = `dev@spaarke.com` (resolves NFR-03) | Owner decision; unblocks task 010 (RB-T044-01) + cluster task 011 merge gates |
+| 2026-06-01 | **Insights sibling contact** = `dev@spaarke.com` (resolves FR-05 path) | Same contact for all sibling coordination (FR-05 RB-T028-02 + FR-06 sign-offs) |
+| 2026-06-01 | **Phase 4 staffing** = Parallel (5 tracks in 1 wave) | Maximizes throughput; current TASK-INDEX P4-W1 plan is correct |
+| 2026-06-01 | **`github-actions-rationalization-r1`** = complete or imminent (lands before 2026-08-04) | Phase 4 Track D (Coverlet) runs as planned in Phase 4; no slip to Phase 5 |
 
 ---
 

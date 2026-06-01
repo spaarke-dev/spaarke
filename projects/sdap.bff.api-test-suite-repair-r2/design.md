@@ -273,8 +273,10 @@ The PCF audit, mutation testing, TestClock PoC, and coverage measurement are PRO
 ### D-05: Real-bug ledger is the source of truth for what closes when
 Each ledger entry's `Status` field transitions: `open` → `assigned-to-r2` → `in-progress` → `repaired` → `closed`. Task POMLs reference ledger entry IDs explicitly. TASK-INDEX shows ledger-entry-closed count alongside task-complete count. This makes auditability cheap.
 
-### D-06: r3 is NOT pre-committed
-The 2026-08-31 close lands a measured + actionable r2. Decisions on r3 (PCF coverage repair, mutation remediation, TestClock migration, coverage gate enforcement) happen at r2 close based on r2's audit findings. Owner makes the r3-or-not decision then.
+### D-06: r3 is NOT planned (resolved 2026-06-01)
+**Updated 2026-06-01**: r3 is **NOT planned**. r2 is the comprehensive closure project — all 20 real-bug ledger entries are resolved here. Phase 4 forward-looking pilots (PCF audit, mutation testing, TestClock PoC, Coverlet baseline, anti-drift effectiveness) produce recommendations that inform future quality investments **without a formal r3 project budgeted**. The project is treated as an urgent BFF-development blocker; no delays. Phase 4 pilot recommendations may be picked up by ad-hoc future work as priorities allow, but no r3 follow-on is scoped or scheduled.
+
+**Original (2026-06-01 pre-resolution)**: "The 2026-08-31 close lands a measured + actionable r2. Decisions on r3 (PCF coverage repair, mutation remediation, TestClock migration, coverage gate enforcement) happen at r2 close based on r2's audit findings. Owner makes the r3-or-not decision then." — superseded by the resolution above.
 
 ---
 
@@ -375,15 +377,15 @@ Files the r2 agent MUST read before starting work:
 
 ---
 
-## 11. Open Questions for owner review
+## 11. Resolved Questions (2026-06-01)
 
-(These move into spec.md's "Unresolved Questions" section after design approval)
+(All 5 open questions resolved by owner; integrated into spec.md "Owner Clarifications" + this design's locked decisions.)
 
-1. **r3 commitment** — D-06 says r3 is not pre-committed. Is the owner OK with that, or should this project formally pre-allocate budget for r3?
-2. **Security reviewer for HIGH severity** — who is the named security reviewer? Currently the role is identified but not the person.
-3. **Insights Layer 2 owner identity** — RB-T028-02 needs sibling project owner contact. Is `ai-spaarke-insights-engine-r1` still active? Is there a named owner?
-4. **Phase 4 staffing** — 5 parallel tracks. Can run as 5 sequential single-agent tasks (slow but safe) OR 2-3 parallel agents per track (fast but heavy on context). Recommendation depends on owner capacity for coordination
-5. **CI gate sequencing** — `github-actions-rationalization-r1` is running in parallel; do we wait for it to land before Phase 4 Track D (coverage measurement)? Default: yes (avoid stepping on each other)
+1. **r3 commitment**: **NO — r3 is NOT planned.** r2 is the comprehensive closure. See D-06 (updated 2026-06-01).
+2. **Security reviewer for HIGH severity**: `dev@spaarke.com`. Resolves NFR-03 for task 010 (RB-T044-01) merge gate.
+3. **Insights Layer 2 owner identity**: `dev@spaarke.com`. Task 002 outreach + task 012 follow-up go to this contact.
+4. **Phase 4 staffing**: Parallel — 5 tracks in 1 wave, 5 agents simultaneous. TASK-INDEX P4-W1 plan is correct.
+5. **CI gate sequencing**: `github-actions-rationalization-r1` Phase 1 is complete or imminent (lands before 2026-08-04). Phase 4 Track D (Coverlet) runs as planned in Phase 4; no slip to Phase 5 expected.
 
 ---
 

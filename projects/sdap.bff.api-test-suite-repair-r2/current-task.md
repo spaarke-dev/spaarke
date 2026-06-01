@@ -69,6 +69,12 @@ See "Files Modified This Session" above.
 ### Decisions Made
 
 - 2026-06-01: Reuse `work/sdap.bff.api-test-suite-repair-r2` branch at Step 4 — no new `feature/...` branch. (Owner decision)
+- 2026-06-01: All 5 spec.md "Unresolved Questions" RESOLVED by owner:
+  - Security reviewer (NFR-03) = `dev@spaarke.com`
+  - Insights sibling contact (FR-05) = `dev@spaarke.com`
+  - Phase 4 staffing = Parallel (5 tracks in 1 wave)
+  - `github-actions-rationalization-r1` Phase 1 = complete or imminent (no Track D slip)
+  - **r3 = NOT planned** (D-06 updated). r2 is comprehensive closure; urgent BFF-development blocker.
 
 ---
 
