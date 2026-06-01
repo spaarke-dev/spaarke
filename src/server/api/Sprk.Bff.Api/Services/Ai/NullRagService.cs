@@ -94,6 +94,38 @@ public sealed class NullRagService : IRagService
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 
+    // ── B8 — knowledge-base index administration (task 011 Phase 1b Tier 3, D-09 §2 B8) ───
+    // These methods absorb what KnowledgeBaseEndpoints used to do directly via SearchIndexClient.
+
+    public Task<KnowledgeIndexHealth> GetIndexHealthAsync(
+        string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        LogDisabled(nameof(GetIndexHealthAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public Task<IndexedDocumentsPage> GetIndexedDocumentsAsync(
+        string indexName,
+        string tenantId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        LogDisabled(nameof(GetIndexedDocumentsAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public Task<int> DeleteIndexedDocumentAsync(
+        string indexName,
+        string documentId,
+        string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        LogDisabled(nameof(DeleteIndexedDocumentAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
     private void LogDisabled(string method)
     {
         _logger.LogDebug(

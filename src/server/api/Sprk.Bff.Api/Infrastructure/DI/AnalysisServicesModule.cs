@@ -176,6 +176,20 @@ public static class AnalysisServicesModule
 
         // B7 — IRagService (P3 Fail-Fast). Real impl registered in AddRagServices behind AI Search keys gate.
         services.AddSingleton<IRagService, NullRagService>();
+
+        // B2 — SprkChatAgentFactory (P3 Fail-Fast subclass). Task 011 Phase 1b Tier 3, D-09 §2 B2.
+        // Real impl registered unconditionally inside AddAiModule (only invoked on compound-ON path).
+        // The Null subclass uses the protected base ctor that bypasses AI deps; consumed unconditionally
+        // by ChatEndpoints (MapChatEndpoints) which catches FeatureDisabledException → SSE error / 503.
+        services.AddSingleton<SprkChatAgentFactory>(sp =>
+            new NullSprkChatAgentFactory(sp.GetRequiredService<ILogger<SprkChatAgentFactory>>()));
+
+        // B3 — PendingPlanManager (P3 Fail-Fast subclass). Task 011 Phase 1b Tier 3, D-09 §2 B3.
+        // Real impl registered scoped inside AddAiModule (compound-ON only). The Null subclass
+        // surfaces compound-intent plan operations as FeatureDisabledException; ChatEndpoints
+        // SendMessageAsync + ApprovePlanAsync catch and emit SSE error chunks per ADR-018.
+        services.AddScoped<PendingPlanManager>(sp =>
+            new NullPendingPlanManager(sp.GetRequiredService<ILogger<PendingPlanManager>>()));
     }
 
     private static void AddAnalysisOrchestrationServices(IServiceCollection services, IConfiguration configuration)

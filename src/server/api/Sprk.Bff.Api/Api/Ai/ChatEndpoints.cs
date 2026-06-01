@@ -728,6 +728,25 @@ public static class ChatEndpoints
             logger.LogInformation(
                 "Client disconnected during SendMessage: session={SessionId}", sessionId);
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B2/B3): NullSprkChatAgentFactory or
+            // NullPendingPlanManager surfaced. Response is already committed as text/event-stream
+            // — emit the error as an SSE 'error' chunk with the stable errorCode so the client
+            // can render kill-switch-specific UX. Mirrors the WorkspaceMatterEndpoints HandleAiSummary
+            // pattern established in Tier 2.
+            logger.LogDebug(
+                "SendMessage called while AI chat feature disabled. ErrorCode={ErrorCode}, Session={SessionId}",
+                ex.ErrorCode, sessionId);
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), CancellationToken.None);
+                await WriteChatSSEAsync(
+                    response,
+                    new ChatSseEvent("error", $"[{ex.ErrorCode}] {ex.Message}"),
+                    CancellationToken.None);
+            }
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error during SendMessage: session={SessionId}", sessionId);
@@ -1089,7 +1108,30 @@ public static class ChatEndpoints
         // Atomic get-and-delete: prevents double-execution (task 070 design doc, Risk 2)
         // First approval: finds the key, deletes it, returns the plan → proceed
         // Second approval: key already gone → returns null → 409 Conflict
-        var pendingPlan = await pendingPlanManager.GetAndDeleteAsync(tenantId, sessionId, cancellationToken);
+        PendingPlan? pendingPlan;
+        try
+        {
+            pendingPlan = await pendingPlanManager.GetAndDeleteAsync(tenantId, sessionId, cancellationToken);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B3): NullPendingPlanManager surfaced. Response
+            // has NOT yet been committed as SSE, so return a 503 ProblemDetails JSON body.
+            logger.LogDebug(
+                "ApprovePlan called while AI compound-intent feature disabled. ErrorCode={ErrorCode}, Session={SessionId}",
+                ex.ErrorCode, sessionId);
+            response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            response.ContentType = "application/problem+json";
+            await response.WriteAsJsonAsync(new
+            {
+                type = FeatureDisabledResults.TypeUri,
+                title = "Feature Disabled",
+                status = 503,
+                detail = ex.Message,
+                errorCode = ex.ErrorCode
+            }, cancellationToken);
+            return;
+        }
 
         if (pendingPlan is null)
         {
@@ -1356,6 +1398,22 @@ public static class ChatEndpoints
                 "Client disconnected during ApprovePlan: session={SessionId}, planId={PlanId}",
                 sessionId, pendingPlan.PlanId);
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B2): NullSprkChatAgentFactory surfaced during
+            // agent construction after SSE headers were already committed. Emit SSE error chunk.
+            logger.LogDebug(
+                "ApprovePlan called while AI chat feature disabled. ErrorCode={ErrorCode}, Session={SessionId}, PlanId={PlanId}",
+                ex.ErrorCode, sessionId, pendingPlan.PlanId);
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), CancellationToken.None);
+                await WriteChatSSEAsync(
+                    response,
+                    new ChatSseEvent("error", $"[{ex.ErrorCode}] {ex.Message}"),
+                    CancellationToken.None);
+            }
+        }
         catch (Exception ex)
         {
             logger.LogError(ex,
@@ -1608,8 +1666,20 @@ public static class ChatEndpoints
             "Resolving commands for session={SessionId}, tenant={TenantId}, entityType={EntityType}",
             sessionId, tenantId, session.HostContext?.EntityType ?? "(none)");
 
-        var resolver = agentFactory.CreateCommandResolver();
-        var commands = await resolver.ResolveCommandsAsync(tenantId, session.HostContext, cancellationToken);
+        IEnumerable<CommandEntry> commands;
+        try
+        {
+            var resolver = agentFactory.CreateCommandResolver();
+            commands = await resolver.ResolveCommandsAsync(tenantId, session.HostContext, cancellationToken);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B2): NullSprkChatAgentFactory surfaced.
+            logger.LogDebug(
+                "GetCommands called while AI chat feature disabled. ErrorCode={ErrorCode}, Session={SessionId}",
+                ex.ErrorCode, sessionId);
+            return ex.AsFeatureDisabled503();
+        }
 
         // Partition into system vs. dynamic and project to CommandResponseItem with
         // explicit source discriminator for frontend SlashCommandMenu grouping (R2-053).

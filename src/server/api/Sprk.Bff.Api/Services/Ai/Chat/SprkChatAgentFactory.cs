@@ -37,8 +37,15 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 ///
 /// Constraint (spec): Factory supports context switching — callers create a new agent
 /// with a new context but attach the existing chat history from the session.
+///
+/// Unseal note (task 011 Phase 1b Tier 3, D-09 §2 B2, 2026-06-01): class was `sealed`;
+/// unsealed to permit <see cref="NullSprkChatAgentFactory"/> subclassing for the
+/// kill-switch-OFF (compound AI disabled) DI state. Per ADR-010 (DI minimalism) the
+/// concrete-class Null-Object is preferred over introducing an interface. Production
+/// constructor and public methods unchanged; only the `sealed` keyword was removed
+/// and the 4 publicly-overridable methods were marked `virtual`.
 /// </summary>
-public sealed class SprkChatAgentFactory
+public class SprkChatAgentFactory
 {
     private readonly IChatClient _chatClient;
     private readonly IChatClient _rawChatClient;
@@ -64,6 +71,26 @@ public sealed class SprkChatAgentFactory
         _serviceProvider = serviceProvider;
         _logger = logger;
         _capabilityRouter = capabilityRouter;
+    }
+
+    /// <summary>
+    /// Protected constructor used only by <see cref="NullSprkChatAgentFactory"/> when the
+    /// compound AI kill switch is OFF. The production singleton always uses the public ctor.
+    /// </summary>
+    /// <remarks>
+    /// Task 011 Phase 1b Tier 3 (D-09 §2 B2, 2026-06-01). Per D-09 §8 Risks the cleanest
+    /// path to support a Null-Object subclass without registering AI dependencies is a
+    /// protected constructor that bypasses the AI-dep chain entirely. Public methods are
+    /// `virtual` so the Null subclass can override every entry point with a feature-disabled
+    /// throw — no base-class behavior runs in the kill-switch-OFF DI state.
+    /// </remarks>
+    protected SprkChatAgentFactory(ILogger<SprkChatAgentFactory> logger)
+    {
+        _chatClient = null!;
+        _rawChatClient = null!;
+        _serviceProvider = null!;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _capabilityRouter = null;
     }
 
     /// <summary>
@@ -120,7 +147,7 @@ public sealed class SprkChatAgentFactory
     /// The returned agent is wrapped with the middleware pipeline (AIPL-057, AIPU-072):
     /// ContentSafety (innermost) -> CostControl -> Telemetry -> Routing (outermost).
     /// </returns>
-    public async Task<ISprkChatAgent> CreateAgentAsync(
+    public virtual async Task<ISprkChatAgent> CreateAgentAsync(
         string sessionId,
         string documentId,
         Guid? playbookId,
@@ -440,7 +467,7 @@ public sealed class SprkChatAgentFactory
     /// <param name="tenantId">Tenant ID for cache key scoping (ADR-014).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A configured <see cref="PlaybookDispatcher"/> instance.</returns>
-    public async Task<PlaybookDispatcher> CreatePlaybookDispatcherAsync(
+    public virtual async Task<PlaybookDispatcher> CreatePlaybookDispatcherAsync(
         string tenantId,
         CancellationToken cancellationToken = default)
     {
@@ -479,7 +506,7 @@ public sealed class SprkChatAgentFactory
     ///   - <see cref="IDistributedCache"/> (singleton) — for Redis caching (ADR-009)
     /// </summary>
     /// <returns>A configured <see cref="DynamicCommandResolver"/> instance.</returns>
-    public DynamicCommandResolver CreateCommandResolver()
+    public virtual DynamicCommandResolver CreateCommandResolver()
     {
         var entityService = _serviceProvider.GetRequiredService<IGenericEntityService>();
         var cache = _serviceProvider.GetRequiredService<IDistributedCache>();
@@ -502,7 +529,7 @@ public sealed class SprkChatAgentFactory
     ///   - <see cref="DocxExportService"/> (resolved from DI via <see cref="IExportService"/>)
     /// </summary>
     /// <returns>A configured <see cref="PlaybookOutputHandler"/> instance.</returns>
-    public PlaybookOutputHandler CreatePlaybookOutputHandler()
+    public virtual PlaybookOutputHandler CreatePlaybookOutputHandler()
     {
         using var scope = _serviceProvider.CreateScope();
         var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
