@@ -43,10 +43,12 @@ const useStyles = makeStyles({
     width: '100%',
     minWidth: 0, // Allow shrinking below intrinsic content width
     padding: '2px',
-    // v1.4.10 — breathing room between the CardChrome header (or form
-    // section heading above) and the first chart content row. UAT round on
-    // v1.4.9 reported 12px wasn't enough; bumped to 20px.
-    paddingTop: '20px',
+    // v1.4.11 — paddingTop kept minimal (2px) so CardChrome's title sits flush
+    // with the top of the form section, matching the OOTB section banner
+    // position of standard form sections like "MATTER INFORMATION". The
+    // "below header" breathing room is handled inside CardChrome itself
+    // (its header has a 12px bottom margin → consistent across all 5 cards).
+    paddingTop: '2px',
     paddingBottom: '14px', // Minimal space for version badge
     boxSizing: 'border-box',
     position: 'relative',
@@ -727,7 +729,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
       )}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.10 • 2026-06-01</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.11 • 2026-06-01</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>
