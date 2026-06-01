@@ -202,6 +202,24 @@ public static class AnalysisServicesModule
         // B7 — IRagService (P3 Fail-Fast). Real impl registered in AddRagServices behind AI Search keys gate.
         services.AddSingleton<IRagService, NullRagService>();
 
+        // ── Tier 1.5 round 4 — flushed by Step 9.5 latent-bug scan 2026-06-01 ─────────────────
+        // Two additional P3 Fail-Fast Null-Objects surfaced by the same anti-pattern that the
+        // 3 prior Tier 1.5 rounds fixed: unconditional endpoint mappings whose handlers inject
+        // services that AddRagServices registers behind a compound + AI Search keys sub-gate.
+        // Absorbed under D-02 cluster exception per user approval. Same root cause pattern as
+        // the prior residuals (ChatContextMappingService, DocxExportService, IWorkingDocumentService).
+        //
+        // IVisualizationService — consumed by VisualizationEndpoints (EndpointMappingExtensions.cs:159
+        //   app.MapVisualizationEndpoints() — unconditional). Real impl registered AddRagServices line 423.
+        //   Lifetime: singleton (matches real VisualizationService).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService, NullVisualizationService>();
+
+        // IFileIndexingService — consumed by RagEndpoints handlers IndexFile + SendToIndex
+        //   (EndpointMappingExtensions.cs:133 app.MapRagEndpoints() — unconditional) AND by
+        //   IndexingWorkerHostedService / RagIndexingJobHandler / BulkRagIndexingJobHandler. Real
+        //   impl registered AddRagServices line 422. Lifetime: scoped (matches real FileIndexingService).
+        services.AddScoped<IFileIndexingService, NullFileIndexingService>();
+
         // B2 — SprkChatAgentFactory (P3 Fail-Fast subclass). Task 011 Phase 1b Tier 3, D-09 §2 B2.
         // Real impl registered unconditionally inside AddAiModule (only invoked on compound-ON path).
         // The Null subclass uses the protected base ctor that bypasses AI deps; consumed unconditionally
@@ -430,7 +448,14 @@ public static class AnalysisServicesModule
             // can still resolve their DI graph. Endpoint catches convert FeatureDisabledException
             // to 503 ProblemDetails. Task 011 Phase 1b Tier 2, D-09 \u00a72 B7.
             services.AddSingleton<IRagService, NullRagService>();
-            Console.WriteLine("\u26a0 RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key) \u2014 NullRagService registered");
+
+            // Tier 1.5 round 4 (2026-06-01) \u2014 IVisualizationService + IFileIndexingService share
+            // the same AI-Search-keys sub-gate as IRagService. Mirror the fallback registration
+            // so the AI-Search-keys-missing branch also resolves these consumers' DI graph.
+            services.AddSingleton<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService, NullVisualizationService>();
+            services.AddScoped<IFileIndexingService, NullFileIndexingService>();
+
+            Console.WriteLine("\u26a0 RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key) \u2014 NullRagService + NullVisualizationService + NullFileIndexingService registered");
         }
 
         services.AddSingleton<ITextChunkingService, TextChunkingService>();

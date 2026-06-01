@@ -523,6 +523,11 @@ public static class RagEndpoints
 
             return Results.Ok(result);
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 1.5 round 4 (D-02 cluster exception): NullFileIndexingService surfaced.
+            return ex.AsFeatureDisabled503();
+        }
         catch (Exception ex)
         {
             return Results.Problem(
@@ -686,6 +691,14 @@ public static class RagEndpoints
                         ErrorMessage = indexResult.ErrorMessage
                     });
                 }
+            }
+            catch (FeatureDisabledException ex)
+            {
+                // Task 011 Phase 1b Tier 1.5 round 4 (D-02 cluster exception): NullFileIndexingService surfaced.
+                // Kill-switch state is request-global, not per-document — short-circuit the whole batch
+                // with a 503 ProblemDetails rather than recording per-document failures that would mislead
+                // operators into chasing N "indexing failed" entries when the root cause is one kill switch.
+                return ex.AsFeatureDisabled503();
             }
             catch (Exception ex)
             {
