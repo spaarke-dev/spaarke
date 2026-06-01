@@ -154,6 +154,16 @@ public static class AnalysisServicesModule
         // Promoted under D-02 cluster exception. ADR-010.
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.DocxExportService>();
 
+        // Tier 1.5 round 3 residual — IWorkingDocumentService (deps: IGenericEntityService + IServiceProvider +
+        // IOptions<AnalysisOptions> + ILogger — all unconditional). Originally registered inside
+        // AddAnalysisOrchestrationServices (conditional); Phase 1c re-re-triage 2026-06-01 surfaced
+        // ChatEndpoints.SendMessageAsync line 318 injects IWorkingDocumentService as a hard [FromServices]
+        // parameter → DI resolve failure (500 NoServiceFound) when Analysis:Enabled=false. Same root cause
+        // pattern as ChatContextMappingService + DocxExportService. Note: ChatEndpoints.ApprovePlanAsync
+        // line 1334 uses defensive RequestServices.GetService<>() — that path was tolerant; SendMessageAsync
+        // was not. Promoted under D-02 cluster exception. ADR-010.
+        services.AddScoped<IWorkingDocumentService, WorkingDocumentService>();
+
         // L5 — AnalysisChatContextResolver (deps: IGenericEntityService + IDistributedCache + ILogger).
         services.AddScoped<AnalysisChatContextResolver>();
 
@@ -217,7 +227,11 @@ public static class AnalysisServicesModule
         services.AddHttpClient<IScopeResolverService, ScopeResolverService>();
         services.AddScoped<IScopeManagementService, ScopeManagementService>();
         services.AddScoped<IAnalysisContextBuilder, AnalysisContextBuilder>();
-        services.AddScoped<IWorkingDocumentService, WorkingDocumentService>();
+        // IWorkingDocumentService promoted to unconditional (task 011 Phase 1b Tier 1.5 round 3,
+        // RB-T028-04 cluster residual — 2026-06-01). Phase 1c re-re-triage surfaced
+        // ChatEndpoints.SendMessageAsync line 318 injects IWorkingDocumentService as a hard
+        // [FromServices] parameter → DI resolve failure (500 NoServiceFound) when Analysis:Enabled=false.
+        // See AddUnconditionalChatAndNotificationServices below.
         services.AddHttpContextAccessor();
         // DocxExportService promoted to unconditional (task 011 Phase 1b Tier 1.5 round 2, RB-T028-04
         // cluster residual — 2026-06-01). Phase 1c re-triage surfaced ChatWordExportEndpoints.ExportToWordAsync
