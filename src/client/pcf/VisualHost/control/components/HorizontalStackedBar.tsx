@@ -45,10 +45,10 @@ export interface IHorizontalStackedBarProps {
 
 // ============= Constants =============
 
-// v1.4.6 — bar height bumped 20 → 24 to read closer to the donut arc thickness
+// v1.4.7 — bar height 24 → 32 to read closer to the donut arc thickness
 // (donut at innerRadius 0.62 has ~38% of radius as arc width; on a typical
 // 200px donut that's ~38px). The two visualizations now feel coordinated.
-const DEFAULT_BAR_HEIGHT = 24;
+const DEFAULT_BAR_HEIGHT = 32;
 const FILL_TRANSITION_MS = 400;
 
 // ============= Color Token Resolution =============
@@ -105,32 +105,19 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground3,
     position: 'relative', // anchor for the budget marker (v1.4.6)
   },
-  // v1.4.6 — Over-budget indicator: a 2px vertical line + small triangle
-  // anchored at the position where the budget falls inside the actual-amount
-  // bar. Only rendered when `rawRatio > 1`. Color contrasts with the bar fill
-  // so it reads as a clear "this is the budget line" marker.
+  // v1.4.7 — Over-budget marker: small diamond (rotated 45° square) anchored
+  // at the boundary between the in-budget (green) and over-budget (red)
+  // segments inside the actual-amount bar. Replaces the v1.4.6 line+label.
   budgetMarker: {
     position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: '2px',
-    backgroundColor: tokens.colorNeutralForeground1,
-    pointerEvents: 'none',
-    transform: 'translateX(-1px)',
-  },
-  budgetMarkerLabel: {
-    position: 'absolute',
-    top: '-2px',
-    transform: 'translateX(-50%)',
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground1,
+    top: '50%',
+    width: '14px',
+    height: '14px',
     backgroundColor: tokens.colorNeutralBackground1,
-    paddingLeft: tokens.spacingHorizontalXXS,
-    paddingRight: tokens.spacingHorizontalXXS,
+    border: `2px solid ${tokens.colorNeutralForeground1}`,
+    transform: 'translate(-50%, -50%) rotate(45deg)',
     pointerEvents: 'none',
-    whiteSpace: 'nowrap',
-    lineHeight: tokens.lineHeightBase100,
-    fontWeight: tokens.fontWeightSemibold,
+    boxSizing: 'border-box',
   },
   barFill: {
     height: '100%',
@@ -139,6 +126,23 @@ const useStyles = makeStyles({
     transitionDuration: `${FILL_TRANSITION_MS}ms`,
     transitionTimingFunction: 'ease-in-out',
     minWidth: 0,
+  },
+  // v1.4.7 — Two-segment fill for over-budget visualization. The bar fills
+  // 100% of the container width, divided into:
+  //   - in-budget segment (left): success/green, sized to (total/current)*100%
+  //   - over-budget segment (right): danger/red, fills the remainder
+  // Sub-elements share the bar's height and inherit the container's overflow:hidden.
+  segmentRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    width: '100%',
+    height: '100%',
+  },
+  segmentInBudget: {
+    height: '100%',
+  },
+  segmentOver: {
+    height: '100%',
   },
   footerRow: {
     display: 'flex',
@@ -363,33 +367,49 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
         aria-valuemax={100}
         aria-label={ariaLabel}
       >
-        {(hasTotalValue || currentValue > 0) && (
-          <div
-            className={styles.barFill}
-            style={{
-              width: hasTotalValue ? `${fillPercent}%` : '100%',
-              backgroundColor: barColor,
-            }}
-          />
-        )}
-        {/* v1.4.6 — over-budget marker: vertical line + "Budget" label at the
-            position where the budget would fall inside the actual-amount bar.
-            Only renders when the current value exceeds the total. */}
-        {budgetMarkerLeftPercent !== null && (
-          <>
+        {/* v1.4.7 — Two rendering paths:
+            (a) UNDER or AT budget: single fill segment using color thresholds
+                (back-compat with chart def's `colorThresholds` semantics).
+            (b) OVER budget: two segments — green (in-budget) on the left,
+                red (over-budget) on the right — divided at the position where
+                the budget falls inside the actual-amount bar. Diamond marker
+                sits at the segment boundary. */}
+        {isOverTotal && budgetMarkerLeftPercent !== null ? (
+          <div className={styles.segmentRow}>
             <div
-              className={styles.budgetMarker}
-              style={{ left: `${budgetMarkerLeftPercent}%` }}
-              aria-hidden={true}
+              className={styles.segmentInBudget}
+              style={{
+                width: `${budgetMarkerLeftPercent}%`,
+                backgroundColor: getTokenSetColors('success').donutSegment,
+              }}
             />
-            <span
-              className={styles.budgetMarkerLabel}
-              style={{ left: `${budgetMarkerLeftPercent}%` }}
-              aria-hidden={true}
-            >
-              {formattedTotal}
-            </span>
-          </>
+            <div
+              className={styles.segmentOver}
+              style={{
+                width: `${100 - budgetMarkerLeftPercent}%`,
+                backgroundColor: getTokenSetColors('danger').donutSegment,
+              }}
+            />
+          </div>
+        ) : (
+          (hasTotalValue || currentValue > 0) && (
+            <div
+              className={styles.barFill}
+              style={{
+                width: hasTotalValue ? `${fillPercent}%` : '100%',
+                backgroundColor: barColor,
+              }}
+            />
+          )
+        )}
+        {/* Diamond marker — only rendered when over budget, positioned at
+            the in-budget/over-budget segment boundary. */}
+        {budgetMarkerLeftPercent !== null && (
+          <div
+            className={styles.budgetMarker}
+            style={{ left: `${budgetMarkerLeftPercent}%` }}
+            aria-hidden={true}
+          />
         )}
       </div>
 

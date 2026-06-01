@@ -31,8 +31,12 @@ const useStyles = makeStyles({
     flexDirection: 'row',
     alignItems: 'stretch',
     cursor: 'pointer',
-    // v1.4.6 — reduced 80→56px per UAT feedback ("reduce height of the card")
-    minHeight: '56px',
+    // v1.4.7 — reduced further (56 → 44) per UAT feedback ("reduce height of
+    // the card"). v1.4.6 changed minHeight alone but the card content's
+    // internal padding kept actual rendered height ~80px. This round also
+    // tightens dateColumn + content paddings + font sizes so the floor is
+    // actually visible.
+    minHeight: '44px',
     overflow: 'hidden',
     padding: '0',
     ':hover': {
@@ -48,27 +52,35 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: '64px',
-    padding: tokens.spacingVerticalS,
+    minWidth: '56px',
+    // v1.4.7 — tighter vertical padding (was spacingVerticalS) lets the
+    // 44px minHeight actually take effect; the column still reads as
+    // distinct because horizontal padding stays generous.
+    paddingTop: tokens.spacingVerticalXXS,
+    paddingBottom: tokens.spacingVerticalXXS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground1,
   },
   dateDay: {
-    fontSize: tokens.fontSizeHero700,
+    fontSize: tokens.fontSizeBase500,
     fontWeight: tokens.fontWeightBold,
-    lineHeight: tokens.lineHeightHero700,
+    lineHeight: tokens.lineHeightBase500,
   },
   dateMonth: {
-    fontSize: tokens.fontSizeBase200,
+    fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightSemibold,
     textTransform: 'uppercase' as const,
+    lineHeight: tokens.lineHeightBase100,
   },
   content: {
     display: 'flex',
     flexDirection: 'column',
     flex: 1,
-    padding: tokens.spacingVerticalS,
+    paddingTop: tokens.spacingVerticalXXS,
+    paddingBottom: tokens.spacingVerticalXXS,
     paddingLeft: tokens.spacingHorizontalM,
-    gap: tokens.spacingVerticalXS,
+    gap: tokens.spacingVerticalXXS,
     overflow: 'hidden',
     justifyContent: 'center',
   },
@@ -85,7 +97,7 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     display: '-webkit-box',
-    WebkitLineClamp: 2,
+    WebkitLineClamp: 1,
     WebkitBoxOrient: 'vertical' as const,
   },
   assignedTo: {
@@ -97,7 +109,8 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: tokens.spacingHorizontalM,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
     gap: tokens.spacingVerticalXXS,
   },
   badgeLabel: {
@@ -123,16 +136,19 @@ function getDueBadgeAppearance(daysUntilDue: number, isOverdue: boolean): 'dange
 
 /**
  * Get urgency-based background color for the date column.
- * Uses CSS custom properties from Fluent v9 theme for dark mode support.
+ * v1.4.7 — switched from `colorStatusXxxBackground2` (pastel tints) to
+ * `colorPaletteXxxBackground2` so the date column tints align with the
+ * donut/HSBar palette (same `colorPalette*` family the rest of Matter UI
+ * uses). Reads cleanly in both light and dark mode.
  */
 function getUrgencyDateStyle(daysUntilDue: number, isOverdue: boolean): React.CSSProperties {
   if (isOverdue || daysUntilDue < 3) {
-    return { backgroundColor: 'var(--colorStatusDangerBackground2)' };
+    return { backgroundColor: tokens.colorPaletteRedBackground2 };
   }
   if (daysUntilDue <= 5) {
-    return { backgroundColor: 'var(--colorStatusWarningBackground2)' };
+    return { backgroundColor: tokens.colorPaletteYellowBackground2 };
   }
-  return { backgroundColor: 'var(--colorStatusSuccessBackground2)' };
+  return { backgroundColor: tokens.colorPaletteGreenBackground2 };
 }
 
 function getDueBadgeText(daysUntilDue: number, isOverdue: boolean): string {
