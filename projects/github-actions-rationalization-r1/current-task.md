@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Task 030 (Phase 3 — actionlint workflow) ready to start |
-| **Step** | Wave A ✅ + Wave B ✅ + 020 ✅ + Wave C ✅ complete (001, 002, 010, 011, 012, 020, 021, 022) — 8/17 done |
-| **Status** | not-started (task 030) |
-| **Next Action** | Dispatch task 030 (add `.github/workflows/workflows-validate.yml` with actionlint). Phase 3 is STRICTLY SEQUENTIAL per NFR-05 — 030 → 031 → 032 must run in order. |
+| **Task** | Task 031 (Phase 3 — required-status-check) needs PR strategy decision |
+| **Step** | 9/17 done. Phase 3: 030 ✅, 031/032 pending |
+| **Status** | not-started (task 031 — blocked on PR strategy) |
+| **Next Action** | Need user input: task 031 requires the `actionlint` status-check context to have fired at least once on a PR before it can be added to required-status-checks. Options: (a) open the project's eventual merge PR as draft now, (b) open a small test PR to register context name, (c) defer 031/032 to near-project-end. |
 
 ### Files Modified This Session
 - `baseline/workflow-inventory-2026-06-01.md` — Wave A
