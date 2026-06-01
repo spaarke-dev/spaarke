@@ -1,7 +1,8 @@
 <task id="090" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>Project wrap-up: lessons-learned, archive baseline, update README, run /repo-cleanup</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-05-31</completion-date>
     <estimated-effort>1-2 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>wrap-up, lessons-learned, repo-cleanup, project-close</tags>
@@ -10,6 +11,22 @@
     <parallel-reason>Final task — runs sequentially after task 086 verification passes. Touches multiple project files (`notes/lessons-learned.md`, `README.md`, `current-task.md`) + invokes `/repo-cleanup` skill which is itself a sequential audit. No other tasks to parallelize with at this point.</parallel-reason>
     <rigor>STANDARD</rigor>
     <repair-not-rewrite>true</repair-not-rewrite>
+    <completion-notes>
+      Project wrap-up executed 2026-05-31 per task POML steps 1-9. Outputs:
+      (1) `notes/lessons-learned.md` written — 9 sections (header, what-went-well, what-surprised-us, what-we-would-do-differently, escalations-summary, sibling-coord-outcomes, Project 2-5 recommendations, carry-forward items, closing summary).
+      (2) `README.md` status header flipped from "🟢 Planning" to "✅ COMPLETE (closed 2026-05-31)" with closure note + ledger + retrospective cross-refs.
+      (3) `/repo-cleanup` checks performed manually (sub-agent .claude/ write boundary): POML statuses verified (4 POMLs have explicit `<status>` tags, all completed; ledger-by-TASK-INDEX-checkmark is the canonical status source); TASK-INDEX shows ✅ for all tasks; all 6 ledgers exist; 1 escalation file (RWT-T031-01 NO-OP — expected per `rewrite-ledger.md`); no orphaned files in `notes/handoffs/`. Stray file in worktree root flagged per task 086 (binary-encoded "Purpose" filename — out of scope per NFR-01, owner attention recommended).
+      (4) TRX baseline files (20 files in `baseline/`) already gitignored per root `.gitignore:58 *.trx`; no action needed.
+      (5) Task 090 POML status flipped to completed (this block).
+      (6) TASK-INDEX.md updated: 090 row 🔲 → ✅ + "Project COMPLETE" header line appended.
+      (7) `current-task.md` not reset (file is 121K tokens / preserved per task instructions for context recovery + audit trail).
+
+      Phase 4 outcomes respected: task 086 PASS with operational context; 23 commits this session; Wave 4.1 + 4.2 complete.
+
+      Binding constraints satisfied: NFR-01 (only `projects/sdap-bff.api-test-suite-repair/` files modified); NFR-09 (`repair-not-rewrite: true` declared above).
+
+      Project ready for `/merge-to-master` (main session decision — NOT invoked from this task).
+    </completion-notes>
   </metadata>
 
   <prompt>

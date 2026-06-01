@@ -3758,3 +3758,71 @@ Both well under 50% (NFR-02 satisfied) — **no §4.8 escalations required**.
 **Phase 4 Wave 4.2 (FINAL) status**: ✅ CLOSED. Project ready for task 090 wrap-up + `/merge-to-master`.
 
 **Recommendation**: invoke `/repo-cleanup` (task 090) then `/merge-to-master` per the project exit-flow. Post-merge, append a "Post-Merge Master Run" line to exit-ledger.md §14.6 once the first master `sdap-ci.yml` SUCCESS run lands.
+
+
+---
+
+## Task 090 - Completed 2026-05-31 — PROJECT CLOSE
+
+**Rigor**: STANDARD (POML `<rigor>STANDARD</rigor>`).
+**Action**: Executed task 090 wrap-up per POML steps 1-9.
+
+### Outputs
+
+1. **`notes/lessons-learned.md`** (NEW) — 9 sections written per design.md §11.1 + task POML acceptance criteria: header / what-went-well (7 subsections) / what-surprised-us (4 subsections) / what-we-would-do-differently (3 subsections) / escalations summary (1.23%) / sibling-coordination outcomes (3 projects) / Project 2-5 recommendations / carry-forward items / closing summary. ~9,000 words; honest retrospective.
+
+2. **`README.md`** status header flipped: `🟢 Planning` → `✅ COMPLETE (closed 2026-05-31)` with closure note + ledger + retrospective cross-refs.
+
+3. **`/repo-cleanup` checks** (performed manually inline per sub-agent .claude/ write boundary):
+   - All 62 POMLs: 4 have explicit `<status>` tags (008, 026, 027, 028 — all completed); rest use TASK-INDEX checkmark as canonical status source. 090 POML status flipped to `<status>completed</status>` + `<completion-date>2026-05-31</completion-date>` + `<completion-notes>` block added.
+   - TASK-INDEX.md: all task rows ✅; project-COMPLETE header line appended at top.
+   - All 6 ledgers exist (`repair`, `archive`, `real-bug`, `flaky`, `rewrite`, `exit`) in `ledgers/`.
+   - 1 escalation file exists (`rewrite-request-T-031-SCOPE-MISMATCH.md` — NO-OP scope-mismatch, auto-approved informational per `rewrite-ledger.md`).
+   - No orphaned files in `notes/handoffs/` (3 handoff files + .gitkeep — all referenced from current-task.md / TASK-INDEX.md).
+   - 20 TRX files in `baseline/` correctly gitignored via root `.gitignore:58 *.trx` (no action needed).
+   - **STRAY FILE FLAG**: 1 untracked file with binary-encoded filename containing "Purpose" surrounded by non-ASCII bytes (private-use area 0xEF 0x80 0xAA / 0xEF 0x80 0xBA) sits at worktree root. Out of scope per NFR-01; owner attention recommended to investigate origin (likely editor scratch save with corrupted name) and decide deletion/quarantine.
+
+4. **`tasks/090-project-wrap-up.poml`** status flipped: `not-started` → `completed` + `<completion-date>2026-05-31</completion-date>` + `<completion-notes>` block.
+
+5. **`tasks/TASK-INDEX.md`** updates: 090 row 🔲 → ✅; "PROJECT COMPLETE" header inserted at top.
+
+6. **`current-task.md`** (this append). Per task instructions, not reset — preserved for context recovery + audit trail (121K tokens of session history).
+
+### Phase 4 outcomes respected
+
+- Task 086 declared PASS (all 14 success criteria ✅; FR-29 + FR-30 satisfied with operational context).
+- 23 commits this session.
+- Phase 4 Wave 4.1 + Wave 4.2 (FINAL) closed.
+
+### Binding constraints satisfied
+
+- **NFR-01**: ✅ no `src/` / `power-platform/` / `infra/` / `scripts/` changes — only `projects/sdap-bff.api-test-suite-repair/` files modified (README.md + tasks/090 POML + TASK-INDEX.md + notes/lessons-learned.md NEW + current-task.md append).
+- **NFR-09**: ✅ `<repair-not-rewrite>true</repair-not-rewrite>` declared in 090 POML metadata.
+- **Permission boundary**: ✅ `.claude/` paths NOT touched (correctly per sub-agent boundary).
+
+### Project Close Celebration
+
+🎉 **Project `sdap-bff.api-test-suite-repair` COMPLETE** — Phase 0/1/2+3/4 all closed; 540→0 Failed; 20 real-bug entries documented; ready for `/merge-to-master`.
+
+- **Wall-clock**: 1 day (vs. design.md §10 estimate of 16-27 days — **−94% to −96%**)
+- **Person-hours**: ~25-35h (vs. estimate of 80-124h — **−56% to −72%**)
+- **Parallel waves executed**: 13 (as planned)
+- **Concurrency cap**: 6 agents/wave (NFR-12)
+- **§4.8 rewrite escalation rate**: 1.23% (well under 5% hard limit)
+- **Archive count**: 0 (trivially satisfies NFR-04 ≤10/phase)
+- **Flaky-quarantine count**: 0 (all residuals are real-bug, not flaky)
+- **Triple-run flake detection**: 0 across 6 runs
+- **Sibling-fixture pattern**: 5 sites documented; 7-keys contract captured in `docs/procedures/testing-and-code-quality.md`
+
+**Out of agent scope (parent-session responsibility)**:
+- `git commit` (NOT run — main session per task instructions).
+- `/merge-to-master` (NOT invoked — main session decision per project exit-flow per task instructions).
+- Post-merge: append "Post-Merge Master Run" line to `exit-ledger.md` §14.6 once the first master `sdap-ci.yml` SUCCESS run lands.
+- 20 real-bug entries carry forward to subsequent projects per per-entry "Owner: TBD" + fix-by-date assignments.
+
+**Audit chain closed**. Future audits cite:
+- `exit-ledger.md` §14 (FR-29 + FR-30 verification)
+- `exit-ledger.md` §13 (closing statement)
+- `notes/lessons-learned.md` (retrospective + Project 2-5 calibration)
+
+*Task 090 complete. Project complete. Ready for main-session merge.*

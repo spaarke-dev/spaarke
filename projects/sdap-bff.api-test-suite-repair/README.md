@@ -1,9 +1,10 @@
 # sdap-bff.api-test-suite-repair
 
-> **Status**: 🟢 Planning — Ready for Phase 0 task execution
+> **Status**: ✅ **COMPLETE** (closed 2026-05-31) — All 14 success criteria satisfied; Failed: 540 → 0; 20 real-bug entries documented; CI gate operational; anti-drift governance shipped. Outcomes A-D delivered. See [`ledgers/exit-ledger.md`](ledgers/exit-ledger.md) for evidence + [`notes/lessons-learned.md`](notes/lessons-learned.md) for retrospective.
 > **Created**: 2026-05-31
+> **Closed**: 2026-05-31
 > **Owner**: ralph.schroeder@hotmail.com
-> **Branch**: `work/sdap-bff.api-test-suite-repair`
+> **Branch**: `work/sdap-bff.api-test-suite-repair` (ready for `/merge-to-master`)
 > **Predecessor**: [`projects/sdap-bff-api-remediation-fix/`](../sdap-bff-api-remediation-fix/) — Phase 4 facade shipped 2026-05-26; test repair deliberately deferred to this project
 
 ---
