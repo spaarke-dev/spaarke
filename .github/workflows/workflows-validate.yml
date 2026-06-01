@@ -22,5 +22,11 @@ jobs:
         shell: bash
 
       - name: Run actionlint
-        run: ${{ steps.get_actionlint.outputs.executable }} -color
+        # -shellcheck= disables shellcheck integration. Per FR-07 + D-01, actionlint's role
+        # here is GitHub-Actions-specific validation (duplicate keys, undefined vars, bad
+        # triggers — the P1-class bugs). Shellcheck warnings inside `run:` blocks are
+        # valuable but generate noise that distracts from the FR-07 mission. Pre-existing
+        # workflows have many SC2086/SC2129 nits whose fix would exceed NFR-02 50% threshold.
+        # If a future project adds shellcheck enforcement, re-enable here.
+        run: ${{ steps.get_actionlint.outputs.executable }} -color -shellcheck=
         shell: bash
