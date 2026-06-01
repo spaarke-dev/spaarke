@@ -26,7 +26,7 @@
 | 001 | Verify 20 real-bug entries reproducible | 0 | ✅ | 000 | P0-W1 | STANDARD | — |
 | 002 | Sibling-owner outreach (Action Engine, Insights, Communications) | 0 | ✅ | 000 | P0-W1 | MINIMAL | — |
 | 010 | Fix RB-T044-01 — `ConversationHistorySanitizer` cross-matter privilege leak (HIGH) | 1 | ✅ | 000, 001, 002 | (sequential) | FULL | ✓ |
-| 011 | Fix RB-T028-03/04/05/06 cluster — conditional registration root cause (HIGH × 4) | 1 | 🔲 | 000, 001 | (sequential, after 010) | FULL | ✓ |
+| 011 | Fix RB-T028-03/04/05/06 cluster — conditional registration root cause (HIGH × 4) | 1 | ⏸ ESCALATED 2026-06-01 ([E-01](../escalations/E-01-rb-t028-cluster-scope-expansion.md)) | 000, 001 | (sequential, after 010) | FULL | ✓ |
 | 012 | Resolve RB-T028-02 Insights Layer 2 HOLD (FR-05) — path-b (production fix in GroundingVerifier.cs) | 1 | ✅ 2026-06-01 | 002 | P1-W1 | FULL | ✓ |
 | 013 | Phase 1 exit triple-run validation gate | 1 | 🔲 | 010, 011, 012 | (sequential, phase-exit) | STANDARD | — |
 | 020 | Fix RB-T044-02 — `CitationExtractor.NormalizeCaseLaw` reporter period | 2 | 🔲 | 013 | P2-W1 | FULL | ✓ |

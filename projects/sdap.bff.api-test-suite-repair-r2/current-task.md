@@ -10,10 +10,14 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 012 — RB-T028-02 Insights Layer 2 HOLD resolution (path-b) — ✅ COMPLETE 2026-06-01 |
-| **Step** | All POML steps complete; production fix applied (GroundingVerifier.Normalize internal→public); 3 tests Skip→Pass; triple-run Failed: 0 × 3; quality gates PASS; ledger RB-T028-02 → `repaired`; D-07 finalized; task 026 deferred (subsumed); committed + pushed. |
-| **Status** | completed |
-| **Next Action** | Phase 1 P1-S2 (task 011, RB-T028-03/04/05/06 cluster) is running in parallel; Phase 1 P1-W1 (this task) ✅ done. Next Phase 1 gate is task 013 (exit triple-run validation) — runs after BOTH 011 and 012 complete. |
+| **Task** | 011 — RB-T028-03/04/05/06 HIGH cluster — ⏸ **ESCALATED 2026-06-01** ([E-01](escalations/E-01-rb-t028-cluster-scope-expansion.md)) |
+| **Step** | Investigation complete; root cause cascade discovered (5 layers); production code + tests REVERTED to baseline; escalation E-01 filed |
+| **Status** | escalated |
+| **Next Action** | Owner reviews E-01 and selects path A/B/C/D. Task 011 blocked until owner direction received. Task 012 (parallel) ✅ COMPLETE. Phase 1 exit gate (task 013) blocked on task 011. |
+
+### Task 012 — ✅ COMPLETE 2026-06-01 (separate parallel task)
+
+All POML steps complete; production fix applied (GroundingVerifier.Normalize internal→public); 3 tests Skip→Pass; triple-run Failed: 0 × 3; quality gates PASS; ledger RB-T028-02 → `repaired`; D-07 finalized; task 026 deferred (subsumed); committed `bce111c3` + pushed.
 
 ### Rigor Decision (Task 012 — current)
 
@@ -96,6 +100,7 @@ Phase 0 will take ~1 week of calendar; tasks 000 + 001 are agent-executable; **t
 - [x] **Task 001 (Phase 0 P0-W1)**: 20-entry reproducibility verification — 2026-06-01. All 20 entries verified-reproducible via pragmatic static-inspection methodology (Skip + Trait + production-path-extant). 5/5 HIGH ready for Phase 1 task 010 + task 011. Output: `baseline/20-entries-reproducibility-verification.md`. Zero `needs-investigation` flagged. Three production-path citations had drifted to "equivalent path" (anticipated by ledger): RB-T028-02 (`Layer2OutcomeExtractor.cs` → `Services/Ai/Insights/Extraction/` namespace), RB-T028-05 (no `ReAnalysisFlowEndpoints.cs`; routes through `ChatEndpoints.cs` + `Program.cs`), RB-T028-07 (`Api/Ai/UploadEndpoints.cs` → `Api/UploadEndpoints.cs`).
 - [x] **Task 002 complete** (P0-W1, parallel task 3 of 3): Sibling-coordination consolidated to `dev@spaarke.com`; r1 priority-order.md FR-06 slots populated; D-07 placeholder created; path (c) removed from FR-05 — 2026-06-01
 - [x] **Task 010 complete** (Phase 1 P1-S1, FULL rigor, HIGH severity): RB-T044-01 cross-matter privilege-leak fix — `ConversationHistorySanitizer.StripRetrievedContent` re-implemented with **unified matter-pivot-aware semantic** (ledger's one-line inversion would have broken `Sanitizer_StripsRetrievalBlocks_PreservesConclusions` — D-03 lesson confirmed). Production file: ~42 added lines on 113-line file (~37% — NFR-02 compliant). 5 PrivilegeLeakageTests Skip→Pass + 1 new 3-matter-pivot regression test (`MatterPivot_ThreeMatters_StripsOnlyImmediatelyPreviousMatterContent`) — FR-02 explicit "cross-matter regression test added" requirement satisfied. Per-fix triple-run: 3 × **Failed: 0** / 5,899 Passed / 132 Skipped / 6,031 Total — see [`baseline/per-fix-triple-run-rb-t044-01-2026-06-01.md`](baseline/per-fix-triple-run-rb-t044-01-2026-06-01.md). Step 9.5 quality gates: `code-review` PASS (0 Critical / 0 Warning / 1 cosmetic Suggestion); `adr-check` PASS (7 ADRs compliant: ADR-001, ADR-007, ADR-008, ADR-010, ADR-013 refined, ADR-015, ADR-029); BFF Hygiene § A all 6 rules satisfied. Security review request to `dev@spaarke.com` per NFR-03 pending in PR #318 comment. — 2026-06-01
+- [⏸] **Task 011 ESCALATED** (Phase 1 P1-S2, FULL rigor, HIGH cluster, 4 RB IDs): Investigation surfaced a 5-layer root-cause cascade much wider than the r1 ledger's "shared root cause" framing captured. Layer 1 (NotificationService misregistered) → Layer 2 (IBriefingAi? param-inference) → Layer 3 (IInvoiceSearchService conditional) → Layer 4 (PendingPlanManager conditional on ChatEndpoints) → Layer 5+ (likely 10-20 more endpoint handlers). r1 ledger's preferred Approach 1 (conditional endpoint mapping) violates NFR-01 because tests expect endpoints to function with `Analysis:Enabled=false`. r1 ledger's alternative Approach 2 (NullObject services) requires ~10+ Null impls + new ADR (~20-30h, exceeds task estimate). All production code + test changes during investigation REVERTED to baseline. **Escalation filed**: [`escalations/E-01-rb-t028-cluster-scope-expansion.md`](escalations/E-01-rb-t028-cluster-scope-expansion.md). Owner decision required (path A/B/C/D). — 2026-06-01
 
 ### Current Step
 
