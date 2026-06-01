@@ -65,7 +65,7 @@ Per FR-08, branch protection on `master` requires these 4 contexts to pass befor
 
 - **Purpose**: dev → staging → prod promotion gate. Downloads deployment artifact from upstream SDAP CI run, redeploys per env with smoke tests. Prod requires reviewer approval via GitHub environment `prod`. Wave-B artifact-contract verification + Wave-D `url:` removal applied (per D-02).
 - **Triggers**: `workflow_dispatch` (env input + artifact run id + skip-smoke-tests bool); `workflow_run` after `SDAP CI` completes on master.
-- **Common failures**: upstream SDAP CI artifact missing or mis-named, OIDC federated credential mismatch for the target env, smoke test failure post-deploy.
+- **Common failures**: upstream SDAP CI artifact missing or mis-named, OIDC federated credential mismatch for the target env (see [D-11](../projects/github-actions-rationalization-r1/decisions/D-11-deploy-promote-oidc-federated-credential-gap.md) — AADSTS700213 on first post-merge run 2026-06-01; owner action pending), smoke test failure post-deploy.
 - **Escalation**: see [`workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md).
 
 ### sdap-ci.yml
@@ -145,8 +145,7 @@ Per D-05 (see [`projects/github-actions-rationalization-r1/design.md`](../projec
 
 ### Owner sign-off (update when applied)
 
-- [ ] **Owner applied routing on YYYY-MM-DD** — verified `dev@spaarke.com` receives `spaarke-dev` notifications.
-- [ ] **OR** Tracked as follow-up (e.g., owner doesn't have direct inbox access; needs an alternate strategy).
+- [x] **Owner applied routing on 2026-06-01** — verified `dev@spaarke.com` receives `spaarke-dev` notifications. (Natural test signal: `Environment Promotion` failure at 2026-06-01 20:02:01 UTC; notification expected at dev@spaarke.com if routing took effect before that timestamp.)
 
 Per Assumption-4 in [`spec.md`](../projects/github-actions-rationalization-r1/spec.md): the owner may need a forwarding alias OR a dedicated `spaarke-dev-bot` GitHub user if the `dev@spaarke.com` inbox isn't directly accessible for verification. Per FR-12 acceptance, **documentation existing is sufficient for project close** — the owner's manual application is tracked as a follow-up and does not gate the project graduation.
 
