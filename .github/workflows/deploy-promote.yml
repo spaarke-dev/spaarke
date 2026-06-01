@@ -25,7 +25,7 @@ on:
         options:
           - dev
           - staging
-          - prod
+          - production
       artifact_run_id:
         description: 'Workflow run ID for deployment artifacts (blank = latest successful CI)'
         required: false
@@ -99,11 +99,11 @@ jobs:
               echo "deploy_prod=false" >> $GITHUB_OUTPUT
               echo "promotion_path=dev → staging" >> $GITHUB_OUTPUT
               ;;
-            prod)
+            production)
               echo "deploy_dev=true" >> $GITHUB_OUTPUT
               echo "deploy_staging=true" >> $GITHUB_OUTPUT
               echo "deploy_prod=true" >> $GITHUB_OUTPUT
-              echo "promotion_path=dev → staging → prod" >> $GITHUB_OUTPUT
+              echo "promotion_path=dev → staging → production" >> $GITHUB_OUTPUT
               ;;
           esac
 
@@ -305,11 +305,12 @@ jobs:
     needs: [plan, deploy-staging]
     if: needs.plan.outputs.deploy_prod == 'true'
 
-    # The 'prod' environment MUST have "Required reviewers" protection rule.
-    # This creates the manual approval gate: staging → prod.
+    # The 'production' GitHub Environment MUST have "Required reviewers" protection rule.
+    # This creates the manual approval gate: staging → production.
     # Deployment will pause here until an authorized reviewer approves.
+    # OIDC subject claim: repo:spaarke-dev/spaarke:environment:production (see D-11).
     environment:
-      name: prod
+      name: production
 
     steps:
       - name: Checkout
