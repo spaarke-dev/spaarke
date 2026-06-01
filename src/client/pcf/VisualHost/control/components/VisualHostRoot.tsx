@@ -173,6 +173,20 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
     }
   }, [chartDefinition?.sprk_configurationjson]);
 
+  // v1.4.6: Parse showCardTitle from chart definition config JSON. When
+  // explicitly `false`, the toolbar suppresses the chart name (icons only)
+  // so it doesn't duplicate a form section heading that already names the
+  // same chart. Undefined/missing defaults to true (legacy behavior).
+  const showCardTitleInToolbar = React.useMemo(() => {
+    if (!chartDefinition?.sprk_configurationjson) return true;
+    try {
+      const config = JSON.parse(chartDefinition.sprk_configurationjson);
+      return typeof config.showCardTitle === 'boolean' ? config.showCardTitle : true;
+    } catch {
+      return true;
+    }
+  }, [chartDefinition?.sprk_configurationjson]);
+
   /**
    * Fetch AI summary from the configured Dataverse text field on the current record.
    * Called lazily by AiSummaryPopover on first open.
@@ -617,7 +631,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
           the chart's internal title via the `hostRenderedTitle` prop. */}
       {showToolbar && chartDefinition && (aiSummaryField || enableDrillThrough) && (
         <div className={styles.toolbar}>
-          {chartDefinition.sprk_name ? (
+          {chartDefinition.sprk_name && showCardTitleInToolbar ? (
             <Text
               size={300}
               className={styles.toolbarTitle}
@@ -627,6 +641,8 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
               {chartDefinition.sprk_name}
             </Text>
           ) : (
+            // v1.4.6 — chart name suppressed (showCardTitle:false in options)
+            // OR chartDefinition has no sprk_name. Spacer keeps icons right-aligned.
             <span aria-hidden={true} style={{ flexGrow: 1 }} />
           )}
           <div className={styles.toolbarIcons}>
@@ -656,7 +672,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
       )}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.5 • 2026-05-31</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.6 • 2026-06-01</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>

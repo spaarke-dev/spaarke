@@ -352,10 +352,11 @@ function formatBreakdownValue(value: number, format: ICardConfig['breakdownValue
 export const DonutChart: React.FC<IDonutChartProps> = ({
   data,
   title,
-  // Default thinner ring (0.72 → ~28% of radius is arc width) reads as a
-  // ring/score indicator rather than a heavy pie wedge. Chart defs that
-  // explicitly set `innerRadius` continue to win.
-  innerRadius = 0.72,
+  // v1.4.6 — default arc width is ~38% of radius (innerRadius 0.62).
+  // v1.4.2 went to 0.72 (very thin ring); UAT round 4 asked for a slightly
+  // wider arc — 0.62 keeps the "ring" feel while showing more color area.
+  // Chart defs that explicitly set `innerRadius` continue to win.
+  innerRadius = 0.62,
   showLegend = true,
   onDrillInteraction,
   drillField,
@@ -476,7 +477,9 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
     // (75%) since the legend stacks vertically. Always honor `height` cap.
     const widthFraction = (placement === 'top' || placement === 'bottom') ? 0.75 : 0.45;
     const donutSize = Math.max(120, Math.min(containerWidth * widthFraction, height));
-    const centerFontSize = `${Math.min(Math.round(donutSize * 0.36), 96)}px`;
+    // v1.4.6 — center font 28% of donut diameter (was 36% in v1.4.2),
+    // capped at 72px. UAT feedback: smaller letter reads better at glance.
+    const centerFontSize = `${Math.min(Math.round(donutSize * 0.28), 72)}px`;
     const showSwatch =
       effectiveLegend.itemFormat === 'swatchLabelValue' ||
       effectiveLegend.itemFormat === 'swatchLabel';

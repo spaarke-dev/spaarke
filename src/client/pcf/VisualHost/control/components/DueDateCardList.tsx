@@ -75,7 +75,13 @@ function calculateDaysUntilDue(dueDate: Date): {
  * Map a Dataverse event record to EventDueDateCard props
  */
 function mapEventToCardProps(record: Record<string, unknown>): IEventDueDateCardProps {
-  const dueDate = record.sprk_duedate ? new Date(record.sprk_duedate as string) : new Date();
+  // v1.4.6 — same precedence as DueDateCardVisual (v1.4.5): prefer
+  // sprk_finalduedate (canonical post-extensions date) when present;
+  // fall back to sprk_duedate (planned date) when finalduedate is null.
+  const dueDateRaw =
+    (record.sprk_finalduedate as string | undefined) ||
+    (record.sprk_duedate as string | undefined);
+  const dueDate = dueDateRaw ? new Date(dueDateRaw) : new Date();
   const { daysUntilDue, isOverdue } = calculateDaysUntilDue(dueDate);
 
   // Event type from FetchXML link-entity alias or formatted value

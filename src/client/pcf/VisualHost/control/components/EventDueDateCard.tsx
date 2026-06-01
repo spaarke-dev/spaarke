@@ -31,7 +31,8 @@ const useStyles = makeStyles({
     flexDirection: 'row',
     alignItems: 'stretch',
     cursor: 'pointer',
-    minHeight: '80px',
+    // v1.4.6 — reduced 80→56px per UAT feedback ("reduce height of the card")
+    minHeight: '56px',
     overflow: 'hidden',
     padding: '0',
     ':hover': {

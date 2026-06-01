@@ -451,6 +451,26 @@ export interface ICardConfig {
   legend?: IChartLegendConfig;
 
   /**
+   * Suppress the chart card's toolbar title text (v1.4.6).
+   *
+   * Default behavior (`undefined` or `true`): the legacy toolbar above the
+   * chart renders the chart's `sprk_name` on the left side, alongside the
+   * sparkle / expand icons on the right (v1.4.3 layout).
+   *
+   * When set to `false`: the toolbar renders ONLY the icons (right-aligned),
+   * with no title text. Useful when the host form section already provides
+   * the same name as a section heading and you want to avoid two visually
+   * identical headers stacked. Has no effect when CardChrome is active
+   * (`showTitle` PCF property = true) — CardChrome owns its own header.
+   *
+   * @example
+   * ```json
+   * { "showCardTitle": false }
+   * ```
+   */
+  showCardTitle?: boolean;
+
+  /**
    * Dataverse column on the chart's parent record (typically `sprk_matter`)
    * that holds the pre-computed AI summary text for this chart. When set,
    * VisualHostRoot renders an `AiSummaryPopover` (sparkle icon) in the

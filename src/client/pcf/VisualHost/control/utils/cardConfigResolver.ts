@@ -281,6 +281,13 @@ export function resolveCardConfig(
       ? json.aiSummaryField
       : undefined;
 
+  // --- Show card title in toolbar (v1.4.6) ---
+  // When false, suppresses the chart name from the toolbar (icons only).
+  // Used when the form section already provides the title and we want to
+  // avoid double-rendering. Undefined defaults to true (legacy behavior).
+  const showCardTitle =
+    typeof json.showCardTitle === 'boolean' ? json.showCardTitle : undefined;
+
   return {
     valueFormat,
     colorSource,
@@ -313,6 +320,7 @@ export function resolveCardConfig(
     descriptionColor,
     legend,
     aiSummaryField,
+    showCardTitle,
   };
 }
 
