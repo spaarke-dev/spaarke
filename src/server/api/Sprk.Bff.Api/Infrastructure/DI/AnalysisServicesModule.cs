@@ -146,6 +146,14 @@ public static class AnalysisServicesModule
         // Promoted under D-02 cluster exception (still attributed to RB-T028-04 cluster fix). ADR-010 (AIPL-053).
         services.AddScoped<ChatContextMappingService>();
 
+        // Tier 1.5 round 2 residual — DocxExportService (deps: ILogger + IOptions<AnalysisOptions> —
+        // AnalysisOptions is bound unconditionally in ConfigurationModule.cs:55-59). Originally registered
+        // inside AddAnalysisOrchestrationServices (conditional); Phase 1c re-triage 2026-06-01 surfaced
+        // ChatWordExportEndpoints.ExportToWordAsync injects the concrete DocxExportService unconditionally
+        // → metadata-gen abort when Analysis:Enabled=false. Same root cause as ChatContextMappingService.
+        // Promoted under D-02 cluster exception. ADR-010.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.DocxExportService>();
+
         // L5 — AnalysisChatContextResolver (deps: IGenericEntityService + IDistributedCache + ILogger).
         services.AddScoped<AnalysisChatContextResolver>();
 
@@ -211,7 +219,10 @@ public static class AnalysisServicesModule
         services.AddScoped<IAnalysisContextBuilder, AnalysisContextBuilder>();
         services.AddScoped<IWorkingDocumentService, WorkingDocumentService>();
         services.AddHttpContextAccessor();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.DocxExportService>();
+        // DocxExportService promoted to unconditional (task 011 Phase 1b Tier 1.5 round 2, RB-T028-04
+        // cluster residual — 2026-06-01). Phase 1c re-triage surfaced ChatWordExportEndpoints.ExportToWordAsync
+        // injects the concrete DocxExportService unconditionally → metadata-gen abort when Analysis:Enabled=false.
+        // See AddUnconditionalChatAndNotificationServices below.
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.DocxExportService>();
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.PdfExportService>();
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.EmailExportService>();
