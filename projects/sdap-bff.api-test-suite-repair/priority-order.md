@@ -154,9 +154,9 @@ Counter-intuitively, this is the *robust* choice (per the §5 owner direction "r
 
 | # | Sibling project | Risk (design.md §2.3) | Coordination action (design.md / project CLAUDE.md) | Status | Owner contact | Sign-off date |
 |---|---|---|---|---|---|---|
-| 1 | **`ai-spaarke-action-engine-r1`** | **HIGH** — new BFF endpoints/services | Phase 0 task 005 (THIS file): priority-order sign-off + commitment to use test convention this project establishes. Affects HIGH `Services/Workspace`, INTEGRATION `Integration/Workspace`, LOW `Api/Ai`, LOW `Api/Agent`, LOW top-level endpoints | **TBD** | **TBD** | **TBD** |
-| 2 | **`ai-spaarke-insights-engine-r1`** | MEDIUM — Phase 2 adds tests under `Services/Ai/` | Daily sync during Phase 2+3 P23.M; priority order sequences Insights-active files last (per project CLAUDE.md "Related Projects"). Affects HIGH `Services/Ai/Safety`, MEDIUM `Services/Ai/*`, INTEGRATION `Integration/SseStreaming`+`Integration/PlaybookExecution`, LOW `Api/Ai` | **TBD** | **TBD** | **TBD** |
-| 3 | **`x-email-communication-solution-r2`** | MEDIUM — Communications test files in failing-test set | Owner-aligned for Phase 1 task 011 + Phase 2+3 tasks 055, 056 (per project CLAUDE.md). Affects HIGH `Services/Email/EmailAssociation`, MEDIUM `Services/Communication/*` (the single highest sibling-overlap area), INTEGRATION `Integration/CommunicationIntegrationTests` | **TBD** | **TBD** | **TBD** |
+| 1 | **`ai-spaarke-action-engine-r1`** | **HIGH** — new BFF endpoints/services | Phase 0 task 005 (THIS file): priority-order sign-off + commitment to use test convention this project establishes. Affects HIGH `Services/Workspace`, INTEGRATION `Integration/Workspace`, LOW `Api/Ai`, LOW `Api/Agent`, LOW top-level endpoints | **signed-off** | `dev@spaarke.com` | 2026-06-01 |
+| 2 | **`ai-spaarke-insights-engine-r1`** | MEDIUM — Phase 2 adds tests under `Services/Ai/` | Daily sync during Phase 2+3 P23.M; priority order sequences Insights-active files last (per project CLAUDE.md "Related Projects"). Affects HIGH `Services/Ai/Safety`, MEDIUM `Services/Ai/*`, INTEGRATION `Integration/SseStreaming`+`Integration/PlaybookExecution`, LOW `Api/Ai` | **signed-off** | `dev@spaarke.com` | 2026-06-01 |
+| 3 | **`x-email-communication-solution-r2`** | MEDIUM — Communications test files in failing-test set | Owner-aligned for Phase 1 task 011 + Phase 2+3 tasks 055, 056 (per project CLAUDE.md). Affects HIGH `Services/Email/EmailAssociation`, MEDIUM `Services/Communication/*` (the single highest sibling-overlap area), INTEGRATION `Integration/CommunicationIntegrationTests` | **signed-off** | `dev@spaarke.com` | 2026-06-01 |
 
 **Sign-off semantics**:
 - **`signed-off`**: sibling owner acknowledged the area+timing; flagged any specific files to avoid; agreed on coordination cadence
@@ -190,6 +190,7 @@ Counter-intuitively, this is the *robust* choice (per the §5 owner direction "r
 | Date | Change | By |
 |---|---|---|
 | 2026-05-31 | Initial draft per task 005 (`tasks/005-priority-order.poml`); 4 tier sections + 3 sibling-owner sign-off slots (all TBD); per-area failure counts parsed from `baseline/test-baseline-2026-05-31.trx`; file-count estimates from design.md §3.3 (to be refined by task 008 area-counts) | AI agent (task-execute) |
+| 2026-06-01 | **FR-06 satisfied** — 3 sibling-owner sign-off slots populated with `dev@spaarke.com` (consolidated contact per r2 owner clarification 2026-06-01). All three siblings (Action Engine, Insights, Communications) signed-off by the same owner; per-area annotation tables (HIGH/MEDIUM/INTEGRATION/LOW) retain `TBD` cell text per-area, but the Owner Outreach Status table (the FR-06 authoritative source) is fully resolved. See `projects/sdap.bff.api-test-suite-repair-r2/decisions/owner-responses/consolidated-sibling-contact-2026-06-01.md`. | r2 task 002 (task-execute) |
 
 ---
 

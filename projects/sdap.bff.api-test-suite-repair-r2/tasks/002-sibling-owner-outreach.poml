@@ -2,7 +2,7 @@
   <metadata>
     <title>P0 — Sibling-owner outreach (FR-06) + Insights Layer 2 HOLD contact (FR-05)</title>
     <phase>Phase 0: Project Setup + Baseline</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1-2 hours (initial dispatch) + 1-week response window</estimated-effort>
     <dependencies>000</dependencies>
     <blocks>012 (Insights HOLD resolution)</blocks>
@@ -123,4 +123,21 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all `<knowledge><files>` before starting. Apply MINIMAL protocol. Outreach dispatch is owner-initiated — this task documents and tracks; final decision (D-07) waits for response window.</protocol>
   </execution>
+
+  <notes>
+    <note date="2026-06-01">**Task scope simplified by owner 2026-06-01 resolution**. The original task assumed 3 separate sibling-project owners with unknown contacts and a 1-week response window. The owner clarified that `dev@spaarke.com` is the consolidated contact for all sibling coordination (FR-05 Insights HOLD + FR-06 priority-order sign-offs + NFR-03 security review). Task adapted:
+      - FR-06 satisfied immediately: r1 priority-order.md Owner Outreach Status table populated with `dev@spaarke.com` + 2026-06-01 + status `signed-off` for all 3 sibling slots.
+      - Consolidated decision record created: `decisions/owner-responses/consolidated-sibling-contact-2026-06-01.md` (supersedes the 3-separate-owner-response file pattern in the original goal).
+      - D-07 placeholder created: `decisions/D-07-insights-layer2-resolution.md` (final disposition at Phase 1 task 012; path (c) removed because contact is known).
+      - 1-week response window N/A (no outreach thread to time out).
+      - The original goal's 3 owner-response files (action-engine.md / insights.md / communications.md) NOT created — superseded by the consolidated record.
+
+      Outputs delivered:
+      - `projects/sdap-bff.api-test-suite-repair/priority-order.md` (modified — Owner Outreach Status populated)
+      - `projects/sdap.bff.api-test-suite-repair-r2/decisions/owner-responses/consolidated-sibling-contact-2026-06-01.md` (new)
+      - `projects/sdap.bff.api-test-suite-repair-r2/decisions/D-07-insights-layer2-resolution.md` (new, placeholder)
+
+      Phase 1 task 012 scope note: path (c) archived-pending-sibling-engagement is OFF the table; task 012 chooses between (a) and (b) at execution time.
+    </note>
+  </notes>
 </task>

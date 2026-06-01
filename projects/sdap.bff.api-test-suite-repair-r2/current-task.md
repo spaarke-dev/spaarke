@@ -57,6 +57,7 @@ Phase 0 will take ~1 week of calendar; tasks 000 + 001 are agent-executable; **t
 - [x] `/project-pipeline` Step 2 Part 2: `project-setup` artifact generation — 2026-06-01 (README + plan + CLAUDE.md + current-task.md + scaffolding)
 - [x] `/project-pipeline` Step 3: `task-create` — 36 POML tasks + TASK-INDEX.md generated — 2026-06-01
 - [x] `/project-pipeline` Step 4: commit `4221c9dd` + push `-u origin work/sdap.bff.api-test-suite-repair-r2` + draft PR #318 against master — 2026-06-01
+- [x] **Task 002 complete** (P0-W1, parallel task 3 of 3): Sibling-coordination consolidated to `dev@spaarke.com`; r1 priority-order.md FR-06 slots populated; D-07 placeholder created; path (c) removed from FR-05 — 2026-06-01
 
 ### Current Step
 
