@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave C (021, 022) ready to start |
-| **Step** | Wave A ✅ + Wave B ✅ + 020 ✅ complete (001, 002, 010, 011, 012, 020) |
-| **Status** | not-started (Wave C) |
-| **Next Action** | Dispatch Wave C in parallel: tasks 021 (deploy-platform + deploy-slot-swap + provision-customer `git rm`), 022 (nightly-quality + weekly-quality + insights-eval + auto-add-to-project `git rm`). Disjoint file sets → parallel-safe. |
+| **Task** | Task 030 (Phase 3 — actionlint workflow) ready to start |
+| **Step** | Wave A ✅ + Wave B ✅ + 020 ✅ + Wave C ✅ complete (001, 002, 010, 011, 012, 020, 021, 022) — 8/17 done |
+| **Status** | not-started (task 030) |
+| **Next Action** | Dispatch task 030 (add `.github/workflows/workflows-validate.yml` with actionlint). Phase 3 is STRICTLY SEQUENTIAL per NFR-05 — 030 → 031 → 032 must run in order. |
 
 ### Files Modified This Session
 - `baseline/workflow-inventory-2026-06-01.md` — Wave A
@@ -44,10 +44,10 @@ Wave B PyYAML validation: both modified workflows parse cleanly with all expecte
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | Wave C (021, 022) |
-| **Task File** | `tasks/021-execute-deploy-workflow-dispositions.poml`, `tasks/022-execute-non-deploy-workflow-dispositions.poml` |
-| **Title** | Wave C — Execute Phase 2 dispositions (7 file deletions) |
-| **Phase** | 2: Rationalization |
+| **Task ID** | 030 |
+| **Task File** | `tasks/030-add-actionlint-workflow.poml` |
+| **Title** | Add actionlint pre-merge validation workflow (FR-07) |
+| **Phase** | 3: Prevention |
 | **Status** | not-started |
 | **Started** | — |
 

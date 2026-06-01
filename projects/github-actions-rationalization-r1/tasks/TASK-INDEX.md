@@ -28,8 +28,8 @@
 | 011 | Fix deploy-infrastructure.yml ghost triggers (P3) | 1: Fix Broken Workflows | STANDARD | ✅ | 001 | B | ✅ |
 | 012 | Fix nightly-quality.yml schedule failures (P4) | 1: Fix Broken Workflows | STANDARD | ✅ | 001 | B | ✅ |
 | 020 | Audit untested workflows + draft dispositions | 2: Rationalization | STANDARD | ✅ | 001 | — | ❌ (single ledger build) |
-| 021 | Execute deploy-* workflow dispositions | 2: Rationalization | STANDARD | 🔲 | 020 | C | ✅ |
-| 022 | Execute non-deploy workflow dispositions | 2: Rationalization | STANDARD | 🔲 | 020 | C | ✅ |
+| 021 | Execute deploy-* workflow dispositions | 2: Rationalization | STANDARD | ✅ | 020 | C | ✅ |
+| 022 | Execute non-deploy workflow dispositions | 2: Rationalization | STANDARD | ✅ | 020 | C | ✅ |
 | 030 | Add actionlint pre-merge validation workflow | 3: Prevention | STANDARD | 🔲 | 010, 011, 012, 021, 022 | — | ❌ (sequential) |
 | 031 | Add actionlint to required-status-checks on master | 3: Prevention | STANDARD | 🔲 | 030 | — | ❌ (sequential) |
 | 032 | Smoke-test actionlint gate via deliberate-fail PR | 3: Prevention | STANDARD | 🔲 | 031 | — | ❌ (sequential) |
@@ -111,6 +111,35 @@
 **Notable**:
 - deploy-slot-swap.yml consolidation is **zero merge effort** — deploy-bff-api.yml is already a functional superset for the in-use prod-only path. Task 021's CONSOLIDATE is a pure `git rm`.
 - D-09 has a speak-now flag (2026-05-28 commit by spaarke-dev) — task 022's PR description should mention this so the contributor can object before merge.
+
+---
+
+## Wave C Findings (2026-06-01) — PHASE 2 EXECUTION COMPLETE
+
+**7 file deletions executed via `git rm`** (per ledger):
+- Task 021: deploy-platform.yml, deploy-slot-swap.yml, provision-customer.yml (D-05/D-06/D-08)
+- Task 022: nightly-quality.yml, weekly-quality.yml, insights-eval.yml, auto-add-to-project.yml (D-03/D-09/D-10)
+
+**Current workflow count**: 13 − 7 = **6**. After Phase 3+4 adds workflows-validate.yml + report-workflow-health.yml = 8 ✅ FR-06 target met.
+
+**Stale references discovered** (NFR-01 forbids fixing now; tracked as TODO):
+- **`src/` references to insights-eval.yml** (out of scope — comments only, non-functional):
+  - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/InsightsModule.cs:82`
+  - `src/server/api/Sprk.Bff.Api/Services/Insights/LiveFacts/DataverseLiveFactResolver.cs:20`
+  - These are code comments referencing a deleted workflow. Recommend filing in product backlog for cleanup.
+- **`docs/` references to deleted workflows** (multiple files; Phase 4 docs tasks 041/042 will touch some; full doc-drift sweep needed at project close):
+  - `docs/procedures/ci-cd-workflow.md` (multiple sections)
+  - `docs/architecture/ci-cd-architecture.md`
+  - `docs/procedures/DEPENDENCY-MANAGEMENT.md:199-200`
+  - `docs/procedures/testing-and-code-quality.md` (Nightly/Weekly sections)
+  - `docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md`
+  - `docs/guides/PRODUCTION-DEPLOYMENT-GUIDE.md`
+  - `docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md`
+- **`.claude/skills/` references**:
+  - `.claude/skills/ci-cd/SKILL.md:171` (auto-add-to-project entry)
+  - `.claude/skills/azure-deploy/SKILL.md` (deploy-platform references)
+
+These will be addressed by the doc-drift audit at project wrap-up (task 090) and the relevant Phase 4 docs tasks (041 `.github/WORKFLOWS.md`, 042 incident-response runbook).
 
 ---
 
