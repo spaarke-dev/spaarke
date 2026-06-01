@@ -36,11 +36,11 @@ public class CompareDocumentsToolTests
     private static DocumentEntity MakeDocument(string id, string itemId, string fileName = "doc.txt")
         => new()
         {
-            Id           = id,
+            Id = id,
             GraphDriveId = DriveId,
-            GraphItemId  = itemId,
-            FileName     = fileName,
-            Name         = fileName
+            GraphItemId = itemId,
+            FileName = fileName,
+            Name = fileName
         };
 
     private static Stream TextStream(string text)
@@ -81,9 +81,9 @@ public class CompareDocumentsToolTests
         // Arrange
         const string commonText = "INTRODUCTION\nThis is the introduction text.\n\nCONCLUSION\nFinal remarks.";
 
-        var docService   = new Mock<IDocumentDataverseService>();
-        var speStore     = new Mock<ISpeFileOperations>();
-        var extractor    = TextExtractorReturning(commonText);
+        var docService = new Mock<IDocumentDataverseService>();
+        var speStore = new Mock<ISpeFileOperations>();
+        var extractor = TextExtractorReturning(commonText);
 
         docService.Setup(s => s.GetDocumentAsync(DocId1, It.IsAny<CancellationToken>()))
                   .ReturnsAsync(MakeDocument(DocId1, ItemId1));
@@ -119,7 +119,7 @@ public class CompareDocumentsToolTests
         const string textB = "INTRODUCTION\nShared introduction text.\n\nNEW SECTION\nThis section only exists in document B.";
 
         var docService = new Mock<IDocumentDataverseService>();
-        var speStore   = new Mock<ISpeFileOperations>();
+        var speStore = new Mock<ISpeFileOperations>();
 
         docService.Setup(s => s.GetDocumentAsync(DocId1, It.IsAny<CancellationToken>()))
                   .ReturnsAsync(MakeDocument(DocId1, ItemId1));
@@ -163,7 +163,7 @@ public class CompareDocumentsToolTests
         const string textB = "INTRODUCTION\nShared intro.";
 
         var docService = new Mock<IDocumentDataverseService>();
-        var speStore   = new Mock<ISpeFileOperations>();
+        var speStore = new Mock<ISpeFileOperations>();
 
         docService.Setup(s => s.GetDocumentAsync(DocId1, It.IsAny<CancellationToken>()))
                   .ReturnsAsync(MakeDocument(DocId1, ItemId1));
@@ -206,7 +206,7 @@ public class CompareDocumentsToolTests
         const string textB = "TERMS AND CONDITIONS\nThe agreement shall commence on February first.";
 
         var docService = new Mock<IDocumentDataverseService>();
-        var speStore   = new Mock<ISpeFileOperations>();
+        var speStore = new Mock<ISpeFileOperations>();
 
         docService.Setup(s => s.GetDocumentAsync(DocId1, It.IsAny<CancellationToken>()))
                   .ReturnsAsync(MakeDocument(DocId1, ItemId1));
@@ -237,7 +237,7 @@ public class CompareDocumentsToolTests
             "the section body changed from 'January' to 'February'");
 
         var modSection = result.Sections.First(s => s.ChangeType == DiffChangeType.Modification);
-        var modChange  = modSection.Changes.First(c => c.ChangeType == DiffChangeType.Modification);
+        var modChange = modSection.Changes.First(c => c.ChangeType == DiffChangeType.Modification);
 
         modChange.OriginalText.Should().Contain("January",
             "original text should contain the removed word");
@@ -254,8 +254,8 @@ public class CompareDocumentsToolTests
     {
         // Arrange — document A's SPE download returns null (simulates 403/404)
         var docService = new Mock<IDocumentDataverseService>();
-        var speStore   = new Mock<ISpeFileOperations>();
-        var extractor  = new Mock<ITextExtractor>();
+        var speStore = new Mock<ISpeFileOperations>();
+        var extractor = new Mock<ITextExtractor>();
 
         docService.Setup(s => s.GetDocumentAsync(DocId1, It.IsAny<CancellationToken>()))
                   .ReturnsAsync(MakeDocument(DocId1, ItemId1));
@@ -295,11 +295,11 @@ public class CompareDocumentsToolTests
     {
         // Arrange — each SPE download has a 100ms delay; parallel execution should
         // complete well within 2× the per-document delay.
-        const int downloadDelayMs  = 100;
-        const int maxAllowedMs     = 300; // generous: serial would be 200ms minimum
+        const int downloadDelayMs = 100;
+        const int maxAllowedMs = 300; // generous: serial would be 200ms minimum
 
         var docService = new Mock<IDocumentDataverseService>();
-        var speStore   = new Mock<ISpeFileOperations>();
+        var speStore = new Mock<ISpeFileOperations>();
 
         docService.Setup(s => s.GetDocumentAsync(DocId1, It.IsAny<CancellationToken>()))
                   .ReturnsAsync(MakeDocument(DocId1, ItemId1));
@@ -318,7 +318,7 @@ public class CompareDocumentsToolTests
         extractor.Setup(x => x.ExtractAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                  .ReturnsAsync(TextExtractionResult.Succeeded("content", TextExtractionMethod.Native));
 
-        var tool    = BuildTool(docService, speStore, extractor);
+        var tool = BuildTool(docService, speStore, extractor);
         var stopwatch = Stopwatch.StartNew();
 
         // Act

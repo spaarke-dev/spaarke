@@ -236,10 +236,10 @@ public static class AiModule
         // registered (production) it is injected; when absent (environments without Cosmos)
         // it resolves to null and the manager falls back to Redis + Dataverse only.
         services.AddScoped<ChatSessionManager>(sp => new ChatSessionManager(
-            cache:                sp.GetRequiredService<IDistributedCache>(),
-            dataverseRepository:  sp.GetRequiredService<IChatDataverseRepository>(),
-            logger:               sp.GetRequiredService<ILogger<ChatSessionManager>>(),
-            persistence:          sp.GetService<ISessionPersistenceService>()));   // optional — null when Cosmos not configured
+            cache: sp.GetRequiredService<IDistributedCache>(),
+            dataverseRepository: sp.GetRequiredService<IChatDataverseRepository>(),
+            logger: sp.GetRequiredService<ILogger<ChatSessionManager>>(),
+            persistence: sp.GetService<ISessionPersistenceService>()));   // optional — null when Cosmos not configured
 
         // ChatHistoryManager — scoped per ADR-010 (AIPL-052).
         // Manages message addition, history retrieval, summarisation (15 messages), and

@@ -90,8 +90,8 @@ public class CitationExtractorTests
     // =========================================================================
 
     [Theory]
-    [InlineData("covered by U.S. Patent No. 9,123,456",    "US9123456",     CitationType.Patent)]
-    [InlineData("as disclosed in US 8,456,789",            "US8456789",     CitationType.Patent)]
+    [InlineData("covered by U.S. Patent No. 9,123,456", "US9123456", CitationType.Patent)]
+    [InlineData("as disclosed in US 8,456,789", "US8456789", CitationType.Patent)]
     public void ExtractCitations_Patent_MatchedAndNormalized(string text, string expectedKey, CitationType expectedType)
     {
         var results = CitationExtractor.ExtractCitations(text);
@@ -103,8 +103,8 @@ public class CitationExtractorTests
 
     [Theory(Skip = "RB-T044-04: CitationExtractor.NormalizePatent for EP/WO branches double-prefixes the country code. Input 'EP3456789' yields 'EPEP3456789' because the regex `(?<ep>EP\\s*[\\d\\s]{7,12})` captures 'EP3456789' INCLUDING the 'EP' prefix, then the normalizer prepends another 'EP'. Same bug for WO branch. See ledger.")]
     [Trait("status", "real-bug-pending-fix")]
-    [InlineData("the priority document EP3456789",         "EP3456789",     CitationType.Patent)]
-    [InlineData("filed as WO2021/123456",                  "WO2021/123456", CitationType.Patent)]
+    [InlineData("the priority document EP3456789", "EP3456789", CitationType.Patent)]
+    [InlineData("filed as WO2021/123456", "WO2021/123456", CitationType.Patent)]
     public void ExtractCitations_Patent_NonUS_MatchedAndNormalized(string text, string expectedKey, CitationType expectedType)
     {
         var results = CitationExtractor.ExtractCitations(text);
@@ -119,10 +119,10 @@ public class CitationExtractorTests
     // =========================================================================
 
     [Theory]
-    [InlineData("disclosed in Form 10-K for fiscal year 2023",  "10-K",  CitationType.SecFiling)]
-    [InlineData("filed a Form 8-K on March 15",                 "8-K",   CitationType.SecFiling)]
-    [InlineData("quarterly report on Form 10-Q",                "10-Q",  CitationType.SecFiling)]
-    [InlineData("registration statement on Form S-1",           "S-1",   CitationType.SecFiling)]
+    [InlineData("disclosed in Form 10-K for fiscal year 2023", "10-K", CitationType.SecFiling)]
+    [InlineData("filed a Form 8-K on March 15", "8-K", CitationType.SecFiling)]
+    [InlineData("quarterly report on Form 10-Q", "10-Q", CitationType.SecFiling)]
+    [InlineData("registration statement on Form S-1", "S-1", CitationType.SecFiling)]
     public void ExtractCitations_SecFiling_MatchedAndNormalized(string text, string expectedKey, CitationType expectedType)
     {
         var results = CitationExtractor.ExtractCitations(text);
@@ -146,8 +146,8 @@ public class CitationExtractorTests
     // =========================================================================
 
     [Theory]
-    [InlineData("47 C.F.R. § 73.3999 prohibits",   "47 C.F.R. § 73.3999", CitationType.Regulation)]
-    [InlineData("under 40 C.F.R. § 122.26",        "40 C.F.R. § 122.26",  CitationType.Regulation)]
+    [InlineData("47 C.F.R. § 73.3999 prohibits", "47 C.F.R. § 73.3999", CitationType.Regulation)]
+    [InlineData("under 40 C.F.R. § 122.26", "40 C.F.R. § 122.26", CitationType.Regulation)]
     public void ExtractCitations_Regulation_MatchedAndNormalized(string text, string expectedKey, CitationType expectedType)
     {
         var results = CitationExtractor.ExtractCitations(text);

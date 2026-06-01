@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -6,7 +7,6 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Insights.LiveFacts;
 using Xunit;
-using System.Text.Json;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Nodes;
 

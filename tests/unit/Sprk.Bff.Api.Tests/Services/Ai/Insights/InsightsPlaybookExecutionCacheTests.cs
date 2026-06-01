@@ -29,7 +29,7 @@ public class InsightsPlaybookExecutionCacheTests
     private const string TenantId = "tenant-acme";
     private const string Subject = "matter:M-1234";
     private const string ScopeHashAlice = "alice-scope-v1";
-    private const string ScopeHashBob   = "bob-scope-v1";
+    private const string ScopeHashBob = "bob-scope-v1";
 
     private readonly Mock<IDistributedCache> _cacheMock = new();
 
@@ -266,7 +266,7 @@ public class InsightsPlaybookExecutionCacheTests
 
         // Compute keys
         var aliceKey = InsightsPlaybookCacheKey.Compose(PlaybookA, Subject, null, ScopeHashAlice);
-        var bobKey   = InsightsPlaybookCacheKey.Compose(PlaybookA, Subject, null, ScopeHashBob);
+        var bobKey = InsightsPlaybookCacheKey.Compose(PlaybookA, Subject, null, ScopeHashBob);
 
         aliceKey.Should().NotBe(bobKey, "key composer must partition by accessibleScopeHash");
 

@@ -38,20 +38,20 @@ public class RecordSyncJobTests
 
     private static RecordSyncOptions DefaultOptions() => new()
     {
-        Enabled              = true,
-        IntervalMinutes      = 30,
-        AiSearchEndpoint     = "https://spaarke-search-dev.search.windows.net",
-        AiSearchApiKey       = "test-key",
+        Enabled = true,
+        IntervalMinutes = 30,
+        AiSearchEndpoint = "https://spaarke-search-dev.search.windows.net",
+        AiSearchApiKey = "test-key",
         DataverseEnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
     };
 
     private static (RecordSyncJob job, Mock<IDistributedCache> cache, Mock<IHttpClientFactory> factory)
         CreateJob(RecordSyncOptions? options = null)
     {
-        var cacheMock   = new Mock<IDistributedCache>();
+        var cacheMock = new Mock<IDistributedCache>();
         var factoryMock = new Mock<IHttpClientFactory>();
-        var loggerMock  = new Mock<ILogger<RecordSyncJob>>();
-        var opts        = Options.Create(options ?? DefaultOptions());
+        var loggerMock = new Mock<ILogger<RecordSyncJob>>();
+        var opts = Options.Create(options ?? DefaultOptions());
 
         var configuration = new ConfigurationBuilder().Build();
         var job = new RecordSyncJob(
@@ -146,7 +146,7 @@ public class RecordSyncJobTests
         // Arrange
         var (job, cache, _) = CreateJob();
         var stored = new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero);
-        var bytes  = Encoding.UTF8.GetBytes(stored.ToString("O"));
+        var bytes = Encoding.UTF8.GetBytes(stored.ToString("O"));
 
         cache.Setup(c => c.GetAsync("recordsync:watermark:sprk_matter", It.IsAny<CancellationToken>()))
              .ReturnsAsync(bytes);
@@ -210,7 +210,7 @@ public class RecordSyncJobTests
             Mock.Of<ILogger<RecordSyncJob>>());
 
         testJob.DataverseRecordsToReturn = BuildFakeDataverseRecords(1);
-        testJob.UploadShouldThrow        = true; // upload always fails
+        testJob.UploadShouldThrow = true; // upload always fails
 
         // Act
         Func<Task> act = async () =>
@@ -505,12 +505,12 @@ public class RecordSyncJobTests
         return Enumerable.Range(0, count)
             .Select(i => new RecordSearchDocument
             {
-                Id                  = $"sprk_matter_matter-{i}",
-                RecordType          = "sprk_matter",
-                RecordName          = $"Matter {i}",
-                DataverseRecordId   = $"matter-{i}",
+                Id = $"sprk_matter_matter-{i}",
+                RecordType = "sprk_matter",
+                RecordName = $"Matter {i}",
+                DataverseRecordId = $"matter-{i}",
                 DataverseEntityName = "sprk_matter",
-                LastModified        = DateTimeOffset.UtcNow,
+                LastModified = DateTimeOffset.UtcNow,
             })
             .ToList();
     }
@@ -528,13 +528,13 @@ internal sealed class TestableRecordSyncJob : RecordSyncJob
 {
     // ── Test inputs ──────────────────────────────────────────────────────────
     public List<JsonElement> DataverseRecordsToReturn { get; set; } = new();
-    public bool UploadShouldThrow            { get; set; } = false;
-    public int  UploadFailuresBeforeSuccess  { get; set; } = 0;
-    public Action? OnUploadCallback          { get; set; }
+    public bool UploadShouldThrow { get; set; } = false;
+    public int UploadFailuresBeforeSuccess { get; set; } = 0;
+    public Action? OnUploadCallback { get; set; }
 
     // ── Test outputs ─────────────────────────────────────────────────────────
     public List<int> UploadCallBatchSizes { get; } = new();
-    public int UploadAttempts             { get; private set; }
+    public int UploadAttempts { get; private set; }
 
     private int _consecutiveUploadFailures = 0;
 
