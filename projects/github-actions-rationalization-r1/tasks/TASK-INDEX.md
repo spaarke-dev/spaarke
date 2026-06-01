@@ -32,7 +32,7 @@
 | 022 | Execute non-deploy workflow dispositions | 2: Rationalization | STANDARD | ✅ | 020 | C | ✅ |
 | 030 | Add actionlint pre-merge validation workflow | 3: Prevention | STANDARD | ✅ | 010, 011, 012, 021, 022 | — | ❌ (sequential) |
 | 031 | Add actionlint to required-status-checks on master | 3: Prevention | STANDARD | ✅ | 030 | — | ❌ (sequential) |
-| 032 | Smoke-test actionlint gate via deliberate-fail PR | 3: Prevention | STANDARD | 🔲 | 031 | — | ❌ (sequential) |
+| 032 | Smoke-test actionlint gate via deliberate-fail PR | 3: Prevention | STANDARD | ✅ | 031 | — | ❌ (sequential) |
 | 040 | Add weekly workflow-health-report workflow | 4: Observability + Docs | STANDARD | 🔲 | 032 | D | ✅ |
 | 041 | Author .github/WORKFLOWS.md | 4: Observability + Docs | MINIMAL | 🔲 | 022, 030, 040 | D | ✅ |
 | 042 | Author docs/procedures/workflow-incident-response.md | 4: Observability + Docs | MINIMAL | 🔲 | 032 | D | ✅ |
