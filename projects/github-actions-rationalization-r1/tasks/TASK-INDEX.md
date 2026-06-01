@@ -1,5 +1,7 @@
 # Task Index — github-actions-rationalization-r1
 
+> **🎉 Project complete 2026-06-01 — all 17 tasks ✅. Two acceptance criteria deferred to post-PR-#317-merge: FR-11 first-run verification (workflow_dispatch chicken-and-egg) and FR-14 ≥90% rate (depends on follow-on `sdap-bff-warnaserror-cleanup-r1`).**
+
 > **Project**: GitHub Actions Rationalization R1
 > **Total Tasks**: 17
 > **Generated**: 2026-06-01 by `/project-pipeline`
@@ -38,7 +40,7 @@
 | 042 | Author docs/procedures/workflow-incident-response.md | 4: Observability + Docs | MINIMAL | ✅ | 032 | D | ✅ |
 | 043 | Document notification-routing steps (FR-12) | 4: Observability + Docs | MINIMAL | ✅ | 041 | D | ✅ |
 | 050 | Verify branch-protection gate end-to-end | 5: Validate the Gate | STANDARD | ✅ | 032, 040, 041, 042, 043 | — | ❌ (final verification) |
-| 090 | Project wrap-up + lessons learned + repo cleanup | Wrap-up | STANDARD | 🔲 | 050 | — | ❌ (final) |
+| 090 | Project wrap-up + lessons learned + repo cleanup | Wrap-up | STANDARD | ✅ | 050 | — | ❌ (final) |
 
 **Total**: 17 tasks (2 in Phase 0 + 3 in Phase 1 + 3 in Phase 2 + 3 in Phase 3 + 4 in Phase 4 + 1 in Phase 5 + 1 wrap-up).
 

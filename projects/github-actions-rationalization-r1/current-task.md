@@ -13,20 +13,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Task 090 (wrap-up) — final |
-| **Step** | 16/17 done. Phases 0–5 ALL complete ✅. |
-| **Status** | not-started (task 090) |
-| **Next Action** | Dispatch task 090 (project wrap-up): adr-check + code-review (light load), repo-cleanup, lessons-learned.md, README/plan.md → Complete status. Note: FR-11 + FR-14 acceptance verification is post-merge-of-PR-#317 (documented in task 050 evidence + will be noted in lessons-learned). |
+| **Task** | none / project complete |
+| **Step** | 17/17 done. All phases (0–5) + wrap-up complete ✅. |
+| **Status** | none / project complete |
+| **Next Action** | Open PR #317 for review and merge to master. After merge: trigger `gh workflow run report-workflow-health.yml` (FR-11). FR-14 ≥90% rate requires follow-on `sdap-bff-warnaserror-cleanup-r1` project to land. |
 
 ### Files Modified This Session
-- `baseline/workflow-inventory-2026-06-01.md` — Wave A
-- `baseline/branch-protection-2026-06-01.json` — Wave A
-- `decisions/D-01-master-ci-failure-disposition.md` — Wave A (master CI DEFERRED)
-- `decisions/D-02-deploy-promote-artifact-contract-verified.md` — Wave B (corrects inventory; no fix needed)
-- `decisions/D-03-nightly-and-weekly-quality-disposition.md` — Wave B (DELETE both; Phase 2 task 022 executes)
-- `.github/workflows/deploy-promote.yml` — Wave B (cascade fix: workflow-level `if:` on summary job, +9/-1 lines)
-- `.github/workflows/deploy-infrastructure.yml` — Wave B (loader fix: moved `env:` from job to step, +4/-4 lines)
-- `tasks/TASK-INDEX.md` — Updated through Wave B
+- `notes/lessons-learned.md` — Task 090 (wrap-up)
+- `README.md` — Status → Complete; graduation criteria checked; changelog entry
+- `plan.md` — Status → Complete
+- `current-task.md` — Reset to project-complete state
+- `tasks/TASK-INDEX.md` — Project-summary line at top
+
+(Prior session files captured in `tasks/TASK-INDEX.md` Wave findings sections — not re-listed here.)
 
 ### Critical Context
 Three consequential findings so far:
@@ -44,12 +43,13 @@ Wave B PyYAML validation: both modified workflows parse cleanly with all expecte
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 090 |
-| **Task File** | `tasks/090-project-wrap-up.poml` |
-| **Title** | Project wrap-up + lessons learned + repo cleanup |
-| **Phase** | Wrap-up |
-| **Status** | not-started |
-| **Started** | — |
+| **Task ID** | — (project complete) |
+| **Task File** | — |
+| **Title** | Project complete |
+| **Phase** | Complete |
+| **Status** | completed |
+| **Started** | 2026-06-01 |
+| **Completed** | 2026-06-01 |
 
 ---
 
@@ -83,23 +83,17 @@ Wave B PyYAML validation: both modified workflows parse cleanly with all expecte
 
 ## Next Action
 
-**Next Step**: Execute task 001 (workflow inventory + baseline) via task-execute skill.
+**Project complete.** Recommended follow-up actions:
 
-**Pre-conditions**:
-- TASK-INDEX.md exists and lists all generated tasks
-- `gh` CLI is authenticated locally
-- Project CLAUDE.md is loaded (NFR-08)
+1. **Open PR #317 for review** — mark non-draft via `gh pr ready 317`; request review from owner.
+2. **Merge PR #317 to master** (standard PR workflow + branch-protection gate).
+3. **Post-merge: FR-11 first-run verification** — trigger `gh workflow run report-workflow-health.yml` from master and verify the "CI Health Report" issue is created. Per `baseline/branch-protection-verification-2026-06-01.md` § "Note on FR-14," this step cannot be performed pre-merge.
+4. **Open follow-on project `sdap-bff-warnaserror-cleanup-r1`** to repair the 17 `src/` `-warnaserror` errors + 330 Prettier files surfaced by D-01. This is the direct dependency for FR-14 ≥90% rate.
 
-**Key Context**:
-- Refer to `spec.md` § FR-01 for workflow inventory acceptance criteria
-- Refer to `design.md` §5 Phase 0 for the audit format
-- Refer to `projects/sdap-bff-api-remediation-fix/inventory/ci-workflow-inventory.md` for the gold-standard format
-
-**Expected Output**:
-- `baseline/workflow-inventory-2026-06-01.md` with one entry per workflow (13 entries)
-- `baseline/branch-protection-2026-06-01.json` snapshot
-
-**Parallel opportunity**: Task 002 (master CI root cause) is independent of task 001 and can run concurrently via a second `task-execute` invocation in the same message.
+**Key context for the next session**:
+- The new `actionlint` required-status-check is in place and was verified blocking via PR #320 (closed unmerged).
+- The new weekly `report-workflow-health.yml` has not yet executed (chicken-and-egg per § 1.6 of lessons-learned.md).
+- `dev@spaarke.com` notification routing is documented in `.github/WORKFLOWS.md`; owner-applied routing is pending per D-05.
 
 ---
 

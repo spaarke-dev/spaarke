@@ -1,7 +1,7 @@
 # Project Plan: GitHub Actions Rationalization R1
 
 > **Last Updated**: 2026-06-01
-> **Status**: Ready for Tasks
+> **Status**: Complete
 > **Spec**: [spec.md](spec.md)
 > **Design**: [design.md](design.md)
 
@@ -372,8 +372,8 @@ This project does not modify application code, so traditional unit/integration t
 
 ---
 
-**Status**: Ready for Tasks
-**Next Action**: Generate POML task files
+**Status**: Complete
+**Next Action**: Open PR #317 for review and merge to master. Post-merge: trigger `gh workflow run report-workflow-health.yml` (FR-11 first-run verification). FR-14 ≥90% rate requires follow-on `sdap-bff-warnaserror-cleanup-r1` to land.
 
 ---
 
