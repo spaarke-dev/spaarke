@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave D (040, 041, 042, 043) ready to start |
-| **Step** | 12/17 done. Phase 0–3 complete ✅ |
-| **Status** | not-started (Wave D) |
-| **Next Action** | Dispatch Wave D in parallel: 040 (weekly health-report workflow), 041 (.github/WORKFLOWS.md), 042 (workflow-incident-response.md runbook), 043 (notification routing docs). 041/042/043 touch different doc files → parallel-safe. 040 touches a new workflow file → parallel-safe with the doc tasks. |
+| **Task** | Task 050 (Phase 5 — gate verification) ready to start |
+| **Step** | 16/17 done. Phase 0–4 complete ✅. Only Phase 5 + wrap-up remain. |
+| **Status** | not-started (task 050) |
+| **Next Action** | Dispatch task 050 (deliberate-fail PR end-to-end gate verification). After task 030's workflows-validate.yml and Wave D's additions have been pushed, the actionlint check now exists on origin/work too — task 050's smoke test will exercise the direct "actionlint fails the PR" path more clearly than task 032's missing-context path. Then wrap-up via task 090. |
 
 ### Files Modified This Session
 - `baseline/workflow-inventory-2026-06-01.md` — Wave A
@@ -44,10 +44,10 @@ Wave B PyYAML validation: both modified workflows parse cleanly with all expecte
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | Wave D (040, 041, 042, 043) |
-| **Task File** | `tasks/040-add-weekly-health-report-workflow.poml`, `tasks/041-author-workflows-md.poml`, `tasks/042-author-workflow-incident-response.poml`, `tasks/043-document-notification-routing.poml` |
-| **Title** | Wave D — Observability + Docs (Phase 4) |
-| **Phase** | 4: Observability + Docs |
+| **Task ID** | 050 |
+| **Task File** | `tasks/050-verify-branch-protection-gate-end-to-end.poml` |
+| **Title** | Verify branch-protection gate end-to-end (deliberate-fail PR) |
+| **Phase** | 5: Validate the Gate |
 | **Status** | not-started |
 | **Started** | — |
 
