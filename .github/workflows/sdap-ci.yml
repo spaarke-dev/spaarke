@@ -217,7 +217,11 @@ jobs:
           # Check for vulnerable packages, ignoring those documented as accepted-risk
           # in ADR-029 (Graph 5.x / Kiota 1.x stack pending major-bump).
           # See docs/assessments/bff-warning-suppression-analysis-2026-06-01.md § 3.6.
-          $acceptedRiskPackages = @('Microsoft.Kiota.')
+          # Accepted-risk list (each entry requires explicit rationale below):
+          # - Microsoft.Kiota.* : NU1903 HIGH GHSA-7j59-v9qr-6fq9 — pending Graph SDK 6.x / Kiota 2.x major-bump (ADR-029)
+          # - OpenMcdf          : Moderate GHSA-jxpf-xq2m-q525 — transitive via DocumentFormat.OpenXml; no patched version available
+          # - OpenTelemetry.Api : Moderate GHSA-g94r-2vxg-569j — transitive via Microsoft.Extensions.* telemetry; upstream patch pending
+          $acceptedRiskPackages = @('Microsoft.Kiota.', 'OpenMcdf', 'OpenTelemetry.Api')
           $output = dotnet list package --vulnerable --include-transitive 2>&1 | Out-String
           Write-Output $output
           if ($output -match "has the following vulnerable packages") {

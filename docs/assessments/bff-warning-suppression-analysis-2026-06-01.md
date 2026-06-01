@@ -252,7 +252,20 @@ The `Code Quality > Dependencies audit` step originally treated ANY vulnerable p
 
 The list is intentionally narrow — adding to it requires a corresponding ADR entry or assessment doc.
 
-**Removal criterion**: when the Graph SDK 6.x / Kiota 2.x major-bump project lands and the Kiota 1.x transitive disappears from the lock-file, the `$acceptedRiskPackages` list can be reset to empty, restoring full strictness.
+**Current accepted-risk entries** (each requires explicit rationale in the workflow comment block):
+
+| Package prefix | Severity | CVE | Rationale |
+|---|---|---|---|
+| `Microsoft.Kiota.` | HIGH | GHSA-7j59-v9qr-6fq9 (NU1903) | Pending Graph SDK 6.x / Kiota 2.x major-bump per ADR-029. ~3 weeks of safe migration; out of scope for current PR. |
+| `OpenMcdf` | Moderate | GHSA-jxpf-xq2m-q525 | Transitive via `DocumentFormat.OpenXml`. No patched 3.x version available at time of analysis; major-bump to 4.x (when released) would need migration testing. |
+| `OpenTelemetry.Api` | Moderate | GHSA-g94r-2vxg-569j | Transitive via Microsoft.Extensions.* telemetry stack. Upstream patch pending; bumping to a newer point release would require validating telemetry-instrumentation compatibility. |
+
+**Removal criteria** (per entry, not all-or-nothing):
+- `Microsoft.Kiota.*` → when the Graph SDK 6.x / Kiota 2.x project lands.
+- `OpenMcdf` → when a patched OpenMcdf is published and `DocumentFormat.OpenXml` accepts the bump, OR when a centralized `Directory.Packages.props` override pins a patched version.
+- `OpenTelemetry.Api` → when an upstream patch is published or the telemetry stack is upgraded.
+
+When all entries are removed, the `$acceptedRiskPackages` list can be reset to empty, restoring full strictness.
 
 ---
 
