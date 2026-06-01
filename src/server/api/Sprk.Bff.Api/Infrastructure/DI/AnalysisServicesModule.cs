@@ -139,6 +139,13 @@ public static class AnalysisServicesModule
         // B5 — ChatHistoryManager (deps: ChatSessionManager + IChatDataverseRepository + ILogger — all unconditional).
         services.AddScoped<ChatHistoryManager>();
 
+        // Tier 1.5 residual — ChatContextMappingService (deps: IDistributedCache + IGenericEntityService +
+        // ILogger + optional IConnectionMultiplexer — all unconditional). Originally classified as
+        // compound-gated in D-09; Phase 1c triage 2026-06-01 surfaced ChatEndpoints.GetContextMappingsAsync
+        // + EvictContextMappingsCacheAsync inject this unconditionally → metadata-gen abort when AI flags off.
+        // Promoted under D-02 cluster exception (still attributed to RB-T028-04 cluster fix). ADR-010 (AIPL-053).
+        services.AddScoped<ChatContextMappingService>();
+
         // L5 — AnalysisChatContextResolver (deps: IGenericEntityService + IDistributedCache + ILogger).
         services.AddScoped<AnalysisChatContextResolver>();
 

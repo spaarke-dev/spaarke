@@ -227,24 +227,20 @@ public static class AiModule
         services.AddScoped<IChatContextProvider, PlaybookChatContextProvider>();
 
         // ── Chat-CRUD bundle promoted to UNCONDITIONAL registration ────────────────────
-        // (task 011 Phase 1b Tier 1, D-09 §2 B4/B5/L5 — 2026-06-01)
+        // (task 011 Phase 1b Tier 1 + Tier 1.5, D-09 §2 B4/B5/L5 + residual — 2026-06-01)
         // The following services were previously registered here but have ZERO AI deps:
         //   - IChatDataverseRepository / ChatDataverseRepository  (B4)
         //   - ChatSessionManager                                  (B4)
         //   - ChatHistoryManager                                  (B5)
         //   - AnalysisChatContextResolver                         (L5)
         //   - StandaloneChatContextProvider                       (L5)
+        //   - ChatContextMappingService                           (Tier 1.5 residual — RB-T028-04)
         // They now live in AnalysisServicesModule.AddUnconditionalChatAndNotificationServices,
         // which runs outside the compound Analysis+DocIntel gate. ChatContextMappingService
-        // remains conditional here because it is consumed only inside the AI compound path
-        // (no unconditional endpoints inject it). See
-        // projects/sdap.bff.api-test-suite-repair-r2/decisions/D-09-nullobject-design.md.
-
-        // ChatContextMappingService — scoped per ADR-010 (AIPL-053).
-        // Resolves which playbook(s) to show for a given entityType + pageType via
-        // sprk_aichatcontextmapping entity. Redis-first with 30-min sliding TTL (ADR-009).
-        // Scoped: depends on IGenericEntityService (singleton); scoping limits per-request visibility.
-        services.AddScoped<ChatContextMappingService>();
+        // was originally classified as compound-gated but ChatEndpoints.GetContextMappingsAsync
+        // + EvictContextMappingsCacheAsync inject it unconditionally — Phase 1c triage 2026-06-01
+        // surfaced this metadata-gen abort. Promoted as Tier 1.5 residual under D-02 cluster
+        // exception. See projects/sdap.bff.api-test-suite-repair-r2/decisions/D-09-nullobject-design.md.
 
         // PendingPlanManager — scoped per ADR-010 (task 071, Phase 2F).
         // Stores pending plans in Redis at "plan:pending:{tenantId}:{sessionId}" with 30-min TTL.
