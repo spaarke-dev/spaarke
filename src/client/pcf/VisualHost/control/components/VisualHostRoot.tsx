@@ -60,6 +60,20 @@ const useStyles = makeStyles({
     marginBottom: '10px',
     gap: '10px',
   },
+  // v1.4.8 — Toolbar variant for `showCardTitle:false`. Positioned absolutely
+  // in the top-right of the container so the icons remain visible without the
+  // toolbar reserving a 32px row of vertical space. Used when the host form
+  // section already provides the chart name as a section heading.
+  toolbarFloat: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '4px',
+    zIndex: 1,
+  },
   toolbarTitle: {
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
@@ -630,8 +644,14 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
           each chart's centered header. When this toolbar renders, ChartRenderer suppresses
           the chart's internal title via the `hostRenderedTitle` prop. */}
       {showToolbar && chartDefinition && (aiSummaryField || enableDrillThrough) && (
-        <div className={styles.toolbar}>
-          {chartDefinition.sprk_name && showCardTitleInToolbar ? (
+        // v1.4.8 — Two render modes:
+        //   showCardTitle:false → float variant. Icons absolutely positioned in
+        //     top-right corner; toolbar reserves zero vertical space. Used when
+        //     a form section heading already provides the chart name.
+        //   else                → inline variant. Title (left) + icons (right)
+        //     occupy a 32px row above the chart content (v1.4.3 layout).
+        showCardTitleInToolbar && chartDefinition.sprk_name ? (
+          <div className={styles.toolbar}>
             <Text
               size={300}
               className={styles.toolbarTitle}
@@ -640,12 +660,32 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
             >
               {chartDefinition.sprk_name}
             </Text>
-          ) : (
-            // v1.4.6 — chart name suppressed (showCardTitle:false in options)
-            // OR chartDefinition has no sprk_name. Spacer keeps icons right-aligned.
-            <span aria-hidden={true} style={{ flexGrow: 1 }} />
-          )}
-          <div className={styles.toolbarIcons}>
+            <div className={styles.toolbarIcons}>
+              {aiSummaryField && (
+                <AiSummaryPopover
+                  trigger={
+                    <Tooltip content="AI Summary" relationship="label">
+                      <Button appearance="subtle" icon={<SparkleRegular />} aria-label="View AI summary" />
+                    </Tooltip>
+                  }
+                  onFetchSummary={handleFetchAiSummary}
+                  positioning="below"
+                />
+              )}
+              {enableDrillThrough && (
+                <Tooltip content="View details" relationship="label">
+                  <Button
+                    appearance="subtle"
+                    icon={<OpenRegular />}
+                    onClick={handleExpandClick}
+                    aria-label="View details in expanded workspace"
+                  />
+                </Tooltip>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className={styles.toolbarFloat}>
             {aiSummaryField && (
               <AiSummaryPopover
                 trigger={
@@ -668,11 +708,11 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
               </Tooltip>
             )}
           </div>
-        </div>
+        )
       )}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.7 • 2026-06-01</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.8 • 2026-06-01</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>

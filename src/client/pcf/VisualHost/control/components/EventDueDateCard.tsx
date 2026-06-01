@@ -52,26 +52,23 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: '56px',
-    // v1.4.7 — tighter vertical padding (was spacingVerticalS) lets the
-    // 44px minHeight actually take effect; the column still reads as
-    // distinct because horizontal padding stays generous.
+    // v1.4.8 — wider column to fit single-line "DD-MMM-YYYY" format
+    minWidth: '120px',
     paddingTop: tokens.spacingVerticalXXS,
     paddingBottom: tokens.spacingVerticalXXS,
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground1,
   },
-  dateDay: {
-    fontSize: tokens.fontSizeBase500,
-    fontWeight: tokens.fontWeightBold,
-    lineHeight: tokens.lineHeightBase500,
-  },
-  dateMonth: {
-    fontSize: tokens.fontSizeBase100,
+  // v1.4.8 — single-line "DD-MMM-YYYY" replaces the prior stacked
+  // dateDay+dateMonth pattern. Larger, bolder so the date reads at a glance
+  // (semibold + base300, tabular-nums to keep digits aligned across cards).
+  dateLabel: {
+    fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
-    textTransform: 'uppercase' as const,
-    lineHeight: tokens.lineHeightBase100,
+    fontVariantNumeric: 'tabular-nums',
+    lineHeight: tokens.lineHeightBase300,
+    whiteSpace: 'nowrap',
   },
   content: {
     display: 'flex',
@@ -104,14 +101,16 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
   },
+  // v1.4.8 — horizontal layout: "Days Left" label LEFT of the pill (was
+  // stacked vertically). Tighter padding to keep the card compact.
   badgeColumn: {
     display: 'flex',
-    flexDirection: 'column',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
-    gap: tokens.spacingVerticalXXS,
+    gap: tokens.spacingHorizontalXS,
   },
   badgeLabel: {
     fontSize: tokens.fontSizeBase100,
@@ -179,8 +178,13 @@ export const EventDueDateCard: React.FC<IEventDueDateCardProps> = props => {
   // Urgency-based date column coloring: <3d red, 3-5d yellow, 6+d green
   const dateColumnStyle = getUrgencyDateStyle(props.daysUntilDue, props.isOverdue);
 
-  const day = props.dueDate.getDate();
-  const month = MONTH_ABBREVS[props.dueDate.getMonth()];
+  // v1.4.8 — single-line "DD-MMM-YYYY" format (e.g., "01-JUL-2026") replaces
+  // the prior 2-line "DD" + "MMM" stacked layout. Day is zero-padded; month
+  // is the 3-letter abbreviation in uppercase.
+  const day = String(props.dueDate.getDate()).padStart(2, '0');
+  const month = MONTH_ABBREVS[props.dueDate.getMonth()].toUpperCase();
+  const year = props.dueDate.getFullYear();
+  const dateLabel = `${day}-${month}-${year}`;
 
   return (
     <Card
@@ -189,11 +193,10 @@ export const EventDueDateCard: React.FC<IEventDueDateCardProps> = props => {
       onKeyDown={handleKeyDown}
       role="button"
       tabIndex={0}
-      aria-label={`${props.eventTypeName}: ${props.eventName}, due ${month} ${day}`}
+      aria-label={`${props.eventTypeName}: ${props.eventName}, due ${dateLabel}`}
     >
       <div className={styles.dateColumn} style={dateColumnStyle}>
-        <span className={styles.dateDay}>{day}</span>
-        <span className={styles.dateMonth}>{month}</span>
+        <span className={styles.dateLabel}>{dateLabel}</span>
       </div>
 
       <div className={styles.content}>
