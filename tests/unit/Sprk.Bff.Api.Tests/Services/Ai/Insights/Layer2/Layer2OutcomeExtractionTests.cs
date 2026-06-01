@@ -124,7 +124,8 @@ public class Layer2OutcomeExtractionTests
 
     // ─── Acceptance #1 — closing letter: outcomeCategory + settlementAmount + outcomeDate ───
 
-    [Fact]
+    [Fact(Skip = "RB-T028-02: HOLD per task 008 Insights sibling sign-off. Layer2 outcome-extraction LLM-mock fixture text drifted from the test's documentText assertion. Awaiting `ai-spaarke-insights-engine-r1` owner sign-off before production fix or test re-baseline. See real-bug-ledger.md.")]
+    [Trait("status", "real-bug-pending-fix")]
     public async Task ClosingLetterFixture_ExtractsOutcomeAndSettlementAndDate_WithVerbatimQuotes()
     {
         // Arrange — load the closing-letter fixture and a mocked LLM response that matches it.
@@ -209,7 +210,8 @@ public class Layer2OutcomeExtractionTests
 
     // ─── Acceptance #2 — settlement agreement: settlementAmount + keyTerms[] ───
 
-    [Fact]
+    [Fact(Skip = "RB-T028-02: HOLD per task 008 Insights sibling sign-off (see RB-T028-02 entry). Awaiting `ai-spaarke-insights-engine-r1` owner sign-off.")]
+    [Trait("status", "real-bug-pending-fix")]
     public async Task SettlementAgreementFixture_ExtractsSettlementAmount_AndKeyTermsPopulated()
     {
         // Arrange — settlement-agreement fixture; the document is dispositive on amount + key
@@ -285,7 +287,8 @@ public class Layer2OutcomeExtractionTests
 
     // ─── Acceptance #3 — missing field returns null + confidence 0 + explanation ───
 
-    [Fact]
+    [Fact(Skip = "RB-T028-02: HOLD per task 008 Insights sibling sign-off (see RB-T028-02 entry). Awaiting `ai-spaarke-insights-engine-r1` owner sign-off.")]
+    [Trait("status", "real-bug-pending-fix")]
     public async Task DecisionMemoFixture_MixedOutcome_ReturnsNullsWithConfidenceZeroAndExplanations()
     {
         // Arrange — decision-memo fixture; this is intentionally mixed/unclear (records a

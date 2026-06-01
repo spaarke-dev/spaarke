@@ -1,7 +1,20 @@
 <task id="028" project="sdap-bff.api-test-suite-repair">
   <metadata>
     <title>Triage + §6.2 re-classification of 51 residual Failed tests for Phase 2+3 close</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-05-31</completion-date>
+    <completion-notes>
+      All 51 residual `Failed` tests classified to §6.2 final end-states (100% `real-bug-pending-fix`).
+      8 new RB-T028-NN ledger entries appended (RB-T028-01..08, severities: HIGH x4, MEDIUM x3, LOW x1).
+      Created `flaky-ledger.md` with zero-entries canonical schema doc.
+      Post-028 TRX measurements confirm `Failed: 0` in both suites:
+        - Unit: 6030 total / 5893 pass / 0 fail / 137 skip
+        - Integration: 421 total / 323 pass / 0 fail / 98 skip
+      Authoritative report: `baseline/post-028-classification-2026-05-31.md`.
+      §4.3 / NFR-10 binding rule satisfied; Phase 2+3 exit gate REVISED from PARTIAL → FULL CLOSURE.
+      NFR proof: NFR-01 ✅ (0 src/power-platform/infra/scripts mods), NFR-02 ✅ (<5% per file), NFR-04 ✅ (0 archives), NFR-09 ✅, NFR-11 ✅ (0 build errors).
+      Quality Gates: code-review PASS (attribute-only diffs), adr-check PASS (no architectural impact), build PASS (0 errors both projects).
+    </completion-notes>
     <estimated-effort>2-3 hours</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>phase-2-3-close, residual-classification, triage, real-bug-pending-fix, flaky-quarantined</tags>

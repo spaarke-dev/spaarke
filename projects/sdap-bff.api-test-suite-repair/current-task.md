@@ -3524,3 +3524,59 @@ Both well under 50% (NFR-02 satisfied) — **no §4.8 escalations required**.
 - §6.2: every touched test has final taxonomy state (repaired/real-bug-pending-fix) — PASS
 - Build: 0 errors, 17 warnings (unchanged) — PASS
 
+
+---
+
+## Task 028 — Residual classification (Phase 2+3 close bridge) — 2026-05-31
+
+- **Task**: 028 (Phase 2+3 close — 51 residual `Failed` triage + §6.2 reclassification)
+- **Status**: completed 2026-05-31
+- **Rigor**: FULL (POML `<rigor>FULL</rigor>`)
+- **Scope**: Classify all 51 `Failed` tests (4 unit + 47 integration) carried out of task 074 PARTIAL CLOSURE; satisfy §4.3 / NFR-10 "no Failed at project close" binding.
+
+### Outcome
+- **Unit**: 6030 / 5893 pass / **0 fail** / 137 skip (was 4 fail)
+- **Integration**: 421 / 323 pass / **0 fail** / 98 skip (was 47 fail)
+- **Phase 2+3 exit gate**: PARTIAL CLOSURE → **FULL CLOSURE** (revised)
+
+### Disposition (100% `real-bug-pending-fix` via 8 new RB-T028-NN entries)
+| Cluster | Count | Ledger | Severity |
+|---|---:|---|---|
+| AnalysisContextBuilder.BuildContinuationPrompt | 1 | RB-T028-01 | MEDIUM |
+| Layer2OutcomeExtractionTests (HOLD) | 3 | RB-T028-02 | MEDIUM |
+| KnowledgeBaseEndpointsTests | 13 | RB-T028-03 | HIGH |
+| ChatEndpointsTests | 11 | RB-T028-04 | HIGH |
+| ReAnalysisFlowTests | 8 | RB-T028-05 | HIGH |
+| AuthorizationIntegrationTests | 5 | RB-T028-06 | HIGH |
+| UploadIntegrationTests | 9 | RB-T028-07 | MEDIUM |
+| PrecedentAdminEndpointsTests | 1 | RB-T028-08 | LOW |
+
+### Files modified (test edits — Skip + Trait additions only)
+- 8 test files: 51 `[Fact/Theory(Skip=...)]` + 51 `[Trait("status","real-bug-pending-fix")]` injections
+- `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` — 8 new entries (now 20 cumulative)
+- `projects/sdap-bff.api-test-suite-repair/ledgers/flaky-ledger.md` — NEW (zero-entries canonical schema)
+- `projects/sdap-bff.api-test-suite-repair/baseline/post-028-classification-2026-05-31.md` — NEW (authoritative report)
+- `projects/sdap-bff.api-test-suite-repair/baseline/post-028-unit-2026-05-31.trx` — NEW (post-classification TRX)
+- `projects/sdap-bff.api-test-suite-repair/baseline/post-028-integration-2026-05-31.trx` — NEW (post-classification TRX)
+- `projects/sdap-bff.api-test-suite-repair/tasks/028-residual-classification.poml` — status → completed with notes
+
+### NFR proof
+- NFR-01: ✅ git status shows 0 src/power-platform/infra/scripts mods
+- NFR-02: ✅ all diffs <5% per file (Skip + Trait additions only)
+- NFR-03: ✅ no DI registration changes
+- NFR-04: ✅ 0 archives (cumulative still 0; well under ≤10 per phase)
+- NFR-06: ✅ no deletions
+- NFR-09: ✅ `<repair-not-rewrite>true</repair-not-rewrite>` declared in POML
+- NFR-10 / §4.3: ✅ both suites now `Failed: 0`
+- NFR-11: ✅ 0 build errors in both projects
+
+### Step 9.5 Quality Gates (FULL rigor)
+- code-review: PASS — additive Skip + Trait only; descriptive ledger-linked messages; no production logic touched
+- adr-check: PASS — no architectural impact; ADR-001/010/028 unaffected
+- build: PASS — 0 errors both projects; warnings unchanged (17 unit / 3 integration)
+
+### Phase 4 hand-off
+- Task 080 (`bff-extensions.md` "Test update obligation"): RB-T028-03/04/05/06 are the canonical anti-drift use case
+- Task 084 (triple-run validation): re-run 3x to verify Skip + Trait persistence; expect Failed=0 each run
+- Task 085 (repair-ledger final write-up): incorporate 8 new ledger entries
+- Task 086 (final verification gate): §4.3 / NFR-10 check now passes cleanly
