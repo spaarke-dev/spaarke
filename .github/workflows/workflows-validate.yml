@@ -1,9 +1,12 @@
 name: actionlint
 
 on:
+  # Fire on all PRs (no path filter) so the 'actionlint' required-status-check
+  # always posts a status. Path filtering created a deadlock pattern on PRs
+  # that didn't touch .github/workflows/** — the check was "expected but
+  # unreported" and blocked merge indefinitely (observed on PR #322 closeout).
+  # Actionlint is fast (~17s) so the overhead is negligible.
   pull_request:
-    paths:
-      - '.github/workflows/**'
 
 permissions:
   contents: read
