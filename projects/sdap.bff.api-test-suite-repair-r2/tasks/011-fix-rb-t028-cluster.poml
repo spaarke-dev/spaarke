@@ -2,7 +2,7 @@
   <metadata>
     <title>P1 — Fix RB-T028-03/04/05/06 HIGH cluster (conditional service registration + unconditional endpoint mapping)</title>
     <phase>Phase 1: HIGH Severity + Insights HOLD</phase>
-    <status>escalated-2026-06-01</status>
+    <status>in-progress (Option B per E-01 resolution 2026-06-01)</status>
     <estimated-effort>5-8 hours</estimated-effort>
     <dependencies>000, 001</dependencies>
     <blocks>013</blocks>

@@ -1,12 +1,28 @@
-# E-01 — RB-T028 Cluster: Scope Expansion Beyond Task Boundary (HUMAN INPUT REQUIRED)
+# E-01 — RB-T028 Cluster: Scope Expansion Beyond Task Boundary (RESOLVED)
 
 > **Project**: sdap.bff.api-test-suite-repair-r2
 > **Task**: 011 (Phase 1 P1-S2 / HIGH cluster fix)
 > **RB IDs**: RB-T028-03, RB-T028-04, RB-T028-05, RB-T028-06
 > **Filed**: 2026-06-01
 > **Filed by**: task-execute (Claude Code, Opus 4.7)
-> **Status**: Open — awaiting owner direction
-> **Severity**: BLOCKING for task 011
+> **Status**: **RESOLVED 2026-06-01** — owner (`dev@spaarke.com`) selected **Option B (NullObject pattern)**
+> **Severity**: BLOCKING for task 011 (now unblocked under Option B scope)
+
+## 2026-06-01 Resolution
+
+Owner reviewed E-01 and selected **Option B**: Null-Object pattern for all conditional AI services. Rationale:
+- Aligns with user direction "no r3 — resolve all issues in r2"
+- Architecturally cleanest of the 4 options
+- NFR-01 compliant (zero test changes)
+- Requires ADR-018 amendment OR new ADR; treated as in-scope governance update
+
+**Re-scoped task 011** to be a 4-phase orchestrator:
+1. **Phase 1a — Inventory + Design** (~3-4h): identify ALL conditional services with unconditional-mapping consumers; design Null-Object pattern per service; draft ADR-018 amendment / new ADR
+2. **Phase 1b — Implementation** (~10-15h): write Null-Object impls; register them in DI when feature flag is off; verify build clean
+3. **Phase 1c — Test + verify** (~3-4h): Skip→Pass transitions for 37+ tests; per-fix triple-run; Step 9.5 quality gates
+4. **Phase 1d — Review** (~1-2h): security review request on PR #318 (RB-T028-06 Auth implications)
+
+Total: ~17-25h (refined from E-01 estimate of 20-30h).
 
 ---
 
