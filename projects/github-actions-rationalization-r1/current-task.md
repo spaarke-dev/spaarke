@@ -13,23 +13,30 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave B (010, 011, 012) ready to start |
-| **Step** | Wave A ✅ complete (001, 002) |
-| **Status** | not-started (Wave B) |
-| **Next Action** | Dispatch Wave B in parallel: tasks 010 (deploy-promote cascade+contract), 011 (deploy-infrastructure ghost triggers), 012 (nightly-quality schedule). Each task touches a different workflow file → parallel-safe. |
+| **Task** | 020 (Phase 2 audit) ready to start |
+| **Step** | Wave A ✅ + Wave B ✅ complete (001, 002, 010, 011, 012) |
+| **Status** | not-started (task 020) |
+| **Next Action** | Dispatch task 020 (Phase 2 audit + draft 8 dispositions). Single-task sequential wave (produces ledger; cannot parallelize). After 020, dispatch Wave C (021, 022) in parallel. |
 
 ### Files Modified This Session
-- `projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md` — Created — 13-workflow audit
-- `projects/github-actions-rationalization-r1/baseline/branch-protection-2026-06-01.json` — Created — master branch protection snapshot (3 required checks, enforce_admins=true)
-- `projects/github-actions-rationalization-r1/decisions/D-01-master-ci-failure-disposition.md` — Created — master CI failure DEFERRED to follow-on `src/`-fix project
-- `projects/github-actions-rationalization-r1/tasks/TASK-INDEX.md` — Updated — Wave A marked ✅; findings added
+- `baseline/workflow-inventory-2026-06-01.md` — Wave A
+- `baseline/branch-protection-2026-06-01.json` — Wave A
+- `decisions/D-01-master-ci-failure-disposition.md` — Wave A (master CI DEFERRED)
+- `decisions/D-02-deploy-promote-artifact-contract-verified.md` — Wave B (corrects inventory; no fix needed)
+- `decisions/D-03-nightly-and-weekly-quality-disposition.md` — Wave B (DELETE both; Phase 2 task 022 executes)
+- `.github/workflows/deploy-promote.yml` — Wave B (cascade fix: workflow-level `if:` on summary job, +9/-1 lines)
+- `.github/workflows/deploy-infrastructure.yml` — Wave B (loader fix: moved `env:` from job to step, +4/-4 lines)
+- `tasks/TASK-INDEX.md` — Updated through Wave B
 
 ### Critical Context
-Wave A surfaced two consequential findings beyond their direct deliverables:
-1. **Master CI failure is `src/` drift** (17 `-warnaserror` errors + 330 Prettier files), NOT a workflow bug → DEFERRED per NFR-01. Phase 5 FR-13 will need a carve-out around `Build & Test (Release)`.
-2. **`deploy-promote.yml` has a broken artifact contract** in addition to the cascade bug — Wave B task 010 must address BOTH.
+Three consequential findings so far:
+1. **Master CI failure is `src/` drift** → DEFERRED per NFR-01; Phase 5 FR-13 needs `Build & Test (Release)` carve-out.
+2. **Wave A inventory was wrong about deploy-promote artifact contract** → corrected via D-02 (sdap-ci.yml DOES produce `deployment-packages`).
+3. **nightly-quality + weekly-quality both blocked by `src/` regression** → DELETE both per D-03; Phase 2 task 022 executes via `git rm`.
 
-Inventory recommendations project to a final count of ~8 workflows (FR-06 target met).
+Phase 1 substantive fixes (Wave B) total ~13 modified lines across 2 workflow files — well under NFR-02's 50% threshold per file.
+
+Wave B PyYAML validation: both modified workflows parse cleanly with all expected jobs and triggers intact. Full actionlint validation will land via task 030's `workflows-validate.yml`.
 
 ---
 
@@ -37,10 +44,10 @@ Inventory recommendations project to a final count of ~8 workflows (FR-06 target
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | Wave B (010, 011, 012) |
-| **Task File** | `tasks/010-fix-deploy-promote-cascade.poml`, `tasks/011-fix-deploy-infrastructure-triggers.poml`, `tasks/012-fix-nightly-quality-schedule.poml` |
-| **Title** | Wave B — Fix P2/P3/P4 broken workflows |
-| **Phase** | 1: Fix Broken Workflows |
+| **Task ID** | 020 |
+| **Task File** | `tasks/020-audit-untested-workflows.poml` |
+| **Title** | Audit untested workflows + draft dispositions (8 decision records + ledger) |
+| **Phase** | 2: Rationalization |
 | **Status** | not-started |
 | **Started** | — |
 

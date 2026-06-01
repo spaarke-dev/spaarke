@@ -24,9 +24,9 @@
 |----|-------|-------|-------|--------|--------------|----------------|---------------|
 | 001 | Workflow inventory + baseline snapshots | 0: Inventory + Baseline | STANDARD | ✅ | none | A | ✅ |
 | 002 | Investigate post-PR-#314 master CI failure (run 26755019759) | 0: Inventory + Baseline | STANDARD | ✅ | none | A | ✅ |
-| 010 | Fix deploy-promote.yml cascade (P2) | 1: Fix Broken Workflows | STANDARD | 🔲 | 001 | B | ✅ |
-| 011 | Fix deploy-infrastructure.yml ghost triggers (P3) | 1: Fix Broken Workflows | STANDARD | 🔲 | 001 | B | ✅ |
-| 012 | Fix nightly-quality.yml schedule failures (P4) | 1: Fix Broken Workflows | STANDARD | 🔲 | 001 | B | ✅ |
+| 010 | Fix deploy-promote.yml cascade (P2) | 1: Fix Broken Workflows | STANDARD | ✅ | 001 | B | ✅ |
+| 011 | Fix deploy-infrastructure.yml ghost triggers (P3) | 1: Fix Broken Workflows | STANDARD | ✅ | 001 | B | ✅ |
+| 012 | Fix nightly-quality.yml schedule failures (P4) | 1: Fix Broken Workflows | STANDARD | ✅ | 001 | B | ✅ |
 | 020 | Audit untested workflows + draft dispositions | 2: Rationalization | STANDARD | 🔲 | 001 | — | ❌ (single ledger build) |
 | 021 | Execute deploy-* workflow dispositions | 2: Rationalization | STANDARD | 🔲 | 020 | C | ✅ |
 | 022 | Execute non-deploy workflow dispositions | 2: Rationalization | STANDARD | 🔲 | 020 | C | ✅ |
@@ -62,10 +62,22 @@
 - **Follow-on project suggested**: `sdap-bff-warnaserror-cleanup-r1` (~4–8 h)
 
 **Notable surprises** (inform Phase 1 + Phase 2 tasks):
-1. `deploy-promote.yml` artifact contract is broken (downloads `deployment-packages` but sdap-ci produces `test-results-*`/`coverage-reports-*`). Task 010 must address BOTH cascade AND contract.
+1. `deploy-promote.yml` artifact contract is broken (downloads `deployment-packages` but sdap-ci produces `test-results-*`/`coverage-reports-*`). Task 010 must address BOTH cascade AND contract. **[Wave B update]**: Investigation showed this was incorrect — `sdap-ci.yml` line 236 DOES produce `deployment-packages`. See D-02 for the correction.
 2. `deploy-promote.yml` and `deploy-infrastructure.yml` are **100% loader-failures** (every run has `jobs: []`). Task 011 fix is structural (YAML/path-filter), not retry-the-failing-test.
 3. `deploy-slot-swap.yml`'s 75% "success rate" is a no-op trick — most "success" runs have all real jobs skipped because upstream sdap-ci failed. Workflow is effectively dormant; ideal CONSOLIDATE candidate.
 4. `auto-add-to-project.yml` broken since 2026-03-13 (29 consecutive fails) — likely expired `GH_TOKEN_PROJECT` secret. Task 020's audit should note this as evidence supporting DELETE.
+
+---
+
+## Wave B Findings (2026-06-01) — INFORMS DOWNSTREAM PHASES
+
+**Task 010 result**: `deploy-promote.yml` cascade fix applied (workflow-level `if:` added to `summary` job; the only job that previously had `if: always()`). 2.1% line replacement. FR-03 satisfied by reasoning: on SDAP CI failure, all 5 jobs evaluate `if:` to false → workflow records as `skipped`, not `failure`. PyYAML parse PASS. Decision record `D-02-deploy-promote-artifact-contract-verified.md` corrects a Wave A inventory error: sdap-ci.yml DOES produce the `deployment-packages` artifact.
+
+**Task 011 result**: `deploy-infrastructure.yml` loader-failure root cause identified and fixed. The bug: `${{ runner.temp }}` was used inside a job-level `env:` block (runner context only available at step level, not job level — silent loader fail). Fix: moved `env:` from job-level to step-level on the only consuming step. 1.1% line replacement. actionlint 1.7.7 PASS (was FAIL before — "context 'runner' is not allowed here"). FR-04 satisfied — loader now succeeds, trigger filters evaluate correctly.
+
+**Task 012 result**: `nightly-quality.yml` failure root cause = **`src/`-regression** (4× CS1739 errors in `tests/integration/Spe.Integration.Tests/ExternalAccess/ExternalAccessIntegrationTests.cs`). NFR-01 forbids `src/` fixes. **DELETE recommended for BOTH `nightly-quality.yml` AND `weekly-quality.yml`** (per D-04 consolidate + D-03 delete-by-default). Decision record at `D-03-nightly-and-weekly-quality-disposition.md`. Execution deferred to Phase 2 task 022. FR-05 satisfied via the delete-with-rationale alternative path.
+
+**No `src/` files modified, no `git rm` executed, no commits made by subagents — main session committed Wave B in single integration commit.**
 
 ---
 
