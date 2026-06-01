@@ -43,10 +43,10 @@ const useStyles = makeStyles({
     width: '100%',
     minWidth: 0, // Allow shrinking below intrinsic content width
     padding: '2px',
-    // v1.4.8.1 — breathing room between the form section heading (rendered
-    // by the host form ABOVE this PCF) and the first chart content row.
-    // UAT feedback: the cards sat flush against the section title with no gap.
-    paddingTop: '12px',
+    // v1.4.10 — breathing room between the CardChrome header (or form
+    // section heading above) and the first chart content row. UAT round on
+    // v1.4.9 reported 12px wasn't enough; bumped to 20px.
+    paddingTop: '20px',
     paddingBottom: '14px', // Minimal space for version badge
     boxSizing: 'border-box',
     position: 'relative',
@@ -571,14 +571,15 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
     // caller explicitly sets showTitle=true (Phase 3+ Matter cards), CardChrome
     // takes over both the title bar AND the expand icon.
     const chromeOptIn = showTitlePcf === true;
-    // v1.4.8.1 — When the chart def opts out of toolbar title rendering
-    // (`showCardTitle: false`), CardChrome ALSO suppresses its title. This
-    // matters for cards where a host form section heading already names the
-    // chart and we want to avoid duplicating it inside CardChrome.
-    const chromeTitle: string | undefined =
-      chromeOptIn && showCardTitleInToolbar
-        ? (chartDefinition.sprk_name || undefined)
-        : undefined;
+    // v1.4.10 — CardChrome ALWAYS renders its title when `chromeOptIn` is
+    // true. The chart-def-level `showCardTitle` option ONLY affects the
+    // legacy toolbar's title (it was never meant to also hide CardChrome's
+    // title — v1.4.9 misapplied it and the result was that Matter Next Date
+    // lost its only header). CardChrome is the canonical title surface for
+    // all 5 Matter chart cards, matching FR-VH-05.
+    const chromeTitle: string | undefined = chromeOptIn
+      ? (chartDefinition.sprk_name || undefined)
+      : undefined;
 
     // Wire expand to existing handleExpandClick so chart-def Drill Through
     // Settings continue to apply (no new ClickActionHandler).
@@ -726,7 +727,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
       )}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.9 • 2026-06-01</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.10 • 2026-06-01</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>

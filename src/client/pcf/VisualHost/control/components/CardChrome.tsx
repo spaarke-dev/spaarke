@@ -81,10 +81,11 @@ const useStyles = makeStyles({
     justifyContent: 'space-between',
     width: '100%',
     minHeight: '24px',
-    // Minimal vertical breathing room — kept tight so the wrapped card body
-    // dimensions remain effectively unchanged vs the unwrapped baseline
-    // (NFR-05 backward compatibility for existing chart defs).
-    ...shorthands.margin(0, 0, tokens.spacingVerticalXS, 0),
+    // v1.4.10 — bumped bottom margin from spacingVerticalXS (4px) to
+    // spacingVerticalM (12px) per UAT feedback ("add additional space
+    // below the header"). All CardChrome-using cards (the 5 Matter charts)
+    // get consistent breathing room between the title bar and the chart body.
+    ...shorthands.margin(0, 0, tokens.spacingVerticalM, 0),
     ...shorthands.gap(tokens.spacingHorizontalS),
     flexShrink: 0,
   },
