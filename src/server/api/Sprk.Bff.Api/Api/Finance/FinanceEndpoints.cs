@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Finance;
 
@@ -268,6 +269,15 @@ public static class FinanceEndpoints
                 result.Results.Count, result.TotalCount, result.DurationMs, correlationId);
 
             return Results.Ok(result);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 L2): NullInvoiceSearchService surfaced.
+            // Convert to 503 ProblemDetails per ADR-018 + ADR-019.
+            logger.LogDebug(
+                "Invoice search called while AI feature disabled. ErrorCode={ErrorCode}, CorrelationId={CorrelationId}",
+                ex.ErrorCode, correlationId);
+            return ex.AsFeatureDisabled503();
         }
         catch (InvalidOperationException ex)
         {

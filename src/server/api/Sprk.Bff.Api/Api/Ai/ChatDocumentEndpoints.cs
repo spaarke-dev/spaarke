@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -245,6 +246,14 @@ public static class ChatDocumentEndpoints
             using var extractionStream = new MemoryStream(originalBinary);
             extractionResult = await textExtractor.ExtractAsync(
                 extractionStream, filename, linkedCts.Token);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 L4): NullTextExtractor surfaced.
+            logger.LogDebug(
+                "Document upload text extraction called while AI feature disabled. ErrorCode={ErrorCode}, DocumentId={DocumentId}",
+                ex.ErrorCode, documentId);
+            return ex.AsFeatureDisabled503();
         }
         catch (OperationCanceledException) when (!httpContext.RequestAborted.IsCancellationRequested)
         {

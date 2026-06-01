@@ -366,6 +366,14 @@ public static class KnowledgeBaseEndpoints
                 Message = $"Deleted {chunksDeleted} chunk(s) for document '{documentId}'."
             });
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
+            logger.LogDebug(
+                "Knowledge base delete called while AI feature disabled. ErrorCode={ErrorCode}, DocumentId={DocumentId}",
+                ex.ErrorCode, documentId);
+            return ex.AsFeatureDisabled503();
+        }
         catch (Exception ex)
         {
             logger.LogError(ex,
@@ -543,6 +551,14 @@ public static class KnowledgeBaseEndpoints
             };
 
             return Results.Ok(result);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
+            logger.LogDebug(
+                "Knowledge base test-search called while AI feature disabled. ErrorCode={ErrorCode}, Query={Query}",
+                ex.ErrorCode, request.Query);
+            return ex.AsFeatureDisabled503();
         }
         catch (Exception ex)
         {

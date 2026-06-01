@@ -30,7 +30,13 @@ public static class AnalysisServicesModule
         }
         else
         {
-            Console.WriteLine("\u26a0 Document Intelligence services disabled (DocumentIntelligence:Enabled = false)");
+            // L4 \u2014 NullTextExtractor (P3 Fail-Fast). Task 011 Phase 1b Tier 2, D-09 \u00a72 L4.
+            // ITextExtractor is consumed unconditionally by WorkspaceFileEndpoints and
+            // ChatDocumentEndpoints; registering a Null-Object here keeps DI param-inference
+            // green when DocumentIntelligence:Enabled=false. Endpoint catches convert the
+            // FeatureDisabledException to 503 ProblemDetails.
+            services.AddSingleton<ITextExtractor, NullTextExtractor>();
+            Console.WriteLine("\u26a0 Document Intelligence services disabled (DocumentIntelligence:Enabled = false) \u2014 NullTextExtractor registered");
         }
 
         var analysisEnabled = configuration.GetValue<bool>("Analysis:Enabled", true);
@@ -64,11 +70,15 @@ public static class AnalysisServicesModule
         }
         else if (!documentIntelligenceEnabled)
         {
-            Console.WriteLine("\u26a0 Analysis services disabled (requires DocumentIntelligence:Enabled = true)");
+            // L1/L3/B6/B7 Null-Objects for compound-OFF (DocumentIntelligence:Enabled=false branch).
+            AddNullObjectsForCompoundOff(services);
+            Console.WriteLine("\u26a0 Analysis services disabled (requires DocumentIntelligence:Enabled = true) \u2014 Null-Objects registered");
         }
         else
         {
-            Console.WriteLine("\u26a0 Analysis services disabled (Analysis:Enabled = false)");
+            // L1/L3/B6/B7 Null-Objects for compound-OFF (Analysis:Enabled=false branch).
+            AddNullObjectsForCompoundOff(services);
+            Console.WriteLine("\u26a0 Analysis services disabled (Analysis:Enabled = false) \u2014 Null-Objects registered");
         }
 
         AddRecordMatchingServices(services, configuration);
@@ -134,6 +144,38 @@ public static class AnalysisServicesModule
 
         // L5 — StandaloneChatContextProvider (deps: IDistributedCache + ILogger).
         services.AddScoped<StandaloneChatContextProvider>();
+    }
+
+    /// <summary>
+    /// Registers P3 Fail-Fast Null-Objects for compound-AI-OFF state (task 011 Phase 1b Tier 2,
+    /// D-09 §2 L1/L3/B6/B7). Called from BOTH compound-off branches (DocIntel-off + Analysis-off).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Each Null-Object throws <see cref="Configuration.FeatureDisabledException"/> on every
+    /// public method; consumer endpoints catch this and convert to 503 ProblemDetails per
+    /// ADR-018 + ADR-019. Logger-only deps keep these Null-Objects safe to register even when
+    /// AI deps (<see cref="IOpenAiClient"/>, etc.) are absent.
+    /// </para>
+    /// <para>
+    /// Per D-09 §8 Risks: <see cref="NullPlaybookService"/> is registered via plain
+    /// <c>AddSingleton</c> (NOT <c>AddHttpClient</c>); the real <c>PlaybookService</c> uses
+    /// typed HttpClient but the Null-Object has no need for HttpClient machinery.
+    /// </para>
+    /// </remarks>
+    private static void AddNullObjectsForCompoundOff(IServiceCollection services)
+    {
+        // L1 — IBriefingAi (P3 Fail-Fast). Real impl registered in AddPublicContractsFacade.
+        services.AddScoped<IBriefingAi, NullBriefingAi>();
+
+        // L3 — IPlaybookOrchestrationService (P3 Fail-Fast). Real impl registered in AddPlaybookServices.
+        services.AddScoped<IPlaybookOrchestrationService, NullPlaybookOrchestrationService>();
+
+        // B6 — IPlaybookService (P3 Fail-Fast). Real impl registered in AddPlaybookServices as typed HttpClient.
+        services.AddSingleton<IPlaybookService, NullPlaybookService>();
+
+        // B7 — IRagService (P3 Fail-Fast). Real impl registered in AddRagServices behind AI Search keys gate.
+        services.AddSingleton<IRagService, NullRagService>();
     }
 
     private static void AddAnalysisOrchestrationServices(IServiceCollection services, IConfiguration configuration)
@@ -337,7 +379,12 @@ public static class AnalysisServicesModule
         }
         else
         {
-            Console.WriteLine("\u26a0 RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key)");
+            // B7 fallback \u2014 compound gate ON but AI Search keys missing. Register Null-Object
+            // so IRagService consumers (RagEndpoints, KnowledgeBaseEndpoints TestSearch + delete)
+            // can still resolve their DI graph. Endpoint catches convert FeatureDisabledException
+            // to 503 ProblemDetails. Task 011 Phase 1b Tier 2, D-09 \u00a72 B7.
+            services.AddSingleton<IRagService, NullRagService>();
+            Console.WriteLine("\u26a0 RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key) \u2014 NullRagService registered");
         }
 
         services.AddSingleton<ITextChunkingService, TextChunkingService>();

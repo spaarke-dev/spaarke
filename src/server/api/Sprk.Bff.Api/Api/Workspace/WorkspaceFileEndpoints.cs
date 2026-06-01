@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http.Features;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Api.Workspace;
@@ -114,6 +115,14 @@ public static class WorkspaceFileEndpoints
 
             return TypedResults.Ok(new ExtractTextResponse(text));
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 L4): NullTextExtractor surfaced.
+            logger.LogDebug(
+                "Text extraction called while AI feature disabled. ErrorCode={ErrorCode}, CorrelationId={CorrelationId}",
+                ex.ErrorCode, httpContext.TraceIdentifier);
+            return ex.AsFeatureDisabled503();
+        }
         catch (Exception ex)
         {
             logger.LogError(ex,
@@ -197,6 +206,16 @@ public static class WorkspaceFileEndpoints
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("delivering", "Delivering results..."), ct);
             await response.WriteAsync("data: [DONE]\n\n", ct);
             await response.Body.FlushAsync(ct);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 L3/L4): NullTextExtractor or
+            // NullPlaybookOrchestrationService surfaced. Response is SSE — emit error chunk.
+            logger.LogDebug(
+                "File summarize called while AI feature disabled. ErrorCode={ErrorCode}, CorrelationId={CorrelationId}",
+                ex.ErrorCode, httpContext.TraceIdentifier);
+            await WriteSSEAsync(response, AnalysisStreamChunk.FromError($"[{ex.ErrorCode}] {ex.Message}"), CancellationToken.None);
+            await response.WriteAsync("data: [DONE]\n\n", CancellationToken.None);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {

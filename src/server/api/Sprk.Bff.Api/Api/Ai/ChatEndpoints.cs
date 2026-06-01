@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
@@ -1433,6 +1434,16 @@ public static class ChatEndpoints
                     }
                 }
             }
+            catch (FeatureDisabledException ex)
+            {
+                // Task 011 Phase 1b Tier 2 (D-09 §2 B6): NullPlaybookService surfaced. Fail-fast 503
+                // — returning empty playbook list would silently render "no playbooks available"
+                // and mask the kill-switch state.
+                logger.LogDebug(
+                    "Playbook list called while AI feature disabled. ErrorCode={ErrorCode}, UserId={UserId}",
+                    ex.ErrorCode, userId);
+                return ex.AsFeatureDisabled503();
+            }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Failed to load user playbooks for userId={UserId}; continuing with public only", userId);
@@ -1450,6 +1461,14 @@ public static class ChatEndpoints
                     playbooks.Add(new ChatPlaybookInfo(pb.Id.ToString(), pb.Name, pb.Description, pb.IsPublic));
                 }
             }
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B6): NullPlaybookService surfaced. Fail-fast 503.
+            logger.LogDebug(
+                "Public playbook list called while AI feature disabled. ErrorCode={ErrorCode}",
+                ex.ErrorCode);
+            return ex.AsFeatureDisabled503();
         }
         catch (Exception ex)
         {
