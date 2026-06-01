@@ -1,8 +1,10 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-01 (post-/project-pipeline Step 4)
+> **Last Updated**: 2026-06-01 (milestone checkpoint — Phase 1a complete; ready for /compact)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+> **Last commit (project work)**: `d2cdce20` — task 011 Phase 1a complete (NullObject inventory + design + ADR-030 draft)
+> **Last commit (this file)**: pending — written by context-handoff session 2026-06-01
 
 ---
 
@@ -75,12 +77,21 @@ Phase 0 will take ~1 week of calendar; tasks 000 + 001 are agent-executable; **t
 
 | Field | Value |
 |---|---|
-| **Task ID** | none |
-| **Task File** | — (none yet) |
-| **Title** | Project initialization (pipeline Steps 0-2) |
-| **Phase** | Pre-Phase-0 (pipeline setup) |
-| **Status** | none |
-| **Started** | — |
+| **Task ID** | 011 (re-scoped to Option B per E-01 resolution 2026-06-01) |
+| **Task File** | [`tasks/011-fix-rb-t028-cluster.poml`](tasks/011-fix-rb-t028-cluster.poml) |
+| **Title** | RB-T028-03/04/05/06 HIGH cluster — Null-Object kill-switch fix (Option B) |
+| **Phase** | Phase 1 P1-S2; sub-phases 1a complete / 1b pending / 1c pending / 1d pending |
+| **Status** | phase-1a-complete; ready for Phase 1b implementation dispatch |
+| **Started** | 2026-06-01 (Phase 1a) — investigation reverted 2026-06-01; re-scoped Option B 2026-06-01 |
+
+### Sub-phase status
+
+| Sub-phase | Status | Effort | Notes |
+|---|---|---|---|
+| **1a** Inventory + Design | ✅ COMPLETE 2026-06-01 (`d2cdce20`) | ~4h actual | 44 conditional services audited; 13 in-scope (8 BLOCKING + 5 LATENT); ADR-030 drafted |
+| **1b** Implementation | 🔲 ready | ~15h estimated | Tier 1 (1.5h) → Tier 2 (5h) → Tier 3 (5h) → triple-runs + Step 9.5 gates (3.5h) |
+| **1c** Tests Skip→Pass + per-fix triple-run | 🔲 pending | included in 1b | 36 expected (NOT 37; r1 off-by-one) |
+| **1d** Security review request + ADR-030 promotion | 🔲 pending | ~1-2h | Main-session-only for `.claude/adr/` write |
 
 ---
 
@@ -105,7 +116,9 @@ Phase 0 will take ~1 week of calendar; tasks 000 + 001 are agent-executable; **t
 
 ### Current Step
 
-Phase 1 P1-S1 (task 010) complete. Awaiting security review on PR #318 before P1-S2 (task 011 cluster) can begin.
+Task 011 Phase 1a complete. Owner reviewed E-01 escalation and selected **Option B (NullObject pattern)**. Phase 1a inventory + design + ADR-030 draft are pushed (commit `d2cdce20`). Phase 1b implementation (~15h) is the next significant work unit; benefits from a fresh-context session.
+
+**PR #318 security review status**: APPROVED 2026-06-01 by `dev@spaarke.com` for task 010 (RB-T044-01). D-08 record captures the approval. The approval clears the eventual merge gate for task 010's work; subsequent HIGH-severity fixes (task 011's cluster touches RB-T028-06 Auth) will need their own security-review request on PR #318 when their work is complete.
 
 ### Files Modified (All Task)
 
@@ -126,28 +139,42 @@ See "Files Modified This Session" above.
 
 ## Next Action
 
-**Next Step**: Dispatch Phase 0 P0-W1 wave — 3 parallel agents (one per task).
+**Next Step**: Dispatch **Task 011 Phase 1b — Tier 1 implementation** (Promote-to-unconditional, ~1.5h, lowest risk). Start here regardless of context budget. After Tier 1 lands cleanly, Tier 2 (~5h) and Tier 3 (~5h) dispatch as their own focused agents.
 
-Send ONE message with 3 `Skill` tool invocations:
-- `Skill(skill="task-execute", args="projects/sdap.bff.api-test-suite-repair-r2/tasks/000-capture-r1-baseline.poml")`
-- `Skill(skill="task-execute", args="projects/sdap.bff.api-test-suite-repair-r2/tasks/001-verify-20-bugs-reproducible.poml")`
-- `Skill(skill="task-execute", args="projects/sdap.bff.api-test-suite-repair-r2/tasks/002-sibling-owner-outreach.poml")`
+**Trigger phrase to resume in any session**: "**continue with task 011 Phase 1b**" or "**continue**" — CLAUDE.md §4 auto-detection will route to `task-execute` against task 011.
 
-**Pre-conditions**:
-- All 36 POML tasks present ✅
-- TASK-INDEX.md with parallel-execution plan present ✅
-- Branch `work/sdap.bff.api-test-suite-repair-r2` tracks `origin/work/sdap.bff.api-test-suite-repair-r2` ✅
-- Draft PR #318 open ✅
+**Tier 1 — Promote-to-unconditional** (4 DI moves; lowest risk):
+1. `NotificationService` — move from inside `AnalysisServicesModule.AddPlaybookServices` if-block to top-level (Layer 1 / B1 finding)
+2. `ChatSessionManager` — promote (zero AI deps; B4)
+3. `ChatHistoryManager` — promote (zero AI deps; B5)
+4. `ChatDataverseRepository` (L5-bis if applicable) — promote per D-09 §X
 
-**Key Context**:
-- Task 000: STANDARD rigor — read r1 ledgers, branch protection, CI gate, current test counts; produce `baseline/r1-closeout-2026-06-01.md`
-- Task 001: STANDARD rigor — verify 20 currently-Skipped tests are still appropriately Skipped (no regression-disguised-as-Skip); produce `baseline/20-entries-reproducibility-verification.md`
-- Task 002: MINIMAL rigor — **DRAFTS** outreach docs to Action Engine / Insights / Communications owners; owner-action follow-up to actually send (Claude cannot send emails)
+**Tier 2 — P3 Null-Objects for facade services** (7 Null classes; ~5h):
+See [`decisions/D-09-nullobject-design.md`](decisions/D-09-nullobject-design.md) §4 for the per-service order. Pattern: each Null impl throws `FeatureDisabledException` with a descriptive message; endpoints that consume the service catch and return 503 ServiceUnavailable with ProblemDetails (consistent with ADR-018).
 
-**Expected Output**:
-- 3 baseline / outreach docs in `projects/.../baseline/` + `projects/.../decisions/owner-responses/`
-- TASK-INDEX statuses for 000, 001, 002 → ✅
-- After wave: build verification `dotnet build src/server/api/Sprk.Bff.Api/` (any wave touching `.cs` files — Phase 0 doesn't, but the protocol applies generally)
+**Tier 3 — Unseal sealed classes + `SearchIndexClient` refactor** (~5h):
+- Unseal `SprkChatAgentFactory`; create `NullSprkChatAgentFactory` subclass (B2)
+- Unseal `PendingPlanManager`; create `NullPendingPlanManager` (B3)
+- Refactor `KnowledgeBaseEndpoints` to route through `IRagService` instead of injecting `SearchIndexClient` directly (B8 — incidental ADR-007 facade-alignment cleanup)
+
+**After all 3 tiers + per-fix triple-run + Step 9.5 gates pass**:
+- Phase 1c: tests Skip→Pass (36 expected); ledger transitions for RB-T028-03/04/05/06; commit + push
+- Phase 1d: security review request on PR #318; main session promotes ADR-030-DRAFT to `.claude/adr/ADR-030-bff-nullobject-kill-switch.md` (sub-agent write boundary)
+
+**Pre-conditions for Phase 1b**:
+- All Phase 1a artifacts pushed ✅ (commit `d2cdce20`)
+- ADR-030 draft authored (`decisions/ADR-030-DRAFT-bff-nullobject-kill-switch.md`) ✅
+- D-09 Null-Object designs documented ✅
+- Implementation order in D-09 §4 ✅
+- Inventory in `baseline/asymmetric-registration-inventory-2026-06-01.md` ✅
+- Branch `work/sdap.bff.api-test-suite-repair-r2` tracks origin (clean working tree)
+- Build green: `dotnet build src/server/api/Sprk.Bff.Api/` should still return 0 errors (verify before Tier 1 start)
+
+**Key Context for next session**:
+- Owner direction (2026-06-01): "no r3 — all issues resolved in r2", "urgent BFF blocker — no delays"
+- E-01 resolution: Option B chosen — Null-Object pattern (architecturally cleanest; ~15h total Phase 1b)
+- All NFRs apply: NFR-01 inverted (production IS in scope); NFR-02 <50% per file; NFR-03 security review for HIGH (`dev@spaarke.com`); NFR-04 commit cites ledger IDs; D-03 FULL rigor gates
+- Sub-agent write boundary applies to ADR-030 promotion (Phase 1d only — `.claude/adr/` is main-session-only)
 
 ---
 
@@ -169,9 +196,35 @@ Send ONE message with 3 `Skill` tool invocations:
 - r2 inverts r1's NFR-01: production code IS in scope; tests are NOT (except Skip→Pass transitions + Phase 4 Track C PoC)
 - RB-T028-03/04/05/06 share one root cause — D-02 cluster exception applies
 
-### Handoff Notes
+### Handoff Notes (2026-06-01 milestone checkpoint)
 
-*No handoff notes (initialization session)*
+**Session summary** — completed in this session:
+1. `/project-pipeline` Steps 0-4: full project initialization (artifacts, 36 POML tasks, branch + draft PR #318)
+2. Resolved all 5 spec.md unresolved questions (security reviewer / Insights contact / Phase 4 staffing / CI rationalization / no-r3)
+3. Phase 0 P0-W1 parallel wave (tasks 000 + 001 + 002 → all ✅)
+4. Phase 1 task 010 (RB-T044-01 cross-matter privilege leak): production fix + security review APPROVED by `dev@spaarke.com` (D-08)
+5. Phase 1 task 012 (RB-T028-02 Insights HOLD path b): production fix in `GroundingVerifier.cs` (NOT in cited `Layer2OutcomeExtractor.cs` — r1 ledger location was wrong); test changes; ledger transitioned; D-07 finalized; task 026 deferred
+6. Task 011 escalated (E-01) — 5-layer cascade discovered; investigation reverted to baseline; owner chose Option B
+7. Task 011 Phase 1a: complete asymmetric-registration inventory + Null-Object designs + ADR-030 draft
+
+**What's NOT done** (Phase 1b/1c/1d remain):
+- Tier 1 promote-to-unconditional (4 DI moves; lowest risk; ~1.5h) — START HERE
+- Tier 2 P3 Null-Object impls (7 classes; ~5h)
+- Tier 3 unseal sealed classes + `SearchIndexClient` refactor (~5h)
+- Tests Skip→Pass (36 transitions across `KnowledgeBaseEndpointsTests`, `ChatEndpointsTests`, `ReAnalysisFlowTests`, `AuthorizationIntegrationTests`)
+- Per-fix triple-run validation (3 × `dotnet test --logger trx`)
+- Step 9.5 quality gates (code-review + adr-check)
+- Security review request on PR #318 for the cluster fix (RB-T028-06 Auth implications)
+- ADR-030 promotion from `decisions/` draft to `.claude/adr/` (main-session-only)
+
+**Critical reminders for recovery**:
+- Owner = `ralph.schroeder@hotmail.com`; sibling/security contact = `dev@spaarke.com` (same person)
+- PR #318 is the bundle PR for ALL r2 work — don't open a separate PR for task 011
+- Phase 1 is sequential within phase; Phase 2+ can parallelize where files disjoint (see TASK-INDEX)
+- After Phase 1b completes, dispatch Phase 1c (test transitions) + 1d (security review) before unblocking task 013 (Phase 1 exit triple-run)
+- TASK-INDEX.md was hand-edited inline (status icons + task 026 marked deferred); don't revert those manual edits
+
+**If `/compact` runs**: this current-task.md is the SOURCE OF TRUTH. The Quick Recovery section + this Handoff Notes section together contain everything needed to resume. The CLAUDE.md trigger phrase "continue with task 011 Phase 1b" routes correctly via §4.
 
 ---
 
