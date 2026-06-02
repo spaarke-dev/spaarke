@@ -106,59 +106,38 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
     onFormValues(formValues);
   }, [formValues, onValidChange, onFormValues]);
 
-  const handleNameChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setFormValues((prev) => ({ ...prev, eventName: e.target.value }));
-    },
-    []
-  );
+  const handleNameChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormValues(prev => ({ ...prev, eventName: e.target.value }));
+  }, []);
 
-  const handleDescriptionChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setFormValues((prev) => ({ ...prev, eventDescription: e.target.value }));
-    },
-    []
-  );
+  const handleDescriptionChange = React.useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setFormValues(prev => ({ ...prev, eventDescription: e.target.value }));
+  }, []);
 
-  const handlePriorityChange = React.useCallback(
-    (_e: unknown, data: { optionValue?: string }) => {
-      const val = parseInt(data.optionValue ?? '100000001', 10);
-      setFormValues((prev) => ({ ...prev, eventPriority: val }));
-    },
-    []
-  );
+  const handlePriorityChange = React.useCallback((_e: unknown, data: { optionValue?: string }) => {
+    const val = parseInt(data.optionValue ?? '100000001', 10);
+    setFormValues(prev => ({ ...prev, eventPriority: val }));
+  }, []);
 
-  const handleDueDateChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setFormValues((prev) => ({ ...prev, eventDueDate: e.target.value }));
-    },
-    []
-  );
+  const handleDueDateChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormValues(prev => ({ ...prev, eventDueDate: e.target.value }));
+  }, []);
 
-  const handleFinalDueDateChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setFormValues((prev) => ({ ...prev, eventFinalDueDate: e.target.value }));
-    },
-    []
-  );
+  const handleFinalDueDateChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormValues(prev => ({ ...prev, eventFinalDueDate: e.target.value }));
+  }, []);
 
-  const handleAssignedToChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setFormValues((prev) => ({
-        ...prev,
-        assignedToId: item?.id ?? '',
-        assignedToName: item?.name ?? '',
-      }));
-    },
-    []
-  );
+  const handleAssignedToChange = React.useCallback((item: ILookupItem | null) => {
+    setFormValues(prev => ({
+      ...prev,
+      assignedToId: item?.id ?? '',
+      assignedToName: item?.name ?? '',
+    }));
+  }, []);
 
-  const handleTodoChange = React.useCallback(
-    (_e: unknown, data: { checked: boolean | 'mixed' }) => {
-      setFormValues((prev) => ({ ...prev, addTodo: data.checked === true }));
-    },
-    []
-  );
+  const handleTodoChange = React.useCallback((_e: unknown, data: { checked: boolean | 'mixed' }) => {
+    setFormValues(prev => ({ ...prev, addTodo: data.checked === true }));
+  }, []);
 
   const handleSearchUsers = React.useCallback(
     (query: string) => searchUsersAsLookup(dataService, query),
@@ -168,7 +147,7 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
   const assignedToValue: ILookupItem | null = formValues.assignedToId
     ? { id: formValues.assignedToId, name: formValues.assignedToName }
     : null;
-  const selectedPriorityText = PRIORITY_OPTIONS.find((o) => o.key === formValues.eventPriority)?.text ?? 'Normal';
+  const selectedPriorityText = PRIORITY_OPTIONS.find(o => o.key === formValues.eventPriority)?.text ?? 'Normal';
 
   return (
     <div className={styles.form}>
@@ -207,7 +186,7 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
             selectedOptions={[String(formValues.eventPriority)]}
             onOptionSelect={handlePriorityChange}
           >
-            {PRIORITY_OPTIONS.map((opt) => (
+            {PRIORITY_OPTIONS.map(opt => (
               <Option key={opt.key} value={String(opt.key)}>
                 {opt.text}
               </Option>
@@ -225,18 +204,10 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
 
       <div className={styles.row}>
         <Field label="Due Date">
-          <Input
-            type="date"
-            value={formValues.eventDueDate}
-            onChange={handleDueDateChange}
-          />
+          <Input type="date" value={formValues.eventDueDate} onChange={handleDueDateChange} />
         </Field>
         <Field label="Final Due Date">
-          <Input
-            type="date"
-            value={formValues.eventFinalDueDate}
-            onChange={handleFinalDueDateChange}
-          />
+          <Input type="date" value={formValues.eventFinalDueDate} onChange={handleFinalDueDateChange} />
         </Field>
       </div>
 
@@ -244,10 +215,7 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
         checked={formValues.addTodo}
         onChange={handleTodoChange}
         label="Add a 'To Do' Item"
-        className={mergeClasses(
-          styles.todoCheckbox,
-          formValues.addTodo && styles.todoCheckboxActive
-        )}
+        className={mergeClasses(styles.todoCheckbox, formValues.addTodo && styles.todoCheckboxActive)}
       />
     </div>
   );

@@ -313,43 +313,52 @@ const DocumentUploadWizardWidget: React.FC<WorkspaceWidgetProps<DocumentUploadWi
   const [uploadedDocumentIds, setUploadedDocumentIds] = useState<string[]>([]);
 
   // ── PaneEventBus: wizard_step events ────────────────────────────────────
-  usePaneEvent('workspace', useCallback((event) => {
-    if (event.type !== 'wizard_step') return;
-    const wizardEvent = event as WizardStepEvent;
-    if (wizardEvent.wizardId !== wizardId) return;
+  usePaneEvent(
+    'workspace',
+    useCallback(
+      event => {
+        if (event.type !== 'wizard_step') return;
+        const wizardEvent = event as WizardStepEvent;
+        if (wizardEvent.wizardId !== wizardId) return;
 
-    switch (wizardEvent.wizardAction) {
-      case 'next':
-        setStepIndex(prev => Math.min(prev + 1, STEP_COUNT - 1));
-        break;
-      case 'back':
-        setStepIndex(prev => Math.max(prev - 1, 0));
-        break;
-      case 'set-field':
-        if (wizardEvent.fieldName === 'documentTitle' && typeof wizardEvent.fieldValue === 'string') {
-          setDocumentTitle(wizardEvent.fieldValue);
+        switch (wizardEvent.wizardAction) {
+          case 'next':
+            setStepIndex(prev => Math.min(prev + 1, STEP_COUNT - 1));
+            break;
+          case 'back':
+            setStepIndex(prev => Math.max(prev - 1, 0));
+            break;
+          case 'set-field':
+            if (wizardEvent.fieldName === 'documentTitle' && typeof wizardEvent.fieldValue === 'string') {
+              setDocumentTitle(wizardEvent.fieldValue);
+            }
+            if (wizardEvent.fieldName === 'documentDescription' && typeof wizardEvent.fieldValue === 'string') {
+              setDocumentDescription(wizardEvent.fieldValue);
+            }
+            break;
         }
-        if (wizardEvent.fieldName === 'documentDescription' && typeof wizardEvent.fieldValue === 'string') {
-          setDocumentDescription(wizardEvent.fieldValue);
-        }
-        break;
-    }
-  }, [wizardId]));
+      },
+      [wizardId]
+    )
+  );
 
   // ── Context pane sync on step change ─────────────────────────────────────
-  const handleStepChange = useCallback((newIndex: number) => {
-    setStepIndex(newIndex);
-    dispatch('context', {
-      type: 'stage_change',
-      contextType: 'wizard-step',
-      contextData: {
-        wizardId,
-        wizardType: 'document-upload',
-        stepIndex: newIndex,
-        stepLabel: STEP_LABELS[newIndex],
-      },
-    });
-  }, [wizardId, dispatch]);
+  const handleStepChange = useCallback(
+    (newIndex: number) => {
+      setStepIndex(newIndex);
+      dispatch('context', {
+        type: 'stage_change',
+        contextType: 'wizard-step',
+        contextData: {
+          wizardId,
+          wizardType: 'document-upload',
+          stepIndex: newIndex,
+          stepLabel: STEP_LABELS[newIndex],
+        },
+      });
+    },
+    [wizardId, dispatch]
+  );
 
   // ── Navigation handlers ──────────────────────────────────────────────────
   const handleNext = useCallback(() => {
@@ -390,17 +399,17 @@ const DocumentUploadWizardWidget: React.FC<WorkspaceWidgetProps<DocumentUploadWi
         }
       }
 
-      const response = await data.authenticatedFetch(
-        `${data.bffBaseUrl}/documents/upload`,
-        { method: 'POST', body: formData }
-      );
+      const response = await data.authenticatedFetch(`${data.bffBaseUrl}/documents/upload`, {
+        method: 'POST',
+        body: formData,
+      });
 
       if (!response.ok) {
         const text = await response.text().catch(() => response.statusText);
         throw new Error(`Upload failed (${response.status}): ${text}`);
       }
 
-      const result = await response.json() as { documentIds: string[] };
+      const result = (await response.json()) as { documentIds: string[] };
       const docIds = result.documentIds ?? [];
       setUploadedDocumentIds(docIds);
       setIsComplete(true);
@@ -437,10 +446,14 @@ const DocumentUploadWizardWidget: React.FC<WorkspaceWidgetProps<DocumentUploadWi
   // ── canAdvance per step ──────────────────────────────────────────────────
   const canAdvance = (): boolean => {
     switch (stepIndex) {
-      case 0: return uploadedFiles.length > 0;
-      case 1: return true; // details are optional
-      case 2: return !isUploading;
-      default: return false;
+      case 0:
+        return uploadedFiles.length > 0;
+      case 1:
+        return true; // details are optional
+      case 2:
+        return !isUploading;
+      default:
+        return false;
     }
   };
 
@@ -501,10 +514,7 @@ const DocumentUploadWizardWidget: React.FC<WorkspaceWidgetProps<DocumentUploadWi
               Upload one or more documents for AI analysis. Supported formats: PDF, DOCX, PPTX, XLSX, TXT.
             </Text>
 
-            <FileUploadZone
-              onFilesAccepted={handleFilesAccepted}
-              onValidationErrors={handleValidationErrors}
-            />
+            <FileUploadZone onFilesAccepted={handleFilesAccepted} onValidationErrors={handleValidationErrors} />
 
             {validationErrors.length > 0 && (
               <div>
@@ -516,9 +526,7 @@ const DocumentUploadWizardWidget: React.FC<WorkspaceWidgetProps<DocumentUploadWi
               </div>
             )}
 
-            {uploadedFiles.length > 0 && (
-              <UploadedFileList files={uploadedFiles} onRemove={handleRemoveFile} />
-            )}
+            {uploadedFiles.length > 0 && <UploadedFileList files={uploadedFiles} onRemove={handleRemoveFile} />}
           </>
         )}
 
@@ -588,9 +596,7 @@ const DocumentUploadWizardWidget: React.FC<WorkspaceWidgetProps<DocumentUploadWi
               )}
             </div>
 
-            {uploadError && (
-              <Text style={{ color: tokens.colorStatusDangerForeground1 }}>{uploadError}</Text>
-            )}
+            {uploadError && <Text style={{ color: tokens.colorStatusDangerForeground1 }}>{uploadError}</Text>}
 
             {isUploading && (
               <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>

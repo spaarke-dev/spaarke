@@ -11,9 +11,9 @@
  * ADR-013: AI features via BFF API — no separate AI service, no client-side AI calls.
  */
 
-import { useState, useCallback } from "react";
-import { bffApiCall } from "../auth/bff-client";
-import { ApiError } from "../types";
+import { useState, useCallback } from 'react';
+import { bffApiCall } from '../auth/bff-client';
+import { ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -120,40 +120,27 @@ export function usePlaybookExecution(): UsePlaybookExecutionState {
     setResult(null);
 
     try {
-      const response = await bffApiCall<PlaybookExecutionResponse>(
-        "/api/v1/external/ai/playbook",
-        {
-          method: "POST",
-          body: JSON.stringify(request),
-        }
-      );
+      const response = await bffApiCall<PlaybookExecutionResponse>('/api/v1/external/ai/playbook', {
+        method: 'POST',
+        body: JSON.stringify(request),
+      });
 
       setResult(response.result);
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.statusCode === 403) {
-          setError(
-            "You do not have permission to run AI analysis. Collaborate or Full Access is required."
-          );
+          setError('You do not have permission to run AI analysis. Collaborate or Full Access is required.');
         } else if (err.statusCode === 404) {
-          setError(
-            "The document or project could not be found. Please refresh and try again."
-          );
+          setError('The document or project could not be found. Please refresh and try again.');
         } else if (err.statusCode >= 500) {
-          setError(
-            "The AI analysis service is temporarily unavailable. Please try again in a moment."
-          );
+          setError('The AI analysis service is temporarily unavailable. Please try again in a moment.');
         } else {
-          setError(
-            `AI analysis failed (${err.statusCode}). Please try again.`
-          );
+          setError(`AI analysis failed (${err.statusCode}). Please try again.`);
         }
       } else {
-        setError(
-          "An unexpected error occurred while running the AI analysis. Please try again."
-        );
+        setError('An unexpected error occurred while running the AI analysis. Please try again.');
       }
-      console.error("[usePlaybookExecution] Playbook execution failed:", err);
+      console.error('[usePlaybookExecution] Playbook execution failed:', err);
     } finally {
       setIsExecuting(false);
     }

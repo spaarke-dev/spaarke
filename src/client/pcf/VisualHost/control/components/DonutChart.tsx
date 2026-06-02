@@ -309,9 +309,7 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
             <div className={styles.matrixRowsCell}>
               {data.map((dp, idx) => {
                 const rowValue =
-                  dp.value == null
-                    ? cardConfig?.nullDisplay ?? '—'
-                    : formatBreakdownValue(dp.value, breakdownFormat);
+                  dp.value == null ? (cardConfig?.nullDisplay ?? '—') : formatBreakdownValue(dp.value, breakdownFormat);
                 return (
                   <div key={`${dp.label}-${idx}`} className={styles.breakdownRow}>
                     <Text className={styles.breakdownLabel}>{dp.label}</Text>

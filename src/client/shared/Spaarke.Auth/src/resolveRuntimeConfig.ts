@@ -373,11 +373,7 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
   cacheTimestamp = Date.now();
   saveToLocalStorage(config);
 
-  const tenantSource = envTenantId && envTenantId.trim()
-    ? 'env-var'
-    : xrmTenantId
-      ? 'xrm-fallback'
-      : 'none';
+  const tenantSource = envTenantId && envTenantId.trim() ? 'env-var' : xrmTenantId ? 'xrm-fallback' : 'none';
   console.log(
     `[Spaarke.RuntimeConfig] Resolved: bffBaseUrl=${config.bffBaseUrl}, ` +
       `scope=api://${bffAppId.substring(0, 8)}..., clientId=${msalClientId.substring(0, 8)}..., ` +

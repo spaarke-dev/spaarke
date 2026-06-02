@@ -88,8 +88,8 @@ public class CitationExtractorTests
     // =========================================================================
 
     [Theory]
-    [InlineData("covered by U.S. Patent No. 9,123,456",    "US9123456",     CitationType.Patent)]
-    [InlineData("as disclosed in US 8,456,789",            "US8456789",     CitationType.Patent)]
+    [InlineData("covered by U.S. Patent No. 9,123,456", "US9123456", CitationType.Patent)]
+    [InlineData("as disclosed in US 8,456,789", "US8456789", CitationType.Patent)]
     public void ExtractCitations_Patent_MatchedAndNormalized(string text, string expectedKey, CitationType expectedType)
     {
         var results = CitationExtractor.ExtractCitations(text);
@@ -116,10 +116,10 @@ public class CitationExtractorTests
     // =========================================================================
 
     [Theory]
-    [InlineData("disclosed in Form 10-K for fiscal year 2023",  "10-K",  CitationType.SecFiling)]
-    [InlineData("filed a Form 8-K on March 15",                 "8-K",   CitationType.SecFiling)]
-    [InlineData("quarterly report on Form 10-Q",                "10-Q",  CitationType.SecFiling)]
-    [InlineData("registration statement on Form S-1",           "S-1",   CitationType.SecFiling)]
+    [InlineData("disclosed in Form 10-K for fiscal year 2023", "10-K", CitationType.SecFiling)]
+    [InlineData("filed a Form 8-K on March 15", "8-K", CitationType.SecFiling)]
+    [InlineData("quarterly report on Form 10-Q", "10-Q", CitationType.SecFiling)]
+    [InlineData("registration statement on Form S-1", "S-1", CitationType.SecFiling)]
     public void ExtractCitations_SecFiling_MatchedAndNormalized(string text, string expectedKey, CitationType expectedType)
     {
         var results = CitationExtractor.ExtractCitations(text);
@@ -143,8 +143,8 @@ public class CitationExtractorTests
     // =========================================================================
 
     [Theory]
-    [InlineData("47 C.F.R. § 73.3999 prohibits",   "47 C.F.R. § 73.3999", CitationType.Regulation)]
-    [InlineData("under 40 C.F.R. § 122.26",        "40 C.F.R. § 122.26",  CitationType.Regulation)]
+    [InlineData("47 C.F.R. § 73.3999 prohibits", "47 C.F.R. § 73.3999", CitationType.Regulation)]
+    [InlineData("under 40 C.F.R. § 122.26", "40 C.F.R. § 122.26", CitationType.Regulation)]
     public void ExtractCitations_Regulation_MatchedAndNormalized(string text, string expectedKey, CitationType expectedType)
     {
         var results = CitationExtractor.ExtractCitations(text);

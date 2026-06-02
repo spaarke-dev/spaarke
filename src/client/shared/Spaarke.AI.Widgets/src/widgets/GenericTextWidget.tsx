@@ -13,14 +13,7 @@
  */
 
 import React from 'react';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Card,
-  CardHeader,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Text, Card, CardHeader, mergeClasses } from '@fluentui/react-components';
 import { WarningRegular } from '@fluentui/react-icons';
 import type { WorkspaceWidgetProps } from '../types/widget-types';
 
@@ -89,13 +82,7 @@ const useStyles = makeStyles({
  * This widget is never registered by name — WorkspaceWidgetRegistry loads it
  * directly as a fallback and injects it into the resolved component cache.
  */
-const GenericTextWidget: React.FC<WorkspaceWidgetProps> = ({
-  data,
-  widgetType,
-  isLoading,
-  error,
-  className,
-}) => {
+const GenericTextWidget: React.FC<WorkspaceWidgetProps> = ({ data, widgetType, isLoading, error, className }) => {
   const styles = useStyles();
 
   // Serialise data for display, falling back gracefully on circular refs.
@@ -111,23 +98,15 @@ const GenericTextWidget: React.FC<WorkspaceWidgetProps> = ({
       <Card className={styles.card}>
         <CardHeader
           image={<WarningRegular className={styles.headerIcon} />}
-          header={
-            <Text className={styles.headerTitle}>
-              Unknown widget type
-            </Text>
-          }
+          header={<Text className={styles.headerTitle}>Unknown widget type</Text>}
           description={
-            <Text className={styles.headerSubtitle}>
-              {`"${widgetType}" is not registered. Showing raw payload.`}
-            </Text>
+            <Text className={styles.headerSubtitle}>{`"${widgetType}" is not registered. Showing raw payload.`}</Text>
           }
         />
 
         {/* Loading state */}
         {isLoading && (
-          <Text style={{ padding: tokens.spacingHorizontalM, color: tokens.colorNeutralForeground3 }}>
-            Loading…
-          </Text>
+          <Text style={{ padding: tokens.spacingHorizontalM, color: tokens.colorNeutralForeground3 }}>Loading…</Text>
         )}
 
         {/* Error state */}

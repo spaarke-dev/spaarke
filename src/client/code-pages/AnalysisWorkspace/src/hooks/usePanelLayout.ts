@@ -155,8 +155,7 @@ export function usePanelLayout(): UsePanelLayoutResult {
       if (!container) return Math.max(MIN_SOURCE_WIDTH_PX, width);
       const containerWidth = container.getBoundingClientRect().width;
       const chatWidth = visibility.chat ? CHAT_FIXED_WIDTH_PX : 0;
-      const maxSourceWidth =
-        containerWidth - chatWidth - SPLITTER_WIDTH_PX - MIN_EDITOR_WIDTH_PX;
+      const maxSourceWidth = containerWidth - chatWidth - SPLITTER_WIDTH_PX - MIN_EDITOR_WIDTH_PX;
       return Math.max(MIN_SOURCE_WIDTH_PX, Math.min(maxSourceWidth, width));
     },
     [visibility.chat]
@@ -245,10 +244,14 @@ export function usePanelLayout(): UsePanelLayoutResult {
   const onSplitterKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       let delta = 0;
-      if (e.key === 'ArrowLeft') delta = KEYBOARD_STEP_PX;       // source grows
-      else if (e.key === 'ArrowRight') delta = -KEYBOARD_STEP_PX; // source shrinks
-      else if (e.key === 'Home') delta = 9999;                    // expand source to max
-      else if (e.key === 'End') delta = -9999;                    // collapse source to min
+      if (e.key === 'ArrowLeft')
+        delta = KEYBOARD_STEP_PX; // source grows
+      else if (e.key === 'ArrowRight')
+        delta = -KEYBOARD_STEP_PX; // source shrinks
+      else if (e.key === 'Home')
+        delta = 9999; // expand source to max
+      else if (e.key === 'End')
+        delta = -9999; // collapse source to min
       else return;
       e.preventDefault();
       updateSourceWidth(sourceWidthPx + delta);

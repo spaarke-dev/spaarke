@@ -1,20 +1,20 @@
 using Azure.Search.Documents.Indexes;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Capabilities;
 using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
-using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Export;
-using Sprk.Bff.Api.Services.Ai.Safety.Citations;
 using Sprk.Bff.Api.Services.Ai.Foundry;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
+using Sprk.Bff.Api.Services.Ai.Safety.Citations;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 

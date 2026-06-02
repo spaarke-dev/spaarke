@@ -270,13 +270,7 @@ export const BulkActionBar: React.FC<IBulkActionBarProps> = ({
             className={styles.iconButton}
             appearance="subtle"
             size="small"
-            icon={
-              downloading ? (
-                <Spinner size="tiny" aria-label="Downloading" />
-              ) : (
-                <ArrowDownload20Regular />
-              )
-            }
+            icon={downloading ? <Spinner size="tiny" aria-label="Downloading" /> : <ArrowDownload20Regular />}
             disabled={downloading}
             onClick={() => {
               void handleDownloadClick();
@@ -312,10 +306,7 @@ export const BulkActionBar: React.FC<IBulkActionBarProps> = ({
         {/* 5. Document Type → selected — sub-menu of sprk_documenttype options */}
         <Menu>
           <MenuTrigger disableButtonEnhancement>
-            <Tooltip
-              content={`Set document type for ${countLabel}`}
-              relationship="label"
-            >
+            <Tooltip content={`Set document type for ${countLabel}`} relationship="label">
               <Button
                 className={styles.iconButton}
                 appearance="subtle"
@@ -331,10 +322,7 @@ export const BulkActionBar: React.FC<IBulkActionBarProps> = ({
                 <MenuItem disabled>(no options)</MenuItem>
               ) : (
                 docTypeOptions.map(opt => (
-                  <MenuItem
-                    key={opt.value}
-                    onClick={() => onDocTypeChange(opt.value)}
-                  >
+                  <MenuItem key={opt.value} onClick={() => onDocTypeChange(opt.value)}>
                     {opt.label}
                   </MenuItem>
                 ))
@@ -384,16 +372,11 @@ export const BulkActionBar: React.FC<IBulkActionBarProps> = ({
             <DialogContent className={styles.dialogBody}>
               <Text>
                 This will permanently delete {selectionCount} document
-                {selectionCount !== 1 ? 's' : ''} from the matter. This action cannot
-                be undone.
+                {selectionCount !== 1 ? 's' : ''} from the matter. This action cannot be undone.
               </Text>
             </DialogContent>
             <DialogActions>
-              <Button
-                appearance="secondary"
-                onClick={() => setConfirmDeleteOpen(false)}
-                disabled={deleting}
-              >
+              <Button appearance="secondary" onClick={() => setConfirmDeleteOpen(false)} disabled={deleting}>
                 Cancel
               </Button>
               <Button
@@ -402,9 +385,7 @@ export const BulkActionBar: React.FC<IBulkActionBarProps> = ({
                   void handleConfirmDelete();
                 }}
                 disabled={deleting}
-                icon={
-                  deleting ? <Spinner size="tiny" aria-label="Deleting" /> : <Delete20Regular />
-                }
+                icon={deleting ? <Spinner size="tiny" aria-label="Deleting" /> : <Delete20Regular />}
               >
                 Delete
               </Button>

@@ -30,21 +30,8 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  shorthands,
-  tokens,
-  Text,
-  Spinner,
-  Badge,
-  Button,
-  Link,
-} from '@fluentui/react-components';
-import {
-  CheckmarkCircleRegular,
-  ErrorCircleRegular,
-  SaveRegular,
-} from '@fluentui/react-icons';
+import { makeStyles, shorthands, tokens, Text, Spinner, Badge, Button, Link } from '@fluentui/react-components';
+import { CheckmarkCircleRegular, ErrorCircleRegular, SaveRegular } from '@fluentui/react-icons';
 import type { ISprkChatDocumentStatusProps } from './types';
 import { DOCUMENT_PROCESSING_TIMEOUT_MS } from './types';
 
@@ -226,10 +213,7 @@ export const SprkChatDocumentStatus: React.FC<ISprkChatDocumentStatusProps> = ({
 
   // Show save button when: document is complete, containerId is available,
   // and document has not already been saved
-  const showSaveButton = status.status === 'complete'
-    && hasContainerId
-    && !!onSaveToMatterFiles
-    && !isSaved;
+  const showSaveButton = status.status === 'complete' && hasContainerId && !!onSaveToMatterFiles && !isSaved;
 
   // Show saved confirmation when persistence succeeded
   const showSavedConfirmation = status.status === 'complete' && isSaved;
@@ -249,13 +233,9 @@ export const SprkChatDocumentStatus: React.FC<ISprkChatDocumentStatusProps> = ({
           <Spinner size="tiny" />
         </div>
         <div className={styles.content}>
-          <Text className={styles.primaryText}>
-            Processing {status.fileName}...
-          </Text>
+          <Text className={styles.primaryText}>Processing {status.fileName}...</Text>
           {isExtendedWait && (
-            <Text className={styles.secondaryText}>
-              Still processing — large documents may take longer
-            </Text>
+            <Text className={styles.secondaryText}>Still processing — large documents may take longer</Text>
           )}
         </div>
       </div>
@@ -279,12 +259,7 @@ export const SprkChatDocumentStatus: React.FC<ISprkChatDocumentStatusProps> = ({
           <Text className={styles.primaryText}>
             Document added to context — {status.fileName}
             {status.pageCount != null && status.pageCount > 0 && (
-              <Badge
-                className={styles.pageCountBadge}
-                appearance="tint"
-                color="informative"
-                size="small"
-              >
+              <Badge className={styles.pageCountBadge} appearance="tint" color="informative" size="small">
                 {status.pageCount} {status.pageCount === 1 ? 'page' : 'pages'}
               </Badge>
             )}
@@ -346,12 +321,8 @@ export const SprkChatDocumentStatus: React.FC<ISprkChatDocumentStatusProps> = ({
         <ErrorCircleRegular className={styles.errorIcon} />
       </div>
       <div className={styles.content}>
-        <Text className={styles.primaryText}>
-          Failed to process document — {status.fileName}
-        </Text>
-        {status.error && (
-          <Text className={styles.errorText}>{status.error}</Text>
-        )}
+        <Text className={styles.primaryText}>Failed to process document — {status.fileName}</Text>
+        {status.error && <Text className={styles.errorText}>{status.error}</Text>}
       </div>
     </div>
   );

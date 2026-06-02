@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Net;
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
@@ -2216,8 +2216,8 @@ public sealed class SpeAdminGraphService
         var patch = new Microsoft.Graph.Models.ColumnDefinition();
         if (displayName is not null) patch.DisplayName = displayName;
         if (description is not null) patch.Description = description;
-        if (required.HasValue)  patch.Required = required.Value;
-        if (indexed.HasValue)   patch.Indexed  = indexed.Value;
+        if (required.HasValue) patch.Required = required.Value;
+        if (indexed.HasValue) patch.Indexed = indexed.Value;
 
         try
         {
@@ -2297,11 +2297,11 @@ public sealed class SpeAdminGraphService
     {
         var col = new Microsoft.Graph.Models.ColumnDefinition
         {
-            Name        = name,
+            Name = name,
             DisplayName = displayName ?? name,
             Description = description,
-            Required    = required,
-            Indexed     = indexed
+            Required = required,
+            Indexed = indexed
         };
 
         switch (columnType.ToLowerInvariant())
@@ -2345,25 +2345,25 @@ public sealed class SpeAdminGraphService
     {
         var columnType = col switch
         {
-            { Boolean: not null }            => "boolean",
-            { DateTime: not null }           => "dateTime",
-            { Currency: not null }           => "currency",
-            { Choice: not null }             => "choice",
-            { Number: not null }             => "number",
-            { PersonOrGroup: not null }      => "personOrGroup",
+            { Boolean: not null } => "boolean",
+            { DateTime: not null } => "dateTime",
+            { Currency: not null } => "currency",
+            { Choice: not null } => "choice",
+            { Number: not null } => "number",
+            { PersonOrGroup: not null } => "personOrGroup",
             { HyperlinkOrPicture: not null } => "hyperlinkOrPicture",
-            _                                => "text"
+            _ => "text"
         };
 
         return new SpeContainerColumn(
-            Id:          col.Id ?? string.Empty,
-            Name:        col.Name ?? string.Empty,
+            Id: col.Id ?? string.Empty,
+            Name: col.Name ?? string.Empty,
             DisplayName: col.DisplayName,
             Description: col.Description,
-            ColumnType:  columnType,
-            Required:    col.Required ?? false,
-            Indexed:     col.Indexed  ?? false,
-            ReadOnly:    col.ReadOnly ?? false);
+            ColumnType: columnType,
+            Required: col.Required ?? false,
+            Indexed: col.Indexed ?? false,
+            ReadOnly: col.ReadOnly ?? false);
     }
 
     /// <summary>

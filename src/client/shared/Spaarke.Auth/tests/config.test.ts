@@ -87,10 +87,7 @@ describe('resolveConfig', () => {
       });
       expect(config.authority).toBe('https://login.microsoftonline.com/organizations');
       expect(config.tenantId).toBe('');
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('tenantId is not a string'),
-        'object'
-      );
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('tenantId is not a string'), 'object');
     } finally {
       warnSpy.mockRestore();
     }

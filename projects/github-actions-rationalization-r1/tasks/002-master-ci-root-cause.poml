@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Investigate post-PR-#314 master CI failure (run 26755019759)</title>
+    <phase>0: Inventory + Baseline</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>ci-cd, github-actions, devops, root-cause, decision-record</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Root-cause investigation produces decision record; no source code modified; explicit acceptance from spec FR-02</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Investigate the master CI failure on run 26755019759 (Build step + Prettier failure observed 2026-06-01 12:31 UTC post-PR-#314). Determine whether it's an environment-related transient (CI runner difference) OR an actual regression. Either fix it OR document it as deferred with explicit rationale. The disposition is recorded in `decisions/D-01-master-ci-failure-disposition.md`.
+  </prompt>
+
+  <role>
+    SPAARKE platform DevOps engineer. Comfortable reading `gh run view` logs, comparing CI runner environments, and authoring decision records. Familiar with the predecessor project's `decisions/D-NN` pattern.
+  </role>
+
+  <goal>
+    A decision record exists at `projects/github-actions-rationalization-r1/decisions/D-01-master-ci-failure-disposition.md` containing:
+    - The root cause of run 26755019759 (or "no clear root cause; transient" with evidence)
+    - A disposition: FIXED (with commit ref), DEFERRED (with rationale + follow-up), or RESOLVED-TRANSIENT (no action needed)
+    - If FIXED: a follow-up PR ref OR a commit on this branch
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-02 + Risk R1: this is a project-blocker if `sdap-ci.yml` remains broken on master post-PR-#314. The failure was Build (Release config) + Prettier formatting issue. Need to determine if it's environment vs regression. Phase 1 fix tasks (010/011/012) should proceed independently, but if this is a real regression, the project must pause Phase 1 to address it.
+    </background>
+    <relevant-files>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>projects/github-actions-rationalization-r1/decisions/D-01-master-ci-failure-disposition.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-02: Must either fix OR document with rationale</constraint>
+    <constraint source="spec">NFR-01: Investigation only — if a real regression in `src/`, document and route to product backlog (do NOT fix `src/` in this project)</constraint>
+    <constraint source="spec">NFR-03: If a fix requires disabling `enforce_admins`, log it in `decisions/`</constraint>
+    <constraint source="project">Decision record follows predecessor's `decisions/D-NN-{topic}.md` format</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Fetch failure details: `gh run view 26755019759 --log-failed` (or `--log`). Identify the failing step, exit code, and key log lines.</step>
+    <step order="2">Read `.github/workflows/sdap-ci.yml` end-to-end. Locate the Build (Release) job + Prettier step. Note runner image, Node version, .NET version.</step>
+    <step order="3">Compare against the post-fix expected state: was PR #314's fix limited to the duplicate-key bug, or did it also touch Build/Prettier? Check `git show {PR#314-merge-sha}` for scope.</step>
+    <step order="4">Reproduce locally if practical: `npm run format -- --check` (Prettier) and `dotnet build -c Release` to see if same failure surfaces locally. If yes → real regression; if no → environment issue.</step>
+    <step order="5">Decision branch:
+      - If FIXED: identify the minimal fix (likely Prettier config or staged code already formatted), commit it on this branch in a separate commit, and link the commit SHA in the decision record. NOTE: NFR-01 forbids `src/` changes if the regression is in `src/` code itself — in that case, route to product backlog and mark DEFERRED.
+      - If DEFERRED: write rationale, identify owner + target date for follow-up, link to a product-backlog issue if one is needed.
+      - If RESOLVED-TRANSIENT: cite evidence (e.g., a subsequent master run that succeeded; runner image bump).
+    </step>
+    <step order="6">Author `decisions/D-01-master-ci-failure-disposition.md` with: title, date, context, evidence, disposition, follow-up. Cross-link from `baseline/workflow-inventory-2026-06-01.md` (if task 001 is complete; otherwise the inventory will link here).</step>
+    <step order="7">Update TASK-INDEX.md: change task 002 status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">View workflow run details + logs</tool>
+    <tool name="git">Read PR #314 merge commit</tool>
+    <tool name="dotnet">Optionally reproduce Build failure locally</tool>
+    <tool name="npm">Optionally reproduce Prettier failure locally</tool>
+    <tool name="Write">Write decision record</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/github-actions-rationalization-r1/decisions/D-01-master-ci-failure-disposition.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`decisions/D-01-master-ci-failure-disposition.md` exists with required sections: Context, Evidence, Disposition, Follow-up.</criterion>
+    <criterion testable="true">Disposition is one of: FIXED (with commit SHA), DEFERRED (with rationale + follow-up), or RESOLVED-TRANSIENT (with evidence).</criterion>
+    <criterion testable="true">If FIXED: a new commit on `work/github-actions-rationalization-r1` addresses the issue, AND `dotnet build -c Release` + `npm run format -- --check` succeed locally.</criterion>
+    <criterion testable="true">TASK-INDEX.md task 002 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Per FR-02 and Risk R1: if this turns out to be a real regression in `src/`, do NOT fix it here (NFR-01 forbids). Mark DEFERRED, file a product-backlog issue, and let the project proceed. The Phase 0 exit-gate is about HAVING a disposition, not about FIXING.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: STANDARD (investigation produces documentation, not code). Can run in parallel with task 001.</protocol>
+  </execution>
+</task>

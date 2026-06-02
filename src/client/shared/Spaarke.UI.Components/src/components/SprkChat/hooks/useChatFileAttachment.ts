@@ -207,9 +207,7 @@ function createIdFactory(): () => string {
 // load the libs across multiple addFiles invocations.
 // ---------------------------------------------------------------------------
 
-async function extractText(
-  file: File
-): Promise<string> {
+async function extractText(file: File): Promise<string> {
   // Browser File.text() is React 19 / modern-browser safe and avoids the
   // older FileReader event-based API.
   return file.text();
@@ -231,9 +229,7 @@ async function extractPdf(
     // Surface the cap as a structured exception so the caller can map it to
     // the `pdf-too-many-pages` reason rather than the generic
     // `extraction-failed` bucket.
-    const error = new Error(
-      `PDF has ${pdf.numPages} pages; max is ${MAX_PDF_PAGES}`
-    );
+    const error = new Error(`PDF has ${pdf.numPages} pages; max is ${MAX_PDF_PAGES}`);
     (error as Error & { code?: string }).code = 'pdf-too-many-pages';
     throw error;
   }
@@ -242,18 +238,13 @@ async function extractPdf(
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber);
     const content = await page.getTextContent();
-    const pageText = content.items
-      .map((item) => ((item as PdfTextItem).str ?? ''))
-      .join(' ');
+    const pageText = content.items.map(item => (item as PdfTextItem).str ?? '').join(' ');
     pageTexts.push(pageText);
   }
   return { text: pageTexts.join('\n\n'), numPages: pdf.numPages };
 }
 
-async function extractDocx(
-  file: File,
-  ensureMammoth: () => Promise<MammothModule>
-): Promise<string> {
+async function extractDocx(file: File, ensureMammoth: () => Promise<MammothModule>): Promise<string> {
   const mammoth = await ensureMammoth();
   const buffer = await file.arrayBuffer();
   const result = await mammoth.extractRawText({ arrayBuffer: buffer });
@@ -285,9 +276,7 @@ async function extractDocx(
  * } = useChatFileAttachment({ onExtractionError });
  * ```
  */
-export function useChatFileAttachment(
-  options: UseChatFileAttachmentOptions = {}
-): IUseChatFileAttachmentResult {
+export function useChatFileAttachment(options: UseChatFileAttachmentOptions = {}): IUseChatFileAttachmentResult {
   const { onExtractionError } = options;
 
   const [files, setFiles] = useState<AttachmentChip[]>([]);
@@ -308,7 +297,7 @@ export function useChatFileAttachment(
       // static `import` at the top of the file. Webpack/Vite emit a separate
       // chunk for `pdfjs-dist`, which is what task 061 / the bundle audit
       // verifies.
-      pdfJsRef.current = import('pdfjs-dist').then((mod) => {
+      pdfJsRef.current = import('pdfjs-dist').then(mod => {
         // pdfjs-dist exports a `GlobalWorkerOptions` object in modern
         // versions; if absent the worker is best-effort and may fall back to
         // a same-thread mode in test environments. We leave the workerSrc
@@ -324,7 +313,7 @@ export function useChatFileAttachment(
   const ensureMammoth = useCallback((): Promise<MammothModule> => {
     if (!mammothRef.current) {
       // Lazy import — same NFR-12 rationale as pdfjs above.
-      mammothRef.current = import('mammoth').then((mod) => {
+      mammothRef.current = import('mammoth').then(mod => {
         // mammoth browser build exports default + extractRawText. Both shapes
         // are observable in practice depending on the bundler interop mode.
         const cast = mod as unknown as MammothModule & { default?: MammothModule };
@@ -406,10 +395,10 @@ export function useChatFileAttachment(
       // toolbar strip can render `extracting` chips. Extraction results will
       // patch them in the next setFiles below.
       if (newChips.length > 0) {
-        setFiles((prev) => [...prev, ...newChips]);
+        setFiles(prev => [...prev, ...newChips]);
       }
       if (newErrors.length > 0) {
-        setErrors((prev) => [...prev, ...newErrors]);
+        setErrors(prev => [...prev, ...newErrors]);
       }
 
       // ---- Gate B: extraction ----
@@ -472,10 +461,7 @@ export function useChatFileAttachment(
           const codedReason = (error as Error & { code?: string }).code;
           const reason: AttachmentErrorReason =
             codedReason === 'pdf-too-many-pages' ? 'pdf-too-many-pages' : 'extraction-failed';
-          const message =
-            reason === 'pdf-too-many-pages'
-              ? error.message
-              : `Failed to extract text: ${error.message}`;
+          const message = reason === 'pdf-too-many-pages' ? error.message : `Failed to extract text: ${error.message}`;
 
           patches.push({
             id: chip.id,
@@ -501,22 +487,22 @@ export function useChatFileAttachment(
 
       // Apply all extraction patches in a single state update.
       if (patches.length > 0) {
-        setFiles((prev) =>
-          prev.map((chip) => {
-            const patch = patches.find((p) => p.id === chip.id);
+        setFiles(prev =>
+          prev.map(chip => {
+            const patch = patches.find(p => p.id === chip.id);
             return patch ? { ...chip, ...patch.patch } : chip;
           })
         );
       }
       if (extractionErrors.length > 0) {
-        setErrors((prev) => [...prev, ...extractionErrors]);
+        setErrors(prev => [...prev, ...extractionErrors]);
       }
     },
     [files.length, ensurePdfJs, ensureMammoth, onExtractionError]
   );
 
   const removeFile = useCallback((index: number): void => {
-    setFiles((prev) => {
+    setFiles(prev => {
       if (index < 0 || index >= prev.length) {
         return prev;
       }
@@ -534,8 +520,8 @@ export function useChatFileAttachment(
   // Derive `attachments` from chips with `status === 'ready'`. Cheap O(n)
   // filter; the alternative (separate state) would invite drift.
   const attachments: ChatAttachment[] = files
-    .filter((chip) => chip.status === 'ready' && chip.textContent !== undefined)
-    .map((chip) => ({
+    .filter(chip => chip.status === 'ready' && chip.textContent !== undefined)
+    .map(chip => ({
       filename: chip.filename,
       contentType: chip.mimeType,
       textContent: chip.textContent ?? '',

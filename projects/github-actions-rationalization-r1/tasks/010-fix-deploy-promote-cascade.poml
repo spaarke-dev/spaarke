@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Fix deploy-promote.yml cascade (P2)</title>
+    <phase>1: Fix Broken Workflows</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>none</blocks>
+    <tags>ci-cd, github-actions, devops, workflow-fix</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Workflow YAML edit with explicit acceptance criterion (FR-03); no .cs/.ts modified; repair-not-rewrite applies</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Fix `deploy-promote.yml` so failed `SDAP CI` runs no longer cascade into deploy-promote failures. Per design §5 Phase 1: either add a workflow-level `if:` filter for SDAP CI success only, OR remove the `workflow_run` trigger entirely if deploy-promote is supposed to be manual-only. Read the file end-to-end first to determine intent.
+  </prompt>
+
+  <role>
+    SPAARKE platform DevOps engineer. Understands GitHub Actions `workflow_run` trigger semantics (job-level `if:` doesn't change workflow-level conclusion). Follows the `<repair-not-rewrite>true</repair-not-rewrite>` discipline (NFR-07) and NFR-02 (&lt;50% line replacement).
+  </role>
+
+  <goal>
+    `deploy-promote.yml` is fixed so that a deliberately-failing SDAP CI run on master does NOT produce a deploy-promote failure record. The fix is &lt;50% line replacement OR a delete-with-rationale per NFR-02 + NFR-04.
+  </goal>
+
+  <context>
+    <background>
+      Per design §2.1 P2: workflow_run trigger fires on SDAP CI completion regardless of conclusion; job-level `if:` filters out non-success but workflow itself still reports failure. Doubles every SDAP CI failure into 2 failure records. Per FR-03 acceptance: deliberate-fail SDAP CI run produces zero deploy-promote failures.
+    </background>
+    <relevant-files>
+      <file>.github/workflows/deploy-promote.yml</file>
+      <file>projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-03: Failed SDAP CI does NOT cascade to deploy-promote failure</constraint>
+    <constraint source="spec">NFR-02: &lt;50% line replacement OR delete-with-rationale</constraint>
+    <constraint source="spec">NFR-04: Deletion via `git rm` + commit, not comment-out</constraint>
+    <constraint source="spec">NFR-07: `<repair-not-rewrite>true</repair-not-rewrite>` — preserve structure</constraint>
+    <constraint source="project">MUST run `actionlint` locally on the file BEFORE pushing</constraint>
+    <constraint source="project">MUST verify via push to a test branch (NOT master) before PR</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+      <file>projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `deploy-promote.yml` end-to-end. Identify the `workflow_run` trigger block and any conditional `if:` at job level. Determine intent (is this meant to run only on success, or to do something even on failure?).</step>
+    <step order="2">Read the workflow-inventory-2026-06-01.md entry for deploy-promote to confirm the recommended action (FIX vs DELETE).</step>
+    <step order="3">Choose fix approach:
+      - **Option A — Add workflow-level conditional**: Add `if: ${{ github.event.workflow_run.conclusion == 'success' }}` at the workflow level (or on every top-level job). This is the minimal-change repair.
+      - **Option B — Remove workflow_run trigger**: If the workflow is meant to be manual-only, remove the `workflow_run:` block from the `on:` clause. Document the decision in `decisions/D-NN-...`.
+    </step>
+    <step order="4">Apply the chosen fix using Edit tool. Verify NFR-02 (&lt;50% line replacement). Run `actionlint` locally: `actionlint .github/workflows/deploy-promote.yml`.</step>
+    <step order="5">Push to a test branch (e.g., `test/deploy-promote-fix-verify`): create a deliberate-fail SDAP CI run (or use a recent failure if available), confirm deploy-promote does NOT register a failure run for it.</step>
+    <step order="6">Open a PR from `work/github-actions-rationalization-r1` (or merge fix commit). Commit message: `fix(ci): stop deploy-promote cascade on SDAP CI failure (FR-03)`.</step>
+    <step order="7">Update TASK-INDEX.md: change task 010 status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="actionlint">Validate workflow YAML before push</tool>
+    <tool name="gh">Test workflow runs on test branch</tool>
+    <tool name="Read">Read workflow file end-to-end</tool>
+    <tool name="Edit">Apply &lt;50% repair</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.github/workflows/deploy-promote.yml (modified)</output>
+    <output type="docs">projects/github-actions-rationalization-r1/decisions/D-NN-deploy-promote-disposition.md (if Option B)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">After fix, a deliberately-failing SDAP CI run on master produces zero deploy-promote failure records (FR-03).</criterion>
+    <criterion testable="true">`actionlint .github/workflows/deploy-promote.yml` returns 0 errors.</criterion>
+    <criterion testable="true">Fix is &lt;50% line replacement (NFR-02) OR file deleted via `git rm` with decision record (NFR-04).</criterion>
+    <criterion testable="true">TASK-INDEX.md task 010 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Job-level `if:` is insufficient — GitHub still records workflow as `failure` if `workflow_run` fires and any job is skipped due to condition. Workflow-level conditional is the canonical fix. Test before merging by pushing a deliberate-fail commit to a test branch and observing the resulting cascade.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: STANDARD. Parallel-safe with 011 and 012 (different workflow files).</protocol>
+  </execution>
+</task>

@@ -61,8 +61,7 @@ class MockBroadcastChannel {
 }
 
 beforeAll(() => {
-  (globalThis as unknown as { BroadcastChannel: typeof MockBroadcastChannel }).BroadcastChannel =
-    MockBroadcastChannel;
+  (globalThis as unknown as { BroadcastChannel: typeof MockBroadcastChannel }).BroadcastChannel = MockBroadcastChannel;
 });
 
 afterEach(() => {
@@ -73,7 +72,7 @@ afterEach(() => {
 describe('broadcastChannel', () => {
   it('delivers a logout message to a registered listener', () => {
     const received: AuthBroadcastMessage[] = [];
-    const dispose = onAuthBroadcast((msg) => received.push(msg));
+    const dispose = onAuthBroadcast(msg => received.push(msg));
 
     // Send from a separate channel instance (BroadcastChannel never echoes to self)
     const sender = new (globalThis as unknown as { BroadcastChannel: typeof MockBroadcastChannel }).BroadcastChannel(
@@ -90,7 +89,7 @@ describe('broadcastChannel', () => {
 
   it('dispose function removes the listener', () => {
     const received: AuthBroadcastMessage[] = [];
-    const dispose = onAuthBroadcast((msg) => received.push(msg));
+    const dispose = onAuthBroadcast(msg => received.push(msg));
     dispose();
 
     const sender = new (globalThis as unknown as { BroadcastChannel: typeof MockBroadcastChannel }).BroadcastChannel(
@@ -110,7 +109,7 @@ describe('broadcastChannel', () => {
 
   it('ignores messages without a `type` field', () => {
     const received: AuthBroadcastMessage[] = [];
-    const dispose = onAuthBroadcast((msg) => received.push(msg));
+    const dispose = onAuthBroadcast(msg => received.push(msg));
 
     const sender = new (globalThis as unknown as { BroadcastChannel: typeof MockBroadcastChannel }).BroadcastChannel(
       'spaarke-auth-events'

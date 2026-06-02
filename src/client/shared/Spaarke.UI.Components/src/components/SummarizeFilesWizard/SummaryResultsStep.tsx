@@ -11,15 +11,7 @@
  *   - Call to Action (if actionable items found)
  */
 import * as React from 'react';
-import {
-  Badge,
-  Button,
-  makeStyles,
-  MessageBar,
-  MessageBarBody,
-  Text,
-  tokens,
-} from '@fluentui/react-components';
+import { Badge, Button, makeStyles, MessageBar, MessageBarBody, Text, tokens } from '@fluentui/react-components';
 import { SparkleRegular } from '@fluentui/react-icons';
 import { AiProgressStepper } from '../AiProgressStepper';
 import { DOCUMENT_ANALYSIS_STEPS } from '../AiProgressStepper';
@@ -174,9 +166,7 @@ export const SummaryResultsStep: React.FC<ISummaryResultsStepProps> = ({
           Analysis Results
         </Text>
         <MessageBar intent="error">
-          <MessageBarBody>
-            {errorMessage || 'An error occurred while analyzing the files.'}
-          </MessageBarBody>
+          <MessageBarBody>{errorMessage || 'An error occurred while analyzing the files.'}</MessageBarBody>
         </MessageBar>
         <Button appearance="primary" onClick={onRetry}>
           Retry Analysis
@@ -211,10 +201,7 @@ export const SummaryResultsStep: React.FC<ISummaryResultsStepProps> = ({
           AI Generated
         </Badge>
         {result.confidence != null && (
-          <Badge
-            appearance="outline"
-            className={styles.confidenceBadge}
-          >
+          <Badge appearance="outline" className={styles.confidenceBadge}>
             {Math.round(result.confidence * 100)}% confidence
           </Badge>
         )}
@@ -223,7 +210,9 @@ export const SummaryResultsStep: React.FC<ISummaryResultsStepProps> = ({
       {/* TL;DR — always shown */}
       <section>
         <div className={styles.sectionHeader}>
-          <Text size={400} weight="semibold">TL;DR</Text>
+          <Text size={400} weight="semibold">
+            TL;DR
+          </Text>
         </div>
         <Text size={300} className={styles.paragraph}>
           {result.tldr}
@@ -233,7 +222,9 @@ export const SummaryResultsStep: React.FC<ISummaryResultsStepProps> = ({
       {/* Summary — always shown */}
       <section>
         <div className={styles.sectionHeader}>
-          <Text size={400} weight="semibold">Summary</Text>
+          <Text size={400} weight="semibold">
+            Summary
+          </Text>
         </div>
         <Text size={300} className={styles.paragraph}>
           {result.summary}
@@ -244,7 +235,9 @@ export const SummaryResultsStep: React.FC<ISummaryResultsStepProps> = ({
       {result.fileHighlights && result.fileHighlights.length > 0 && (
         <section>
           <div className={styles.sectionHeader}>
-            <Text size={400} weight="semibold">File-by-File Highlights</Text>
+            <Text size={400} weight="semibold">
+              File-by-File Highlights
+            </Text>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
             {result.fileHighlights.map((file, idx) => {
@@ -252,9 +245,13 @@ export const SummaryResultsStep: React.FC<ISummaryResultsStepProps> = ({
               return (
                 <div key={idx} className={styles.fileCard}>
                   <div className={styles.fileHeader}>
-                    <Text size={300} weight="semibold">{file.fileName}</Text>
+                    <Text size={300} weight="semibold">
+                      {file.fileName}
+                    </Text>
                     {file.documentType && (
-                      <Badge appearance="outline" size="small">{file.documentType}</Badge>
+                      <Badge appearance="outline" size="small">
+                        {file.documentType}
+                      </Badge>
                     )}
                   </div>
                   {file.summary && (
@@ -282,10 +279,12 @@ export const SummaryResultsStep: React.FC<ISummaryResultsStepProps> = ({
       {result.practiceAreas && result.practiceAreas.length > 0 && (
         <section>
           <div className={styles.sectionHeader}>
-            <Text size={400} weight="semibold">Related Practice Areas</Text>
+            <Text size={400} weight="semibold">
+              Related Practice Areas
+            </Text>
           </div>
           <div className={styles.tagsContainer}>
-            {result.practiceAreas.map((area) => (
+            {result.practiceAreas.map(area => (
               <Badge key={area} appearance="tint" color="informative" size="medium">
                 {area}
               </Badge>
@@ -298,7 +297,9 @@ export const SummaryResultsStep: React.FC<ISummaryResultsStepProps> = ({
       {result.mentionedParties && result.mentionedParties.length > 0 && (
         <section>
           <div className={styles.sectionHeader}>
-            <Text size={400} weight="semibold">Who&apos;s Mentioned</Text>
+            <Text size={400} weight="semibold">
+              Who&apos;s Mentioned
+            </Text>
           </div>
           <table className={styles.partiesTable}>
             <thead>
@@ -323,7 +324,9 @@ export const SummaryResultsStep: React.FC<ISummaryResultsStepProps> = ({
       {result.callToAction && (
         <section>
           <div className={styles.sectionHeader}>
-            <Text size={400} weight="semibold">Call to Action</Text>
+            <Text size={400} weight="semibold">
+              Call to Action
+            </Text>
           </div>
           <div className={styles.callToActionBox}>
             <Text size={300} className={styles.paragraph}>

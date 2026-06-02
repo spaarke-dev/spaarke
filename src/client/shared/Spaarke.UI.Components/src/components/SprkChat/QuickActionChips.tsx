@@ -139,7 +139,7 @@ export const QuickActionChips: React.FC<IQuickActionChipsProps> = ({
       return;
     }
 
-    const observer = new ResizeObserver((entries) => {
+    const observer = new ResizeObserver(entries => {
       for (const entry of entries) {
         const width = entry.contentRect.width;
         setIsVisible(width >= MIN_PANE_WIDTH_FOR_CHIPS);
@@ -172,7 +172,7 @@ export const QuickActionChips: React.FC<IQuickActionChipsProps> = ({
 
       {/* Horizontally scrollable chip row */}
       <div className={styles.chipRow} role="toolbar" aria-label="Quick actions" data-testid="quick-action-chips-row">
-        {visibleActions.map((action) => (
+        {visibleActions.map(action => (
           <Button
             key={action.id}
             className={styles.chip}

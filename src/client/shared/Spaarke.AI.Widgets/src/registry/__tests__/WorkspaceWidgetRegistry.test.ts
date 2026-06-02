@@ -30,10 +30,14 @@ import {
 const MockGenericText: React.FC = () => null;
 MockGenericText.displayName = 'MockGenericTextWidget';
 
-jest.mock('../GenericTextWidget', () => ({
-  __esModule: true,
-  default: MockGenericText,
-}), { virtual: true });
+jest.mock(
+  '../GenericTextWidget',
+  () => ({
+    __esModule: true,
+    default: MockGenericText,
+  }),
+  { virtual: true }
+);
 
 // Also mock the resolved path used by the dynamic import inside the registry.
 jest.mock('../../widgets/GenericTextWidget', () => ({
@@ -76,10 +80,8 @@ beforeEach(() => {
 
 describe('registerWorkspaceWidget', () => {
   it('registers a widget type', () => {
-    registerWorkspaceWidget(
-      'fake-a',
-      defaultMetadata,
-      () => Promise.resolve({ default: FakeWidgetA as React.ComponentType<any> })
+    registerWorkspaceWidget('fake-a', defaultMetadata, () =>
+      Promise.resolve({ default: FakeWidgetA as React.ComponentType<any> })
     );
     expect(hasWorkspaceWidget('fake-a')).toBe(true);
   });
@@ -100,10 +102,8 @@ describe('registerWorkspaceWidget', () => {
 
 describe('resolveWorkspaceWidget — known type', () => {
   it('returns the correct widget component for a registered type', async () => {
-    registerWorkspaceWidget(
-      'fake-a',
-      defaultMetadata,
-      () => Promise.resolve({ default: FakeWidgetA as React.ComponentType<any> })
+    registerWorkspaceWidget('fake-a', defaultMetadata, () =>
+      Promise.resolve({ default: FakeWidgetA as React.ComponentType<any> })
     );
 
     const resolved = await resolveWorkspaceWidget('fake-a');
@@ -112,9 +112,7 @@ describe('resolveWorkspaceWidget — known type', () => {
   });
 
   it('calls the factory only once (caches after first load)', async () => {
-    const factory = jest.fn(() =>
-      Promise.resolve({ default: FakeWidgetA as React.ComponentType<any> })
-    );
+    const factory = jest.fn(() => Promise.resolve({ default: FakeWidgetA as React.ComponentType<any> }));
     registerWorkspaceWidget('fake-cached', defaultMetadata, factory);
 
     await resolveWorkspaceWidget('fake-cached');
@@ -146,10 +144,8 @@ describe('resolveWorkspaceWidget — unknown type', () => {
 
 describe('resolveWorkspaceWidget — factory failure', () => {
   it('returns GenericTextWidget when the factory throws', async () => {
-    registerWorkspaceWidget(
-      'broken-widget',
-      defaultMetadata,
-      () => Promise.reject(new Error('Simulated import failure'))
+    registerWorkspaceWidget('broken-widget', defaultMetadata, () =>
+      Promise.reject(new Error('Simulated import failure'))
     );
 
     const resolved = await resolveWorkspaceWidget('broken-widget');
@@ -158,21 +154,13 @@ describe('resolveWorkspaceWidget — factory failure', () => {
   });
 
   it('does not throw when the factory fails', async () => {
-    registerWorkspaceWidget(
-      'throws-widget',
-      defaultMetadata,
-      () => Promise.reject(new Error('boom'))
-    );
+    registerWorkspaceWidget('throws-widget', defaultMetadata, () => Promise.reject(new Error('boom')));
 
     await expect(resolveWorkspaceWidget('throws-widget')).resolves.toBeDefined();
   });
 
   it('never returns null or undefined when factory fails', async () => {
-    registerWorkspaceWidget(
-      'null-factory-widget',
-      defaultMetadata,
-      () => Promise.reject(new Error('network error'))
-    );
+    registerWorkspaceWidget('null-factory-widget', defaultMetadata, () => Promise.reject(new Error('network error')));
 
     const result = await resolveWorkspaceWidget('null-factory-widget');
 
@@ -184,10 +172,8 @@ describe('resolveWorkspaceWidget — factory failure', () => {
 describe('getWorkspaceWidgetMetadata', () => {
   it('returns metadata for registered types', () => {
     const meta = { displayName: 'My Widget', category: 'analysis', defaultOrder: 5, allowMultiple: false };
-    registerWorkspaceWidget(
-      'my-widget',
-      meta,
-      () => Promise.resolve({ default: FakeWidgetA as React.ComponentType<any> })
+    registerWorkspaceWidget('my-widget', meta, () =>
+      Promise.resolve({ default: FakeWidgetA as React.ComponentType<any> })
     );
 
     expect(getWorkspaceWidgetMetadata('my-widget')).toEqual(meta);
@@ -200,15 +186,11 @@ describe('getWorkspaceWidgetMetadata', () => {
 
 describe('getAllWorkspaceWidgetTypes', () => {
   it('returns all registered type strings', () => {
-    registerWorkspaceWidget(
-      'type-one',
-      defaultMetadata,
-      () => Promise.resolve({ default: FakeWidgetA as React.ComponentType<any> })
+    registerWorkspaceWidget('type-one', defaultMetadata, () =>
+      Promise.resolve({ default: FakeWidgetA as React.ComponentType<any> })
     );
-    registerWorkspaceWidget(
-      'type-two',
-      defaultMetadata,
-      () => Promise.resolve({ default: FakeWidgetB as React.ComponentType<any> })
+    registerWorkspaceWidget('type-two', defaultMetadata, () =>
+      Promise.resolve({ default: FakeWidgetB as React.ComponentType<any> })
     );
 
     const types = getAllWorkspaceWidgetTypes();
@@ -225,10 +207,8 @@ describe('getAllWorkspaceWidgetTypes', () => {
 
 describe('replaceWorkspaceWidget', () => {
   it('replaces an existing registration with a new factory', async () => {
-    registerWorkspaceWidget(
-      'swappable',
-      defaultMetadata,
-      () => Promise.resolve({ default: FakeWidgetA as React.ComponentType<any> })
+    registerWorkspaceWidget('swappable', defaultMetadata, () =>
+      Promise.resolve({ default: FakeWidgetA as React.ComponentType<any> })
     );
 
     // First resolve — caches FakeWidgetA.

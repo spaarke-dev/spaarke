@@ -642,7 +642,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
         // Dispatch on parent entity type — these are the lookup fields the upload wizard sets.
         IEnumerable<DocumentEntity> documents = request.EntityType.ToLowerInvariant() switch
         {
-            "matter"  => await _documentService.GetDocumentsByMatterAsync(parentGuid, null, cancellationToken),
+            "matter" => await _documentService.GetDocumentsByMatterAsync(parentGuid, null, cancellationToken),
             "project" => await _documentService.GetDocumentsByProjectAsync(parentGuid, null, cancellationToken),
             "invoice" => await _documentService.GetDocumentsByInvoiceAsync(parentGuid, null, cancellationToken),
             _ => throw new ArgumentException(
@@ -676,8 +676,8 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
         if (request.Filters?.DateRange is { } dateRange)
         {
-            if (dateRange.From is { } from)  documents = documents.Where(d => d.CreatedOn >= from.UtcDateTime);
-            if (dateRange.To   is { } to)    documents = documents.Where(d => d.CreatedOn <= to.UtcDateTime);
+            if (dateRange.From is { } from) documents = documents.Where(d => d.CreatedOn >= from.UtcDateTime);
+            if (dateRange.To is { } to) documents = documents.Where(d => d.CreatedOn <= to.UtcDateTime);
         }
 
         // Sort: most recent first, then name ascending for stable ordering.
@@ -734,7 +734,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
         // Parent lookup — the entity type dictates which property holds the FK.
         var (parentId, parentName) = parentEntityType.ToLowerInvariant() switch
         {
-            "matter"  => (doc.MatterId,  doc.MatterName),
+            "matter" => (doc.MatterId, doc.MatterName),
             "project" => (doc.ProjectId, doc.ProjectName),
             "invoice" => (doc.InvoiceId, doc.InvoiceName),
             _ => (null, null)

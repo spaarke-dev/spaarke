@@ -1,7 +1,7 @@
+using System.Linq;
 using System.Text;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai.Chat;
-using System.Linq;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 

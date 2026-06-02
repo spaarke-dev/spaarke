@@ -9,10 +9,10 @@
  * Standards: ADR-012 (shared component library), ADR-021 (Fluent v9, dark mode)
  */
 
-import * as React from "react";
-import { makeStyles, tokens } from "@fluentui/react-components";
-import { MetricCard } from "./MetricCard";
-import type { MetricCardConfig } from "./types";
+import * as React from 'react';
+import { makeStyles, tokens } from '@fluentui/react-components';
+import { MetricCard } from './MetricCard';
+import type { MetricCardConfig } from './types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -38,11 +38,11 @@ const useStyles = makeStyles({
    * `justifyContent: "start"` prevents the last row from stretching.
    */
   grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(120px, 160px))",
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 160px))',
     gap: tokens.spacingHorizontalL,
     // Align left — prevents last row from stretching if fewer cards than columns
-    justifyContent: "start",
+    justifyContent: 'start',
   },
 });
 
@@ -67,18 +67,11 @@ const useStyles = makeStyles({
  * />
  * ```
  */
-export const MetricCardRow: React.FC<MetricCardRowProps> = ({
-  cards,
-  className,
-}) => {
+export const MetricCardRow: React.FC<MetricCardRowProps> = ({ cards, className }) => {
   const styles = useStyles();
 
   return (
-    <div
-      className={`${styles.grid}${className ? ` ${className}` : ""}`}
-      role="group"
-      aria-label="Summary metrics"
-    >
+    <div className={`${styles.grid}${className ? ` ${className}` : ''}`} role="group" aria-label="Summary metrics">
       {cards.map((config: MetricCardConfig) => (
         <MetricCard
           key={config.id}
@@ -97,4 +90,4 @@ export const MetricCardRow: React.FC<MetricCardRowProps> = ({
   );
 };
 
-MetricCardRow.displayName = "MetricCardRow";
+MetricCardRow.displayName = 'MetricCardRow';

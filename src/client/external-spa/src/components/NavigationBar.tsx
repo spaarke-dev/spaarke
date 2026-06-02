@@ -1,4 +1,4 @@
-import * as React from "react";
+import * as React from 'react';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -6,7 +6,7 @@ import {
   BreadcrumbDivider,
   makeStyles,
   tokens,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 
 const useStyles = makeStyles({
   nav: {
@@ -54,11 +54,7 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({ items }) => {
                 <BreadcrumbButton
                   current={isLast}
                   href={!isLast && item.href ? item.href : undefined}
-                  style={
-                    isLast
-                      ? { color: tokens.colorNeutralForeground1 }
-                      : { color: tokens.colorBrandForeground1 }
-                  }
+                  style={isLast ? { color: tokens.colorNeutralForeground1 } : { color: tokens.colorBrandForeground1 }}
                 >
                   {item.label}
                 </BreadcrumbButton>

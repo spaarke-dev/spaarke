@@ -7,16 +7,7 @@
  * Accepts IDataService (not IWebApi) for shared library portability.
  */
 import * as React from 'react';
-import {
-  Text,
-  Input,
-  Textarea,
-  Dropdown,
-  Option,
-  Field,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Text, Input, Textarea, Dropdown, Option, Field, makeStyles, tokens } from '@fluentui/react-components';
 import type { ICreateTodoFormState } from './formTypes';
 import { EMPTY_TODO_FORM } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
@@ -80,9 +71,7 @@ export const CreateTodoStep: React.FC<ICreateTodoStepProps> = ({
 }) => {
   const styles = useStyles();
 
-  const [formValues, setFormValues] = React.useState<ICreateTodoFormState>(
-    initialFormValues ?? EMPTY_TODO_FORM
-  );
+  const [formValues, setFormValues] = React.useState<ICreateTodoFormState>(initialFormValues ?? EMPTY_TODO_FORM);
 
   React.useEffect(() => {
     const isValid = formValues.title.trim().length > 0;
@@ -90,36 +79,24 @@ export const CreateTodoStep: React.FC<ICreateTodoStepProps> = ({
     onFormValues(formValues);
   }, [formValues, onValidChange, onFormValues]);
 
-  const handleTitleChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setFormValues((prev) => ({ ...prev, title: e.target.value }));
-    },
-    []
-  );
+  const handleTitleChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormValues(prev => ({ ...prev, title: e.target.value }));
+  }, []);
 
-  const handleDueDateChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setFormValues((prev) => ({ ...prev, dueDate: e.target.value }));
-    },
-    []
-  );
+  const handleDueDateChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormValues(prev => ({ ...prev, dueDate: e.target.value }));
+  }, []);
 
-  const handlePriorityChange = React.useCallback(
-    (_e: unknown, data: { optionValue?: string }) => {
-      const val = parseInt(data.optionValue ?? '100000001', 10);
-      setFormValues((prev) => ({ ...prev, priority: val }));
-    },
-    []
-  );
+  const handlePriorityChange = React.useCallback((_e: unknown, data: { optionValue?: string }) => {
+    const val = parseInt(data.optionValue ?? '100000001', 10);
+    setFormValues(prev => ({ ...prev, priority: val }));
+  }, []);
 
-  const handleDescriptionChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setFormValues((prev) => ({ ...prev, description: e.target.value }));
-    },
-    []
-  );
+  const handleDescriptionChange = React.useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setFormValues(prev => ({ ...prev, description: e.target.value }));
+  }, []);
 
-  const selectedPriorityText = PRIORITY_OPTIONS.find((o) => o.key === formValues.priority)?.text ?? 'Normal';
+  const selectedPriorityText = PRIORITY_OPTIONS.find(o => o.key === formValues.priority)?.text ?? 'Normal';
 
   return (
     <div className={styles.form}>
@@ -143,11 +120,7 @@ export const CreateTodoStep: React.FC<ICreateTodoStepProps> = ({
 
       <div className={styles.row}>
         <Field label="Due Date">
-          <Input
-            type="date"
-            value={formValues.dueDate}
-            onChange={handleDueDateChange}
-          />
+          <Input type="date" value={formValues.dueDate} onChange={handleDueDateChange} />
         </Field>
         <Field label="Priority">
           <Dropdown
@@ -155,7 +128,7 @@ export const CreateTodoStep: React.FC<ICreateTodoStepProps> = ({
             selectedOptions={[String(formValues.priority)]}
             onOptionSelect={handlePriorityChange}
           >
-            {PRIORITY_OPTIONS.map((opt) => (
+            {PRIORITY_OPTIONS.map(opt => (
               <Option key={opt.key} value={String(opt.key)}>
                 {opt.text}
               </Option>

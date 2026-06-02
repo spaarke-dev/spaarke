@@ -77,10 +77,10 @@ public static class AiSafetyModule
         // unit tests inject a stub without hitting the real Content Safety API).
         services.AddScoped<IGroundednessCheckService>(sp =>
         {
-            var factory    = sp.GetRequiredService<IHttpClientFactory>();
+            var factory = sp.GetRequiredService<IHttpClientFactory>();
             var httpClient = factory.CreateClient(PromptShieldService.HttpClientName);
-            var logger     = sp.GetRequiredService<ILogger<GroundednessCheckService>>();
-            var telemetry  = sp.GetRequiredService<GroundednessCheckTelemetry>();
+            var logger = sp.GetRequiredService<ILogger<GroundednessCheckService>>();
+            var telemetry = sp.GetRequiredService<GroundednessCheckTelemetry>();
             return new GroundednessCheckService(httpClient, logger, telemetry);
         });
 

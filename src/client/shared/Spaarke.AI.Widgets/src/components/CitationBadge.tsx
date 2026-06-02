@@ -24,11 +24,7 @@
 
 import React from 'react';
 import { Badge, Tooltip, makeStyles, tokens } from '@fluentui/react-components';
-import {
-  CheckmarkCircleRegular,
-  WarningRegular,
-  ArrowSwapRegular,
-} from '@fluentui/react-icons';
+import { CheckmarkCircleRegular, WarningRegular, ArrowSwapRegular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -127,17 +123,9 @@ const UNVERIFIED_SUFFIX = 'Not found in available sources';
  */
 function buildTooltipContent(result: CitationVerificationResult): string {
   const statusLabel =
-    result.status === 'verified'
-      ? 'Verified'
-      : result.status === 'partial'
-      ? 'Partially verified'
-      : 'Unverified';
+    result.status === 'verified' ? 'Verified' : result.status === 'partial' ? 'Partially verified' : 'Unverified';
 
-  const parts = [
-    statusLabel,
-    `Source: ${result.providerName}`,
-    `Confidence: ${result.confidence}`,
-  ];
+  const parts = [statusLabel, `Source: ${result.providerName}`, `Confidence: ${result.confidence}`];
 
   if (result.status === 'unverified') {
     parts.push(UNVERIFIED_SUFFIX);
@@ -162,29 +150,11 @@ interface BadgeIconProps {
 const BadgeIcon: React.FC<BadgeIconProps> = ({ status, styles }) => {
   switch (status) {
     case 'verified':
-      return (
-        <CheckmarkCircleRegular
-          className={styles.verifiedIcon}
-          fontSize={12}
-          aria-hidden="true"
-        />
-      );
+      return <CheckmarkCircleRegular className={styles.verifiedIcon} fontSize={12} aria-hidden="true" />;
     case 'unverified':
-      return (
-        <WarningRegular
-          className={styles.unverifiedIcon}
-          fontSize={12}
-          aria-hidden="true"
-        />
-      );
+      return <WarningRegular className={styles.unverifiedIcon} fontSize={12} aria-hidden="true" />;
     case 'partial':
-      return (
-        <ArrowSwapRegular
-          className={styles.partialIcon}
-          fontSize={12}
-          aria-hidden="true"
-        />
-      );
+      return <ArrowSwapRegular className={styles.partialIcon} fontSize={12} aria-hidden="true" />;
   }
 };
 
@@ -239,41 +209,27 @@ export interface CitationBadgeProps {
  *   }}
  * />
  */
-export const CitationBadge: React.FC<CitationBadgeProps> = ({
-  result,
-  className,
-}) => {
+export const CitationBadge: React.FC<CitationBadgeProps> = ({ result, className }) => {
   const styles = useStyles();
 
-  const tooltipContent = React.useMemo(
-    () => buildTooltipContent(result),
-    [result]
-  );
+  const tooltipContent = React.useMemo(() => buildTooltipContent(result), [result]);
 
   // Map status → Fluent Badge appearance token.
   // 'tint' uses the palette background/foreground tokens directly,
   // which is dark-mode safe.
   const badgeAppearance = 'tint' as const;
   const badgeColor =
-    result.status === 'verified'
-      ? 'success'
-      : result.status === 'unverified'
-      ? 'warning'
-      : 'informative';
+    result.status === 'verified' ? 'success' : result.status === 'unverified' ? 'warning' : 'informative';
 
   const ariaLabel =
     result.status === 'verified'
       ? `Citation ${result.id} verified`
       : result.status === 'unverified'
-      ? `Citation ${result.id} unverified — not found in available sources`
-      : `Citation ${result.id} partially verified`;
+        ? `Citation ${result.id} unverified — not found in available sources`
+        : `Citation ${result.id} partially verified`;
 
   return (
-    <Tooltip
-      content={tooltipContent}
-      relationship="label"
-      withArrow
-    >
+    <Tooltip content={tooltipContent} relationship="label" withArrow>
       <span
         className={`${styles.badgeWrapper}${className ? ` ${className}` : ''}`}
         data-testid={`citation-badge-${result.id}`}

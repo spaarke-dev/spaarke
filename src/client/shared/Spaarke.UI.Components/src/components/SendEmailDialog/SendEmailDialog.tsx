@@ -311,10 +311,7 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
           Default of 'auto' produces { height: 'auto', minHeight: 'auto' }
           which is a no-op for back-compat consumers (LegalWorkspace +
           SpeDocumentViewer). */}
-      <DialogSurface
-        className={styles.surface}
-        style={{ maxWidth, height, minHeight: height }}
-      >
+      <DialogSurface className={styles.surface} style={{ maxWidth, height, minHeight: height }}>
         {/* v1.1.59 — title-bar X close icon removed per UAT.
             The Cancel button in the footer is the single close
             affordance, matching FilePreviewDialog's pattern

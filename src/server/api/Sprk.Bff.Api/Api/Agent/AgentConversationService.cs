@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Concurrent;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
 
 namespace Sprk.Bff.Api.Api.Agent;
 
@@ -138,12 +138,12 @@ public sealed class AgentConversationService
 
     private static AgentConversationContext CreateNewContext(
         string tenantId, string conversationId, string userId) => new()
-    {
-        TenantId = tenantId,
-        ConversationId = conversationId,
-        UserId = userId,
-        CreatedAt = DateTimeOffset.UtcNow
-    };
+        {
+            TenantId = tenantId,
+            ConversationId = conversationId,
+            UserId = userId,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
 
     // Keys scoped by tenant per ADR-014
     private static string BuildCacheKey(string tenantId, string conversationId) =>

@@ -37,21 +37,11 @@
  *     tokens directly.
  */
 
-import * as React from "react";
-import {
-  Spinner,
-  Text,
-  Button,
-  makeStyles,
-  tokens,
-} from "@fluentui/react-components";
-import {
-  EmojiSparkleRegular,
-  ArrowClockwiseRegular,
-  WarningRegular,
-} from "@fluentui/react-icons";
-import { useDailyBriefing } from "./useDailyBriefing";
-import type { NarrateRequest } from "./useDailyBriefing";
+import * as React from 'react';
+import { Spinner, Text, Button, makeStyles, tokens } from '@fluentui/react-components';
+import { EmojiSparkleRegular, ArrowClockwiseRegular, WarningRegular } from '@fluentui/react-icons';
+import { useDailyBriefing } from './useDailyBriefing';
+import type { NarrateRequest } from './useDailyBriefing';
 
 // ---------------------------------------------------------------------------
 // Telemetry event-name constant (shared key for App Insights KQL parity)
@@ -62,8 +52,7 @@ import type { NarrateRequest } from "./useDailyBriefing";
 // SpaarkeAi embed) using this stable identifier.
 // ---------------------------------------------------------------------------
 
-export const TELEMETRY_EVENT_DAILY_BRIEFING_429 =
-  "spaarke-ai-error.daily-briefing.rate-limited";
+export const TELEMETRY_EVENT_DAILY_BRIEFING_429 = 'spaarke-ai-error.daily-briefing.rate-limited';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -71,39 +60,39 @@ export const TELEMETRY_EVENT_DAILY_BRIEFING_429 =
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    flex: "1 1 0",
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1 1 0',
     minHeight: 0,
-    padding: "8px 12px 12px 12px",
-    gap: "8px",
+    padding: '8px 12px 12px 12px',
+    gap: '8px',
   },
   loading: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "120px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '120px',
   },
   // Empty state (OC-08 — friendly happy-path "nothing to see") and 429 degraded
   // state share a centered, vertical layout so the section preserves its
   // dimensions across all three states (FR-16 / NFR-11).
   centeredState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "120px",
-    gap: "8px",
-    textAlign: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '120px',
+    gap: '8px',
+    textAlign: 'center',
     color: tokens.colorNeutralForeground2,
   },
   emptyIcon: {
-    fontSize: "32px",
+    fontSize: '32px',
     color: tokens.colorNeutralForeground3,
     // currentColor inheritance keeps dark-mode parity (ADR-021).
   },
   degradedIcon: {
-    fontSize: "32px",
+    fontSize: '32px',
     color: tokens.colorPaletteYellowForeground1,
   },
   degradedTitle: {
@@ -112,37 +101,37 @@ const useStyles = makeStyles({
   },
   degradedBody: {
     color: tokens.colorNeutralForeground2,
-    maxWidth: "320px",
+    maxWidth: '320px',
   },
   retryButtonRow: {
-    display: "flex",
-    justifyContent: "center",
-    marginTop: "4px",
+    display: 'flex',
+    justifyContent: 'center',
+    marginTop: '4px',
   },
   bulletList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "8px",
-    listStyle: "none",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    listStyle: 'none',
     margin: 0,
     padding: 0,
-    overflowY: "auto",
+    overflowY: 'auto',
   },
   bulletItem: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: "8px",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: '8px',
     color: tokens.colorNeutralForeground1,
   },
   bulletMarker: {
     color: tokens.colorBrandForeground1,
     fontWeight: tokens.fontWeightSemibold,
     flexShrink: 0,
-    minWidth: "12px",
+    minWidth: '12px',
   },
   bulletText: {
-    flex: "1 1 auto",
+    flex: '1 1 auto',
     lineHeight: tokens.lineHeightBase300,
   },
 });
@@ -231,13 +220,13 @@ export const DailyBriefingSection: React.FC<DailyBriefingSectionProps> = ({
   const emittedFailureRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
-    if (error?.kind === "rate-limit") {
+    if (error?.kind === 'rate-limit') {
       const failureKey = `${error.status}:${error.message}`;
       if (emittedFailureRef.current !== failureKey) {
         emittedFailureRef.current = failureKey;
 
         const properties: Record<string, unknown> = {
-          endpoint: "/api/ai/daily-briefing/narrate",
+          endpoint: '/api/ai/daily-briefing/narrate',
           statusCode: error.status,
           message: error.message,
           timestamp: new Date().toISOString(),
@@ -253,10 +242,7 @@ export const DailyBriefingSection: React.FC<DailyBriefingSectionProps> = ({
           }
         } else {
           // No callback supplied — log so the failure remains observable.
-          console.warn(
-            `[DailyBriefingSection] ${TELEMETRY_EVENT_DAILY_BRIEFING_429}`,
-            properties,
-          );
+          console.warn(`[DailyBriefingSection] ${TELEMETRY_EVENT_DAILY_BRIEFING_429}`, properties);
         }
       }
     } else if (!error) {
@@ -284,14 +270,10 @@ export const DailyBriefingSection: React.FC<DailyBriefingSectionProps> = ({
   //    Stays visible at the same dimensions as success/empty; retry CTA
   //    re-invokes the hook bypassing the TTL cache.
   // ---------------------------------------------------------------------
-  if (error && error.kind === "rate-limit") {
+  if (error && error.kind === 'rate-limit') {
     return (
       <div className={styles.root}>
-        <div
-          className={styles.centeredState}
-          role="status"
-          aria-live="polite"
-        >
+        <div className={styles.centeredState} role="status" aria-live="polite">
           <WarningRegular className={styles.degradedIcon} aria-hidden="true" />
           <Text size={400} className={styles.degradedTitle}>
             Daily Briefing temporarily unavailable
@@ -323,11 +305,7 @@ export const DailyBriefingSection: React.FC<DailyBriefingSectionProps> = ({
   if (error) {
     return (
       <div className={styles.root}>
-        <div
-          className={styles.centeredState}
-          role="status"
-          aria-live="polite"
-        >
+        <div className={styles.centeredState} role="status" aria-live="polite">
           <WarningRegular className={styles.degradedIcon} aria-hidden="true" />
           <Text size={400} className={styles.degradedTitle}>
             Daily Briefing unavailable
@@ -359,13 +337,8 @@ export const DailyBriefingSection: React.FC<DailyBriefingSectionProps> = ({
     return (
       <div className={styles.root}>
         <div className={styles.centeredState}>
-          <EmojiSparkleRegular
-            className={styles.emptyIcon}
-            aria-hidden="true"
-          />
-          <Text size={300}>
-            Nothing to see right now — enjoy your day
-          </Text>
+          <EmojiSparkleRegular className={styles.emptyIcon} aria-hidden="true" />
+          <Text size={300}>Nothing to see right now — enjoy your day</Text>
         </div>
       </div>
     );

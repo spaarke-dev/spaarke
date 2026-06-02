@@ -1,0 +1,35 @@
+name: actionlint
+
+on:
+  # Fire on all PRs (no path filter) so the 'actionlint' required-status-check
+  # always posts a status. Path filtering created a deadlock pattern on PRs
+  # that didn't touch .github/workflows/** — the check was "expected but
+  # unreported" and blocked merge indefinitely (observed on PR #322 closeout).
+  # Actionlint is fast (~17s) so the overhead is negligible.
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download actionlint
+        id: get_actionlint
+        run: bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+        shell: bash
+
+      - name: Run actionlint
+        # -shellcheck= disables shellcheck integration. Per FR-07 + D-01, actionlint's role
+        # here is GitHub-Actions-specific validation (duplicate keys, undefined vars, bad
+        # triggers — the P1-class bugs). Shellcheck warnings inside `run:` blocks are
+        # valuable but generate noise that distracts from the FR-07 mission. Pre-existing
+        # workflows have many SC2086/SC2129 nits whose fix would exceed NFR-02 50% threshold.
+        # If a future project adds shellcheck enforcement, re-enable here.
+        run: ${{ steps.get_actionlint.outputs.executable }} -color -shellcheck=
+        shell: bash

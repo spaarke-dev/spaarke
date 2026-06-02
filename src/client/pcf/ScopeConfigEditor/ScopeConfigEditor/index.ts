@@ -124,7 +124,7 @@ export class ScopeConfigEditor implements ComponentFramework.ReactControl<IInput
    */
   private _resolveApiBaseUrl(context: ComponentFramework.Context<IInputs>): void {
     getApiBaseUrl(context.webAPI)
-      .then((url) => {
+      .then(url => {
         this._resolvedApiBaseUrl = url;
         this._apiBaseUrlError = undefined;
         // Trigger re-render so updateView picks up the resolved URL

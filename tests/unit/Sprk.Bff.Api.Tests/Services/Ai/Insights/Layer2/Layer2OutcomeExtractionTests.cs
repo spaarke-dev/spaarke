@@ -616,8 +616,8 @@ public class Layer2OutcomeExtractionTests
         // ingest playbook can load it at runtime. This asserts the copy actually happened.
         var assemblyDir = Path.GetDirectoryName(typeof(Layer2OutcomeExtractionTests).Assembly.Location)
             ?? AppContext.BaseDirectory;
-            // The .Tests assembly references the BFF API; its output directory should contain the
-            // copied content. Walk down into Services/Ai/Insights/Prompts/.
+        // The .Tests assembly references the BFF API; its output directory should contain the
+        // copied content. Walk down into Services/Ai/Insights/Prompts/.
         var promptPath = Path.Combine(
             assemblyDir, "Services", "Ai", "Insights", "Prompts", "outcome-extraction.v1.txt");
         File.Exists(promptPath).Should().BeTrue(

@@ -21,8 +21,8 @@ import {
   resolveCodePageTheme,
   setupCodePageThemeListener,
   getEffectiveDarkMode,
-} from "@spaarke/ui-components/utils/themeStorage";
-import type { Theme } from "@fluentui/react-components";
+} from '@spaarke/ui-components/utils/themeStorage';
+import type { Theme } from '@fluentui/react-components';
 
 /**
  * Detect the current theme using the shared resolution chain.

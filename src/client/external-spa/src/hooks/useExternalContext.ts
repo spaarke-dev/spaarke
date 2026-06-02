@@ -14,10 +14,10 @@
  * See: docs/architecture/power-pages-spa-guide.md — Authentication section
  */
 
-import { useState, useEffect, useCallback } from "react";
-import { getExternalUserContext } from "../auth/bff-client";
-import type { ExternalUserContextResponse } from "../auth/bff-client";
-import { ApiError } from "../types";
+import { useState, useEffect, useCallback } from 'react';
+import { getExternalUserContext } from '../auth/bff-client';
+import type { ExternalUserContextResponse } from '../auth/bff-client';
+import { ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
 // Public hook state interface
@@ -65,7 +65,7 @@ export function useExternalContext(): UseExternalContextState {
   const [fetchTrigger, setFetchTrigger] = useState<number>(0);
 
   const refresh = useCallback(() => {
-    setFetchTrigger((n) => n + 1);
+    setFetchTrigger(n => n + 1);
   }, []);
 
   useEffect(() => {
@@ -84,12 +84,12 @@ export function useExternalContext(): UseExternalContextState {
         if (!cancelled) {
           if (err instanceof ApiError) {
             setError(`Failed to load your workspace context (${err.statusCode}). Please try refreshing the page.`);
-          } else if (err instanceof Error && err.message.includes("redirecting to login")) {
+          } else if (err instanceof Error && err.message.includes('redirecting to login')) {
             // Portal session expired — portal-auth.ts is handling the redirect.
             // No need to display an error; the page will navigate away.
           } else {
-            console.error("[ExternalContext] Unexpected error loading workspace context:", err);
-            setError("An unexpected error occurred while loading your workspace. Please try refreshing the page.");
+            console.error('[ExternalContext] Unexpected error loading workspace context:', err);
+            setError('An unexpected error occurred while loading your workspace. Please try refreshing the page.');
           }
         }
       } finally {

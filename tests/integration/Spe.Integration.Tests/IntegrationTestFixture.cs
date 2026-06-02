@@ -153,11 +153,11 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
 
                 // PowerBi options (required by ReportingModule — PowerBiOptions ValidateDataAnnotations)
                 // These are test values; no real Power BI API calls are made in integration tests.
-                ["PowerBi:TenantId"]     = "test-powerbi-tenant-id",
-                ["PowerBi:ClientId"]     = "test-powerbi-client-id",
+                ["PowerBi:TenantId"] = "test-powerbi-tenant-id",
+                ["PowerBi:ClientId"] = "test-powerbi-client-id",
                 ["PowerBi:ClientSecret"] = "test-powerbi-client-secret",
-                ["PowerBi:ApiUrl"]       = "https://api.powerbi.com",
-                ["PowerBi:Scope"]        = "https://analysis.windows.net/.default",
+                ["PowerBi:ApiUrl"] = "https://api.powerbi.com",
+                ["PowerBi:Scope"] = "https://analysis.windows.net/.default",
 
                 // Reporting module gate — disabled by default so module-disabled tests pass.
                 // Individual tests that need a 200 from /api/reporting/* override this via

@@ -21,9 +21,7 @@ import { IInputs, IOutputs } from './generated/ManifestTypes';
 import { UniversalDatasetGridHost } from './UniversalDatasetGridHost';
 import { logger } from './utils/logger';
 
-export class UniversalDatasetGrid
-  implements ComponentFramework.ReactControl<IInputs, IOutputs>
-{
+export class UniversalDatasetGrid implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   private notifyOutputChanged: () => void = () => undefined;
   /** Selected event date from row click (Task 012 — bi-directional calendar sync). */
   private _selectedEventDate: string | null = null;

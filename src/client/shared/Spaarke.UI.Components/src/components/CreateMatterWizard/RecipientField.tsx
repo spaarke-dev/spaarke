@@ -17,21 +17,8 @@
  */
 
 import * as React from 'react';
-import {
-  Input,
-  Text,
-  Button,
-  Spinner,
-  makeStyles,
-  tokens,
-  mergeClasses,
-} from '@fluentui/react-components';
-import {
-  DismissRegular,
-  SearchRegular,
-  PersonRegular,
-  MailRegular,
-} from '@fluentui/react-icons';
+import { Input, Text, Button, Spinner, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
+import { DismissRegular, SearchRegular, PersonRegular, MailRegular } from '@fluentui/react-icons';
 import type { ILookupItem } from '../../types/LookupTypes';
 
 // ---------------------------------------------------------------------------
@@ -266,8 +253,8 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
       try {
         const items = await onSearch(inputValue.trim());
         // Filter out already-added recipients
-        const existingKeys = new Set(recipients.map((r) => r.key));
-        const filtered = items.filter((item) => !existingKeys.has(item.id));
+        const existingKeys = new Set(recipients.map(r => r.key));
+        const filtered = items.filter(item => !existingKeys.has(item.id));
         setResults(filtered);
         setShowResults(filtered.length > 0);
         setHighlightedIndex(-1);
@@ -320,7 +307,7 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
   const handleAddManualEmail = React.useCallback(() => {
     const email = inputValue.trim();
     if (!EMAIL_REGEX.test(email)) return;
-    if (recipients.some((r) => r.email === email || r.key === email)) return;
+    if (recipients.some(r => r.email === email || r.key === email)) return;
 
     const newRecipient: IRecipientItem = {
       key: email,
@@ -337,7 +324,7 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
   // -- Remove recipient --
   const handleRemove = React.useCallback(
     (key: string) => {
-      onRecipientsChange(recipients.filter((r) => r.key !== key));
+      onRecipientsChange(recipients.filter(r => r.key !== key));
     },
     [recipients, onRecipientsChange]
   );
@@ -354,14 +341,10 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
         }
       } else if (e.key === 'ArrowDown' && showResults) {
         e.preventDefault();
-        setHighlightedIndex((prev) =>
-          prev < results.length - 1 ? prev + 1 : 0
-        );
+        setHighlightedIndex(prev => (prev < results.length - 1 ? prev + 1 : 0));
       } else if (e.key === 'ArrowUp' && showResults) {
         e.preventDefault();
-        setHighlightedIndex((prev) =>
-          prev > 0 ? prev - 1 : results.length - 1
-        );
+        setHighlightedIndex(prev => (prev > 0 ? prev - 1 : results.length - 1));
       } else if (e.key === 'Escape') {
         setShowResults(false);
       }
@@ -385,11 +368,8 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
       {/* Chip list */}
       {recipients.length > 0 && (
         <div className={styles.chipList}>
-          {recipients.map((r) => (
-            <span
-              key={r.key}
-              className={mergeClasses(styles.chip, r.isManual && styles.chipManual)}
-            >
+          {recipients.map(r => (
+            <span key={r.key} className={mergeClasses(styles.chip, r.isManual && styles.chipManual)}>
               <span className={mergeClasses(styles.chipIcon, r.isManual && styles.chipIconManual)}>
                 {r.isManual ? <MailRegular fontSize={14} /> : <PersonRegular fontSize={14} />}
               </span>
@@ -416,7 +396,7 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
       <div className={styles.inputRow}>
         <Input
           value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
+          onChange={e => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
           onFocus={handleFocus}
           placeholder={placeholder ?? `Search contacts or type email...`}
@@ -435,11 +415,7 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
 
         {/* Results dropdown */}
         {showResults && (
-          <div
-            className={styles.resultsList}
-            role="listbox"
-            aria-label={`${label} search results`}
-          >
+          <div className={styles.resultsList} role="listbox" aria-label={`${label} search results`}>
             {results.map((item, index) => (
               <div
                 key={item.id}
@@ -450,7 +426,7 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
                 role="option"
                 aria-selected={index === highlightedIndex}
                 onClick={() => handleSelectContact(item)}
-                onKeyDown={(e) => {
+                onKeyDown={e => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     handleSelectContact(item);

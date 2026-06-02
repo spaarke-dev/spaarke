@@ -412,13 +412,13 @@ public class ChatSessionManagerTests
         // Cosmos holds the session
         var storedSession = new StoredSession
         {
-            Id          = "session-cold-cosmos",
-            SessionId   = "session-cold-cosmos",
-            TenantId    = TenantId,
-            PlaybookId  = PlaybookId,
-            Messages    = [],
+            Id = "session-cold-cosmos",
+            SessionId = "session-cold-cosmos",
+            TenantId = TenantId,
+            PlaybookId = PlaybookId,
+            Messages = [],
             WidgetStates = [],
-            CreatedAt   = DateTimeOffset.UtcNow.AddMinutes(-30),
+            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-30),
             LastActivity = DateTimeOffset.UtcNow.AddMinutes(-5)
         };
         _persistenceMock

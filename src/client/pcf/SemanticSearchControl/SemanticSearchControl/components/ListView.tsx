@@ -792,10 +792,8 @@ export const ListView: React.FC<IListViewProps> = ({
     [selectedIds, onSelectionChange]
   );
 
-  const allSelected =
-    sortedResults.length > 0 && sortedResults.every(r => selectedIds.has(r.documentId));
-  const someSelected =
-    sortedResults.some(r => selectedIds.has(r.documentId)) && !allSelected;
+  const allSelected = sortedResults.length > 0 && sortedResults.every(r => selectedIds.has(r.documentId));
+  const someSelected = sortedResults.some(r => selectedIds.has(r.documentId)) && !allSelected;
 
   const handleToggleAll = React.useCallback(() => {
     if (allSelected) {
@@ -935,9 +933,7 @@ export const ListView: React.FC<IListViewProps> = ({
             className={styles.sortHeader}
             onClick={() => handleHeaderClick('name')}
             role="button"
-            aria-label={`Sort by document name — currently ${
-              sortColumn === 'name' ? sortDirection : 'unsorted'
-            }`}
+            aria-label={`Sort by document name — currently ${sortColumn === 'name' ? sortDirection : 'unsorted'}`}
           >
             Document{renderSortCaret('name')}
           </span>
@@ -978,8 +974,7 @@ export const ListView: React.FC<IListViewProps> = ({
         renderHeaderCell: () => <span>Relationship</span>,
         renderCell: (result: SearchResult) => {
           const rel: 'associated' | 'semantic' | 'both' =
-            result.relationship ??
-            ((result.combinedScore ?? 0) === 0 ? 'associated' : 'semantic');
+            result.relationship ?? ((result.combinedScore ?? 0) === 0 ? 'associated' : 'semantic');
           // 'both' renders as Same Matter — the direct association is the
           // canonical, stronger relationship signal even when a semantic
           // match exists.
@@ -1017,17 +1012,14 @@ export const ListView: React.FC<IListViewProps> = ({
             className={styles.sortHeader}
             onClick={() => handleHeaderClick('combinedScore')}
             role="button"
-            aria-label={`Sort by similarity — currently ${
-              sortColumn === 'combinedScore' ? sortDirection : 'unsorted'
-            }`}
+            aria-label={`Sort by similarity — currently ${sortColumn === 'combinedScore' ? sortDirection : 'unsorted'}`}
           >
             Similarity{renderSortCaret('combinedScore')}
           </span>
         ),
         renderCell: (result: SearchResult) => {
           const rel: 'associated' | 'semantic' | 'both' =
-            result.relationship ??
-            ((result.combinedScore ?? 0) === 0 ? 'associated' : 'semantic');
+            result.relationship ?? ((result.combinedScore ?? 0) === 0 ? 'associated' : 'semantic');
           if (rel === 'associated') {
             // v1.1.54 (Item 4) — direct-association rows render "100%" in
             // a green pill (was: blank brand-blue pill). Mirrors the card
@@ -1067,9 +1059,8 @@ export const ListView: React.FC<IListViewProps> = ({
         renderCell: (result: SearchResult) => {
           const IconComp = getFileIcon(result.fileType);
           const typeLabel =
-            (result.documentType && result.documentType.trim().length > 0
-              ? result.documentType
-              : result.fileType) || 'Document';
+            (result.documentType && result.documentType.trim().length > 0 ? result.documentType : result.fileType) ||
+            'Document';
           return (
             <span title={typeLabel} aria-label={typeLabel}>
               <IconComp fontSize={20} aria-hidden="true" />
@@ -1086,16 +1077,12 @@ export const ListView: React.FC<IListViewProps> = ({
             className={styles.sortHeader}
             onClick={() => handleHeaderClick('modifiedAt')}
             role="button"
-            aria-label={`Sort by modified date — currently ${
-              sortColumn === 'modifiedAt' ? sortDirection : 'unsorted'
-            }`}
+            aria-label={`Sort by modified date — currently ${sortColumn === 'modifiedAt' ? sortDirection : 'unsorted'}`}
           >
             Modified{renderSortCaret('modifiedAt')}
           </span>
         ),
-        renderCell: (result: SearchResult) => (
-          <Text size={200}>{formatShortDate(result.modifiedAt)}</Text>
-        ),
+        renderCell: (result: SearchResult) => <Text size={200}>{formatShortDate(result.modifiedAt)}</Text>,
       }),
 
       // v1.1.54 (Item 6) — COL_AI (AI Summary sparkle) column removed.
@@ -1410,10 +1397,14 @@ export const ListView: React.FC<IListViewProps> = ({
                     return (
                       <DataGridCell
                         className={cellClass}
-                        onClick={isPinCell ? (ev: React.MouseEvent) => {
-                          ev.stopPropagation();
-                          onTogglePin(item.documentId);
-                        } : undefined}
+                        onClick={
+                          isPinCell
+                            ? (ev: React.MouseEvent) => {
+                                ev.stopPropagation();
+                                onTogglePin(item.documentId);
+                              }
+                            : undefined
+                        }
                       >
                         <TableCellLayout truncate={!isSelectCell && !isPinCell && !isMenuCell}>
                           {renderCell(item)}
@@ -1434,13 +1425,7 @@ export const ListView: React.FC<IListViewProps> = ({
             as ResultsList for parity. Renders only when the host wired
             `onLoadMoreSentinel` — back-compat: when omitted, no observer
             is attached and pagination semantics are unchanged. */}
-        {onLoadMoreSentinel && (
-          <div
-            ref={sentinelRef}
-            style={{ height: '1px', width: '100%' }}
-            aria-hidden="true"
-          />
-        )}
+        {onLoadMoreSentinel && <div ref={sentinelRef} style={{ height: '1px', width: '100%' }} aria-hidden="true" />}
       </div>
 
       {/* Preview dialog — instantiated once at the list level; opens for whichever

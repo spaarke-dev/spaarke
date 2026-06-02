@@ -27,11 +27,7 @@ import * as React from 'react';
 import { Button, Text, tokens } from '@fluentui/react-components';
 import { CheckmarkCircleFilled } from '@fluentui/react-icons';
 
-import {
-  CreateRecordWizard,
-  type ICreateRecordWizardConfig,
-  type IFinishContext,
-} from '../CreateRecordWizard';
+import { CreateRecordWizard, type ICreateRecordWizardConfig, type IFinishContext } from '../CreateRecordWizard';
 
 import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
@@ -60,19 +56,16 @@ async function associateProjectWithMatter(projectId: string, matterId: string): 
   const orgUrl = window.location.origin;
   const ref = `${orgUrl}/api/data/v9.0/sprk_matters(${matterId})`;
 
-  const response = await fetch(
-    `${orgUrl}/api/data/v9.0/sprk_projects(${projectId})/sprk_Project_Matter_nn/$ref`,
-    {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'OData-MaxVersion': '4.0',
-        'OData-Version': '4.0',
-      },
-      body: JSON.stringify({ '@odata.id': ref }),
-    }
-  );
+  const response = await fetch(`${orgUrl}/api/data/v9.0/sprk_projects(${projectId})/sprk_Project_Matter_nn/$ref`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'OData-MaxVersion': '4.0',
+      'OData-Version': '4.0',
+    },
+    body: JSON.stringify({ '@odata.id': ref }),
+  });
 
   if (!response.ok) {
     const text = await response.text().catch(() => '');
@@ -103,12 +96,10 @@ async function associateProjectWithAccount(
     );
     if (resp.ok) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const json = await resp.json() as any;
+      const json = (await resp.json()) as any;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const rels: Array<any> = json.value ?? [];
-      const accountRel = rels.find(
-        (r: { ReferencedEntity: string }) => r.ReferencedEntity === 'account'
-      );
+      const accountRel = rels.find((r: { ReferencedEntity: string }) => r.ReferencedEntity === 'account');
       if (accountRel?.ReferencingEntityNavigationPropertyName) {
         navPropBind = `${accountRel.ReferencingEntityNavigationPropertyName}@odata.bind`;
       }
@@ -135,7 +126,7 @@ async function searchContactsAsLookup(dataService: IDataService, query: string):
     `&$filter=contains(fullname,'${safeFilter}')` +
     `&$orderby=fullname asc&$top=10`;
   const result = await dataService.retrieveMultipleRecords('contact', options);
-  return result.entities.map((e) => ({
+  return result.entities.map(e => ({
     id: e['contactid'] as string,
     name: (e['fullname'] as string) + (e['emailaddress1'] ? ` (${e['emailaddress1']})` : ''),
   }));
@@ -149,7 +140,7 @@ async function searchOrganizationsAsLookup(dataService: IDataService, query: str
     `&$filter=contains(sprk_name,'${safeFilter}')` +
     `&$orderby=sprk_name asc&$top=10`;
   const result = await dataService.retrieveMultipleRecords('sprk_organization', options);
-  return result.entities.map((e) => ({
+  return result.entities.map(e => ({
     id: e['sprk_organizationid'] as string,
     name: e['sprk_name'] as string,
   }));
@@ -163,7 +154,7 @@ async function searchUsersAsLookup(dataService: IDataService, query: string): Pr
     `&$filter=contains(fullname,'${safeFilter}') and isdisabled eq false` +
     `&$orderby=fullname asc&$top=10`;
   const result = await dataService.retrieveMultipleRecords('systemuser', options);
-  return result.entities.map((e) => ({
+  return result.entities.map(e => ({
     id: e['systemuserid'] as string,
     name: (e['fullname'] as string) + (e['internalemailaddress'] ? ` (${e['internalemailaddress']})` : ''),
   }));
@@ -177,7 +168,7 @@ async function searchMatterTypesAsLookup(dataService: IDataService, query: strin
     `&$filter=contains(sprk_mattertypename,'${safeFilter}')` +
     `&$orderby=sprk_mattertypename asc&$top=10`;
   const result = await dataService.retrieveMultipleRecords('sprk_mattertype_ref', options);
-  return result.entities.map((e) => ({
+  return result.entities.map(e => ({
     id: e['sprk_mattertype_refid'] as string,
     name: e['sprk_mattertypename'] as string,
   }));
@@ -191,7 +182,7 @@ async function searchPracticeAreasAsLookup(dataService: IDataService, query: str
     `&$filter=contains(sprk_practiceareaname,'${safeFilter}')` +
     `&$orderby=sprk_practiceareaname asc&$top=10`;
   const result = await dataService.retrieveMultipleRecords('sprk_practicearea_ref', options);
-  return result.entities.map((e) => ({
+  return result.entities.map(e => ({
     id: e['sprk_practicearea_refid'] as string,
     name: e['sprk_practiceareaname'] as string,
   }));
@@ -231,11 +222,7 @@ export interface ICreateProjectWizardProps {
 
 function buildWebApiAdapter(dataService: IDataService) {
   return {
-    retrieveMultipleRecords: async (
-      entityLogicalName: string,
-      options?: string,
-      _maxPageSize?: number,
-    ) => {
+    retrieveMultipleRecords: async (entityLogicalName: string, options?: string, _maxPageSize?: number) => {
       const result = await dataService.retrieveMultipleRecords(entityLogicalName, options);
       return { entities: result.entities };
     },
@@ -333,7 +320,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         id: 'create-record',
         label: 'Enter Info',
         canAdvance: () => formValid,
-        renderContent: (wizardFiles) => (
+        renderContent: wizardFiles => (
           <CreateProjectStep
             dataService={dataService}
             onValidChange={setFormValid}
@@ -444,7 +431,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
             const message = err instanceof Error ? err.message : 'Unknown error';
             warnings.push(
               `Work assignment could not be created (${message}). ` +
-              'You can create it manually from the project record.'
+                'You can create it manually from the project record.'
             );
           }
         }
@@ -469,14 +456,13 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
             } else {
               warnings.push(
                 `Event could not be created (${eventResult.errorMessage ?? 'unknown error'}). ` +
-                'You can create it manually from the project record.'
+                  'You can create it manually from the project record.'
               );
             }
           } catch (err) {
             const message = err instanceof Error ? err.message : 'Unknown error';
             warnings.push(
-              `Event could not be created (${message}). ` +
-              'You can create it manually from the project record.'
+              `Event could not be created (${message}). ` + 'You can create it manually from the project record.'
             );
           }
         }
@@ -496,7 +482,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
             const message = err instanceof Error ? err.message : String(err);
             warnings.push(
               `Association with "${association.recordName}" could not be created: ${message} — ` +
-              'You can link the record manually from the project form.'
+                'You can link the record manually from the project form.'
             );
           }
         }
@@ -513,7 +499,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               projectRef: projectName,
             },
             authFetch,
-            bffBaseUrl,
+            bffBaseUrl
           );
 
           if (!provisionResult.success) {
@@ -528,10 +514,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
           try {
             const entityService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
 
-            const uploadResult = await entityService.uploadFilesToSpe(
-              context.speContainerId,
-              context.uploadedFiles
-            );
+            const uploadResult = await entityService.uploadFilesToSpe(context.speContainerId, context.uploadedFiles);
 
             if (uploadResult.errors.length > 0) {
               for (const err of uploadResult.errors) {
@@ -564,7 +547,12 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         }
 
         // 3. Send email (if selected)
-        if (context.selectedActions.includes('send-email') && context.followOn.emailTo.trim() && authFetch && bffBaseUrl) {
+        if (
+          context.selectedActions.includes('send-email') &&
+          context.followOn.emailTo.trim() &&
+          authFetch &&
+          bffBaseUrl
+        ) {
           const emailService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
           const emailResult = await emailService.sendEmail({
             to: context.followOn.emailTo,
@@ -579,8 +567,8 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         if (provisioningWarning) {
           warnings.push(
             `Secure Project provisioning failed: ${provisioningWarning} — ` +
-            'The project record was created but the Business Unit, SPE container, and External Access Account ' +
-            'may need to be provisioned manually.'
+              'The project record was created but the Business Unit, SPE container, and External Access Account ' +
+              'may need to be provisioned manually.'
           );
         }
 
@@ -594,37 +582,26 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         };
 
         return {
-          icon: (
-            <CheckmarkCircleFilled
-              fontSize={64}
-              style={{ color: tokens.colorPaletteGreenForeground1 }}
-            />
-          ),
+          icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
           title: hasWarnings
             ? 'Project created with warnings'
             : mergedFormValues.isSecure
-            ? 'Secure Project created!'
-            : 'Project created!',
+              ? 'Secure Project created!'
+              : 'Project created!',
           body: (
             <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-              <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>
-                &ldquo;{projectName}&rdquo;
-              </span>{' '}
+              <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>&ldquo;{projectName}&rdquo;</span>{' '}
               has been created
               {hasWarnings
                 ? ', though some operations could not complete. See details below.'
                 : mergedFormValues.isSecure
-                ? ' with its Business Unit, document container, and external access account provisioned.'
-                : ' and is ready to use.'}
+                  ? ' with its Business Unit, document container, and external access account provisioned.'
+                  : ' and is ready to use.'}
             </Text>
           ),
           actions: (
             <>
-              <Button
-                appearance="primary"
-                onClick={viewProject}
-                aria-label={`View project: ${projectName}`}
-              >
+              <Button appearance="primary" onClick={viewProject} aria-label={`View project: ${projectName}`}>
                 View Project
               </Button>
               <Button appearance="secondary" onClick={onClose}>
@@ -636,19 +613,28 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         };
       },
     }),
-    [formValid, formValues, dataService, handleSearchContacts, handleSearchOrganizations, handleSearchUsers, handleSearchMatterTypes, handleSearchPracticeAreas, onClose, authFetch, bffBaseUrl, navigationService, resolveSpeContainerId, webApiAdapter]
+    [
+      formValid,
+      formValues,
+      dataService,
+      handleSearchContacts,
+      handleSearchOrganizations,
+      handleSearchUsers,
+      handleSearchMatterTypes,
+      handleSearchPracticeAreas,
+      onClose,
+      authFetch,
+      bffBaseUrl,
+      navigationService,
+      resolveSpeContainerId,
+      webApiAdapter,
+    ]
   );
 
   // ── Render ──────────────────────────────────────────────────────────────
 
   return (
-    <CreateRecordWizard
-      open={open}
-      onClose={onClose}
-      webApi={webApiAdapter}
-      config={config}
-      embedded={embedded}
-    />
+    <CreateRecordWizard open={open} onClose={onClose} webApi={webApiAdapter} config={config} embedded={embedded} />
   );
 };
 

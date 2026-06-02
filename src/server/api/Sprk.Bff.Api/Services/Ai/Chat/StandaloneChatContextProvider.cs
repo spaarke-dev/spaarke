@@ -65,11 +65,11 @@ public class StandaloneChatContextProvider
     internal static readonly IReadOnlyDictionary<string, string> EntityDisplayNames =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["contact"]      = "Contact",
-            ["account"]      = "Account",
-            ["opportunity"]  = "Opportunity",
-            ["incident"]     = "Case",
-            ["sprk_matter"]  = "Matter",
+            ["contact"] = "Contact",
+            ["account"] = "Account",
+            ["opportunity"] = "Opportunity",
+            ["incident"] = "Case",
+            ["sprk_matter"] = "Matter",
         };
 
     /// <summary>

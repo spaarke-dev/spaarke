@@ -18,7 +18,7 @@
  * @see projects/events-workspace-apps-UX-r1/tasks/097-column-header-menu-oob-parity.poml
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -38,7 +38,7 @@ import {
   Divider,
   Dropdown,
   Option,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   ArrowSortUp20Regular,
   ArrowSortDown20Regular,
@@ -53,15 +53,15 @@ import {
   Dismiss16Regular,
   Checkmark16Regular,
   ChevronDown16Regular,
-} from "@fluentui/react-icons";
+} from '@fluentui/react-icons';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type ColumnFilterType = "text" | "choice" | "date" | "lookup";
+export type ColumnFilterType = 'text' | 'choice' | 'date' | 'lookup';
 
-export type SortDirection = "asc" | "desc" | null;
+export type SortDirection = 'asc' | 'desc' | null;
 
 export interface ColumnFilterOption {
   /** Value to filter by */
@@ -103,55 +103,55 @@ export interface ColumnHeaderMenuProps {
 
 const useStyles = makeStyles({
   th: {
-    ...shorthands.padding("10px", "12px"),
-    textAlign: "left",
+    ...shorthands.padding('10px', '12px'),
+    textAlign: 'left',
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground2,
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke1),
-    whiteSpace: "nowrap",
-    position: "relative",
-    cursor: "pointer",
-    userSelect: "none",
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    whiteSpace: 'nowrap',
+    position: 'relative',
+    cursor: 'pointer',
+    userSelect: 'none',
     fontFamily: "'Segoe UI', 'Segoe UI Web', Arial, sans-serif",
     fontSize: tokens.fontSizeBase200,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
   headerContent: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    ...shorthands.gap("4px"),
-    width: "100%",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shorthands.gap('4px'),
+    width: '100%',
   },
   titleWrapper: {
-    display: "flex",
-    alignItems: "center",
-    ...shorthands.gap("4px"),
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('4px'),
     flex: 1,
   },
   // Persistent dropdown chevron - always visible like OOB
   dropdownChevron: {
     color: tokens.colorNeutralForeground3,
-    display: "flex",
-    alignItems: "center",
-    marginLeft: "2px",
+    display: 'flex',
+    alignItems: 'center',
+    marginLeft: '2px',
     flexShrink: 0,
   },
   sortIndicator: {
-    fontSize: "10px",
+    fontSize: '10px',
     color: tokens.colorBrandForeground1,
-    marginLeft: "2px",
+    marginLeft: '2px',
     fontWeight: tokens.fontWeightBold,
   },
   // Filter indicator - inline with column name like OOB
   filterIndicator: {
-    display: "inline-flex",
-    alignItems: "center",
-    marginLeft: "4px",
+    display: 'inline-flex',
+    alignItems: 'center',
+    marginLeft: '4px',
     color: tokens.colorBrandForeground1,
-    fontSize: "12px",
+    fontSize: '12px',
     flexShrink: 0,
   },
   menuItem: {
@@ -164,26 +164,26 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForegroundDisabled,
   },
   menuItemIcon: {
-    marginRight: "8px",
+    marginRight: '8px',
   },
   menuItemCheckmark: {
-    marginRight: "8px",
-    width: "16px",
-    height: "16px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    marginRight: '8px',
+    width: '16px',
+    height: '16px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   filterPopoverSurface: {
-    ...shorthands.padding("12px"),
-    minWidth: "220px",
-    maxWidth: "300px",
+    ...shorthands.padding('12px'),
+    minWidth: '220px',
+    maxWidth: '300px',
   },
   filterHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: "12px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '12px',
   },
   filterTitle: {
     fontWeight: tokens.fontWeightSemibold,
@@ -191,32 +191,32 @@ const useStyles = makeStyles({
     fontFamily: "'Segoe UI', 'Segoe UI Web', Arial, sans-serif",
   },
   equalsDropdown: {
-    width: "100%",
-    marginBottom: "8px",
+    width: '100%',
+    marginBottom: '8px',
   },
   searchInput: {
-    width: "100%",
-    marginBottom: "8px",
+    width: '100%',
+    marginBottom: '8px',
   },
   optionsList: {
-    maxHeight: "200px",
-    overflowY: "auto",
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.gap("4px"),
+    maxHeight: '200px',
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap('4px'),
   },
   optionItem: {
-    display: "flex",
-    alignItems: "center",
-    ...shorthands.padding("4px", "0"),
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.padding('4px', '0'),
   },
   clearButton: {
-    marginTop: "8px",
-    width: "100%",
+    marginTop: '8px',
+    width: '100%',
   },
   buttonRow: {
-    display: "flex",
-    ...shorthands.gap("8px"),
+    display: 'flex',
+    ...shorthands.gap('8px'),
   },
 });
 
@@ -234,7 +234,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
   columnKey,
   title,
   filterType,
-  filterValue = "",
+  filterValue = '',
   selectedValues = [],
   options = [],
   onFilterChange,
@@ -262,12 +262,12 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
   // ─────────────────────────────────────────────────────────────────────────
 
   const handleSortAsc = React.useCallback(() => {
-    onSortChange?.("asc");
+    onSortChange?.('asc');
     setMenuOpen(false);
   }, [onSortChange]);
 
   const handleSortDesc = React.useCallback(() => {
-    onSortChange?.("desc");
+    onSortChange?.('desc');
     setMenuOpen(false);
   }, [onSortChange]);
 
@@ -300,14 +300,14 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
   );
 
   const handleClear = React.useCallback(() => {
-    setLocalFilterValue("");
+    setLocalFilterValue('');
     onFilterChange(null);
     setFilterOpen(false);
   }, [onFilterChange]);
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === "Enter") {
+      if (e.key === 'Enter') {
         handleTextFilterApply();
       }
     },
@@ -320,11 +320,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
 
   const renderSortIndicator = () => {
     if (!sortDirection) return null;
-    return (
-      <span className={styles.sortIndicator}>
-        {sortDirection === "asc" ? "\u25B2" : "\u25BC"}
-      </span>
-    );
+    return <span className={styles.sortIndicator}>{sortDirection === 'asc' ? '\u25B2' : '\u25BC'}</span>;
   };
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -333,13 +329,13 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
 
   const renderFilterContent = () => {
     switch (filterType) {
-      case "text":
-      case "lookup":
+      case 'text':
+      case 'lookup':
         return (
           <>
             <Dropdown
               className={styles.equalsDropdown}
-              defaultSelectedOptions={["equals"]}
+              defaultSelectedOptions={['equals']}
               defaultValue="Equals"
               appearance="outline"
             >
@@ -356,11 +352,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
               appearance="outline"
             />
             <div className={styles.buttonRow}>
-              <Button
-                appearance="primary"
-                size="small"
-                onClick={handleTextFilterApply}
-              >
+              <Button appearance="primary" size="small" onClick={handleTextFilterApply}>
                 Apply
               </Button>
               <Button
@@ -375,23 +367,21 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
           </>
         );
 
-      case "choice":
+      case 'choice':
         return (
           <>
             <div className={styles.optionsList}>
-              {options.map((option) => (
+              {options.map(option => (
                 <div key={String(option.value)} className={styles.optionItem}>
                   <Checkbox
                     checked={selectedValues.includes(option.value)}
-                    onChange={(_, data) =>
-                      handleChoiceToggle(option.value, data.checked === true)
-                    }
+                    onChange={(_, data) => handleChoiceToggle(option.value, data.checked === true)}
                     label={option.label}
                   />
                 </div>
               ))}
             </div>
-            <Divider style={{ margin: "8px 0" }} />
+            <Divider style={{ margin: '8px 0' }} />
             <Button
               appearance="subtle"
               size="small"
@@ -404,7 +394,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
           </>
         );
 
-      case "date":
+      case 'date':
         return (
           <>
             <Input
@@ -417,11 +407,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
               type="date"
             />
             <div className={styles.buttonRow}>
-              <Button
-                appearance="primary"
-                size="small"
-                onClick={handleTextFilterApply}
-              >
+              <Button appearance="primary" size="small" onClick={handleTextFilterApply}>
                 Apply
               </Button>
               <Button
@@ -442,7 +428,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
   };
 
   return (
-    <th ref={headerRef} className={`${styles.th} ${className || ""}`}>
+    <th ref={headerRef} className={`${styles.th} ${className || ''}`}>
       <Menu open={menuOpen} onOpenChange={(_, data) => setMenuOpen(data.open)}>
         <MenuTrigger disableButtonEnhancement>
           <div
@@ -450,8 +436,8 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
             role="button"
             tabIndex={0}
             aria-label={`${title} column options`}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') {
                 setMenuOpen(!menuOpen);
               }
             }}
@@ -482,7 +468,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
                   className={styles.menuItem}
                   icon={
                     <span className={styles.menuItemCheckmark}>
-                      {sortDirection === "asc" && <Checkmark16Regular />}
+                      {sortDirection === 'asc' && <Checkmark16Regular />}
                     </span>
                   }
                   secondaryContent={<TextSortAscending20Regular />}
@@ -494,7 +480,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
                   className={styles.menuItem}
                   icon={
                     <span className={styles.menuItemCheckmark}>
-                      {sortDirection === "desc" && <Checkmark16Regular />}
+                      {sortDirection === 'desc' && <Checkmark16Regular />}
                     </span>
                   }
                   secondaryContent={<TextSortDescending20Regular />}
@@ -509,11 +495,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
             {/* Filter Option */}
             <MenuItem
               className={styles.menuItem}
-              icon={
-                <span className={styles.menuItemCheckmark}>
-                  {hasActiveFilter && <Filter20Filled />}
-                </span>
-              }
+              icon={<span className={styles.menuItemCheckmark}>{hasActiveFilter && <Filter20Filled />}</span>}
               secondaryContent={<Filter20Regular />}
               onClick={handleFilterByClick}
             >
@@ -525,9 +507,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
             {/* Column Width - Placeholder (disabled) */}
             <MenuItem
               className={styles.menuItemDisabled}
-              icon={
-                <span className={styles.menuItemCheckmark} />
-              }
+              icon={<span className={styles.menuItemCheckmark} />}
               secondaryContent={<ResizeTable20Regular />}
               disabled
             >
@@ -539,9 +519,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
             {/* Move Left/Right - Placeholders (disabled) */}
             <MenuItem
               className={styles.menuItemDisabled}
-              icon={
-                <span className={styles.menuItemCheckmark} />
-              }
+              icon={<span className={styles.menuItemCheckmark} />}
               secondaryContent={<ArrowLeft20Regular />}
               disabled
             >
@@ -549,9 +527,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
             </MenuItem>
             <MenuItem
               className={styles.menuItemDisabled}
-              icon={
-                <span className={styles.menuItemCheckmark} />
-              }
+              icon={<span className={styles.menuItemCheckmark} />}
               secondaryContent={<ArrowRight20Regular />}
               disabled
             >
@@ -569,8 +545,8 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
           onOpenChange={(_, data) => setFilterOpen(data.open)}
           positioning={{
             target: headerRef.current,
-            position: "below",
-            align: "start",
+            position: 'below',
+            align: 'start',
             offset: { mainAxis: 4 },
           }}
           trapFocus

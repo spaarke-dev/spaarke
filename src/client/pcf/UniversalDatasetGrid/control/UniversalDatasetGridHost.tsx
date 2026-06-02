@@ -108,8 +108,7 @@ export const UniversalDatasetGridHost: React.FC<IUniversalDatasetGridHostProps> 
         >
           <strong>Authentication initialization failed</strong>
           <div style={{ marginTop: 8 }}>
-            {authError}. Please refresh the page and try again. If the problem persists,
-            contact your administrator.
+            {authError}. Please refresh the page and try again. If the problem persists, contact your administrator.
           </div>
         </div>
       );

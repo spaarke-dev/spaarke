@@ -217,7 +217,7 @@ public static partial class CitationExtractor
     {
         // Canonical form: "{title} C.F.R. § {part}"
         var title = m.Groups["title"].Value.Trim();
-        var part  = m.Groups["part"].Value.Trim();
+        var part = m.Groups["part"].Value.Trim();
         return $"{title} C.F.R. § {part}";
     }
 }

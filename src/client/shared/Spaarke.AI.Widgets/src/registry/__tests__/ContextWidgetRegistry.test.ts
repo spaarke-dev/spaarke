@@ -53,12 +53,8 @@ describe('registerContextWidget', () => {
   });
 
   it('does not overwrite an existing registration (first wins)', () => {
-    const factory1 = jest.fn(() =>
-      Promise.resolve({ default: FakeContextWidgetA as React.ComponentType<any> })
-    );
-    const factory2 = jest.fn(() =>
-      Promise.resolve({ default: FakeContextWidgetB as React.ComponentType<any> })
-    );
+    const factory1 = jest.fn(() => Promise.resolve({ default: FakeContextWidgetA as React.ComponentType<any> }));
+    const factory2 = jest.fn(() => Promise.resolve({ default: FakeContextWidgetB as React.ComponentType<any> }));
 
     registerContextWidget('dup-type', { factory: factory1 });
     registerContextWidget('dup-type', { factory: factory2 });
@@ -72,8 +68,7 @@ describe('registerContextWidget', () => {
 describe('resolveContextWidget — known type', () => {
   it('returns the correct context widget component', async () => {
     registerContextWidget('doc-meta', {
-      factory: () =>
-        Promise.resolve({ default: FakeContextWidgetA as React.ComponentType<any> }),
+      factory: () => Promise.resolve({ default: FakeContextWidgetA as React.ComponentType<any> }),
     });
 
     const resolved = await resolveContextWidget('doc-meta');
@@ -82,9 +77,7 @@ describe('resolveContextWidget — known type', () => {
   });
 
   it('calls the factory only once (caches after first load)', async () => {
-    const factory = jest.fn(() =>
-      Promise.resolve({ default: FakeContextWidgetA as React.ComponentType<any> })
-    );
+    const factory = jest.fn(() => Promise.resolve({ default: FakeContextWidgetA as React.ComponentType<any> }));
     registerContextWidget('cached-context', { factory });
 
     await resolveContextWidget('cached-context');
@@ -169,8 +162,7 @@ describe('getAllContextWidgetTypes', () => {
 describe('replaceContextWidget', () => {
   it('replaces an existing registration and clears the cache', async () => {
     registerContextWidget('swappable-ctx', {
-      factory: () =>
-        Promise.resolve({ default: FakeContextWidgetA as React.ComponentType<any> }),
+      factory: () => Promise.resolve({ default: FakeContextWidgetA as React.ComponentType<any> }),
     });
 
     // First resolution — caches FakeContextWidgetA.
@@ -179,8 +171,7 @@ describe('replaceContextWidget', () => {
 
     // Replace with new factory.
     replaceContextWidget('swappable-ctx', {
-      factory: () =>
-        Promise.resolve({ default: FakeContextWidgetB as React.ComponentType<any> }),
+      factory: () => Promise.resolve({ default: FakeContextWidgetB as React.ComponentType<any> }),
     });
 
     const second = await resolveContextWidget('swappable-ctx');

@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { Theme } from "@fluentui/react-components";
+import { useState, useEffect, useCallback } from 'react';
+import { Theme } from '@fluentui/react-components';
 import {
   getUserThemePreference,
   setUserThemePreference,
@@ -7,16 +7,16 @@ import {
   setupCodePageThemeListener,
   applyMdaTheme,
   ThemePreference,
-} from "../utils/themeStorage";
+} from '../utils/themeStorage';
 
 /**
  * DarkLightMode exposed to consumers.
  * Maps to ThemePreference ('auto' treated as 'light' for display).
  */
-export type DarkLightMode = "light" | "dark";
+export type DarkLightMode = 'light' | 'dark';
 
 function preferenceToMode(pref: ThemePreference): DarkLightMode {
-  return pref === "dark" ? "dark" : "light";
+  return pref === 'dark' ? 'dark' : 'light';
 }
 
 export interface IUseThemeResult {
@@ -37,9 +37,7 @@ export interface IUseThemeResult {
  */
 export function useTheme(): IUseThemeResult {
   const [theme, setTheme] = useState<Theme>(resolveCodePageTheme);
-  const [themeMode, setDarkLightModeState] = useState<DarkLightMode>(() =>
-    preferenceToMode(getUserThemePreference())
-  );
+  const [themeMode, setDarkLightModeState] = useState<DarkLightMode>(() => preferenceToMode(getUserThemePreference()));
 
   const setDarkLightMode = useCallback((mode: DarkLightMode) => {
     setUserThemePreference(mode);

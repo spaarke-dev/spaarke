@@ -12,11 +12,11 @@
  * Standards: ADR-012 (shared component library), ADR-021 (Fluent v9, dark mode)
  */
 
-import * as React from "react";
-import { SectionPanel } from "./SectionPanel";
-import { ActionCardRow } from "./ActionCardRow";
-import { MetricCardRow } from "./MetricCardRow";
-import { useWorkspaceShellStyles, useSectionContentPaddingStyles } from "./WorkspaceShell.styles";
+import * as React from 'react';
+import { SectionPanel } from './SectionPanel';
+import { ActionCardRow } from './ActionCardRow';
+import { MetricCardRow } from './MetricCardRow';
+import { useWorkspaceShellStyles, useSectionContentPaddingStyles } from './WorkspaceShell.styles';
 import type {
   WorkspaceConfig,
   SectionConfig,
@@ -24,7 +24,7 @@ import type {
   MetricCardSectionConfig,
   ContentSectionConfig,
   WorkspaceRowConfig,
-} from "./types";
+} from './types';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -33,15 +33,22 @@ import type {
 /** Renders the interior of a SectionPanel based on its type. */
 const renderSectionBody = (section: SectionConfig): React.ReactNode => {
   switch (section.type) {
-    case "action-cards": {
+    case 'action-cards': {
       const s = section as ActionCardSectionConfig;
-      return <ActionCardRow cards={s.cards} onCardClick={s.onCardClick} disabledCards={s.disabledCards} maxVisible={s.maxVisible} />;
+      return (
+        <ActionCardRow
+          cards={s.cards}
+          onCardClick={s.onCardClick}
+          disabledCards={s.disabledCards}
+          maxVisible={s.maxVisible}
+        />
+      );
     }
-    case "metric-cards": {
+    case 'metric-cards': {
       const s = section as MetricCardSectionConfig;
       return <MetricCardRow cards={s.cards} />;
     }
-    case "content": {
+    case 'content': {
       const s = section as ContentSectionConfig;
       return s.renderContent();
     }
@@ -59,16 +66,12 @@ interface SectionPanelWrapperProps {
   paddedClassName: string;
 }
 
-const SectionPanelWrapper: React.FC<SectionPanelWrapperProps> = ({
-  section,
-  paddedClassName,
-}) => {
+const SectionPanelWrapper: React.FC<SectionPanelWrapperProps> = ({ section, paddedClassName }) => {
   const body = renderSectionBody(section);
 
   // Action-cards and metric-cards get standard interior padding; content sections
   // manage their own spacing (the consumer-supplied renderContent handles it).
-  const needsPadding =
-    section.type === "action-cards" || section.type === "metric-cards";
+  const needsPadding = section.type === 'action-cards' || section.type === 'metric-cards';
 
   return (
     <SectionPanel
@@ -79,11 +82,7 @@ const SectionPanelWrapper: React.FC<SectionPanelWrapperProps> = ({
       className={section.className}
       style={section.style}
     >
-      {needsPadding ? (
-        <div className={paddedClassName}>{body}</div>
-      ) : (
-        body
-      )}
+      {needsPadding ? <div className={paddedClassName}>{body}</div> : body}
     </SectionPanel>
   );
 };
@@ -174,27 +173,16 @@ export interface WorkspaceShellProps {
  * <WorkspaceShell config={config} />
  * ```
  */
-export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
-  config,
-  className,
-  style,
-}) => {
+export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({ config, className, style }) => {
   const shellStyles = useWorkspaceShellStyles();
   const contentPaddingStyles = useSectionContentPaddingStyles();
 
   // Build a map of section id → SectionConfig for O(1) lookup
-  const sectionMap = React.useMemo(
-    () => new Map(config.sections.map((s) => [s.id, s])),
-    [config.sections]
-  );
+  const sectionMap = React.useMemo(() => new Map(config.sections.map(s => [s.id, s])), [config.sections]);
 
   const renderSection = React.useCallback(
     (section: SectionConfig) => (
-      <SectionPanelWrapper
-        key={section.id}
-        section={section}
-        paddedClassName={contentPaddingStyles.padded}
-      />
+      <SectionPanelWrapper key={section.id} section={section} paddedClassName={contentPaddingStyles.padded} />
     ),
     [contentPaddingStyles.padded]
   );
@@ -203,12 +191,9 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   // Single-column layout
   // -------------------------------------------------------------------------
 
-  if (config.layout === "single-column") {
+  if (config.layout === 'single-column') {
     return (
-      <div
-        className={`${shellStyles.shell}${className ? ` ${className}` : ""}`}
-        style={style}
-      >
+      <div className={`${shellStyles.shell}${className ? ` ${className}` : ''}`} style={style}>
         {config.sections.map(renderSection)}
       </div>
     );
@@ -221,13 +206,10 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   const rows = config.rows ?? [];
 
   return (
-    <div
-      className={`${shellStyles.shell}${className ? ` ${className}` : ""}`}
-      style={style}
-    >
+    <div className={`${shellStyles.shell}${className ? ` ${className}` : ''}`} style={style}>
       {rows.map((row: WorkspaceRowConfig) => {
         const rowSections = row.sectionIds
-          .map((id) => sectionMap.get(id))
+          .map(id => sectionMap.get(id))
           .filter((s): s is SectionConfig => s !== undefined);
 
         if (rowSections.length === 0) return null;
@@ -235,7 +217,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
         // Default grid-template-columns: equal columns for all sections in the row
         const defaultColumns = `repeat(${rowSections.length}, 1fr)`;
         const columns = row.gridTemplateColumns ?? defaultColumns;
-        const columnsSmall = row.gridTemplateColumnsSmall ?? "1fr";
+        const columnsSmall = row.gridTemplateColumnsSmall ?? '1fr';
 
         return (
           <div
@@ -258,4 +240,4 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   );
 };
 
-WorkspaceShell.displayName = "WorkspaceShell";
+WorkspaceShell.displayName = 'WorkspaceShell';
