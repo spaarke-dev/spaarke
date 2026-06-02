@@ -309,25 +309,30 @@ A new helper `GetPivotMatterId(history, fromTurnIndex)` selects the mode. The in
 
 ---
 
-## RB-T044-02 — `CitationExtractor.NormalizeCaseLaw` over-strips trailing period of reporter abbreviation
+## RB-T044-02 — `CitationExtractor.NormalizeCaseLaw` over-strips trailing period of reporter abbreviation — **REPAIRED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T044-02 |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 2 Wave 1 task 020) |
 | **Date filed** | 2026-05-31 |
+| **Date repaired** | 2026-06-01 |
+| **Resolution mode** | `repaired` (NFR-04) |
+| **Resolution commit** | See r2 PR #318 commit "fix(ai/safety): remove TrimEnd('.') from CitationExtractor.NormalizeCaseLaw (RB-T044-02; repaired)" (Wave 1 bundled commit by main session per task 020 coordination protocol) |
+| **Cross-reference** | r2 task 020 — [`projects/sdap.bff.api-test-suite-repair-r2/tasks/020-fix-rb-t044-02.poml`](../../sdap.bff.api-test-suite-repair-r2/tasks/020-fix-rb-t044-02.poml) |
 | **Filing task** | Task 044 (P23.H5 — Ai/Safety) |
 | **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs) |
 | **Affected method** | `NormalizeCaseLaw(Match m)` (line 163) |
-| **Tests Skip'd** | `ExtractCitations_CaseLaw_MatchedAndNormalized` Theory (4 InlineData cases) in [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs). |
-| **Fix-by date** | 2026-07-31 (60-day target — MEDIUM severity) |
+| **Tests Skip'd → Pass** | `ExtractCitations_CaseLaw_MatchedAndNormalized` Theory in [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs) — 4 InlineData cases (`Roe v. Wade, 410 U.S. 113`; `Smith v. Jones, 542 U.S. 296`; `Ashcroft v. Iqbal, 556 U.S. 662`; `Miranda v. Arizona, 384 U.S. 436`). `[Theory(Skip = "RB-T044-02: …")]` → `[Theory]`; per-Theory `[Trait("status", "real-bug-pending-fix")]` removed (class-level `[Trait("status", "repaired")]` now applies). All 4 InlineData cases pass; targeted `dotnet test --filter "FullyQualifiedName~CitationExtractor"` reports Failed: 0 / Passed: 27 / Skipped: 3 (the 3 unrelated Skips are RB-T044-03, RB-T044-04, and a Regulation NoPeriodForm Skip — separate ledger entries). Services.Ai.Safety regression: 215/215 pass (vs 211/211 pre-fix; the 4 new passes are exactly the 4 unskipped InlineData cases). |
+| **Fix-by date (original)** | 2026-07-31 (60-day target — MEDIUM severity) — **closed 60 days early** |
 | **Severity** | MEDIUM (citation normalization affects downstream verification provider lookups + UI display) |
-| **Owner** | TBD (AI citations/verification feature owner) |
+| **Owner** | r2 task 020 owner (Claude Opus 4.7 implementation) |
 
 ### Bug detail
 
 **Documented canonical form** (test InlineData expectations + the class XML doc table at line 11): canonical key for `Smith v. Jones, 542 U.S. 296 (2004)` is `"542 U.S. 296"` — preserving the trailing period of the reporter abbreviation `U.S.`.
 
-**Implementation** (line 167):
+**Implementation** (line 167, pre-fix):
 
 ```csharp
 var reporter = m.Groups["reporter"].Value.Trim().TrimEnd('.');
@@ -335,13 +340,32 @@ var reporter = m.Groups["reporter"].Value.Trim().TrimEnd('.');
 
 **Bug**: `TrimEnd('.')` strips the trailing `.` of the reporter token. The regex captures `U.S.` (with trailing period), and the normalizer strips it to `U.S`, yielding the non-canonical key `542 U.S 296`.
 
-### Recommended production fix
+### Fix applied 2026-06-01
 
-Remove `.TrimEnd('.')` from line 167 (the reporter capture group already excludes the trailing year-court parenthetical; no other trim is needed).
+**Production change** (`src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs`):
+- Removed `.TrimEnd('.')` from `NormalizeCaseLaw` (was line 167). The reporter regex capture group `(?<reporter>[A-Z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)*\.?(?:\s*\d+d|\s*\d+th)?)` already excludes the trailing year-court parenthetical; the trailing period is part of the canonical abbreviation and MUST be preserved.
+- Added 2-line rationale comment citing RB-T044-02 + the load-bearing canonical-abbreviation contract (downstream verification provider lookups depend on the trailing period).
+- Net diff: +3 lines (2 comment, 1 modified line), -1 line. File now 209 lines (was 207). NFR-02 compliant (~1.4% line replacement, well under 50%).
 
-### Verification after fix
+**Test change** (`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs` — in Skip→Pass scope per r2 NFR-01):
+- `[Theory(Skip = "RB-T044-02: …")]` on `ExtractCitations_CaseLaw_MatchedAndNormalized` → `[Theory]`.
+- Per-Theory `[Trait("status", "real-bug-pending-fix")]` removed (class-level `[Trait("status", "repaired")]` now applies).
 
-Remove the `Skip = "..."` attribute on `ExtractCitations_CaseLaw_MatchedAndNormalized` Theory; remove per-Theory `[Trait("status", "real-bug-pending-fix")]`. Run; all 4 InlineData cases must pass.
+**Hand-trace validation**: for input `Smith v. Jones, 542 U.S. 296 (2004)`, regex captures `volume="542"`, `reporter="U.S."`, `page="296"`. Post-fix `NormalizeCaseLaw` returns `"542 U.S. 296"` — exact match for the documented canonical key.
+
+### Why this didn't surface in production
+
+The CaseLaw Theory cases were `Skip`'d during task 044 (P23.H5 Ai/Safety filing) with the explicit RB-T044-02 reason string. Live `ExtractCitations` traffic that encounters CaseLaw citations would produce non-canonical keys (`542 U.S 296`), which downstream verification providers + UI dedup would treat as never-seen citations — silent correctness regression for case law citation lookups. The fix restores the documented canonical form.
+
+### Step 9.5 quality gates (2026-06-01)
+
+- `code-review` PASS (0 Critical / 0 Warning / 0 Suggestion). Quality direction: Improved on both files (bug fixed; 4 tests now exercise; rationale comment cites ledger ID).
+- `adr-check` PASS — ADR-010 (DI minimalism), ADR-013 refined (AI architecture facade discipline; change is INSIDE `Services/Ai/Safety/`), ADR-015 (no LLM-text logging; preserved) all compliant. BFF Hygiene §A: all 5 rules N/A or satisfied (in-method bug fix; no new endpoints, services, DI registrations, NuGet packages, or background work).
+- Security review: NOT required (MEDIUM severity per D-03 / project CLAUDE.md; FULL rigor at Step 9.5 only requires `code-review` + `adr-check`).
+
+### Coordination note (task 020 / task 021 file overlap)
+
+Per task 020 POML §parallel-safe and coordination protocol: task 021 (RB-T044-04 `NormalizePatent` EP/WO double-prefix) targets the SAME `CitationExtractor.cs` file but a DIFFERENT method (`NormalizePatent` lines 180-193). Task 020's edits are confined to `NormalizeCaseLaw` (lines 163-172); `NormalizePatent` was NOT modified and task 021's surface is unimpinged.
 
 ---
 
@@ -448,13 +472,18 @@ Remove `Skip` + trait on `ExtractCitations_Regulation_NoPeriodForm_MatchedAndNor
 
 ---
 
-## RB-T053-01 — `CapabilityRouter` Layer 1 substring keyword classifier produces semantic-gap false positives
+## RB-T053-01 — `CapabilityRouter` Layer 1 substring keyword classifier produces semantic-gap false positives — **PARTIAL-REPAIR-RESIDUAL-FILED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T053-01 |
 | **Date filed** | 2026-05-31 |
 | **Filing task** | Task 053 (P23.M4 — `Services/Ai/Capabilities` non-Streaming batch) |
+| **Status** | **`partial-repair-residual-filed`** (transitioned 2026-06-01 by r2 task 022 — Option 1+B closes 3 of 4 corpus failures; remaining residual filed as RB-T053-01a) |
+| **Resolution commit** | See r2 PR #318 commit "feat(sdap-bff-test-r2): P2-W1 wave 1 bundle — RB-T044-02/RB-T053-01 partial/RB-T070-03/RB-T028-01/RB-T028-07 closed/partial" (forthcoming) |
+| **Repaired-by (partial)** | Task 022 Option 1 (word-boundary regex via `TokenMatches` helper + compiled regex cache) + Option B (`descriptionScoreWeight = 0.0`, preserving `ScoreDescription` helper) per D-11 final decision. **Closed**: id=77 'Henderson case', id=89 'Martinez case', id=102 'AI model'. **Residual**: id=91 'amicus curiae brief' → RB-T053-01a (semantic-role ambiguity requiring Layer-2 LLM disambiguation). |
+| **Repaired-date** | 2026-06-01 (partial) |
+| **Repair-mechanism** | Word-boundary regex matching (replaces substring `Contains`) + description-word scoring disabled (`descriptionScoreWeight = 0.0`) per D-11 §B owner decision. Layer-1 hit rate maintained at 68.6% (no regression on the 4 previously-passing single-keyword Layer-1 tests). |
 | **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs) |
 | **Affected** | Layer-1 classifier substring-match scoring (algorithm overview at class XML doc line 17-26): `score = matched_hints / total_hints` where match is `lowercased hint is substring of lowercased user message`. Confidence formula `topScore / (topScore + secondScore + Epsilon)` saturates at 1.0 when only one capability matches any keyword. |
 | **Tests Skip'd** | (1) `CapabilityRouterBenchmarkTests.Layer1_DoesNotFalsePositive_OnNonKeywordMessages` (`Fact`); (2) `CapabilityRouterBenchmarkTests.Layer1_FullCorpus_DistributionSummary` (`Fact`). Both in [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Capabilities/CapabilityRouterBenchmarkTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Capabilities/CapabilityRouterBenchmarkTests.cs). |
@@ -584,6 +613,7 @@ Remove the `Skip = "..."` attribute on the test and the per-test `[Trait("status
 | **Fix-by date** | 2026-09-30 (90-day target — requires test-infrastructure change, possibly a Dataverse mock at integration-test boundary) |
 | **Severity** | MEDIUM (loss of unit-test coverage on a SprkChat path; production correctness is unchanged) |
 | **Owner** | TBD (SprkChat / AnalysisWorkspace feature owner) |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 2 P2-W1 task 023 — Path 1 owner-approved per [`projects/sdap.bff.api-test-suite-repair-r2/decisions/D-12-rb-t070-03-fix-path.md`](../../sdap.bff.api-test-suite-repair-r2/decisions/D-12-rb-t070-03-fix-path.md). Config-key-gated test-seam (`Analysis:UseStubResolver`) added to `AnalysisChatContextResolver`; production path unaffected — production never sets the key. 7 affected tests Skip→Pass; targeted run 40 Passed / 0 Failed / 1 Skipped (the 1 Skip is `WhenAnalysisNotFound_Returns404`, task-021 — orthogonal). Commit TBD by main session.) |
 
 ### Bug detail
 
@@ -609,19 +639,21 @@ Once a fix path is chosen and implemented, remove the `Skip = "..."` attribute o
 
 ---
 
-## RB-T028-01 — `AnalysisContextBuilder.BuildContinuationPrompt` uses non-deterministic `OrderByDescending(m => m.Timestamp)` — truncation drops messages and reorders pairs when timestamps tie
+## RB-T028-01 — `AnalysisContextBuilder.BuildContinuationPrompt` uses non-deterministic `OrderByDescending(m => m.Timestamp)` — truncation drops messages and reorders pairs when timestamps tie — **REPAIRED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T028-01 |
 | **Date filed** | 2026-05-31 |
 | **Filing task** | Task 028 (Phase 2+3 close — residual classification) |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 2 task 024, Option B) |
+| **Resolution commit** | See r2 PR #318 next commit citing "RB-T028-01; repaired" (Option B — TakeLast — chosen after verifying chronological-order contract in `ChatHistoryManager.GetHistoryAsync` ("Ordered list of messages (oldest first)") + `AnalysisOrchestrationService.cs:304-323` append pattern; cross-reference: `projects/sdap.bff.api-test-suite-repair-r2/tasks/024-fix-rb-t028-01.poml`) |
 | **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisContextBuilder.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisContextBuilder.cs) |
-| **Affected methods** | `BuildContinuationPrompt(ChatMessageModel[] history, ...)` (line 115) and `BuildContinuationPromptWithContext(...)` (line 162) — both at lines 129-133 / 211-215 use `.OrderByDescending(m => m.Timestamp).Take(_options.MaxChatHistoryMessages).Reverse()` |
-| **Tests Skip'd** | (1) `AnalysisContextBuilderTests.BuildContinuationPrompt_ExceedsMaxHistory_TruncatesToLimit` (`Fact`) — line 215 in [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisContextBuilderTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisContextBuilderTests.cs). |
-| **Fix-by date** | 2026-07-31 (60-day target — MEDIUM severity; observable in production when concurrent chat messages share a tick) |
+| **Affected methods** | `BuildContinuationPrompt(ChatMessageModel[] history, ...)` (line 115) and `BuildContinuationPromptWithContext(...)` (line 162) — both at lines 129-133 / 211-215 use `.OrderByDescending(m => m.Timestamp).Take(_options.MaxChatHistoryMessages).Reverse()`. Both methods repaired in r2 task 024 — replaced 3-stage LINQ chain with `history.TakeLast(_options.MaxChatHistoryMessages).ToArray()`. |
+| **Tests Skip'd → Pass** | (1) `AnalysisContextBuilderTests.BuildContinuationPrompt_ExceedsMaxHistory_TruncatesToLimit` (`Fact`) — line 215 in [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisContextBuilderTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisContextBuilderTests.cs). Skip attribute removed; per-test trait transitioned `[Trait("status", "real-bug-pending-fix")]` → `[Trait("status", "repaired")]`. Targeted filter run: 11/11 Passed / 0 Skipped / 0 Failed (other 10 tests in class remain green). |
+| **Fix-by date (original)** | 2026-07-31 (60-day target — MEDIUM severity) — **closed 60 days early** |
 | **Severity** | MEDIUM (production effect: messages with identical `Timestamp` values produce non-deterministic truncation + ordering — for a fast-typing user or burst-LLM-streaming scenario, the truncation may drop a recent message and reorder pairs, corrupting the conversation context window sent to the LLM) |
-| **Owner** | TBD (AI Chat / continuation-prompt feature owner) |
+| **Owner** | `dev@spaarke.com` (resolved via Option B at task 024 per consolidated-sibling-contact decision 2026-06-01) |
 
 ### Bug detail
 
@@ -668,6 +700,26 @@ Option B is the cleaner fix if the caller (`AnalysisOrchestrationService`) alrea
 ### Verification after fix
 
 Remove the `Skip = "..."` attribute on `BuildContinuationPrompt_ExceedsMaxHistory_TruncatesToLimit` and the per-test `[Trait("status", "real-bug-pending-fix")]`. Run; should pass. Update this ledger row to "Resolved" with fix-commit SHA + date.
+
+### Resolution notes (2026-06-01, r2 task 024)
+
+**Chosen fix**: **Option B (`TakeLast(N)`)** — applied to BOTH `BuildContinuationPrompt` (lines 129-133) and `BuildContinuationPromptWithContext` (lines 211-215).
+
+**Why Option B**: Verified that history reaches `AnalysisContextBuilder` in chronological order via two independent contracts:
+
+1. `Services/Ai/Chat/ChatHistoryManager.GetHistoryAsync` documents its return type as: *"Ordered list of messages (oldest first), up to maxMessages."*
+2. `Services/Ai/AnalysisOrchestrationService.cs` lines 304-323 appends messages with `chatHistory.Add(new ChatMessageModel("user", userMessage, DateTime.UtcNow))` then `chatHistory.Add(new ChatMessageModel("assistant", response, DateTime.UtcNow))` — strict chronological append into the `analysis.ChatHistory` array.
+
+With chronological input, `TakeLast(N)` is semantically equivalent to "last N messages in order" — no sort needed, no tiebreak needed, no `Reverse()` needed. Cleaner than Option A (~3 LOC vs ~7 LOC per method), avoids materializing an index projection, and removes the failure surface entirely (no sort = no tie ambiguity possible).
+
+**Production change**: ~3% line replacement on a 247-line file (well below NFR-02's 50% threshold). Comment added inline citing `RB-T028-01` and the chronological-order contract for future maintenance.
+
+**Step 9.5 quality gates**:
+- `code-review`: PASS (0 Critical / 0 Warning / 0 Suggestion; 0 AI code smells)
+- `adr-check`: PASS (5 ADRs verified compliant — ADR-001, ADR-007, ADR-008, ADR-010, ADR-013 refined)
+- BFF Hygiene §10 (CLAUDE.md): all 5 pre-merge checklist items satisfied (in-place repair; no new functionality; no DI/endpoint/package additions)
+
+**Targeted test verification**: `dotnet test --filter "FullyQualifiedName~AnalysisContextBuilder"` — 11 Passed / 0 Skipped / 0 Failed / 16ms. The previously-skipped `BuildContinuationPrompt_ExceedsMaxHistory_TruncatesToLimit` now passes; all 10 other tests in the class remain green.
 
 ---
 
@@ -868,19 +920,24 @@ Once RB-T028-03..05 are fixed via conditional endpoint mapping, RB-T028-06 will 
 
 ---
 
-## RB-T028-07 — `UploadEndpoint` returns 500 instead of expected status codes — production endpoint surfaces unhandled exception in test host
+## RB-T028-07 — `UploadEndpoint` returns 500 instead of expected status codes — production endpoint surfaces unhandled exception in test host — **REPAIRED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T028-07 |
 | **Date filed** | 2026-05-31 |
 | **Filing task** | Task 028 (Phase 2+3 close — residual classification) |
-| **Production file** | [`src/server/api/Sprk.Bff.Api/Api/Ai/UploadEndpoints.cs`](../../../src/server/api/Sprk.Bff.Api/Api/Ai/UploadEndpoints.cs) (or equivalent — the file-upload handler) |
-| **Affected** | Upload handler exception path — returns 500 instead of 422/200/204 for the documented file-type and oversize validation cases. |
-| **Tests Skip'd** | 9 tests in [`tests/integration/Spe.Integration.Tests/Api/Ai/UploadIntegrationTests.cs`](../../../tests/integration/Spe.Integration.Tests/Api/Ai/UploadIntegrationTests.cs) — `Upload_AcceptsTxt`, `…AcceptsPdf`, `…AcceptsDocx`, `…AcceptsMd`, `…RejectsJpg`, `…RejectsExe`, `…RejectsZip`, `…RejectsOversized`, `SessionCleanup_DeletesUploadedDoc`. |
-| **Fix-by date** | 2026-07-31 (60-day target — MEDIUM severity; production endpoint observability not yet measured — the 500 response is silent in production telemetry; documented status codes per the API contract are not being honored) |
-| **Severity** | MEDIUM (production correctness gap on Upload validation contract; the endpoint accepts files but does not return the documented validation status codes — frontend cannot distinguish "rejected for wrong type" from "server crashed") |
-| **Owner** | TBD (BFF Upload / file-validation feature owner — possibly intersects with `ai-spaarke-action-engine-r1` or upload-orchestration owners) |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 task 025 — root cause NOT subsumed by task 011 cluster fix; distinct fixture-config gap) |
+| **Date repaired** | 2026-06-01 |
+| **Repaired by** | r2 task 025 — additive fixture-config key in `IntegrationTestFixture` (same `factory-config keys` pattern as r1 task 062). Verified empirically: task 011 (Phase 1 RB-T028-03/04/05/06 cluster fix) did NOT transitively close this entry — Step 2 verification gate showed all 9 tests still returned 500 at HEAD `5d129e1d`. |
+| **Repair mechanism** | **Fixture-config gap** (NOT an ADR-030 case). Root cause: `SessionPersistenceService` ctor at `src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs:52-53` throws hard `InvalidOperationException("CosmosPersistence:DatabaseName is not configured.")` when the config key is missing. `IntegrationTestFixture` previously set only `CosmosPersistence:Endpoint` (added by r1 task 062 for Cluster A). When `ChatSessionManager` (registered unconditionally by Phase 1b task 011 at `AnalysisServicesModule.cs:133-137`) is resolved per-request, `sp.GetService<ISessionPersistenceService>()` triggers ctor → throws → bubbles to `ExceptionHandlerMiddleware` → 500. The ledger's original hypothesis (§§894-896: exception isolation + storage seam in `UploadEndpoints.cs`) was incorrect — actual cause is upstream in the DI graph, not in the handler. `ChatEndpointsTests` did not surface this because `ChatEndpointsTestFixture` (line 497-505) explicitly overrides `ChatSessionManager` registration with a 3-arg ctor that bypasses `ISessionPersistenceService` entirely. `UploadTestFixture` did not override and inherited the production registration. |
+| **Resolution commit** | r2 task 025 commit (pending) — modifies `tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs` to add `["CosmosPersistence:DatabaseName"] = "spaarke-ai-test"` (mirroring `CustomWebAppFactory.cs:120` unit-test pattern). No production code change. |
+| **Production file (per ledger entry)** | [`src/server/api/Sprk.Bff.Api/Api/Ai/UploadEndpoints.cs`](../../../src/server/api/Sprk.Bff.Api/Api/Ai/UploadEndpoints.cs) (or equivalent — actual file-upload handler is `Api/Ai/ChatDocumentEndpoints.cs`). NO production code modified by this repair; the issue was test-host config, not production behavior. |
+| **Tests Skip'd → Pass** | 9 tests in [`tests/integration/Spe.Integration.Tests/Api/Ai/UploadIntegrationTests.cs`](../../../tests/integration/Spe.Integration.Tests/Api/Ai/UploadIntegrationTests.cs) — `Upload_AcceptsPdf`, `Upload_AcceptsDocx`, `Upload_AcceptsTxt`, `Upload_AcceptsMd`, `Upload_RejectsJpg`, `Upload_RejectsExe`, `Upload_RejectsZip`, `Upload_RejectsOversized`, `SessionCleanup_DeletesUploadedDoc`. All Skip attributes removed; per-test trait transitioned `real-bug-pending-fix` → `repaired`. All 9 tests now return the documented status codes (202 Accepted for allowed types, 422 Unprocessable Entity for rejected types). |
+| **Verification** | 2-run stability check on the targeted filter `dotnet test --filter "FullyQualifiedName~UploadIntegrationTests"` — both runs PASS (10 passed / 0 failed / 2 SkippableFact unchanged). Wider regression check on full `Spe.Integration.Tests` suite: 369 passed / 0 failed / 53 skipped / 422 total — no regression. |
+| **Fix-by date (original)** | 2026-07-31 (60-day target — MEDIUM severity) — **MET** (closed 60 days early on 2026-06-01) |
+| **Severity** | MEDIUM (test-host config gap, NOT a production observability bug; production never sees this 500 because real Cosmos config supplies `DatabaseName`. The original "MEDIUM production correctness gap" framing was incorrect — but cleared the same fix-by date.) |
+| **Owner** | r2 task 025 owner (Claude Opus 4.7 implementation — test-fixture-only change, FULL rigor downgraded to STANDARD per D-03 since no production code change) |
 
 ### Bug detail
 
@@ -909,6 +966,26 @@ Production uploads succeed against real SharePoint Embedded; the storage path do
 ### Verification after fix
 
 Remove all 9 Skip + Trait overrides in `UploadIntegrationTests.cs`. Run; all 9 must pass.
+
+### Resolution narrative (added by r2 task 025, 2026-06-01) — CORRECTED ROOT CAUSE
+
+The original hypothesis above (lines 945-958: "Upload endpoint's file-validation path throws an unhandled exception (likely related to SharePoint Embedded or storage-stream dependency)") was **incorrect**. Empirical Step 2 verification gate at HEAD `5d129e1d` (after task 011 Phase 1b cluster fix) confirmed all 9 tests still returned 500, with logs showing:
+
+```
+fail: Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware[1]
+  An unhandled exception has occurred while executing the request.
+  System.InvalidOperationException: CosmosPersistence:DatabaseName is not configured.
+```
+
+**Actual root cause**: `SessionPersistenceService` (registered unconditionally by `AiPersistenceModule.AddAiPersistenceModule`) throws hard from its constructor at `Services/Ai/Sessions/SessionPersistenceService.cs:52-53` when `CosmosPersistence:DatabaseName` is missing — unlike sibling `AuditLogService` at `Infrastructure/DI/AiPersistenceModule.cs:85` which uses `?? "spaarke-ai"` default. After task 011 Phase 1b promoted `ChatSessionManager` to unconditional registration (with `sp.GetService<ISessionPersistenceService>()` null-tolerant call at `AnalysisServicesModule.cs:137`), every scoped resolution of `ChatSessionManager` now triggers `SessionPersistenceService` ctor, which throws if `DatabaseName` is missing. `IntegrationTestFixture` (after r1 task 062) set `CosmosPersistence:Endpoint` but never `DatabaseName`. The 500 was upstream of the `ChatDocumentEndpoints.UploadDocumentAsync` handler — file-validation never executed.
+
+**Why `ChatEndpointsTests` did not surface this**: `ChatEndpointsTestFixture` (lines 497-505) replaces the production `ChatSessionManager` registration with a 3-arg ctor call that omits `ISessionPersistenceService` entirely. `UploadTestFixture` had no equivalent override and inherited the production registration. This is exactly the "sibling fixture asymmetry" pattern documented in r1 closeout design.md §5.3.
+
+**Fix applied**: One-line addition to `tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs` adding `["CosmosPersistence:DatabaseName"] = "spaarke-ai-test"`, mirroring the unit-test fixture pattern at `CustomWebAppFactory.cs:120`. No production code change required.
+
+**Why this is correct per NFR-01**: NFR-01 (r2) permits "tests modified ONLY for Skip → Pass transitions associated with closed ledger entries". The additive fixture-config key is the established `factory-config keys` pattern (r1 task 062 — design.md line 33: "All 198 cleared via `IntegrationTestFixture` Cosmos key"). Per ADR-030 §41 ("MUST NOT use Null-Object pattern to silently mask broken DI configuration"), the production fail-fast guard is intentional and not in scope for a Null-Object workaround. Per CLAUDE.md §10 / `bff-extensions.md`, no new DI registrations, no new endpoints, no new services — verified.
+
+**Latent production hardening opportunity (NOT applied here, recommended for future)**: `SessionPersistenceService` ctor could match `AuditLogService` and use `?? "spaarke-ai"` default. This would align the module's behavior (3 of 5 Cosmos consumers tolerate missing `DatabaseName` via default; `SessionPersistenceService` and `PromptLibraryService` throw). Not addressed by this task because (a) production is correctly configured and never hits this path, (b) NFR-01 forbids "while we're here" production changes.
 
 ---
 
@@ -978,6 +1055,31 @@ Remove the Skip + Trait override. Run `dotnet test --filter "FullyQualifiedName~
 - This is a TEST-ONLY repair under D-02 cluster exception for a gate-blocking flake that pre-dates r2.
 - The production code is correct; the test's assertion was overly strict for a probabilistic process.
 - Phase 5 governance update should NOT codify this — it's a one-off probabilistic-flake repair pattern, not a recurring concern.
+
+---
+
+## RB-T053-01a — `CapabilityRouter` Layer-1 residual: hint-token semantic-role ambiguity (id=91 'amicus curiae brief')
+
+| Field | Value |
+|---|---|
+| **Bug ID** | RB-T053-01a |
+| **Date filed** | 2026-06-01 |
+| **Filing task** | r2 task 022 (partial closure of RB-T053-01 via Option 1+B; 1 of 4 corpus false-positives remains) |
+| **Status** | **`open`** — Layer-2 LLM disambiguation is the by-design fix |
+| **Parent entry** | RB-T053-01 (transitioned to `partial-repair-residual-filed` 2026-06-01 by task 022 Option 1+B) |
+| **Severity** | LOW (1 corpus false-positive remaining; Layer-2 cascade catches it in production) |
+| **Production file** | `src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs` (no further Layer-1 change expected — requires Layer-2 logic) |
+| **Affected tests** | `Layer1_DoesNotFalsePositive_OnNonKeywordMessages` + `Layer1_FullCorpus_DistributionSummary` (both Skip'd pointing at RB-T053-01a) |
+| **Specific corpus message** | id=91: "Pull the brief for the amicus curiae filing" — matches hint 'brief' in summarize_content capability |
+| **Root cause** | The word 'brief' is a LEGITIMATE hint for summarize_content AND a standalone word in the user message — but the message uses 'brief' in a different semantic role ('the brief' = legal-document noun phrase, vs the capability's intended 'to brief' = verb to summarize). Layer-1 keyword matching has no way to distinguish; Layer-2 LLM disambiguation is designed for this exact pattern. |
+| **Recommended fix** | NO change to Layer-1. Either: (a) accept the false-positive at Layer-1 and rely on Layer-2 cascade for messages with `brief` (current production behavior — Layer-2 should reroute), OR (b) explicitly downgrade single-hint matches when the hint is also a common English noun via a stop-noun list (`brief`, `case`, `argument`, etc.) — risks under-routing legitimate uses. Path (a) is cleanest. |
+| **Fix-by date** | 2026-09-30 (90-day target — LOW; production behavior is already correct via Layer-2 cascade) |
+| **Owner** | TBD (CapabilityRouter / AI orchestration team) |
+
+### Notes
+
+- NOT a regression introduced by r2 task 022. RESIDUAL of the partial closure (3 of 4 corpus failures closed by Option 1+B).
+- The two affected Layer-1 benchmark tests assert a stricter contract than Layer-1 alone can guarantee — they require Layer-1 to NEVER produce a confident false-positive even in semantically ambiguous cases. Cleanest long-term resolution is either (a) accept Layer-1 may produce single-hint false-positives in ambiguous semantic-role cases, OR (b) rewrite the tests to assert the LAYER-2 contract (zero confidently-wrong AFTER cascade), not Layer-1 alone.
 
 ---
 

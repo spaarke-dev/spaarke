@@ -162,9 +162,11 @@ public static partial class CitationExtractor
 
     private static string NormalizeCaseLaw(Match m)
     {
-        // Canonical form: "{volume} {reporter} {page}" (strips year/court parenthetical)
+        // Canonical form: "{volume} {reporter} {page}" (strips year/court parenthetical).
+        // The reporter's trailing period is part of the canonical abbreviation (e.g., "U.S.") and MUST be preserved
+        // (RB-T044-02: prior TrimEnd('.') over-stripped reporter periods, breaking verification provider lookups).
         var volume   = m.Groups["volume"].Value.Trim();
-        var reporter = m.Groups["reporter"].Value.Trim().TrimEnd('.');
+        var reporter = m.Groups["reporter"].Value.Trim();
         var page     = m.Groups["page"].Value.Trim();
         return $"{volume} {reporter} {page}";
     }

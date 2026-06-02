@@ -66,8 +66,8 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// <summary>
     /// Upload a .pdf file. Assert HTTP 202 and documentId returned.
     /// </summary>
-    [Fact(Skip = "RB-T028-07: Upload endpoint returns 500 instead of expected status codes. Production endpoint surfaces unhandled exception on file upload in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_AcceptsPdf()
     {
         // Arrange
@@ -92,8 +92,8 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// <summary>
     /// Upload a .docx file. Assert HTTP 202 and documentId returned.
     /// </summary>
-    [Fact(Skip = "RB-T028-07: Upload endpoint returns 500 instead of expected status codes. Production endpoint surfaces unhandled exception on file upload in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_AcceptsDocx()
     {
         // Arrange
@@ -120,8 +120,8 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// <summary>
     /// Upload a .txt file. Assert HTTP 202 and documentId returned.
     /// </summary>
-    [Fact(Skip = "RB-T028-07: Upload endpoint returns 500 instead of expected status codes. Production endpoint surfaces unhandled exception on file upload in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_AcceptsTxt()
     {
         // Arrange
@@ -145,8 +145,8 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// <summary>
     /// Upload a .md file. Assert HTTP 202 and documentId returned.
     /// </summary>
-    [Fact(Skip = "RB-T028-07: Upload endpoint returns 500 instead of expected status codes. Production endpoint surfaces unhandled exception on file upload in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_AcceptsMd()
     {
         // Arrange
@@ -174,8 +174,8 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// <summary>
     /// Upload a .jpg file. Assert HTTP 422 with error message about unsupported type.
     /// </summary>
-    [Fact(Skip = "RB-T028-07: Upload endpoint returns 500 instead of expected status codes. Production endpoint surfaces unhandled exception on file upload in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_RejectsJpg()
     {
         // Arrange
@@ -194,8 +194,8 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// <summary>
     /// Upload a .exe file. Assert HTTP 422 rejection.
     /// </summary>
-    [Fact(Skip = "RB-T028-07: Upload endpoint returns 500 instead of expected status codes. Production endpoint surfaces unhandled exception on file upload in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_RejectsExe()
     {
         // Arrange
@@ -214,8 +214,8 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// <summary>
     /// Upload a .zip file. Assert HTTP 422 rejection.
     /// </summary>
-    [Fact(Skip = "RB-T028-07: Upload endpoint returns 500 instead of expected status codes. Production endpoint surfaces unhandled exception on file upload in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_RejectsZip()
     {
         // Arrange
@@ -241,8 +241,8 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// Since WebApplicationFactory uses real Kestrel, we simulate via form field name
     /// with a stream just over the limit check. The endpoint checks file.Length directly.
     /// </summary>
-    [Fact(Skip = "RB-T028-07: Upload endpoint returns 500 instead of expected status codes. Production endpoint surfaces unhandled exception on file upload in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_RejectsOversized()
     {
         // Arrange — create content that tricks the endpoint into seeing > 50 MB
@@ -336,8 +336,8 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// to persist the document after session deletion — it should fail with 404
     /// because the session no longer exists.
     /// </summary>
-    [Fact(Skip = "RB-T028-07: Upload endpoint returns 500 instead of expected status codes. Production endpoint surfaces unhandled exception on file upload in test host. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task SessionCleanup_DeletesUploadedDoc()
     {
         // Arrange — use a unique session for cleanup test

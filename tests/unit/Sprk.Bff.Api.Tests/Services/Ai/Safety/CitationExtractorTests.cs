@@ -25,8 +25,7 @@ public class CitationExtractorTests
     // Case Law
     // =========================================================================
 
-    [Theory(Skip = "RB-T044-02: CitationExtractor.NormalizeCaseLaw uses TrimEnd('.') which over-strips the trailing '.' of canonical reporter abbreviations (e.g., 'U.S.' → 'U.S'). Expected key '542 U.S. 296' becomes '542 U.S 296'. See ledger.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Theory]
     [InlineData("The Court held in Roe v. Wade, 410 U.S. 113 (1973) that",
                 "410 U.S. 113", CitationType.CaseLaw)]
     [InlineData("See Smith v. Jones, 542 U.S. 296 (2004).",

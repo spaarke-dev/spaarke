@@ -79,6 +79,12 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
                 // and never contacted during integration test host startup. Mirrors CustomWebAppFactory.cs
                 // pattern applied by task 018 to clear the same cluster in unit tests.
                 ["CosmosPersistence:Endpoint"] = "https://test.documents.azure.com:443/",
+                // DatabaseName added by r2 task 025 (RB-T028-07): SessionPersistenceService ctor throws hard
+                // on missing DatabaseName (unlike AuditLogService which uses default "spaarke-ai"). When
+                // ChatSessionManager is resolved as scoped (per-request), sp.GetService<ISessionPersistenceService>()
+                // triggers ctor → throws → 500 from Upload endpoint. Matches CustomWebAppFactory.cs:120 unit-test
+                // pattern. Fake DB name is sufficient; Cosmos client is never contacted in integration host.
+                ["CosmosPersistence:DatabaseName"] = "spaarke-ai-test",
 
                 // Graph options (GraphOptions validator)
                 ["Graph:TenantId"] = "test-tenant-id",

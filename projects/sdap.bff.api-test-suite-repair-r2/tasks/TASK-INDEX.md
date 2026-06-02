@@ -34,7 +34,7 @@
 | 022 | Fix RB-T053-01 — `CapabilityRouter` Layer-1 classifier (3-option owner decision) | 2 | 🔲 | 013 | P2-W1 | FULL | ✓ |
 | 023 | Fix RB-T070-03 — `AnalysisChatContextResolver` dead-path (restore-or-delete owner decision) | 2 | 🔲 | 013 | P2-W1 | FULL | ✓ |
 | 024 | Fix RB-T028-01 — `AnalysisContextBuilder` non-deterministic sort | 2 | 🔲 | 013 | P2-W1 | FULL | ✓ |
-| 025 | Fix RB-T028-07 — Upload endpoint binding (verify subsumed by 011 first) | 2 | 🔲 | 011, 013 | P2-W1 | FULL | ✓ |
+| 025 | Fix RB-T028-07 — Upload endpoint binding (verify subsumed by 011 first) | 2 | ✅ 2026-06-01 (NOT subsumed by 011 — distinct fixture-config gap; 9 tests Skip→Pass via `IntegrationTestFixture` `CosmosPersistence:DatabaseName` add) | 011, 013 | P2-W1 | FULL→STANDARD (test-only fix) | ✓ |
 | 026 | Fix RB-T028-02 fallback (conditional — only if 012 outcome = "we-take-bug") | 2 | ⏭ 2026-06-01 (subsumed by task 012 path-b) | 012 | P2-W1 (conditional) | FULL | — |
 | 029 | Phase 2 exit triple-run validation gate | 2 | 🔲 | 020, 021, 022, 023, 024, 025, 026 | (sequential, phase-exit) | STANDARD | — |
 | 030 | Fix RB-T012-01 — `SessionRestoreService` quote handling | 3 | 🔲 | 029 | P3-W1 | FULL | ✓ |

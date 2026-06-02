@@ -2,7 +2,7 @@
   <metadata>
     <title>P2.W1 — Fix RB-T028-07: Upload endpoint binding gap (verify resolved by task 011 first)</title>
     <phase>Phase 2</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>0-3 hours (0 if already resolved by task 011; 2-3h otherwise)</estimated-effort>
     <dependencies>011,013</dependencies>
     <blocks>029</blocks>
