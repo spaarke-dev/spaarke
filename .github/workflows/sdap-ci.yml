@@ -35,6 +35,11 @@ jobs:
           scan-ref: '.'
           format: 'sarif'
           output: 'trivy-results.sarif'
+          # Skip the knowledge/ repo (reference docs + MCP sample apps — not product code).
+          # The Azurite default key in trey-research/db.ts is a publicly documented
+          # Microsoft test credential; see .trivyignore for full rationale.
+          skip-dirs: 'knowledge'
+          trivyignores: '.trivyignore'
 
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
@@ -155,8 +160,18 @@ jobs:
         run: npx eslint .
 
       # Spaarke.AI.Widgets tsc gate (R4 task 061 / B-2 / NFR-05)
-      # Builds sibling Spaarke.AI.Outputs first so paths resolve against dist/index.d.ts.
+      # Builds sibling Spaarke.UI.Components + Spaarke.AI.Outputs first so paths
+      # resolve against dist/index.d.ts (tsconfig path mapping in AI.Widgets points
+      # to ../Spaarke.UI.Components/dist/index.d.ts and ../Spaarke.AI.Outputs/dist/index.d.ts).
       # See projects/spaarke-ai-platform-unification-r4/notes/b2-tsc-rootdir-decision.md
+      - name: Install Spaarke.UI.Components deps
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.UI.Components (declarations required by Widgets typecheck)
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npx tsc
+
       - name: Install Spaarke.AI.Outputs deps
         working-directory: src/client/shared/Spaarke.AI.Outputs
         run: npm install --legacy-peer-deps --no-audit --no-fund
