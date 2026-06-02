@@ -160,10 +160,26 @@ jobs:
         run: npx eslint .
 
       # Spaarke.AI.Widgets tsc gate (R4 task 061 / B-2 / NFR-05)
-      # Builds sibling Spaarke.UI.Components + Spaarke.AI.Outputs first so paths
-      # resolve against dist/index.d.ts (tsconfig path mapping in AI.Widgets points
-      # to ../Spaarke.UI.Components/dist/index.d.ts and ../Spaarke.AI.Outputs/dist/index.d.ts).
+      # AI.Widgets tsconfig path-maps four @spaarke/* sibling packages to their
+      # respective ../<Package>/dist/index.d.ts. CI must build each dist before
+      # the typecheck so path resolution succeeds.
       # See projects/spaarke-ai-platform-unification-r4/notes/b2-tsc-rootdir-decision.md
+      - name: Install Spaarke.Auth deps
+        working-directory: src/client/shared/Spaarke.Auth
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.Auth (declarations required by UI.Components + Widgets typecheck)
+        working-directory: src/client/shared/Spaarke.Auth
+        run: npx tsc
+
+      - name: Install Spaarke.AI.Context deps
+        working-directory: src/client/shared/Spaarke.AI.Context
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.AI.Context (declarations required by Widgets typecheck)
+        working-directory: src/client/shared/Spaarke.AI.Context
+        run: npx tsc
+
       - name: Install Spaarke.UI.Components deps
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npm install --legacy-peer-deps --no-audit --no-fund

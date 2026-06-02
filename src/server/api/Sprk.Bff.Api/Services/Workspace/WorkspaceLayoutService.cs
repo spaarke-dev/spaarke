@@ -560,12 +560,12 @@ public sealed class WorkspaceLayoutService
 
             // R4 task 054 (B-5): re-read post-write so the response DTO
             // carries the canonical Dataverse-stamped ModifiedOn (not the
-                // DateTimeOffset.UtcNow placeholder from task 053). This
-                // guarantees the client's next PUT will match on first try.
-                // Cost: +1 RetrieveAsync per update — acceptable at user-
-                // gesture frequency. If the re-read fails (rare), fall back
-                // to UtcNow with a warning; the next GET will still return
-                // the canonical value.
+            // DateTimeOffset.UtcNow placeholder from task 053). This
+            // guarantees the client's next PUT will match on first try.
+            // Cost: +1 RetrieveAsync per update — acceptable at user-
+            // gesture frequency. If the re-read fails (rare), fall back
+            // to UtcNow with a warning; the next GET will still return
+            // the canonical value.
             DateTimeOffset canonicalModifiedOn;
             try
             {
