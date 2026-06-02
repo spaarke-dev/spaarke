@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none / project complete |
-| **Step** | 17/17 done. All phases (0–5) + wrap-up complete ✅. |
-| **Status** | none / project complete |
-| **Next Action** | Open PR #317 for review and merge to master. After merge: trigger `gh workflow run report-workflow-health.yml` (FR-11). FR-14 ≥90% rate requires follow-on `sdap-bff-warnaserror-cleanup-r1` project to land. |
+| **Task** | none / project FULLY CLOSED 2026-06-02 |
+| **Step** | All phases + wrap-up + 5 closeout PRs all merged. Every open item classified per closure-discipline principle. |
+| **Status** | none / project closed |
+| **Next Action** | None for this project. Suggested follow-on projects (initialize via `/design-to-spec` → `/project-pipeline` when ready): (1) `sdap-bff-warning-cleanup-r1` — clear the suppressed warnings + skipped tests catalogued in `docs/assessments/bff-warning-suppression-analysis-2026-06-01.md`; (2) `production-environment-setup-r3` — replace placeholder KV secrets with real production values + align Service Bus + queue contracts (see D-12 § Recommended follow-on for concrete scope). |
 
 ### Files Modified This Session
 - `notes/lessons-learned.md` — Task 090 (wrap-up)
