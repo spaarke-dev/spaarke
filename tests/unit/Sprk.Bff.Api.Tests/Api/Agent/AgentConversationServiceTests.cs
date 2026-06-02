@@ -402,10 +402,7 @@ public class AgentConversationServiceTests
     // RB-T070-01 in ledgers/real-bug-ledger.md. Tests remain in the suite (Skip'd)
     // so the bug is not forgotten; remove Skip when production honours cancellation.
 
-    [Fact(Skip = "RB-T070-01: AgentConversationService.GetOrCreateContextAsync does not surface " +
-                  "OperationCanceledException when called with a pre-cancelled token. Production " +
-                  "fix required; see projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
     public async Task GetOrCreateContextAsync_RespectsCancellationToken()
     {
         using var cts = new CancellationTokenSource();
@@ -415,10 +412,7 @@ public class AgentConversationServiceTests
             () => _service.GetOrCreateContextAsync(TenantId, ConversationId, UserId, cts.Token));
     }
 
-    [Fact(Skip = "RB-T070-01: AgentConversationService.UpdateContextAsync does not surface " +
-                  "OperationCanceledException when called with a pre-cancelled token. Production " +
-                  "fix required; see projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
     public async Task UpdateContextAsync_RespectsCancellationToken()
     {
         using var cts = new CancellationTokenSource();
@@ -435,10 +429,7 @@ public class AgentConversationServiceTests
             () => _service.UpdateContextAsync(context, cts.Token));
     }
 
-    [Fact(Skip = "RB-T070-01: AgentConversationService.RemoveContextAsync does not surface " +
-                  "OperationCanceledException when called with a pre-cancelled token. Production " +
-                  "fix required; see projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
     public async Task RemoveContextAsync_RespectsCancellationToken()
     {
         using var cts = new CancellationTokenSource();

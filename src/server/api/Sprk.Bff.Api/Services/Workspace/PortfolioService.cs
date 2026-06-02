@@ -56,6 +56,7 @@ public class PortfolioService
     private readonly IDistributedCache _cache;
     private readonly IGenericEntityService _genericEntityService;
     private readonly ILogger<PortfolioService> _logger;
+    private readonly TimeProvider _timeProvider;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -66,16 +67,26 @@ public class PortfolioService
     /// Initializes a new instance of <see cref="PortfolioService"/>.
     /// </summary>
     /// <param name="cache">Distributed cache (Redis) for portfolio data.</param>
-    /// <param name="dataverseService">Dataverse service for querying matter records.</param>
+    /// <param name="genericEntityService">Dataverse service for querying matter records.</param>
     /// <param name="logger">Logger for diagnostics.</param>
+    /// <param name="timeProvider">
+    /// BCL clock abstraction (.NET 8 <see cref="TimeProvider"/>) used to stamp <c>CachedAt</c> and
+    /// <c>Timestamp</c> fields on the returned response records. Defaults to
+    /// <see cref="TimeProvider.System"/> when not injected (production); tests inject a
+    /// deterministic provider (e.g., a hand-rolled subclass with a fixed <see cref="DateTimeOffset"/>)
+    /// to assert against known timestamps. Introduced by Phase 4 Track C TestClock PoC
+    /// (FR-13 / task 042) per <c>projects/sdap.bff.api-test-suite-repair-r2/design.md §5.5</c>.
+    /// </param>
     public PortfolioService(
         IDistributedCache cache,
         IGenericEntityService genericEntityService,
-        ILogger<PortfolioService> logger)
+        ILogger<PortfolioService> logger,
+        TimeProvider? timeProvider = null)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>
@@ -190,7 +201,7 @@ public class PortfolioService
             BudgetUtilizationPercent: portfolio.UtilizationPercent,
             PortfolioSpend: portfolio.TotalSpend,
             PortfolioBudget: portfolio.TotalBudget,
-            Timestamp: DateTimeOffset.UtcNow);
+            Timestamp: _timeProvider.GetUtcNow());
 
         // 3. Cache with 5-minute TTL under its own key
         var serialized = JsonSerializer.Serialize(result, JsonOptions);
@@ -215,7 +226,12 @@ public class PortfolioService
     /// <summary>
     /// Aggregates raw matter records into a portfolio summary.
     /// </summary>
-    private static PortfolioSummaryResponse AggregatePortfolio(IReadOnlyList<MatterRecord> matters)
+    /// <remarks>
+    /// Instance method (not <c>static</c>) so the <c>CachedAt</c> timestamp can be sourced from
+    /// the injected <see cref="TimeProvider"/> — required for deterministic test assertions per
+    /// FR-13 (TestClock PoC). Pure-aggregate logic is otherwise side-effect free.
+    /// </remarks>
+    private PortfolioSummaryResponse AggregatePortfolio(IReadOnlyList<MatterRecord> matters)
     {
         var activeMatters = matters.Where(m => m.IsActive).ToList();
 
@@ -241,7 +257,7 @@ public class PortfolioService
             MattersAtRisk: mattersAtRisk,
             OverdueEvents: overdueEvents,
             ActiveMatters: activeMatters.Count,
-            CachedAt: DateTimeOffset.UtcNow);
+            CachedAt: _timeProvider.GetUtcNow());
     }
 
     /// <summary>

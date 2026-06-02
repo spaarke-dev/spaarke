@@ -68,6 +68,13 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
                 ["DocumentIntelligence:OpenAiDeployment"] = "gpt-4o",
                 ["Analysis:Enabled"] = "true",
 
+                // RB-T070-03 Path 1 (owner-approved 2026-06-01): activate the test seam in
+                // AnalysisChatContextResolver. When ON, non-GUID analysisIds return a canned
+                // response (echoes the original stub-resolver behavior the 7 affected tests
+                // were written against). Production never sets this key, so the seam is
+                // dormant in real traffic. See ADR-010 / ADR-018 / decision D-12.
+                ["Analysis:UseStubResolver"] = "true",
+
                 // AI Search options (required for IRagService)
                 ["DocumentIntelligence:AiSearchEndpoint"] = "https://test.search.windows.net",
                 ["DocumentIntelligence:AiSearchKey"] = "test-search-key",

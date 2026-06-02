@@ -1,0 +1,128 @@
+<task id="084" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P5.5 — Doc-drift audit after procedure-doc + constraint-doc updates (verify no stale references)</title>
+    <phase>Phase 5</phase>
+    <status>not-started</status>
+    <estimated-effort>1-3 hours</estimated-effort>
+    <dependencies>080,081</dependencies>
+    <blocks>090</blocks>
+    <tags>phase-5, governance, audit, doc-drift, verification</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Audit via `doc-drift-audit` skill; produces an audit report. No `src/` or test edits; reads docs + `.claude/`. STANDARD per CLAUDE.md §8.</rigor-reason>
+    <parallel-group>P5-W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs after 080 + 081 complete but in parallel with 082 + 083 (merge gate). Writes only to `projects/.../audits/`. Disjoint write path from 082 (baseline/ TRX + summary) and 083 (git ops on remote).</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Run the `doc-drift-audit` skill against the procedure-doc + constraint-doc updates from Phase 5 (tasks 080 + 081). Verify no stale references to old structure: e.g., outdated section headers in `testing-and-code-quality.md`, outdated `.claude/constraints/bff-extensions.md` § F structure, broken cross-references between procedure doc + constraint doc + ADRs.
+
+    Per the `doc-drift-audit` skill, the deliverable is an audit report at `projects/sdap.bff.api-test-suite-repair-r2/audits/doc-drift-post-procedure-update-2026-08-XX.md` listing: (a) stale references found; (b) missing cross-references; (c) recommended fixes; (d) verification that critical cross-links resolve (e.g., procedure doc → `bff-extensions.md` § F, `bff-extensions.md` § F → ADR-010 + ADR-018).
+
+    If audit finds stale references: file fix-up commits OR document in audit as r3 carry-forward (per D-04, r2 doesn't do full remediation but should fix anything that breaks navigation).
+  </prompt>
+
+  <role>Governance AI agent running `doc-drift-audit` skill against r2's documentation surface to verify post-update consistency.</role>
+
+  <goal>
+    Single deliverable: `projects/sdap.bff.api-test-suite-repair-r2/audits/doc-drift-post-procedure-update-2026-08-XX.md` containing:
+    - **Scope**: docs surfaces audited (`docs/procedures/testing-and-code-quality.md`, `.claude/constraints/bff-extensions.md`, root `CLAUDE.md` §10, related ADRs)
+    - **Stale references found**: any outdated section names, broken cross-links, deprecated terminology
+    - **Missing cross-references**: where the new sections from tasks 080 + 081 should be cross-referenced but aren't
+    - **Recommended fixes**: per-issue with priority (P1 = breaks navigation / P2 = nice-to-have / P3 = cosmetic)
+    - **Fixes applied**: list of P1 fixes applied in this task (small in-line edits); P2/P3 deferred to r3 carry-forward
+    - **Verdict**: PASS (no P1 issues remaining) / PARTIAL (P1 fixes applied but more findings deferred) / FAIL (P1 issues found that can't be fixed in r2 scope)
+
+    Per D-04, this audit IS the deliverable — not full doc-drift remediation. r3 can address P2/P3.
+  </goal>
+
+  <inputs>
+    <file purpose="audited-procedure-doc">docs/procedures/testing-and-code-quality.md (updated by task 080)</file>
+    <file purpose="audited-constraint-doc">.claude/constraints/bff-extensions.md (potentially updated by task 081)</file>
+    <file purpose="claude-md">CLAUDE.md (§10 BFF Hygiene — references both audited docs)</file>
+    <file purpose="related-adrs">.claude/adr/ADR-010-di-minimalism.md, .claude/adr/ADR-018-feature-flags.md</file>
+    <file purpose="doc-drift-skill">.claude/skills/doc-drift-audit/SKILL.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="D-04">Phase 4 + 5 outputs are pilot-grade; this audit verifies consistency but does NOT do full remediation. r3 acts on P2/P3 findings.</constraint>
+    <constraint source="doc-drift-audit skill">Per skill SKILL.md, audit is diff-based (compares current state to recent commits) and produces a compact report</constraint>
+    <constraint source="NFR-01">No `src/` or test logic modifications</constraint>
+    <constraint source="CLAUDE.md §3">If audit finds issues in `.claude/` paths and a fix is warranted, the fix MUST be applied in main session (sub-agent boundary)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/doc-drift-audit/SKILL.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The `doc-drift-audit` skill is the procedural check that documentation changes don't break the navigation surface. After tasks 080 + 081 update both the procedure doc + the constraint doc (potentially), cross-references between them, root CLAUDE.md, and applicable ADRs may need follow-up updates.
+
+      Per the skill SKILL.md, this is a diff-based audit (compact, not full-repo) — runs against the recent commits and flags anything stale.
+
+      In r2 specifically, the audited surfaces are:
+      1. `docs/procedures/testing-and-code-quality.md` — touched by task 080
+      2. `.claude/constraints/bff-extensions.md` — potentially touched by task 081
+      3. Root `CLAUDE.md` §10 — references both audited docs
+      4. Related ADRs (010, 018) — referenced from constraint doc
+
+      Per D-04, the deliverable IS the audit report. P1 fixes (breaks navigation) are applied in this task; P2/P3 deferred to r3.
+    </background>
+    <dependencies>
+      <dependency task="080" status="not-started">Phase 5 procedure doc update — primary audit target</dependency>
+      <dependency task="081" status="not-started">Phase 5 conditional constraint extension — secondary audit target</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/audits/doc-drift-post-procedure-update-2026-08-XX.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Verify tasks 080 + 081 are complete. Read their commit history to know what changed.</step>
+    <step order="2">Invoke the `doc-drift-audit` skill per its SKILL.md. Provide as input: the changed files (procedure doc + constraint doc + decision record from 081) + the dependent files (CLAUDE.md §10 + ADRs).</step>
+    <step order="3">Audit pass 1 (cross-references): verify every cross-link in the changed files resolves. Verify every reference from CLAUDE.md §10 to the changed files still resolves. Flag broken links.</step>
+    <step order="4">Audit pass 2 (terminology consistency): scan for stale terminology (e.g., "test update obligation" vs newer "test-update obligation", "real-bug-pending-fix" vs "real-bug-ledger-pending"). Flag inconsistencies.</step>
+    <step order="5">Audit pass 3 (structural consistency): verify section ordering in both docs follows established convention (per `docs-procedures` + `docs-standards` skills' patterns). Flag structural drift.</step>
+    <step order="6">Prioritize findings: P1 = breaks navigation; P2 = nice-to-have consistency; P3 = cosmetic.</step>
+    <step order="7">Apply P1 fixes inline (small edits). If any P1 fix touches `.claude/` paths — invoke main-session Edit (this task is parallel-safe but `.claude/` edits within it are main-session).</step>
+    <step order="8">Author `projects/sdap.bff.api-test-suite-repair-r2/audits/doc-drift-post-procedure-update-2026-08-XX.md` with: scope, findings, fixes applied (P1), deferred items (P2/P3 for r3), verdict (PASS / PARTIAL / FAIL).</step>
+    <step order="9">Verify `git status`: only the audit doc + any P1 fix files modified. Commit: "docs(audit): doc-drift audit post procedure-doc + constraint-doc updates (FR-09)".</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">doc-drift-audit (per SKILL.md)</tool>
+    <tool name="Read">audited docs; CLAUDE.md; ADRs</tool>
+    <tool name="Grep">cross-reference resolution checks</tool>
+    <tool name="Edit">P1 fixes only (small inline corrections)</tool>
+    <tool name="Write">audit report</tool>
+    <tool name="Bash">`git status`; final commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/audits/doc-drift-post-procedure-update-2026-08-XX.md</output>
+    <output type="docs-conditional">P1 fix-up commits to audited docs (if any)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit report exists at `projects/sdap.bff.api-test-suite-repair-r2/audits/doc-drift-post-procedure-update-2026-08-XX.md`</criterion>
+    <criterion testable="true">Report has scope statement (which docs audited)</criterion>
+    <criterion testable="true">Report lists findings by priority (P1/P2/P3)</criterion>
+    <criterion testable="true">Report shows fixes applied (P1) and deferred (P2/P3 → r3 carry-forward)</criterion>
+    <criterion testable="true">Report has explicit verdict: PASS / PARTIAL / FAIL</criterion>
+    <criterion testable="true">No `src/` or test logic modifications (verified via `git status`)</criterion>
+    <criterion testable="true">P1 fixes (if any) are inline; no large refactoring</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. STANDARD rigor (audit-only deliverable; minor P1 inline fixes acceptable).
+  </execution>
+</task>

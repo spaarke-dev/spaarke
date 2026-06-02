@@ -162,7 +162,7 @@ public sealed class CapabilityRouterBenchmarkTests
     /// should not produce a confident Layer 1 result. A confident result here would
     /// mean false-positive routing.
     /// </summary>
-    [Fact(Skip = "real-bug-pending-fix RB-T053-01: CapabilityRouter Layer 1 substring keyword classifier produces 4 false-positives on the 105-message corpus (id=77 'Henderson case' → legal_research, id=89 'Martinez case' → legal_research, id=91 'amicus curiae' brief → summarize_content, id=102 meta-question 'AI model' → document_analysis). Test asserts the documented zero-false-positive contract; production has a real semantic-gap bug — Layer 1 cannot distinguish keyword presence from keyword-intended meaning without LLM semantic disambiguation. See ledgers/real-bug-ledger.md RB-T053-01.")]
+    [Fact(Skip = "real-bug-pending-fix RB-T053-01a (residual after r2 task 022 partial closure 2026-06-01): Option 1 (word-boundary regex) + Option B (drop description-word scoring) eliminated 3 of 4 corpus false-positives (id=77, id=89, id=102). The 4th case (id=91 'Pull the brief for the amicus curiae filing' matching hint 'brief' in summarize_content) is a genuine semantic-gap — the word 'brief' is a LEGITIMATE hint AND a standalone token in the message, but its semantic role differs ('the brief' = legal-document noun phrase vs 'to brief' = verb). Layer-1 keyword matching cannot distinguish; Layer-2 LLM disambiguation is the correct fix and is by-design for this exact pattern. Filed as ledgers/real-bug-ledger.md RB-T053-01a; Phase 3 or beyond can address it.")]
     [Trait("status", "real-bug-pending-fix")]
     public void Layer1_DoesNotFalsePositive_OnNonKeywordMessages()
     {
@@ -260,7 +260,7 @@ public sealed class CapabilityRouterBenchmarkTests
     /// Runs the full corpus and emits a distribution summary compatible with the
     /// results template in the benchmark report.
     /// </summary>
-    [Fact(Skip = "real-bug-pending-fix RB-T053-01: same Layer 1 semantic-gap as Layer1_DoesNotFalsePositive_OnNonKeywordMessages — full-corpus summary asserts confidentWrong == 0 but Layer 1 produces 3 confidently-wrong routes (Henderson case, Martinez case, amicus curiae brief). Distribution-summary diagnostics (hit rate 68.6%, P50/P95 confidence buckets) are valuable observability; the test fails because the documented zero-misroute invariant is also asserted. See ledgers/real-bug-ledger.md RB-T053-01.")]
+    [Fact(Skip = "real-bug-pending-fix RB-T053-01a (residual after r2 task 022 partial closure 2026-06-01): same Layer-1 semantic-gap as Layer1_DoesNotFalsePositive_OnNonKeywordMessages — full-corpus summary asserts confidentWrong == 0 but Option 1+B leaves 1 confidently-wrong route remaining (id=91 'amicus curiae brief' → summarize_content via legitimate hint 'brief' in a different semantic role). Layer-2 LLM disambiguation is the by-design fix for this. See ledgers/real-bug-ledger.md RB-T053-01a.")]
     [Trait("status", "real-bug-pending-fix")]
     public void Layer1_FullCorpus_DistributionSummary()
     {

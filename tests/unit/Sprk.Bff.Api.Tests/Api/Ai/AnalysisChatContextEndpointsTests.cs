@@ -9,12 +9,13 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
 
-// Task 070 (2026-05-31): class-level trait "repaired" reflects the 3 passing tests
-// (MapAnalysisChatContextEndpoints_MethodExists_AndIsStatic, GetAnalysisChatContext_WithoutAuth_ReturnsUnauthorized,
-// GetAnalysisChatContext_WithAuth_DoesNotReturn404) plus the X-Tenant-Id header repair
-// applied to all GET requests expecting 200. The 7 stub-resolver tests carry their own
-// "real-bug-pending-fix" Trait (RB-T070-03) and Skip until either (a) the stub resolver
-// is restored for the unit-test path, or (b) a Dataverse mock is wired into CustomWebAppFactory.
+// Task 070 (2026-05-31) → Task 023 r2 (2026-06-01): class-level trait "repaired" now
+// reflects ALL 10 tests in the class. RB-T070-03 closed via Path 1 (owner-approved
+// 2026-06-01, decision D-12) — a config-key-gated test seam (Analysis:UseStubResolver)
+// in AnalysisChatContextResolver restores canned-response behavior for non-GUID
+// analysisIds in the in-process CustomWebAppFactory. Production traffic is unaffected
+// (production never sets the seam key). The 7 affected tests are flipped Skip→Pass
+// and their per-test "real-bug-pending-fix" trait is replaced with "repaired".
 [Trait("status", "repaired")]
 
 /// <summary>
@@ -116,12 +117,11 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
     // Successful Resolution Tests (200 OK)
     // =========================================================================
 
-    [Fact(Skip = "RB-T070-03: AnalysisChatContextResolver now calls Dataverse directly (the stub " +
-                  "resolver this test was written against no longer exists). Production fix or new " +
-                  "test infrastructure required: either restore a stub for the unit-test path or " +
-                  "wire a Dataverse mock into CustomWebAppFactory. " +
-                  "See projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    // RB-T070-03 repaired 2026-06-01 (task 023 Path 1 / D-12):
+    // Test seam Analysis:UseStubResolver=true is set in CustomWebAppFactory; non-GUID
+    // analysisIds return a canned AnalysisChatContextResponse so this assertion holds.
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task GetAnalysisChatContext_WithAuth_Returns200_WithStubResolver()
     {
         // Arrange
@@ -136,8 +136,8 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
             "stub resolver returns a non-null response for any analysisId");
     }
 
-    [Fact(Skip = "RB-T070-03: see GetAnalysisChatContext_WithAuth_Returns200_WithStubResolver.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task GetAnalysisChatContext_WithAuth_ResponseDeserializesTo_AnalysisChatContextResponse()
     {
         // Arrange
@@ -158,8 +158,8 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
         context.InlineActions.Should().NotBeNull("response must include InlineActions list");
     }
 
-    [Fact(Skip = "RB-T070-03: see GetAnalysisChatContext_WithAuth_Returns200_WithStubResolver.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task GetAnalysisChatContext_WithAuth_ResponseContainsAnalysisId()
     {
         // Arrange
@@ -179,8 +179,8 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
             "AnalysisContext.AnalysisId must match the route parameter");
     }
 
-    [Fact(Skip = "RB-T070-03: see GetAnalysisChatContext_WithAuth_Returns200_WithStubResolver.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task GetAnalysisChatContext_WithAuth_ResponseHasNonEmptyDefaultPlaybookName()
     {
         // Arrange
@@ -199,8 +199,8 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
             "DefaultPlaybookName must be present so the AnalysisWorkspace UI can display it");
     }
 
-    [Fact(Skip = "RB-T070-03: see GetAnalysisChatContext_WithAuth_Returns200_WithStubResolver.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task GetAnalysisChatContext_WithAuth_StubResponse_ContainsAllSevenInlineActions()
     {
         // Arrange
@@ -219,8 +219,8 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
             "stub resolver includes all 7 capability actions so the UI can render QuickActionChips during development");
     }
 
-    [Fact(Skip = "RB-T070-03: see GetAnalysisChatContext_WithAuth_Returns200_WithStubResolver.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task GetAnalysisChatContext_WithAuth_StubResponse_IncludesSelectionReviseWithDiffType()
     {
         // Arrange
@@ -243,8 +243,8 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
             "selection_revise must be of actionType 'diff' to trigger DiffReviewPanel");
     }
 
-    [Fact(Skip = "RB-T070-03: see GetAnalysisChatContext_WithAuth_Returns200_WithStubResolver.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task GetAnalysisChatContext_WithAuth_ContentType_IsApplicationJson()
     {
         // Arrange

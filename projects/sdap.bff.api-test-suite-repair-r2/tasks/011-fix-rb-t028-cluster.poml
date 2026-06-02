@@ -1,0 +1,182 @@
+<task id="011" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P1 — Fix RB-T028-03/04/05/06 HIGH cluster (conditional service registration + unconditional endpoint mapping)</title>
+    <phase>Phase 1: HIGH Severity + Insights HOLD</phase>
+    <status>completed-2026-06-01 (all phases ✅; D-10 security review approved by dev@spaarke.com on PR #318 comment 4596658441; 18 services migrated via Null-Object pattern per ADR-030; 10-commit chain d207ae93..b00328be; ledger entries RB-T028-03/04/05/06 transitioned to `repaired`)</status>
+    <estimated-effort>5-8 hours</estimated-effort>
+    <dependencies>000, 001</dependencies>
+    <blocks>013</blocks>
+    <tags>phase-1, bff-api, di, registration, real-bug-ledger, high-severity, production-fix, cluster</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>HIGH-severity production-code change in `src/` touching DI registration + endpoint mapping (ADR-010 + ADR-018 DIRECTLY binding); tags include `bff-api`, `di`, `registration`; modifying `.cs` files; cluster fix (4 entries) — triggers FULL rigor with Step 9.5 code-review + adr-check.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single registration-path edit — parallel agents would race on the same DI / endpoint-mapping files. Cluster fix under D-02 exception: ONE production change closes all 4 entries.</parallel-reason>
+    <production-fix-per-ledger>true</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Fix RB-T028-03/04/05/06 — the HIGH-severity 4-entry cluster with shared root cause: endpoint metadata generation aborts at startup because `INotificationService` (and similar) is registered conditionally (inside a feature-flag `if` block, e.g., `if (Analysis:Enabled) services.AddNotificationService();`) but the corresponding endpoints map unconditionally (`MapKnowledgeBaseEndpoints` / `MapChatEndpoints` / `MapReAnalysisFlowEndpoints` / `MapAuthorizationEndpoints` are mapped regardless of the flag). ASP.NET Core's startup endpoint-metadata generation fails on the FIRST unresolvable handler, taking down the entire pipeline.
+
+    Production fix: per-case decision per the ledger recommendation — either (a) make service registration unconditional for services whose endpoints map unconditionally, OR (b) make endpoint mapping conditional on the same flag. Choose per-case based on whether the flag is product-meaningful (e.g., a real kill switch) or just an internal feature-not-shipped guard. The ledger recommends "conditional endpoint mapping approach (option 1) consistently across all 4 affected endpoint families (KB, Chat, ReAnalysis, Auth)" per single PR.
+
+    D-02 cluster exception applies: ONE production change closes all 4 ledger entries. Commit message MUST cite RB-T028-03, RB-T028-04, RB-T028-05, RB-T028-06 (NFR-04).
+
+    37 tests flip Skip → Pass on success (13 KnowledgeBase + 11 Chat + 8 ReAnalysisFlow + 5 Auth).
+  </prompt>
+
+  <role>Senior .NET developer with BFF DI + endpoint-registration discipline. ADR-010 (DI minimalism) + ADR-018 (kill switches) aware: the conditional-registration root cause is precisely the kind of application question those ADRs govern.</role>
+
+  <goal>
+    Seven deliverables verified:
+    1. Single production fix applied across DI registration / endpoint mapping pair (either registration made unconditional, or endpoint mapping made conditional — per-case, ledger recommends option-1).
+    2. Affected production files: typically `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiNotificationModule.cs` (or wherever `INotificationService` is registered) + endpoint definition files: `src/server/api/Sprk.Bff.Api/Api/Ai/KnowledgeBaseEndpoints.cs`, `Api/Ai/ChatEndpoints.cs`, `Api/Ai/ReAnalysisFlowEndpoints.cs`, `Api/Authorization/AuthorizationEndpoints.cs` (or equivalent — VERIFY paths via Grep at task start).
+    3. Test fixtures unchanged (NFR-01) — 4 fixtures continue to set `Analysis:Enabled=false`; production now boots cleanly under that flag.
+    4. 37 tests flip Skip → Pass:
+       - KnowledgeBaseIntegrationTests (13 — RB-T028-03)
+       - ChatEndpointsTests (11 — RB-T028-04)
+       - ReAnalysisFlowTests (8 — RB-T028-05)
+       - AuthorizationIntegrationTests (5 — RB-T028-06)
+       Per-test trait changes from `real-bug-pending-fix` to `repaired`.
+    5. All 4 ledger entries (RB-T028-03/04/05/06) Status transitions to `repaired` with shared fix-commit SHA + cross-reference to r2 task 011.
+    6. Build passes (`dotnet build src/server/api/Sprk.Bff.Api/` 0 errors).
+    7. Per-fix triple-run validation: 3 consecutive `dotnet test tests/unit/Sprk.Bff.Api.Tests/` runs with Failed: 0 (per design.md §8 R2 risk mitigation "per-fix triple-run").
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="r1-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file purpose="r1-lessons">projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+    <file purpose="adr-010">.claude/adr/ADR-010-di-minimalism.md</file>
+    <file purpose="adr-018">.claude/adr/ADR-018-feature-flags.md</file>
+    <file purpose="adr-001">.claude/adr/ADR-001-minimal-api.md</file>
+    <file purpose="adr-008">.claude/adr/ADR-008-endpoint-filters.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — service registration discipline; do NOT add unnecessary registrations; favor making registration unconditional ONLY when the service has zero-cost-when-feature-off behavior; otherwise make endpoint mapping conditional</constraint>
+    <constraint source="ADR-018">Kill switches — feature-flag application is the root-cause question; understand whether `Analysis:Enabled` is a product-meaningful switch (must keep conditional) or an internal not-yet-shipped guard (can simplify)</constraint>
+    <constraint source="ADR-001">Minimal API — endpoint registration patterns; if conditional, use `if (flag) app.MapXxxEndpoints();` wrapper</constraint>
+    <constraint source="ADR-008">Endpoint filters — RB-T028-06 (Auth) requires care: Authorization endpoints don't directly require `INotificationService`, but share endpoint-metadata-generation surface — the fix to RB-T028-03/04/05 auto-resolves T028-06</constraint>
+    <constraint source="NFR-01">r2: production code IS in scope; this is the canonical r2 cluster fix</constraint>
+    <constraint source="NFR-02">Each production code change &lt;50% line replacement per file; if exceeded across the cluster, escalation via `escalations/rewrite-request-T-011-RB-T028-cluster.md`</constraint>
+    <constraint source="NFR-04">Commit message MUST cite RB-T028-03 + RB-T028-04 + RB-T028-05 + RB-T028-06 + resolution mode (`repaired`) — D-02 cluster exception</constraint>
+    <constraint source="D-02">One production fix can close multiple ledger entries when root cause shared — RB-T028-03/04/05/06 cluster qualifies</constraint>
+    <constraint source="D-03">HIGH severity gets code-review + adr-check at Step 9.5; if the fix touches auth endpoints, security review also</constraint>
+    <constraint source="bff-extensions.md § F">Test update obligation — satisfied implicitly by 37 Skip→Pass transitions; no new test files needed (tests are existing and now pass)</constraint>
+    <constraint source="RB-T028-03/04/05/06 ledger entries">PRs modifying `src/server/api/Sprk.Bff.Api/Services/` MUST add/update tests in `tests/unit/Sprk.Bff.Api.Tests/`. Endpoints that map unconditionally must have unconditional service registration (per RB-T028-03/04/05/06, codified in CLAUDE.md §10) — this fix is the canonical implementation of that rule</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      r1 task 027 (clean host boot discovery) and task 028 (cluster classification) surfaced this as a 4-entry cluster sharing one root cause: ASP.NET Core's endpoint-metadata generation aborts at startup when ANY mapped endpoint's parameter binding cannot be resolved. The 4 affected endpoint families (KnowledgeBase, Chat, ReAnalysisFlow, Authorization) all live in the same host. When tests set `Analysis:Enabled=false`, the AI services (e.g., `INotificationService`) are not registered — but the endpoints are still mapped. Startup fails with `notificationService | UNKNOWN` — and all 37 tests across the 4 fixtures fail identically. RB-T028-06 (Auth) is included because Auth endpoints share the metadata-generation surface — once the AI-endpoint binding gap is closed, Auth tests pass without separate edits.
+
+      **Path corrections from Phase 0 task 001 (2026-06-01)**: The r1 ledger's cited file `Api/Ai/ReAnalysisFlowEndpoints.cs` DOES NOT EXIST as a standalone file in the current codebase. ReAnalysis flow routes through `Api/Ai/ChatEndpoints.cs` + `Program.cs`. This STRENGTHENS the cluster root-cause hypothesis: the fix target is `Program.cs` (where endpoints are mapped unconditionally) + the DI module(s) where AI services are conditionally registered. Step 1 must Grep to discover the actual conditional-registration sites — do NOT assume `Infrastructure/DI/AiNotificationModule.cs` exists at that exact path. Task 001's reproducibility doc (`baseline/20-entries-reproducibility-verification.md`) has full path-correction details for RB-T028-02, RB-T028-05, RB-T028-07 — read it during Step 1 context load.
+
+      r1's D-02 codifies the cluster-exception rule: ONE production change can close multiple entries when root cause is shared. r1's lessons-learned reinforces: "cluster-level classification scales." This task IS the canonical Phase 1 cluster fix.
+
+      Critical risk per design.md §8 R2: "RB-T028 root-cause fix breaks other endpoint registrations." Mitigation: per-fix triple-run + staged rollout (one endpoint family at a time if approach (a) chosen) + automated revert via PR revert if any post-merge regression. Per-fix triple-run is mandatory before PR merge.
+
+      Decision point at task start: option (a) make service registration unconditional, OR option (b) make endpoint mapping conditional. Ledger recommends option (1) which corresponds to option (b) above — conditional endpoint mapping. Owner judgment per ADR-018: is `Analysis:Enabled` a product-meaningful kill switch (option-b correct) or an internal-only guard (option-a correct)? Cite the decision in the PR description.
+    </background>
+    <dependencies>
+      <dependency task="000" status="must-complete-first">Baseline must establish cluster's current state</dependency>
+      <dependency task="001" status="must-complete-first">Reproducibility verification must confirm all 4 entries valid</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <!-- Path corrections from Phase 0 task 001 reproducibility verification (2026-06-01):
+         - ReAnalysisFlowEndpoints.cs DOES NOT EXIST as a separate file; ReAnalysis flow routes through
+           ChatEndpoints.cs + Program.cs (this STRENGTHENS the cluster root-cause hypothesis: the fix is
+           a single Program.cs unconditional-mapping change).
+         - Verify all DI module file paths via Grep at Step 1 (do not assume AiNotificationModule.cs /
+           AiSafetyModule.cs paths — discover the actual conditional-registration sites first).
+         - Task 001 baseline doc has full path-correction details:
+           projects/sdap.bff.api-test-suite-repair-r2/baseline/20-entries-reproducibility-verification.md
+    -->
+    <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/Ai/KnowledgeBaseEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/Authorization/</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Integration/KnowledgeBaseIntegrationTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ChatEndpointsTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ReAnalysisFlowTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Integration/AuthorizationIntegrationTests.cs</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/20-entries-reproducibility-verification.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read all 4 ledger entries (RB-T028-03/04/05/06) end-to-end. **Also read** `projects/sdap.bff.api-test-suite-repair-r2/baseline/20-entries-reproducibility-verification.md` for the 2026-06-01 path corrections. Grep for `INotificationService` registration site(s) in `src/server/api/Sprk.Bff.Api/Infrastructure/DI/`; identify the exact `if`-guarded registration line — note: do NOT assume `AiNotificationModule.cs` exists at that path; discover via Grep. Grep for `MapKnowledgeBaseEndpoints` / `MapChatEndpoints` / `MapAuthorizationEndpoints` registration site(s) in `Program.cs` or equivalent. **Note**: there is no `ReAnalysisFlowEndpoints.cs` separate file; ReAnalysis flow is in `ChatEndpoints.cs` + `Program.cs` — confirm via Grep.</step>
+    <step order="2">Verify the 4 test fixtures: read `KnowledgeBaseTestFixture`, `ChatEndpointsTestFixture`, `ReAnalysisFlowTestFixture`, `AuthorizationTestFixture`; confirm each sets `Analysis:Enabled=false`. NO test changes — fixtures stay as-is per NFR-01.</step>
+    <step order="3">Decision: option-a (registration unconditional) vs option-b (endpoint mapping conditional). Apply ADR-018 judgment: if `Analysis:Enabled` is product-meaningful (a real kill switch), choose option-b (mapping conditional — endpoints disappear when off); if it's internal not-yet-shipped guard, choose option-a (registration unconditional — kept always available). Ledger recommends option-b for consistency across all 4 endpoint families. Document the decision in `projects/sdap.bff.api-test-suite-repair-r2/decisions/D-08-rb-t028-cluster-fix-approach.md`.</step>
+    <step order="4">Apply the production fix per the chosen approach. If option-b: wrap each of the 4 endpoint map calls in `if (configuration.GetValue<bool>("Analysis:Enabled")) app.MapXxxEndpoints();`. If option-a: lift `services.AddNotificationService()` (and friends) out of the feature-flag `if` block. Single PR; cluster commit.</step>
+    <step order="5">Build: `dotnet build src/server/api/Sprk.Bff.Api/` — confirm 0 errors.</step>
+    <step order="6">Remove Skip + update traits across the 4 test files: `KnowledgeBaseIntegrationTests.cs`, `ChatEndpointsTests.cs`, `ReAnalysisFlowTests.cs`, `AuthorizationIntegrationTests.cs`. Change per-test `[Trait("status","real-bug-pending-fix")]` to `[Trait("status","repaired")]`.</step>
+    <step order="7">Run focused tests: `dotnet test --filter "FullyQualifiedName~KnowledgeBaseIntegrationTests"`; `--filter "...~ChatEndpointsTests"`; `--filter "...~ReAnalysisFlowTests"`; `--filter "...~AuthorizationIntegrationTests"`. Confirm all 37 tests pass.</step>
+    <step order="8">Per-fix triple-run validation: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --logger trx` 3 consecutive runs; confirm Failed: 0 across all 3. Capture 3 TRX files in `baseline/per-fix-triple-run-rb-t028-cluster-{date}.md`.</step>
+    <step order="9">Run Step 9.5 quality gates: `code-review` + `adr-check` skills (per FULL rigor). The `adr-check` MUST validate ADR-010 + ADR-018 compliance for the chosen approach.</step>
+    <step order="10">PR creation: cite RB-T028-03, RB-T028-04, RB-T028-05, RB-T028-06 + resolution mode `repaired` (4-entry cluster, D-02 exception) in commit message + PR title; PR description includes the chosen-approach decision (D-08) + per-fix triple-run TRX references.</step>
+    <step order="11">After PR merge: update `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` — transition all 4 entries Status to `repaired` with shared fix-commit SHA + date + cross-reference to r2 task 011.</step>
+    <step order="12">Update `projects/sdap.bff.api-test-suite-repair-r2/tasks/TASK-INDEX.md` — mark 011 as ✅; update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">DI modules, endpoint files, test fixtures, ledger</tool>
+    <tool name="Grep">Locate registration sites + endpoint map calls</tool>
+    <tool name="Edit">Apply production fix; update test attributes across 4 test files</tool>
+    <tool name="Bash">`dotnet build`, `dotnet test --filter`, `dotnet test --logger trx` (×3), `git status`</tool>
+    <tool name="Write">D-08 decision record + per-fix triple-run artifact</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/* OR src/server/api/Sprk.Bff.Api/Program.cs (per chosen approach)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Integration/KnowledgeBaseIntegrationTests.cs (Skip removed; trait updated)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ChatEndpointsTests.cs (Skip removed; trait updated)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ReAnalysisFlowTests.cs (Skip removed; trait updated)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Integration/AuthorizationIntegrationTests.cs (Skip removed; trait updated)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (4 entries transitioned)</output>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/decisions/D-08-rb-t028-cluster-fix-approach.md</output>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/baseline/per-fix-triple-run-rb-t028-cluster-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RB-T028-03, RB-T028-04, RB-T028-05, RB-T028-06 ledger entries all transition Status to `repaired` with shared fix-commit SHA</criterion>
+    <criterion testable="true">37 Skip→Pass transitions: 13 KnowledgeBase + 11 Chat + 8 ReAnalysisFlow + 5 Auth (per ledger counts)</criterion>
+    <criterion testable="true">Build passes: `dotnet build src/server/api/Sprk.Bff.Api/` 0 errors</criterion>
+    <criterion testable="true">Per-fix triple-run: 3 consecutive `dotnet test` runs with Failed: 0; 3 TRX files captured</criterion>
+    <criterion testable="true">Commit message cites all 4 ledger entry IDs + resolution mode `repaired` (NFR-04 + D-02 cluster exception)</criterion>
+    <criterion testable="true">Production fix is &lt;50% line replacement per file (NFR-02); no escalation needed</criterion>
+    <criterion testable="true">D-08 decision record exists documenting option-a vs option-b choice with ADR-018 reasoning</criterion>
+    <criterion testable="true">Step 9.5 quality gates pass: code-review + adr-check (with ADR-010 + ADR-018 specific validation)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all `<knowledge><files>` before starting. Apply FULL protocol. Step 3 (decision option-a vs option-b) is a load-bearing checkpoint — document in D-08 before applying any edit.</protocol>
+  </execution>
+</task>

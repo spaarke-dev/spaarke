@@ -1,0 +1,6 @@
+
+# Coverlet artifacts (Phase 4 Track D) — captured in findings doc, not tracked
+baseline/coverlet*/
+
+# Stryker.NET output (Phase 4 Track B) — captured in findings doc, not tracked
+StrykerOutput/

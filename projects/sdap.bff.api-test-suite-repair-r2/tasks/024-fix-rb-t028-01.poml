@@ -1,0 +1,142 @@
+<task id="024" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P2.W2 — Fix RB-T028-01: AnalysisContextBuilder.BuildContinuationPrompt non-deterministic sort tiebreak</title>
+    <phase>Phase 2</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>013,023</dependencies>
+    <blocks>029</blocks>
+    <tags>phase-2, bff-api, real-bug-ledger, medium-severity, production-fix, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production code change in `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisContextBuilder.cs`; affects LLM context window correctness (drops messages, reorders pairs); FULL rigor + Step 9.5 quality gates mandatory</rigor-reason>
+    <parallel-group>P2-W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Disjoint file (`AnalysisContextBuilder.cs` in `Services/Ai/`) vs task 023 (`AnalysisChatContextResolver.cs` in `Services/Ai/Chat/`) — different files within the Ai module. Parallel-safe with task 023 if both run in Wave 1. Conservatively placed in Wave 2 in case 023 escalates to factory edits.</parallel-reason>
+    <production-fix-per-ledger>true</production-fix-per-ledger>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Close real-bug-ledger entry **RB-T028-01** by fixing the non-deterministic sort behavior in `AnalysisContextBuilder.BuildContinuationPrompt` (line 115) and `BuildContinuationPromptWithContext` (line 162). The `.OrderByDescending(m => m.Timestamp).Take(_options.MaxChatHistoryMessages).Reverse()` chain drops messages and reorders pairs when multiple messages share the same `Timestamp` tick (observable when concurrent chat messages arrive in a burst — fast typing, LLM streaming).
+
+    Per the ledger §622-643, two equivalent fixes are documented:
+
+    **Option A** (preferred when explicit tiebreaker is acceptable):
+    ```csharp
+    var indexed = history.Select((m, i) => (msg: m, idx: i));
+    var messagesToInclude = indexed
+        .OrderByDescending(x => x.msg.Timestamp)
+        .ThenByDescending(x => x.idx)
+        .Take(_options.MaxChatHistoryMessages)
+        .Reverse()
+        .Select(x => x.msg)
+        .ToArray();
+    ```
+
+    **Option B** (cleaner — caller `AnalysisOrchestrationService` already provides chronological order per `Services.Ai.Chat.ChatHistoryService` contract):
+    ```csharp
+    var messagesToInclude = history
+        .TakeLast(_options.MaxChatHistoryMessages)
+        .ToArray();
+    ```
+
+    Default to **Option B** unless code-review at Step 9.5 surfaces a counter-contract from `ChatHistoryService` source. Apply the fix in BOTH `BuildContinuationPrompt` and `BuildContinuationPromptWithContext` methods (both have the same bug pattern). Per NFR-04 cite `RB-T028-01` + resolution mode `repaired`.
+  </prompt>
+
+  <role>Backend AI agent fixing the non-deterministic LLM context-window construction in `Services/Ai/AnalysisContextBuilder`.</role>
+
+  <goal>
+    `AnalysisContextBuilder.BuildContinuationPrompt` + `BuildContinuationPromptWithContext` produce deterministic last-N-message windows regardless of timestamp collisions. The `BuildContinuationPrompt_ExceedsMaxHistory_TruncatesToLimit` test flips Skip → Pass. RB-T028-01 transitions to `repaired`.
+  </goal>
+
+  <inputs>
+    <file purpose="target-production-file">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisContextBuilder.cs</file>
+    <file purpose="target-test-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisContextBuilderTests.cs</file>
+    <file purpose="ledger-entry">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (RB-T028-01 section, lines 589-647)</file>
+    <file purpose="contract-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryService.cs (verify chronological-order contract for Option B selection)</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">AI Chat continuation prompt is part of in-process AI surface per refined ADR-013</constraint>
+    <constraint source="ADR-010">DI minimalism — fix is internal to `AnalysisContextBuilder`; no new DI registrations</constraint>
+    <constraint source="NFR-01">Production code IS in scope; tests modified ONLY for Skip→Pass</constraint>
+    <constraint source="NFR-02"><50% line replacement per file (Option A ~5 LOC change; Option B ~3 LOC change in each of 2 methods)</constraint>
+    <constraint source="NFR-04">Commit message cites `RB-T028-01` + resolution mode `repaired`</constraint>
+    <constraint source="D-02">One production fix = one ledger entry closed</constraint>
+    <constraint source="design.md §5.3">RB-T028-01 fix path: ThenByDescending tiebreaker OR TakeLast(N)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per ledger §608-616: `Enumerable.OrderByDescending` is stable, but when many `DateTime.UtcNow` calls execute in a tight loop (e.g., `Enumerable.Range(1,20).Select(...)`), multiple messages get identical `Timestamp` ticks. With ties, `Take(N)` selects an unspecified subset of tied entries; the `Reverse()` operation inverts relative order of remaining ties. Result observed in the failing test: production produces messages 10,12,13,14,15,16,17,18,20,19 instead of 11..20 — **drops Msg-11 and inverts (19, 20)**.
+
+      Both `BuildContinuationPrompt` (line 115) and `BuildContinuationPromptWithContext` (line 162) have the SAME bug pattern at lines 129-133 and 211-215 respectively. The unit test only covers the first method, but the production fix MUST apply to both methods — per the ledger §620.
+
+      Option B (TakeLast) is preferred IF `ChatHistoryService` already provides messages chronologically — verify this contract before defaulting; if violated, use Option A.
+    </background>
+    <dependencies>
+      <dependency task="013" status="required">Phase 1 exit triple-run validated</dependency>
+      <dependency task="023" status="optional">Conservative dependency — task 023 also touches Services/Ai/Chat module; sequence in Wave 2 to avoid context-builder/resolver edit collision risk</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisContextBuilder.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisContextBuilderTests.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryService.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Load RB-T028-01 ledger entry (lines 589-647 in real-bug-ledger.md). Confirm Status is `open` or `assigned-to-r2`.</step>
+    <step order="2">Read `ChatHistoryService.cs` to verify the chronological-order contract documented in the ledger. If history is provided in ascending Timestamp order, **Option B (TakeLast)** is correct. If not, fall back to **Option A (ThenByDescending)**.</step>
+    <step order="3">Read `AnalysisContextBuilder.cs` lines 115 (`BuildContinuationPrompt`) and 162 (`BuildContinuationPromptWithContext`). Confirm both contain the bug pattern at lines 129-133 and 211-215.</step>
+    <step order="4">Apply the chosen option (default B) to BOTH methods. Verify the change preserves chronological output order (caller expects ascending order in the conversation history block).</step>
+    <step order="5">Remove `Skip = "..."` + per-test trait override on `BuildContinuationPrompt_ExceedsMaxHistory_TruncatesToLimit` (line 215 of test file).</step>
+    <step order="6">Build: `dotnet build src/server/api/Sprk.Bff.Api/`. Verify 0 errors.</step>
+    <step order="7">Run targeted tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~AnalysisContextBuilder"`. Confirm the previously-skipped test passes + other tests in the class remain green.</step>
+    <step order="8">Step 9.5 quality gates: `code-review` (verify Option choice is justified vs ChatHistoryService contract) + `adr-check` (ADR-010 / ADR-013).</step>
+    <step order="9">Update RB-T028-01 ledger: Status → `repaired`; fix-commit SHA + date; record chosen option in Notes.</step>
+    <step order="10">Commit: `fix(ai): make BuildContinuationPrompt deterministic by using TakeLast (RB-T028-01; repaired)` OR `...by adding ThenByDescending tiebreaker (...)`. Update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">AnalysisContextBuilder.cs + test file + ChatHistoryService.cs + ledger entry</tool>
+    <tool name="Edit">Production fix in both methods + test Skip removal</tool>
+    <tool name="Bash">`dotnet build` + targeted `dotnet test`</tool>
+    <tool name="Skill">Step 9.5 quality gate via `code-review` (justify Option A vs B choice) + `adr-check` (ADR-010 / ADR-013)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisContextBuilder.cs (both BuildContinuationPrompt + BuildContinuationPromptWithContext made deterministic)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisContextBuilderTests.cs (BuildContinuationPrompt_ExceedsMaxHistory_TruncatesToLimit Skip→Pass)</output>
+    <output type="ledger">RB-T028-01 status: `assigned-to-r2` → `repaired`; chosen option recorded</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BOTH `BuildContinuationPrompt` and `BuildContinuationPromptWithContext` updated to deterministic-truncation (verified via `git diff`)</criterion>
+    <criterion testable="true">`BuildContinuationPrompt_ExceedsMaxHistory_TruncatesToLimit` passes (no Skip)</criterion>
+    <criterion testable="true">Other tests in `AnalysisContextBuilderTests` remain green</criterion>
+    <criterion testable="true">RB-T028-01 ledger Status transitions to `repaired` with chosen option noted</criterion>
+    <criterion testable="true">Commit message includes `RB-T028-01` + resolution mode `repaired`</criterion>
+    <criterion testable="true">Chronological output order preserved (verified by ordering assertion in passing test)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <approach>Default to Option B (TakeLast) after verifying ChatHistoryService chronological contract; fall back to Option A if contract is weaker. Apply to both methods (ledger documents same bug pattern in both).</approach>
+  </execution>
+</task>
