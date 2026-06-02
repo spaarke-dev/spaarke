@@ -13,6 +13,8 @@ export type {
   FetchMultipleResult,
 } from './IDataverseClient';
 
+export { XrmDataverseClient } from './XrmDataverseClient';
+
 export { AppInsightsService } from './AppInsightsService';
 export { EntityCreationService } from './EntityCreationService';
 export type {

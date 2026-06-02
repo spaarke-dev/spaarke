@@ -3,7 +3,7 @@
   <metadata>
     <title>XrmDataverseClient implementation (Xrm.WebApi wrapper for MDA hosts)</title>
     <phase>1: Phase A — Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>005,009</blocks>

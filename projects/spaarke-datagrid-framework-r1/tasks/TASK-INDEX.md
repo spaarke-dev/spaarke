@@ -13,8 +13,8 @@
 | ID | Title | Rigor | Status | Dependencies | Parallel | Blocks |
 |---|---|---|---|---|---|---|
 | 001 | Foundation contracts: IDataverseClient + DataGridConfiguration + tokens | FULL | ✅ | none | — | 002,003,004,005,006,007,008,009 |
-| 002 | XrmDataverseClient implementation | FULL | 🔲 | 001 | A1 | 005,009 |
-| 003 | DataGrid core (scaffold + lazy infinite-scroll + useDataGridContext) | FULL | 🔲 | 001 | A1 | 004,005,006,007,008,009 |
+| 002 | XrmDataverseClient implementation | FULL | ✅ | 001 | A1 | 005,009 |
+| 003 | DataGrid core (scaffold + lazy infinite-scroll + useDataGridContext) | FULL | ✅ | 001 | A1 | 004,005,006,007,008,009 |
 | 004 | Lift ColumnHeaderMenu + ColumnFilterHeader with applyStylesToPortals fix | FULL | 🔲 | 003 | A2 | 009 |
 | 005 | LookupMultiFilterChip (async Combobox + debounce + cache) | FULL | 🔲 | 002,003 | A2 | 009 |
 | 006 | OptionSetMultiFilterChip (metadata-driven + status colors) | FULL | 🔲 | 003 | A2 | 009 |

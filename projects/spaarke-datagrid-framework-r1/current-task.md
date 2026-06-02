@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 001 — Foundation contracts (IDataverseClient + DataGridConfiguration + tokens) |
-| **Step** | 8 of 9 (Build verification — awaiting `npm install` background completion) |
-| **Status** | in-progress |
-| **Next Action** | When npm install bg job completes: re-run `npm run build` in `src/client/shared/Spaarke.UI.Components/`; if zero errors → Step 9 quality gates → Step 10 update TASK-INDEX (001 ✅) |
+| **Task** | none (Wave A1 just completed; ready for Wave A2 dispatch) |
+| **Step** | — |
+| **Status** | none |
+| **Next Action** | Dispatch Wave A2 — tasks 004 + 005 + 006 + 007 + 008 in parallel (5 sub-agents). All depend on task 003 ✅; touch separate primitive files (ColumnHeaderMenu, LookupChip, OptionSetChip, Date/Text/Bool chips, CommandBar). Hard cap: 6 agents per wave (we'll use 5). |
 
 ### Files Modified This Session
 
