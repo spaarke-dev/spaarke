@@ -55,9 +55,9 @@
 | 080 | Update `docs/procedures/testing-and-code-quality.md` (ledger lifecycle + TestClock pattern + Track E findings) | 5 | ✅ 2026-06-01 (4 new sections: 3 anti-drift lessons + TestClock pattern; +265 LOC; 15 cross-refs) | 040-044 | P5-W1 | STANDARD | — |
 | 081 | Extend `.claude/constraints/bff-extensions.md` § F (CONDITIONAL; **MAIN-SESSION-ONLY**) | 5 | ✅ 2026-06-01 (3 sub-sections F.1/F.2/F.3 added per D-13 warrant decision; cross-refs to procedure §§18.x + ADR-030) | 080, 011 | **sequential (.claude/ boundary)** | FULL | — |
 | 082 | Final triple-run validation — 6 TRX (FR-15) | 5 | ✅ 2026-06-01 (PASS — Failed=0 across all 6 runs; unit 5932/0/109 × 3; integration 370/0/52 × 3; zero variance, zero flakes; PR #318 merge-ready per FR-15 + NFR-05; summary at `baseline/phase5-final-triple-run-2026-06-01.md`) | 080, 081 | (sequential, phase-exit) | STANDARD | — |
-| 083 | PR + admin-merge cycle (FR-16; merge ≤ 2026-08-31) | 5 | 🔲 | 082 | (sequential) | STANDARD | — |
+| 083 | PR + admin-merge cycle (FR-16; merge ≤ 2026-08-31) | 5 | ✅ 2026-06-01 (MERGED to master at commit `7b804d35` via `gh pr merge 318 --admin --merge`; ~3 months early vs. 2026-08-31 target; CI all green: Security/Trivy/actionlint/Client Quality/Build & Test Debug+Release/Code Quality/ADR Violations/CI Summary all SUCCESS) | 082 | (sequential) | STANDARD | — |
 | 084 | `doc-drift-audit` after procedure updates | 5 | ✅ 2026-06-01 (PASS-WITH-RECOMMENDATIONS — 0 P1, 2 P2 advisory, 2 P3 cosmetic; baseline at `baseline/phase5-doc-drift-audit-2026-06-01.md`) | 080, 081 | P5-W2 | STANDARD | — |
-| 090 | **Project Wrap-up** — quality gates + repo-cleanup + README/plan close + lessons-learned + exit-ledger | wrap-up | 🔲 | 083, 084 | (sequential, FINAL) | FULL | — |
+| 090 | **Project Wrap-up** — quality gates + repo-cleanup + README/plan close + lessons-learned + exit-ledger | wrap-up | ✅ 2026-06-01 (README + plan set to ✅ Complete with all 14 graduation criteria checked; `notes/lessons-learned.md` authored — 10 sections including 6-point quantitative summary; r3-followup-backlog.md aggregated 12+ items from Phase 4 baselines + RB-T053-01a residual + doc-drift advisory; test-fixture-contracts.md authored as documentation hardening) | 083, 084 | (sequential, FINAL) | FULL | — |
 
 ---
 
