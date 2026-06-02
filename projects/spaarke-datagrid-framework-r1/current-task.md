@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (B-Wave-2 COMPLETE — BffDataverseClient TS + integration tests 25/25 PASS + rate-limit bug fix; ready for B-Wave-3 deploy) |
+| **Task** | none (B-Wave-3 = task 017 BFF deploy DEFERRED ⏸ pending insights-engine-r2 master merge; Phase C unblocked) |
 | **Step** | — |
 | **Status** | none |
-| **Next Action** | B-Wave-3 = task 017 (BFF deploy via `bff-deploy` skill) — deploy DEV environment. Gated by 016 passing (✅ 25/25). After 017: Phase B COMPLETE. Then Phase C, D, E, F (consumer / migration / retirement). |
+| **Next Action** | Phase C kickoff — task 020 (author savedqueries for KPI Assessment + Invoice Matter-context views). UQ-04 owner clarification needed for column layouts. Then C-Wave-1 = 021 + 022 (config records, parallel). See `notes/drafts/017-deferral.md` for BFF deploy deferral details. |
 
 ### Files Modified This Session
 
