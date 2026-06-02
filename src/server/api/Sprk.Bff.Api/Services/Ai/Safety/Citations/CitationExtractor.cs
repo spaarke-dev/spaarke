@@ -70,9 +70,12 @@ public static partial class CitationExtractor
 
     /// <summary>
     /// Federal Regulation (CFR): "47 C.F.R. § 73.3999"  |  "21 CFR Part 312"
+    /// Inter-letter periods are optional to honor the documented no-period form (RB-T044-05):
+    /// the class XML doc (line 15) lists `21 CFR Part 312` as a supported input, but the original
+    /// regex required the period form `C.F.R.` so the no-period form was never matched.
     /// </summary>
     [GeneratedRegex(
-        @"\b(?<title>\d{1,3})\s+C\.F\.R\.?(?:\s+(?:Part|§)\s*)(?<part>\d[\d\-\.]*)",
+        @"\b(?<title>\d{1,3})\s+C\.?F\.?R\.?(?:\s+(?:Part|§)\s*)(?<part>\d[\d\-\.]*)",
         RegexOptions.Compiled | RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase,
         matchTimeoutMilliseconds: 500)]
     private static partial Regex RegulationPattern();

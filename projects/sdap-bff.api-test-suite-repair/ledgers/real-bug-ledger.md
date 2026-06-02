@@ -544,25 +544,28 @@ Per task 021 POML §parallel-safe and coordination protocol: task 021 edits are 
 
 ---
 
-## RB-T044-05 — `CitationExtractor.RegulationPattern` does not accept documented `CFR` (no-period) form
+## RB-T044-05 — `CitationExtractor.RegulationPattern` does not accept documented `CFR` (no-period) form — **REPAIRED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T044-05 |
 | **Date filed** | 2026-05-31 |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 3 P3-W2 task 033) |
+| **Resolution commit** | TBD — committed in next r2 PR with message citing "RB-T044-05; repaired" per NFR-04 |
+| **Cross-reference** | r2 task 033 — [`projects/sdap.bff.api-test-suite-repair-r2/tasks/033-fix-rb-t044-05.poml`](../../sdap.bff.api-test-suite-repair-r2/tasks/033-fix-rb-t044-05.poml) |
 | **Filing task** | Task 044 (P23.H5 — Ai/Safety) |
 | **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs) |
-| **Affected method** | `RegulationPattern()` regex (line 74) |
-| **Tests Skip'd** | `ExtractCitations_Regulation_NoPeriodForm_MatchedAndNormalized` (`Fact`) — split from original Theory by task 044 — in `CitationExtractorTests.cs`. |
-| **Fix-by date** | 2026-07-31 (60-day target — LOW severity) |
+| **Affected method** | `RegulationPattern()` regex (line 78 post-task-033; was line 74 at filing time) — inter-letter periods made optional: `C\.?F\.?R\.?` (was `C\.F\.R\.?`). Named groups (`title`, `part`) preserved; regex flags (Compiled / ExplicitCapture / IgnoreCase) + 500ms timeout preserved. XML doc updated to document the no-period contract honored. |
+| **Tests Skip'd → Pass** | `ExtractCitations_Regulation_NoPeriodForm_MatchedAndNormalized` (`Fact`) in [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs) — Skip attribute removed; per-test trait `[Trait("status", "real-bug-pending-fix")]` removed (class-level `[Trait("status", "repaired")]` applies). Targeted filter run: 30 Passed / 0 Failed / 0 Skipped. |
+| **Fix-by date (original)** | 2026-07-31 (60-day target — LOW severity) — **closed 60 days early** |
 | **Severity** | LOW (LLM outputs commonly use the period form `C.F.R.`; no-period `CFR` form is the corner case) |
-| **Owner** | TBD (AI citations/verification feature owner) |
+| **Owner** | r2 task 033 owner (Claude Opus 4.7 implementation) |
 
 ### Bug detail
 
-Class XML doc line 15 explicitly lists `21 CFR Part 312` as a supported example. The regex requires the literal `C.F.R.` form (only the trailing period is optional). Input `21 CFR Part 312` does not match, contradicting the documented contract.
+Class XML doc line 15 explicitly lists `21 CFR Part 312` as a supported example. The regex required the literal `C.F.R.` form (only the trailing period was optional). Input `21 CFR Part 312` did not match, contradicting the documented contract.
 
-### Recommended production fix
+### Recommended production fix (applied 2026-06-01)
 
 Loosen the inter-letter periods to optional:
 
@@ -570,9 +573,13 @@ Loosen the inter-letter periods to optional:
 @"\b(?<title>\d{1,3})\s+C\.?F\.?R\.?(?:\s+(?:Part|§)\s*)(?<part>\d[\d\-\.]*)"
 ```
 
-### Verification after fix
+### Verification after fix (completed 2026-06-01)
 
-Remove `Skip` + trait on `ExtractCitations_Regulation_NoPeriodForm_MatchedAndNormalized`. Run; must pass. Verify the original Regulation Theory cases still pass.
+`Skip` attribute + `[Trait("status","real-bug-pending-fix")]` removed on `ExtractCitations_Regulation_NoPeriodForm_MatchedAndNormalized`. Targeted run: 30 Passed / 0 Failed / 0 Skipped — re-enabled test passes; both original Regulation Theory cases (`47 C.F.R. § 73.3999`, `40 C.F.R. § 122.26`) continue to pass — no regression. BFF API build 0 errors / 17 warnings (zero new warnings; all pre-existing NU1903 / CS0618 / CS1998 / CS8601 / CS8604 — none touch CitationExtractor.cs).
+
+### Coordination note (task 020 / task 021 / task 032 / task 033 file overlap — verified clean)
+
+Per task 033 POML §parallel-safe and coordination protocol: task 033 edits are confined to `RegulationPattern()` regex (line 78 post-fix) — DIFFERENT from task 020's `NormalizeCaseLaw` + `CaseLawPattern` (lines 34-38, 163-172), task 021's `NormalizePatent` + `PatentPattern` (lines 55-59, 189-207), and task 032's `NormalizeStatute` + `StatutePattern` (lines 44-48, 174-187). Verified post-fix: all 3 sibling repairs intact — targeted run of 30 tests covers (4 CaseLaw Theory + 3 Statute Theory + 1 Statute strip-subsection Fact + 2 US Patent Theory + 2 EP/WO Patent Theory + 2 Regulation period-form Theory + 1 Regulation no-period Fact + SEC Filing + multi-type + edge cases) all PASS. No merge race.
 
 ---
 
@@ -1096,23 +1103,28 @@ fail: Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware[1]
 
 ---
 
-## RB-T028-08 — `PrecedentAdminEndpoints.CreateTentativeAsync` verification gap — Moq expected once but was 0 times
+## RB-T028-08 — `PrecedentAdminEndpoints.CreateTentativeAsync` Moq predicate mismatch (test-fixture-config gap) — **REPAIRED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T028-08 |
 | **Date filed** | 2026-05-31 |
 | **Filing task** | Task 028 (Phase 2+3 close — residual classification) |
-| **Production file** | [`src/server/api/Sprk.Bff.Api/Api/Insights/PrecedentAdminEndpoints.cs`](../../../src/server/api/Sprk.Bff.Api/Api/Insights/PrecedentAdminEndpoints.cs) |
-| **Affected method** | `PostPrecedent` handler's call path to `IPrecedentService.CreateTentativeAsync(...)` |
-| **Tests Skip'd** | (1) `PrecedentAdminEndpointsTests.PostPrecedent_AsAdmin_Returns_201_WithTentativeStatus` (`Fact`) in [`tests/integration/Spe.Integration.Tests/Api/Insights/PrecedentAdminEndpointsTests.cs`](../../../tests/integration/Spe.Integration.Tests/Api/Insights/PrecedentAdminEndpointsTests.cs). |
-| **Fix-by date** | 2026-09-30 (90-day target — LOW severity; only 1 of 6 PrecedentAdmin tests fails; the other 5 pass, indicating the endpoint mostly works) |
-| **Severity** | LOW (5 of 6 tests in `PrecedentAdminEndpointsTests` pass; this single test asserts an Moq verification on `CreateTentativeAsync` that may be a test-stale signature drift rather than a true production bug — but the dispatching is reliable enough to defer triage) |
-| **Owner** | TBD (Insights `PrecedentAdminEndpoints` owner — coordinate with `ai-spaarke-insights-engine-r1`) |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 3 P3-W2 task 037) |
+| **Date repaired** | 2026-06-01 |
+| **Repaired by** | r2 task 037 (Phase 3 P3-W2). Test-fixture-config fix in `tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs` `IntegrationTestConstants.TestUserId` constant. |
+| **Repair mechanism** | Fixture-config alignment with Entra ID `oid` claim contract (always a valid GUID) — `TestUserId` literal changed from `"test-user-00000000-0000-0000-0000-integration001"` (NOT a parseable GUID) to `"11111111-1111-1111-1111-111111111111"` (a valid GUID). NOT subsumed by 011 (which addressed DI registration/endpoint-mapping symmetry — RB-T028-03/04/05/06 cluster). Mirror of r2 task 025's RB-T028-07 fixture-config closure pattern (distinct from the 011 cluster fix). |
+| **Resolution commit** | Pending main-session commit on branch `work/sdap.bff.api-test-suite-repair-r2` (PR #318 chain). NFR-04 commit message: `fix(bff-api): correct TestUserId to valid-GUID format for oid-fallback contract (RB-T028-08; repaired)`. |
+| **Production file** | [`src/server/api/Sprk.Bff.Api/Api/Insights/PrecedentAdminEndpoints.cs`](../../../src/server/api/Sprk.Bff.Api/Api/Insights/PrecedentAdminEndpoints.cs) (UNCHANGED — investigation confirmed production code is correct; lines 152-164 `Guid.TryParse(callerOid)` fallback works correctly when given a valid GUID, which Entra ID always provides) |
+| **Affected method** | `PostPrecedent` handler's caller-oid-as-fallback-reviewer logic at lines 152-164 of `PrecedentAdminEndpoints.cs`. |
+| **Tests Skip'd → Pass** | (1) `PrecedentAdminEndpointsTests.PostPrecedent_AsAdmin_Returns_201_WithTentativeStatus` (`Fact`) in [`tests/integration/Spe.Integration.Tests/Api/Insights/PrecedentAdminEndpointsTests.cs`](../../../tests/integration/Spe.Integration.Tests/Api/Insights/PrecedentAdminEndpointsTests.cs). Skip attribute removed; per-test trait transitioned `real-bug-pending-fix` → `repaired`. Targeted run: `dotnet test --filter "FullyQualifiedName~PrecedentAdminEndpointsTests"` → **6 Passed / 0 Failed / 0 Skipped / 6 Total**. Full integration suite (post-fix): **370 Passed / 0 Failed / 52 Skipped / 422 Total** — zero regression. |
+| **Fix-by date (original)** | 2026-09-30 (90-day target — LOW severity) — **MET** (closed 121 days early on 2026-06-01) |
+| **Severity** | LOW (5 of 6 tests in `PrecedentAdminEndpointsTests` previously passed; this single test asserted an Moq predicate that required the `oid` claim be a parseable GUID, which the shared test fixture's literal did not satisfy) |
+| **Owner** | r2 task 037 owner (Claude Opus 4.7 implementation; `dev@spaarke.com` security review per NFR-03 — test-only change, no production code modified) |
 
 ### Bug detail
 
-**Symptom** (TRX failure message):
+**Symptom** (TRX failure message — original):
 ```
 Moq.MockException :
 Expected invocation on the mock once, but was 0 times:
@@ -1123,20 +1135,47 @@ Expected invocation on the mock once, but was 0 times:
 Performed invocations: (none)
 ```
 
-The Moq verification expects `CreateTentativeAsync` to be called with a specific predicate, but it was called zero times. Two possible explanations:
+**Actual root cause (corrected from r1's hypothesis)** — confirmed by running the test post-Skip-removal at HEAD `546ebcb3` (2026-06-01) BEFORE applying the fix:
 
-1. **Production signature drift**: the endpoint handler was refactored to call `CreatePendingAsync` or `CreatePrecedentAsync` instead of `CreateTentativeAsync`, leaving the Moq expectation stale.
-2. **Production short-circuit**: the endpoint handler returns 201 (matching the test's success assertion) without actually calling the service — perhaps due to a feature flag, a cached response, or a refactor that moved the side effect.
+1. **Production code was correct all along**. The endpoint DOES call `CreateTentativeAsync` on `IPrecedentBoard` (line 183 of `PrecedentAdminEndpoints.cs`); DI registers `IPrecedentBoard` unconditionally in `InsightsModule.cs` (line 59); the endpoint is unconditionally mapped in `EndpointMappingExtensions.cs` (line 192). No signature drift, no short-circuit, no DI-conditional-registration gap. The ledger filing-task hypothesis "Moq expected once but was 0 times = production never called" was MISLEADING — Moq.Verify with a predicate that does NOT match a real invocation reports "performed: (none)" only when ZERO invocations match the predicate, and `Performed invocations:` in the post-Skip-removal TRX shows the call WAS made (with `ReviewerByUserId = ` empty), just not matching the predicate's `ReviewerByUserId.HasValue` clause.
 
-The 201 response code matches the test's outer assertion (`response.StatusCode.Should().Be(HttpStatusCode.Created)`), so the endpoint is "working" — just not the way the test expects.
+2. **The actual Moq predicate failure** was on the `ReviewerByUserId` field of the request. The TRX captured invocation: `IPrecedentBoard.CreateTentativeAsync(CreatePrecedentRequest { PatternStatement = ..., Scope = ip-licensing-bigfirm-llp, SupportingMatterIds = ..., ReviewerByUserId =  }, CancellationToken)` — the empty trailing value is `null`.
 
-### Recommended next step
+3. **Why ReviewerByUserId was null** — production lines 152-164 of `PrecedentAdminEndpoints.cs`:
+   ```csharp
+   Guid? reviewerByUserId = request.ReviewerByUserId;
+   if ((reviewerByUserId is null || reviewerByUserId == Guid.Empty)
+       && Guid.TryParse(callerOid, out var callerGuid))
+   {
+       reviewerByUserId = callerGuid;
+   }
+   ```
+   The test passes `reviewerByUserId = null` in the request body, so the fallback path is taken. The fallback only fires if `Guid.TryParse(callerOid, out var callerGuid)` succeeds. The test fixture's auth handler injects `oid = "test-user-00000000-0000-0000-0000-integration001"` (via shared `IntegrationTestConstants.TestUserId`). That string is 47 chars and superficially GUID-shaped but starts with `test-user-` — `Guid.TryParse` returns FALSE. Therefore `reviewerByUserId` stays `null`, the endpoint calls the board with null reviewer, returns 201 correctly, but the Moq predicate `r.ReviewerByUserId.HasValue && r.ReviewerByUserId.Value != Guid.Empty` is FALSE → "expected once, but was 0 times".
 
-Read `PrecedentAdminEndpoints.cs` PostPrecedent handler + `IPrecedentService` interface to confirm whether `CreateTentativeAsync` was renamed/replaced. If renamed → update test's Moq verification to match. If genuine production gap → file production fix with the Insights owner.
+4. **The Entra ID `oid` claim contract** guarantees a valid GUID in production. Production code is correct to depend on `Guid.TryParse(callerOid)` succeeding. The test fixture violated the contract by using a non-GUID literal — a fixture-config category gap mirroring r2 task 025's RB-T028-07 closure pattern.
+
+### Fix applied 2026-06-01
+
+**Test-only change** (`tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs`):
+- `IntegrationTestConstants.TestUserId` constant value changed from `"test-user-00000000-0000-0000-0000-integration001"` (NOT a parseable GUID) to `"11111111-1111-1111-1111-111111111111"` (a valid GUID).
+- XML doc expanded to document the Entra-ID `oid` claim contract and cross-reference RB-T028-08 / task 037.
+- All consumers (the two fake auth handlers' "oid" + NameIdentifier claims) pick up the new value automatically — no other call-site changes needed.
+
+**Test transition** (`tests/integration/Spe.Integration.Tests/Api/Insights/PrecedentAdminEndpointsTests.cs`):
+- `[Fact(Skip = "RB-T028-08: ...")]` → `[Fact]`; per-test `[Trait("status", "real-bug-pending-fix")]` → `[Trait("status", "repaired")]`.
+
+**Why this was NOT a "production gap" or "signature drift"**: investigation confirmed production code paths (endpoint handler + DI registration + endpoint mapping + IPrecedentBoard interface) are all correct and aligned. The bug was the test fixture asserting a stricter contract (`Guid.TryParse(oid)` must succeed) than the shared `TestUserId` constant satisfied.
+
+**Why this is correct per NFR-01**: NFR-01 permits "tests modified ONLY for Skip → Pass transitions OR Moq drift correction" — this is a fixture-config alignment with the Entra ID `oid` claim contract (the production code is correct to assume `Guid.TryParse(oid)` succeeds; the fixture is what was inconsistent with that contract). Pattern: identical to task 025's RB-T028-07 closure (CosmosPersistence:DatabaseName).
+
+**Why this didn't surface in production**: Entra ID always provides a valid GUID `oid` claim. The non-GUID literal was a test-only artifact.
 
 ### Verification after fix
 
-Remove the Skip + Trait override. Run `dotnet test --filter "FullyQualifiedName~PrecedentAdminEndpointsTests.PostPrecedent_AsAdmin_Returns_201_WithTentativeStatus"`; must pass.
+- Removed Skip + per-test trait override.
+- Targeted run: `dotnet test tests/integration/Spe.Integration.Tests/ --filter "FullyQualifiedName~PrecedentAdminEndpointsTests"` → **6 Passed / 0 Failed / 0 Skipped / 6 Total** (5 s).
+- Full integration suite: **370 Passed / 0 Failed / 52 Skipped / 422 Total** (27 s) — zero regression.
+- Full unit suite: **5927 Passed / 0 Failed / 109 Skipped / 6036 Total** (1m12s) — zero cross-project ripple.
 
 ---
 

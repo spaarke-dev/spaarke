@@ -44,7 +44,7 @@
 | 034 | Fix RB-T050-01 — `SourcePaneSseEventData.CitationId` JsonIgnore | 3 | 🔲 | 029 | P3-W1 | FULL | ✓ |
 | 035 | Fix RB-T070-01 — `AgentConversationService` CancellationToken (3 methods) | 3 | 🔲 | 029 | P3-W1 | FULL | ✓ |
 | 036 | Fix RB-T070-02 — `R2SseEventEmitter` RetryAfterSeconds null omission | 3 | ✅ | 029 | P3-W1 | FULL | ✓ |
-| 037 | Fix RB-T028-08 — PrecedentAdmin endpoint binding (verify subsumed by 011) | 3 | 🔲 | 029, 011 | P3-W2 | FULL | ✓ |
+| 037 | Fix RB-T028-08 — PrecedentAdmin endpoint binding (verify subsumed by 011) | 3 | ✅ 2026-06-01 (NOT subsumed by 011 — distinct fixture-config gap; 1 Skip→Pass via `IntegrationTestFixture` `TestUserId` valid-GUID fix; mirror of task 025 pattern) | 029, 011 | P3-W2 | FULL→STANDARD (test-only fix) | ✓ |
 | 038 | `Spe.Integration.Tests` triple-run (FR-10; flake quarantine ≤2) | 3 | 🔲 | 030-037 | (sequential, phase-exit) | STANDARD | — |
 | 039 | Phase 3 exit validation — cumulative ledger audit | 3 | 🔲 | 038 | (sequential, phase-exit) | STANDARD | — |
 | 040 | Track A — PCF/Code Pages test rot audit (read-only) | 4 | 🔲 | 039 | P4-W1 | STANDARD | — |

@@ -23,8 +23,24 @@ namespace Spe.Integration.Tests;
 /// </summary>
 public static class IntegrationTestConstants
 {
-    /// <summary>The Entra ID object ID claim used by authorization filters.</summary>
-    public const string TestUserId = "test-user-00000000-0000-0000-0000-integration001";
+    /// <summary>
+    /// The Entra ID object ID ("oid") claim used by authorization filters and any
+    /// production code that calls <see cref="Guid.TryParse(string,out Guid)"/> on the
+    /// authenticated caller's oid (e.g. <c>PrecedentAdminEndpoints.CreatePrecedent</c>
+    /// admin-as-reviewer fallback). Per Entra ID contract the oid claim is ALWAYS a
+    /// valid GUID; this constant mirrors that contract so production paths that depend
+    /// on it work transparently in the in-process test host.
+    /// </summary>
+    /// <remarks>
+    /// Changed from the previous non-GUID literal <c>"test-user-00000000-0000-0000-0000-integration001"</c>
+    /// per r2 task 037 (RB-T028-08 fixture-config gap). The previous value caused
+    /// <see cref="Guid.TryParse(string,out Guid)"/> to return <c>false</c>, which made
+    /// the <c>PrecedentAdminEndpointsTests.PostPrecedent_AsAdmin_Returns_201_WithTentativeStatus</c>
+    /// Moq verification fail (predicate on <c>ReviewerByUserId.HasValue &amp;&amp; != Guid.Empty</c>).
+    /// The endpoint returned 201 correctly; only the reviewer-id fallback was silently null.
+    /// Mirror of task 025's RB-T028-07 fixture-config closure pattern.
+    /// </remarks>
+    public const string TestUserId = "11111111-1111-1111-1111-111111111111";
 
     /// <summary>Test bearer token value for fake authentication header.</summary>
     public const string TestBearerToken = "integration-test-token";

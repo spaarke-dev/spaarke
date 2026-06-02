@@ -1,10 +1,10 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-01 (Task 036 Phase 3 P3-W1 — RB-T070-02 LOW closure executed; awaiting commit by main session)
+> **Last Updated**: 2026-06-01 (Task 037 Phase 3 P3-W2 — RB-T028-08 LOW closure executed; awaiting commit by main session; sibling 033 already complete in this wave)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
-> **Last commit (project work)**: `9828711a` — HEAD when task 036 began (no commits this task; main session bundles)
-> **Last PR #318 activity**: tasks 010 / 011 / 012 (Phase 1) + 020 / 021 / 022 / 023 / 024 / 025 (Phase 2) — Phase 2 production work complete; Phase 3 P3-W1 in flight
+> **Last commit (project work)**: `546ebcb3` — HEAD when task 037 began (no commits this task; main session bundles P3-W2: 033 + 037)
+> **Last PR #318 activity**: tasks 010 / 011 / 012 (Phase 1) + 020 / 021 / 022 / 023 / 024 / 025 (Phase 2) + 030 / 031 / 032 / 034 / 035 / 036 (Phase 3 P3-W1) — Phase 3 P3-W2 closing (033 + 037 done)
 
 ---
 
@@ -12,74 +12,80 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 036 — Phase 3 P3-W1 — RB-T070-02 (LOW) repaired |
-| **Step** | 9 of 9 (production fix applied; test un-Skip'd; targeted run 21/21 PASS; ledger row updated; Step 9.5 FULL rigor gates PASS; awaiting main-session commit per NFR-04) |
+| **Task** | 037 — Phase 3 P3-W2 — RB-T028-08 (LOW) repaired (sibling 033 already complete this wave) |
+| **Step** | 10 of 10 (investigation confirmed fixture-config gap NOT subsumed by 011; TestUserId valid-GUID fix applied; test un-Skip'd; targeted run 6/6 PASS; full integration suite 370/0/52/422 zero regression; full unit suite 5927/0/109/6036 zero ripple; ledger row updated; Step 9.5 STANDARD/FULL gates PASS) |
 | **Status** | completed-2026-06-01 (no commit by this task; main session bundles per project convention) |
-| **Next Action** | Continue P3-W1 dispatch (sibling tasks 030, 031, 032, 034, 035 in parallel; all touch disjoint files). Main session bundles commits citing each ledger entry per NFR-04. |
+| **Next Action** | Phase 3 P3-W2 complete (033 + 037 both ✅). Next: dispatch P3-W3 (task 038 — `Spe.Integration.Tests` triple-run / FR-10 — validates RB-T028-07 9-test slice + RB-T028-08 1-test slice). Then P3-W4 (task 039 — Phase 3 exit cumulative ledger audit). |
 
-### Task 036 outcome (2026-06-01) — REPAIRED
+### Task 037 outcome (2026-06-01) — REPAIRED (fixture-config gap, NOT subsumed by 011)
 
-- **Production change**: `src/server/api/Sprk.Bff.Api/Api/Ai/R2SseEventEmitter.cs` — added `using System.Text.Json.Serialization;` (line 2) + `[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]` decoration on `CapabilityChangePayload.RetryAfterSeconds` record parameter (~line 311). Property-level attribute chosen over global serializer option per POML guidance (minimum blast radius); guarantees omission regardless of which JsonSerializerOptions any downstream serializer uses.
-- **Why a fix was needed** (despite EmitAsync's JsonOptions already setting `DefaultIgnoreCondition = WhenWritingNull`): the `ChatSseEvent.Data` field carries the raw payload object; downstream serializers (test capture + SSE writer) may re-serialize with different options. The property-level attribute makes the omission guarantee travel WITH the type.
-- **Test change**: `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/R2SseEventEmitterTests.cs` — `EmitCapabilityChangeAsync_OmitsRetryAfterSecondsWhenNull` (~line 276) flipped Skip→`[Fact]`; per-test `[Trait("status","real-bug-pending-fix")]` removed (class-level `[Trait("status","repaired")]` applies).
-- **Build**: `dotnet build src/server/api/Sprk.Bff.Api/` succeeds, 0 errors, 2 warnings (both pre-existing NU1903 Microsoft.Kiota.Abstractions vulnerability warnings; zero new warnings).
-- **Targeted test run**: `dotnet test --filter "FullyQualifiedName~R2SseEventEmitterTests"` → 21 Passed / 0 Failed / 0 Skipped. Both the new-passing test AND the existing positive case (`EmitCapabilityChangeAsync_SerializesCapabilityAndStatus` asserting `retryAfterSeconds=30` when non-null) pass.
-- **Ledger transition**: `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` — RB-T070-02 row updated with Status=`repaired`, transition date 2026-06-01, Tests Skip'd → Pass row showing 21/21 targeted-run result; resolution commit placeholder TBD pending main-session commit.
-- **Step 9.5 FULL rigor gates**: code-review PASS (1-attribute addition, minimal-blast-radius, matches POML), adr-check PASS (ADR-001 SSE wire contract preserved at the contract level; bug fix brings impl into compliance with documented contract; ADR-013 BFF-internal infra unaffected; bff-extensions.md not triggered — no new endpoint/package/DI/background work).
-- **NFR-04 commit message (for main session)**: `fix(bff-api): omit null RetryAfterSeconds in CapabilityChangePayload (RB-T070-02; repaired)`
-- **No commit by this task** — main session bundles per project convention (sibling tasks 030/031/032/034/035 in same P3-W1 wave).
+- **Investigation verdict**: **FIXTURE-CONFIG GAP** (mirror of task 025 RB-T028-07 pattern). NOT subsumed by 011, NOT signature drift, NOT a production gap.
+- **Root cause**: `IntegrationTestConstants.TestUserId` (line 27 of `IntegrationTestFixture.cs`) was `"test-user-00000000-0000-0000-0000-integration001"` — superficially GUID-shaped (47 chars) but starts with `test-user-` so `Guid.TryParse` returns FALSE. Production `PrecedentAdminEndpoints.CreatePrecedent` (lines 152-164) uses the caller's `oid` claim as the fallback reviewer-id when the request body's `reviewerByUserId` is null — via `Guid.TryParse(callerOid, out var callerGuid)`. With the non-GUID fixture literal, the fallback fails silently → `ReviewerByUserId` stays `null` → Moq predicate `r.ReviewerByUserId.HasValue && != Guid.Empty` is FALSE → "expected once, but was 0 times".
+- **Verification before fix**: Ran the test post-Skip-removal at HEAD `546ebcb3` to capture the actual Moq failure. TRX showed `Performed invocations: IPrecedentBoard.CreateTentativeAsync(... ReviewerByUserId = , CancellationToken)` — the empty trailing value confirmed null reviewer, confirming the fixture-config hypothesis.
+- **Test-only change**: `tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs` — `IntegrationTestConstants.TestUserId` (line 27) changed from `"test-user-00000000-0000-0000-0000-integration001"` to `"11111111-1111-1111-1111-111111111111"`. XML doc expanded (~lines 26-45) to document the Entra-ID `oid` contract and cross-reference RB-T028-08 / task 037. All consumers (both fake auth handlers' "oid" + NameIdentifier claims at lines 371/372 and 435/436) pick up the new value automatically.
+- **Test transition**: `tests/integration/Spe.Integration.Tests/Api/Insights/PrecedentAdminEndpointsTests.cs` line 55 — `[Fact(Skip = "RB-T028-08: ...")]` → `[Fact]`; per-test `[Trait("status","real-bug-pending-fix")]` → `[Trait("status","repaired")]`.
+- **No production code change**: `PrecedentAdminEndpoints.cs`, `IPrecedentBoard.cs`, `InsightsModule.cs`, `EndpointMappingExtensions.cs` all confirmed correct and unchanged.
+- **Build**: `dotnet build src/server/api/Sprk.Bff.Api/` succeeds, 0 errors, 2 warnings (pre-existing NU1903 Kiota CVEs; zero new); `dotnet build tests/integration/Spe.Integration.Tests/` succeeds, 0 errors, 3 warnings (pre-existing).
+- **Targeted run (full class)**: `dotnet test --filter "FullyQualifiedName~PrecedentAdminEndpointsTests"` → **6 Passed / 0 Failed / 0 Skipped / 6 Total** (5 s). Re-enabled `PostPrecedent_AsAdmin_Returns_201_WithTentativeStatus` passes; 5 other tests in class still pass — no regression.
+- **Full integration regression check**: `dotnet test tests/integration/Spe.Integration.Tests/` → **370 Passed / 0 Failed / 52 Skipped / 422 Total** (27 s) — zero regression from shared TestUserId change.
+- **Full unit regression check**: `dotnet test tests/unit/Sprk.Bff.Api.Tests/` → **5927 Passed / 0 Failed / 109 Skipped / 6036 Total** (1m12s) — zero cross-project ripple.
+- **Ledger transition**: RB-T028-08 row → `repaired` with full root-cause documentation + Tests Skip'd → Pass row + verification metrics; resolution commit placeholder TBD pending main-session commit.
+- **Step 9.5 quality gates** (effectively STANDARD per task 025 precedent — test-only change): code-review PASS (1 constant value change + XML doc expansion, minimal-blast-radius, mirrors task 025 RB-T028-07 fixture-config pattern, full regression sweep documented). adr-check PASS (ADR-010 / ADR-018 / ADR-001 / ADR-008 all NOT triggered — no DI/flag/endpoint/filter changes; `bff-extensions.md` not triggered — no new endpoint/package/DI/background work).
+- **NFR-04 commit message (for main session)**: `fix(bff-api): correct TestUserId to valid-GUID format for oid-fallback contract (RB-T028-08; repaired)`
+- **No commit by this task** — main session bundles per project convention.
 
-### Task 029 outcome (2026-06-01) — PASS
+### Task 033 outcome (2026-06-01) — REPAIRED
 
-- **3 runs completed** at HEAD `9828711a45207d9122bac470a91ef766adcd0ffa`:
-  - Run 1: 6035 / 5916 / **0 Failed** / 119 Skipped / 1m15s ✅
-  - Run 2: 6035 / 5916 / **0 Failed** / 119 Skipped / 1m13s ✅
-  - Run 3: 6035 / 5916 / **0 Failed** / 119 Skipped / 1m14s ✅
-- **Zero variance**. Identical Pass/Fail/Skip counts across all 3 runs. Identical test-name sets across all 3 runs (sorted diff = empty).
-- **Zero flake candidates**. No test transitioned between Pass and Fail in any pair of runs.
-- **Delta vs Phase 1 exit baseline (5902/0/129/6031)**: +14 Passed, −10 Skipped, +4 Total, 0 Failed delta. Reconciles tight against expected Phase 2 Skip→Pass (14 unit + 9 integration-suite for RB-T028-07 = 23; the 9 RB-T028-07 transitions live in `Spe.Integration.Tests` and are validated by FR-10 task 038, NOT this unit triple-run; the −10 unit Skipped + 4 new unit tests = +14 Passed matches exactly).
-- **Files created**: `baseline/phase2-run{1,2,3}-2026-06-01.trx` + `baseline/phase2-exit-triple-run-2026-06-01.md` (summary doc with PASS verdict + ledger inventory + delta reconciliation).
-- **TASK-INDEX**: 029 row flipped to ✅ 2026-06-01.
-- **POML status**: `<status>` set to `completed-2026-06-01`.
-- **No commit by this task** — main session bundles.
+- **Production change**: `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs` — `RegulationPattern()` regex (line 78) relaxed inter-letter periods from mandatory to optional: `C\.F\.R\.?` → `C\.?F\.?R\.?`. Named groups (`title`, `part`) preserved; regex flags (Compiled / ExplicitCapture / IgnoreCase) + 500ms timeout preserved. XML doc updated (~lines 71-76) to document the no-period form contract per RB-T044-05.
+- **Why a fix was needed**: Class XML doc line 15 explicitly lists `21 CFR Part 312` (no-period form) as a supported input, but the original regex required the period form `C.F.R.` (only the trailing period was optional). The no-period form was never matched, contradicting the documented contract.
+- **Test change**: `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs` — `ExtractCitations_Regulation_NoPeriodForm_MatchedAndNormalized` (~line 157) flipped `[Fact(Skip = "...")]`→`[Fact]`; per-test `[Trait("status","real-bug-pending-fix")]` removed (class-level `[Trait("status","repaired")]` applies).
+- **Build**: `dotnet build src/server/api/Sprk.Bff.Api/` succeeds, 0 errors, 17 warnings (all pre-existing — NU1903 Kiota CVE × 2, CS0618 obsolete × 6, CS1998 async × 5, CS8601 × 2, CS8604 × 2; zero new warnings; none touch CitationExtractor.cs).
+- **Targeted test run**: `dotnet test --filter "FullyQualifiedName~CitationExtractorTests"` → 30 Passed / 0 Failed / 0 Skipped / Duration 22ms. Confirms:
+  - Re-enabled `ExtractCitations_Regulation_NoPeriodForm_MatchedAndNormalized` (RB-T044-05) PASSES.
+  - 2 existing Regulation Theory cases (`47 C.F.R. § 73.3999`, `40 C.F.R. § 122.26`) still PASS — no regression.
+  - Sibling-fix preservation verified: 4 CaseLaw Theory (task 020 RB-T044-02 NormalizeCaseLaw `.TrimEnd('.')` removal), 3 Statute Theory + 1 Statute strip-subsection Fact (task 032 RB-T044-03 NormalizeStatute paren-strip), 2 US Patent + 2 EP/WO Patent (task 021 RB-T044-04 NormalizePatent double-prefix removal) — ALL PASS. Tasks 020/021/032 fixes NOT disturbed.
+- **Ledger transition**: `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` — RB-T044-05 row updated with Status=`repaired`, transition date 2026-06-01, "Tests Skip'd → Pass" row showing 30/30 targeted-run result; resolution commit placeholder TBD pending main-session commit.
+- **Step 9.5 FULL rigor gates**: code-review PASS (5-char regex literal change, minimal-blast-radius, matches POML §goal + ledger §Recommended Fix verbatim, sibling fixes verified untouched), adr-check PASS (ADR-013 refined — change is INSIDE `Services/Ai/Safety/Citations/`, facade discipline preserved; ADR-015 — no LLM-text logging added; ADR-010 — no DI changes; bff-extensions.md §A all 5 rules satisfied — no new endpoint/service/DI/package/background work; §F test update obligation satisfied).
+- **NFR-04 commit message (for main session)**: `fix(bff-api): RegulationPattern accepts CFR no-period form (RB-T044-05; repaired)`
+- **No commit by this task** — main session bundles per project convention (sibling task 037 also in P3-W2).
 
-### Phase 2 closures summary (now-complete)
+### P3-W2 wave status
+
+| Task | Ledger | File | Status |
+|---|---|---|---|
+| 033 | RB-T044-05 | CitationExtractor.cs (RegulationPattern) | ✅ repaired-2026-06-01 |
+| 037 (this) | RB-T028-08 | IntegrationTestFixture.cs (TestUserId) + PrecedentAdminEndpointsTests.cs (Skip removed) | ✅ repaired-2026-06-01 |
+
+**P3-W2 wave COMPLETE.** Both LOW closures landed; P3-W3 (task 038 integration triple-run) unblocked.
+
+### Phase 3 closures running total (P3-W1 + P3-W2 partial)
 
 | Task | Ledger | Status |
 |---|---|---|
-| 020 | RB-T044-02 | ✅ repaired |
-| 021 | RB-T044-04 | ✅ repaired |
-| 022 | RB-T053-01 | 🟡 partial (Option 1+B per D-11; RB-T053-01a residual filed) |
-| 023 | RB-T070-03 | ✅ repaired (Path 1 test-seam per D-12) |
-| 024 | RB-T028-01 | ✅ repaired (TakeLast Option B) |
-| 025 | RB-T028-07 | ✅ repaired (fixture-config — distinct from 011's DI cluster) |
-| 026 | RB-T028-02 | ⏭ subsumed by task 012 (Phase 1 path-b) |
-| 029 | (gate) | ✅ PASS 2026-06-01 |
+| 030 | (P3-W1) | ✅ repaired-2026-06-01 |
+| 031 | (P3-W1) | ✅ repaired-2026-06-01 |
+| 032 | RB-T044-03 | ✅ repaired-2026-06-01 |
+| 033 | RB-T044-05 | ✅ repaired-2026-06-01 (this task) |
+| 034 | (P3-W1) | ✅ repaired-2026-06-01 |
+| 035 | RB-T070-01 | ✅ repaired-2026-06-01 |
+| 036 | RB-T070-02 | ✅ repaired-2026-06-01 |
+| 037 | RB-T028-08 | ✅ repaired-2026-06-01 (this task; fixture-config gap NOT subsumed by 011) |
 
-**Cumulative ledger closure (Phase 1 + Phase 2)**: 11 of 21 closed + 1 partial + 1 residual filed (RB-T053-01a). 9 remain for Phase 3 (8 LOW from r1 + RB-T053-01a tracked as r3-candidate).
+### Files Modified This Session (task 037)
 
-### Phase 3 readiness
-
-P3-W1 dispatch is unblocked. All Phase 3 P3-W1 tasks (030, 031, 032, 034, 035, 036) depend only on `029 ✅` and operate on disjoint Services/ files (parallel-safe, 6-agent hard cap honored).
-
-Phase 3 wave plan (per TASK-INDEX):
-
-| Wave | Agents | Tasks | Constraint |
-|---|---|---|---|
-| **P3-W1** | 6 | 030, 031, 032, 034, 035, 036 | Disjoint files — next dispatch |
-| P3-W2 | 2 | 033 (after 032), 037 | 033 same file as 032 |
-| P3-W3 | 1 | 038 | `Spe.Integration.Tests` triple-run (FR-10) — validates RB-T028-07 9-test slice |
-| P3-W4 | 1 | 039 | Phase 3 exit cumulative ledger audit |
-
-### Files Modified This Session (task 029)
-
-- `projects/sdap.bff.api-test-suite-repair-r2/baseline/phase2-run1-2026-06-01.trx` — created (TRX run 1)
-- `projects/sdap.bff.api-test-suite-repair-r2/baseline/phase2-run2-2026-06-01.trx` — created (TRX run 2)
-- `projects/sdap.bff.api-test-suite-repair-r2/baseline/phase2-run3-2026-06-01.trx` — created (TRX run 3)
-- `projects/sdap.bff.api-test-suite-repair-r2/baseline/phase2-exit-triple-run-2026-06-01.md` — created (summary doc + verdict)
-- `projects/sdap.bff.api-test-suite-repair-r2/tasks/TASK-INDEX.md` — edited (029 row → ✅ 2026-06-01 PASS)
-- `projects/sdap.bff.api-test-suite-repair-r2/tasks/029-phase2-exit-triple-run.poml` — edited (`<status>` → `completed-2026-06-01`)
+- `tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs` — `IntegrationTestConstants.TestUserId` constant changed from non-GUID literal to valid GUID `"11111111-1111-1111-1111-111111111111"`; XML doc expanded to document Entra-ID `oid` contract
+- `tests/integration/Spe.Integration.Tests/Api/Insights/PrecedentAdminEndpointsTests.cs` — Skip attribute removed from `PostPrecedent_AsAdmin_Returns_201_WithTentativeStatus` (line 55); per-test trait transitioned `real-bug-pending-fix` → `repaired`
+- `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` — RB-T028-08 row → `repaired` with full root-cause documentation
+- `projects/sdap.bff.api-test-suite-repair-r2/tasks/037-fix-rb-t028-08.poml` — `<status>` → `completed-2026-06-01`
+- `projects/sdap.bff.api-test-suite-repair-r2/tasks/TASK-INDEX.md` — 037 row → ✅ with FULL→STANDARD rigor note
 - `projects/sdap.bff.api-test-suite-repair-r2/current-task.md` — this file
+
+### Files Modified Earlier This Session (task 033 — completed prior, retained for traceability)
+
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs` — production regex relaxation (RegulationPattern line 78 + XML doc lines 71-76)
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs` — Skip removed + per-test trait removed (line 157)
+- `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` — RB-T044-05 row → `repaired`
+- `projects/sdap.bff.api-test-suite-repair-r2/tasks/033-fix-rb-t044-05.poml` — `<status>` → `completed-2026-06-01`
 
 ---
 
@@ -87,54 +93,49 @@ Phase 3 wave plan (per TASK-INDEX):
 
 | Field | Value |
 |---|---|
-| **Task ID** | 029 — Phase 2 P2-W3 exit triple-run validation gate |
-| **Task File** | [`tasks/029-phase2-exit-triple-run.poml`](tasks/029-phase2-exit-triple-run.poml) |
-| **Title** | Phase 2 exit triple-run validation gate (MEDIUM tier complete) |
-| **Phase** | Phase 2 P2-W3 |
-| **Status** | completed-2026-06-01 (PASS) |
+| **Task ID** | 033 — Phase 3 P3-W2 — RB-T044-05 (LOW) closure |
+| **Task File** | [`tasks/033-fix-rb-t044-05.poml`](tasks/033-fix-rb-t044-05.poml) |
+| **Title** | P3 — Fix RB-T044-05: CitationExtractor.RegulationPattern accept documented `CFR` (no-period) form |
+| **Phase** | Phase 3 P3-W2 |
+| **Status** | completed-2026-06-01 (REPAIRED) |
 | **Started + Completed** | 2026-06-01 |
 
 ---
 
 ## Progress
 
-### Completed Steps (task 029)
+### Completed Steps (task 033)
 
-- [x] Step 1 — Pre-flight: verified Phase 2 deps (020 ✅, 021 ✅, 022 🟡 acceptable per D-02, 023 ✅, 024 ✅, 025 ✅, 026 ⏭); working tree clean (TASK-INDEX in-flight delta from prior task = benign); BFF API build 0 errors / 17 warnings; test build 0 errors / 2 warnings.
-- [x] Step 2 — Triple-run executed at HEAD `9828711a`; 3 TRX files saved to `baseline/`.
-- [x] Step 3 — Parse + cross-run flake analysis: 0 Failed outcomes, 119 NotExecuted, 6035 unique testNames per run; sorted-testName diff Run1-vs-Run2-vs-Run3 = empty.
-- [x] Step 4 — Summary doc authored with 8 sections per dispatcher spec.
-- [x] Step 5 — Gate verdict PASS; TASK-INDEX flipped 029 → ✅ 2026-06-01; POML `<status>` → `completed-2026-06-01`; this file refreshed for Phase 3 P3-W1 dispatch readiness.
+- [x] Step 1 — Loaded r1 ledger entry RB-T044-05 (lines 547-575); documented bug + recommended fix verified.
+- [x] Step 2 — Verified task 032 commit landed (HEAD `546ebcb3` Phase 3 P3-W1 wave bundle; `NormalizeStatute` with subsection paren-strip confirmed at lines 174-186; `StatutePattern` regex with `[a-z]?(?:\([a-z0-9]+\))*` confirmed at line 45).
+- [x] Step 3 — Read `CitationExtractor.cs` focusing on `RegulationPattern()` (line 74-78).
+- [x] Step 4 — Applied minimal regex edit: `C\.F\.R\.?` → `C\.?F\.?R\.?` (5 chars added). XML doc updated to document RB-T044-05 contract. Named groups + flags + timeout preserved.
+- [x] Step 5 — Build BFF: `dotnet build src/server/api/Sprk.Bff.Api/` → 0 errors / 17 warnings (zero new).
+- [x] Step 6 — Edit `CitationExtractorTests.cs`: removed `[Fact(Skip = "RB-T044-05: ...")]`→`[Fact]`; removed per-test `[Trait("status","real-bug-pending-fix")]`.
+- [x] Step 7 — Targeted run: `dotnet test --filter "FullyQualifiedName~CitationExtractorTests"` → 30 Passed / 0 Failed / 0 Skipped.
+- [x] Step 8 — Ledger row RB-T044-05 updated: status → `repaired`; fix-commit SHA placeholder TBD + date 2026-06-01.
+- [x] Step 9 — (no commit by this task — main session bundles per NFR-04)
+- [x] Step 9.5 — FULL rigor gates: code-review PASS + adr-check PASS.
+- [x] Step 10 — `current-task.md` updated (this file).
 
 ### Current Step
 
-Done. Awaiting main-session dispatch of Phase 3 P3-W1 (6-agent wave).
+Done. Awaiting main-session commit + sibling task 037 completion + next dispatch (P3-W3 task 038).
 
 ### Decisions Made
 
-- 2026-06-01 (task 029): No `.claude/` writes (sub-agent boundary respected); no commits (main session bundles Phase 2 + 029 artifacts per project convention).
+- 2026-06-01 (task 033): No `.claude/` writes (sub-agent boundary respected); no commits (main session bundles P3-W2 + remaining Phase 3 artifacts per project convention).
 
 ---
 
 ## Next Action
 
-**Dispatch Phase 3 P3-W1** — 6-agent parallel wave: tasks 030, 031, 032, 034, 035, 036.
+**Sibling task 037 completion + Phase 3 P3-W3 dispatch** (task 038 — `Spe.Integration.Tests` triple-run / FR-10 — validates RB-T028-07 9-test slice).
 
-**Per TASK-INDEX.md** — all 6 tasks operate on disjoint Services/ files; hard cap 6 honored; all depend only on `029 ✅`. Send ONE message with 6 `Skill` tool invocations (one per task), each invoking `task-execute` with the respective POML path.
+After P3-W3 completes:
+- **Task 039** (P3-W4) — Phase 3 exit cumulative ledger audit (NOT a triple-run; confirms all Phase 1 + 2 + 3 closures).
 
-**Sequential gates within Phase 3**:
-- Task 033 (after 032) — same file (`CitationExtractor.cs`)
-- Task 037 — independent (Phase 3 P3-W2 wave with 033)
-- Task 038 (after 030-037) — Spe.Integration.Tests triple-run (FR-10)
-- Task 039 (after 038) — Phase 3 exit cumulative audit
-
-**Trigger phrase to resume**: "continue" / "dispatch P3-W1" / "execute Phase 3 wave 1" — CLAUDE.md §4 auto-routes to the next 🔲 task (030) and into task-execute.
-
-**Pre-conditions for P3-W1 dispatch**:
-- Task 029 gate must PASS ✅ (this task — confirmed PASS 2026-06-01)
-- All 11 prior closures still hold (Phase 1 × 7 + Phase 2 × 5 minus 022 partial) — confirmed by 3 × clean unit triple-run with zero variance
-- Build green: `dotnet build src/server/api/Sprk.Bff.Api/` → 0 errors (verified 2026-06-01 pre-task-029)
-- TASK-INDEX 029 ✅ (verified)
+**Trigger phrase to resume**: "continue" / "dispatch P3-W3" / "execute task 038" — CLAUDE.md §4 auto-routes to the next 🔲 task and into task-execute.
 
 ---
 
@@ -146,28 +147,23 @@ Done. Awaiting main-session dispatch of Phase 3 P3-W1 (6-agent wave).
 
 ## Session Notes
 
-### Current Session (task 029)
+### Current Session (task 033)
 
-- Started: 2026-06-01 (task-execute skill, STANDARD rigor)
-- Focus: Phase 2 exit triple-run validation gate — pure measurement task
-- Outcome: PASS — Phase 3 unblocked
+- Started: 2026-06-01 (task-execute skill, FULL rigor)
+- Focus: RB-T044-05 LOW closure — regex literal repair on CitationExtractor.RegulationPattern
+- Outcome: REPAIRED — Skip→Pass on 1 unit test; 4 sibling fixes (tasks 020/021/032 + existing Regulation Theory) verified intact
 
 ### Key Learnings
 
-- Phase 2 unit-suite delta from Phase 1 (+14 Passed / −10 Skipped / +4 Total) reconciles tight against task closures when the RB-T028-07 9-test integration slice is correctly attributed to `Spe.Integration.Tests` (validated by task 038 FR-10, NOT this unit triple-run).
-- The Phase 1 RB-T013-01 inline flake fix (test relaxation from `HaveCount(100)` to `HaveCountGreaterThanOrEqualTo(99)`) proved durable — Phase 2 triple-run had zero flakes, confirming the birthday-paradox accommodation works correctly.
-- Task 022's 🟡 partial closure (Option 1+B per D-11 + RB-T053-01a residual filed) does NOT contribute Skip→Pass; the affected tests intentionally stay Skip'd pointing at the residual — this is by design per the partial-closure contract.
+- Single-character regex relaxation (`\.` → `\.?`) is the textbook minimal-blast-radius repair pattern for "literal vs documented form" contract bugs. Same pattern would apply to similar literal-form regex constraints in other CitationExtractor patterns if filed in future.
+- The 4 same-file siblings (NormalizeCaseLaw / NormalizePatent / NormalizeStatute / NormalizeRegulation, plus CaseLawPattern / StatutePattern / PatentPattern / RegulationPattern / SecFilingPattern) are ORTHOGONAL — each repair touches one method/pattern only. The coordination protocol (serialize P3-W1 → P3-W2 by task 032 commit landing first) protected against merge race but the actual functional touch surface never overlapped.
+- `dotnet test --filter "FullyQualifiedName~CitationExtractorTests"` runs 30 tests in 22ms — covers all 4 sibling repairs in a single targeted invocation. This makes it a perfect smoke gate for any future change to CitationExtractor.cs.
 
 ### Handoff Notes
 
-**For next session** — Phase 3 P3-W1 dispatch is the next significant work unit. Read TASK-INDEX.md §"Phase 3 — LOW Severity + Integration Stability" for the wave plan. All 6 tasks in P3-W1 are LOW severity, parallel-safe, depend only on `029 ✅`.
+**For next session** — task 037 is the remaining P3-W2 task (parallel-safe, different file). Then P3-W3 (task 038 integration triple-run) and P3-W4 (task 039 cumulative audit).
 
-**Critical reminders**:
-- All 8 Phase 3 LOW tasks (030-037) follow standard task-execute protocol with FULL rigor (production code in `.cs` files; bff-api tag).
-- Phase 3 introduces the first integration triple-run gate (task 038, FR-10) which validates the 9 RB-T028-07 Skip→Pass closed in task 025.
-- Phase 3 exit gate (task 039) is a cumulative ledger audit — NOT a triple-run; it confirms all Phase 1 + 2 + 3 closures.
-
-**If `/compact` runs**: this current-task.md is the SOURCE OF TRUTH. The Quick Recovery section + Next Action section together contain everything needed to resume. The CLAUDE.md trigger phrase "continue" routes correctly via §4 to the next 🔲 task.
+**If `/compact` runs**: this current-task.md is the SOURCE OF TRUTH. The Quick Recovery section + Next Action section together contain everything needed to resume.
 
 ---
 
@@ -179,19 +175,14 @@ Done. Awaiting main-session dispatch of Phase 3 P3-W1 (6-agent wave).
 - **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
 - **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
 - **Phase 1 exit baseline**: [`baseline/phase1-exit-triple-run-2026-06-01.md`](baseline/phase1-exit-triple-run-2026-06-01.md)
-- **Phase 2 exit baseline**: [`baseline/phase2-exit-triple-run-2026-06-01.md`](baseline/phase2-exit-triple-run-2026-06-01.md) (this task)
+- **Phase 2 exit baseline**: [`baseline/phase2-exit-triple-run-2026-06-01.md`](baseline/phase2-exit-triple-run-2026-06-01.md)
 
-### Applicable ADRs
+### Knowledge Files Loaded (task 033)
 
-(See CLAUDE.md "Binding ADRs" section for full list with relevance)
-
-### Knowledge Files Loaded
-
-- `spec.md` (this project)
-- `design.md` (this project)
-- `tasks/029-phase2-exit-triple-run.poml` (task spec for this task)
-- `baseline/phase1-exit-triple-run-2026-06-01.md` (Phase 1 baseline for delta computation)
-- `tasks/TASK-INDEX.md` (Phase 2 dep status verification + Phase 3 readiness check)
+- `projects/sdap.bff.api-test-suite-repair-r2/tasks/033-fix-rb-t044-05.poml` (task spec for this task)
+- `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` (RB-T044-05 entry — bug detail + Recommended Fix)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs` (production target — read pre + post fix)
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs` (test target — read pre + post Skip flip)
 
 ---
 
@@ -201,14 +192,13 @@ Done. Awaiting main-session dispatch of Phase 3 P3-W1 (6-agent wave).
 
 1. **Quick Recovery**: Read the "Quick Recovery" section above (< 30 seconds)
 2. **If more context needed**: Read CLAUDE.md (project-scoped AI context)
-3. **Find next task**: Read `tasks/TASK-INDEX.md` for first 🔲 task (currently task 030)
-4. **Resume**: Invoke `task-execute` skill with that task file path; OR dispatch Phase 3 P3-W1 6-agent wave via multi-Skill message
+3. **Find next task**: Read `tasks/TASK-INDEX.md` for first 🔲 task
+4. **Resume**: Invoke `task-execute` skill with that task file path
 
 **Commands**:
 - `/project-continue` — Full project context reload + master sync
 - `/context-handoff` — Save current state before compaction
 - "where was I?" — Quick context recovery
-- "dispatch P3-W1" / "execute Phase 3 wave 1" — Send a single message with 6 parallel `task-execute` invocations
 
 **For full protocol**: See [docs/procedures/context-recovery.md](../../docs/procedures/context-recovery.md)
 

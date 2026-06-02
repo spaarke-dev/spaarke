@@ -154,8 +154,7 @@ public class CitationExtractorTests
             c.NormalizedKey == expectedKey);
     }
 
-    [Fact(Skip = "RB-T044-05: CitationExtractor.RegulationPattern requires the literal 'C.F.R.' form, but the class XML doc explicitly documents '21 CFR Part 312' (no periods) as a supported input. The regex must be widened to `C\\.?F\\.?R\\.?` to honor the documented contract. See ledger.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
     public void ExtractCitations_Regulation_NoPeriodForm_MatchedAndNormalized()
     {
         var results = CitationExtractor.ExtractCitations("21 CFR Part 312 governs IND");

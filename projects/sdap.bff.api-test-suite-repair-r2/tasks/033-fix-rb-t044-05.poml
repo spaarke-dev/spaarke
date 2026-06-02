@@ -2,7 +2,7 @@
   <metadata>
     <title>P3 — Fix RB-T044-05: CitationExtractor.RegulationPattern accept documented `CFR` (no-period) form</title>
     <phase>Phase 3: LOW Severity + Integration Stability</phase>
-    <status>not-started</status>
+    <status>completed-2026-06-01</status>
     <estimated-effort>30-60 minutes</estimated-effort>
     <dependencies>029, 032</dependencies>
     <blocks>038</blocks>
