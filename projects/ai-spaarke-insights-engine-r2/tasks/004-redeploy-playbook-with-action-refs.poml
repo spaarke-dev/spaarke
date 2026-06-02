@@ -12,7 +12,9 @@
   </metadata>
 
   <prompt>
-    Run Deploy-Playbook.ps1 with the updated predict-matter-cost.playbook.json to recreate the playbook in Spaarke Dev with proper action-code references and sprk_isactive=true on all nodes. The existing playbook can either be (a) updated in place via the script's -Force flag if supported, or (b) deleted and recreated. Either approach must result in 8 active nodes wired to the 6 INSIGHTS.* action rows plus the existing AgentService synthesis action.
+    **Re-scoped 2026-06-02 per D-01 + owner direction**: per D-01 §2.4 the deployed nodes have wiped configjson — in-place update is NOT viable. This task MUST delete the existing 8 sprk_playbooknode rows (do NOT delete the sprk_analysisplaybook itself) before redeploy. Post-deploy verification (lint from task 003) MUST confirm both sprk_actionid AND sprk_configjson are populated correctly. After successful deploy, document the "do not open in Make Playbook Designer UI" operational rule (folded into task 006). See D-01 §4 path-b re-scope.
+
+    Run Deploy-Playbook.ps1 with the updated predict-matter-cost.playbook.json to recreate the 8 nodes (after deletion) in Spaarke Dev with proper action-code references AND complete configjson contents AND sprk_isactive=true on all nodes. The result must be 8 active nodes wired to the 6 INS-* action rows (from task 002) plus the existing AgentService synthesis action.
   </prompt>
 
   <role>Operator + Spaarke deployment specialist.</role>

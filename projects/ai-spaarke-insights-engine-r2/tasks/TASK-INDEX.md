@@ -21,16 +21,18 @@
 
 ## Wave-organized index
 
-### Wave B — Unblock synthesis (~½ day; sequenced FIRST)
+### Wave B — Unblock synthesis (~1–2 days; sequenced FIRST; re-scoped per D-01 path-b 2026-06-02)
+
+> **Re-scoped**: per [decisions/D-01](../decisions/D-01-wave-b-root-cause-corrected.md), Wave B was expanded from 6 tasks/~½ day to 6 tasks/~1–2 days. Original framing ("create 6 rows") was the right *direction* but missed the configjson-wipe issue + actionType-vs-actionCode mismatch. Tasks 001 + 002 were re-scoped; tasks 003, 004, 006 have addenda. Per owner direction, JPS authoring goes through `/jps-action-create` + `/jps-playbook-design` skills.
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [001](001-create-insights-action-rows.poml) | B1 | Create 6 sprk_analysisaction rows in Spaarke Dev | 🔲 | 2h | ❌ | — |
-| [002](002-update-playbook-json-action-refs.poml) | B2 | Update predict-matter-cost.playbook.json action refs | 🔲 | 1h | ❌ | 001 |
-| [003](003-deploy-playbook-action-lint.poml) | B3 | Deploy-Playbook.ps1 action-wiring lint check | 🔲 | 1h | ✅ | — |
-| [004](004-redeploy-playbook-with-action-refs.poml) | B4 | Re-deploy predict-matter-cost@v1 to Spaarke Dev | 🔲 | 30m | ❌ | 002, 003 |
+| [001](001-create-insights-action-rows.poml) | B1 | **Investigate playbook-architecture + scope-model-index** (resolve D-01 Q1+Q2+Q3 via authoritative docs) | 🔲 | 2h | ❌ | — |
+| [002](002-update-playbook-json-action-refs.poml) | B2 | **Create 6 sprk_analysisaction rows via `/jps-action-create` skill** (one per Insights ActionType) | 🔲 | 4h | ❌ | 001 |
+| [003](003-deploy-playbook-action-lint.poml) | B3 | Deploy-Playbook.ps1 lint check (action-code + configjson preservation per D-01) | 🔲 | 2h | ✅ | — |
+| [004](004-redeploy-playbook-with-action-refs.poml) | B4 | **Delete + re-deploy 8 nodes** (clean clobbered configjson per D-01 §2.4) | 🔲 | 1h | ❌ | 002, 003 |
 | [005](005-live-smoke-predict-matter-cost.poml) | B5 | Live smoke verification (SC-01) | 🔲 | 1h | ❌ | 004 |
-| [006](006-update-phase1-verification-doc.poml) | B6 | Update Phase 1 verification doc with closed-gap status | 🔲 | 30m | ❌ | 005 |
+| [006](006-update-phase1-verification-doc.poml) | B6 | Update verification doc + document "do not open in Designer" rule + close D-01 | 🔲 | 1h | ❌ | 005 |
 
 ---
 

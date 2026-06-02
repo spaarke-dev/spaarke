@@ -12,7 +12,9 @@
   </metadata>
 
   <prompt>
-    Update the Phase 1 deployment-verification doc (in r1 project or the Spaarke-wide architecture doc) to reflect that the predict-matter-cost@v1 live-execution gap is CLOSED. This is documentation hygiene closing out the Wave B unblock. Per owner direction R1-1, the broader r1 wrap-up is NOT in r2 scope — this is a targeted doc update on the specific gap that Wave B fixed.
+    **Re-scoped 2026-06-02 per D-01 + owner direction**: this task now ALSO documents the new operational rule surfaced by D-01 §2.4 — "do NOT open Insights playbooks in the Make Playbook Designer UI after deploy" (canvas Designer wipes sprk_configjson custom contents). Add this rule to INSIGHTS-ENGINE-GUIDE.md (Wave A2 will polish) + close decision record D-01 with the final outcome. See D-01 §4 path-b re-scope.
+
+    Update the Phase 1 deployment-verification doc (in r1 project or the Spaarke-wide architecture doc) to reflect that the predict-matter-cost@v1 live-execution gap is CLOSED. This is documentation hygiene closing out the Wave B unblock. Per owner direction R1-1, the broader r1 wrap-up is NOT in r2 scope — this is a targeted doc update on the specific gap that Wave B fixed. PATH-B EXTENSION: also document Designer-no-open rule + close D-01.
   </prompt>
 
   <role>Documentation maintainer.</role>

@@ -12,7 +12,9 @@
   </metadata>
 
   <prompt>
-    Add a lint check to Deploy-Playbook.ps1 that rejects any playbook JSON whose nodes lack action-code references. This prevents the regression that surfaced in r1 deployment (nodes created without sprk_isactive=true; nodes created without action wiring → engine builds "0 active nodes" execution graphs → defensive scaffold decline at the orchestrator).
+    **Re-scoped 2026-06-02 per D-01 + owner direction**: task expanded beyond original "lint check only". Per D-01 §2.4–§2.5, the deployed predict-matter-cost@v1 nodes have BOTH missing sprk_actionid bindings AND wiped sprk_configjson contents. This task's lint check now MUST verify all three: (1) every node JSON has actionCode, (2) deployed sprk_actionid is populated post-deploy, (3) deployed sprk_configjson matches the JSON spec (catches canvas Designer clobbering). See D-01 §4 path-b re-scope. Original "action-wiring lint" framing below is preserved as the foundation.
+
+    Add a lint check to Deploy-Playbook.ps1 that rejects any playbook JSON whose nodes lack action-code references. This prevents the regression that surfaced in r1 deployment (nodes created without sprk_isactive=true; nodes created without action wiring → engine builds "0 active nodes" execution graphs → defensive scaffold decline at the orchestrator). PATH-B EXTENSION: also lint configjson preservation per D-01.
   </prompt>
 
   <role>PowerShell engineer + Spaarke deployment-script maintainer.</role>

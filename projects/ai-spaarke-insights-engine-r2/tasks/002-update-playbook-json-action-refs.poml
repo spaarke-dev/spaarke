@@ -1,53 +1,88 @@
 <task id="002" project="ai-spaarke-insights-engine-r2">
   <metadata>
-    <title>B2 — Update predict-matter-cost.playbook.json to reference new Insights action codes</title>
+    <title>B2 — Create 6 sprk_analysisaction rows in Spaarke Dev via jps-action-create skill (one per Insights ActionType)</title>
     <status>not-started</status>
     <wave>B</wave>
-    <estimated-effort>1h</estimated-effort>
-    <tags>playbook-config, jps, predict-matter-cost, unblock-synthesis</tags>
+    <estimated-effort>4h</estimated-effort>
+    <tags>dataverse, jps-action-create, sprk_analysisaction, insights-actiontypes, unblock-synthesis</tags>
     <dependencies>001</dependencies>
     <parallel-safe>false</parallel-safe>
     <rigor>STANDARD</rigor>
-    <wave-item>B2</wave-item>
+    <wave-item>B2 (re-scoped 2026-06-02 per D-01 + owner direction; was "update playbook JSON action refs")</wave-item>
   </metadata>
 
   <prompt>
-    Update predict-matter-cost.playbook.json (the source-of-truth declarative spec consumed by Deploy-Playbook.ps1) so each Insights-mode node references the new sprk_analysisaction action code created in task 001. Today the playbook nodes lack proper action wiring, which is why end-to-end execution returns the defensive scaffold decline.
+    **Re-scoped 2026-06-02 per D-01 + owner direction**: this task is now the canonical "create 6 sprk_analysisaction rows" task (was the original B1 framing; the empirical investigation moved that work here after answering the architectural open questions in task 001). Per owner direction, every JPS prompt MUST be authored via the `/jps-action-create` skill (Tier 1 component). This task invokes that skill 6 times — one per Insights node ActionType — and creates the resulting sprk_analysisaction rows in Spaarke Dev.
   </prompt>
 
-  <role>Playbook author + JPS contract specialist.</role>
+  <role>JPS-action curator + dataverse-mcp operator + orchestrator of the jps-action-create skill.</role>
 
   <goal>
-    predict-matter-cost.playbook.json updated with action-code references on every node. Each node's "actionCode" (or equivalent JPS field) points to one of the 6 INSIGHTS.* rows from task 001. Synthesis node (AgentService) action code unchanged from r1 — only Insights-mode nodes need new references.
+    6 new sprk_analysisaction rows live in Spaarke Dev, each authored via the `/jps-action-create` skill workflow. Each row:
+    - Has a unique action code (e.g., INS-LIVE-FACT, INS-INDEX-RETRIEVE, INS-EVIDENCE-SUFFICIENCY, INS-GROUNDING-VERIFY, INS-DECLINE-TO-FIND, INS-RETURN-ARTIFACT)
+    - Has sprk_actiontype set to the matching enum integer (80, 90, 100, 70, 110, 120) — exact mechanism per D-01 §3 Q1 resolution from task 001
+    - Has sprk_systemprompt populated with valid JPS JSON per the canonical schema ($schema, $version, instruction, input, output, scopes, examples, metadata)
+    - Is queryable + dispatchable via PlaybookOrchestrationService → NodeExecutorRegistry → matching INodeExecutor
   </goal>
 
   <inputs>
-    <file purpose="r1-playbook-json">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json</file>
-    <file purpose="action-codes">projects/ai-spaarke-insights-engine-r2/notes/drafts/wave-b-action-codes.md (from task 001)</file>
-    <file purpose="spec">projects/ai-spaarke-insights-engine-r2/spec.md</file>
+    <file purpose="prerequisite-findings">projects/ai-spaarke-insights-engine-r2/decisions/D-01-wave-b-root-cause-corrected.md (Q1+Q2+Q3 resolved per task 001)</file>
+    <file purpose="canonical-jps-model">Existing sprk_analysisaction "ACT-021" (Classify Document) — gold-standard JPS structure (loaded via MCP read_query)</file>
+    <file purpose="skill-to-invoke">.claude/skills/jps-action-create/SKILL.md (Tier 1 component)</file>
+    <file purpose="exemplar">.claude/skills/jps-action-create/examples/document-profiler.json (simple-extraction reference)</file>
+    <file purpose="complex-exemplar">.claude/skills/jps-action-create/examples/clause-analyzer.json (complex-with-scopes reference)</file>
+    <file purpose="jps-guide">docs/guides/JPS-AUTHORING-GUIDE.md</file>
+    <file purpose="node-executor-source-of-truth">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/{LiveFactNode,IndexRetrieveNode,EvidenceSufficiencyNode,GroundingVerifyNode,DeclineToFindNode,ReturnInsightArtifactNode}.cs (for each: SupportedActionTypes + Validate() + Execute() — defines what the JPS prompt needs to produce)</file>
   </inputs>
 
   <constraints>
-    <constraint source="task-001-output">Use the EXACT action codes documented in notes/drafts/wave-b-action-codes.md</constraint>
-    <constraint source="r1">Preserve the existing 8-node graph structure (LiveFact → IndexRetrieve×2 → EvidenceSufficiency → [conditional: AiAnalysis → GroundingVerify | DeclineToFind] → ReturnInsightArtifact)</constraint>
-    <constraint source="r1">Preserve the AgentService synthesis node's existing action code (was working in r1)</constraint>
+    <constraint source="owner-direction-2026-06-02">Each JPS prompt MUST be authored via the /jps-action-create skill workflow (do not author inline)</constraint>
+    <constraint source="D-01 §2.2">ActionType enum mapping (Spaarke Dev integers): LiveFact=80, IndexRetrieve=90, EvidenceSufficiency=100, GroundingVerify=70, DeclineToFind=110, ReturnInsightArtifact=120</constraint>
+    <constraint source="spec.md PR-1">All prompt content goes into sprk_analysisaction.sprk_systemprompt — NO new sprk_prompt entity</constraint>
+    <constraint source="D-01 §3 Q1 resolution">Set sprk_actiontype (or whatever field+mechanism task 001 determined is canonical) correctly per row — this is load-bearing for orchestrator dispatch</constraint>
+    <constraint source="ADR-027">Schema/data changes flow through managed-solution promotion path; Spaarke Dev acceptable for B (data, not schema)</constraint>
   </constraints>
 
+  <knowledge>
+    <topic>JPS authoring, sprk_analysisaction structure, Insights node executor contracts</topic>
+    <files>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-action-create/examples/document-profiler.json</file>
+      <file>.claude/skills/jps-action-create/examples/clause-analyzer.json</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+    </files>
+  </knowledge>
+
   <steps>
-    <step order="1" name="Read action codes">Load wave-b-action-codes.md</step>
-    <step order="2" name="Read existing playbook JSON">Confirm current node structure + which nodes lack action refs</step>
-    <step order="3" name="Add action-code references">Set "actionCode" (per JPS schema field convention; verify field name against Deploy-Playbook.ps1) on each Insights-mode node to the matching INSIGHTS.* code</step>
-    <step order="4" name="Validate JSON">Parse with PowerShell ConvertFrom-Json to confirm well-formed</step>
-    <step order="5" name="Commit change">Single commit: "fix(insights-engine-r2): wire action codes in predict-matter-cost.playbook.json (Wave B2)"</step>
+    <step order="1" name="Re-read D-01 + task 001 findings">Confirm Q1+Q2+Q3 are resolved; confirm canonical sprk_actiontype mechanism</step>
+    <step order="2" name="For each of the 6 Insights ActionTypes, read the corresponding INodeExecutor source">LiveFactNode.cs → understand what the prompt must produce (subject, predicate, evidence). Same for IndexRetrieveNode, EvidenceSufficiencyNode, GroundingVerifyNode, DeclineToFindNode, ReturnInsightArtifactNode.</step>
+    <step order="3" name="Invoke /jps-action-create for LIVE-FACT">Skill Step 1 requirements gathering: action = "Resolve current matter Live Facts via ILiveFactResolver", outputs = liveFacts structured map; structured output = true; no scopes (deterministic, no LLM)</step>
+    <step order="4" name="Invoke /jps-action-create for INDEX-RETRIEVE">indexName, artifactType, filter, vectorQuery, topK inputs; outputs = ranked Observations/Precedents</step>
+    <step order="5" name="Invoke /jps-action-create for EVIDENCE-SUFFICIENCY">rules input (sufficiency criteria); verdict + gap-analysis output</step>
+    <step order="6" name="Invoke /jps-action-create for GROUNDING-VERIFY">citations + source chunks inputs; verified-citations output (stripped fabricated ones)</step>
+    <step order="7" name="Invoke /jps-action-create for DECLINE-TO-FIND">reason + suggestedActions + confidenceInDecline inputs; DeclineResponse output</step>
+    <step order="8" name="Invoke /jps-action-create for RETURN-ARTIFACT">from + artifactKind + subject + predicate inputs; InsightArtifact envelope output</step>
+    <step order="9" name="Create 6 rows in Spaarke Dev via mcp__dataverse__create_record">Each carries: sprk_actioncode (INS-...), sprk_name, sprk_description, sprk_systemprompt (the JPS JSON from skill), sprk_tags, sprk_sortorder, **sprk_actiontype** (canonical mechanism per D-01 Q1)</step>
+    <step order="10" name="Verify rows queryable">For each row: MCP read_query confirms sprk_systemprompt is valid JSON + sprk_actiontype is correct integer + sprk_isactive=true (or via state/status fields)</step>
+    <step order="11" name="Update D-01 + handoff notes">Record action-code-to-Guid map for task 003's playbook JSON updates</step>
   </steps>
 
+  <tools>
+    <tool name="Skill">/jps-action-create (6 invocations)</tool>
+    <tool name="mcp__dataverse__create_record">Author the 6 rows</tool>
+    <tool name="mcp__dataverse__read_query">Verify + look up ACT-021 model</tool>
+  </tools>
+
   <outputs>
-    <output type="config">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json (modified)</output>
+    <output type="dataverse-data">6 new sprk_analysisaction rows in Spaarke Dev (action codes INS-LIVE-FACT, INS-INDEX-RETRIEVE, INS-EVIDENCE-SUFFICIENCY, INS-GROUNDING-VERIFY, INS-DECLINE-TO-FIND, INS-RETURN-ARTIFACT)</output>
+    <output type="notes">projects/ai-spaarke-insights-engine-r2/notes/drafts/wave-b-action-codes.md (final codes + Guids + JPS prompt content per row; for task 003 consumption)</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Every Insights-mode node in the playbook has an actionCode field referencing a row from task 001</criterion>
-    <criterion testable="true">JSON parses cleanly via PowerShell ConvertFrom-Json</criterion>
-    <criterion testable="true">No nodes removed/added relative to r1 graph</criterion>
+    <criterion testable="true">6 sprk_analysisaction rows queryable in Spaarke Dev with the documented action codes</criterion>
+    <criterion testable="true">Each row's sprk_systemprompt is valid JPS JSON conforming to $schema=https://spaarke.com/schemas/prompt/v1, $version=1</criterion>
+    <criterion testable="true">Each row's sprk_actiontype matches the enum integer (LiveFact=80 etc.)</criterion>
+    <criterion testable="true">All 6 rows authored via /jps-action-create invocations (verifiable in handoff notes)</criterion>
+    <criterion testable="true">notes/drafts/wave-b-action-codes.md ready for task 003 to update playbook JSON</criterion>
   </acceptance-criteria>
 </task>
