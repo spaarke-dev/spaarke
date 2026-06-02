@@ -1,7 +1,8 @@
 <task id="001" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>B1 — Investigate playbook-architecture + scope-model-index (resolve D-01 open questions Q1+Q2+Q3 authoritatively)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-02</completed>
     <wave>B</wave>
     <estimated-effort>2h</estimated-effort>
     <tags>investigation, jps-playbook, architecture-doc, decision-record-d-01, unblock-synthesis</tags>

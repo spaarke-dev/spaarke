@@ -7,80 +7,74 @@
 
 ## Status
 
-**Current task**: 001 — Investigate playbook-architecture + scope-model-index (resolve D-01 open questions)
-**Task file**: [`tasks/001-create-insights-action-rows.poml`](tasks/001-create-insights-action-rows.poml)
-**Wave**: B (Unblock synthesis — sequenced first per owner direction WB-1; re-scoped 2026-06-02 per D-01 path-b + JPS-skills owner direction)
-**Status**: paused — awaiting owner approval to resume execution of re-scoped task 001
-**Started**: 2026-06-02 (original); paused 2026-06-02 after empirical investigation surfaced broader failure mode (see D-01)
+**Current task**: 002 — Create 6 sprk_analysisaction rows via `/jps-action-create` skill (one per Insights ActionType)
+**Task file**: [`tasks/002-update-playbook-json-action-refs.poml`](tasks/002-update-playbook-json-action-refs.poml)
+**Wave**: B (Unblock synthesis — sequenced first per WB-1; path-b re-scope per D-01)
+**Status**: not-started — ready to begin
+**Started**: —
 **Rigor**: STANDARD
-**Decision record**: [`decisions/D-01-wave-b-root-cause-corrected.md`](decisions/D-01-wave-b-root-cause-corrected.md) — APPROVED path-b re-scope + JPS-skills constraint
-**Next action**: Resume task 001 (now: read playbook-architecture.md + scope-model-index.json → resolve D-01 Q1+Q2+Q3) after owner confirms the re-scope changes.
+**Next action**: Begin Step 1 of task 002 (re-read D-01 + investigation handoff notes, then invoke `/jps-action-create` skill for INS-LIVE-FACT)
 
 ---
 
-## Project context (loads on task-execute Step 0)
+## Task 001 — COMPLETED (2026-06-02)
+
+| Acceptance criterion | Status |
+|---|---|
+| Each D-01 Q1, Q2, Q3 marked "Resolved per [doc citation]" with one-sentence finding | ✅ |
+| Wave B tasks 002-008 confirmed still viable | ✅ — D-01 §4 unchanged |
+| No further empirical investigation needed before task 002 starts | ✅ |
+
+**Output**: [`notes/handoffs/wave-b1-investigation-notes.md`](notes/handoffs/wave-b1-investigation-notes.md) — the definitive reference for tasks 002-008. Includes the three-level node type system, the two ActionType dispatch paths, the canvas Designer mapping table, and the Wave B operational rule (do NOT open Insights playbooks in Designer).
+
+**Key findings**:
+- ActionType has TWO sources: `sprk_analysisaction.sprk_actiontype` (when node has sprk_actionid FK) AND `sprk_playbooknode.sprk_configjson.__actionType` (when node has no FK). Wave B will set BOTH for safety.
+- Designer's canvas-type mapping has only 9 types — none for Insights (60-120). Opening an Insights playbook in Designer wipes configjson. → operational rule documented in task 006.
+
+---
+
+## Project context
 
 - **Project**: `ai-spaarke-insights-engine-r2`
 - **Branch**: `work/ai-spaarke-insights-engine-r2`
-- **Worktree**: `c:\code_files\spaarke-wt-ai-spaarke-insights-engine-r2`
-- **Spec**: [`spec.md`](spec.md)
-- **Plan**: [`plan.md`](plan.md)
-- **Project CLAUDE.md**: [`CLAUDE.md`](CLAUDE.md)
-- **Task index**: [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md)
+- **Decision record**: [`decisions/D-01-wave-b-root-cause-corrected.md`](decisions/D-01-wave-b-root-cause-corrected.md) — APPROVED; Q1+Q2+Q3 resolved
 
 ---
 
-## Wave sequencing (per owner direction WB-1)
+## Wave sequencing
 
 Wave B FIRST → A → C → D → E → wrap-up.
 
 | Wave | Tasks | Status |
 |---|---|---|
-| **B** (Unblock synthesis) | 001–006 | 🔄 in-progress (001 active) |
-| **A** (Foundations) | 010–015 | 🔲 not-started |
-| **C** (JPS compliance) | 020–024 | 🔲 not-started |
-| **D** (2D taxonomy + multi-entity) | 030–036 | 🔲 not-started |
-| **E** (Hybrid + Assistant) | 040–043 | 🔲 not-started |
-| Wrap-up | 090 | 🔲 not-started |
+| **B** (Unblock synthesis) | 001–006 | 🔄 in-progress (001 ✅; 002 ready) |
+| **A** (Foundations) | 010–015 | 🔲 |
+| **C** (JPS compliance) | 020–024 | 🔲 |
+| **D** (2D taxonomy + multi-entity) | 030–036 | 🔲 |
+| **E** (Hybrid + Assistant) | 040–043 | 🔲 |
+| Wrap-up | 090 | 🔲 |
 
 ---
 
-## Active task: 001
+## Active task: 002 (ready to start)
 
 ### Goal
 
-6 new sprk_analysisaction rows in Spaarke Dev, each carrying JPS-formatted system prompt where applicable, for Insights node ActionTypes (LiveFact, IndexRetrieve, EvidenceSufficiency, GroundingVerify, DeclineToFind, ReturnInsightArtifact). These rows enable the existing predict-matter-cost@v1 playbook's nodes to dispatch correctly (currently failing because action wiring is absent — defensive scaffold decline at the orchestrator).
+6 new sprk_analysisaction rows live in Spaarke Dev, each authored via `/jps-action-create` skill workflow. Action codes: INS-LIVE-FACT, INS-INDEX-RETRIEVE, INS-EVIDENCE-SUFFICIENCY, INS-GROUNDING-VERIFY, INS-DECLINE-TO-FIND, INS-RETURN-ARTIFACT. Each row: valid JPS JSON in sprk_systemprompt + sprk_actiontype set to matching enum integer (80/90/100/70/110/120).
 
-### Knowledge files loaded
+### Safety gate (carried forward from task 001)
 
-- (pending) `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/*.txt` (3 prompt files)
-- (pending) `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json`
-- (pending) `src/server/api/Sprk.Bff.Api/Services/Insights/Graph/` (node executor directory)
-- (pending) `.claude/skills/dataverse-mcp-usage/SKILL.md`
-- (pending) Existing "Classify Document" sprk_analysisaction row (via MCP read_query)
+⚠️ This task creates real rows in Spaarke Dev (shared state). After designing the 6 JPS prompts via the skill, **pause and present them to owner for review** before executing the 6 `mcp__dataverse__create_record` calls. The skill workflow naturally provides preview output for each prompt before commit.
 
-### Constraints
+### Steps to be executed
 
-- spec.md PR-1: All prompts go into sprk_analysisaction.sprk_systemprompt (existing JPS primitive; no new sprk_prompt entity)
-- spec.md NFR-03: Every Insights playbook node must reference a sprk_analysisaction row
-- ADR-027: Schema/data changes flow through managed-solution promotion path (Spaarke Dev for B1 acceptable)
-
-### Steps completed
-
-(none yet)
-
-### Files to be modified
-
-- (planned) New 6 sprk_analysisaction rows in Spaarke Dev (data, not source code)
-- (planned) `projects/ai-spaarke-insights-engine-r2/notes/drafts/wave-b-action-codes.md` (NEW — final action codes + JPS prompt content per row)
-
-### Decisions made
-
-- 2026-06-02: Rigor STANDARD chosen — task is data-only (no .cs/.ts modifications); 6 boundary steps; constraints + ADRs apply.
-
-### Safety gate
-
-⚠️ This task creates real rows in Spaarke Dev (shared state). After designing the 6 prompts in JPS format, **pause and present them to owner for review** before executing `mcp__dataverse__create_record`.
+1. Re-read D-01 + investigation handoff notes
+2. For each of 6 ActionTypes: read the corresponding INodeExecutor source file
+3. Invoke `/jps-action-create` for INS-LIVE-FACT (Step 3 in task POML)
+4-8. Same for the other 5 ActionTypes
+9. Create 6 rows in Spaarke Dev via `mcp__dataverse__create_record` (after owner review)
+10. Verify rows queryable
+11. Update D-01 + handoff notes with action code → Guid map
 
 ---
 

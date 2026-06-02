@@ -27,7 +27,7 @@
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [001](001-create-insights-action-rows.poml) | B1 | **Investigate playbook-architecture + scope-model-index** (resolve D-01 Q1+Q2+Q3 via authoritative docs) | 🔲 | 2h | ❌ | — |
+| [001](001-create-insights-action-rows.poml) | B1 | **Investigate playbook-architecture + scope-model-index** (resolve D-01 Q1+Q2+Q3 via authoritative docs) | ✅ | 2h | ❌ | — |
 | [002](002-update-playbook-json-action-refs.poml) | B2 | **Create 6 sprk_analysisaction rows via `/jps-action-create` skill** (one per Insights ActionType) | 🔲 | 4h | ❌ | 001 |
 | [003](003-deploy-playbook-action-lint.poml) | B3 | Deploy-Playbook.ps1 lint check (action-code + configjson preservation per D-01) | 🔲 | 2h | ✅ | — |
 | [004](004-redeploy-playbook-with-action-refs.poml) | B4 | **Delete + re-deploy 8 nodes** (clean clobbered configjson per D-01 §2.4) | 🔲 | 1h | ❌ | 002, 003 |
