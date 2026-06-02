@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Azure;
 using Azure.Search.Documents;
+using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
@@ -57,12 +58,29 @@ public class PrivilegeAwareRagServiceTests
 
     private RagService CreateService()
     {
+        // Constructor updated 2026-06-01 (RB-T028-03/04/05/06 repair, Phase 1c test infra):
+        // Tier 3 B8 refactor (commit 5613b8ad) added required SearchIndexClient +
+        // IOptions<AiSearchOptions> parameters to absorb the SDK calls previously made by
+        // KnowledgeBaseEndpoints. Privilege-aware tests do not exercise the B8 admin methods,
+        // so a Loose mock SearchIndexClient + a default-shape AiSearchOptions satisfies the
+        // constructor without affecting test semantics.
+        var searchIndexClientMock = new Mock<SearchIndexClient>(MockBehavior.Loose);
+        var aiSearchOptions = Options.Create(new AiSearchOptions
+        {
+            Endpoint = "https://test-search.search.windows.net",
+            ApiKeySecretName = "test-api-key",
+            KnowledgeIndexName = "spaarke-knowledge-index-v2",
+            DiscoveryIndexName = "discovery-index"
+        });
+
         return new RagService(
             _deploymentServiceMock.Object,
             _openAiClientMock.Object,
             _embeddingCacheMock.Object,
             _privilegeGroupResolverMock.Object,
             _options,
+            searchIndexClientMock.Object,
+            aiSearchOptions,
             _loggerMock.Object);
     }
 

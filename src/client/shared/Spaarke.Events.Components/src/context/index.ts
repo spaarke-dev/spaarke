@@ -17,7 +17,7 @@ export {
   useStatusFilter,
   useActiveEvent,
   useGridRefresh,
-} from "./EventsPageContext";
+} from './EventsPageContext';
 
 export type {
   EventsPageFilters,
@@ -25,4 +25,4 @@ export type {
   EventsPageActions,
   EventsPageContextValue,
   EventsPageProviderProps,
-} from "./EventsPageContext";
+} from './EventsPageContext';

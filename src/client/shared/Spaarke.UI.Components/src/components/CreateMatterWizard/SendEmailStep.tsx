@@ -12,14 +12,7 @@
  */
 
 import * as React from 'react';
-import {
-  Field,
-  Input,
-  Textarea,
-  Text,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Field, Input, Textarea, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { LookupField } from './LookupField';
 import type { ICreateMatterFormState } from './formTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
@@ -178,8 +171,7 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
           Send Notification Email
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Compose an introductory email. It will be created as an email activity
-          in Dataverse, linked to this matter.
+          Compose an introductory email. It will be created as an email activity in Dataverse, linked to this matter.
         </Text>
       </div>
 
@@ -197,26 +189,20 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
         />
 
         {/* Subject */}
-        <Field
-          label={renderLabel('Subject', true)}
-          required
-        >
+        <Field label={renderLabel('Subject', true)} required>
           <Input
             value={emailSubject}
-            onChange={(e) => onEmailSubjectChange(e.target.value)}
+            onChange={e => onEmailSubjectChange(e.target.value)}
             placeholder="Email subject"
             aria-label="Subject"
           />
         </Field>
 
         {/* Body */}
-        <Field
-          label={renderLabel('Message', true)}
-          required
-        >
+        <Field label={renderLabel('Message', true)} required>
           <Textarea
             value={emailBody}
-            onChange={(e) => onEmailBodyChange(e.target.value)}
+            onChange={e => onEmailBodyChange(e.target.value)}
             placeholder="Compose your message&hellip;"
             rows={15}
             resize="vertical"
@@ -226,8 +212,7 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
 
         {/* Info note */}
         <Text size={100} className={styles.infoNote}>
-          This email will be saved as a draft activity on the matter record. You
-          can review and send it from there.
+          This email will be saved as a draft activity on the matter record. You can review and send it from there.
         </Text>
       </div>
     </div>

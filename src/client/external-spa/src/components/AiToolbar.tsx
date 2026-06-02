@@ -20,7 +20,7 @@
  * ADR-022: React 18 functional component (createRoot is in main.tsx).
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -39,20 +39,16 @@ import {
   Toolbar,
   ToolbarButton,
   Tooltip,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   SparkleRegular,
   DocumentTextRegular,
   FolderOpenRegular,
   SearchInfoRegular,
   DismissRegular,
-} from "@fluentui/react-icons";
-import { AccessLevel } from "../types";
-import {
-  usePlaybookExecution,
-  PlaybookResult,
-  PlaybookResultSection,
-} from "../hooks/usePlaybookExecution";
+} from '@fluentui/react-icons';
+import { AccessLevel } from '../types';
+import { usePlaybookExecution, PlaybookResult, PlaybookResultSection } from '../hooks/usePlaybookExecution';
 
 // ---------------------------------------------------------------------------
 // Stable playbook IDs (opaque identifiers — no content, definitions, or prompts)
@@ -60,9 +56,9 @@ import {
 // playbook definitions, prompt templates, or AI model configuration.
 // ---------------------------------------------------------------------------
 
-const PLAYBOOK_SUMMARIZE_DOCUMENT = "summarize-document";
-const PLAYBOOK_SUMMARIZE_PROJECT = "summarize-project";
-const PLAYBOOK_RUN_ANALYSIS = "run-analysis";
+const PLAYBOOK_SUMMARIZE_DOCUMENT = 'summarize-document';
+const PLAYBOOK_SUMMARIZE_PROJECT = 'summarize-project';
+const PLAYBOOK_RUN_ANALYSIS = 'run-analysis';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -70,14 +66,14 @@ const PLAYBOOK_RUN_ANALYSIS = "run-analysis";
 
 const useStyles = makeStyles({
   toolbar: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
     backgroundColor: tokens.colorNeutralBackground2,
-    borderWidth: "1px",
-    borderStyle: "solid",
+    borderWidth: '1px',
+    borderStyle: 'solid',
     borderColor: tokens.colorNeutralStroke2,
     borderRadius: tokens.borderRadiusMedium,
   },
@@ -85,41 +81,41 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
     paddingRight: tokens.spacingHorizontalXS,
-    userSelect: "none",
+    userSelect: 'none',
   },
   divider: {
-    height: "20px",
+    height: '20px',
     marginLeft: tokens.spacingHorizontalXS,
     marginRight: tokens.spacingHorizontalXS,
   },
   resultDialogBody: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
-    maxHeight: "60vh",
-    overflowY: "auto",
+    maxHeight: '60vh',
+    overflowY: 'auto',
     paddingRight: tokens.spacingHorizontalXS,
   },
   resultHeader: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     color: tokens.colorBrandForeground1,
   },
   resultHeaderIcon: {
-    flexShrink: "0",
-    fontSize: "18px",
+    flexShrink: '0',
+    fontSize: '18px',
   },
   resultSection: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   sectionTitle: {
     color: tokens.colorNeutralForeground1,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     paddingBottom: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalXS,
@@ -127,7 +123,7 @@ const useStyles = makeStyles({
   sectionContent: {
     color: tokens.colorNeutralForeground2,
     lineHeight: tokens.lineHeightBase400,
-    whiteSpace: "pre-wrap",
+    whiteSpace: 'pre-wrap',
   },
   metaText: {
     color: tokens.colorNeutralForeground4,
@@ -135,17 +131,17 @@ const useStyles = makeStyles({
     marginTop: tokens.spacingVerticalS,
   },
   loadingContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "120px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '120px',
     gap: tokens.spacingVerticalM,
   },
   emptyResult: {
     color: tokens.colorNeutralForeground3,
-    fontStyle: "italic",
-    textAlign: "center",
+    fontStyle: 'italic',
+    textAlign: 'center',
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
   },
@@ -163,13 +159,7 @@ interface ResultDialogProps {
   error: string | null;
 }
 
-const ResultDialog: React.FC<ResultDialogProps> = ({
-  open,
-  onClose,
-  result,
-  isExecuting,
-  error,
-}) => {
+const ResultDialog: React.FC<ResultDialogProps> = ({ open, onClose, result, isExecuting, error }) => {
   const styles = useStyles();
 
   const handleClose = () => {
@@ -185,7 +175,7 @@ const ResultDialog: React.FC<ResultDialogProps> = ({
         if (!data.open) handleClose();
       }}
     >
-      <DialogSurface style={{ minWidth: "560px", maxWidth: "720px" }}>
+      <DialogSurface style={{ minWidth: '560px', maxWidth: '720px' }}>
         <DialogTitle
           action={
             <Button
@@ -199,7 +189,7 @@ const ResultDialog: React.FC<ResultDialogProps> = ({
         >
           <div className={styles.resultHeader}>
             <SparkleRegular className={styles.resultHeaderIcon} />
-            <span>{result?.playbookLabel ?? "AI Analysis"}</span>
+            <span>{result?.playbookLabel ?? 'AI Analysis'}</span>
           </div>
         </DialogTitle>
 
@@ -230,35 +220,28 @@ const ResultDialog: React.FC<ResultDialogProps> = ({
                     No results were returned for this analysis.
                   </Text>
                 ) : (
-                  result.sections.map(
-                    (section: PlaybookResultSection, index: number) => (
-                      <React.Fragment key={`${section.title}-${index}`}>
-                        {index > 0 && <Divider />}
-                        <div className={styles.resultSection}>
-                          <Text
-                            size={400}
-                            weight="semibold"
-                            className={styles.sectionTitle}
-                            as="h3"
-                          >
-                            {section.title}
-                          </Text>
-                          <Text size={300} className={styles.sectionContent}>
-                            {section.content}
-                          </Text>
-                        </div>
-                      </React.Fragment>
-                    )
-                  )
+                  result.sections.map((section: PlaybookResultSection, index: number) => (
+                    <React.Fragment key={`${section.title}-${index}`}>
+                      {index > 0 && <Divider />}
+                      <div className={styles.resultSection}>
+                        <Text size={400} weight="semibold" className={styles.sectionTitle} as="h3">
+                          {section.title}
+                        </Text>
+                        <Text size={300} className={styles.sectionContent}>
+                          {section.content}
+                        </Text>
+                      </div>
+                    </React.Fragment>
+                  ))
                 )}
 
                 {/* Execution metadata */}
                 {result.executedAt && (
                   <Text className={styles.metaText} size={100}>
-                    Generated{" "}
-                    {new Intl.DateTimeFormat("en-US", {
-                      dateStyle: "medium",
-                      timeStyle: "short",
+                    Generated{' '}
+                    {new Intl.DateTimeFormat('en-US', {
+                      dateStyle: 'medium',
+                      timeStyle: 'short',
                     }).format(new Date(result.executedAt))}
                   </Text>
                 )}
@@ -268,11 +251,7 @@ const ResultDialog: React.FC<ResultDialogProps> = ({
         </DialogBody>
 
         <DialogActions>
-          <Button
-            appearance="secondary"
-            onClick={handleClose}
-            disabled={isExecuting}
-          >
+          <Button appearance="secondary" onClick={handleClose} disabled={isExecuting}>
             Close
           </Button>
         </DialogActions>
@@ -324,11 +303,7 @@ export interface AiToolbarProps {
  * />
  * ```
  */
-export const AiToolbar: React.FC<AiToolbarProps> = ({
-  projectId,
-  accessLevel,
-  selectedDocumentId,
-}) => {
+export const AiToolbar: React.FC<AiToolbarProps> = ({ projectId, accessLevel, selectedDocumentId }) => {
   const styles = useStyles();
 
   // Toolbar is invisible to ViewOnly users — enforced at render level
@@ -336,12 +311,7 @@ export const AiToolbar: React.FC<AiToolbarProps> = ({
     return null;
   }
 
-  return (
-    <AiToolbarInner
-      projectId={projectId}
-      selectedDocumentId={selectedDocumentId}
-    />
-  );
+  return <AiToolbarInner projectId={projectId} selectedDocumentId={selectedDocumentId} />;
 };
 
 // ---------------------------------------------------------------------------
@@ -353,10 +323,7 @@ interface AiToolbarInnerProps {
   selectedDocumentId?: string | null;
 }
 
-const AiToolbarInner: React.FC<AiToolbarInnerProps> = ({
-  projectId,
-  selectedDocumentId,
-}) => {
+const AiToolbarInner: React.FC<AiToolbarInnerProps> = ({ projectId, selectedDocumentId }) => {
   const styles = useStyles();
   const { isExecuting, result, error, execute, reset } = usePlaybookExecution();
   const [dialogOpen, setDialogOpen] = React.useState<boolean>(false);
@@ -421,30 +388,16 @@ const AiToolbarInner: React.FC<AiToolbarInnerProps> = ({
           AI
         </Text>
 
-        <Divider
-          vertical
-          className={styles.divider}
-          aria-hidden="true"
-        />
+        <Divider vertical className={styles.divider} aria-hidden="true" />
 
         {/* Summarize Document */}
         <Tooltip
-          content={
-            hasSelectedDocument
-              ? "Summarize the selected document"
-              : "Select a document first to summarize it"
-          }
+          content={hasSelectedDocument ? 'Summarize the selected document' : 'Select a document first to summarize it'}
           relationship="label"
         >
           <ToolbarButton
             aria-label="Summarize Document"
-            icon={
-              isExecuting && result === null && !error ? (
-                <Spinner size="tiny" />
-              ) : (
-                <DocumentTextRegular />
-              )
-            }
+            icon={isExecuting && result === null && !error ? <Spinner size="tiny" /> : <DocumentTextRegular />}
             disabled={summarizeDocumentDisabled}
             onClick={handleSummarizeDocument}
           >
@@ -453,10 +406,7 @@ const AiToolbarInner: React.FC<AiToolbarInnerProps> = ({
         </Tooltip>
 
         {/* Summarize Project */}
-        <Tooltip
-          content="Generate an AI-powered summary of the entire project"
-          relationship="label"
-        >
+        <Tooltip content="Generate an AI-powered summary of the entire project" relationship="label">
           <ToolbarButton
             aria-label="Summarize Project"
             icon={<FolderOpenRegular />}
@@ -468,10 +418,7 @@ const AiToolbarInner: React.FC<AiToolbarInnerProps> = ({
         </Tooltip>
 
         {/* Run Analysis */}
-        <Tooltip
-          content="Run an AI analysis on project documents and activities"
-          relationship="label"
-        >
+        <Tooltip content="Run an AI analysis on project documents and activities" relationship="label">
           <ToolbarButton
             aria-label="Run Analysis"
             icon={<SearchInfoRegular />}

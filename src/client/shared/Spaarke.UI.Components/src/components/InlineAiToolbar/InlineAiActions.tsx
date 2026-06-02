@@ -17,12 +17,7 @@
  */
 
 import * as React from 'react';
-import {
-  Button,
-  Tooltip,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Button, Tooltip, makeStyles, tokens } from '@fluentui/react-components';
 import { InlineAiActionsProps, InlineAiAction } from './inlineAiToolbar.types';
 
 // ─────────────────────────────────────────────────────────────────────────────

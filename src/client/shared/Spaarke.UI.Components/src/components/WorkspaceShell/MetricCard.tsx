@@ -12,18 +12,10 @@
  * Standards: ADR-012 (shared component library), ADR-021 (Fluent v9, dark mode)
  */
 
-import * as React from "react";
-import {
-  Text,
-  Badge,
-  Spinner,
-  makeStyles,
-  shorthands,
-  tokens,
-  mergeClasses,
-} from "@fluentui/react-components";
-import type { FluentIcon } from "@fluentui/react-icons";
-import type { MetricBadgeVariant, MetricTrend } from "./types";
+import * as React from 'react';
+import { Text, Badge, Spinner, makeStyles, shorthands, tokens, mergeClasses } from '@fluentui/react-components';
+import type { FluentIcon } from '@fluentui/react-icons';
+import type { MetricBadgeVariant, MetricTrend } from './types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -63,47 +55,47 @@ const useStyles = makeStyles({
      * MetricCardRow uses minmax(120px, 160px) columns, so cards stay compact
      * and square across all viewport widths.
      */
-    aspectRatio: "1",
-    position: "relative",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    aspectRatio: '1',
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: tokens.spacingVerticalL,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
-    cursor: "pointer",
+    cursor: 'pointer',
     backgroundColor: tokens.colorNeutralBackground1,
     ...shorthands.borderWidth(tokens.strokeWidthThin),
-    ...shorthands.borderStyle("solid"),
+    ...shorthands.borderStyle('solid'),
     ...shorthands.borderColor(tokens.colorNeutralStroke2),
     borderRadius: tokens.borderRadiusMedium,
-    transitionProperty: "box-shadow, background-color, border-color",
+    transitionProperty: 'box-shadow, background-color, border-color',
     transitionDuration: tokens.durationNormal,
     transitionTimingFunction: tokens.curveEasyEase,
-    ":focus-visible": {
-      outlineWidth: "2px",
-      outlineStyle: "solid",
+    ':focus-visible': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
       outlineColor: tokens.colorBrandStroke1,
-      outlineOffset: "2px",
+      outlineOffset: '2px',
     },
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
       ...shorthands.borderColor(tokens.colorNeutralStroke1Hover),
       boxShadow: tokens.shadow4,
     },
-    ":active": {
+    ':active': {
       backgroundColor: tokens.colorNeutralBackground1Pressed,
       ...shorthands.borderColor(tokens.colorNeutralStroke1Pressed),
       boxShadow: tokens.shadow2,
     },
   },
   iconWrapper: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "32px",
-    height: "32px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '32px',
+    height: '32px',
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorBrandForeground1,
@@ -117,20 +109,20 @@ const useStyles = makeStyles({
   },
   label: {
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
+    textAlign: 'center',
     lineHeight: tokens.lineHeightBase200,
   },
   spinnerWrapper: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "24px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '24px',
     marginBottom: tokens.spacingVerticalXXS,
   },
   badgeWrapper: {
-    position: "absolute",
-    top: "8px",
-    right: "8px",
+    position: 'absolute',
+    top: '8px',
+    right: '8px',
   },
 });
 
@@ -174,7 +166,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (e.key === "Enter" || e.key === " ") {
+      if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         onClick?.();
       }
@@ -182,11 +174,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
     [onClick]
   );
 
-  const showBadge =
-    !isLoading &&
-    badgeVariant !== undefined &&
-    badgeCount !== undefined &&
-    badgeCount > 0;
+  const showBadge = !isLoading && badgeVariant !== undefined && badgeCount !== undefined && badgeCount > 0;
 
   return (
     <div
@@ -200,12 +188,8 @@ export const MetricCard: React.FC<MetricCardProps> = ({
       {/* Notification badge */}
       {showBadge && (
         <div className={styles.badgeWrapper}>
-          <Badge
-            appearance="filled"
-            color={badgeVariant === "overdue" ? "danger" : "success"}
-            size="small"
-          >
-            {badgeCount} {badgeVariant === "overdue" ? "Overdue" : "New"}
+          <Badge appearance="filled" color={badgeVariant === 'overdue' ? 'danger' : 'success'} size="small">
+            {badgeCount} {badgeVariant === 'overdue' ? 'Overdue' : 'New'}
           </Badge>
         </div>
       )}
@@ -222,7 +206,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
         </div>
       ) : (
         <Text size={600} weight="semibold" className={styles.value}>
-          {value !== undefined ? value : "\u2014"}
+          {value !== undefined ? value : '\u2014'}
         </Text>
       )}
 
@@ -234,4 +218,4 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   );
 };
 
-MetricCard.displayName = "MetricCard";
+MetricCard.displayName = 'MetricCard';

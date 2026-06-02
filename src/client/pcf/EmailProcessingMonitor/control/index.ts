@@ -17,9 +17,7 @@ import { EmailProcessingMonitorHost } from './EmailProcessingMonitorHost';
 
 const VERSION = '1.1.2';
 
-export class EmailProcessingMonitor
-  implements ComponentFramework.ReactControl<IInputs, IOutputs>
-{
+export class EmailProcessingMonitor implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private notifyOutputChanged: () => void = () => undefined;
 

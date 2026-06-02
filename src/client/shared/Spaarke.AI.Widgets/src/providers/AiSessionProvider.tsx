@@ -44,15 +44,7 @@
  * @see AUDIT-FINDINGS-AUTH-SYSTEM §H-4 — function-based auth contract
  */
 
-import React, {
-  createContext,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import React, { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { buildBffApiUrl, useAuth, type AuthenticatedFetchFn } from '@spaarke/auth';
 import { useDispatchPaneEvent } from '../events/useDispatchPaneEvent';
 import type { AiPaneEvent, EntityContext, StreamingCallbacks, StreamingState } from '@spaarke/ai-context';
@@ -334,8 +326,8 @@ export function AiSessionProvider({
   }, [bffBaseUrl, entityContext, isAuthenticated]);
 
   // ── Chat Session State (persisted to sessionStorage) ───────────────────
-  const [chatSessionId, setChatSessionIdState] = useState<string | null>(
-    () => readSession(AI_SESSION_CHAT_SESSION_KEY)
+  const [chatSessionId, setChatSessionIdState] = useState<string | null>(() =>
+    readSession(AI_SESSION_CHAT_SESSION_KEY)
   );
 
   const setChatSessionId = useCallback((sessionId: string): void => {
@@ -464,7 +456,7 @@ export function AiSessionProvider({
         tokenCountRef.current += 1;
         // Batch state updates every 10 tokens to avoid re-render storm.
         if (tokenCountRef.current % 10 === 0) {
-          setStreamingState((prev) => ({
+          setStreamingState(prev => ({
             ...prev,
             tokenCount: tokenCountRef.current,
           }));
@@ -478,7 +470,7 @@ export function AiSessionProvider({
           tokenCount: tokenCountRef.current,
         });
         // Increment turn count — one turn completes per stream-end.
-        setTurnCount((n) => n + 1);
+        setTurnCount(n => n + 1);
       },
 
       // onPaneEvent — the critical R1→R2 migration point.

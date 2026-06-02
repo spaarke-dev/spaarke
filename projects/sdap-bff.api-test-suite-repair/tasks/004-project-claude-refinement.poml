@@ -1,0 +1,117 @@
+<task id="004" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>Refine project CLAUDE.md with Phase 0 outcomes — FR-03</title>
+    <status>completed</status>
+    <estimated-effort>45-60 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-0, claude-md, decision-capture</tags>
+    <parallel-group>0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes only to projects/sdap-bff.api-test-suite-repair/CLAUDE.md; disjoint from task 005 (priority-order.md). NOT a `.claude/` path — project CLAUDE.md is agent-writable per sub-agent boundary scope.</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    The project CLAUDE.md was initialized by `/project-pipeline` on 2026-05-31. After Phase 0
+    Wave 1 tasks (001 baseline, 002 integration baseline, 003 D-01 verdict) complete, refine
+    CLAUDE.md to reference the now-captured artifacts.
+
+    Specifically: append the Phase 0 baseline numbers (from 001 TRX summary + 002 TRX summary)
+    and the D-01 verdict (from 003) to the "Decisions Made" section. Verify §6 binding rules,
+    §4 resolved decisions, and NFR-09 declaration are all still present and consistent.
+
+    This is an additive refinement — NOT a rewrite of CLAUDE.md. Existing structure preserved.
+    NO production code changes (CLAUDE.md is project doc, not src/).
+  </prompt>
+
+  <role>AI agent integrating Phase 0 baseline data + D-01 verdict into project CLAUDE.md.</role>
+
+  <goal>
+    `projects/sdap-bff.api-test-suite-repair/CLAUDE.md` updated in place with:
+    - New "Decisions Made" entry dated YYYY-MM-DD citing 001 baseline counts (Passed / Failed / Skipped / Compile-broken)
+    - New "Decisions Made" entry dated YYYY-MM-DD citing 002 integration baseline counts (or "compile-broken — fallback file" if 002 hit that path)
+    - New "Decisions Made" entry dated YYYY-MM-DD citing the D-01 verdict (use Microsoft / hand-roll / escalate) and the implication for P1.B1
+    - Existing §6 binding rules + §4 resolved decisions sections UNCHANGED
+    - NFR-09 declaration still verifiable (Key Technical Constraints section references `repair-not-rewrite: true`)
+  </goal>
+
+  <inputs>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="baseline-trx">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+    <file purpose="integration-baseline">projects/sdap-bff.api-test-suite-repair/baseline/integration-test-baseline-2026-MM-DD.trx</file>
+    <file purpose="d01-verdict">projects/sdap-bff.api-test-suite-repair/decisions/D-01-async-enumerable-helper.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-03">Project CLAUDE.md references §6 binding rules + §4 resolved decisions + NFR-09 in verifiable form</constraint>
+    <constraint source="NFR-08">Project CLAUDE.md is the agent-visible source of truth; conflicts with design.md resolve in favor of CLAUDE.md</constraint>
+    <constraint source="NFR-09">Every task POML declares `repair-not-rewrite: true` — CLAUDE.md must reference this rule</constraint>
+    <constraint source="§4.1">Repair-not-rewrite is non-negotiable; CLAUDE.md states it at top of NEGATIVE rules section</constraint>
+    <constraint source="root CLAUDE.md §3">Sub-agent write boundary protects `.claude/` paths; `projects/.../CLAUDE.md` is AGENT-WRITABLE (not under `.claude/`)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/spec.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/skills/task-execute/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per FR-03, project CLAUDE.md is the agent-visible source of truth. After Phase 0 Wave 1
+      produces concrete baseline numbers and the D-01 verdict, CLAUDE.md grows to cite those
+      artifacts. This makes every Phase 1+ task agent start with the actual numbers (not the
+      placeholders the 2026-05-31 init wrote). Predecessor pattern: see
+      `projects/sdap-bff-api-remediation-fix/CLAUDE.md` "Decisions Made" section structure.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Needs baseline TRX counts</dependency>
+      <dependency task="002" status="not-started">Needs integration TRX counts (or fallback)</dependency>
+      <dependency task="003" status="not-started">Needs D-01 verdict</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read current `projects/sdap-bff.api-test-suite-repair/CLAUDE.md` fully. Identify the "Decisions Made" section.</step>
+    <step order="2">Read baseline artifacts: 001 TRX (extract Passed/Failed/Skipped/Total counts), 002 TRX or fallback file (same counts or "compile-broken" note), 003 D-01 verdict (extract verdict + implication).</step>
+    <step order="3">Verify §6 binding rules section is present and references: NFR-01 (no production changes), NFR-02 (no rewrites), NFR-03 (no DI registrations in tests), §4.5 (no factory rewrite), §4.3 (no Failed end-states), NFR-06 (archive via rename), §4.8 (escalation hard limit).</step>
+    <step order="4">Verify §4 resolved decisions are reflected: §4.1 (repair-not-rewrite non-negotiable), §4.3 (zero failures), §4.4 (no production changes), §4.5 (no factory rewrite), §4.7 (coordinate not lock), §4.8 (escalation gate). Cross-check against §5 locked decisions: §5.1 (D-01 verdict implementation), §5.2 (CI gate full enforce_admins), §5.3 (integration in scope), §5.4 (agent judges per binding rules), §5.5 (anti-drift via code review + PR template, no CI script), §5.6 (3 namespace fixes kept).</step>
+    <step order="5">Verify NFR-09 reference present (POML metadata `repair-not-rewrite: true` declaration is documented as a requirement). Locate the "Key Technical Constraints" section bullet.</step>
+    <step order="6">Append new "Decisions Made" entries — 3 dated bullets:
+      (a) "Phase 0 baseline captured (task 001): {Total} tests, {Passed} pass, {Failed} fail, {Skipped} skip, {N} compile-broken. Reference: `baseline/test-baseline-{date}.trx`."
+      (b) "Phase 0 integration baseline captured (task 002): {counts OR compile-broken fallback}. Reference: `baseline/integration-test-baseline-{date}.trx`."
+      (c) "Phase 0 D-01 verdict on Microsoft.Extensions.AI.Testing: {verdict}. P1.B1 implementation approach: {approach}. Reference: `decisions/D-01-async-enumerable-helper.md`."
+    </step>
+    <step order="7">Update "Project Status" header: "Phase: 🟢 Phase 0 Wave 1 complete; Phase 0 Wave 2 (tasks 004, 005) in progress" and "Last Updated: YYYY-MM-DD".</step>
+    <step order="8">Run a final verification pass: scan the file for any reference to placeholder numbers from the 2026-05-31 init (e.g., "5,215 / 4,844 / 269 / 17" prose without "as of 2026-05-30 design.md §3" qualifier). Where present, leave the design.md §3 baseline note intact but ensure the new Decisions Made entries cite the actual TRX-derived counts.</step>
+    <step order="9">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` to record completion + the 3 new Decisions Made entry summaries.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">CLAUDE.md, baseline TRX files, D-01 decision file</tool>
+    <tool name="Edit">Append-only edits to projects CLAUDE.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/CLAUDE.md (refined with Phase 0 outcomes)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CLAUDE.md "Decisions Made" section contains 3 new dated entries citing tasks 001, 002, 003 outputs</criterion>
+    <criterion testable="true">§6 binding rules section preserved unchanged</criterion>
+    <criterion testable="true">§4 resolved decisions + §5 locked decisions reflected in "Key Technical Constraints" section</criterion>
+    <criterion testable="true">NFR-09 requirement (`repair-not-rewrite: true` POML declaration) referenced in Key Technical Constraints</criterion>
+    <criterion testable="true">"Project Status" header updated to reflect Phase 0 progress + today's date</criterion>
+    <criterion testable="true">No files outside `projects/sdap-bff.api-test-suite-repair/` modified (`git status` confirms)</criterion>
+  </acceptance-criteria>
+</task>

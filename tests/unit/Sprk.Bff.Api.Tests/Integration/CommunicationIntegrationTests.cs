@@ -14,9 +14,9 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
-using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
@@ -39,6 +39,7 @@ namespace Sprk.Bff.Api.Tests.Integration;
 /// - Status query: Dataverse retrieval and OptionSetValue/DateTime mapping
 /// - Error paths: Graph failures, Dataverse failures, unauthorized senders
 /// </summary>
+[Trait("status", "repaired")]
 public class CommunicationIntegrationTests
 {
     #region Test Infrastructure
@@ -135,7 +136,8 @@ public class CommunicationIntegrationTests
     private static CommunicationService BuildService(
         Mock<IGraphClientFactory> graphFactoryMock,
         Mock<IDataverseService> dataverseMock,
-        CommunicationOptions? options = null)
+        CommunicationOptions? options = null,
+        Mock<IGenericEntityService>? entityServiceMock = null)
     {
         var opts = options ?? CreateDefaultOptions();
         var accountService = new CommunicationAccountService(
@@ -149,11 +151,19 @@ public class CommunicationIntegrationTests
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<ApprovedSenderValidator>>());
 
+        // Wave 2.4 task 060 — production refactored Dataverse record creation onto
+        // IGenericEntityService (line 780 of CommunicationService.cs uses
+        // _genericEntityService.CreateAsync, not _dataverseService.CreateAsync).
+        // Test callers that need to observe or stub CreateAsync must supply an
+        // IGenericEntityService mock; the default Mock.Of<IGenericEntityService>()
+        // returns Guid.Empty for CreateAsync, which surfaces as the prior failures.
+        var resolvedEntityService = entityServiceMock?.Object ?? Mock.Of<IGenericEntityService>();
+
         return new CommunicationService(
             graphFactoryMock.Object,
             senderValidator,
             Mock.Of<ICommunicationDataverseService>(),
-            Mock.Of<IGenericEntityService>(),
+            resolvedEntityService,
             Mock.Of<IDocumentDataverseService>(),
             null!, // EmlGenerationService - not used when ArchiveToSpe=false
             null!, // SpeFileStore - not used when ArchiveToSpe=false
@@ -170,17 +180,20 @@ public class CommunicationIntegrationTests
     [Fact]
     public async Task Full_SendFlow_BffCaller_CreatesRecordAndReturnsSuccess()
     {
-        // Arrange: Graph returns 202 Accepted, Dataverse CreateAsync returns a new record ID
+        // Arrange: Graph returns 202 Accepted; IGenericEntityService.CreateAsync
+        // returns a new record ID (production refactored to call CreateAsync on
+        // the generic entity facade — Wave 2.4 task 060 repair).
         var graphFactoryMock = new Mock<IGraphClientFactory>();
         graphFactoryMock.Setup(f => f.ForApp()).Returns(CreateMockGraphClient());
 
         var expectedRecordId = Guid.NewGuid();
         var dataverseMock = new Mock<IDataverseService>();
-        dataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
+        var entityServiceMock = new Mock<IGenericEntityService>();
+        entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedRecordId);
 
-        var sut = BuildService(graphFactoryMock, dataverseMock);
+        var sut = BuildService(graphFactoryMock, dataverseMock, entityServiceMock: entityServiceMock);
 
         var matterId = Guid.NewGuid();
         var request = CreateValidRequest(
@@ -211,9 +224,9 @@ public class CommunicationIntegrationTests
         response.From.Should().Be("noreply@contoso.com", "Default sender should resolve");
         response.CorrelationId.Should().Be("e2e-bff-001");
 
-        // Assert: Dataverse CreateAsync was called with correct Entity fields
-        dataverseMock.Verify(
-            d => d.CreateAsync(
+        // Assert: IGenericEntityService.CreateAsync was called with correct Entity fields
+        entityServiceMock.Verify(
+            s => s.CreateAsync(
                 It.Is<DataverseEntity>(e =>
                     e.LogicalName == "sprk_communication" &&
                     e.GetAttributeValue<string>("sprk_subject") == "Project Update" &&
@@ -243,11 +256,12 @@ public class CommunicationIntegrationTests
 
         var expectedRecordId = Guid.NewGuid();
         var dataverseMock = new Mock<IDataverseService>();
-        dataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
+        var entityServiceMock = new Mock<IGenericEntityService>();
+        entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedRecordId);
 
-        var communicationService = BuildService(graphFactoryMock, dataverseMock);
+        var communicationService = BuildService(graphFactoryMock, dataverseMock, entityServiceMock: entityServiceMock);
 
         var toolHandler = new SendCommunicationToolHandler(
             communicationService,
@@ -297,12 +311,13 @@ public class CommunicationIntegrationTests
 
         DataverseEntity? capturedEntity = null;
         var dataverseMock = new Mock<IDataverseService>();
-        dataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
+        var entityServiceMock = new Mock<IGenericEntityService>();
+        entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
             .Callback<DataverseEntity, CancellationToken>((entity, _) => capturedEntity = entity)
             .ReturnsAsync(Guid.NewGuid());
 
-        var sut = BuildService(graphFactoryMock, dataverseMock);
+        var sut = BuildService(graphFactoryMock, dataverseMock, entityServiceMock: entityServiceMock);
 
         var matterId = Guid.NewGuid();
         var request = CreateValidRequest(
@@ -515,16 +530,17 @@ public class CommunicationIntegrationTests
     [Fact]
     public async Task DataverseFailure_EmailStillSent()
     {
-        // Arrange: Graph succeeds but Dataverse CreateAsync throws
+        // Arrange: Graph succeeds but IGenericEntityService.CreateAsync throws
         var graphFactoryMock = new Mock<IGraphClientFactory>();
         graphFactoryMock.Setup(f => f.ForApp()).Returns(CreateMockGraphClient());
 
         var dataverseMock = new Mock<IDataverseService>();
-        dataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
+        var entityServiceMock = new Mock<IGenericEntityService>();
+        entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Dataverse is unavailable"));
 
-        var sut = BuildService(graphFactoryMock, dataverseMock);
+        var sut = BuildService(graphFactoryMock, dataverseMock, entityServiceMock: entityServiceMock);
 
         var request = CreateValidRequest(
             subject: "Important email",
@@ -627,12 +643,13 @@ public class CommunicationIntegrationTests
 
         DataverseEntity? capturedEntity = null;
         var dataverseMock = new Mock<IDataverseService>();
-        dataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
+        var entityServiceMock = new Mock<IGenericEntityService>();
+        entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
             .Callback<DataverseEntity, CancellationToken>((entity, _) => capturedEntity = entity)
             .ReturnsAsync(Guid.NewGuid());
 
-        var communicationService = BuildService(graphFactoryMock, dataverseMock);
+        var communicationService = BuildService(graphFactoryMock, dataverseMock, entityServiceMock: entityServiceMock);
         var toolHandler = new SendCommunicationToolHandler(
             communicationService,
             Mock.Of<ILogger<SendCommunicationToolHandler>>());
@@ -668,19 +685,20 @@ public class CommunicationIntegrationTests
     [Fact]
     public async Task DataverseRecord_HasCorrectFieldNamesAndTypes()
     {
-        // Arrange: capture the Entity passed to CreateAsync and verify field names
-        // This catches schema mismatches (especially the intentional "communiation" typo)
+        // Arrange: capture the Entity passed to IGenericEntityService.CreateAsync and verify field names.
+        // This catches schema mismatches (especially the intentional "communiation" typo).
         var graphFactoryMock = new Mock<IGraphClientFactory>();
         graphFactoryMock.Setup(f => f.ForApp()).Returns(CreateMockGraphClient());
 
         DataverseEntity? capturedEntity = null;
         var dataverseMock = new Mock<IDataverseService>();
-        dataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
+        var entityServiceMock = new Mock<IGenericEntityService>();
+        entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
             .Callback<DataverseEntity, CancellationToken>((entity, _) => capturedEntity = entity)
             .ReturnsAsync(Guid.NewGuid());
 
-        var sut = BuildService(graphFactoryMock, dataverseMock);
+        var sut = BuildService(graphFactoryMock, dataverseMock, entityServiceMock: entityServiceMock);
 
         var request = CreateValidRequest(
             to: new[] { "a@example.com" },
@@ -743,12 +761,13 @@ public class CommunicationIntegrationTests
 
         DataverseEntity? capturedEntity = null;
         var dataverseMock = new Mock<IDataverseService>();
-        dataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
+        var entityServiceMock = new Mock<IGenericEntityService>();
+        entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
             .Callback<DataverseEntity, CancellationToken>((entity, _) => capturedEntity = entity)
             .ReturnsAsync(Guid.NewGuid());
 
-        var sut = BuildService(graphFactoryMock, dataverseMock);
+        var sut = BuildService(graphFactoryMock, dataverseMock, entityServiceMock: entityServiceMock);
 
         var orgId = Guid.NewGuid();
         var request = CreateValidRequest(
@@ -1044,12 +1063,13 @@ public class CommunicationIntegrationTests
         DataverseEntity? capturedEntity = null;
         var expectedRecordId = Guid.NewGuid();
         var dataverseMock = new Mock<IDataverseService>();
-        dataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
+        var entityServiceMock = new Mock<IGenericEntityService>();
+        entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
             .Callback<DataverseEntity, CancellationToken>((entity, _) => capturedEntity = entity)
             .ReturnsAsync(expectedRecordId);
 
-        var sut = BuildService(graphFactoryMock, dataverseMock);
+        var sut = BuildService(graphFactoryMock, dataverseMock, entityServiceMock: entityServiceMock);
 
         var request = new SendCommunicationRequest
         {
@@ -1209,8 +1229,9 @@ public class CommunicationIntegrationTests
         DataverseEntity? capturedEntity = null;
         var expectedRecordId = Guid.NewGuid();
         var dataverseMock = new Mock<IDataverseService>();
-        dataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
+        var entityServiceMock = new Mock<IGenericEntityService>();
+        entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
             .Callback<DataverseEntity, CancellationToken>((entity, _) => capturedEntity = entity)
             .ReturnsAsync(expectedRecordId);
 
@@ -1230,7 +1251,7 @@ public class CommunicationIntegrationTests
             ArchiveContainerId = "fake-container-id"
         };
 
-        var sut = BuildService(graphFactoryMock, dataverseMock, options);
+        var sut = BuildService(graphFactoryMock, dataverseMock, options, entityServiceMock: entityServiceMock);
 
         // Create request with attachments but ArchiveToSpe=false (default)
         // Note: AttachmentDocumentIds triggers DownloadAndBuildAttachmentsAsync which requires SpeFileStore.

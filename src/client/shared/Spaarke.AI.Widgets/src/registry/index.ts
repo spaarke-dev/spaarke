@@ -20,9 +20,7 @@ export {
   clearWorkspaceRegistry,
 } from './WorkspaceWidgetRegistry';
 
-export type {
-  WorkspaceWidgetRegistration,
-} from './WorkspaceWidgetRegistry';
+export type { WorkspaceWidgetRegistration } from './WorkspaceWidgetRegistry';
 
 // WidgetMetadata is exported from @spaarke/ai-widgets via types/widget-types.ts.
 // Do not re-export here to avoid duplicate identifier errors.

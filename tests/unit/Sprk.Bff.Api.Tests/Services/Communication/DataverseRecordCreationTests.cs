@@ -20,19 +20,26 @@ namespace Sprk.Bff.Api.Tests.Services.Communication;
 /// Tests that CreateDataverseRecordAsync sets correct field names and values
 /// on the sprk_communication entity during SendAsync.
 /// </summary>
+/// <remarks>
+/// 2026-05-31 (task 011 / P1.A2 verify+repair): the sprk_communication writer was migrated to
+/// IGenericEntityService.CreateAsync (ISP segregation of IDataverseService). Tests now capture
+/// on IGenericEntityService; signal-clarity preserved. Sibling-coordination note: production
+/// signature in Services/Communication/CommunicationService.cs is unchanged by this task.
+/// </remarks>
+[Trait("status", "repaired")]
 public class DataverseRecordCreationTests
 {
     #region Test Infrastructure
 
     private readonly Mock<IGraphClientFactory> _graphClientFactoryMock;
-    private readonly Mock<IDataverseService> _dataverseServiceMock;
+    private readonly Mock<IGenericEntityService> _genericEntityServiceMock;
     private readonly Mock<ILogger<CommunicationService>> _loggerMock;
     private DataverseEntity? _capturedEntity;
 
     public DataverseRecordCreationTests()
     {
         _graphClientFactoryMock = new Mock<IGraphClientFactory>();
-        _dataverseServiceMock = new Mock<IDataverseService>();
+        _genericEntityServiceMock = new Mock<IGenericEntityService>();
         _loggerMock = new Mock<ILogger<CommunicationService>>();
 
         // Default: Graph succeeds (202 Accepted)
@@ -41,7 +48,7 @@ public class DataverseRecordCreationTests
             .Returns(CreateMockGraphClient());
 
         // Capture the Entity passed to CreateAsync
-        _dataverseServiceMock
+        _genericEntityServiceMock
             .Setup(ds => ds.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
             .Callback<DataverseEntity, CancellationToken>((entity, _) => _capturedEntity = entity)
             .ReturnsAsync(Guid.NewGuid());
@@ -75,7 +82,7 @@ public class DataverseRecordCreationTests
             _graphClientFactoryMock.Object,
             senderValidator,
             Mock.Of<ICommunicationDataverseService>(),
-            Mock.Of<IGenericEntityService>(),
+            _genericEntityServiceMock.Object,
             Mock.Of<IDocumentDataverseService>(),
             emlGenerationService,
             speFileStore,
@@ -541,7 +548,7 @@ public class DataverseRecordCreationTests
     public async Task SendAsync_WhenDataverseCreateFails_StillReturnsSendSuccess()
     {
         // Arrange - make Dataverse throw
-        _dataverseServiceMock
+        _genericEntityServiceMock
             .Setup(ds => ds.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Dataverse is down"));
 
@@ -562,7 +569,7 @@ public class DataverseRecordCreationTests
     {
         // Arrange
         var expectedId = Guid.NewGuid();
-        _dataverseServiceMock
+        _genericEntityServiceMock
             .Setup(ds => ds.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedId);
 

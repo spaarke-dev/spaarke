@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Workflow inventory + baseline snapshots</title>
+    <phase>0: Inventory + Baseline</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>010, 011, 012, 020</blocks>
+    <tags>ci-cd, github-actions, devops, workflow-audit, documentation</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Inventory + new file creation; explicit acceptance criteria from spec (FR-01); no .cs/.ts code modified</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Audit all 13 GitHub Actions workflows in `.github/workflows/`. For each workflow, capture its trigger configuration, last-30-day success rate (via `gh run list`), declared purpose, value statement, last meaningful commit, and recommended action (keep/fix/delete/consolidate). Produce a single inventory document and a branch-protection snapshot. This is the foundation that gates Phase 1 fix work — each Phase 1 task reads its workflow's inventory line before starting.
+  </prompt>
+
+  <role>
+    SPAARKE platform DevOps engineer. Familiar with GitHub Actions, `gh` CLI, and the gold-standard workflow-audit format from `projects/sdap-bff-api-remediation-fix/inventory/ci-workflow-inventory.md`. Follow the predecessor project's `baseline/` pattern for snapshot artifacts.
+  </role>
+
+  <goal>
+    Two artifacts exist and are committed:
+    1. `projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md` with one entry per workflow (13 entries) following the gold-standard format
+    2. `projects/github-actions-rationalization-r1/baseline/branch-protection-2026-06-01.json` containing the current master branch-protection configuration
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-01: each of the 13 workflows must be audited with a captured value statement, success rate, owner, and recommended action. This task is the prerequisite for all Phase 1 fix work (010/011/012) and Phase 2 disposition decisions (020+).
+    </background>
+    <relevant-files>
+      <file>.github/workflows/adr-audit.yml</file>
+      <file>.github/workflows/auto-add-to-project.yml</file>
+      <file>.github/workflows/deploy-bff-api.yml</file>
+      <file>.github/workflows/deploy-infrastructure.yml</file>
+      <file>.github/workflows/deploy-office-addins.yml</file>
+      <file>.github/workflows/deploy-platform.yml</file>
+      <file>.github/workflows/deploy-promote.yml</file>
+      <file>.github/workflows/deploy-slot-swap.yml</file>
+      <file>.github/workflows/insights-eval.yml</file>
+      <file>.github/workflows/nightly-quality.yml</file>
+      <file>.github/workflows/provision-customer.yml</file>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>.github/workflows/weekly-quality.yml</file>
+      <file>projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md</file>
+      <file>projects/github-actions-rationalization-r1/baseline/branch-protection-2026-06-01.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-01: One inventory entry per workflow; document must exist at `baseline/workflow-inventory-2026-06-01.md`</constraint>
+    <constraint source="spec">NFR-01: No production code changes (`src/`, `power-platform/`, `infra/`, `scripts/`)</constraint>
+    <constraint source="project">Use the gold-standard format from `projects/sdap-bff-api-remediation-fix/inventory/ci-workflow-inventory.md`</constraint>
+    <constraint source="project">Snapshot branch protection via `gh api repos/spaarke-dev/sdap/branches/master/protection` (or current org/repo)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/ci-workflow-inventory.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+    </files>
+    <patterns>
+      <pattern name="Gold-standard workflow audit" location="projects/sdap-bff-api-remediation-fix/inventory/ci-workflow-inventory.md">
+        Per-workflow inventory format with triggers, plug-in points, current state, recommendations.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load project CLAUDE.md (NFR-08), spec.md FR-01 acceptance criteria, and the gold-standard format from predecessor.</step>
+    <step order="2">For each of the 13 workflow files in `.github/workflows/`: read the file, extract triggers, jobs, declared purpose (from `name:` + comments). Note approximate line count and last commit (`git log -1 --format='%h %ai %s' -- .github/workflows/{name}.yml`).</step>
+    <step order="3">For each workflow, query last-30-day runs: `gh run list --workflow={file} --limit 100 --json conclusion,createdAt,event,headBranch`. Compute success rate, failure rate, and skip/cancel rate. Note pattern (0s loader-failures vs real failures).</step>
+    <step order="4">For each workflow, assign a tentative recommended action: KEEP (works + valuable), FIX (broken, in P2/P3/P4), DELETE (no successful runs in 30d, candidate per D-03), CONSOLIDATE (overlaps with another, candidate per D-04). Cite evidence.</step>
+    <step order="5">Write `projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md` with a section per workflow following the gold-standard format. Include a summary table at top: count by recommended action.</step>
+    <step order="6">Capture branch protection: `gh api repos/{owner}/{repo}/branches/master/protection > projects/github-actions-rationalization-r1/baseline/branch-protection-2026-06-01.json`. If repo can't be inferred from current git remote, use `git remote get-url origin` to derive it.</step>
+    <step order="7">Verify outputs exist and are non-empty. Update TASK-INDEX.md: change task 001 status to ✅ completed.</step>
+    <step order="8">If any deviations from plan, document in `projects/github-actions-rationalization-r1/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">GitHub CLI for `gh run list` and `gh api branches/master/protection`</tool>
+    <tool name="git">For commit history per workflow</tool>
+    <tool name="Read">Read workflow YAML files</tool>
+    <tool name="Write">Write inventory + JSON snapshot</tool>
+    <tool name="Grep">Search workflow contents for triggers, scheduling, dependencies</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md</output>
+    <output type="config">projects/github-actions-rationalization-r1/baseline/branch-protection-2026-06-01.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`baseline/workflow-inventory-2026-06-01.md` exists with exactly 13 workflow entries (one per file in `.github/workflows/`).</criterion>
+    <criterion testable="true">Each entry includes: trigger config, last-30-day success rate (% with run count), declared purpose, recommended action (KEEP/FIX/DELETE/CONSOLIDATE) with cited evidence.</criterion>
+    <criterion testable="true">`baseline/branch-protection-2026-06-01.json` exists and is valid JSON containing the master branch protection configuration.</criterion>
+    <criterion testable="true">Summary table at top of inventory shows count by recommended action (e.g., KEEP: 4, FIX: 3, DELETE: 5, CONSOLIDATE: 1).</criterion>
+    <criterion testable="true">TASK-INDEX.md task 001 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The `gh run list` for some workflows may show zero runs in 30 days. That's not an error — record it as evidence supporting a DELETE recommendation. The actual delete decision is made in Phase 2 (task 020+), not here. Workflow `sdap-ci.yml` should show recovery post-PR-#314 (2026-06-01) — if it does NOT, that's a project-blocker per Risk R1; flag it explicitly.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in the knowledge/files section before starting. Follow task-execute skill protocol (rigor: STANDARD — no Step 9.5 quality gates required).</protocol>
+  </execution>
+</task>

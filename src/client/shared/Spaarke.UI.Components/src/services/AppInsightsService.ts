@@ -89,9 +89,7 @@ class AppInsightsServiceImpl {
   public trackEvent(name: string, properties?: Record<string, unknown>): void {
     if (!this._initialized || !this._appInsights) {
       // eslint-disable-next-line no-console
-      console.warn(
-        `[AppInsightsService] trackEvent('${name}') called before initialize() — event dropped.`
-      );
+      console.warn(`[AppInsightsService] trackEvent('${name}') called before initialize() — event dropped.`);
       return;
     }
     try {

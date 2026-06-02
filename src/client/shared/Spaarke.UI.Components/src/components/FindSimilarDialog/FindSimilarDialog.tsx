@@ -123,12 +123,7 @@ const useStyles = makeStyles({
 // Component
 // ---------------------------------------------------------------------------
 
-export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
-  open,
-  onClose,
-  url,
-  embedded = false,
-}) => {
+export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({ open, onClose, url, embedded = false }) => {
   const styles = useStyles();
 
   const handleExpand = React.useCallback(() => {
@@ -147,7 +142,9 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
       <DialogSurface className={styles.surface}>
         {!embedded && (
           <div className={styles.titleBar}>
-            <Text weight="semibold" size={400}>Similar Documents</Text>
+            <Text weight="semibold" size={400}>
+              Similar Documents
+            </Text>
             <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS }}>
               <Tooltip content="Open in new tab" relationship="label">
                 <Button
@@ -159,7 +156,13 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
                 />
               </Tooltip>
               <Tooltip content="Close" relationship="label">
-                <Button appearance="subtle" icon={<DismissRegular />} size="small" onClick={onClose} aria-label="Close" />
+                <Button
+                  appearance="subtle"
+                  icon={<DismissRegular />}
+                  size="small"
+                  onClick={onClose}
+                  aria-label="Close"
+                />
               </Tooltip>
             </div>
           </div>

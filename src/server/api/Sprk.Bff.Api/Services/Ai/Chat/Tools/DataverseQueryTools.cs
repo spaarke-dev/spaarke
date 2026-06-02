@@ -58,11 +58,11 @@ public sealed class DataverseQueryTools
     private static readonly IReadOnlyDictionary<string, string> EntitySetNames =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["sprk_matter"]    = "sprk_matters",
-            ["sprk_project"]   = "sprk_projects",
-            ["contact"]        = "contacts",
-            ["account"]        = "accounts",
-            ["sprk_document"]  = "sprk_documents"
+            ["sprk_matter"] = "sprk_matters",
+            ["sprk_project"] = "sprk_projects",
+            ["contact"] = "contacts",
+            ["account"] = "accounts",
+            ["sprk_document"] = "sprk_documents"
         };
 
     /// <summary>
@@ -72,10 +72,10 @@ public sealed class DataverseQueryTools
     private static readonly IReadOnlyDictionary<string, string[]> SummaryFields =
         new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
         {
-            ["sprk_matter"]   = ["sprk_matterid", "sprk_name", "sprk_status", "sprk_mattertype", "sprk_clientid"],
-            ["sprk_project"]  = ["sprk_projectid", "sprk_name", "sprk_status", "sprk_matterlookup"],
-            ["contact"]       = ["contactid", "fullname", "emailaddress1", "jobtitle"],
-            ["account"]       = ["accountid", "name", "telephone1", "websiteurl"],
+            ["sprk_matter"] = ["sprk_matterid", "sprk_name", "sprk_status", "sprk_mattertype", "sprk_clientid"],
+            ["sprk_project"] = ["sprk_projectid", "sprk_name", "sprk_status", "sprk_matterlookup"],
+            ["contact"] = ["contactid", "fullname", "emailaddress1", "jobtitle"],
+            ["account"] = ["accountid", "name", "telephone1", "websiteurl"],
             ["sprk_document"] = ["sprk_documentid", "sprk_name", "sprk_documenttype", "sprk_status"]
         };
 
@@ -85,10 +85,10 @@ public sealed class DataverseQueryTools
     private static readonly IReadOnlyDictionary<string, string> PrimaryIdFields =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["sprk_matter"]   = "sprk_matterid",
-            ["sprk_project"]  = "sprk_projectid",
-            ["contact"]       = "contactid",
-            ["account"]       = "accountid",
+            ["sprk_matter"] = "sprk_matterid",
+            ["sprk_project"] = "sprk_projectid",
+            ["contact"] = "contactid",
+            ["account"] = "accountid",
             ["sprk_document"] = "sprk_documentid"
         };
 
@@ -98,10 +98,10 @@ public sealed class DataverseQueryTools
     private static readonly IReadOnlyDictionary<string, string> DisplayNameFields =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["sprk_matter"]   = "sprk_name",
-            ["sprk_project"]  = "sprk_name",
-            ["contact"]       = "fullname",
-            ["account"]       = "name",
+            ["sprk_matter"] = "sprk_name",
+            ["sprk_project"] = "sprk_name",
+            ["contact"] = "fullname",
+            ["account"] = "name",
             ["sprk_document"] = "sprk_name"
         };
 
@@ -197,8 +197,8 @@ public sealed class DataverseQueryTools
         var effectiveTop = Math.Clamp(top, 1, MaxTop);
 
         var entitySetName = EntitySetNames[entityType];
-        var selectFields  = SummaryFields[entityType];
-        var selectClause  = string.Join(",", selectFields);
+        var selectFields = SummaryFields[entityType];
+        var selectClause = string.Join(",", selectFields);
 
         // Build OData query URL
         var queryUrl = $"{_dataverseBaseUrl}/api/data/v9.2/{entitySetName}?$select={selectClause}&$top={effectiveTop}";
@@ -251,10 +251,10 @@ public sealed class DataverseQueryTools
                        (string.IsNullOrWhiteSpace(filter) ? "." : $" matching the filter: {filter}");
             }
 
-            var idField      = PrimaryIdFields[entityType];
-            var nameField    = DisplayNameFields[entityType];
-            var sb           = new System.Text.StringBuilder();
-            var recordCount  = valueArray.GetArrayLength();
+            var idField = PrimaryIdFields[entityType];
+            var nameField = DisplayNameFields[entityType];
+            var sb = new System.Text.StringBuilder();
+            var recordCount = valueArray.GetArrayLength();
 
             sb.AppendLine($"Found {recordCount} '{entityType}' record(s)" +
                           (string.IsNullOrWhiteSpace(filter) ? ":" : $" matching '{filter}':"));
@@ -262,7 +262,7 @@ public sealed class DataverseQueryTools
 
             foreach (var record in valueArray.EnumerateArray())
             {
-                var id          = GetStringField(record, idField);
+                var id = GetStringField(record, idField);
                 var displayName = GetStringField(record, nameField);
 
                 sb.AppendLine($"  ID: {id}");
@@ -352,7 +352,7 @@ public sealed class DataverseQueryTools
         }
 
         var entitySetName = EntitySetNames[entityType];
-        var queryUrl      = $"{_dataverseBaseUrl}/api/data/v9.2/{entitySetName}({recordGuid:D})";
+        var queryUrl = $"{_dataverseBaseUrl}/api/data/v9.2/{entitySetName}({recordGuid:D})";
 
         _logger.LogInformation(
             "DataverseQueryTools.GetEntityDetail: entityType={EntityType}, recordId={RecordId}",
@@ -438,12 +438,12 @@ public sealed class DataverseQueryTools
 
             var value = property.Value.ValueKind switch
             {
-                JsonValueKind.Null      => "(null)",
-                JsonValueKind.String    => property.Value.GetString() ?? string.Empty,
-                JsonValueKind.Number    => property.Value.GetRawText(),
-                JsonValueKind.True      => "true",
-                JsonValueKind.False     => "false",
-                _                       => property.Value.GetRawText()
+                JsonValueKind.Null => "(null)",
+                JsonValueKind.String => property.Value.GetString() ?? string.Empty,
+                JsonValueKind.Number => property.Value.GetRawText(),
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                _ => property.Value.GetRawText()
             };
 
             sb.AppendLine($"  {property.Name}: {value}");
@@ -462,8 +462,8 @@ public sealed class DataverseQueryTools
             return prop.ValueKind switch
             {
                 JsonValueKind.String => prop.GetString() ?? string.Empty,
-                JsonValueKind.Null   => string.Empty,
-                _                    => prop.GetRawText()
+                JsonValueKind.Null => string.Empty,
+                _ => prop.GetRawText()
             };
         }
 

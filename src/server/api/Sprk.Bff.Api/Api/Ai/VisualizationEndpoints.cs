@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Visualization;
 
 namespace Sprk.Bff.Api.Api.Ai;
@@ -141,6 +142,11 @@ public static class VisualizationEndpoints
 
             return Results.Ok(response);
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 1.5 round 4 (D-02 cluster exception): NullVisualizationService surfaced.
+            return ex.AsFeatureDisabled503();
+        }
         catch (KeyNotFoundException ex)
         {
             logger.LogWarning(ex,
@@ -263,6 +269,11 @@ public static class VisualizationEndpoints
             }
 
             return Results.Ok(result);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 1.5 round 4 (D-02 cluster exception): NullVisualizationService surfaced.
+            return ex.AsFeatureDisabled503();
         }
         catch (Exception ex)
         {

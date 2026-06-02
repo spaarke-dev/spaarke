@@ -6,17 +6,8 @@
  * Follows the same checkbox-card pattern as CreateRecordWizard/FollowOnSteps.
  */
 import * as React from 'react';
-import {
-  Text,
-  Checkbox,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
-import {
-  PersonRegular,
-  MailRegular,
-  CalendarRegular,
-} from '@fluentui/react-icons';
+import { Text, Checkbox, makeStyles, tokens } from '@fluentui/react-components';
+import { PersonRegular, MailRegular, CalendarRegular } from '@fluentui/react-icons';
 import type { WorkAssignmentFollowOnId } from './formTypes';
 
 // ---------------------------------------------------------------------------
@@ -158,7 +149,7 @@ export const NextStepsSelectionStep: React.FC<INextStepsSelectionStepProps> = ({
     (actionId: WorkAssignmentFollowOnId) => {
       onSelectedActionsChange(
         selectedActions.includes(actionId)
-          ? selectedActions.filter((a) => a !== actionId)
+          ? selectedActions.filter(a => a !== actionId)
           : [...selectedActions, actionId]
       );
     },
@@ -177,7 +168,7 @@ export const NextStepsSelectionStep: React.FC<INextStepsSelectionStepProps> = ({
       </div>
 
       <div className={styles.cardGrid}>
-        {FOLLOW_ON_CARDS.map((card) => {
+        {FOLLOW_ON_CARDS.map(card => {
           const isSelected = selectedActions.includes(card.id);
           return (
             <div
@@ -188,7 +179,7 @@ export const NextStepsSelectionStep: React.FC<INextStepsSelectionStepProps> = ({
               aria-checked={isSelected}
               aria-label={card.label}
               tabIndex={0}
-              onKeyDown={(e) => {
+              onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   toggleAction(card.id);

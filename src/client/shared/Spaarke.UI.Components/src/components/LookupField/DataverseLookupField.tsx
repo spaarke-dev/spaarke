@@ -36,14 +36,7 @@
  */
 
 import * as React from 'react';
-import {
-  Button,
-  Field,
-  Spinner,
-  Text,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Button, Field, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { DismissRegular, SearchRegular } from '@fluentui/react-icons';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { INavigationService } from '../../types/serviceInterfaces';
@@ -244,14 +237,7 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
     return (
       <div className={styles.wrapper}>
         <Field
-          label={
-            <LabelContent
-              label={label}
-              required={required}
-              labelExtra={labelExtra}
-              styles={styles}
-            />
-          }
+          label={<LabelContent label={label} required={required} labelExtra={labelExtra} styles={styles} />}
           required={required}
         >
           {value ? (
@@ -274,14 +260,7 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
   return (
     <div className={styles.wrapper}>
       <Field
-        label={
-          <LabelContent
-            label={label}
-            required={required}
-            labelExtra={labelExtra}
-            styles={styles}
-          />
-        }
+        label={<LabelContent label={label} required={required} labelExtra={labelExtra} styles={styles} />}
         required={required}
       >
         {value ? (
@@ -310,7 +289,7 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
               disabled={isOpening}
               aria-label={`Select ${label}`}
             >
-              {isOpening ? 'Opening\u2026' : placeholder ?? `Search ${label.toLowerCase()}...`}
+              {isOpening ? 'Opening\u2026' : (placeholder ?? `Search ${label.toLowerCase()}...`)}
             </Button>
           </div>
         )}

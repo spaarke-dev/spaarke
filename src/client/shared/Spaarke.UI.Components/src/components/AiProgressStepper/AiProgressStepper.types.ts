@@ -8,7 +8,7 @@
  * @see ADR-012 - Shared Component Library conventions
  */
 
-export type AiProgressStepStatus = "pending" | "active" | "completed" | "error";
+export type AiProgressStepStatus = 'pending' | 'active' | 'completed' | 'error';
 
 export interface AiProgressStep {
   /** Matches the backend `step` field in progress chunks (e.g. "extracting_text"). */
@@ -39,7 +39,7 @@ export interface AiProgressStepperProps {
    * - `card`: floating overlay with semi-transparent backdrop (AnalysisWorkspace, PlaybookBuilder)
    * - `inline`: flat layout embedded directly in parent container (wizard steps, REST surfaces)
    */
-  variant?: "card" | "inline";
+  variant?: 'card' | 'inline';
 }
 
 /**
@@ -48,28 +48,28 @@ export interface AiProgressStepperProps {
  */
 export const DOCUMENT_ANALYSIS_STEPS: AiProgressStep[] = [
   {
-    id: "document_loaded",
-    label: "Opening Document",
-    description: "Loading document metadata...",
+    id: 'document_loaded',
+    label: 'Opening Document',
+    description: 'Loading document metadata...',
   },
   {
-    id: "extracting_text",
-    label: "Reading Content",
-    description: "Extracting text with Document Intelligence...",
+    id: 'extracting_text',
+    label: 'Reading Content',
+    description: 'Extracting text with Document Intelligence...',
   },
   {
-    id: "context_ready",
-    label: "Preparing Analysis",
-    description: "Loading knowledge and context...",
+    id: 'context_ready',
+    label: 'Preparing Analysis',
+    description: 'Loading knowledge and context...',
   },
   {
-    id: "analyzing",
-    label: "Running Analysis",
-    description: "AI is analyzing your document...",
+    id: 'analyzing',
+    label: 'Running Analysis',
+    description: 'AI is analyzing your document...',
   },
   {
-    id: "delivering",
-    label: "Delivering Results",
-    description: "Streaming results to editor...",
+    id: 'delivering',
+    label: 'Delivering Results',
+    description: 'Streaming results to editor...',
   },
 ];

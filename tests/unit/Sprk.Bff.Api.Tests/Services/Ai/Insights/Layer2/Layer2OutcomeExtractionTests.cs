@@ -9,6 +9,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Models.Insights;
+using Sprk.Bff.Api.Services.Ai.CitationVerification;
 using Sprk.Bff.Api.Services.Ai.Insights.Extraction;
 using Xunit;
 
@@ -125,6 +126,7 @@ public class Layer2OutcomeExtractionTests
     // ─── Acceptance #1 — closing letter: outcomeCategory + settlementAmount + outcomeDate ───
 
     [Fact]
+    [Trait("status", "repaired")]
     public async Task ClosingLetterFixture_ExtractsOutcomeAndSettlementAndDate_WithVerbatimQuotes()
     {
         // Arrange — load the closing-letter fixture and a mocked LLM response that matches it.
@@ -157,17 +159,20 @@ public class Layer2OutcomeExtractionTests
         """;
 
         // Manual acceptance check: every evidence quote MUST be a verbatim substring of the
-        // source fixture. This is the load-bearing prompt-engineering invariant that
-        // GroundingVerifier (D-P9) mechanically enforces in production.
+        // source fixture under the SAME normalization GroundingVerifier (D-P9) applies in
+        // production — CRLF↔LF tolerant via whitespace collapsing + lowercase. See
+        // GroundingVerifier.Normalize XML doc for the canonical contract (RB-T028-02
+        // resolution, 2026-06-01).
         var validation = OutcomeExtractionResponseValidator.Validate(mockedLlmJson);
         validation.IsValid.Should().BeTrue("validator must accept a schema-conforming response");
-        documentText.Should().Contain(validation.Response!.Evidence.OutcomeCategory!,
+        var normalizedDoc = GroundingVerifier.Normalize(documentText);
+        normalizedDoc.Should().Contain(GroundingVerifier.Normalize(validation.Response!.Evidence.OutcomeCategory!),
             "outcomeCategory quote MUST be verbatim from the closing letter (GroundingVerifier check)");
-        documentText.Should().Contain(validation.Response.Evidence.SettlementAmount!,
+        normalizedDoc.Should().Contain(GroundingVerifier.Normalize(validation.Response.Evidence.SettlementAmount!),
             "settlementAmount quote MUST be verbatim from the closing letter");
-        documentText.Should().Contain(validation.Response.Evidence.OutcomeDate!,
+        normalizedDoc.Should().Contain(GroundingVerifier.Normalize(validation.Response.Evidence.OutcomeDate!),
             "outcomeDate quote MUST be verbatim from the closing letter");
-        documentText.Should().Contain(validation.Response.Evidence.MatterDurationDays!,
+        normalizedDoc.Should().Contain(GroundingVerifier.Normalize(validation.Response.Evidence.MatterDurationDays!),
             "matterDurationDays quote MUST be verbatim from the closing letter");
 
         // Act — run the full pipeline.
@@ -210,6 +215,7 @@ public class Layer2OutcomeExtractionTests
     // ─── Acceptance #2 — settlement agreement: settlementAmount + keyTerms[] ───
 
     [Fact]
+    [Trait("status", "repaired")]
     public async Task SettlementAgreementFixture_ExtractsSettlementAmount_AndKeyTermsPopulated()
     {
         // Arrange — settlement-agreement fixture; the document is dispositive on amount + key
@@ -246,12 +252,16 @@ public class Layer2OutcomeExtractionTests
         }
         """;
 
-        // Manual verbatim-substring check against the fixture.
+        // Manual verbatim-substring check against the fixture under production-equivalent
+        // normalization (GroundingVerifier.Normalize handles CRLF↔LF differences between the
+        // CRLF-on-disk fixture and the LF-normalized raw-string-literal quote; per RB-T028-02
+        // resolution, 2026-06-01).
         var validation = OutcomeExtractionResponseValidator.Validate(mockedLlmJson);
         validation.IsValid.Should().BeTrue("validator must accept a schema-conforming response");
-        documentText.Should().Contain(validation.Response!.Evidence.SettlementAmount!,
+        var normalizedDoc = GroundingVerifier.Normalize(documentText);
+        normalizedDoc.Should().Contain(GroundingVerifier.Normalize(validation.Response!.Evidence.SettlementAmount!),
             "settlementAmount quote MUST be verbatim from the settlement agreement");
-        documentText.Should().Contain(validation.Response.Evidence.OutcomeDate!,
+        normalizedDoc.Should().Contain(GroundingVerifier.Normalize(validation.Response.Evidence.OutcomeDate!),
             "outcomeDate quote MUST be verbatim from the settlement agreement");
 
         // Act
@@ -286,6 +296,7 @@ public class Layer2OutcomeExtractionTests
     // ─── Acceptance #3 — missing field returns null + confidence 0 + explanation ───
 
     [Fact]
+    [Trait("status", "repaired")]
     public async Task DecisionMemoFixture_MixedOutcome_ReturnsNullsWithConfidenceZeroAndExplanations()
     {
         // Arrange — decision-memo fixture; this is intentionally mixed/unclear (records a
@@ -331,8 +342,11 @@ public class Layer2OutcomeExtractionTests
             "validator must accept honest abstention shape (null + null + 0.0). Errors: " +
             string.Join("; ", validation.Errors));
 
-        // Manual verbatim-substring check on the one non-null evidence quote.
-        documentText.Should().Contain(validation.Response!.Evidence.OutcomeCategory!,
+        // Manual verbatim-substring check on the one non-null evidence quote — under the same
+        // GroundingVerifier.Normalize semantics production applies (RB-T028-02 resolution,
+        // 2026-06-01).
+        GroundingVerifier.Normalize(documentText).Should().Contain(
+            GroundingVerifier.Normalize(validation.Response!.Evidence.OutcomeCategory!),
             "outcomeCategory quote MUST be verbatim from the decision memo");
 
         // Act
@@ -602,8 +616,8 @@ public class Layer2OutcomeExtractionTests
         // ingest playbook can load it at runtime. This asserts the copy actually happened.
         var assemblyDir = Path.GetDirectoryName(typeof(Layer2OutcomeExtractionTests).Assembly.Location)
             ?? AppContext.BaseDirectory;
-            // The .Tests assembly references the BFF API; its output directory should contain the
-            // copied content. Walk down into Services/Ai/Insights/Prompts/.
+        // The .Tests assembly references the BFF API; its output directory should contain the
+        // copied content. Walk down into Services/Ai/Insights/Prompts/.
         var promptPath = Path.Combine(
             assemblyDir, "Services", "Ai", "Insights", "Prompts", "outcome-extraction.v1.txt");
         File.Exists(promptPath).Should().BeTrue(

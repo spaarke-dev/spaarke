@@ -9,9 +9,5 @@
  * @see ADR-012              — Shared Component Library
  */
 
-export { AssociateToStep } from "./AssociateToStep";
-export type {
-    AssociateToStepProps,
-    AssociationResult,
-    EntityTypeOption,
-} from "./types";
+export { AssociateToStep } from './AssociateToStep';
+export type { AssociateToStepProps, AssociationResult, EntityTypeOption } from './types';

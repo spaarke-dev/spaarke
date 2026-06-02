@@ -79,11 +79,7 @@ function makeWrapper(bus: PaneEventBus, overrides?: Partial<React.ComponentProps
   return function Wrapper({ children }: { children: React.ReactNode }): React.JSX.Element {
     return (
       <PaneEventBusProvider bus={bus}>
-        <AiSessionProvider
-          bffBaseUrl="https://spe-api-dev.example.com"
-          entityContext={null}
-          {...overrides}
-        >
+        <AiSessionProvider bffBaseUrl="https://spe-api-dev.example.com" entityContext={null} {...overrides}>
           {children}
         </AiSessionProvider>
       </PaneEventBusProvider>
@@ -110,9 +106,9 @@ describe('AiSessionProvider — SSE routing to PaneEventBus', () => {
     const contextEvents: ContextPaneEvent[] = [];
     const safetyEvents: SafetyPaneEvent[] = [];
 
-    bus.subscribe('workspace', (e) => workspaceEvents.push(e));
-    bus.subscribe('context', (e) => contextEvents.push(e));
-    bus.subscribe('safety', (e) => safetyEvents.push(e));
+    bus.subscribe('workspace', e => workspaceEvents.push(e));
+    bus.subscribe('context', e => contextEvents.push(e));
+    bus.subscribe('safety', e => safetyEvents.push(e));
 
     const { result } = renderSession(bus);
 
@@ -141,8 +137,8 @@ describe('AiSessionProvider — SSE routing to PaneEventBus', () => {
     const contextEvents: ContextPaneEvent[] = [];
     const workspaceEvents: WorkspacePaneEvent[] = [];
 
-    bus.subscribe('context', (e) => contextEvents.push(e));
-    bus.subscribe('workspace', (e) => workspaceEvents.push(e));
+    bus.subscribe('context', e => contextEvents.push(e));
+    bus.subscribe('workspace', e => workspaceEvents.push(e));
 
     const { result } = renderSession(bus);
 
@@ -168,7 +164,7 @@ describe('AiSessionProvider — SSE routing to PaneEventBus', () => {
     const bus = new PaneEventBus();
     const contextEvents: ContextPaneEvent[] = [];
 
-    bus.subscribe('context', (e) => contextEvents.push(e));
+    bus.subscribe('context', e => contextEvents.push(e));
 
     const { result } = renderSession(bus);
 
@@ -192,7 +188,7 @@ describe('AiSessionProvider — SSE routing to PaneEventBus', () => {
     const bus = new PaneEventBus();
     const safetyEvents: SafetyPaneEvent[] = [];
 
-    bus.subscribe('safety', (e) => safetyEvents.push(e));
+    bus.subscribe('safety', e => safetyEvents.push(e));
 
     const { result } = renderSession(bus);
 
@@ -243,8 +239,8 @@ describe('AiSessionProvider — multi-subscriber independence', () => {
     const paneBEvents: WorkspacePaneEvent[] = [];
 
     // Two independent pane subscribers — simulates WorkspacePane + a secondary widget
-    bus.subscribe('workspace', (e) => paneAEvents.push(e));
-    bus.subscribe('workspace', (e) => paneBEvents.push(e));
+    bus.subscribe('workspace', e => paneAEvents.push(e));
+    bus.subscribe('workspace', e => paneBEvents.push(e));
 
     const { result } = renderSession(bus);
 
@@ -280,8 +276,8 @@ describe('AiSessionProvider — multi-subscriber independence', () => {
     const contextAEvents: ContextPaneEvent[] = [];
     const contextBEvents: ContextPaneEvent[] = [];
 
-    bus.subscribe('context', (e) => contextAEvents.push(e));
-    bus.subscribe('context', (e) => contextBEvents.push(e));
+    bus.subscribe('context', e => contextAEvents.push(e));
+    bus.subscribe('context', e => contextBEvents.push(e));
 
     const { result } = renderSession(bus);
 
@@ -304,8 +300,8 @@ describe('AiSessionProvider — multi-subscriber independence', () => {
     const paneAEvents: WorkspacePaneEvent[] = [];
     const paneBEvents: WorkspacePaneEvent[] = [];
 
-    const unsubscribeA = bus.subscribe('workspace', (e) => paneAEvents.push(e));
-    bus.subscribe('workspace', (e) => paneBEvents.push(e));
+    const unsubscribeA = bus.subscribe('workspace', e => paneAEvents.push(e));
+    bus.subscribe('workspace', e => paneBEvents.push(e));
 
     const { result } = renderSession(bus);
 
@@ -493,24 +489,16 @@ describe('useAiSession — outside provider', () => {
   });
 
   it('throws a descriptive error when used outside AiSessionProvider', () => {
-    expect(() => renderHook(() => useAiSession())).toThrow(
-      /AiSessionProvider/
-    );
+    expect(() => renderHook(() => useAiSession())).toThrow(/AiSessionProvider/);
   });
 
   it('throws a descriptive error when used outside PaneEventBusProvider', () => {
     // AiSessionProvider without PaneEventBusProvider — dispatch hook will throw
     function BadWrapper({ children }: { children: React.ReactNode }) {
-      return (
-        <AiSessionProvider bffBaseUrl="https://example.com">
-          {children}
-        </AiSessionProvider>
-      );
+      return <AiSessionProvider bffBaseUrl="https://example.com">{children}</AiSessionProvider>;
     }
 
-    expect(() => renderHook(() => useAiSession(), { wrapper: BadWrapper })).toThrow(
-      /PaneEventBusProvider/
-    );
+    expect(() => renderHook(() => useAiSession(), { wrapper: BadWrapper })).toThrow(/PaneEventBusProvider/);
   });
 });
 

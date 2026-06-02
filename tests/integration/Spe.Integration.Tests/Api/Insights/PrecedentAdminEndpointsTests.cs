@@ -53,6 +53,7 @@ public class PrecedentAdminEndpointsTests : IClassFixture<PrecedentAdminTestFixt
     // -------------------------------------------------------------------------
 
     [Fact]
+    [Trait("status", "repaired")]
     public async Task PostPrecedent_AsAdmin_Returns_201_WithTentativeStatus()
     {
         // Arrange

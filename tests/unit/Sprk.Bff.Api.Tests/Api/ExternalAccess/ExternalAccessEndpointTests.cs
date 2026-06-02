@@ -32,6 +32,7 @@ namespace Sprk.Bff.Api.Tests.Api.ExternalAccess;
 /// ADR-001: Minimal API patterns.
 /// ADR-008: Auth filters are applied per-endpoint and are NOT tested here — integration tests cover those.
 /// </summary>
+[Trait("status", "repaired")]
 public class ExternalAccessEndpointTests
 {
     // =========================================================================

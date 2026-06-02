@@ -102,13 +102,9 @@ function loadPersistedState(storageKey: string, defaults: PersistedState): Persi
       const parsed = JSON.parse(stored) as Partial<PersistedState>;
       return {
         detailWidth:
-          typeof parsed.detailWidth === 'number' && parsed.detailWidth > 0
-            ? parsed.detailWidth
-            : defaults.detailWidth,
+          typeof parsed.detailWidth === 'number' && parsed.detailWidth > 0 ? parsed.detailWidth : defaults.detailWidth,
         isDetailVisible:
-          typeof parsed.isDetailVisible === 'boolean'
-            ? parsed.isDetailVisible
-            : defaults.isDetailVisible,
+          typeof parsed.isDetailVisible === 'boolean' ? parsed.isDetailVisible : defaults.isDetailVisible,
       };
     }
   } catch {
@@ -135,9 +131,7 @@ function persistState(storageKey: string, state: PersistedState): void {
 // Hook
 // ---------------------------------------------------------------------------
 
-export function useTwoPanelLayout(
-  options: UseTwoPanelLayoutOptions = {}
-): UseTwoPanelLayoutResult {
+export function useTwoPanelLayout(options: UseTwoPanelLayoutOptions = {}): UseTwoPanelLayoutResult {
   const {
     defaultDetailWidth = DEFAULT_DETAIL_WIDTH_PX,
     minPrimaryWidth = DEFAULT_MIN_PRIMARY_WIDTH_PX,

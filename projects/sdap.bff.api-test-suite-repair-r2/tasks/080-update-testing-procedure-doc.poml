@@ -1,0 +1,132 @@
+<task id="080" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P5.1 — Update docs/procedures/testing-and-code-quality.md (ledger lifecycle + TestClock pattern + Track E findings)</title>
+    <phase>Phase 5</phase>
+    <status>not-started</status>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <dependencies>040,041,042,043,044</dependencies>
+    <blocks>082,084</blocks>
+    <tags>phase-5, governance, documentation, ledger-lifecycle, testclock</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Documentation update under `docs/` (not `.claude/` — agent-safe per CLAUDE.md §3); no `src/` or test logic edits. STANDARD per CLAUDE.md §8 rigor decision tree.</rigor-reason>
+    <parallel-group>P5-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes only to `docs/procedures/testing-and-code-quality.md` (under `docs/`, not `.claude/`). Disjoint write path from task 081 (`.claude/constraints/`), 082 (test execution artifacts), 083 (git ops). Reads Phase 4 outputs but doesn't modify them.</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Update `docs/procedures/testing-and-code-quality.md` with three new sections derived from Phase 4 findings:
+
+    (a) **Ledger lifecycle** (per FR-07): document the real-bug-ledger state machine (`open` → `assigned-to-r2` → `in-progress` → `repaired`/`transferred-to-sibling`/`archived-as-dead-target` → `closed`). Cover: when to file vs when to fix, owner assignment rules, fix-by date logic, escalation paths. r2 is the canonical execution example to reference.
+
+    (b) **TestClock + seeded-Guid pattern** (per FR-13): merge the pattern draft from Phase 4 Track C (task 042's output `notes/testclock-pattern-draft.md`) into the procedure doc. Cover: abstraction signature, DI registration, TestClock/TestGuidProvider test-side usage, when-to-use, r3 migration plan reference.
+
+    (c) **Anti-drift effectiveness findings reference** (per FR-09): brief section pointing to `baseline/anti-drift-effectiveness-2026-08-XX.md` (Phase 4 Track E output). Include: high-level finding (compliance rate band); reference to corrective-action proposals if any. Does NOT inline-duplicate the report — references and cross-links.
+
+    Per D-04, this is the governance update that captures Phase 4 findings; NOT full remediation. r3 (if commissioned) acts on the recommendations.
+
+    Per CLAUDE.md §3, `docs/` is sub-agent-safe — this task does NOT need main-session-only treatment.
+  </prompt>
+
+  <role>Documentation AI agent updating the testing-and-code-quality procedure doc with Phase 4 outputs.</role>
+
+  <goal>
+    `docs/procedures/testing-and-code-quality.md` updated with three new sections:
+    1. **Real-Bug Ledger Lifecycle** — state machine + transitions + owner assignment + fix-by date logic
+    2. **Deterministic Test Data: TestClock + Seeded Guid Pattern** — abstraction signature + DI registration + test-side usage + r3 migration plan
+    3. **Anti-Drift Effectiveness — 2026-06-01 → 2026-08-15** — cross-reference to `baseline/anti-drift-effectiveness-2026-08-XX.md`; high-level finding statement
+
+    Existing sections in `testing-and-code-quality.md` are PRESERVED unchanged (additive edit). The new sections integrate into the existing structure (likely after the current ledger-related content; check for natural insertion point).
+  </goal>
+
+  <inputs>
+    <file purpose="target-procedure-doc">docs/procedures/testing-and-code-quality.md</file>
+    <file purpose="testclock-pattern-draft">projects/sdap.bff.api-test-suite-repair-r2/notes/testclock-pattern-draft.md (Phase 4 Track C output)</file>
+    <file purpose="anti-drift-report">projects/sdap.bff.api-test-suite-repair-r2/baseline/anti-drift-effectiveness-2026-08-XX.md (Phase 4 Track E output)</file>
+    <file purpose="r1-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (canonical lifecycle example)</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-07">`docs/procedures/testing-and-code-quality.md` updated with ledger lifecycle documentation</constraint>
+    <constraint source="FR-13">Pattern doc (from task 042) merged into procedure doc; r3 migration plan referenced</constraint>
+    <constraint source="FR-09">Track E findings cross-referenced from procedure doc</constraint>
+    <constraint source="D-04">Phase 4 outputs are pilot-grade; Phase 5 governance updates capture findings, NOT full remediation</constraint>
+    <constraint source="NFR-07">Anti-drift report (referenced here) is published whether favorable or not — this task does NOT soft-pedal</constraint>
+    <constraint source="CLAUDE.md §3">`docs/` is agent-safe (sub-agent write boundary applies only to `.claude/`); main-session-only NOT required for this task</constraint>
+    <constraint source="NFR-01">No `src/` or test logic modifications</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap.bff.api-test-suite-repair-r2/notes/testclock-pattern-draft.md</file>
+      <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/anti-drift-effectiveness-2026-08-XX.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+      <file>projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §5.6 / FR-07, the ledger lifecycle was operationalized in r1 + r2 but not yet documented as a reusable procedure. r2 close is the right moment to codify: r1 + r2 together demonstrate the full lifecycle (file → assigned → in-progress → repaired / transferred / archived → closed) with 20 ledger entries as worked examples.
+
+      Per design.md §5.5 Track C / FR-13, the TestClock pattern documentation lives in `testing-and-code-quality.md` (NOT in `.claude/` — it's a development procedure, not a binding constraint). Task 042 drafts the pattern; this task merges it into the procedure doc.
+
+      Per FR-09 / NFR-07, the anti-drift effectiveness report is the published evidence for D-05's design choice (no CI script). The procedure doc references the report so future contributors find the evidence base without searching project-internal `baseline/`.
+
+      All three sections are ADDITIVE — existing procedure-doc structure is preserved. The doc has been the canonical reference since pre-r1; r2's contribution is the lifecycle codification + new patterns.
+    </background>
+    <dependencies>
+      <dependency task="040" status="not-started">Phase 4 Track A (audit) — may inform documentation if rot patterns generalize</dependency>
+      <dependency task="041" status="not-started">Phase 4 Track B (mutation testing) — informs testing-and-code-quality.md if assertion-strengthening guidance is added</dependency>
+      <dependency task="042" status="not-started">Phase 4 Track C (TestClock PoC) — REQUIRED for section (b); provides the pattern draft</dependency>
+      <dependency task="043" status="not-started">Phase 4 Track D (Coverlet) — measurement-only; not required for this doc update</dependency>
+      <dependency task="044" status="not-started">Phase 4 Track E (anti-drift report) — REQUIRED for section (c); provides the report</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>docs/procedures/testing-and-code-quality.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read `docs/procedures/testing-and-code-quality.md` in full to understand existing structure (section order, formatting conventions, cross-reference style).</step>
+    <step order="2">Read `projects/sdap.bff.api-test-suite-repair-r2/notes/testclock-pattern-draft.md` (from task 042). If absent (task 042 didn't run or was reduced scope), note in commit and skip section (b) or scope it minimally.</step>
+    <step order="3">Read `projects/sdap.bff.api-test-suite-repair-r2/baseline/anti-drift-effectiveness-2026-08-XX.md` (from task 044). Extract high-level finding for cross-reference section.</step>
+    <step order="4">Read `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` to extract the canonical 20-entry lifecycle example for the new ledger-lifecycle section.</step>
+    <step order="5">Identify insertion point(s) in `testing-and-code-quality.md` for the three new sections. Likely: after existing test-quality content, before any closing sections. Preserve existing sections unchanged.</step>
+    <step order="6">Draft and insert section (a) "Real-Bug Ledger Lifecycle": state machine diagram (text-based); transitions; owner assignment rules; fix-by date logic; r2's 20-entry execution as worked example; cross-reference to r1 + r2 ledger files.</step>
+    <step order="7">Draft and insert section (b) "Deterministic Test Data: TestClock + Seeded Guid Pattern": merge content from `notes/testclock-pattern-draft.md`; abstract the PoC to a generally-applicable pattern; reference r3 migration plan.</step>
+    <step order="8">Draft and insert section (c) "Anti-Drift Effectiveness — 2026-06-01 → 2026-08-15": brief; cross-reference to the baseline report; high-level finding statement; note corrective-action proposals if &lt;80% compliance.</step>
+    <step order="9">Verify `git status` shows ONLY `docs/procedures/testing-and-code-quality.md` modified (no `.claude/`, no `src/`, no `.github/`).</step>
+    <step order="10">Commit message: "docs(procedures): add ledger lifecycle + TestClock pattern + anti-drift findings sections (FR-07, FR-13, FR-09)".</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">existing procedure doc; Phase 4 outputs (TestClock draft, anti-drift report); r1 ledger</tool>
+    <tool name="Edit">testing-and-code-quality.md — insert three new sections (preserve existing structure)</tool>
+    <tool name="Bash">`git status` for boundary verification; final commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/procedures/testing-and-code-quality.md (updated with three new sections)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File diff shows new "Real-Bug Ledger Lifecycle" section in `docs/procedures/testing-and-code-quality.md`</criterion>
+    <criterion testable="true">File diff shows new "Deterministic Test Data: TestClock + Seeded Guid Pattern" section (if task 042 produced draft)</criterion>
+    <criterion testable="true">File diff shows new "Anti-Drift Effectiveness 2026-06-01 → 2026-08-15" section with cross-reference to `baseline/anti-drift-effectiveness-2026-08-XX.md`</criterion>
+    <criterion testable="true">Existing procedure-doc sections preserved unchanged (verified via diff)</criterion>
+    <criterion testable="true">`git status` shows ONLY `docs/procedures/testing-and-code-quality.md` modified</criterion>
+    <criterion testable="true">Commit message references FR-07, FR-13, FR-09</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. STANDARD rigor (docs/ update; no Step 9.5 quality gates required for documentation-only changes).
+  </execution>
+</task>

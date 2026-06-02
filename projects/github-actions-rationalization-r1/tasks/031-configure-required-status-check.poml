@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Add actionlint to required-status-checks on master</title>
+    <phase>3: Prevention (actionlint)</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>032</blocks>
+    <tags>ci-cd, github-actions, devops, branch-protection</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Branch-protection config change; FR-08 acceptance; potential enforce_admins bypass (NFR-03)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 030; touches branch protection</parallel-reason>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Add the `actionlint` status check (from task 030's workflow) to required-status-checks on master branch protection, alongside the existing 3 (`Build &amp; Test (Debug)`, `Build &amp; Test (Release)`, `Code Quality`). Per FR-08: `gh api repos/.../branches/master/protection/required_status_checks` should return 4 contexts after this task. If the initial actionlint PR needs to land via brief `enforce_admins` bypass, log it in `decisions/D-NN-enforce-admins-bypass-actionlint.md` (NFR-03).
+  </prompt>
+
+  <role>
+    SPAARKE platform DevOps engineer. Comfortable with `gh api` branch-protection PATCH operations and the `enforce_admins` toggle.
+  </role>
+
+  <goal>
+    Master branch protection has 4 required status checks: the existing 3 PLUS `actionlint`. The change is recorded in `baseline/branch-protection-{date}.json` snapshot. Any enforce_admins bypass during initial actionlint PR landing is logged in `decisions/`.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-08: 4 required status check contexts after this task. Per NFR-05: actionlint MUST be required BEFORE Phase 5's deliberate-fail verification. Per NFR-03: enforce_admins disable only inside merge-window of an actionlint-fix PR, logged in `decisions/`. The first PR with task 030's workflow file can't satisfy its own required-check, so a brief bypass may be needed.
+    </background>
+    <relevant-files>
+      <file>projects/github-actions-rationalization-r1/baseline/branch-protection-{date}.json</file>
+      <file>projects/github-actions-rationalization-r1/decisions/D-NN-enforce-admins-bypass-actionlint.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-08: Required status checks count = 4 (existing 3 + actionlint)</constraint>
+    <constraint source="spec">NFR-03: enforce_admins disable only inside actionlint-fix merge-window; logged in `decisions/`</constraint>
+    <constraint source="spec">NFR-05: actionlint required BEFORE Phase 5 starts</constraint>
+    <constraint source="project">MUST capture before + after branch-protection snapshots in `baseline/`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+      <file>projects/github-actions-rationalization-r1/baseline/branch-protection-2026-06-01.json</file>
+      <file>docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Snapshot current branch protection: `gh api repos/{owner}/{repo}/branches/master/protection > baseline/branch-protection-{today}-pre-actionlint.json`.</step>
+    <step order="2">Verify task 030's workflow has fired on at least one PR and posted the `actionlint` status check (the context name must already exist in GitHub's known checks).</step>
+    <step order="3">Construct the PATCH body (JSON) with required_status_checks.contexts = existing 3 + `actionlint`. Apply via `gh api -X PATCH repos/{owner}/{repo}/branches/master/protection --input patch.json` (or equivalent `--field` flags).</step>
+    <step order="4">If the first PR adding task 030's workflow needs to land BEFORE the required-check is added: brief enforce_admins bypass: `gh api -X PATCH repos/.../branches/master/protection --field enforce_admins=false`; merge the PR; immediately restore: `--field enforce_admins=true`. Log the bypass window in `decisions/D-NN-enforce-admins-bypass-actionlint.md`.</step>
+    <step order="5">Snapshot after-state: `gh api repos/.../branches/master/protection > baseline/branch-protection-{today}-post-actionlint.json`. Verify contexts count = 4.</step>
+    <step order="6">Update TASK-INDEX.md: change task 031 status to ✅ completed. Task 032 may now proceed.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">api for branch-protection PATCH + snapshots</tool>
+    <tool name="Write">Decision record if bypass used</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">Branch protection config (4 required status checks)</output>
+    <output type="config">projects/github-actions-rationalization-r1/baseline/branch-protection-{date}-pre-actionlint.json</output>
+    <output type="config">projects/github-actions-rationalization-r1/baseline/branch-protection-{date}-post-actionlint.json</output>
+    <output type="docs">projects/github-actions-rationalization-r1/decisions/D-NN-enforce-admins-bypass-actionlint.md (if bypass used)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`gh api repos/.../branches/master/protection/required_status_checks` returns 4 context names including `actionlint` (FR-08).</criterion>
+    <criterion testable="true">Pre- and post-snapshots exist in `baseline/`.</criterion>
+    <criterion testable="true">If enforce_admins bypassed: `decisions/D-NN-enforce-admins-bypass-actionlint.md` records the rationale, start time, and restoration time (NFR-03).</criterion>
+    <criterion testable="true">After this task, enforce_admins is restored to `true`.</criterion>
+    <criterion testable="true">TASK-INDEX.md task 031 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Brief enforce_admins bypass pattern is established by the predecessor project (2026-06-01 PR #314 merge). Keep the bypass window under 5 minutes. If the actionlint workflow self-validates on the merging PR (it should — task 030 ensures the new file passes actionlint), no bypass is needed; the check name just needs to exist in GitHub's check registry first.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: STANDARD. Must complete before 032 (deliberate-fail smoke test).</protocol>
+  </execution>
+</task>

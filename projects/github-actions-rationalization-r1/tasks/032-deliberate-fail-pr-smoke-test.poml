@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Smoke-test actionlint gate via deliberate-fail PR</title>
+    <phase>3: Prevention (actionlint)</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>050</blocks>
+    <tags>ci-cd, github-actions, devops, smoke-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification PR; produces evidence file</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 031</parallel-reason>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Open a deliberate-fail PR introducing a duplicate YAML key (or similar actionlint-detectable error) into a workflow file. Confirm the `actionlint` check fires + fails, and confirm the PR is blocked from merging. Close the PR without merging; capture evidence in `baseline/`.
+  </prompt>
+
+  <role>
+    SPAARKE platform DevOps engineer. Comfortable opening + closing PRs and capturing evidence of branch-protection enforcement.
+  </role>
+
+  <goal>
+    Evidence file `baseline/actionlint-smoke-test-{date}.md` exists containing: the deliberate-fail PR URL, the actionlint check output, the merge-blocked state screenshot/text, and the post-close state.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-07 acceptance: a deliberate-fail PR is blocked from merging. This smoke-test is the proof. The change is throwaway — close the PR without merging.
+    </background>
+    <relevant-files>
+      <file>projects/github-actions-rationalization-r1/baseline/actionlint-smoke-test-{date}.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-07: Deliberate-fail PR is BLOCKED from merging</constraint>
+    <constraint source="project">PR is closed WITHOUT merging</constraint>
+    <constraint source="project">Test branch is named `test/actionlint-smoke-{date}` (clearly throwaway)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create branch `test/actionlint-smoke-{date}` from current `work/github-actions-rationalization-r1` (or master if cleaner). Pick any existing workflow (NOT `workflows-validate.yml` itself) and add a duplicate YAML key (e.g., duplicate `name:` line, or duplicate input). This is the deliberate fail.</step>
+    <step order="2">Commit + push. Open PR against master.</step>
+    <step order="3">Wait for `actionlint` check to fire. Confirm it FAILS with the duplicate-key error.</step>
+    <step order="4">Confirm the PR shows "Required status check `actionlint` failing" or equivalent merge-block. Capture evidence: PR URL, check output (`gh pr checks {pr-num}`), screenshot or text of the merge-block state.</step>
+    <step order="5">Write `baseline/actionlint-smoke-test-{date}.md` with: PR URL, actionlint check output, merge-block evidence, conclusion (PASS — gate works).</step>
+    <step order="6">Close the PR without merging: `gh pr close {pr-num}`. Delete the test branch: `git push origin --delete test/actionlint-smoke-{date}`.</step>
+    <step order="7">Update TASK-INDEX.md: change task 032 status to ✅ completed. Phase 3 complete; Phase 4 may begin.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Branch creation + commit</tool>
+    <tool name="gh">PR open + check + close</tool>
+    <tool name="Write">Evidence document</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/github-actions-rationalization-r1/baseline/actionlint-smoke-test-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PR is blocked from merging by the `actionlint` status check (FR-07).</criterion>
+    <criterion testable="true">Evidence file exists in `baseline/` with PR URL, check output, merge-block state.</criterion>
+    <criterion testable="true">PR closed without merging; test branch deleted.</criterion>
+    <criterion testable="true">TASK-INDEX.md task 032 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Don't merge this PR. The verification is solely about confirming the gate blocks; the deliberate-fail code is never integrated. If actionlint fails to detect the duplicate key (false negative), that's a serious issue — escalate before continuing.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: STANDARD. Must complete before Phase 5 (task 050).</protocol>
+  </execution>
+</task>

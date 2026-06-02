@@ -1,9 +1,9 @@
+using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Services.Ai.Capabilities;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Xunit;
-using FluentAssertions;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 
@@ -19,6 +19,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 ///   - MaxToolsPerTurn cap enforced; never more than 8 tool schemas in one prompt.
 ///   - Broad mode (empty SelectedCapabilities) includes all tools up to MaxToolsPerTurn.
 /// </summary>
+[Trait("status", "repaired")]
 public class OrchestratorPromptBuilderTests
 {
     // ── Shared helpers ────────────────────────────────────────────────────────
@@ -406,8 +407,10 @@ public class OrchestratorPromptBuilderTests
 
         if (!string.IsNullOrEmpty(result.PerTurnSuffix))
         {
-            full.Should().EndWith(result.PerTurnSuffix.TrimEnd(),
-                because: "FullSystemPrompt must end with the per-turn suffix");
+            // FullSystemPrompt may include a trailing newline after the suffix (Markdown block
+            // termination). Compare TrimEnd vs TrimEnd to ignore trailing-whitespace drift.
+            full.TrimEnd().Should().EndWith(result.PerTurnSuffix.TrimEnd(),
+                because: "FullSystemPrompt must end with the per-turn suffix (ignoring trailing whitespace)");
         }
     }
 

@@ -59,7 +59,7 @@
  * direct-click path uses the same resolver.
  */
 function resolveXrmNavigation(): any | null {
-  if (typeof window === "undefined") return null;
+  if (typeof window === 'undefined') return null;
 
   const frames: Window[] = [window];
   try {
@@ -93,8 +93,8 @@ function resolveXrmNavigation(): any | null {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TARGET: 2 = 2;
-const DEFAULT_WIDTH = { value: 60, unit: "%" as const };
-const DEFAULT_HEIGHT = { value: 70, unit: "%" as const };
+const DEFAULT_WIDTH = { value: 60, unit: '%' as const };
+const DEFAULT_HEIGHT = { value: 70, unit: '%' as const };
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -153,7 +153,7 @@ function fireNavigateTo({ webresourceName, data, title }: NavigateToParams): voi
     nav
       .navigateTo(
         {
-          pageType: "webresource",
+          pageType: 'webresource',
           webresourceName,
           data,
         },
@@ -184,9 +184,9 @@ function fireNavigateTo({ webresourceName, data, title }: NavigateToParams): voi
  */
 export function launchCreateMatterWizard(options: BaseLauncherOptions): void {
   fireNavigateTo({
-    webresourceName: "sprk_creatematterwizard",
+    webresourceName: 'sprk_creatematterwizard',
     data: `bffBaseUrl=${encodeURIComponent(options.bffBaseUrl)}`,
-    title: "Create New Matter",
+    title: 'Create New Matter',
   });
 }
 
@@ -197,9 +197,9 @@ export function launchCreateMatterWizard(options: BaseLauncherOptions): void {
  */
 export function launchCreateProjectWizard(options: BaseLauncherOptions): void {
   fireNavigateTo({
-    webresourceName: "sprk_createprojectwizard",
+    webresourceName: 'sprk_createprojectwizard',
     data: `bffBaseUrl=${encodeURIComponent(options.bffBaseUrl)}`,
-    title: "Create New Project",
+    title: 'Create New Project',
   });
 }
 
@@ -212,12 +212,12 @@ export function launchSummarizeFilesWizard(options: SummarizeFilesLauncherOption
   const bffParam = `bffBaseUrl=${encodeURIComponent(options.bffBaseUrl)}`;
   const data =
     options.documentIds && options.documentIds.length > 0
-      ? `documentIds=${options.documentIds.join(",")}&${bffParam}`
+      ? `documentIds=${options.documentIds.join(',')}&${bffParam}`
       : bffParam;
   fireNavigateTo({
-    webresourceName: "sprk_summarizefileswizard",
+    webresourceName: 'sprk_summarizefileswizard',
     data,
-    title: "Summarize Files",
+    title: 'Summarize Files',
   });
 }
 
@@ -232,13 +232,13 @@ export function launchSummarizeFilesWizard(options: SummarizeFilesLauncherOption
  * proven LegalWorkspace baseline.
  */
 export function launchFindSimilarWizard(options: FindSimilarLauncherOptions): void {
-  const documentIdPart = options.documentId ?? "";
-  const containerIdPart = options.containerId ?? "";
+  const documentIdPart = options.documentId ?? '';
+  const containerIdPart = options.containerId ?? '';
   const data = `documentId=${documentIdPart}&containerId=${containerIdPart}&bffBaseUrl=${encodeURIComponent(options.bffBaseUrl)}`;
   fireNavigateTo({
-    webresourceName: "sprk_findsimilar",
+    webresourceName: 'sprk_findsimilar',
     data,
-    title: "Find Similar Documents",
+    title: 'Find Similar Documents',
   });
 }
 
@@ -254,9 +254,9 @@ export function launchFindSimilarWizard(options: FindSimilarLauncherOptions): vo
  */
 export function launchAssignWorkWizard(options: BaseLauncherOptions): void {
   fireNavigateTo({
-    webresourceName: "sprk_createworkassignmentwizard",
+    webresourceName: 'sprk_createworkassignmentwizard',
     data: `bffBaseUrl=${encodeURIComponent(options.bffBaseUrl)}`,
-    title: "Create Work Assignment",
+    title: 'Create Work Assignment',
   });
 }
 
@@ -272,8 +272,8 @@ export function launchPlaybookIntent(options: PlaybookIntentLauncherOptions): vo
   const bffParam = `bffBaseUrl=${encodeURIComponent(options.bffBaseUrl)}`;
   const data = `intent=${options.intent}&${bffParam}`;
   fireNavigateTo({
-    webresourceName: "sprk_playbooklibrary",
+    webresourceName: 'sprk_playbooklibrary',
     data,
-    title: options.title ?? "Playbook Library",
+    title: options.title ?? 'Playbook Library',
   });
 }

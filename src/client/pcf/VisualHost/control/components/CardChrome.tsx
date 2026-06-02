@@ -24,14 +24,7 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  Button,
-  Tooltip,
-  Text,
-  shorthands,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Button, Tooltip, Text, shorthands } from '@fluentui/react-components';
 import { OpenRegular, Sparkle20Regular } from '@fluentui/react-icons';
 import {
   AiSummaryPopover,
@@ -139,12 +132,7 @@ export const CardChrome: React.FC<ICardChromeProps> = ({
       {renderHeader && (
         <div className={styles.header}>
           {hasTitle ? (
-            <Text
-              size={300}
-              className={styles.title}
-              title={title}
-              aria-label={title}
-            >
+            <Text size={300} className={styles.title} title={title} aria-label={title}>
               {title}
             </Text>
           ) : (

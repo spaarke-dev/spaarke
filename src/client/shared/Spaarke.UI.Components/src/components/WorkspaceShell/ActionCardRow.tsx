@@ -9,10 +9,10 @@
  * Standards: ADR-012 (shared component library), ADR-021 (Fluent v9, dark mode)
  */
 
-import * as React from "react";
-import { makeStyles, tokens } from "@fluentui/react-components";
-import { ActionCard } from "./ActionCard";
-import type { ActionCardConfig } from "./types";
+import * as React from 'react';
+import { makeStyles, tokens } from '@fluentui/react-components';
+import { ActionCard } from './ActionCard';
+import type { ActionCardConfig } from './types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -55,10 +55,10 @@ const useStyles = makeStyles({
    * regardless of how wide the column resolves to at any given viewport width.
    */
   row: {
-    display: "flex",
-    flexDirection: "row",
+    display: 'flex',
+    flexDirection: 'row',
     gap: tokens.spacingHorizontalL,
-    flexWrap: "wrap",
+    flexWrap: 'wrap',
   },
 });
 
@@ -94,11 +94,7 @@ export const ActionCardRow: React.FC<ActionCardRowProps> = ({
   const visibleCards = maxVisible ? cards.slice(0, maxVisible) : cards;
 
   return (
-    <div
-      className={`${styles.row}${className ? ` ${className}` : ""}`}
-      role="group"
-      aria-label="Quick actions"
-    >
+    <div className={`${styles.row}${className ? ` ${className}` : ''}`} role="group" aria-label="Quick actions">
       {visibleCards.map((config: ActionCardConfig) => (
         <ActionCard
           key={config.id}
@@ -113,4 +109,4 @@ export const ActionCardRow: React.FC<ActionCardRowProps> = ({
   );
 };
 
-ActionCardRow.displayName = "ActionCardRow";
+ActionCardRow.displayName = 'ActionCardRow';

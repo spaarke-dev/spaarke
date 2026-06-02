@@ -1,0 +1,120 @@
+<task id="041" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P4.B — Mutation testing pilot: Stryker.NET against Services/Ai/Safety/* (greenfield)</title>
+    <phase>Phase 4</phase>
+    <status>not-started</status>
+    <estimated-effort>4-8 hours</estimated-effort>
+    <dependencies>039</dependencies>
+    <blocks>080</blocks>
+    <tags>phase-4, testing, mutation-testing, stryker, ai, safety</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Greenfield Stryker.NET config + measurement run; produces report doc. May add NEW config file (e.g., `stryker-config.json`) but no `src/` or test logic edits. STANDARD per CLAUDE.md §8 (new file creation + measurement; no production logic touched).</rigor-reason>
+    <parallel-group>P4-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Stryker config file (`stryker-config.json`) is greenfield; output report under `projects/.../baseline/`. Disjoint write path from Track A (audits/), C (src/server Workspace + tests), D (.github/workflows + baseline/coverlet), E (baseline/anti-drift). Read scope is `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/*` — disjoint from Track C's `Services/Workspace/`.</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Configure Stryker.NET against `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/` (13 files) and execute a baseline mutation run. **No existing Stryker config — this is greenfield.** Per D-04, this is **pilot-grade**: measurement only, NO assertion strengthening or test additions.
+
+    Deliverable: a single report doc `baseline/mutation-testing-Services-Ai-Safety-2026-08-XX.md` containing: (1) mutation score; (2) top-10 weakest assertions surfaced by surviving mutants; (3) r3 expansion recommendation (whether to expand to `Services/Ai/Capabilities/*` + `Services/Ai/Chat/*`).
+
+    Per FR-12, the pilot is bounded: `Services/Ai/Safety/` only. Per D-04, no test code changes — surviving mutants are documented, not fixed.
+
+    Stryker.NET package availability assumption (spec.md Assumptions): if Stryker.NET v3.x is incompatible with the test project structure, document the gap and scope the pilot down to a smaller subset OR escalate as a Phase 4 blocker. Do not attempt extensive csproj restructuring (out of scope).
+  </prompt>
+
+  <role>Backend AI agent setting up Stryker.NET, executing baseline mutation run on Services/Ai/Safety/, and producing a measurement report with r3 expansion recommendation.</role>
+
+  <goal>
+    Single deliverable: `projects/sdap.bff.api-test-suite-repair-r2/baseline/mutation-testing-Services-Ai-Safety-2026-08-XX.md` containing:
+    - **Mutation score** for `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/*` (overall + per-file)
+    - **Top-10 weakest assertions** — surviving mutants with file:line, mutator type, and the assertion gap they exposed
+    - **r3 expansion recommendation**: whether to expand mutation testing to `Services/Ai/Capabilities/*` and `Services/Ai/Chat/*` in r3, with rationale
+    - **Stryker.NET configuration record**: which version, which mutators enabled, run wall-clock time
+    - **Tooling notes**: any compatibility issues encountered, version pinning required, etc.
+
+    Configuration file (`stryker-config.json` or equivalent) at repo root or `tests/unit/Sprk.Bff.Api.Tests/` scope — greenfield; choose location consistent with Stryker.NET conventions. No edits to `src/` files; no edits to test assertions.
+  </goal>
+
+  <inputs>
+    <file purpose="target-surface">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/</file>
+    <file purpose="target-tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">AI/Safety services extend BFF in-process per refined ADR-013 (2026-05-20); mutation testing operates in-process</constraint>
+    <constraint source="D-04">Phase 4 tracks are pilot-grade — measurement only, NO remediation. Surviving mutants are documented; assertions are NOT strengthened in this task</constraint>
+    <constraint source="FR-12">Output is `baseline/mutation-testing-Services-Ai-Safety-2026-08-XX.md` with mutation score + top-10 weak assertions + r3 expansion recommendation</constraint>
+    <constraint source="NFR-01">No `src/` modifications; no test assertion changes</constraint>
+    <constraint source="NFR-06">Project-internal artifact under `projects/sdap.bff.api-test-suite-repair-r2/baseline/`</constraint>
+    <constraint source="ADR-029">If Stryker run impacts BFF publish size baseline, document in report (no published binaries affected)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The post-r1 synopsis (design.md §2.3 long-term item 11) flagged mutation testing as a high-value-paths priority for `Services/Ai/Safety/*` — the cross-matter privilege-leak surface (RB-T044-01 was exactly this). r2 Phase 1 fixed RB-T044-01 via inversion correction + regression test addition; the remaining question is: **how many other "obvious" assertions in this area are too weak to catch a similar bug?** Stryker.NET answers that empirically by generating mutated versions of the production code and checking whether each mutant is killed by an existing test.
+
+      Per D-04, r2 ships **the score**, not the fix. The score informs r3's scope. If `Services/Ai/Safety/*` mutation score is high (>80%), r3 may not need expansion. If it's low (<60%), r3 expansion to `Capabilities/*` and `Chat/*` is well-motivated. If it's middling, the top-10 list directs r3 to the highest-leverage assertion repairs.
+
+      Stryker.NET maturity (per spec.md Assumptions): v3.x is the current line. Compatibility with the test project's csproj structure is the load-bearing risk — if csproj uses unusual TestAdapter setups or non-standard project SDK, Stryker may fail. Document any issues; do not force-fit.
+    </background>
+    <dependencies>
+      <dependency task="039" status="not-started">Phase 3 exit (all 20 ledger entries closed) — Phase 4 starts when Phase 3 exits</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/mutation-testing-Services-Ai-Safety-2026-08-XX.md</file>
+    <file>stryker-config.json (new; root or tests/ scope per Stryker.NET convention)</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Verify Stryker.NET availability: `dotnet tool install -g dotnet-stryker` (or local-tool variant). Capture version installed. If install fails, document and escalate.</step>
+    <step order="2">Read `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/` to enumerate the 13 files. Read `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/` to see existing test coverage.</step>
+    <step order="3">Create `stryker-config.json` (greenfield) targeting: source filter = `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/*`; test project = `tests/unit/Sprk.Bff.Api.Tests/`. Configure mutators (default set is fine for pilot). Configure thresholds for reporting (NOT for failure — D-04 is measurement only).</step>
+    <step order="4">Run Stryker: `dotnet stryker --config-file stryker-config.json`. Capture wall-clock time. If timeout/OOM, scope down to a single Safety subdirectory and document.</step>
+    <step order="5">Parse Stryker HTML/JSON report to extract: overall mutation score; per-file scores; top-10 surviving mutants (by mutator type and assertion gap).</step>
+    <step order="6">Author `projects/sdap.bff.api-test-suite-repair-r2/baseline/mutation-testing-Services-Ai-Safety-2026-08-XX.md` with: executive summary; mutation score; top-10 surviving mutants table; r3 expansion recommendation; Stryker config record; tooling notes.</step>
+    <step order="7">Verify `git status` shows ONLY: `stryker-config.json` (new); the new baseline doc. NO `src/` or test logic edits.</step>
+    <step order="8">Commit message: "test(mutation): Stryker.NET pilot baseline for Services/Ai/Safety/* (FR-12)".</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">install/run `dotnet-stryker`; parse output; `git status`; final commit</tool>
+    <tool name="Read">enumerate Safety/ source + test files</tool>
+    <tool name="Write">stryker-config.json (new); baseline report doc (new)</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">stryker-config.json (new; greenfield Stryker.NET configuration)</output>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/baseline/mutation-testing-Services-Ai-Safety-2026-08-XX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Baseline report exists at `projects/sdap.bff.api-test-suite-repair-r2/baseline/mutation-testing-Services-Ai-Safety-2026-08-XX.md`</criterion>
+    <criterion testable="true">Report contains overall mutation score (numeric percentage)</criterion>
+    <criterion testable="true">Report contains top-10 surviving mutants list (file:line, mutator, assertion gap rationale)</criterion>
+    <criterion testable="true">Report contains explicit r3 expansion recommendation (expand to Capabilities + Chat / do not expand) with rationale</criterion>
+    <criterion testable="true">Stryker.NET config file (`stryker-config.json`) exists and targets `Services/Ai/Safety/*` only</criterion>
+    <criterion testable="true">No `src/` modifications (verified via `git status`); no test assertion changes</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. STANDARD rigor (greenfield config + measurement; no Step 9.5 quality gates required).
+  </execution>
+</task>

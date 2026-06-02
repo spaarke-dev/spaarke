@@ -413,10 +413,7 @@ describe('EntityInfoWidget — reactive entityId update', () => {
   it('updates the status badge when entity changes', () => {
     const bus = new PaneEventBus();
 
-    renderWidget(
-      { data: makeData({ entityId: 'matter-001', status: 'Active' }) },
-      bus
-    );
+    renderWidget({ data: makeData({ entityId: 'matter-001', status: 'Active' }) }, bus);
     expect(screen.getByText('Active')).toBeInTheDocument();
 
     act(() => {
@@ -434,10 +431,7 @@ describe('EntityInfoWidget — reactive entityId update', () => {
   it('unsubscribes from bus events on unmount (no memory leak)', () => {
     const bus = new PaneEventBus();
 
-    const { unmount } = renderWidget(
-      { data: makeData({ entityId: 'matter-001' }) },
-      bus
-    );
+    const { unmount } = renderWidget({ data: makeData({ entityId: 'matter-001' }) }, bus);
 
     const subscribersBefore = bus.subscriberCount('context');
     expect(subscribersBefore).toBeGreaterThan(0);

@@ -33,19 +33,8 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Button,
-  makeStyles,
-  mergeClasses,
-  Textarea,
-  tokens,
-  Tooltip,
-} from '@fluentui/react-components';
-import {
-  CheckmarkRegular,
-  ThumbDislikeRegular,
-  ThumbLikeRegular,
-} from '@fluentui/react-icons';
+import { Button, makeStyles, mergeClasses, Textarea, tokens, Tooltip } from '@fluentui/react-components';
+import { CheckmarkRegular, ThumbDislikeRegular, ThumbLikeRegular } from '@fluentui/react-icons';
 import { buildBffApiUrl } from '@spaarke/auth';
 import { useAiSession } from '../providers/useAiSession';
 
@@ -362,19 +351,16 @@ export const FeedbackButtons: React.FC<FeedbackButtonsProps> = ({
     if (feedbackState === 'submitting' || feedbackState === 'submitted') return;
     setSelectedRating('negative');
     // Toggle: if already expanded, collapse; otherwise expand
-    setFeedbackState((prev) => (prev === 'expanded' ? 'idle' : 'expanded'));
+    setFeedbackState(prev => (prev === 'expanded' ? 'idle' : 'expanded'));
     setErrorMessage(null);
   }, [feedbackState]);
 
-  const handleCommentChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>): void => {
-      const value = e.target.value;
-      if (value.length <= MAX_COMMENT_LENGTH) {
-        setComment(value);
-      }
-    },
-    []
-  );
+  const handleCommentChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>): void => {
+    const value = e.target.value;
+    if (value.length <= MAX_COMMENT_LENGTH) {
+      setComment(value);
+    }
+  }, []);
 
   const handleSubmitComment = useCallback((): void => {
     if (feedbackState === 'submitting') return;
@@ -463,12 +449,7 @@ export const FeedbackButtons: React.FC<FeedbackButtonsProps> = ({
 
         {/* Checkmark confirmation — visible for CHECKMARK_DURATION_MS after submission */}
         {isSubmitted && (
-          <span
-            className={styles.checkmarkIcon}
-            role="status"
-            aria-label="Feedback submitted"
-            aria-live="polite"
-          >
+          <span className={styles.checkmarkIcon} role="status" aria-label="Feedback submitted" aria-live="polite">
             <CheckmarkRegular />
           </span>
         )}
@@ -492,10 +473,7 @@ export const FeedbackButtons: React.FC<FeedbackButtonsProps> = ({
           {/* Character count */}
           <span
             id="feedback-char-count"
-            className={mergeClasses(
-              styles.characterCount,
-              isNearLimit && styles.characterCountWarning
-            )}
+            className={mergeClasses(styles.characterCount, isNearLimit && styles.characterCountWarning)}
             aria-live="polite"
           >
             {charsRemaining} characters remaining

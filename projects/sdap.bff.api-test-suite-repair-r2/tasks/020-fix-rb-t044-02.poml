@@ -1,0 +1,118 @@
+<task id="020" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P2.W1 — Fix RB-T044-02: CitationExtractor.NormalizeCaseLaw over-strips reporter period</title>
+    <phase>Phase 2</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>013</dependencies>
+    <blocks>021,029</blocks>
+    <tags>phase-2, bff-api, real-bug-ledger, medium-severity, production-fix, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production code change in `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs` (modifying .cs); Step 9.5 code-review + adr-check mandatory per CLAUDE.md §8 FULL rigor decision tree</rigor-reason>
+    <parallel-group>P2-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Disjoint file (CitationExtractor.cs) vs Wave 1 peers (CapabilityRouter, AnalysisChatContextResolver, UploadEndpoints, Insights Layer 2). 021 (NormalizePatent) targets the SAME file and runs AFTER this task in a sub-wave to avoid file overlap.</parallel-reason>
+    <production-fix-per-ledger>true</production-fix-per-ledger>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Close real-bug-ledger entry **RB-T044-02** by fixing the production bug in `CitationExtractor.NormalizeCaseLaw`. The `TrimEnd('.')` call at line 167 over-strips the canonical trailing period of US Supreme Court reporter abbreviations (e.g., `U.S.`), violating the documented canonical-key contract.
+
+    The ledger's recommended fix: **remove `.TrimEnd('.')`** from line 167 — the reporter capture group already excludes the trailing year-court parenthetical, so no additional trim is needed.
+
+    Per D-02, this single production fix closes ONE ledger entry. Per NFR-04, the commit message MUST cite `RB-T044-02` + resolution mode `repaired`. Per NFR-02, line replacement <50% in the file. After the fix, remove the `Skip = "..."` attribute on the affected Theory (`ExtractCitations_CaseLaw_MatchedAndNormalized`, 4 InlineData) and flip per-Theory `[Trait("status","real-bug-pending-fix")]` to inherit class-level `repaired`.
+  </prompt>
+
+  <role>Backend AI agent fixing production code in `Services/Ai/Safety/Citations/` to close a MEDIUM-severity real-bug ledger entry.</role>
+
+  <goal>
+    `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs` `NormalizeCaseLaw` method no longer applies `TrimEnd('.')`. The 4 affected InlineData cases in `ExtractCitations_CaseLaw_MatchedAndNormalized` Theory flip Skip → Pass. The ledger entry RB-T044-02 transitions from `assigned-to-r2` → `repaired`. Existing Statute / Regulation / Patent test cases remain green.
+  </goal>
+
+  <inputs>
+    <file purpose="target-production-file">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs</file>
+    <file purpose="target-test-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs</file>
+    <file purpose="ledger-entry">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (RB-T044-02 section, lines 289-323)</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">AI/Safety services extend BFF in-process per refined ADR-013 (2026-05-20); no extraction to external service</constraint>
+    <constraint source="ADR-010">DI minimalism — do NOT add new DI registrations for this fix; the change is a pure-method edit</constraint>
+    <constraint source="NFR-01">Production code IS in scope (r2 inverts r1); tests modified ONLY for Skip→Pass</constraint>
+    <constraint source="NFR-02"><50% line replacement per file; else file escalation via `escalations/rewrite-request-T-020-CitationExtractor.md`</constraint>
+    <constraint source="NFR-04">Commit message cites ledger entry ID `RB-T044-02` + resolution mode `repaired`</constraint>
+    <constraint source="D-02">One production fix = one ledger entry closed</constraint>
+    <constraint source="design.md §5.3">RB-T044-02 fix path: remove `.TrimEnd('.')` from `NormalizeCaseLaw` line 167</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      `CitationExtractor` is one of the Layer-1 citation normalization stages used by `Services/Ai/Safety/*` for verification provider lookups + UI display. Per the class XML doc at line 11, canonical key for `Smith v. Jones, 542 U.S. 296 (2004)` is `"542 U.S. 296"` — the trailing period of `U.S.` is part of the canonical form. The current implementation calls `.TrimEnd('.')` defensively, producing `"542 U.S. 296"` → `"542 U.S. 296"` for most cases but failing the 4 reporter-period InlineData cases. The bug surfaces only when the reporter abbreviation itself ends in a period.
+
+      r2 Phase 2 Wave 1 (this wave) targets MEDIUM-severity entries; parallel-safe across disjoint file sets. This task and task 021 (NormalizePatent EP/WO double-prefix) BOTH touch `CitationExtractor.cs` — they CANNOT run in parallel. Task 020 (this one) runs first; task 021 runs in the next sub-wave AFTER this commit lands.
+    </background>
+    <dependencies>
+      <dependency task="013" status="required">Phase 1 exit triple-run validated; baseline green</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Load the RB-T044-02 ledger entry (`projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` lines 289-323). Confirm Status is `open` or `assigned-to-r2`; if `repaired` or `archived`, abort with a note.</step>
+    <step order="2">Read `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs` `NormalizeCaseLaw` method (around line 163). Verify the `.TrimEnd('.')` call is at line 167 as documented; if drift, capture exact line.</step>
+    <step order="3">Read `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs` `ExtractCitations_CaseLaw_MatchedAndNormalized` Theory. Note the 4 InlineData cases + the per-Theory `[Trait("status","real-bug-pending-fix")]` override + the Skip attribute.</step>
+    <step order="4">Apply the production fix: remove `.TrimEnd('.')` from `NormalizeCaseLaw` line 167. Verify no other call sites in the method also strip the period. Confirm the method returns the expected canonical key for all 4 InlineData cases by hand-tracing the regex captures.</step>
+    <step order="5">Remove the `Skip = "..."` attribute and the per-Theory `[Trait("status","real-bug-pending-fix")]` override on `ExtractCitations_CaseLaw_MatchedAndNormalized`. The class-level `[Trait("status","repaired")]` will then apply.</step>
+    <step order="6">Build: `dotnet build src/server/api/Sprk.Bff.Api/`. Verify 0 errors.</step>
+    <step order="7">Run targeted tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~CitationExtractorTests"`. Confirm all 4 InlineData cases pass + Statute/Regulation/Patent Theory cases still pass.</step>
+    <step order="8">Step 9.5 quality gates: run `code-review` + `adr-check` (FULL rigor). Verify the change is <50% line replacement; verify no new DI registrations (ADR-010); verify AI/Safety service stays in-process (ADR-013).</step>
+    <step order="9">Update RB-T044-02 ledger entry: transition Status to `repaired`; add fix-commit SHA + date.</step>
+    <step order="10">Commit: `fix(ai/safety): remove TrimEnd('.') from CitationExtractor.NormalizeCaseLaw (RB-T044-02; repaired)`. Update `projects/sdap.bff.api-test-suite-repair-r2/current-task.md` with completion summary.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">CitationExtractor.cs + test file + ledger entry</tool>
+    <tool name="Edit">Production fix + test Skip-attribute removal</tool>
+    <tool name="Bash">`dotnet build` + targeted `dotnet test`</tool>
+    <tool name="Skill">Step 9.5 quality gate via `code-review` + `adr-check` skills (ADR-010 / ADR-013 compliance)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs (NormalizeCaseLaw: -1 line `.TrimEnd('.')` removed)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs (4 InlineData Skip→Pass)</output>
+    <output type="ledger">RB-T044-02 status: `assigned-to-r2` → `repaired`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`CitationExtractor.NormalizeCaseLaw` no longer contains `.TrimEnd('.')` (verified via `git diff`)</criterion>
+    <criterion testable="true">All 4 InlineData cases of `ExtractCitations_CaseLaw_MatchedAndNormalized` pass (verified via `dotnet test` filter)</criterion>
+    <criterion testable="true">Other Theory cases (Statute, Regulation, Patent) in `CitationExtractorTests` remain green</criterion>
+    <criterion testable="true">RB-T044-02 ledger Status field transitions to `repaired`</criterion>
+    <criterion testable="true">Commit message includes the literal string `RB-T044-02` and resolution mode `repaired`</criterion>
+    <criterion testable="true">File-level line replacement is <50% (NFR-02 — confirmed by `git diff --stat`)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <approach>Targeted single-line removal + test attribute cleanup. Standard FULL-rigor flow.</approach>
+  </execution>
+</task>

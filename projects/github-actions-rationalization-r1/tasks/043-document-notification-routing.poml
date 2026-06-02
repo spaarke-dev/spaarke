@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Document notification-routing steps (FR-12)</title>
+    <phase>4: Observability + Docs</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>041</dependencies>
+    <blocks>050</blocks>
+    <tags>documentation, ci-cd, github-actions, notification-routing</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task; owner-action step; FR-12 acceptance</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Fill in the "Notification Routing" section of `.github/WORKFLOWS.md` (placeholder set by task 041) with the exact steps to route `spaarke-dev` org notifications to `dev@spaarke.com` per D-05. The doc is owner-applied — Claude does NOT apply the routing change. Capture owner sign-off note OR follow-up task.
+  </prompt>
+
+  <role>
+    SPAARKE technical writer. Owner-facing documentation; precise step-by-step UI navigation.
+  </role>
+
+  <goal>
+    The Notification Routing section of `.github/WORKFLOWS.md` contains:
+    1. The org/account-level GitHub UI navigation path (Settings → Emails → Add email; org Settings → Notifications)
+    2. Specific path to route `spaarke-dev` org notifications to `dev@spaarke.com`
+    3. Verification steps (send a test notification; confirm receipt)
+    4. Owner sign-off note OR follow-up task ID if not yet applied
+  </goal>
+
+  <context>
+    <background>
+      Per FR-12: notification routing documentation includes exact steps; owner action is to apply manually. Per D-05: workflow-level email sends are fragile; use GitHub's built-in routing. Owner approved the destination `dev@spaarke.com` on 2026-06-01.
+    </background>
+    <relevant-files>
+      <file>.github/WORKFLOWS.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-12: Documentation exists; owner action follows</constraint>
+    <constraint source="design">D-05: Routing at GitHub account/org level, NOT workflow code</constraint>
+    <constraint source="project">Document only — DO NOT apply the routing change (owner-controlled)</constraint>
+    <constraint source="project">Include verification step so owner can confirm successful routing</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+      <file>.github/WORKFLOWS.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `.github/WORKFLOWS.md` (task 041's output). Locate the "Notification Routing" placeholder section.</step>
+    <step order="2">Author the Notification Routing content. Include:
+      - Why: D-05 rationale (1 paragraph)
+      - Steps (numbered):
+        1. Add `dev@spaarke.com` as a verified email on the `spaarke-dev` GitHub account (Settings → Emails → Add email address; verify via inbox)
+        2. Set `dev@spaarke.com` as the primary notification email (Settings → Notifications → Default notification email)
+        3. Configure per-event preferences if needed (Settings → Notifications → System → Actions: Web + Email)
+        4. For org-level routing (if applicable): Org settings → Notifications → Routing
+      - Verification: trigger a workflow failure (or wait for one); confirm `dev@spaarke.com` receives the notification within 5 minutes
+      - Troubleshooting: spam folder check; verify email forwarding chain; ensure GitHub email isn't filtered
+    </step>
+    <step order="3">Add an "Owner Sign-Off" subsection with: [ ] Owner applied routing on YYYY-MM-DD; OR [ ] Pending — tracked as follow-up.</step>
+    <step order="4">Commit + push. Notify owner via PR or direct message that the routing is ready to apply.</step>
+    <step order="5">Update TASK-INDEX.md: change task 043 status to ✅ completed. Note: the OWNER's manual application is tracked as a follow-up; doesn't gate project close (per project decision — FR-12 acceptance is "documented OR followed-up").</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">.github/WORKFLOWS.md current state</tool>
+    <tool name="Edit">Fill in the Notification Routing section</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.github/WORKFLOWS.md (Notification Routing section populated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Notification Routing section of `.github/WORKFLOWS.md` contains step-by-step UI navigation.</criterion>
+    <criterion testable="true">Section references `dev@spaarke.com` as the destination (per owner clarification 2026-06-01).</criterion>
+    <criterion testable="true">Verification + troubleshooting steps included.</criterion>
+    <criterion testable="true">Owner Sign-Off subsection present (checkbox state will be updated when owner applies the routing).</criterion>
+    <criterion testable="true">TASK-INDEX.md task 043 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Per Assumption-4 in spec: `dev@spaarke.com` verification path may need owner to control inbox directly OR have a forwarding alias. Note both paths in troubleshooting. Project close does NOT require the owner to have applied — only documentation must exist.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: MINIMAL. Parallel-safe with 040, 041, 042.</protocol>
+  </execution>
+</task>

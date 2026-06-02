@@ -25,11 +25,7 @@
  * ```
  */
 
-import type {
-  IUploadService,
-  UploadOptions,
-  UploadResult,
-} from '../../types/serviceInterfaces';
+import type { IUploadService, UploadOptions, UploadResult } from '../../types/serviceInterfaces';
 import { getXrm } from '../xrmContext';
 
 /**
@@ -106,12 +102,7 @@ export function createXrmUploadService(bffBaseUrl: string): IUploadService {
   const baseUrl = bffBaseUrl.replace(/\/+$/, '');
 
   return {
-    uploadFile(
-      entityName: string,
-      entityId: string,
-      file: File,
-      options?: UploadOptions
-    ): Promise<UploadResult> {
+    uploadFile(entityName: string, entityId: string, file: File, options?: UploadOptions): Promise<UploadResult> {
       const url = `${baseUrl}/api/documents/upload`;
       const clientUrl = getBearerToken();
       const headers = buildHeaders(clientUrl);
@@ -137,7 +128,7 @@ export function createXrmUploadService(bffBaseUrl: string): IUploadService {
           });
           xhr.withCredentials = true;
 
-          xhr.upload.addEventListener('progress', (event) => {
+          xhr.upload.addEventListener('progress', event => {
             if (event.lengthComputable && options.onProgress) {
               options.onProgress(event.loaded, event.total);
             }
@@ -152,9 +143,7 @@ export function createXrmUploadService(bffBaseUrl: string): IUploadService {
                 reject(new Error('Failed to parse upload response'));
               }
             } else {
-              reject(
-                new Error(`Upload failed with status ${xhr.status}: ${xhr.statusText}`)
-              );
+              reject(new Error(`Upload failed with status ${xhr.status}: ${xhr.statusText}`));
             }
           });
 
@@ -176,20 +165,15 @@ export function createXrmUploadService(bffBaseUrl: string): IUploadService {
         headers,
         credentials: 'include',
         body: formData,
-      }).then(async (response) => {
+      }).then(async response => {
         if (!response.ok) {
-          throw new Error(
-            `Upload failed with status ${response.status}: ${response.statusText}`
-          );
+          throw new Error(`Upload failed with status ${response.status}: ${response.statusText}`);
         }
         return (await response.json()) as UploadResult;
       });
     },
 
-    async getContainerIdForEntity(
-      entityName: string,
-      entityId: string
-    ): Promise<string> {
+    async getContainerIdForEntity(entityName: string, entityId: string): Promise<string> {
       const url = `${baseUrl}/api/containers/${encodeURIComponent(entityName)}/${encodeURIComponent(entityId)}`;
       const clientUrl = getBearerToken();
       const headers = buildHeaders(clientUrl);
@@ -201,9 +185,7 @@ export function createXrmUploadService(bffBaseUrl: string): IUploadService {
       });
 
       if (!response.ok) {
-        throw new Error(
-          `Failed to retrieve container ID (${response.status}): ${response.statusText}`
-        );
+        throw new Error(`Failed to retrieve container ID (${response.status}): ${response.statusText}`);
       }
 
       const data = (await response.json()) as { containerId: string };

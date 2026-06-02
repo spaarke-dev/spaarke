@@ -4,7 +4,7 @@
  * Standards: ADR-012 (shared component library), ADR-021 (Fluent v9 tokens, dark mode)
  */
 
-import type { FluentIcon } from "@fluentui/react-icons";
+import type { FluentIcon } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Card configuration types
@@ -30,10 +30,10 @@ export interface ActionCardConfig {
 }
 
 /** Trend direction for metric cards. */
-export type MetricTrend = "up" | "down" | "neutral";
+export type MetricTrend = 'up' | 'down' | 'neutral';
 
 /** Badge variant for metric cards. */
-export type MetricBadgeVariant = "new" | "overdue";
+export type MetricBadgeVariant = 'new' | 'overdue';
 
 /** Configuration for a single metric card in the "Quick Summary" row. */
 export interface MetricCardConfig {
@@ -64,7 +64,7 @@ export interface MetricCardConfig {
 // ---------------------------------------------------------------------------
 
 /** Discriminated union for section type. */
-export type SectionType = "action-cards" | "metric-cards" | "content";
+export type SectionType = 'action-cards' | 'metric-cards' | 'content';
 
 /** Common fields shared by all section configurations. */
 interface SectionConfigBase {
@@ -93,7 +93,7 @@ interface SectionConfigBase {
 
 /** Section wrapping an ActionCardRow. */
 export interface ActionCardSectionConfig extends SectionConfigBase {
-  type: "action-cards";
+  type: 'action-cards';
   /** Action card definitions to render in the row. */
   cards: ActionCardConfig[];
   /** Map of card id → click handler (overrides ActionCardConfig.onClick). */
@@ -106,14 +106,14 @@ export interface ActionCardSectionConfig extends SectionConfigBase {
 
 /** Section wrapping a MetricCardRow. */
 export interface MetricCardSectionConfig extends SectionConfigBase {
-  type: "metric-cards";
+  type: 'metric-cards';
   /** Metric card definitions to render in the row. */
   cards: MetricCardConfig[];
 }
 
 /** Generic content section that accepts arbitrary children via render prop. */
 export interface ContentSectionConfig extends SectionConfigBase {
-  type: "content";
+  type: 'content';
   /**
    * Render prop that produces the section body content.
    * Using a render prop avoids storing React elements in plain config objects.
@@ -122,10 +122,7 @@ export interface ContentSectionConfig extends SectionConfigBase {
 }
 
 /** Discriminated union for all section configurations. */
-export type SectionConfig =
-  | ActionCardSectionConfig
-  | MetricCardSectionConfig
-  | ContentSectionConfig;
+export type SectionConfig = ActionCardSectionConfig | MetricCardSectionConfig | ContentSectionConfig;
 
 // ---------------------------------------------------------------------------
 // WorkspaceShell configuration
@@ -134,9 +131,9 @@ export type SectionConfig =
 /** Layout arrangement for sections within the shell. */
 export type WorkspaceLayoutVariant =
   /** Stack all sections vertically (single column). */
-  | "single-column"
+  | 'single-column'
   /** Arrange sections in rows defined by WorkspaceRowConfig. */
-  | "rows";
+  | 'rows';
 
 /** A single row in the workspace layout. */
 export interface WorkspaceRowConfig {
@@ -191,13 +188,13 @@ export interface WorkspaceConfig {
 // ---------------------------------------------------------------------------
 
 /** Category for grouping sections in the layout wizard Step 2 checklist. */
-export type SectionCategory = "overview" | "data" | "ai" | "productivity";
+export type SectionCategory = 'overview' | 'data' | 'ai' | 'productivity';
 
 /** Navigation target for sections that need to open Dataverse views or records. */
 export type NavigateTarget =
-  | { type: "view"; entity: string; viewId?: string }
-  | { type: "record"; entity: string; id: string }
-  | { type: "url"; url: string };
+  | { type: 'view'; entity: string; viewId?: string }
+  | { type: 'record'; entity: string; id: string }
+  | { type: 'url'; url: string };
 
 /**
  * Standard context passed to every section factory.
@@ -221,7 +218,10 @@ export interface SectionFactoryContext {
   onOpenWizard: (
     webResourceName: string,
     data?: string,
-    options?: { width?: number | { value: number; unit: "%" | "px" }; height?: number | { value: number; unit: "%" | "px" } },
+    options?: {
+      width?: number | { value: number; unit: '%' | 'px' };
+      height?: number | { value: number; unit: '%' | 'px' };
+    }
   ) => void;
   /**
    * Register a badge count updater. The workspace header shows this
@@ -252,7 +252,7 @@ export interface SectionFactoryContext {
    * When "all", query helpers use `_owningbusinessunit_value eq ${businessUnitId}`
    * instead of `_ownerid_value eq ${userId}`.
    */
-  scope?: "my" | "all";
+  scope?: 'my' | 'all';
   /** User's business unit ID (GUID). Required when scope="all". */
   businessUnitId?: string;
 }

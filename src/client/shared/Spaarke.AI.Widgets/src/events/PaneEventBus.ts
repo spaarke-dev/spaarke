@@ -29,11 +29,7 @@
  * @see useDispatchPaneEvent — React hook for dispatching
  */
 
-import type {
-  PaneChannel,
-  PaneChannelEventMap,
-  PaneEventHandler,
-} from './PaneEventTypes';
+import type { PaneChannel, PaneChannelEventMap, PaneEventHandler } from './PaneEventTypes';
 
 // ---------------------------------------------------------------------------
 // Internal channel store type
@@ -100,10 +96,7 @@ export class PaneEventBus {
    * // On cleanup:
    * unsubscribe();
    */
-  subscribe<C extends PaneChannel>(
-    channel: C,
-    handler: PaneEventHandler<C>
-  ): () => void {
+  subscribe<C extends PaneChannel>(channel: C, handler: PaneEventHandler<C>): () => void {
     // Cast needed because TypeScript cannot narrow the Set<PaneEventHandler<C>>
     // through the mapped type index. The generic constraint guarantees correctness.
     const set = this._channels[channel] as Set<PaneEventHandler<C>>;
@@ -138,10 +131,7 @@ export class PaneEventBus {
    *   groundedness: { score: 0.97 },
    * });
    */
-  dispatch<C extends PaneChannel>(
-    channel: C,
-    event: PaneChannelEventMap[C]
-  ): void {
+  dispatch<C extends PaneChannel>(channel: C, event: PaneChannelEventMap[C]): void {
     const set = this._channels[channel] as Set<PaneEventHandler<C>>;
 
     // Iterate a snapshot so that handlers that unsubscribe during dispatch

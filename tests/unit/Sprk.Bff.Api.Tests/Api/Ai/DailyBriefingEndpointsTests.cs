@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
@@ -16,18 +17,32 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 /// items, no channels) returns 200 with empty bullets/channels instead of 400
 /// "Bad Request". This unblocks the frontend `useDailyBriefing` hook in fresh
 /// dev environments where the user has no notifications to narrate.
+///
+/// Task 070 repair (2026-05-31): the production HandleNarrate signature was changed
+/// — the old `IOpenAiClient` parameter was replaced by an optional `IBriefingAi?` and
+/// reordered (`request, loggerFactory, httpContext, cancellationToken, briefingAi`).
+/// The reflection invocation has been updated to match the current signature and
+/// pass <c>null</c> for the briefingAi (the AI-disabled path is what the existing
+/// "empty payload" assertions exercise).
 /// </summary>
+[Trait("status", "repaired")]
 public sealed class DailyBriefingEndpointsTests
 {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Invokes the private static HandleNarrate handler via reflection.
-    /// Mirrors the pattern used by <see cref="CapabilityEndpointsTests"/>.
+    /// Current production signature (task 070 repair):
+    ///   HandleNarrate(DailyBriefingNarrateRequest request, ILoggerFactory loggerFactory,
+    ///                 HttpContext httpContext, CancellationToken cancellationToken,
+    ///                 IBriefingAi? briefingAi = null)
+    /// The empty-payload short-circuit returns 200 only AFTER the AI-availability
+    /// check; tests must therefore pass a non-null <c>briefingAi</c> mock. The mock
+    /// uses <see cref="MockBehavior.Strict"/> so any unexpected call would fail.
     /// </summary>
     private static async Task<IResult> InvokeHandleNarrateAsync(
         DailyBriefingNarrateRequest request,
-        IOpenAiClient openAiClient,
+        IBriefingAi briefingAi,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
@@ -36,13 +51,13 @@ public sealed class DailyBriefingEndpointsTests
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
             ?? throw new InvalidOperationException("HandleNarrate not found via reflection");
 
-        var task = (Task<IResult>)method.Invoke(null, new object[]
+        var task = (Task<IResult>)method.Invoke(null, new object?[]
         {
             request,
-            openAiClient,
             NullLoggerFactory.Instance,
             httpContext,
-            cancellationToken
+            cancellationToken,
+            briefingAi
         })!;
 
         return await task;
@@ -64,12 +79,12 @@ public sealed class DailyBriefingEndpointsTests
             Channels = []
         };
 
-        // OpenAI client must NOT be invoked — empty payload short-circuits before any AI call
-        var openAi = new Mock<IOpenAiClient>(MockBehavior.Strict);
+        // BriefingAi must NOT be invoked — empty payload short-circuits before any AI call.
+        var briefingAi = new Mock<IBriefingAi>(MockBehavior.Strict);
         var context = MakeContext();
 
         // Act
-        var result = await InvokeHandleNarrateAsync(request, openAi.Object, context);
+        var result = await InvokeHandleNarrateAsync(request, briefingAi.Object, context);
 
         // Assert — 200 with empty narrative response
         result.Should().BeOfType<Ok<DailyBriefingNarrateResponse>>();
@@ -82,8 +97,8 @@ public sealed class DailyBriefingEndpointsTests
         ok.Value.Tldr.PriorityItemCount.Should().Be(0);
         ok.Value.ChannelNarratives.Should().BeEmpty();
 
-        // Strict mock — verifies OpenAI was never called
-        openAi.VerifyNoOtherCalls();
+        // Strict mock — verifies BriefingAi was never called
+        briefingAi.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -98,14 +113,14 @@ public sealed class DailyBriefingEndpointsTests
             Channels = []
         };
 
-        var openAi = new Mock<IOpenAiClient>(MockBehavior.Strict);
+        var briefingAi = new Mock<IBriefingAi>(MockBehavior.Strict);
         var context = MakeContext();
 
         // Act
-        var result = await InvokeHandleNarrateAsync(request, openAi.Object, context);
+        var result = await InvokeHandleNarrateAsync(request, briefingAi.Object, context);
 
         // Assert — still 200 because the three actionable arrays are all empty
         result.Should().BeOfType<Ok<DailyBriefingNarrateResponse>>();
-        openAi.VerifyNoOtherCalls();
+        briefingAi.VerifyNoOtherCalls();
     }
 }

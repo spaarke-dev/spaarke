@@ -35,8 +35,7 @@ import { registerContextWidget } from './ContextWidgetRegistry';
 // ---------------------------------------------------------------------------
 
 registerContextWidget('progress-tracker', {
-  factory: () =>
-    import('../widgets/context/ProgressTrackerWidget').then((m) => ({ default: m.default })),
+  factory: () => import('../widgets/context/ProgressTrackerWidget').then(m => ({ default: m.default })),
 });
 
 // ---------------------------------------------------------------------------
@@ -49,8 +48,7 @@ registerContextWidget('progress-tracker', {
 // ---------------------------------------------------------------------------
 
 registerContextWidget('playbook-gallery', {
-  factory: () =>
-    import('../widgets/context/PlaybookGalleryWidget').then((m) => ({ default: m.default })),
+  factory: () => import('../widgets/context/PlaybookGalleryWidget').then(m => ({ default: m.default })),
 });
 
 // ---------------------------------------------------------------------------
@@ -66,8 +64,7 @@ registerContextWidget('playbook-gallery', {
 // ---------------------------------------------------------------------------
 
 registerContextWidget('entity-info', {
-  factory: () =>
-    import('../widgets/context/EntityInfoWidget').then((m) => ({ default: m.default })),
+  factory: () => import('../widgets/context/EntityInfoWidget').then(m => ({ default: m.default })),
 });
 
 // ---------------------------------------------------------------------------
@@ -83,8 +80,7 @@ registerContextWidget('entity-info', {
 // ---------------------------------------------------------------------------
 
 registerContextWidget('findings', {
-  factory: () =>
-    import('../widgets/context/FindingsWidget').then((m) => ({ default: m.default })),
+  factory: () => import('../widgets/context/FindingsWidget').then(m => ({ default: m.default })),
 });
 
 // ---------------------------------------------------------------------------

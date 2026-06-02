@@ -1,6 +1,6 @@
+using System.Security.Claims;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
-using System.Security.Claims;
 
 namespace Sprk.Bff.Api.Api.Filters;
 

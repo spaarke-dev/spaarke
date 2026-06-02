@@ -248,23 +248,41 @@ configureMarkedRenderer();
 // ---------------------------------------------------------------------------
 
 const DEFAULT_ALLOWED_TAGS = [
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-  'p', 'br', 'hr',
-  'strong', 'b', 'em', 'i', 'u', 's', 'del',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'p',
+  'br',
+  'hr',
+  'strong',
+  'b',
+  'em',
+  'i',
+  'u',
+  's',
+  'del',
   'a',
-  'ul', 'ol', 'li',
-  'code', 'pre',
+  'ul',
+  'ol',
+  'li',
+  'code',
+  'pre',
   'blockquote',
-  'table', 'thead', 'tbody', 'tr', 'th', 'td',
+  'table',
+  'thead',
+  'tbody',
+  'tr',
+  'th',
+  'td',
   'img',
-  'div', 'span',
+  'div',
+  'span',
 ];
 
-const DEFAULT_ALLOWED_ATTRS = [
-  'href', 'title', 'target', 'rel',
-  'src', 'alt', 'width', 'height',
-  'class',
-];
+const DEFAULT_ALLOWED_ATTRS = ['href', 'title', 'target', 'rel', 'src', 'alt', 'width', 'height', 'class'];
 
 // ---------------------------------------------------------------------------
 // Main function
@@ -300,10 +318,7 @@ const DEFAULT_ALLOWED_ATTRS = [
  * return <div dangerouslySetInnerHTML={{ __html: html }} />;
  * ```
  */
-export function renderMarkdown(
-  markdown: string,
-  options?: RenderMarkdownOptions,
-): string {
+export function renderMarkdown(markdown: string, options?: RenderMarkdownOptions): string {
   if (!markdown) {
     return '';
   }

@@ -1,0 +1,188 @@
+<task id="051" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.M2 — Ai/Chat batch 2 (10 named files, 2nd third)</title>
+    <status>completed</status>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, medium-tier, p23-m, bff-api, testing, ai, chat</tags>
+    <parallel-group>23-M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>10 named Ai/Chat test files (2nd third) are disjoint from sibling batches 050 (1st third) and 052 (3rd third); excludes Streaming* files</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Repair the MEDIUM-tier Ai/Chat tests — batch 2 of 3 (10 named files in
+    `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/`, 2nd third by alphabetical partition).
+    EXCLUDE Streaming* files (handled by tasks 030/031). Batch boundary is maintained for
+    parallel-safety with batches 050 (1st third) and 052 (3rd third).
+
+    For each failing test:
+    1. Identify failure (orchestration assertion drift, response-shape change, error-path change)
+    2. Determine: `test-stale` vs `production-bug` (mark `real-bug-pending-fix` + ledger)
+    3. Apply §6.2 trait
+    4. Verify Pass
+
+    Per project CLAUDE.md NFR-02 + design.md §4.1: this is repair, NOT rewrite. If ANY file's diff
+    would exceed 50% line replacement, HALT and file
+    `projects/sdap-bff.api-test-suite-repair/escalations/rewrite-request-T-051-{FileName}.md`
+    per §4.8 escalation procedure. Do NOT proceed without owner approval.
+
+    NO production code changes (NFR-01). Per §6.2, every touched test ends in `repaired`,
+    `real-bug-pending-fix`, `flaky-quarantined`, or archived. `Failed` is FORBIDDEN at close.
+  </prompt>
+
+  <role>Senior .NET test repair specialist with Microsoft.Extensions.AI + IChatClient orchestration expertise.</role>
+
+  <goal>
+    10 Ai/Chat test files (2nd third, non-Streaming) end in §6.2 final end-state. Zero Failed.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+    <file purpose="real-bug-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation</constraint>
+    <constraint source="§6.2">Every touched test gets a §6.2 final end-state trait</constraint>
+    <constraint source="§4.5">MUST NOT touch `CustomWebAppFactory.cs`</constraint>
+    <constraint source="FR-17">All MEDIUM-tier tests must end in §6.2 final end-state</constraint>
+    <constraint source="batch-partition">Batch 2 covers second 10 non-Streaming Ai/Chat files alphabetically; respect partition</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      MEDIUM-tier Ai/Chat is partitioned across 3 batches (M1/M2/M3) for parallel-safety; this
+      batch handles the 2nd third. Per design.md §3.3 these are mocked-orchestration tests.
+    </background>
+    <dependencies>
+      <dependency task="014" status="not-started">Compile health verified</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/&lt;second 10 non-Streaming files alphabetically&gt;</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">List all `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/*.cs` files excluding `Streaming*`. Sort alphabetically. Take files 11-20 → this is batch 2.</step>
+    <step order="2">From Phase 0 baseline TRX, identify failing tests within this batch.</step>
+    <step order="3">For each file: compute pre-edit line count; read failing tests + production code.</step>
+    <step order="4">If any planned file edit would exceed 50% of file lines → HALT, file `escalations/rewrite-request-T-051-{FileName}.md`, await owner approval.</step>
+    <step order="5">Classify each failure: `test-stale` vs `production-bug`.</step>
+    <step order="6">Apply traits per §6.2; file ledger entries as needed.</step>
+    <step order="7">After each file: `dotnet test --filter "FullyQualifiedName~&lt;ClassName&gt;"` verify Pass.</step>
+    <step order="8">Update `current-task.md` with file list and disposition.</step>
+    <step order="9">Verify `git status` shows NO production changes.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">10 Ai/Chat test files (2nd third, non-Streaming, repaired)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (entries if bugs found)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All batch-2 Ai/Chat tests Pass or Skip-with-reason; zero Failed</criterion>
+    <criterion testable="true">Per-file diff &lt;50% line replacement (NFR-02)</criterion>
+    <criterion testable="true">Every touched test has a §6.2 final end-state trait</criterion>
+    <criterion testable="true">No overlap with batch 1 (task 050) or batch 3 (task 052) files</criterion>
+    <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">`CustomWebAppFactory.cs` is NOT modified</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <scope-resolved date="2026-05-31" wave="Phase-2+3 Wave 2.3" source="task 050 absorbed all failing Services.Ai.Chat.* tests in Wave 2.2">
+      Strict alphabetical batch 2 covers files 11-20 of the 19 non-Streaming `*.cs` files at the
+      `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/` folder root (Streaming subdir absent;
+      subdirectories Middleware/SseEventTypes/Tools excluded by the flat-glob partition policy):
+
+        11. OrchestratorPromptBuilderTests.cs                                       ← claimed by 050
+        12. PlaybookChatContextProviderEnrichmentIntegrationTests.cs                ← claimed by 050
+        13. PlaybookChatContextProviderEnrichmentTests.cs
+        14. PlaybookChatContextProviderTests.cs
+        15. PlaybookDispatcherIntegrationTests.cs
+        16. SessionCleanupSecurityTests.cs
+        17. SprkChatAgentFactoryTests.cs
+        18. SprkChatAgentTests.cs
+        19. StandaloneChatContextProviderTests.cs
+
+      Per [`baseline/failure-inventory-post-018-2026-05-31.md`](../../baseline/failure-inventory-post-018-2026-05-31.md)
+      the post-019 TRX Services.Ai.Chat.* failures were exactly 4:
+        - DirectOpenAiAgentTests (file 6 — alphabetical batch 1)
+        - OrchestratorPromptBuilderTests (file 11 — boundary)
+        - PlaybookChatContextProviderEnrichmentIntegrationTests (file 12 — boundary)
+        - SseEventTypes.ChatSseEventFactoryTests (subdir extension)
+      All 4 absorbed and `repaired`/`real-bug-pending-fix`-tagged by task 050 per its
+      completion-note (RB-T050-01 ledgered; see [`ledgers/real-bug-ledger.md`](../../ledgers/real-bug-ledger.md)).
+
+      Files 13-19 had ZERO failing tests in the post-019 baseline (verified via grep against
+      `baseline/post-019-verify-2026-05-31.trx`: `outcome="Failed"` count for these 7 class
+      prefixes = 0). Targeted verify run produced **117 Passed / 0 Failed / 0 Skipped (156 ms)**
+      against `FullyQualifiedName~PlaybookChatContextProvider|~PlaybookDispatcher|~SessionCleanup|~SprkChatAgent|~StandaloneChatContextProvider`.
+
+      Per §6.2 / NFR-09 (`repair-not-rewrite=true`) and project precedent (parallel task 055
+      `<scope-resolved>` pattern post-task-011), passing tests in scope require NO trait
+      additions and NO source edits. The NFR-02 50%-rewrite hazard is structurally avoided
+      because there is nothing to rewrite.
+
+      Task disposition: **NO-OP / scope-resolved**. Zero test files modified; zero ledger
+      entries added; zero escalations needed. Acceptance criteria satisfied by absence of
+      in-scope failures + verified passing state.
+    </scope-resolved>
+    <completion-note date="2026-05-31" wave="Phase-2+3 Wave 2.3">
+      Per-file disposition (files 13-19; alphabetical batch 2 minus 11-12 which task 050 absorbed):
+        - PlaybookChatContextProviderEnrichmentTests.cs       — already Passing; no edit; §6.2 NO-OP
+        - PlaybookChatContextProviderTests.cs                 — already Passing; no edit; §6.2 NO-OP
+        - PlaybookDispatcherIntegrationTests.cs               — already Passing; no edit; §6.2 NO-OP
+        - SessionCleanupSecurityTests.cs                      — already Passing; no edit; §6.2 NO-OP
+        - SprkChatAgentFactoryTests.cs                        — already Passing; no edit; §6.2 NO-OP
+        - SprkChatAgentTests.cs                               — already Passing; no edit; §6.2 NO-OP
+        - StandaloneChatContextProviderTests.cs               — already Passing; no edit; §6.2 NO-OP
+
+      Diff scope: 0 test files, +0/-0 lines. Zero production code changes (`git status`
+      shows only pre-existing `current-task.md`, sibling `055-*.poml`, and concurrent-wave
+      sibling `CapabilityRouterBenchmarkTests.cs`+`CreateTaskNodeExecutorTests.cs` edits
+      from in-flight tasks 053+054 — disjoint from this task's scope). CustomWebAppFactory.cs
+      untouched. No ledger entries needed. No §4.8 escalation triggered.
+
+      Targeted verify: `dotnet test --filter "FullyQualifiedName~PlaybookChatContextProvider|~PlaybookDispatcher|~SessionCleanup|~SprkChatAgent|~StandaloneChatContextProvider"`:
+        Passed!  - Failed: 0, Passed: 117, Skipped: 0, Total: 117, Duration: 156 ms
+
+      Build: `dotnet build tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Release`:
+        0 errors / 1 pre-existing NU1903 Kiota CVE warning (unchanged). Clean.
+
+      Step 9.5 Quality Gates (self-review per agent execution + zero-change scope):
+        - code-review:    ✅ PASSED — zero changes to review; no diff to evaluate against
+          §6.2 taxonomy, NFR-02 50%-threshold, or trait-tagging compliance.
+        - adr-check:      ✅ PASSED — no production code touched (NFR-01 ✓);
+          no DI changes (NFR-03 ✓); no IOpenAiClient/IPlaybookService injection into CRUD
+          paths (ADR-013 refined ✓); helper `AsyncEnumerableHelpers.cs` not modified (read-only).
+        - dotnet build:   ✅ 0 errors / 1 pre-existing warning.
+        - targeted test:  ✅ 117/117 pass.
+
+      POML status: flipped `not-started` → `completed`. TASK-INDEX.md NOT touched per
+      orchestrator instruction; git commit NOT performed per orchestrator instruction.
+    </completion-note>
+  </notes>
+</task>

@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Project wrap-up + lessons learned + repo cleanup</title>
+    <phase>Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, project-close, repo-cleanup, quality-gate</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Mandatory wrap-up task per task-create skill; runs adr-check, code-review (light — no .cs/.ts in scope), and repo-cleanup</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task; sequential after all phases</parallel-reason>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Run final quality gates (adr-check is light load — this project barely touches application architecture; code-review applies to workflow YAML + docs). Run repo-cleanup. Update README.md status to Complete with all graduation criteria checked. Update plan.md status to Complete. Author `notes/lessons-learned.md` documenting non-obvious learnings (especially: ghost-trigger root-cause patterns, actionlint integration tips, enforce_admins bypass discipline). Close the project.
+  </prompt>
+
+  <role>
+    SPAARKE platform DevOps engineer + technical writer. Project close-out and knowledge preservation.
+  </role>
+
+  <goal>
+    The project is officially complete:
+    1. README.md status = Complete, all graduation criteria checked, Completed Date set
+    2. plan.md status = Complete
+    3. `notes/lessons-learned.md` exists with non-obvious insights
+    4. repo-cleanup completed (ephemeral files removed; handoffs archived if any)
+    5. All task statuses in TASK-INDEX.md = ✅
+    6. No outstanding adr-check / code-review issues on touched files
+  </goal>
+
+  <context>
+    <background>
+      Mandatory final task per task-create skill convention. The project's graduation criteria from README.md are the ultimate acceptance — all 9 must be ✅ checked.
+    </background>
+    <relevant-files>
+      <file>projects/github-actions-rationalization-r1/README.md</file>
+      <file>projects/github-actions-rationalization-r1/plan.md</file>
+      <file>projects/github-actions-rationalization-r1/notes/lessons-learned.md</file>
+      <file>projects/github-actions-rationalization-r1/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All 9 graduation criteria in README.md must be checked or have documented deferral</constraint>
+    <constraint source="project">lessons-learned.md focuses on NON-OBVIOUS insights, not a recap of work done</constraint>
+    <constraint source="project">repo-cleanup may remove `notes/debug/`, `notes/spikes/`, `notes/drafts/` contents; archive `notes/handoffs/` to `.archive/` if any</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/README.md</file>
+      <file>projects/github-actions-rationalization-r1/plan.md</file>
+      <file>projects/github-actions-rationalization-r1/tasks/TASK-INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/adr-check` on the project surface (`.github/workflows/`, `.github/WORKFLOWS.md`, `docs/procedures/workflow-incident-response.md`). Light load expected — ADR-029 only relevant if `deploy-bff-api.yml` was retained. Fix any critical issues; document non-critical as deferred.</step>
+    <step order="2">Run `/code-review` on touched files. Workflow YAML reviews are uncommon for this skill but applicable. Address critical findings.</step>
+    <step order="3">Run `/repo-cleanup projects/github-actions-rationalization-r1`. Review the cleanup report. Approve removals (notes/debug/, notes/spikes/, notes/drafts/ contents). Archive `notes/handoffs/` to `.archive/` if any handoff files exist.</step>
+    <step order="4">Author `projects/github-actions-rationalization-r1/notes/lessons-learned.md` with sections:
+      - **Non-obvious findings**: e.g., "GitHub Actions records workflow_run as `failure` even when all jobs are conditionally skipped via job-level if:" (P2 root cause), ghost-trigger loader-failure signature (0s + jobs=[]), actionlint self-validation chicken-and-egg
+      - **Patterns to reuse**: predecessor's `decisions/` + `ledgers/` + `baseline/` triad worked well for this DevOps-style project
+      - **Pitfalls avoided**: didn't disable enforce_admins permanently; didn't comment-out workflows; didn't fix `src/` regressions while auditing workflows
+      - **Recommendations for follow-on work**: e.g., consider adding `yamllint` strict mode in addition to actionlint; consider extracting common `gh run list` logic into reusable composite action
+    </step>
+    <step order="5">Update `README.md`:
+      - Status: "Complete"
+      - Last Updated: today
+      - Phase: "Complete"
+      - Progress: 100%
+      - Completed Date: today
+      - Check all 9 graduation-criteria checkboxes (mark deferred ones explicitly if FR-12 owner action is pending)
+      - Add changelog entry: "2026-MM-DD | 1.1 | Project complete; all graduation criteria met (FR-12 routing application pending owner)"
+    </step>
+    <step order="6">Update `plan.md` status to Complete.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: verify all task statuses = ✅. Add a project-summary line at top: "Project complete YYYY-MM-DD — all 16 tasks ✅".</step>
+    <step order="8">Update `current-task.md`: status = "none"; next action = "Project complete. Run `/repo-cleanup` if not already, then merge `work/github-actions-rationalization-r1` to master via `/merge-to-master`."</step>
+    <step order="9">Commit all final changes. Recommend the user run `/merge-to-master` next to integrate the work.</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">/adr-check, /code-review, /repo-cleanup</tool>
+    <tool name="Read">Current state of all artifacts</tool>
+    <tool name="Edit">Update README, plan.md, TASK-INDEX, current-task.md</tool>
+    <tool name="Write">Create lessons-learned.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/github-actions-rationalization-r1/notes/lessons-learned.md</output>
+    <output type="docs">projects/github-actions-rationalization-r1/README.md (status: Complete)</output>
+    <output type="docs">projects/github-actions-rationalization-r1/plan.md (status: Complete)</output>
+    <output type="docs">projects/github-actions-rationalization-r1/tasks/TASK-INDEX.md (all ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 9 graduation criteria in README.md are checked OR have documented deferral (FR-12 owner action explicitly noted).</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` exists with sections: Non-obvious findings, Patterns to reuse, Pitfalls avoided, Recommendations.</criterion>
+    <criterion testable="true">repo-cleanup completed; ephemeral files removed.</criterion>
+    <criterion testable="true">All tasks in TASK-INDEX.md show ✅ status.</criterion>
+    <criterion testable="true">No outstanding adr-check critical findings on touched files.</criterion>
+    <criterion testable="true">README, plan.md, current-task.md all reflect Complete status.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    FR-14 (rolling 7-day success rate ≥90%) requires waiting for the Phase 4 weekly report to fire on its scheduled cadence. If the project is closing before the first natural Monday run, manually trigger the report (`gh workflow run report-workflow-health.yml`) and use its output to check FR-14. If the rate is still below 90% at close, document as a follow-up (the gates are in place; the rate will improve as new clean runs accumulate).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: STANDARD. Final task; the project is closed after this task completes successfully.</protocol>
+  </execution>
+</task>

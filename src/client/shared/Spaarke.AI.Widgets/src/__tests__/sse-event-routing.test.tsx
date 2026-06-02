@@ -76,10 +76,7 @@ function makeWrapper(bus: PaneEventBus) {
   return function Wrapper({ children }: { children: React.ReactNode }): React.JSX.Element {
     return (
       <PaneEventBusProvider bus={bus}>
-        <AiSessionProvider
-          bffBaseUrl="https://test-bff.example.com"
-          entityContext={null}
-        >
+        <AiSessionProvider bffBaseUrl="https://test-bff.example.com" entityContext={null}>
           {children}
         </AiSessionProvider>
       </PaneEventBusProvider>
@@ -97,10 +94,10 @@ function subscribeAll(bus: PaneEventBus) {
   const conversation: ConversationPaneEvent[] = [];
   const safety: SafetyPaneEvent[] = [];
 
-  bus.subscribe('workspace', (e) => workspace.push(e));
-  bus.subscribe('context', (e) => context.push(e));
-  bus.subscribe('conversation', (e) => conversation.push(e));
-  bus.subscribe('safety', (e) => safety.push(e));
+  bus.subscribe('workspace', e => workspace.push(e));
+  bus.subscribe('context', e => context.push(e));
+  bus.subscribe('conversation', e => conversation.push(e));
+  bus.subscribe('safety', e => safety.push(e));
 
   return { workspace, context, conversation, safety };
 }
@@ -337,9 +334,7 @@ describe('SSE pane event routing: unknown events', () => {
       } as AiPaneEvent);
     });
 
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Unknown SSE pane event type')
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Unknown SSE pane event type'));
 
     warnSpy.mockRestore();
   });
@@ -426,8 +421,8 @@ describe('SSE pane event routing: cross-channel isolation', () => {
     const subscriberA: WorkspacePaneEvent[] = [];
     const subscriberB: WorkspacePaneEvent[] = [];
 
-    bus.subscribe('workspace', (e) => subscriberA.push(e));
-    bus.subscribe('workspace', (e) => subscriberB.push(e));
+    bus.subscribe('workspace', e => subscriberA.push(e));
+    bus.subscribe('workspace', e => subscriberB.push(e));
 
     const { result } = renderHook(() => useAiSession(), { wrapper: makeWrapper(bus) });
 
@@ -459,8 +454,8 @@ describe('SSE pane event routing: cross-channel isolation', () => {
     const subscriberA: ContextPaneEvent[] = [];
     const subscriberB: ContextPaneEvent[] = [];
 
-    const unsubA = bus.subscribe('context', (e) => subscriberA.push(e));
-    bus.subscribe('context', (e) => subscriberB.push(e));
+    const unsubA = bus.subscribe('context', e => subscriberA.push(e));
+    bus.subscribe('context', e => subscriberB.push(e));
 
     const { result } = renderHook(() => useAiSession(), { wrapper: makeWrapper(bus) });
 

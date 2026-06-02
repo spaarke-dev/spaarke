@@ -1,0 +1,133 @@
+<task id="025" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P2.W1 — Fix RB-T028-07: Upload endpoint binding gap (verify resolved by task 011 first)</title>
+    <phase>Phase 2</phase>
+    <status>completed</status>
+    <estimated-effort>0-3 hours (0 if already resolved by task 011; 2-3h otherwise)</estimated-effort>
+    <dependencies>011,013</dependencies>
+    <blocks>029</blocks>
+    <tags>phase-2, bff-api, real-bug-ledger, medium-severity, production-fix, di</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production code change in `src/server/api/Sprk.Bff.Api/Api/UploadEndpoints.cs` + likely `Program.cs` (DI/binding); same pattern as Phase 1 RB-T028-03/04/05/06 cluster which is the canonical DI/endpoint-binding anti-pattern. FULL rigor + Step 9.5 mandatory.</rigor-reason>
+    <parallel-group>P2-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Disjoint file set (`Api/UploadEndpoints.cs` + possibly `Program.cs`) vs Wave 1 peers (CitationExtractor, CapabilityRouter, AnalysisChatContextResolver). NOTE: if fix requires `Program.cs` edits, may serialize with other Phase 2 tasks that also touch Program.cs — verify before parallel dispatch.</parallel-reason>
+    <production-fix-per-ledger>true</production-fix-per-ledger>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Close real-bug-ledger entry **RB-T028-07** by fixing the Upload endpoint binding/exception path. 9 integration tests in `tests/integration/Spe.Integration.Tests/Api/Ai/UploadIntegrationTests.cs` fail with `HttpStatusCode.InternalServerError (500)` instead of the documented `422 UnprocessableEntity` / `200 OK` / `204 NoContent`.
+
+    🚨 **STEP 0 GATE**: Before any code change, **verify whether task 011 (Phase 1 RB-T028-03/04/05/06 cluster fix) already resolved this entry**. The ledger §812-852 hypothesizes the same root cause as the Phase 1 cluster: conditional service registration + unconditional endpoint mapping. Run `dotnet test tests/integration/Spe.Integration.Tests/ --filter "FullyQualifiedName~UploadIntegrationTests"` BEFORE fixing — if all 9 tests now pass (i.e., the Phase 1 root-cause fix subsumes this entry), close RB-T028-07 with mode `repaired-by-cluster` cross-referencing task 011 commit SHA. NO further code change needed.
+
+    If still failing: apply the ledger §841-844 recommended two-step fix:
+    1. **Exception isolation**: wrap the file-validation block in try/catch and return `Results.UnprocessableEntity()` / `Results.BadRequest()` for known-rejection cases. Don't let validation errors fall through to ASP.NET Core's 500 handler.
+    2. **Storage seam**: introduce an `IUploadStorage` (or use `IBlobStore` if it exists) abstraction so the test fixture can register an in-memory implementation that succeeds on Accept-* cases.
+
+    Per NFR-04 cite `RB-T028-07` + resolution mode (`repaired` OR `repaired-by-cluster`). Per ADR-010 + ADR-018: if conditional registration is the cause, prefer **unconditional service registration** when the endpoint is mapped unconditionally (the rule codified by Phase 1 task 011).
+  </prompt>
+
+  <role>Backend AI agent verifying + (conditionally) fixing the Upload endpoint binding/exception path.</role>
+
+  <goal>
+    All 9 tests in `UploadIntegrationTests.cs` pass without Skip. EITHER closed as `repaired-by-cluster` (cross-referencing task 011) if Phase 1 fix subsumed this entry, OR closed as `repaired` with the new exception-isolation + storage-seam fix applied.
+  </goal>
+
+  <inputs>
+    <file purpose="target-production-file">src/server/api/Sprk.Bff.Api/Api/UploadEndpoints.cs</file>
+    <file purpose="target-test-file">tests/integration/Spe.Integration.Tests/Api/Ai/UploadIntegrationTests.cs</file>
+    <file purpose="program-cs">src/server/api/Sprk.Bff.Api/Program.cs (for DI/binding inspection)</file>
+    <file purpose="ledger-entry">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (RB-T028-07 section, lines 812-852)</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    <file purpose="phase-1-reference">projects/sdap.bff.api-test-suite-repair-r2/tasks/011-fix-rb-t028-cluster.poml (Phase 1 cluster fix — root cause reference)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Endpoint mapping discipline — endpoints map only when their services are registered (Phase 1 task 011 codified rule)</constraint>
+    <constraint source="ADR-010">DI minimalism + NFR-03 in BFF — do NOT inflate DI baseline; prefer unconditional registration over conditional when endpoint is unconditional</constraint>
+    <constraint source="ADR-018">Kill switches — feature flags MUST gate either both endpoint AND service, or neither</constraint>
+    <constraint source="NFR-01">Production code IS in scope; tests modified ONLY for Skip→Pass</constraint>
+    <constraint source="NFR-02"><50% line replacement per file; storage-seam introduction may approach limit on `UploadEndpoints.cs` — escalate if needed</constraint>
+    <constraint source="NFR-04">Commit message cites `RB-T028-07` + correct resolution mode (`repaired` or `repaired-by-cluster`)</constraint>
+    <constraint source="D-02">One production fix = one ledger entry closed; cluster exception applies if subsumed by task 011</constraint>
+    <constraint source="design.md §5.3">Upload endpoint binding may already be resolved by Phase 1; verify before fixing</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per ledger §835-838 hypothesis: `UploadTestFixture` inherits `IntegrationTestFixture` (line 487) so it has all base config keys; the host boots cleanly. But the Upload endpoint's file-validation path throws an unhandled exception (likely related to SharePoint Embedded or storage-stream dependency not satisfied in test host) before reaching the documented 422/200 return code.
+
+      The Phase 1 cluster fix (task 011, RB-T028-03/04/05/06) addressed the same root-cause class (conditional service registration + unconditional endpoint mapping). If task 011 made the upload-handler dependencies unconditionally registered, RB-T028-07's symptom may disappear without an Upload-specific fix. Step 0 of this task verifies this hypothesis empirically.
+
+      Per the predecessor `lessons-learned.md`: cluster-level classification scales — one production change can close multiple entries. If verification passes, this task closes WITHOUT a new code change.
+    </background>
+    <dependencies>
+      <dependency task="011" status="required">Phase 1 RB-T028 cluster fix landed; may subsume RB-T028-07</dependency>
+      <dependency task="013" status="required">Phase 1 exit triple-run validated</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Api/UploadEndpoints.cs</file>
+    <file>tests/integration/Spe.Integration.Tests/Api/Ai/UploadIntegrationTests.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Load RB-T028-07 ledger entry (lines 812-852 in real-bug-ledger.md). Confirm Status is `open` or `assigned-to-r2`.</step>
+    <step order="2">🚨 **VERIFICATION GATE**: confirm task 011 (Phase 1 cluster fix) is committed. Run `dotnet test tests/integration/Spe.Integration.Tests/ --filter "FullyQualifiedName~UploadIntegrationTests"`. Record outcome:
+      - **9/9 PASS** → subsumed by task 011. Skip to Step 9 with mode `repaired-by-cluster`.
+      - **0/9 or partial** → continue to Step 3 with original fix path.
+    </step>
+    <step order="3">[Conditional — only if Step 2 shows still-failing] Read `src/server/api/Sprk.Bff.Api/Api/UploadEndpoints.cs` to identify the file-validation path and its exception surface. Read `Program.cs` upload-related DI registration block.</step>
+    <step order="4">[Conditional] Apply exception isolation: wrap file-type / size validation in try/catch returning `Results.UnprocessableEntity()` / `Results.BadRequest()` for known rejection paths. Avoid fall-through to 500 handler.</step>
+    <step order="5">[Conditional] If a storage abstraction is needed for the Accept-* cases: check if `IBlobStore` (or similar) exists; if yes, ensure UploadEndpoints uses it. If no, introduce minimal `IUploadStorage` interface + in-memory test implementation registered via `CustomWebAppFactory.cs` test config. Apply NFR-02 line-replacement check before committing — if `UploadEndpoints.cs` exceeds 50% line replacement, file `escalations/rewrite-request-T-025-UploadEndpoints.md`.</step>
+    <step order="6">[Conditional] Remove `Skip = "..."` + per-test traits on all 9 Skip'd tests in `UploadIntegrationTests.cs`.</step>
+    <step order="7">Build: `dotnet build src/server/api/Sprk.Bff.Api/`. Verify 0 errors.</step>
+    <step order="8">Run targeted tests: `dotnet test tests/integration/Spe.Integration.Tests/ --filter "FullyQualifiedName~UploadIntegrationTests"`. Confirm all 9 pass.</step>
+    <step order="9">Step 9.5 quality gates: `code-review` + `adr-check` (especially ADR-010 / ADR-018 application — ensure consistent registration-vs-mapping conditionality).</step>
+    <step order="10">Update RB-T028-07 ledger: Status → `repaired` (if Step 3+ code change) OR `repaired-by-cluster` (if Step 2 verification passed). For `repaired-by-cluster`: cross-reference task 011 commit SHA in Notes. Commit (only if code changed): `fix(ai/upload): isolate file-validation exceptions + storage seam (RB-T028-07; repaired)` OR no-code-change closure note in TASK-INDEX. Update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">UploadEndpoints.cs + Program.cs + test file + ledger entry</tool>
+    <tool name="Bash">`dotnet test --filter ~UploadIntegrationTests` for verification gate; `dotnet build` after fix</tool>
+    <tool name="Edit">Conditional production fix + test Skip removal</tool>
+    <tool name="Skill">Step 9.5 quality gate via `code-review` (ADR-010 / ADR-018 registration/mapping compliance) + `adr-check`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">[Conditional] src/server/api/Sprk.Bff.Api/Api/UploadEndpoints.cs + Program.cs (if not already fixed by task 011)</output>
+    <output type="test">tests/integration/Spe.Integration.Tests/Api/Ai/UploadIntegrationTests.cs (9 Skip→Pass)</output>
+    <output type="ledger">RB-T028-07 status: `repaired` OR `repaired-by-cluster` (cross-reference task 011)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Step 2 verification gate run + outcome recorded in `current-task.md` BEFORE any code change</criterion>
+    <criterion testable="true">All 9 tests in `UploadIntegrationTests.cs` pass (no Skip) after task completion</criterion>
+    <criterion testable="true">RB-T028-07 ledger Status transitions to `repaired` OR `repaired-by-cluster` with correct cross-reference</criterion>
+    <criterion testable="true">Commit message (if code changed) includes `RB-T028-07` + resolution mode</criterion>
+    <criterion testable="true">No new DI registrations beyond Phase 1 task 011 outcome (ADR-010 NFR-03)</criterion>
+    <criterion testable="true">If conditional registration was the root cause: endpoint mapping and service registration are now consistently gated (ADR-018) per Phase 1 cluster rule</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <approach>Step 2 verification gate is load-bearing — many entries in the RB-T028 cluster may be subsumed by task 011. If subsumed, this is a no-code-change closure.</approach>
+  </execution>
+</task>

@@ -40,10 +40,19 @@ import type { AuthenticatedFetchFn } from '../../services/EntityCreationService'
 export interface IEnterInfoStepProps {
   dataService: IDataService;
   onValidChange: (isValid: boolean) => void;
-  onFormValues: (values: Pick<
-    ICreateWorkAssignmentFormState,
-    'name' | 'description' | 'matterTypeId' | 'matterTypeName' | 'practiceAreaId' | 'practiceAreaName' | 'priority' | 'responseDueDate'
-  >) => void;
+  onFormValues: (
+    values: Pick<
+      ICreateWorkAssignmentFormState,
+      | 'name'
+      | 'description'
+      | 'matterTypeId'
+      | 'matterTypeName'
+      | 'practiceAreaId'
+      | 'practiceAreaName'
+      | 'priority'
+      | 'responseDueDate'
+    >
+  ) => void;
   initialValues?: Partial<ICreateWorkAssignmentFormState>;
   /** Files uploaded in the Add Files step -- used for AI pre-fill when no record is selected. */
   uploadedFiles?: IUploadedFile[];
@@ -144,33 +153,30 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
   }, [initialValues]);
 
   // -- AI Pre-fill via shared hook --------------------------------------------
-  const handlePrefillApply = React.useCallback(
-    (resolved: IResolvedPrefillFields) => {
-      for (const [key, value] of Object.entries(resolved)) {
-        if (typeof value === 'string') {
-          if (key === 'name') setName(value);
-          else if (key === 'description') setDescription(value);
-        } else {
-          // Lookup resolved: { id, name }
-          if (key === 'matterTypeName') {
-            setMatterTypeId(value.id);
-            setMatterTypeName(value.name);
-          } else if (key === 'practiceAreaName') {
-            setPracticeAreaId(value.id);
-            setPracticeAreaName(value.name);
-          }
+  const handlePrefillApply = React.useCallback((resolved: IResolvedPrefillFields) => {
+    for (const [key, value] of Object.entries(resolved)) {
+      if (typeof value === 'string') {
+        if (key === 'name') setName(value);
+        else if (key === 'description') setDescription(value);
+      } else {
+        // Lookup resolved: { id, name }
+        if (key === 'matterTypeName') {
+          setMatterTypeId(value.id);
+          setMatterTypeName(value.name);
+        } else if (key === 'practiceAreaName') {
+          setPracticeAreaId(value.id);
+          setPracticeAreaName(value.name);
         }
       }
-    },
-    []
-  );
+    }
+  }, []);
 
   const prefill = useAiPrefill({
     endpoint: '/api/workspace/matters/pre-fill',
     uploadedFiles,
     authenticatedFetch,
     bffBaseUrl,
-    fieldExtractor: (data) => ({
+    fieldExtractor: data => ({
       textFields: {
         name: data.matterName as string | undefined,
         description: data.summary as string | undefined,
@@ -181,8 +187,8 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
       },
     }),
     lookupResolvers: {
-      matterTypeName: (v) => searchMatterTypes(dataService, v),
-      practiceAreaName: (v) => searchPracticeAreas(dataService, v),
+      matterTypeName: v => searchMatterTypes(dataService, v),
+      practiceAreaName: v => searchPracticeAreas(dataService, v),
     },
     onApply: handlePrefillApply,
     skipIfInitialized: hasInitialValues,
@@ -191,56 +197,61 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
 
   // Report validity + values -- Priority and Response Due Date are mandatory
   React.useEffect(() => {
-    const isValid =
-      name.trim().length > 0 &&
-      priority > 0 &&
-      responseDueDate.trim().length > 0;
+    const isValid = name.trim().length > 0 && priority > 0 && responseDueDate.trim().length > 0;
     onValidChange(isValid);
-    onFormValues({ name, description, matterTypeId, matterTypeName, practiceAreaId, practiceAreaName, priority, responseDueDate });
-  }, [name, description, matterTypeId, matterTypeName, practiceAreaId, practiceAreaName, priority, responseDueDate, onValidChange, onFormValues]);
+    onFormValues({
+      name,
+      description,
+      matterTypeId,
+      matterTypeName,
+      practiceAreaId,
+      practiceAreaName,
+      priority,
+      responseDueDate,
+    });
+  }, [
+    name,
+    description,
+    matterTypeId,
+    matterTypeName,
+    practiceAreaId,
+    practiceAreaName,
+    priority,
+    responseDueDate,
+    onValidChange,
+    onFormValues,
+  ]);
 
-  const handleNameChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value),
-    []
-  );
+  const handleNameChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value), []);
 
   const handleDescriptionChange = React.useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => setDescription(e.target.value),
     []
   );
 
-  const handleMatterTypeChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setMatterTypeId(item?.id ?? '');
-      setMatterTypeName(item?.name ?? '');
-    },
-    []
-  );
+  const handleMatterTypeChange = React.useCallback((item: ILookupItem | null) => {
+    setMatterTypeId(item?.id ?? '');
+    setMatterTypeName(item?.name ?? '');
+  }, []);
 
   const handleSearchMatterTypes = React.useCallback(
     (query: string) => searchMatterTypes(dataService, query),
     [dataService]
   );
 
-  const handlePracticeAreaChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setPracticeAreaId(item?.id ?? '');
-      setPracticeAreaName(item?.name ?? '');
-    },
-    []
-  );
+  const handlePracticeAreaChange = React.useCallback((item: ILookupItem | null) => {
+    setPracticeAreaId(item?.id ?? '');
+    setPracticeAreaName(item?.name ?? '');
+  }, []);
 
   const handleSearchPracticeAreas = React.useCallback(
     (query: string) => searchPracticeAreas(dataService, query),
     [dataService]
   );
 
-  const handlePriorityChange = React.useCallback(
-    (_e: unknown, data: { optionValue?: string }) => {
-      setPriority(parseInt(data.optionValue ?? '100000001', 10));
-    },
-    []
-  );
+  const handlePriorityChange = React.useCallback((_e: unknown, data: { optionValue?: string }) => {
+    setPriority(parseInt(data.optionValue ?? '100000001', 10));
+  }, []);
 
   const handleDueDateChange = React.useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => setResponseDueDate(e.target.value),
@@ -249,11 +260,19 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
 
   const matterTypeValue: ILookupItem | null = matterTypeId ? { id: matterTypeId, name: matterTypeName } : null;
   const practiceAreaValue: ILookupItem | null = practiceAreaId ? { id: practiceAreaId, name: practiceAreaName } : null;
-  const selectedPriorityText = PRIORITY_OPTIONS.find((o) => o.key === priority)?.text ?? 'Normal';
+  const selectedPriorityText = PRIORITY_OPTIONS.find(o => o.key === priority)?.text ?? 'Normal';
 
   if (prefill.status === 'loading') {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: tokens.spacingVerticalL, padding: tokens.spacingVerticalXXL }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: tokens.spacingVerticalL,
+          padding: tokens.spacingVerticalXXL,
+        }}
+      >
         <Spinner size="medium" label="Analyzing uploaded files..." />
       </div>
     );
@@ -272,12 +291,7 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
       </div>
 
       <Field label="Name" required>
-        <Input
-          value={name}
-          onChange={handleNameChange}
-          placeholder="Work assignment name"
-          autoComplete="off"
-        />
+        <Input value={name} onChange={handleNameChange} placeholder="Work assignment name" autoComplete="off" />
       </Field>
 
       <Field label="Description">
@@ -314,7 +328,7 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
             selectedOptions={[String(priority)]}
             onOptionSelect={handlePriorityChange}
           >
-            {PRIORITY_OPTIONS.map((opt) => (
+            {PRIORITY_OPTIONS.map(opt => (
               <Option key={opt.key} value={String(opt.key)}>
                 {opt.text}
               </Option>
@@ -322,11 +336,7 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
           </Dropdown>
         </Field>
         <Field label="Response Due Date" required>
-          <Input
-            type="date"
-            value={responseDueDate}
-            onChange={handleDueDateChange}
-          />
+          <Input type="date" value={responseDueDate} onChange={handleDueDateChange} />
         </Field>
       </div>
     </div>

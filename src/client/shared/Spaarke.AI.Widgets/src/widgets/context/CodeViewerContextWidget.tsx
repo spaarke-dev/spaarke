@@ -31,7 +31,7 @@ export type { CodeViewerData };
  */
 const CodeViewerContextWidget = createContextWidgetAdapter<CodeViewerData>(
   CodeViewerWidget,
-  createNoOpHighlighter<CodeViewerData>(),
+  createNoOpHighlighter<CodeViewerData>()
 );
 
 CodeViewerContextWidget.displayName = 'CodeViewerContextWidget';

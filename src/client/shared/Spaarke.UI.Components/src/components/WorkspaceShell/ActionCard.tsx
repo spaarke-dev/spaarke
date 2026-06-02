@@ -11,15 +11,9 @@
  * Standards: ADR-012 (shared component library), ADR-021 (Fluent v9, dark mode)
  */
 
-import * as React from "react";
-import {
-  Text,
-  makeStyles,
-  shorthands,
-  tokens,
-  mergeClasses,
-} from "@fluentui/react-components";
-import type { FluentIcon } from "@fluentui/react-icons";
+import * as React from 'react';
+import { Text, makeStyles, shorthands, tokens, mergeClasses } from '@fluentui/react-components';
+import type { FluentIcon } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -50,65 +44,65 @@ const useStyles = makeStyles({
      * Flex-stretch sizing: cards grow equally to fill the row, matching
      * QuickSummaryMetricCard behaviour so both rows render identically.
      */
-    minWidth: "120px",
-    flex: "1 1 0",
-    height: "120px",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    minWidth: '120px',
+    flex: '1 1 0',
+    height: '120px',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: tokens.spacingVerticalL,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
-    cursor: "pointer",
+    cursor: 'pointer',
     backgroundColor: tokens.colorNeutralBackground1,
     ...shorthands.borderWidth(tokens.strokeWidthThin),
-    ...shorthands.borderStyle("solid"),
+    ...shorthands.borderStyle('solid'),
     ...shorthands.borderColor(tokens.colorNeutralStroke2),
     borderRadius: tokens.borderRadiusMedium,
-    transitionProperty: "box-shadow, background-color, border-color",
+    transitionProperty: 'box-shadow, background-color, border-color',
     transitionDuration: tokens.durationNormal,
     transitionTimingFunction: tokens.curveEasyEase,
     // Focus ring (keyboard navigation)
-    ":focus-visible": {
-      outlineWidth: "2px",
-      outlineStyle: "solid",
+    ':focus-visible': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
       outlineColor: tokens.colorBrandStroke1,
-      outlineOffset: "2px",
+      outlineOffset: '2px',
     },
     // Hover elevation
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
       ...shorthands.borderColor(tokens.colorNeutralStroke1Hover),
       boxShadow: tokens.shadow4,
     },
     // Active / pressed state
-    ":active": {
+    ':active': {
       backgroundColor: tokens.colorNeutralBackground1Pressed,
       ...shorthands.borderColor(tokens.colorNeutralStroke1Pressed),
       boxShadow: tokens.shadow2,
     },
   },
   cardDisabled: {
-    cursor: "not-allowed",
-    opacity: "0.5",
-    ":hover": {
+    cursor: 'not-allowed',
+    opacity: '0.5',
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1,
       ...shorthands.borderColor(tokens.colorNeutralStroke2),
-      boxShadow: "none",
+      boxShadow: 'none',
     },
-    ":active": {
+    ':active': {
       backgroundColor: tokens.colorNeutralBackground1,
       ...shorthands.borderColor(tokens.colorNeutralStroke2),
-      boxShadow: "none",
+      boxShadow: 'none',
     },
   },
   iconWrapper: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "40px",
-    height: "40px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '40px',
+    height: '40px',
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorBrandBackground2,
     marginBottom: tokens.spacingVerticalM,
@@ -116,7 +110,7 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   label: {
-    textAlign: "center",
+    textAlign: 'center',
     color: tokens.colorNeutralForeground1,
     lineHeight: tokens.lineHeightBase200,
   },
@@ -161,7 +155,7 @@ export const ActionCard: React.FC<ActionCardProps> = ({
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (!disabled && (e.key === "Enter" || e.key === " ")) {
+      if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
         e.preventDefault();
         onClick?.();
       }
@@ -177,11 +171,7 @@ export const ActionCard: React.FC<ActionCardProps> = ({
       aria-disabled={disabled}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
-      className={mergeClasses(
-        styles.card,
-        disabled && styles.cardDisabled,
-        className
-      )}
+      className={mergeClasses(styles.card, disabled && styles.cardDisabled, className)}
     >
       <div className={styles.iconWrapper} aria-hidden="true">
         <Icon fontSize={20} />
@@ -193,4 +183,4 @@ export const ActionCard: React.FC<ActionCardProps> = ({
   );
 };
 
-ActionCard.displayName = "ActionCard";
+ActionCard.displayName = 'ActionCard';

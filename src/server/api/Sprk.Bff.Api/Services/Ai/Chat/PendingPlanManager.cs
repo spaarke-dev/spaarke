@@ -23,8 +23,15 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 ///
 /// DI registration: Scoped (one per HTTP request, same as <see cref="ChatSessionManager"/>).
 /// No additional DI registrations needed — <see cref="IDistributedCache"/> is already registered.
+///
+/// Unseal note (task 011 Phase 1b Tier 3, D-09 §2 B3, 2026-06-01): class was `sealed`;
+/// unsealed to permit <see cref="NullPendingPlanManager"/> subclassing for the kill-switch-OFF
+/// (compound AI disabled) DI state. Per ADR-010 (DI minimalism) the concrete-class Null-Object
+/// is preferred over introducing an interface. Production constructor and method bodies are
+/// unchanged; only the `sealed` keyword was removed and the 4 publicly-overridable methods
+/// were marked `virtual`.
 /// </summary>
-public sealed class PendingPlanManager
+public class PendingPlanManager
 {
     /// <summary>Absolute TTL for pending plans (30 minutes per task 070 design).</summary>
     internal static readonly TimeSpan PendingPlanTtl = TimeSpan.FromMinutes(30);
@@ -53,12 +60,27 @@ public sealed class PendingPlanManager
     }
 
     /// <summary>
+    /// Protected constructor used only by <see cref="NullPendingPlanManager"/> when the
+    /// compound AI kill switch is OFF. The production scoped instance always uses the public ctor.
+    /// </summary>
+    /// <remarks>
+    /// Task 011 Phase 1b Tier 3 (D-09 §2 B3, 2026-06-01). Keeps the Null-Object subclass from
+    /// resolving <see cref="IDistributedCache"/> (which is unconditional, so this is purely a
+    /// hygiene measure: the Null subclass never touches Redis even if it's available).
+    /// </remarks>
+    protected PendingPlanManager(ILogger<PendingPlanManager> logger)
+    {
+        _cache = null!;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
     /// Stores a pending plan in Redis with the 30-minute TTL.
     /// Overwrites any existing pending plan for the session.
     /// </summary>
     /// <param name="plan">The pending plan to store.</param>
     /// <param name="ct">Cancellation token.</param>
-    public async Task StoreAsync(PendingPlan plan, CancellationToken ct = default)
+    public virtual async Task StoreAsync(PendingPlan plan, CancellationToken ct = default)
     {
         var key = BuildPendingPlanKey(plan.TenantId, plan.SessionId);
         var json = JsonSerializer.Serialize(plan, JsonOptions);
@@ -83,7 +105,7 @@ public sealed class PendingPlanManager
     /// <param name="tenantId">Tenant ID (ADR-014 tenant isolation).</param>
     /// <param name="sessionId">Session ID.</param>
     /// <param name="ct">Cancellation token.</param>
-    public async Task<PendingPlan?> GetAsync(string tenantId, string sessionId, CancellationToken ct = default)
+    public virtual async Task<PendingPlan?> GetAsync(string tenantId, string sessionId, CancellationToken ct = default)
     {
         var key = BuildPendingPlanKey(tenantId, sessionId);
         var bytes = await _cache.GetAsync(key, ct);
@@ -118,7 +140,7 @@ public sealed class PendingPlanManager
     /// <param name="sessionId">Session ID.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The pending plan, or null if not found (expired or already deleted).</returns>
-    public async Task<PendingPlan?> GetAndDeleteAsync(string tenantId, string sessionId, CancellationToken ct = default)
+    public virtual async Task<PendingPlan?> GetAndDeleteAsync(string tenantId, string sessionId, CancellationToken ct = default)
     {
         var key = BuildPendingPlanKey(tenantId, sessionId);
         var bytes = await _cache.GetAsync(key, ct);
@@ -152,7 +174,7 @@ public sealed class PendingPlanManager
     /// <param name="tenantId">Tenant ID.</param>
     /// <param name="sessionId">Session ID.</param>
     /// <param name="ct">Cancellation token.</param>
-    public async Task DeleteAsync(string tenantId, string sessionId, CancellationToken ct = default)
+    public virtual async Task DeleteAsync(string tenantId, string sessionId, CancellationToken ct = default)
     {
         var key = BuildPendingPlanKey(tenantId, sessionId);
         await _cache.RemoveAsync(key, ct);

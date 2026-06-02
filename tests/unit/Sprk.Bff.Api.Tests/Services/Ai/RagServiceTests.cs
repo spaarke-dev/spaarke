@@ -1,5 +1,6 @@
 using Azure;
 using Azure.Search.Documents;
+using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
@@ -20,6 +21,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 /// Unit tests for RagService - Hybrid RAG search implementation.
 /// Tests hybrid search (keyword + vector), semantic ranking, and document indexing.
 /// </summary>
+[Trait("status", "repaired")]
 public class RagServiceTests
 {
     private readonly Mock<IKnowledgeDeploymentService> _deploymentServiceMock;
@@ -62,12 +64,29 @@ public class RagServiceTests
 
     private RagService CreateService()
     {
+        // Constructor updated 2026-06-01 (RB-T028-03/04/05/06 repair, Phase 1c test infra):
+        // Tier 3 B8 refactor (commit 5613b8ad) added required SearchIndexClient +
+        // IOptions<AiSearchOptions> parameters to absorb the SDK calls previously made by
+        // KnowledgeBaseEndpoints. Existing unit tests do not exercise the B8 admin methods,
+        // so a Loose mock SearchIndexClient + a default-shape AiSearchOptions satisfies the
+        // constructor without affecting test semantics.
+        var searchIndexClientMock = new Mock<SearchIndexClient>(MockBehavior.Loose);
+        var aiSearchOptions = Options.Create(new AiSearchOptions
+        {
+            Endpoint = "https://test-search.search.windows.net",
+            ApiKeySecretName = "test-api-key",
+            KnowledgeIndexName = "spaarke-knowledge-index-v2",
+            DiscoveryIndexName = "discovery-index"
+        });
+
         return new RagService(
             _deploymentServiceMock.Object,
             _openAiClientMock.Object,
             _embeddingCacheMock.Object,
             _privilegeGroupResolverMock.Object,
             _options,
+            searchIndexClientMock.Object,
+            aiSearchOptions,
             _loggerMock.Object);
     }
 
@@ -1166,9 +1185,30 @@ public class RagServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(responseMock);
 
+        // SearchClient.Endpoint is a virtual property — Moq returns null by default,
+        // which would NRE the observability LogInformation in RagService.IndexDocumentsBatchAsync.
+        // Configure a benign test endpoint so the log call succeeds.
+        searchClientMock
+            .SetupGet(x => x.Endpoint)
+            .Returns(new Uri("https://test-search.search.windows.net"));
+
         _deploymentServiceMock
             .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(searchClientMock.Object);
+
+        // RagService.IndexDocumentsBatchAsync also resolves a KnowledgeDeploymentConfig
+        // for observability logging (Model, IndexName, Endpoint, BatchSize). Provide a
+        // minimal Shared-model config so the observability log call does not NRE.
+        _deploymentServiceMock
+            .Setup(x => x.GetDeploymentConfigAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new KnowledgeDeploymentConfig
+            {
+                TenantId = "tenant-1",
+                Name = "test-deployment",
+                Model = RagDeploymentModel.Shared,
+                IndexName = "spaarke-knowledge-index-v2",
+                IsActive = true
+            });
     }
 
     #endregion

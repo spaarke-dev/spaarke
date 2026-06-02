@@ -1,0 +1,126 @@
+<task id="044" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P4.E — Anti-drift effectiveness report (BFF-touching PRs 2026-06-01 → 2026-08-15)</title>
+    <phase>Phase 4</phase>
+    <status>not-started</status>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <dependencies>039</dependencies>
+    <blocks>080</blocks>
+    <tags>phase-4, governance, anti-drift, measurement, report</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Analysis report only; reads PR metadata via `gh` CLI; produces single markdown doc. No `src/`, test, or governance-doc edits. STANDARD per CLAUDE.md §8 (analysis + new file creation; no code touched).</rigor-reason>
+    <parallel-group>P4-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes only to `projects/.../baseline/anti-drift-effectiveness-2026-08-XX.md`. Disjoint write path from Track A (audits/), B (stryker-config.json + baseline/mutation-*), C (src/server Workspace + tests), D (baseline/coverlet-*). PR-metadata reads are network calls, not file reads.</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Measure the effectiveness of r1's anti-drift mechanisms (`.claude/constraints/bff-extensions.md` § F + PR template question + procedure doc + root CLAUDE.md §10 bullet 6) by analyzing BFF-touching PRs from 2026-06-01 (r1 close) → 2026-08-15 (Phase 4 start window).
+
+    Per PR: capture (a) test-update obligation checkbox state in PR template; (b) actual test addition/update presence in diff; (c) reviewer comment presence calling out test-update obligation.
+
+    Output: compliance rate + corrective-action proposals (if <80%).
+
+    **Per NFR-07**, the report is published whether favorable or not — no burying inconvenient data. If compliance is high (>80%), report it. If compliance is low (<80%), report it AND propose corrective action.
+  </prompt>
+
+  <role>Governance AI agent measuring anti-drift mechanism effectiveness via PR-metadata analysis; producing a published report.</role>
+
+  <goal>
+    Single deliverable: `projects/sdap.bff.api-test-suite-repair-r2/baseline/anti-drift-effectiveness-2026-08-XX.md` containing:
+    - **Scope statement**: window analyzed (2026-06-01 → 2026-08-15); definition of "BFF-touching PR" (modifies `src/server/api/Sprk.Bff.Api/` or `src/server/shared/` per CLAUDE.md §10 binding scope)
+    - **Per-PR analysis table**: PR # + title + author + date merged + checkbox state + test diff presence (Y/N) + reviewer test-update comment presence (Y/N) + compliance verdict (compliant / non-compliant / partial)
+    - **Aggregate compliance rate**: 3 metrics — (a) checkbox checked rate; (b) actual test diff rate when checkbox checked; (c) reviewer call-out rate when checkbox unchecked
+    - **Findings analysis**: which mechanism worked best (constraint doc / PR template / procedure doc / reviewer judgment); failure modes observed
+    - **Corrective-action proposals** (if any metric <80%): specific recommendations (e.g., make PR template question required to merge; add reviewer-prompt to CODEOWNERS automation; etc.). Tie back to D-05 (no CI script — proposals MUST honor that constraint)
+    - **r3 recommendation**: whether to revisit anti-drift mechanism design in r3 OR accept current effectiveness as the steady state
+
+    Per NFR-07: this report is published regardless of finding (no soft-pedaling, no hiding low compliance).
+  </goal>
+
+  <inputs>
+    <file purpose="constraint-doc">.claude/constraints/bff-extensions.md</file>
+    <file purpose="pr-template">.github/pull_request_template.md</file>
+    <file purpose="procedure-doc">docs/procedures/testing-and-code-quality.md</file>
+    <file purpose="r1-lessons">projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-07">Anti-drift effectiveness report (FR-09) is published whether findings are favorable or not — no burying inconvenient data</constraint>
+    <constraint source="FR-09">Output is `baseline/anti-drift-effectiveness-2026-08-XX.md` with measured data + analysis + (if &lt;80%) corrective-action proposals</constraint>
+    <constraint source="D-05">Anti-drift was DELIBERATELY chosen as constraint-docs + PR-template + reviewer-judgment over CI script. Corrective-action proposals MUST honor that constraint (no "add a CI script" proposals)</constraint>
+    <constraint source="D-04">Phase 4 tracks are pilot-grade — report ships measurement + recommendation; r3 (if commissioned) acts on it</constraint>
+    <constraint source="NFR-01">No `src/` or test logic modifications</constraint>
+    <constraint source="NFR-06">Project-internal artifact under `projects/sdap.bff.api-test-suite-repair-r2/baseline/`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>.github/pull_request_template.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      r1's anti-drift body of work codified the test-update obligation across 4 surfaces: `.claude/constraints/bff-extensions.md` § F (binding rule), `.github/pull_request_template.md` (PR-author question), `docs/procedures/testing-and-code-quality.md` (reviewer checklist), root `CLAUDE.md` §10 bullet 6 (cross-reference). Per design.md §5.5, this was chosen over a CI script because: (a) doc-only PRs would false-positive; (b) refactor PRs with unchanged-but-still-valid tests would false-positive; (c) owner direction was "do not over-burden PR process."
+
+      But the choice traded enforcement strength for false-positive resistance. The empirical question r2 Track E answers: **does it actually work?** The 10-week window 2026-06-01 → 2026-08-15 is the first measurable period (r1 closed 2026-06-01, when the mechanisms went live).
+
+      Per NFR-07, this report MUST publish regardless of finding. If compliance is high, that validates the design. If compliance is low, that signals D-05 may need revisiting in r3 (NOT by adding a CI script — but by tightening which-PRs-trigger-the-checkbox, or escalating to required reviewer-tag, etc.).
+
+      `gh api repos/spaarke-dev/spaarke/pulls?state=closed&since=2026-06-01&until=2026-08-15` is the entry-point query. Filter to BFF-touching (file-path diff intersects `src/server/api/Sprk.Bff.Api/` or `src/server/shared/`). For each: fetch PR body to check template checkbox state; fetch PR diff to check test additions; fetch PR comments to check reviewer call-out.
+    </background>
+    <dependencies>
+      <dependency task="039" status="not-started">Phase 3 exit (all 20 ledger entries closed)</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/anti-drift-effectiveness-2026-08-XX.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Use `gh api repos/spaarke-dev/spaarke/pulls?state=closed` to enumerate merged PRs in the window 2026-06-01 → 2026-08-15. Capture PR #, title, author, merge date.</step>
+    <step order="2">For each PR, fetch the file-list diff (`gh pr diff <N> --name-only`). Filter to BFF-touching: any file in `src/server/api/Sprk.Bff.Api/` or `src/server/shared/` (per CLAUDE.md §10 BFF scope). Discard non-BFF PRs.</step>
+    <step order="3">For each BFF-touching PR, fetch PR body (`gh pr view <N> --json body`). Parse to detect the test-update obligation checkbox state (`[ ]` = unchecked; `[x]` = checked). Some PRs may pre-date the template — note "no template" verdict.</step>
+    <step order="4">For each BFF-touching PR, fetch test diff: `gh pr diff <N> -- 'tests/**'` — capture whether any test file was added/modified.</step>
+    <step order="5">For each BFF-touching PR, fetch comments via `gh api repos/spaarke-dev/spaarke/pulls/<N>/comments` and `/issues/<N>/comments`. Scan for reviewer mentions of "test update", "test coverage", "bff-extensions", "test obligation", or equivalent.</step>
+    <step order="6">Per-PR compliance verdict: (a) "compliant" if checkbox checked AND test diff present; (b) "non-compliant" if checkbox unchecked AND no test diff AND no reviewer call-out; (c) "partial" otherwise. Document edge cases (e.g., doc-only PR that pre-claimed an exception).</step>
+    <step order="7">Aggregate: checkbox-checked rate, test-diff-when-checked rate, reviewer-call-out-when-unchecked rate. Identify failure modes.</step>
+    <step order="8">Author `projects/sdap.bff.api-test-suite-repair-r2/baseline/anti-drift-effectiveness-2026-08-XX.md` with: scope statement; per-PR analysis table; aggregate metrics; findings analysis; corrective-action proposals (if any &lt;80%); r3 recommendation.</step>
+    <step order="9">Verify `git status` shows ONLY the new report doc (no `src/`, `.claude/`, `.github/`, or `docs/` modifications — those are Phase 5 if warranted).</step>
+    <step order="10">Commit message: "docs(governance): anti-drift effectiveness report 2026-06-01 → 2026-08-15 (FR-09; NFR-07 published-regardless)".</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">`gh` CLI queries for PR metadata, diff, body, comments; `git status`; final commit</tool>
+    <tool name="Read">constraint doc, PR template, procedure doc for definition reference</tool>
+    <tool name="Write">baseline report doc</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/baseline/anti-drift-effectiveness-2026-08-XX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Report exists at `projects/sdap.bff.api-test-suite-repair-r2/baseline/anti-drift-effectiveness-2026-08-XX.md`</criterion>
+    <criterion testable="true">Report contains per-PR analysis table (rows = BFF-touching PRs in window)</criterion>
+    <criterion testable="true">Report contains 3 aggregate compliance metrics (checkbox rate; test-diff-when-checked rate; reviewer-call-out-when-unchecked rate)</criterion>
+    <criterion testable="true">If any metric &lt;80%, report contains corrective-action proposals that honor D-05 (no CI script)</criterion>
+    <criterion testable="true">Report contains r3 recommendation (revisit / accept-as-steady-state)</criterion>
+    <criterion testable="true">No modifications to `src/`, `.claude/`, `.github/`, `docs/` (verified by `git status`)</criterion>
+    <criterion testable="true">Report published per NFR-07 — favorable or not</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. STANDARD rigor (analysis + reporting only; no Step 9.5 quality gates required).
+  </execution>
+</task>

@@ -1,0 +1,186 @@
+<task id="073" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.L4 — LOW-tier *EndpointTests batch (top-level, ~13 files)</title>
+    <status>completed-noop</status>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, low-tier, p23-l, bff-api, testing, triage, endpoint-tests</tags>
+    <parallel-group>23-L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Top-level *EndpointTests.cs files are disjoint from Api/* subdirectory batches 070, 071, 072</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Triage and repair OR archive the LOW-tier top-level `*EndpointTests.cs` files (~13 files at
+    `tests/unit/Sprk.Bff.Api.Tests/*EndpointTests.cs` per design.md §3.3 — these are the 13
+    top-level endpoint tests distinct from the 75 Api/* subdirectory tests covered by batches
+    070-072).
+
+    Per FR-20 P23.L START GATE: this batch MUST NOT start until P23.H AND P23.M are each ≥50%
+    complete. Verify upstream progress before starting.
+
+    For each test file:
+    1. Determine: KEEP (repair) or ARCHIVE (rename per §6.5) — same triage as Api/* batches
+    2. If KEEP: repair assertions; apply `[Trait("status", "repaired")]`; verify Pass
+    3. If ARCHIVE: rename to `&lt;OldName&gt;.cs.archived-2026-MM-DD`; add `archive-ledger.md` entry
+
+    ESCALATION TRIGGER: If archive count in this batch exceeds 10 files → ESCALATE per NFR-04
+    BEFORE proceeding. File `escalations/archive-approval-T-073.md`.
+
+    Per project CLAUDE.md NFR-02 + design.md §4.1: this is repair, NOT rewrite. If ANY repaired
+    file's diff would exceed 50% line replacement, HALT and file
+    `projects/sdap-bff.api-test-suite-repair/escalations/rewrite-request-T-073-{FileName}.md`
+    per §4.8 escalation procedure. Do NOT proceed without owner approval.
+
+    NO production code changes (NFR-01). NO silent deletion (NFR-06). Per §6.2 every touched test
+    ends in `repaired`, `real-bug-pending-fix`, `flaky-quarantined`, or archived. `Failed` is
+    FORBIDDEN at close.
+  </prompt>
+
+  <role>Senior .NET test repair specialist with endpoint testing judgment.</role>
+
+  <goal>
+    ~13 top-level *EndpointTests.cs files triaged. Repaired files Pass. Archived files renamed +
+    ledgered. Zero Failed.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+    <file purpose="archive-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/archive-ledger.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation</constraint>
+    <constraint source="NFR-04">Archive count &gt;10 in this batch triggers owner escalation</constraint>
+    <constraint source="NFR-06">MUST NOT silently delete tests; archive via rename</constraint>
+    <constraint source="§6.2">Every touched test gets a §6.2 final end-state (or archived)</constraint>
+    <constraint source="FR-19">All LOW-tier tests must end in §6.2 final end-state</constraint>
+    <constraint source="FR-20">Start gate: P23.H and P23.M each ≥50% complete</constraint>
+    <constraint source="scope">Top-level *EndpointTests only; subdirectory Api/* files belong to batches 070-072</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.3 LOW-tier has 75 Api/* files + 13 top-level *EndpointTests = 88 total.
+      Batches 070-072 cover the 75 subdirectory files; this batch covers the 13 top-level
+      *EndpointTests at the test root.
+    </background>
+    <dependencies>
+      <dependency task="040" status="not-started">≥50% of P23.H required</dependency>
+      <dependency task="050" status="not-started">≥50% of P23.M required</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/*EndpointTests.cs (top-level, ~13 files)</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Verify FR-20 start gate: ≥50% of P23.H + ≥50% of P23.M complete. If not, HALT.</step>
+    <step order="2">List top-level `tests/unit/Sprk.Bff.Api.Tests/*EndpointTests.cs` (NOT subdirectory; ~13 files).</step>
+    <step order="3">From Phase 0 baseline TRX, identify failing tests within batch.</step>
+    <step order="4">For each file: REPAIR vs ARCHIVE judgment per §6.2 + design.md §3.3.</step>
+    <step order="5">Track archive count. If approaching 10 → file `escalations/archive-approval-T-073.md` per NFR-04 BEFORE proceeding past 10.</step>
+    <step order="6">For REPAIR: edit; if &gt;50% replacement → §4.8 escalate. Apply `[Trait("status", "repaired")]`.</step>
+    <step order="7">For ARCHIVE: rename to `*.cs.archived-2026-MM-DD`; add `archive-ledger.md` entry with justification.</step>
+    <step order="8">After each file: verify outcome via `dotnet test --filter`.</step>
+    <step order="9">Update `current-task.md` with disposition table.</step>
+    <step order="10">Verify `git status` shows NO production changes.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test</tool>
+    <tool name="git">status + mv (for archive rename)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">~13 top-level *EndpointTests.cs files (repaired or archived)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/archive-ledger.md (entries for archived files)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All top-level *EndpointTests Pass, Skip-with-reason, or are archived; zero Failed</criterion>
+    <criterion testable="true">FR-20 start gate verified</criterion>
+    <criterion testable="true">Per-file repair diff &lt;50% (NFR-02); archives renamed per §6.5</criterion>
+    <criterion testable="true">Archive count ≤10, OR `escalations/archive-approval-T-073.md` exists with owner approval (NFR-04)</criterion>
+    <criterion testable="true">Every touched test has §6.2 final end-state trait OR is archived</criterion>
+    <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">No overlap with subdirectory Api/* batches (070, 071, 072)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <scope-extension date="2026-05-31">
+      Wave 1 baseline reconciliation (task 008) — MATERIAL EXPANSION. Top-level cluster is 46
+      failures across 9 classes:
+        - Original glob (`*EndpointTests.cs`): UploadEndpoints (9), ListingEndpoints (6),
+          UserEndpoints (6) = 21 failures
+        - Top-level NON-*EndpointTests (file-named like FileOperationsTests, PipelineHealthTests,
+          HealthAndHeadersTests, EndpointGroupingTests, CorsAndAuthTests): 6+4+4+3+1 = 18 failures
+        - DEFAULT decision item 5: SpeAdmin.SearchItemsTests (7 failures) — extends scope to
+          include `tests/unit/Sprk.Bff.Api.Tests/SpeAdmin/*.cs` (LOW-tier closest fit; pending
+          owner override).
+      Extended relevant-files set:
+        - tests/unit/Sprk.Bff.Api.Tests/FileOperationsTests.cs
+        - tests/unit/Sprk.Bff.Api.Tests/PipelineHealthTests.cs
+        - tests/unit/Sprk.Bff.Api.Tests/HealthAndHeadersTests.cs
+        - tests/unit/Sprk.Bff.Api.Tests/EndpointGroupingTests.cs
+        - tests/unit/Sprk.Bff.Api.Tests/CorsAndAuthTests.cs
+        - tests/unit/Sprk.Bff.Api.Tests/SpeAdmin/*.cs
+
+      Several classes show 100% failure rate (Pipeline, HealthAndHeaders) — suggests endpoint
+      pipeline regression (auth header, CORS, startup). Investigate root cause BEFORE per-test
+      edits. If owner directs separate sub-task (075-low-tier-speadmin), replace this block.
+      See `notes/handoffs/phase23-scope-delta-2026-05-31.md`.
+    </scope-extension>
+    <scope-updated date="2026-05-31" source="task 026 re-reconciliation post-Wave-1.3">
+      Near-total scope reduction — Wave 1.3 task 018's factory edit (the very root-cause hypothesis
+      noted above — "endpoint pipeline regression... startup") **was** the right hypothesis.
+      The factory edit's `CosmosPersistence:*` + `AgentService:*` config keys cleared the
+      host-startup failures in all but 2 classes.
+
+      **Cleared by task 018** (originally absorbed by this task):
+        - UploadEndpointsTests: 9 → 0 (RESOLVED)
+        - ListingEndpointsTests: 6 → 0 (RESOLVED)
+        - UserEndpointsTests: 6 → 0 (RESOLVED)
+        - FileOperationsTests: 6 → 0 (RESOLVED)
+        - EndpointGroupingTests: 3 → 0 (RESOLVED)
+        - CorsAndAuthTests: 1 → 0 (RESOLVED)
+        - SpeAdmin.SearchItemsTests (extension item 5): 7 → 0 (RESOLVED)
+        - Subtotal cleared: 38
+
+      **Partially cleared** (residual non-startup failures):
+        - HealthAndHeadersTests: 4 → 1 (3 cleared by 018; 1 residual non-startup)
+        - PipelineHealthTests: 4 → 1 (3 cleared by 018; 1 residual non-startup)
+        - Subtotal partial: 8 → 2
+
+      **Refreshed in-scope failure counts**:
+        - HealthAndHeadersTests: 1
+        - PipelineHealthTests: 1
+        - **Total: 2 failures (was 46; −44 by task 018)**
+
+      **Wave plan revision**: this task is now near-trivial. Rigor recommendation drops from
+      FULL to STANDARD or even MINIMAL — 2 failures in 2 classes, both single-test residuals
+      after a known root-cause fix. Effort estimate revises from ~2-4h to <30 minutes.
+
+      Note: SpeAdmin extension is fully resolved; if owner originally planned a separate
+      `075-low-tier-speadmin.poml`, that task is also unnecessary (SearchItems was the only
+      failing SpeAdmin class).
+      See `notes/handoffs/phase23-scope-delta-post-018-2026-05-31.md`.
+    </scope-updated>
+  </notes>
+</task>

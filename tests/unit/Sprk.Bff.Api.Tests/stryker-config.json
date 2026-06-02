@@ -1,0 +1,27 @@
+{
+  "stryker-config": {
+    "project": "Sprk.Bff.Api.csproj",
+    "test-projects": [
+      "Sprk.Bff.Api.Tests.csproj"
+    ],
+    "mutate": [
+      "**/Services/Ai/Safety/CrossMatter/ConversationHistorySanitizer.cs"
+    ],
+    "reporters": [
+      "html",
+      "json",
+      "progress",
+      "cleartext"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 60,
+      "break": 0
+    },
+    "concurrency": 1,
+    "verbosity": "info",
+    "since": {
+      "enabled": false
+    }
+  }
+}

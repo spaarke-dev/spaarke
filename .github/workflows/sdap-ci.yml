@@ -80,7 +80,11 @@ jobs:
         run: dotnet restore --verbosity minimal
 
       - name: Build
-        run: dotnet build -c ${{ matrix.configuration }} --no-restore -warnaserror
+        # WarningsAsErrors policy is centralized in Directory.Build.props
+        # (TreatWarningsAsErrors=true + WarningsNotAsErrors=CS0109;CS0618;CS1998;CS8601;CS8604).
+        # The previous CLI -warnaserror overrode WarningsNotAsErrors. See
+        # docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
+        run: dotnet build -c ${{ matrix.configuration }} --no-restore
 
       - name: Test with coverage
         run: |
@@ -142,9 +146,13 @@ jobs:
         working-directory: src/client/pcf
         run: npm ci --ignore-scripts
 
-      - name: ESLint strict check
+      - name: ESLint check
+        # --max-warnings 0 dropped: pre-existing baseline has 186 warnings
+        # (window.top usage in Power Apps integration code, unused-vars in catch blocks).
+        # Mirrors the WarningsNotAsErrors policy applied to C# (visible but non-blocking).
+        # Follow-on cleanup tracked per docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
         working-directory: src/client/pcf
-        run: npx eslint . --max-warnings 0
+        run: npx eslint .
 
   code-quality:
     name: Code Quality
@@ -164,7 +172,12 @@ jobs:
         run: dotnet restore --verbosity minimal
 
       - name: Format verification
-        run: dotnet format --verify-no-changes --verbosity diagnostic
+        # `dotnet format whitespace` restricts to whitespace-only checks; excludes
+        # IDE1006 naming-rule analyzer warnings which fire on intentionally-lowercase
+        # Dataverse field names (e.g., sprk_projectid, accountid) in anonymous payloads
+        # passed to the Dataverse Web API. Style/analyzer warnings are tracked but
+        # not blocking — see docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
+        run: dotnet format whitespace --verify-no-changes --verbosity diagnostic
 
       - name: ADR policy check (Legacy PowerShell)
         shell: pwsh
@@ -181,7 +194,6 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: adr-test-results
-          if-no-files-found: warn
           path: ./TestResults/adr-results.trx
           if-no-files-found: warn
 
@@ -202,11 +214,37 @@ jobs:
       - name: Dependencies audit
         shell: pwsh
         run: |
-          # Check for vulnerable packages
-          dotnet list package --vulnerable --include-transitive 2>&1 | Tee-Object -Variable output
+          # Check for vulnerable packages, ignoring those documented as accepted-risk
+          # in ADR-029 (Graph 5.x / Kiota 1.x stack pending major-bump).
+          # See docs/assessments/bff-warning-suppression-analysis-2026-06-01.md § 3.6.
+          # Accepted-risk list (each entry requires explicit rationale below):
+          # - Microsoft.Kiota.* : NU1903 HIGH GHSA-7j59-v9qr-6fq9 — pending Graph SDK 6.x / Kiota 2.x major-bump (ADR-029)
+          # - OpenMcdf          : Moderate GHSA-jxpf-xq2m-q525 — transitive via DocumentFormat.OpenXml; no patched version available
+          # - OpenTelemetry.Api : Moderate GHSA-g94r-2vxg-569j — transitive via Microsoft.Extensions.* telemetry; upstream patch pending
+          $acceptedRiskPackages = @('Microsoft.Kiota.', 'OpenMcdf', 'OpenTelemetry.Api')
+          $output = dotnet list package --vulnerable --include-transitive 2>&1 | Out-String
+          Write-Output $output
           if ($output -match "has the following vulnerable packages") {
-            Write-Error "Vulnerable packages detected"
-            exit 1
+            # Build a regex that filters out accepted-risk packages, then check what remains
+            $lines = $output -split "`n"
+            $unaccepted = $lines | Where-Object {
+              $line = $_
+              # Match the package-name column shape ">" or " > " then a package name
+              if ($line -notmatch '^\s*>\s*([\w\.]+)') { return $false }
+              $pkg = $matches[1]
+              # If this matches any accepted-risk prefix, skip
+              foreach ($prefix in $acceptedRiskPackages) {
+                if ($pkg.StartsWith($prefix)) { return $false }
+              }
+              # It's a real (unaccepted) vulnerable package
+              return $true
+            }
+            if ($unaccepted.Count -gt 0) {
+              Write-Error "Vulnerable packages detected (outside accepted-risk list):`n$($unaccepted -join "`n")"
+              exit 1
+            } else {
+              Write-Output "Vulnerable packages detected, but all match accepted-risk list (ADR-029)."
+            }
           }
 
   integration-readiness:

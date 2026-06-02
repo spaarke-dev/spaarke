@@ -12,11 +12,7 @@ import * as React from 'react';
 import { Button, Text, tokens } from '@fluentui/react-components';
 import { CheckmarkCircleFilled } from '@fluentui/react-icons';
 
-import {
-  CreateRecordWizard,
-  type ICreateRecordWizardConfig,
-  type IFinishContext,
-} from '../CreateRecordWizard';
+import { CreateRecordWizard, type ICreateRecordWizardConfig, type IFinishContext } from '../CreateRecordWizard';
 
 import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
@@ -110,15 +106,14 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
     () => ({
       title: 'Create New To Do',
       entityLabel: 'to do',
-      filesStepSubtitle:
-        'Upload documents to associate with this to do, or click Next to skip.',
+      filesStepSubtitle: 'Upload documents to associate with this to do, or click Next to skip.',
       finishingLabel: 'Creating to do\u2026',
 
       infoStep: {
         id: 'create-record',
         label: 'To Do Details',
         canAdvance: () => formValid,
-        renderContent: (_wizardFiles) => (
+        renderContent: _wizardFiles => (
           <CreateTodoStep
             dataService={dataService}
             onValidChange={setFormValid}
@@ -132,9 +127,7 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
       searchOrganizations: handleSearchOrganizations,
       searchUsers: handleSearchUsers,
 
-      resolveSpeContainerId: resolveSpeContainerId
-        ? resolveSpeContainerId
-        : () => Promise.resolve(''),
+      resolveSpeContainerId: resolveSpeContainerId ? resolveSpeContainerId : () => Promise.resolve(''),
 
       buildEmailSubject: (entityName: string) => `New To Do: ${entityName}`,
       buildEmailBody: (fields: Record<string, string>) =>
@@ -193,22 +186,13 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
         const hasWarnings = warnings.length > 0;
 
         return {
-          icon: (
-            <CheckmarkCircleFilled
-              fontSize={64}
-              style={{ color: tokens.colorPaletteGreenForeground1 }}
-            />
-          ),
+          icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
           title: hasWarnings ? 'To Do created with warnings' : 'To Do created!',
           body: (
             <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-              <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>
-                &ldquo;{todoName}&rdquo;
-              </span>{' '}
-              has been added to your to do list
-              {hasWarnings
-                ? ', though some operations could not complete. See details below.'
-                : '.'}
+              <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>&ldquo;{todoName}&rdquo;</span> has
+              been added to your to do list
+              {hasWarnings ? ', though some operations could not complete. See details below.' : '.'}
             </Text>
           ),
           actions: (
@@ -220,29 +204,37 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
         };
       },
     }),
-    [formValid, formValues, dataService, authenticatedFetch, bffBaseUrl, handleSearchContacts, handleSearchOrganizations, handleSearchUsers, onClose, resolveSpeContainerId]
+    [
+      formValid,
+      formValues,
+      dataService,
+      authenticatedFetch,
+      bffBaseUrl,
+      handleSearchContacts,
+      handleSearchOrganizations,
+      handleSearchUsers,
+      onClose,
+      resolveSpeContainerId,
+    ]
   );
 
   // Adapt IDataService to the webApi shape that CreateRecordWizard expects
-  const webApiAdapter = React.useMemo(() => ({
-    createRecord: async (entityName: string, data: Record<string, unknown>) => {
-      const id = await dataService.createRecord(entityName, data);
-      return { id };
-    },
-    retrieveRecord: (entityName: string, id: string, options?: string) =>
-      dataService.retrieveRecord(entityName, id, options),
-    retrieveMultipleRecords: (entityName: string, options?: string, _maxPageSize?: number) =>
-      dataService.retrieveMultipleRecords(entityName, options),
-  }), [dataService]);
+  const webApiAdapter = React.useMemo(
+    () => ({
+      createRecord: async (entityName: string, data: Record<string, unknown>) => {
+        const id = await dataService.createRecord(entityName, data);
+        return { id };
+      },
+      retrieveRecord: (entityName: string, id: string, options?: string) =>
+        dataService.retrieveRecord(entityName, id, options),
+      retrieveMultipleRecords: (entityName: string, options?: string, _maxPageSize?: number) =>
+        dataService.retrieveMultipleRecords(entityName, options),
+    }),
+    [dataService]
+  );
 
   return (
-    <CreateRecordWizard
-      open={open}
-      onClose={onClose}
-      webApi={webApiAdapter}
-      config={config}
-      embedded={embedded}
-    />
+    <CreateRecordWizard open={open} onClose={onClose} webApi={webApiAdapter} config={config} embedded={embedded} />
   );
 };
 

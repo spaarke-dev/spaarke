@@ -410,20 +410,9 @@ export function setupCodePageThemeListener(onChange: CodePageThemeChangeHandler)
  * Compatible with both Xrm.WebApi and BFF API adapters (ADR-012).
  */
 export interface IThemeWebApi {
-  retrieveMultipleRecords(
-    entityType: string,
-    options: string,
-    maxPageSize?: number
-  ): Promise<{ entities: any[] }>;
-  createRecord(
-    entityType: string,
-    data: Record<string, any>
-  ): Promise<{ id: string }>;
-  updateRecord(
-    entityType: string,
-    id: string,
-    data: Record<string, any>
-  ): Promise<void>;
+  retrieveMultipleRecords(entityType: string, options: string, maxPageSize?: number): Promise<{ entities: any[] }>;
+  createRecord(entityType: string, data: Record<string, any>): Promise<{ id: string }>;
+  updateRecord(entityType: string, id: string, data: Record<string, any>): Promise<void>;
 }
 
 /**
@@ -439,10 +428,7 @@ export interface IThemeWebApi {
  * @param webApi - WebApi interface (Xrm.WebApi or adapter)
  * @param userId - Current user's systemuser GUID
  */
-export async function syncThemeFromDataverse(
-  webApi: IThemeWebApi,
-  userId: string
-): Promise<void> {
+export async function syncThemeFromDataverse(webApi: IThemeWebApi, userId: string): Promise<void> {
   try {
     const select = 'sprk_userpreferenceid,sprk_preferencevalue';
     const filter = `_sprk_user_value eq ${userId} and sprk_preferencetype eq ${PREFERENCE_TYPE_THEME}`;

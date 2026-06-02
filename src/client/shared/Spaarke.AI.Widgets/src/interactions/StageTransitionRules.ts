@@ -53,7 +53,7 @@
  * context value type remains unchanged. Consumers reading currentStage from
  * ShellStageContext receive one of these four strings.
  */
-export type PaneStage = "welcome" | "loading" | "active-chat" | "review";
+export type PaneStage = 'welcome' | 'loading' | 'active-chat' | 'review';
 
 // ---------------------------------------------------------------------------
 // SessionState — input to determineStage()
@@ -146,23 +146,23 @@ export function determineStage(state: SessionState): PaneStage {
 
   // Stage 1: no active session → always welcome regardless of other flags.
   if (!hasSession) {
-    return "welcome";
+    return 'welcome';
   }
 
   // Stage 4: two or more workspace tabs → multi-task view.
   // Checked before widget guard so that multi-tab always wins over active-chat.
   if (tabCount >= 2) {
-    return "review";
+    return 'review';
   }
 
   // Stage 3: at least one widget loaded, or entity context resolved.
   // Either condition means the user has a document / entity to work with.
   if (hasWidget || hasEntity) {
-    return "active-chat";
+    return 'active-chat';
   }
 
   // Stage 2: session exists (playbook chosen / message sent) but no content yet.
-  return "loading";
+  return 'loading';
 }
 
 // ---------------------------------------------------------------------------

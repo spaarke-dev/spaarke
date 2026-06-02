@@ -165,13 +165,7 @@ export interface PaneHeaderProps {
  * `<header>` element for accessibility — screen readers announce it as
  * a landmark region without needing an explicit `role`.
  */
-export const PaneHeader: React.FC<PaneHeaderProps> = ({
-  title,
-  icon,
-  rightSlot,
-  onCollapse,
-  expanded = true,
-}) => {
+export const PaneHeader: React.FC<PaneHeaderProps> = ({ title, icon, rightSlot, onCollapse, expanded = true }) => {
   const styles = useStyles();
 
   // ── Collapse-toggle wiring (Task 094) ──────────────────────────────────

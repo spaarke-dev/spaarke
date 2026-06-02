@@ -23,8 +23,8 @@
  * ADR-007: File uploads go through BFF API -> SpeFileStore facade.
  * ADR-012: Reuses shared FileUpload and Wizard components from @spaarke/ui-components.
  */
-import * as React from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import * as React from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   makeStyles,
   tokens,
@@ -34,32 +34,22 @@ import {
   Spinner,
   Badge,
   Button,
-} from "@fluentui/react-components";
-import {
-  CheckmarkCircleRegular,
-  DocumentRegular,
-  ArrowUploadRegular,
-} from "@fluentui/react-icons";
+} from '@fluentui/react-components';
+import { CheckmarkCircleRegular, DocumentRegular, ArrowUploadRegular } from '@fluentui/react-icons';
 
-import { WizardShell } from "@spaarke/ui-components/components/Wizard";
+import { WizardShell } from '@spaarke/ui-components/components/Wizard';
 import type {
   IWizardStepConfig,
   IWizardSuccessConfig,
-} from "@spaarke/ui-components/components/Wizard/wizardShellTypes";
-import {
-  FileUploadZone,
-  UploadedFileList,
-} from "@spaarke/ui-components/components/FileUpload";
-import type {
-  IUploadedFile,
-  IFileValidationError,
-} from "@spaarke/ui-components/components/FileUpload/fileUploadTypes";
-import { createBffUploadService } from "@spaarke/ui-components/utils/adapters/bffUploadServiceAdapter";
-import type { AuthenticatedFetch } from "@spaarke/ui-components/utils/adapters/bffDataServiceAdapter";
+} from '@spaarke/ui-components/components/Wizard/wizardShellTypes';
+import { FileUploadZone, UploadedFileList } from '@spaarke/ui-components/components/FileUpload';
+import type { IUploadedFile, IFileValidationError } from '@spaarke/ui-components/components/FileUpload/fileUploadTypes';
+import { createBffUploadService } from '@spaarke/ui-components/utils/adapters/bffUploadServiceAdapter';
+import type { AuthenticatedFetch } from '@spaarke/ui-components/utils/adapters/bffDataServiceAdapter';
 
-import { BFF_API_URL } from "../config";
-import { acquireBffToken } from "../auth/msal-auth";
-import { PageContainer, NavigationBar } from "../components";
+import { BFF_API_URL } from '../config';
+import { acquireBffToken } from '../auth/msal-auth';
+import { PageContainer, NavigationBar } from '../components';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -67,44 +57,44 @@ import { PageContainer, NavigationBar } from "../components";
 
 const useStyles = makeStyles({
   errorContainer: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     paddingTop: tokens.spacingVerticalL,
   },
   stepContent: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   validationErrors: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   uploadProgress: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
     paddingTop: tokens.spacingVerticalM,
   },
   uploadItem: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   uploadItemName: {
-    flex: "1 1 auto",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    flex: '1 1 auto',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   fileCount: {
     color: tokens.colorNeutralForeground3,
   },
   summarySection: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
@@ -148,8 +138,8 @@ interface UploadPageParams {
 
 function parseQueryParams(search: string): UploadPageParams | null {
   const params = new URLSearchParams(search);
-  const entityType = params.get("entityType");
-  const entityId = params.get("entityId");
+  const entityType = params.get('entityType');
+  const entityId = params.get('entityId');
 
   if (!entityType || !entityId) {
     return null;
@@ -158,7 +148,7 @@ function parseQueryParams(search: string): UploadPageParams | null {
   return {
     entityType,
     entityId,
-    containerId: params.get("containerId") ?? undefined,
+    containerId: params.get('containerId') ?? undefined,
   };
 }
 
@@ -193,16 +183,11 @@ export const DocumentUploadPage: React.FC = () => {
   const location = useLocation();
 
   // Parse query params from the hash route's search string
-  const pageParams = React.useMemo(
-    () => parseQueryParams(location.search),
-    [location.search]
-  );
+  const pageParams = React.useMemo(() => parseQueryParams(location.search), [location.search]);
 
   // ── File state ──────────────────────────────────────────────────────────
   const [selectedFiles, setSelectedFiles] = React.useState<IUploadedFile[]>([]);
-  const [validationErrors, setValidationErrors] = React.useState<
-    IFileValidationError[]
-  >([]);
+  const [validationErrors, setValidationErrors] = React.useState<IFileValidationError[]>([]);
 
   // ── BFF services (stable refs) ──────────────────────────────────────────
   const authenticatedFetch = React.useMemo(() => createAuthenticatedFetch(), []);
@@ -213,24 +198,18 @@ export const DocumentUploadPage: React.FC = () => {
   );
 
   // ── File handlers ───────────────────────────────────────────────────────
-  const handleFilesAccepted = React.useCallback(
-    (files: IUploadedFile[]) => {
-      setSelectedFiles((prev) => [...prev, ...files]);
-      // Clear validation errors when new files are accepted
-      setValidationErrors([]);
-    },
-    []
-  );
+  const handleFilesAccepted = React.useCallback((files: IUploadedFile[]) => {
+    setSelectedFiles(prev => [...prev, ...files]);
+    // Clear validation errors when new files are accepted
+    setValidationErrors([]);
+  }, []);
 
-  const handleValidationErrors = React.useCallback(
-    (errors: IFileValidationError[]) => {
-      setValidationErrors(errors);
-    },
-    []
-  );
+  const handleValidationErrors = React.useCallback((errors: IFileValidationError[]) => {
+    setValidationErrors(errors);
+  }, []);
 
   const handleRemoveFile = React.useCallback((fileId: string) => {
-    setSelectedFiles((prev) => prev.filter((f) => f.id !== fileId));
+    setSelectedFiles(prev => prev.filter(f => f.id !== fileId));
   }, []);
 
   // ── Navigation ──────────────────────────────────────────────────────────
@@ -239,14 +218,12 @@ export const DocumentUploadPage: React.FC = () => {
     if (pageParams?.entityId) {
       navigate(`/project/${pageParams.entityId}`);
     } else {
-      navigate("/");
+      navigate('/');
     }
   }, [navigate, pageParams]);
 
   // ── Upload (finish handler) ─────────────────────────────────────────────
-  const handleFinish = React.useCallback(async (): Promise<
-    IWizardSuccessConfig | void
-  > => {
+  const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig | void> => {
     if (!pageParams || selectedFiles.length === 0) {
       return;
     }
@@ -263,29 +240,26 @@ export const DocumentUploadPage: React.FC = () => {
         });
         results.push({ name: uploadedFile.name, success: true });
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Upload failed";
+        const message = err instanceof Error ? err.message : 'Upload failed';
         results.push({ name: uploadedFile.name, success: false, error: message });
       }
     }
 
-    const successCount = results.filter((r) => r.success).length;
-    const failedCount = results.filter((r) => !r.success).length;
-    const warnings = results
-      .filter((r) => !r.success)
-      .map((r) => `${r.name}: ${r.error}`);
+    const successCount = results.filter(r => r.success).length;
+    const failedCount = results.filter(r => !r.success).length;
+    const warnings = results.filter(r => !r.success).map(r => `${r.name}: ${r.error}`);
 
     return {
-      icon: <CheckmarkCircleRegular style={{ fontSize: "48px", color: tokens.colorPaletteGreenForeground1 }} />,
+      icon: <CheckmarkCircleRegular style={{ fontSize: '48px', color: tokens.colorPaletteGreenForeground1 }} />,
       title:
         failedCount === 0
-          ? `${successCount} file${successCount !== 1 ? "s" : ""} uploaded successfully`
+          ? `${successCount} file${successCount !== 1 ? 's' : ''} uploaded successfully`
           : `${successCount} of ${results.length} files uploaded`,
       body: (
         <Text size={300}>
           {failedCount === 0
-            ? "All files have been uploaded to the project document library."
-            : `${failedCount} file${failedCount !== 1 ? "s" : ""} failed to upload. See warnings below.`}
+            ? 'All files have been uploaded to the project document library.'
+            : `${failedCount} file${failedCount !== 1 ? 's' : ''} failed to upload. See warnings below.`}
         </Text>
       ),
       actions: (
@@ -301,18 +275,12 @@ export const DocumentUploadPage: React.FC = () => {
   if (!pageParams) {
     return (
       <PageContainer>
-        <NavigationBar
-          items={[
-            { label: "My Projects", href: "#/" },
-            { label: "Upload Documents" },
-          ]}
-        />
+        <NavigationBar items={[{ label: 'My Projects', href: '#/' }, { label: 'Upload Documents' }]} />
         <div className={styles.errorContainer}>
           <MessageBar intent="error">
             <MessageBarBody>
-              Missing required parameters. This page requires entityType and
-              entityId query parameters. Please navigate from the project
-              documents tab.
+              Missing required parameters. This page requires entityType and entityId query parameters. Please navigate
+              from the project documents tab.
             </MessageBarBody>
           </MessageBar>
         </div>
@@ -326,22 +294,18 @@ export const DocumentUploadPage: React.FC = () => {
   // ── Wizard step configs ─────────────────────────────────────────────────
   const stepConfigs: IWizardStepConfig[] = [
     {
-      id: "select-files",
-      label: "Select Files",
+      id: 'select-files',
+      label: 'Select Files',
       renderContent: () => (
         <div className={styles.stepContent}>
           <Text size={400} weight="semibold">
             Select files to upload
           </Text>
           <Text size={300}>
-            Drag and drop files below, or click to browse. Supported formats:
-            PDF, DOCX, XLSX (max 10 MB each).
+            Drag and drop files below, or click to browse. Supported formats: PDF, DOCX, XLSX (max 10 MB each).
           </Text>
 
-          <FileUploadZone
-            onFilesAccepted={handleFilesAccepted}
-            onValidationErrors={handleValidationErrors}
-          />
+          <FileUploadZone onFilesAccepted={handleFilesAccepted} onValidationErrors={handleValidationErrors} />
 
           {/* Validation error messages */}
           {validationErrors.length > 0 && (
@@ -361,13 +325,9 @@ export const DocumentUploadPage: React.FC = () => {
             <>
               <Text size={200} className={styles.fileCount}>
                 {selectedFiles.length} file
-                {selectedFiles.length !== 1 ? "s" : ""} selected (
-                {formatBytes(totalSize)} total)
+                {selectedFiles.length !== 1 ? 's' : ''} selected ({formatBytes(totalSize)} total)
               </Text>
-              <UploadedFileList
-                files={selectedFiles}
-                onRemove={handleRemoveFile}
-              />
+              <UploadedFileList files={selectedFiles} onRemove={handleRemoveFile} />
             </>
           )}
         </div>
@@ -375,16 +335,15 @@ export const DocumentUploadPage: React.FC = () => {
       canAdvance: () => selectedFiles.length > 0,
     },
     {
-      id: "review-upload",
-      label: "Review & Upload",
+      id: 'review-upload',
+      label: 'Review & Upload',
       renderContent: () => (
         <div className={styles.stepContent}>
           <Text size={400} weight="semibold">
             Review and confirm upload
           </Text>
           <Text size={300}>
-            The following files will be uploaded to the project document library.
-            Click Finish to start the upload.
+            The following files will be uploaded to the project document library. Click Finish to start the upload.
           </Text>
 
           <div className={styles.summarySection}>
@@ -397,17 +356,10 @@ export const DocumentUploadPage: React.FC = () => {
             <Text size={200}>
               Files: {selectedFiles.length} ({formatBytes(totalSize)} total)
             </Text>
-            {pageParams.containerId && (
-              <Text size={200}>
-                Container: {pageParams.containerId.substring(0, 8)}...
-              </Text>
-            )}
+            {pageParams.containerId && <Text size={200}>Container: {pageParams.containerId.substring(0, 8)}...</Text>}
           </div>
 
-          <UploadedFileList
-            files={selectedFiles}
-            onRemove={handleRemoveFile}
-          />
+          <UploadedFileList files={selectedFiles} onRemove={handleRemoveFile} />
         </div>
       ),
       canAdvance: () => selectedFiles.length > 0,
@@ -419,11 +371,9 @@ export const DocumentUploadPage: React.FC = () => {
     <PageContainer>
       <NavigationBar
         items={[
-          { label: "My Projects", href: "#/" },
-          ...(pageParams.entityId
-            ? [{ label: "Project", href: `#/project/${pageParams.entityId}` }]
-            : []),
-          { label: "Upload Documents" },
+          { label: 'My Projects', href: '#/' },
+          ...(pageParams.entityId ? [{ label: 'Project', href: `#/project/${pageParams.entityId}` }] : []),
+          { label: 'Upload Documents' },
         ]}
       />
 

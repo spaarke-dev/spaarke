@@ -1,19 +1,19 @@
-import * as React from "react";
-import { MessageBar, MessageBarTitle, MessageBarBody, Button, makeStyles, tokens } from "@fluentui/react-components";
+import * as React from 'react';
+import { MessageBar, MessageBarTitle, MessageBarBody, Button, makeStyles, tokens } from '@fluentui/react-components';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     padding: tokens.spacingHorizontalXL,
     gap: tokens.spacingVerticalL,
   },
   messageBar: {
-    maxWidth: "600px",
-    width: "100%",
+    maxWidth: '600px',
+    width: '100%',
   },
 });
 
@@ -45,7 +45,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   override componentDidCatch(error: Error, info: React.ErrorInfo): void {
-    console.error("[SecureProjectWorkspace] Uncaught error:", error, info);
+    console.error('[SecureProjectWorkspace] Uncaught error:', error, info);
   }
 
   private handleReset = (): void => {
@@ -82,7 +82,7 @@ const ErrorFallback: React.FC<ErrorFallbackProps> = ({ error, onReset }) => {
           <MessageBarTitle>Something went wrong</MessageBarTitle>
           {error?.message
             ? `An unexpected error occurred: ${error.message}`
-            : "An unexpected error occurred. Please try refreshing the page."}
+            : 'An unexpected error occurred. Please try refreshing the page.'}
         </MessageBarBody>
       </MessageBar>
       <Button appearance="primary" onClick={onReset}>

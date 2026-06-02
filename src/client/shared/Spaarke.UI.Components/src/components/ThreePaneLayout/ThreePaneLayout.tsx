@@ -23,11 +23,7 @@
 
 import * as React from 'react';
 import { Button, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import {
-  ChevronLeft16Regular,
-  ChevronRight16Regular,
-  EmojiSmileSlight24Regular,
-} from '@fluentui/react-icons';
+import { ChevronLeft16Regular, ChevronRight16Regular, EmojiSmileSlight24Regular } from '@fluentui/react-icons';
 import { PanelSplitter } from '../PanelSplitter/PanelSplitter';
 import { ThreePaneLayoutProps } from './ThreePaneLayout.types';
 import { useThreePaneLayout } from './useThreePaneLayout';
@@ -380,15 +376,13 @@ export function ThreePaneLayout({
   // Splitters between two collapsed panes are already hidden (task 094); when
   // an expanded side pane is the sole expanded surface the adjacent splitter
   // also hides (no resize partner), so its `flex: 1` doesn't fight a splitter.
-  const expandedCount =
-    (isLeftVisible ? 1 : 0) + (isCenterVisible ? 1 : 0) + (isRightVisible ? 1 : 0);
+  const expandedCount = (isLeftVisible ? 1 : 0) + (isCenterVisible ? 1 : 0) + (isRightVisible ? 1 : 0);
   const leftIsSoleExpanded = isLeftVisible && expandedCount === 1;
   const rightIsSoleExpanded = isRightVisible && expandedCount === 1;
   // Center-collapsed-but-both-sides-expanded edge case: give right the flex
   // so the otherwise-empty space at the right edge is filled by the Context
   // pane (the canonical "primary content" surface in SpaarkeAi's three-pane).
-  const rightFillsForCollapsedCenter =
-    isLeftVisible && !isCenterVisible && isRightVisible;
+  const rightFillsForCollapsedCenter = isLeftVisible && !isCenterVisible && isRightVisible;
 
   // (Task 119) Degenerate "all 3 panes collapsed" state — operator request
   // 2026-05-22: instead of leaving a barren empty area to the right of the
@@ -434,11 +428,7 @@ export function ThreePaneLayout({
       {isLeftVisible ? (
         <div
           className={mergeClasses(styles.leftPane, !isDragging && styles.panelAnimated)}
-          style={
-            leftIsSoleExpanded
-              ? { flex: '1 1 auto', width: 'auto' }
-              : { width: `${leftWidthPx}px` }
-          }
+          style={leftIsSoleExpanded ? { flex: '1 1 auto', width: 'auto' } : { width: `${leftWidthPx}px` }}
         >
           {leftPane}
         </div>
@@ -587,21 +577,10 @@ export function ThreePaneLayout({
           The primary Button is `autoFocus` so keyboard users can press Enter
           to expand immediately when the empty state appears. */}
       {allCollapsed && (
-        <div
-          className={styles.allCollapsedOverlay}
-          role="region"
-          aria-label="All panes are collapsed"
-        >
-          <EmojiSmileSlight24Regular
-            className={styles.allCollapsedSmiley}
-            aria-hidden="true"
-          />
+        <div className={styles.allCollapsedOverlay} role="region" aria-label="All panes are collapsed">
+          <EmojiSmileSlight24Regular className={styles.allCollapsedSmiley} aria-hidden="true" />
           <Text className={styles.allCollapsedText}>Welcome back</Text>
-          <Button
-            appearance="primary"
-            autoFocus
-            onClick={handleOpenFromAllCollapsed}
-          >
+          <Button appearance="primary" autoFocus onClick={handleOpenFromAllCollapsed}>
             Open
           </Button>
         </div>

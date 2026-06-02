@@ -1,0 +1,133 @@
+<task id="039" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P3 — Phase 3 exit validation (combined unit + integration; cumulative ledger state check; Phase 4 readiness)</title>
+    <phase>Phase 3: LOW Severity + Integration Stability</phase>
+    <status>completed-2026-06-01</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>038</dependencies>
+    <blocks>none (Phase 3 closure)</blocks>
+    <tags>phase-3, validation, phase-exit</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Validation summary task; no code change. Per task-execute rigor decision tree: validation / inventory / docs = STANDARD; Step 9.5 quality gates skipped.</rigor-reason>
+    <parallel-group>P3-W4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase-exit gate. Single-agent summary task that depends on task 038's triple-run TRX artifacts.</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Phase 3 exit gate. Aggregate evidence from Phase 3 work and produce a single exit-validation artifact that:
+
+    1. **Cumulative ledger state check**: confirm all 20 real-bug-ledger entries (5 HIGH + 7 MED + 8 LOW) are in `repaired` / `transferred-to-sibling` / `archived-as-dead-target` state. Zero entries in `open` / `assigned-to-r2` / `in-progress`. This is FR-01 acceptance for Phases 1-3.
+    2. **Phase 3 unit-suite confirmation**: re-run `dotnet test tests/unit/Sprk.Bff.Api.Tests/ -c Release --logger trx` ONCE (Phase 3 closure point; Phase 5 will do the final triple-run). Confirm `Failed: 0`.
+    3. **Phase 3 integration-suite confirmation**: cross-reference task 038's 3 TRX artifacts; confirm all 3 show `Failed: 0`; cite flake count + disposition.
+    4. **Per-task closure verification**: for each of tasks 030-037, confirm commit message cites ledger entry ID + resolution mode (NFR-04); confirm ledger row updated.
+    5. **Phase 4 readiness**: produce a 1-page summary of Phase 4 entry conditions (5 parallel tracks; their inputs; external dependencies — particularly `github-actions-rationalization-r1` status for Track D Coverlet).
+
+    NO production code changes. NO test changes. Validation aggregation + summary doc.
+
+    Hard dependency: task 038 (Spe.Integration.Tests triple-run) complete with all 3 runs `Failed: 0`.
+  </prompt>
+
+  <role>Phase 3 exit validator producing the closure artifact and Phase 4 readiness assessment.</role>
+
+  <goal>
+    `projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-exit-{date}.md` exists with:
+    - Ledger summary: 20 entries → status counts (all should be closed)
+    - Unit-suite single-run TRX summary (today) showing `Failed: 0`
+    - Integration-suite triple-run cross-reference (task 038) showing 3 × `Failed: 0`
+    - Per-task (030-037) commit-message audit confirming ledger ID + resolution mode in each
+    - Phase 4 readiness summary (5 tracks; dependencies; suggested wave structure)
+    - Phase 3 close declaration (date + signature)
+
+    `projects/sdap.bff.api-test-suite-repair-r2/current-task.md` updated; Phase 3 closed.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="r1-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file purpose="phase-3-triple-run">projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-integration-triple-run-2026-MM-DD.md</file>
+    <file purpose="r1-task-084-pattern">projects/sdap-bff.api-test-suite-repair/tasks/084-full-suite-triple-run.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-01">All 20 ledger entries closed by Phase 3 exit (HIGH from Phase 1, MED from Phase 2, LOW from Phase 3) — verify here</constraint>
+    <constraint source="FR-04">All 8 LOW severity entries closed (this phase)</constraint>
+    <constraint source="FR-10">Spe.Integration.Tests triple-run validation complete (cross-reference task 038)</constraint>
+    <constraint source="NFR-04">Audit each Phase 3 closure commit cites ledger entry ID + resolution mode</constraint>
+    <constraint source="NFR-05">Triple-run validation completed before phase exit (cross-reference task 038)</constraint>
+    <constraint source="NFR-06">Phase produces a delta artifact in `baseline/` — this task creates the Phase 3 anchor</constraint>
+    <constraint source="NFR-11">No test ends in `Failed` state at phase exit</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/tasks/084-full-suite-triple-run.poml</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 3 is the close-out of the production-fix arc (Phases 1-3). After this gate, the project moves into Phase 4 (5 parallel quality-lift tracks: PCF audit / Stryker pilot / TestClock PoC / Coverlet baseline / anti-drift report) per spec.md FR-11..FR-14 and design.md §5.5.
+
+      This exit gate is the LAST checkpoint where a Phase 1-3 regression can surface before Phase 4 begins. Any deterministic failure here triggers a Phase 3 reopen — Phase 4 cannot start with open production-fix gaps.
+
+      Note: the final 6-TRX combined triple-run validation happens at Phase 5 close per FR-15. This Phase 3 exit is intentionally lighter (1 unit run today + cross-reference task 038's 3 integration runs) since Phase 4 is non-`src/`-modifying for tracks A, B, E and only modestly modifies for tracks C and D.
+    </background>
+    <dependencies>
+      <dependency task="038" status="must-be-complete">Spe.Integration.Tests triple-run produced 3 TRX with `Failed: 0`</dependency>
+      <dependency task="030-037" status="must-be-complete">All 8 LOW severity production fixes complete with ledger entries → `repaired`</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-exit-2026-MM-DD.md</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-unit-confirmation-2026-MM-DD.trx</file>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/current-task.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Resolve today's date (YYYY-MM-DD).</step>
+    <step order="2">Ledger audit: load `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md`; for each of the 20 entries (5 HIGH + 7 MED + 8 LOW from the catalog in design.md §2.2), record current status. EXPECT: zero entries in `open`/`assigned-to-r2`/`in-progress`. Any entry not closed is a HALT.</step>
+    <step order="3">Unit-suite confirmation run: `dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Release --logger "trx;LogFileName=phase3-unit-confirmation-{date}.trx" --results-directory projects/sdap.bff.api-test-suite-repair-r2/baseline/`. Confirm `Failed: 0`.</step>
+    <step order="4">Integration-suite cross-reference: read task 038's summary doc (`baseline/phase3-integration-triple-run-{date}.md`); confirm all 3 runs show `Failed: 0`; capture flake count + disposition for this exit-gate doc.</step>
+    <step order="5">Per-task NFR-04 audit: for each of tasks 030, 031, 032, 033, 034, 035, 036, 037, find the commit via `git log --grep="RB-T..."`. Confirm message contains the ledger entry ID + resolution mode word (`repaired` / `transferred-to-sibling` / `archived-as-dead-target`). Record commit SHA + message excerpt for each.</step>
+    <step order="6">Phase 4 readiness: list the 5 parallel tracks (A: PCF audit, B: Stryker pilot, C: TestClock PoC, D: Coverlet baseline, E: anti-drift report). For each, list inputs needed + external dependencies. Flag Track D as gated on `github-actions-rationalization-r1` Phase 1 (per plan.md §5).</step>
+    <step order="7">Write `projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-exit-{date}.md` with sections: (a) Ledger State; (b) Unit-Suite Confirmation; (c) Integration-Suite Triple-Run; (d) Per-Task Closure Audit; (e) Phase 4 Readiness; (f) Phase 3 Close Declaration.</step>
+    <step order="8">Verify `git status` shows only new files in `baseline/` — no `src/`, no `tests/`, no other modifications.</step>
+    <step order="9">Update `projects/sdap.bff.api-test-suite-repair-r2/current-task.md` with completion + cite exit doc path + declare Phase 3 closed + next task = first Phase 4 task per `TASK-INDEX.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Ledger file; task 038 summary doc; git log</tool>
+    <tool name="dotnet">test (TRX logger) — unit suite single run</tool>
+    <tool name="Bash">`git log --grep`, `git status`</tool>
+    <tool name="Write">phase3-exit summary markdown</tool>
+  </tools>
+
+  <outputs>
+    <output type="baseline">projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-exit-2026-MM-DD.md</output>
+    <output type="baseline">projects/sdap.bff.api-test-suite-repair-r2/baseline/phase3-unit-confirmation-2026-MM-DD.trx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`phase3-exit-{date}.md` exists with all 6 required sections</criterion>
+    <criterion testable="true">All 20 real-bug-ledger entries are in closed state (`repaired` / `transferred-to-sibling` / `archived-as-dead-target`); zero in `open`/`assigned-to-r2`/`in-progress`</criterion>
+    <criterion testable="true">Unit-suite confirmation TRX shows `Failed: 0`</criterion>
+    <criterion testable="true">Integration-suite triple-run cross-reference confirms 3 × `Failed: 0` with flake count ≤2</criterion>
+    <criterion testable="true">All 8 Phase 3 closure commits (030-037) cite their RB entry ID + resolution mode per NFR-04 (verified via `git log --grep`)</criterion>
+    <criterion testable="true">Phase 4 readiness section lists 5 tracks with inputs + external dependencies (Track D Coverlet gating flagged)</criterion>
+    <criterion testable="true">`git status` shows only new files in `baseline/`; no `src/` or `tests/` modifications</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Invoke `task-execute` skill with this POML. STANDARD rigor — no Step 9.5 quality gates. Phase-exit aggregation only.
+  </execution>
+</task>
