@@ -3,7 +3,7 @@
   <metadata>
     <title>DateRangeFilterChip + TextFilterChip + BoolFilterChip (3 primitives bundled)</title>
     <phase>1: Phase A — Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>003</dependencies>
     <blocks>009</blocks>
@@ -115,6 +115,11 @@
 
   <notes>
     Bundling 3 simpler chips into one task because (a) they share the same Popover pattern, (b) they're each small (50–80 lines), and (c) they all depend only on task 003. Parallels tasks 004, 005, 006, 008 (Wave A2). The unit test for `localDateToUtcBounds` is the only non-trivial test in this task — the rest are visual/Storybook coverage.
+
+    **Completion (2026-06-01)**: All 3 chips authored, unit test passes (4/4), build green, zero raw hex, zero React-18-only APIs. Deviations documented in `notes/drafts/007-deviations.md`:
+    1. Used HTML5 `<Input type="date">` instead of Fluent v9 `<Calendar>` (Calendar lives in `@fluentui/react-calendar-compat` which is not a peerDep — adding it was out of scope).
+    2. `localDateToUtcBounds` adapted to take `(Date, Date)` instead of the GridSection.tsx string-based signature (Date inputs are what date pickers natively emit); per-bound math is verbatim.
+    3. Matched LookupMultiFilterChip's canonical NFR-03 pattern: nested `<FluentProvider applyStylesToPortals>` with NO explicit `theme` prop (theme propagates via React context). Earlier task instructions referenced an inherited-theme prop that conflicts with the actual `useFluent()` Fluent v9 API.
   </notes>
 
   <execution>

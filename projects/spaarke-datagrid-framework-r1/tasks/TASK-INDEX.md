@@ -15,11 +15,11 @@
 | 001 | Foundation contracts: IDataverseClient + DataGridConfiguration + tokens | FULL | ✅ | none | — | 002,003,004,005,006,007,008,009 |
 | 002 | XrmDataverseClient implementation | FULL | ✅ | 001 | A1 | 005,009 |
 | 003 | DataGrid core (scaffold + lazy infinite-scroll + useDataGridContext) | FULL | ✅ | 001 | A1 | 004,005,006,007,008,009 |
-| 004 | Lift ColumnHeaderMenu + ColumnFilterHeader with applyStylesToPortals fix | FULL | 🔲 | 003 | A2 | 009 |
-| 005 | LookupMultiFilterChip (async Combobox + debounce + cache) | FULL | 🔲 | 002,003 | A2 | 009 |
-| 006 | OptionSetMultiFilterChip (metadata-driven + status colors) | FULL | 🔲 | 003 | A2 | 009 |
-| 007 | DateRange + Text + Bool filter chips (3 bundled) | FULL | 🔲 | 003 | A2 | 009 |
-| 008 | CommandBar (6 actions + custom registry + CSV export) | FULL | 🔲 | 003 | A2 | 009 |
+| 004 | Lift ColumnHeaderMenu + ColumnFilterHeader with applyStylesToPortals fix | FULL | ✅ | 003 | A2 | 009 |
+| 005 | LookupMultiFilterChip (async Combobox + debounce + cache) | FULL | ✅ | 002,003 | A2 | 009 |
+| 006 | OptionSetMultiFilterChip (metadata-driven + status colors) | FULL | ✅ | 003 | A2 | 009 |
+| 007 | DateRange + Text + Bool filter chips (3 bundled) | FULL | ✅ | 003 | A2 | 009 |
+| 008 | CommandBar (6 actions + custom registry + CSV export) | FULL | ✅ | 003 | A2 | 009 |
 | 009 | Storybook coverage + MDA pixel-parity gate + axe a11y | STANDARD | 🔲 | 002,003,004,005,006,007,008 | — | 030,033 |
 
 ### Phase B — BFF Passthrough (8 tasks)

@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (Wave A1 just completed; ready for Wave A2 dispatch) |
+| **Task** | none (Wave A2 just completed; only task 009 remains in Phase A) |
 | **Step** | — |
 | **Status** | none |
-| **Next Action** | Dispatch Wave A2 — tasks 004 + 005 + 006 + 007 + 008 in parallel (5 sub-agents). All depend on task 003 ✅; touch separate primitive files (ColumnHeaderMenu, LookupChip, OptionSetChip, Date/Text/Bool chips, CommandBar). Hard cap: 6 agents per wave (we'll use 5). |
+| **Next Action** | Task 009 (Phase A acceptance gate: Storybook coverage + axe + MDA visual diff). Serial close of Phase A — depends on all of 002-008 (✅). After 009: Phase A complete, unlocks Phase D + downstream consumer phases. |
 
 ### Files Modified This Session
 

@@ -1,20 +1,27 @@
 /**
  * `@spaarke/ui-components/components/DataGrid` — configuration-driven DataGrid framework.
  *
- * Phase A surface exports:
- * - `dataGridTokens` + `DataGridTokens` type — MDA Power Apps grid UI parity tokens (task 001)
- * - `DataGrid` component — the core `<DataGrid configId={...} />` (task 003)
- * - `useLazyLoad` hook — FetchXML paging cookie chain (task 003)
- * - `resolveConfig` + types — pure three-tier config resolution (task 003)
+ * Phase A complete (tasks 001-008):
+ * - Foundation contracts: tokens, DataGrid component, lazy-load, config resolution
+ * - Column header primitives: ColumnHeaderMenu + ColumnFilterHeader (portal-fixed)
+ * - 5 filter chip primitives: Lookup, OptionSet, DateRange, Text, Bool
+ * - CommandBar primitive with 6 default actions + custom registry + CSV export
  *
- * Filter chips, command bar, and column header menu primitives land in tasks 004–008.
+ * Phase A acceptance gate (task 009) verifies Storybook coverage + MDA visual parity.
+ *
+ * **Note on internal type names**: `ColumnFilterType` and `ColumnFilterOption` exist
+ * in both `columnHeader/ColumnFilterHeader.tsx` and `columnHeader/ColumnHeaderMenu.tsx`.
+ * Top-level barrel does NOT re-export them to avoid duplicate-identifier errors.
+ * Consumers needing those types should import directly from the source files.
  *
  * @see projects/spaarke-datagrid-framework-r1
  */
 
+// ─── Foundation (task 001) ───
 export { dataGridTokens } from './tokens';
 export type { DataGridTokens } from './tokens';
 
+// ─── Core DataGrid (task 003) ───
 export { DataGrid, default as DataGridDefault } from './DataGrid';
 export type { DataGridProps, DataGridHostContext } from './DataGrid';
 
@@ -27,3 +34,74 @@ export type {
   ResolvedConfig,
   ResolvedColumn,
 } from './configResolution';
+
+// ─── Column header primitives (task 004) ───
+export { ColumnHeaderMenu } from './columnHeader/ColumnHeaderMenu';
+export type {
+  ColumnHeaderMenuProps,
+  SortDirection,
+} from './columnHeader/ColumnHeaderMenu';
+export { ColumnFilterHeader } from './columnHeader/ColumnFilterHeader';
+export type { ColumnFilterHeaderProps } from './columnHeader/ColumnFilterHeader';
+// (ColumnFilterType + ColumnFilterOption are internal; import from source if needed.)
+
+// ─── Filter chip primitives (tasks 005-007) ───
+export { LookupMultiFilterChip, useDebouncedValue } from './chips/LookupMultiFilterChip';
+export type {
+  LookupMultiFilterChipProps,
+  LookupRecord,
+} from './chips/LookupMultiFilterChip';
+
+export { OptionSetMultiFilterChip } from './chips/OptionSetMultiFilterChip';
+export type { OptionSetMultiFilterChipProps } from './chips/OptionSetMultiFilterChip';
+
+export { DateRangeFilterChip, localDateToUtcBounds } from './chips/DateRangeFilterChip';
+export type {
+  DateRangeFilterChipProps,
+  UtcDateBounds,
+} from './chips/DateRangeFilterChip';
+
+export { TextFilterChip } from './chips/TextFilterChip';
+export type { TextFilterChipProps } from './chips/TextFilterChip';
+
+export { BoolFilterChip } from './chips/BoolFilterChip';
+export type { BoolFilterChipProps, BoolFilterValue } from './chips/BoolFilterChip';
+
+// ─── Command bar primitive (task 008) ───
+// Renamed at barrel to `DataGridCommandBar` to avoid collision with the unrelated
+// `CommandBar` exported by components/PageChrome/. The internal name in
+// commandBar/CommandBar.tsx stays `CommandBar` — deep imports still work.
+export { CommandBar as DataGridCommandBar } from './commandBar/CommandBar';
+export type { CommandBarProps as DataGridCommandBarProps } from './commandBar/CommandBar';
+
+export {
+  defaultCreateFormHandler,
+  defaultDeleteSelectedHandler,
+  defaultRefreshHandler,
+  defaultExportExcelHandler,
+  defaultEditColumnsHandler,
+  defaultEditFiltersHandler,
+  DEFAULT_ACTION_META,
+  DEFAULT_ACTION_HANDLERS,
+} from './commandBar/defaults';
+export type {
+  DefaultHandler,
+  DefaultHandlerContext,
+  DefaultActionMeta,
+} from './commandBar/defaults';
+
+export {
+  exportCsv,
+  escapeCsvField,
+  csvFilename,
+  formatYyyymmdd,
+  UTF8_BOM,
+} from './commandBar/csvExport';
+
+export {
+  registerCommandHandler,
+  getCommandHandler,
+  unregisterCommandHandler,
+  clearCommandHandlers,
+  listCommandHandlers,
+} from './commandBar/registry';
