@@ -354,6 +354,45 @@ The 6 action rows still serve as:
 - Documentation of executor contracts (the JPS prompts)
 - Future-proofing if `sprk_actiontype` field is added to the entity in a later schema migration
 
+## ✅ sprk_actiontypeid lookup FK set (2026-06-02 addendum per owner direction)
+
+After D-01 Q1 empirical confirmation showed `sprk_actiontype` (int) absent on the entity, owner directed Path (a): create lookup rows in `sprk_analysisactiontype` + set `sprk_actiontypeid` FK on the 6 INS-* rows for proper categorization.
+
+### 6 new sprk_analysisactiontype lookup rows created
+
+| Lookup name | sprk_analysisactiontypeid |
+|---|---|
+| `70 - Grounding Verify` | `a1a3a6e6-8f5e-f111-a825-70a8a59455f4` |
+| `80 - Live Fact Resolver` | `a2a3a6e6-8f5e-f111-a825-70a8a59455f4` |
+| `90 - Index Retrieve` | `a5a3a6e6-8f5e-f111-a825-70a8a59455f4` |
+| `100 - Evidence Sufficiency` | `a9a3a6e6-8f5e-f111-a825-70a8a59455f4` |
+| `110 - Decline to Find` | `8d0b9fec-8f5e-f111-a825-70a8a59455f4` |
+| `120 - Return Insight Artifact` | `8e0b9fec-8f5e-f111-a825-70a8a59455f4` |
+
+Naming convention `NN - Name` mirrors the existing "01 - Extraction" / "02 - Classification" pattern so `AnalysisActionService.ExtractSortOrderFromTypeName()` (line 51) parses the numeric prefix correctly. This gives the 6 rows proper sort order in admin forms.
+
+### Final sprk_actiontypeid FK mappings on the INS-* rows
+
+| INS-* row | sprk_actiontypeid → lookup row |
+|---|---|
+| INS-GRND | `a1a3a6e6-...` (70 - Grounding Verify) |
+| INS-FACT | `a2a3a6e6-...` (80 - Live Fact Resolver) |
+| INS-IDXR | `a5a3a6e6-...` (90 - Index Retrieve) |
+| INS-EVID | `a9a3a6e6-...` (100 - Evidence Sufficiency) |
+| INS-DECL | `8d0b9fec-...` (110 - Decline to Find) |
+| INS-RART | `8e0b9fec-...` (120 - Return Insight Artifact) |
+
+### Architectural note — what this does and doesn't fix
+
+| Concern | Status |
+|---|---|
+| Admin-form display (rows show their type label) | ✅ Fixed — visible in `sprk_analysisaction` form's Action Type field |
+| Sort order via `ExtractSortOrderFromTypeName` name-prefix parsing | ✅ Working — INS-* rows get sortOrder 70/80/90/100/110/120 |
+| ActionType dispatch via `action.ActionType` reading `entity.ActionTypeValue` (= `sprk_actiontype` int) | ❌ Still broken — field absent on entity. Code reads from missing field, defaults to AiAnalysis(0) |
+| ActionType dispatch via `sprk_playbooknode.sprk_configjson.__actionType` | ⏳ To be addressed in B3 + B4 (the working path) |
+
+**Potential future code-side fix** (not in Wave B scope): update `AnalysisActionService.cs:53-55` to derive `ActionType` from the parsed `sortOrder` when `entity.ActionTypeValue` is null + the parsed prefix matches an `ActionType` enum value. This would make `sprk_actiontypeid` the de-facto single source of dispatch truth, eliminating the dependence on the missing `sprk_actiontype` int field.
+
 ## Next step
 
 Execute 6 `mcp__dataverse__create_record` calls (one per row). On each create:
