@@ -15,6 +15,24 @@ export type {
 
 export { XrmDataverseClient } from './XrmDataverseClient';
 
+// BffDataverseClient — BFF-passthrough sibling impl (task 015, FR-BFF-06).
+// Use in non-MDA hosts: Code Pages, workspace widgets, Office Add-ins, Storybook.
+// Constructor takes `authenticatedFetch` from `@spaarke/auth` (DI for decoupling)
+// and an optional `bffBaseUrl` (falls back to window.SPAARKE_BFF_URL / env).
+export { BffDataverseClient } from './BffDataverseClient';
+export type {
+  BffDataverseClientOptions,
+  AuthenticatedFetchFn as BffAuthenticatedFetchFn,
+} from './BffDataverseClient';
+export {
+  BffDataverseClientError,
+  BffDataverseClientConfigurationError,
+  BffNotFoundError,
+  BffForbiddenError,
+  BffBadRequestError,
+  BffServerError,
+} from './BffDataverseClient';
+
 export { AppInsightsService } from './AppInsightsService';
 export { EntityCreationService } from './EntityCreationService';
 export type {

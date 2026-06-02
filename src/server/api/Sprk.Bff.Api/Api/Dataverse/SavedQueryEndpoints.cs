@@ -42,7 +42,7 @@ public static class SavedQueryEndpoints
         // FR-BFF-01: GET /api/dataverse/savedquery/{savedQueryId}
         // Handler-side privilege check (entity is unknown until savedquery is loaded).
         group.MapGet("/savedquery/{savedQueryId:guid}", GetSavedQueryByIdAsync)
-            .RequireRateLimiting("standard")
+            .RequireRateLimiting("dataverse-query") // task 016 D-016-03: was "standard" (unregistered policy — would 500 in prod)
             .WithName("GetDataverseSavedQuery")
             .WithSummary("Get a saved query payload by id")
             .WithDescription("Returns the entity, FetchXML, LayoutXML, and name of a saved query. Privilege-checked against the saved query's returnedtypecode entity.")
@@ -56,7 +56,7 @@ public static class SavedQueryEndpoints
         // Filter-side privilege check via FromRouteValue.
         group.MapGet("/savedqueries/{entityLogicalName}", GetSavedQueriesForEntityAsync)
             .AddDataverseAuthorizationFilter(EntitySource.FromRouteValue, routeKey: "entityLogicalName")
-            .RequireRateLimiting("standard")
+            .RequireRateLimiting("dataverse-query") // task 016 D-016-03: was "standard" (unregistered policy — would 500 in prod)
             .WithName("ListDataverseSavedQueriesForEntity")
             .WithSummary("List saved queries for an entity")
             .WithDescription("Returns user-owned (querytype=0) active saved queries for the specified entity logical name.")

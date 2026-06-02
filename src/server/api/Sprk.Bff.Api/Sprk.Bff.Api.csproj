@@ -20,6 +20,10 @@
     <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
     <!-- Allow integration test assembly to access internal members -->
     <InternalsVisibleTo Include="Spe.Integration.Tests" />
+    <!-- Sprk.Bff.Api.IntegrationTests: BFF Dataverse passthrough endpoint tests (task 016) reach
+         internal DataverseAuthorizationFilter / IDataversePrivilegeChecker / IFetchXmlEntityExtractor /
+         EntitySource / SavedQueryService / FetchService / FetchRequestDto / SavedQueryDto types. -->
+    <InternalsVisibleTo Include="Sprk.Bff.Api.IntegrationTests" />
   </ItemGroup>
 
   <ItemGroup>

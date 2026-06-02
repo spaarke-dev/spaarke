@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (B-Wave-1 COMPLETE — all 5 BFF endpoints live + filter + privilege checker + extractor; Program.cs aggregated; full build green) |
+| **Task** | none (B-Wave-2 COMPLETE — BffDataverseClient TS + integration tests 25/25 PASS + rate-limit bug fix; ready for B-Wave-3 deploy) |
 | **Step** | — |
 | **Status** | none |
-| **Next Action** | B-Wave-2 = task 015 (BffDataverseClient — @spaarke/ui-components TypeScript implementation of IDataverseClient using @spaarke/auth.authenticatedFetch). Serial; depends on all 4 of 011-014 (✅). After 015: B-Wave-3 (task 016 integration tests + cross-entity privilege bypass test) → B-Wave-4 (task 017 BFF deploy via bff-deploy skill). |
+| **Next Action** | B-Wave-3 = task 017 (BFF deploy via `bff-deploy` skill) — deploy DEV environment. Gated by 016 passing (✅ 25/25). After 017: Phase B COMPLETE. Then Phase C, D, E, F (consumer / migration / retirement). |
 
 ### Files Modified This Session
 

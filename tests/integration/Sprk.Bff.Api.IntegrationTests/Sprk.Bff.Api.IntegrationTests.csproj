@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.23" />
+    <PackageReference Include="Moq" Version="4.20.70" />
+
+    <!-- Security: Override vulnerable transitive dependency -->
+    <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj" />
+    <ProjectReference Include="..\..\..\src\server\shared\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
+  </ItemGroup>
+
+  <!--
+    InternalsVisibleTo: the Dataverse projection endpoints + filter + DTOs are intentionally
+    `internal sealed` (per project conventions). Integration tests must reach the internal
+    DataverseAuthorizationFilter / IDataversePrivilegeChecker / IFetchXmlEntityExtractor /
+    EntitySource types and Models DTOs. We declare InternalsVisibleTo on the BFF project so
+    tests can DI-substitute internal services without making them public.
+
+    Sprk.Bff.Api's csproj does NOT need to be modified — InternalsVisibleTo is declared at
+    consumer-side via this metadata file: tests/integration/Sprk.Bff.Api.IntegrationTests/
+    InternalsVisibleTo.cs (added alongside the test files).
+  -->
+
+</Project>
