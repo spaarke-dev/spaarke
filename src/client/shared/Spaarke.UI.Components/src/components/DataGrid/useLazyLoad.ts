@@ -91,6 +91,10 @@ function applyPaging(
     if (doc.querySelector('parsererror')) return fetchXml;
     const fetchEl = doc.querySelector('fetch');
     if (!fetchEl) return fetchXml;
+    // Dataverse rejects FetchXML with both `top` and `page` (mutually exclusive).
+    // SavedQueries commonly carry a default `top` from the designer; strip it
+    // when injecting paging so the framework's cookie chain takes over.
+    fetchEl.removeAttribute('top');
     fetchEl.setAttribute('page', String(page));
     fetchEl.setAttribute('count', String(pageSize));
     if (pagingCookie) {
