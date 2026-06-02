@@ -1,0 +1,58 @@
+{
+  "_version": "1.0",
+  "source": {
+    "type": "savedquery",
+    "savedQueryId": "b9f6d045-9a5e-f111-ab0c-7c1e521545d7"
+  },
+  "display": {
+    "title": "Invoices",
+    "densityDefault": "compact",
+    "emptyStateMessage": "No invoices for this matter."
+  },
+  "filterChips": {
+    "mode": "auto"
+  },
+  "commandBar": {
+    "showDefaultCommands": {
+      "newRecord": true,
+      "refresh": true,
+      "exportExcel": true,
+      "delete": false,
+      "editColumns": false,
+      "editFilters": false
+    }
+  },
+  "rowOpen": {
+    "type": "navigateToForm"
+  },
+  "secondaryActions": [
+    {
+      "id": "ask-sprkchat-invoice",
+      "label": "Ask Sprkchat",
+      "icon": "Chat20Regular",
+      "kind": "ai-assistant",
+      "requiresSelection": "single",
+      "aiAssistantId": "default"
+    },
+    {
+      "id": "review-playbook",
+      "label": "Review",
+      "icon": "DocumentSearch20Regular",
+      "kind": "playbook",
+      "requiresSelection": "single",
+      "playbookId": "invoice-review-default"
+    }
+  ],
+  "behavior": {
+    "selectionMode": "multi",
+    "pageSize": 100,
+    "enableSorting": true,
+    "enableColumnResize": true,
+    "enableKeyboardNavigation": true,
+    "parentContextFilter": {
+      "attribute": "sprk_matter",
+      "parentContextKey": "matterId",
+      "operator": "eq"
+    }
+  }
+}

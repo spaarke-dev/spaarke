@@ -13,7 +13,7 @@
 | **Task** | none (B-Wave-3 = task 017 BFF deploy DEFERRED ⏸ pending insights-engine-r2 master merge; Phase C unblocked) |
 | **Step** | — |
 | **Status** | none |
-| **Next Action** | Phase C kickoff — task 020 (author savedqueries for KPI Assessment + Invoice Matter-context views). UQ-04 owner clarification needed for column layouts. Then C-Wave-1 = 021 + 022 (config records, parallel). See `notes/drafts/017-deferral.md` for BFF deploy deferral details. |
+| **Next Action** | C-Wave-2 = task 023 (Custom Pages — both `sprk_kpiassessmentspage.html` + `sprk_invoicespage.html` bundled). Wire `<DataGrid configId={...} parentContext={{ matterId }}/>` using configIds: KPI=3019a06e-9b5e-f111-ab0c-7c1e521545d7, Invoice=d021827b-9b5e-f111-ab0c-7c1e521545d7. |
 
 ### Files Modified This Session
 
