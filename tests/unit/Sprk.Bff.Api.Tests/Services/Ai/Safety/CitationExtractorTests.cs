@@ -100,8 +100,8 @@ public class CitationExtractorTests
     }
 
     [Theory]
-    [InlineData("the priority document EP3456789",         "EP3456789",     CitationType.Patent)]
-    [InlineData("filed as WO2021/123456",                  "WO2021/123456", CitationType.Patent)]
+    [InlineData("the priority document EP3456789", "EP3456789", CitationType.Patent)]
+    [InlineData("filed as WO2021/123456", "WO2021/123456", CitationType.Patent)]
     public void ExtractCitations_Patent_NonUS_MatchedAndNormalized(string text, string expectedKey, CitationType expectedType)
     {
         var results = CitationExtractor.ExtractCitations(text);

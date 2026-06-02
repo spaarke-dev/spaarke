@@ -131,10 +131,10 @@ public static class AnalysisServicesModule
         // B4 — ChatSessionManager (deps: IDistributedCache, IChatDataverseRepository,
         // ILogger, optional ISessionPersistenceService — last is null-tolerant via GetService).
         services.AddScoped<ChatSessionManager>(sp => new ChatSessionManager(
-            cache:                sp.GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(),
-            dataverseRepository:  sp.GetRequiredService<IChatDataverseRepository>(),
-            logger:               sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChatSessionManager>>(),
-            persistence:          sp.GetService<Sprk.Bff.Api.Services.Ai.Sessions.ISessionPersistenceService>()));
+            cache: sp.GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(),
+            dataverseRepository: sp.GetRequiredService<IChatDataverseRepository>(),
+            logger: sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChatSessionManager>>(),
+            persistence: sp.GetService<Sprk.Bff.Api.Services.Ai.Sessions.ISessionPersistenceService>()));
 
         // B5 — ChatHistoryManager (deps: ChatSessionManager + IChatDataverseRepository + ILogger — all unconditional).
         services.AddScoped<ChatHistoryManager>();

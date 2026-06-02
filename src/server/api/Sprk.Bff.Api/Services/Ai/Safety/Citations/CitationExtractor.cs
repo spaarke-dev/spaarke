@@ -168,9 +168,9 @@ public static partial class CitationExtractor
         // Canonical form: "{volume} {reporter} {page}" (strips year/court parenthetical).
         // The reporter's trailing period is part of the canonical abbreviation (e.g., "U.S.") and MUST be preserved
         // (RB-T044-02: prior TrimEnd('.') over-stripped reporter periods, breaking verification provider lookups).
-        var volume   = m.Groups["volume"].Value.Trim();
+        var volume = m.Groups["volume"].Value.Trim();
         var reporter = m.Groups["reporter"].Value.Trim();
-        var page     = m.Groups["page"].Value.Trim();
+        var page = m.Groups["page"].Value.Trim();
         return $"{volume} {reporter} {page}";
     }
 
@@ -182,7 +182,7 @@ public static partial class CitationExtractor
         // breaking downstream verification provider lookups + UI dedup for any statute cited with a subsection).
         // The regex capture `(?<section>\d[\d\-\.]*[a-z]?(?:\([a-z0-9]+\))*)` deliberately INCLUDES the subsection
         // parenthetical in the raw match so the surface RawText is faithful; canonicalization happens here.
-        var title   = m.Groups["title"].Value.Trim();
+        var title = m.Groups["title"].Value.Trim();
         var section = m.Groups["section"].Value.Trim();
         var parenStart = section.IndexOf('(');
         if (parenStart >= 0) section = section[..parenStart];
