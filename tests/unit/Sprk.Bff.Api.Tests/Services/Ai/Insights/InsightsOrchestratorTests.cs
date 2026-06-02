@@ -329,7 +329,14 @@ public class InsightsOrchestratorTests
         captured.Subject.Should().Be(Subject);
         captured.TenantId.Should().Be(TenantId);
         captured.AccessibleScopeHash.Should().Be(ScopeHash);
-        captured.Parameters.Should().BeEquivalentTo(parameters);
+        // Parameters are enriched with well-known template vars derived from Subject per
+        // Insights Engine r2 Wave B (2026-06-02) — caller-supplied k1/k2 preserved AND
+        // matterId added from "matter:M-9999" Subject so playbook node ConfigJson templates
+        // like {{matterId}} resolve without ceremony. See InsightsOrchestrator.EnrichParametersFromSubject.
+        captured.Parameters.Should().NotBeNull();
+        captured.Parameters!.Should().Contain("k1", "v1");
+        captured.Parameters.Should().Contain("k2", "v2");
+        captured.Parameters.Should().Contain("matterId", "M-9999");
         captured.Ttl.Should().BeNull("orchestrator defers to cache DefaultTtl");
     }
 
