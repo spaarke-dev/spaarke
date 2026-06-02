@@ -1,7 +1,7 @@
 # Project Plan: sdap.bff.api-test-suite-repair-r2
 
 > **Last Updated**: 2026-06-01
-> **Status**: Ready for Tasks
+> **Status**: ✅ **COMPLETE** — merged to master at commit `7b804d35` (PR #318 admin-merge, 2026-06-01; closed ~3 months early)
 > **Spec**: [spec.md](spec.md)
 > **Design**: [design.md](design.md)
 > **Predecessor**: [`sdap-bff.api-test-suite-repair`](../sdap-bff.api-test-suite-repair/) (r1, closed 2026-06-01)
