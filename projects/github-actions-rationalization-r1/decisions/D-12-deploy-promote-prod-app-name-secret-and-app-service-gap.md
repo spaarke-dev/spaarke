@@ -68,9 +68,9 @@ To be verified during owner action. Hypothesis: only a single App Service exists
 1. **Out of scope**: The fix requires creating Azure infrastructure (an App Service for production) AND adding GitHub repo secrets. Neither is repository code.
 2. **Requires owner / Contributor role on the target Azure subscription**: provisioning App Services + their App Service Plans.
 3. **Requires owner role in the repo to add secrets**: secrets are write-only via `gh secret set`.
-4. **No urgency unless prod deploy is imminent**: the production deploy pipeline is not in active use (per the github-actions-rationalization-r1 Wave A inventory, `deploy-promote.yml` had zero invocations resulting in successful prod deploys in the 30 days prior to project start).
+4. **Owner-stated timeline (2026-06-02)**: production deploy is **needed in the near future** — not imminent today, but not deferred indefinitely. Treat this record as a near-term backlog item, not a perpetual TODO. The production-deploy capability remains in the workflow (per owner decision against Path 4B alternative); only the underlying infrastructure + secret are deferred. The production GitHub Environment (with reviewer + wait-timer + branch-policy protections) is already in place and ready to enforce gates when prod deploy is provisioned.
 
-### Owner action steps (when ready to use prod deploy)
+### Owner action steps (near-term — to be executed when prod deploy is ready to launch)
 
 #### Step 1 — Decide on App Service naming
 
