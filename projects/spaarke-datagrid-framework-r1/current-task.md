@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (Phase A COMPLETE — all 9 tasks ✅; ready for Phase B dispatch or task 080) |
+| **Task** | none (B-Wave-0 = task 010 just completed; 3 open questions with defaults need user sign-off before B-Wave-1) |
 | **Step** | — |
 | **Status** | none |
-| **Next Action** | Either: (a) dispatch Phase B Wave B-0 = task 010 (BFF Placement Justification + filter shape — serial foundation; blocks B-Wave-1 = 011/012/013/014 in parallel); OR (b) execute task 080 (Storybook hosting + workflow operationalization, ~3h). User's call. Phase A primitives + framework now stable; downstream consumer phases (C/D/E/F) unblocked once Phase B endpoints land. |
+| **Next Action** | Surface open questions (Q1 privilege-check API, Q2 FetchXML extractor, Q3 cache backend) to user. Then dispatch B-Wave-1 = tasks 011 + 012 + 013 + 014 (4 parallel agents) with sign-off OR with defaults if user delegates. After B-Wave-1: serial B2 (015 BffDataverseClient) → B3 (016 tests) → B4 (017 deploy). |
 
 ### Files Modified This Session
 

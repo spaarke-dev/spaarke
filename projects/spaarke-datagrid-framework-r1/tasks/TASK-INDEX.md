@@ -26,7 +26,7 @@
 
 | ID | Title | Rigor | Status | Dependencies | Parallel | Blocks |
 |---|---|---|---|---|---|---|
-| 010 | BFF Placement Justification + ADR-008 filter shape | FULL | 🔲 | none | — | 011,012,013,014,015,016,017 |
+| 010 | BFF Placement Justification + ADR-008 filter shape | FULL | ✅ | none | — | 011,012,013,014,015,016,017 |
 | 011 | SavedQueryService + 2 endpoints (savedquery + savedqueries) — 1h cache | FULL | 🔲 | 010 | B1 | 015,016,017 |
 | 012 | MetadataService + metadata endpoint — 6h cache | FULL | 🔲 | 010 | B1 | 015,016,017 |
 | 013 | FetchService + fetch endpoint (cross-entity privilege check) | FULL | 🔲 | 010 | B1 | 015,016,017 |

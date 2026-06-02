@@ -3,7 +3,7 @@
   <metadata>
     <title>BFF Placement Justification + ADR-008 authorization filter shape design</title>
     <phase>2: Phase B — BFF Passthrough</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>011,012,013,014,015,016,017</blocks>
