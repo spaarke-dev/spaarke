@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Storybook hosting + living style guide workflow (operationalize the Phase A investment)</title>
+    <phase>Post-Phase-A operational</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>009</dependencies>
+    <blocks>090</blocks>
+    <tags>docs, ci-cd, infrastructure, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Operational + documentation; CI workflow changes; no core framework code modifications</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Cross-cutting infrastructure + docs task; touches `.github/workflows/`, `docs/guides/`, and module CLAUDE.md files. Best run serially before project wrap-up.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Operationalize the Phase A Storybook investment so future Code Page authors and primitive developers actually reference it for consistency. Pick a hosting platform, wire CI deployment, write a "living style guide" workflow doc, and add a code-review gate that new primitive PRs include stories.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Familiar with GitHub Actions, Storybook deploy patterns (Chromatic / GitHub Pages / Azure Static Web Apps), and Spaarke documentation conventions.
+  </role>
+
+  <goal>
+    1. Storybook deployed to a reachable URL on every PR + main push
+    2. `docs/guides/STORYBOOK-AS-LIVING-STYLE-GUIDE.md` documents the workflow (when to author stories, how to reference them, what gates apply)
+    3. `src/client/shared/CLAUDE.md` and `projects/spaarke-datagrid-framework-r1/CLAUDE.md` link to the new guide
+    4. Code review checklist updated (PR template OR `docs/procedures/testing-and-code-quality.md`) — new primitives MUST include stories
+  </goal>
+
+  <context>
+    <background>
+      Phase A (tasks 001-009) produced ~1700 LOC of Storybook stories across the DataGrid framework primitives (DataGrid core, 5 chips, ColumnHeaderMenu, CommandBar). These stories serve 4 purposes per Phase A acceptance: dev iteration sandbox, axe-core QA surface, MDA visual-parity capture, executable documentation. Without hosting + a documented workflow, the consistency benefit is limited to "every dev runs `npm run storybook` locally" — which is friction.
+
+      User confirmed (2026-06-01) that operationalizing Storybook is in scope. This task does that.
+    </background>
+    <relevant-files>
+      <file>.github/workflows/</file>
+      <file>docs/guides/STORYBOOK-AS-LIVING-STYLE-GUIDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/CLAUDE.md</file>
+      <file>.github/pull_request_template.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/storybook/</file>
+      <file>src/client/shared/Spaarke.UI.Components/.storybook/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 — Storybook itself is dev tooling, not subject to UI ADRs, but the stories it shows MUST exemplify Fluent v9 patterns correctly.</constraint>
+    <constraint source="project">Hosting must NOT introduce per-developer cost. Free tier (Chromatic free / GitHub Pages / Azure Static Web App free) is sufficient for R1.</constraint>
+    <constraint source="project">CI deploy must NOT block PR merge if Storybook deploy fails (it's a soft gate — a regression in Storybook should be visible but shouldn't block code merges).</constraint>
+    <constraint source="project">The workflow guide must be tight (≤200 lines). Verbose docs rot fast.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/phase-a-acceptance-gate.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Survey existing `.github/workflows/` for similar deploy patterns (e.g., docs site deploy, Code Page deploy). Identify reusable scaffold.</step>
+    <step order="2">Decide on hosting platform via short trade-off doc in `notes/drafts/080-hosting-decision.md`:
+      - **Chromatic** (Storybook native): pros = visual regression diff baked in, ~free for small teams, captures snapshots automatically. Cons = third-party SaaS, ~$149/mo for unlimited if team grows.
+      - **GitHub Pages**: pros = free, in-repo. Cons = no built-in visual diff (would need Playwright snapshot tooling separately).
+      - **Azure Static Web Apps**: pros = matches existing Spaarke deploy patterns, ~$10/mo, supports preview environments per-PR. Cons = no visual diff bundled.
+      Recommendation: **Chromatic** if visual diff matters (it does — NFR-01 MDA parity gate). Otherwise Azure Static Web Apps.</step>
+    <step order="3">Implement chosen hosting in `.github/workflows/storybook-deploy.yml`:
+      - Trigger: push to `master` + pull_request to `master`
+      - Build: `cd src/client/shared/Spaarke.UI.Components && npm install --legacy-peer-deps && npm run build-storybook` (or equivalent)
+      - Deploy: per platform (Chromatic CLI / `actions/upload-pages-artifact` / Static Web App action)
+      - PR comments: deploy URL (per-PR preview) commented back to the PR for review
+      - Failure mode: deploy failure does NOT block PR merge (soft gate)</step>
+    <step order="4">Verify Storybook build script exists in `src/client/shared/Spaarke.UI.Components/package.json`. If `build-storybook` is missing, add it (`storybook build`). Document the local-run command (`npm run storybook` for dev, `npm run build-storybook` for CI).</step>
+    <step order="5">Author `docs/guides/STORYBOOK-AS-LIVING-STYLE-GUIDE.md` (≤200 lines) covering:
+      - **What stories are for** (3 sentences — dev iteration, axe/dark-mode QA, MDA visual diff capture, executable documentation)
+      - **Where stories live** (`@spaarke/ui-components/storybook/`)
+      - **When to author a story** (new primitive = mandatory; new Code Page = recommended if novel UX)
+      - **What states each story should cover** (empty / typical / cleared / dark — per primitive type)
+      - **How to reference stories from a new Code Page** (the hosted URL + the local `npm run storybook`)
+      - **Acceptance gate for new primitives** (story exists + axe-clean + dark mode parity)
+      - Link to: `.claude/skills/fluent-v9-component/SKILL.md`, `.claude/patterns/ui/fluent-v9-component-authoring.md`</step>
+    <step order="6">Update `src/client/shared/CLAUDE.md` to link to the new guide (one-line addition under existing component-authoring section).</step>
+    <step order="7">Update `projects/spaarke-datagrid-framework-r1/CLAUDE.md` "Resources" section to link to the new guide + the hosted Storybook URL.</step>
+    <step order="8">Add code-review checklist item — either to `.github/pull_request_template.md` OR `docs/procedures/testing-and-code-quality.md`:
+      - "If this PR adds a new primitive to `@spaarke/ui-components/components/`, does it include a Storybook story covering: empty / typical / cleared / dark? [ ]"</step>
+    <step order="9">Smoke test the CI workflow:
+      - Push a trivial change to a story file
+      - Verify the workflow runs
+      - Verify the Storybook deploys
+      - Verify the URL is accessible
+      - Verify the PR comment (if using Chromatic / Static Web App preview) appears</step>
+    <step order="10">Update TASK-INDEX.md: task 080 ✅.</step>
+    <step order="11">Document any deviations in `notes/drafts/080-deviations.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Author workflow yml + guide + checklist updates</tool>
+    <tool name="Bash">Verify Storybook build locally; CI smoke test</tool>
+    <tool name="gh">Check workflow run + PR comment integration</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">.github/workflows/storybook-deploy.yml</output>
+    <output type="docs">docs/guides/STORYBOOK-AS-LIVING-STYLE-GUIDE.md</output>
+    <output type="docs">src/client/shared/CLAUDE.md (modified — link added)</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/CLAUDE.md (modified — link added)</output>
+    <output type="docs">.github/pull_request_template.md OR docs/procedures/testing-and-code-quality.md (modified — checklist item added)</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/080-hosting-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a push to master, when the CI workflow runs, then Storybook deploys to the chosen hosting platform and the URL is publicly (or org-internally) reachable.</criterion>
+    <criterion testable="true">Given a new PR that modifies a story file, when CI runs, then the workflow deploys a preview AND comments the preview URL back to the PR.</criterion>
+    <criterion testable="true">Given `docs/guides/STORYBOOK-AS-LIVING-STYLE-GUIDE.md`, when reviewed, then it covers all 6 workflow topics (what / where / when / states / how to reference / acceptance gate) in ≤200 lines.</criterion>
+    <criterion testable="true">Given `src/client/shared/CLAUDE.md`, when grepped for "STORYBOOK-AS-LIVING-STYLE-GUIDE", then it links to the new guide.</criterion>
+    <criterion testable="true">Given the PR template (or testing-and-code-quality.md), when read, then the new primitive checklist item is present.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is the operational follow-up to Phase A acceptance (task 009). It's deliberately small (~3h) and focused. The HARDEST part is choosing the hosting platform — recommend Chromatic if NFR-01 MDA parity visual-diff matters (it does), else Azure Static Web Apps for cost + Spaarke pattern match.
+
+    If Chromatic is chosen, the project owner needs to create the Chromatic account and add the `CHROMATIC_PROJECT_TOKEN` GitHub secret. That's a human-loop step — flag it in the deviations doc if so.
+
+    This task was added 2026-06-01 in response to user direction during Wave A2 close — to make the Storybook investment actually load-bearing for future Code Pages.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Standard rigor. Dispatch as single sub-agent or run in main session — your call.</protocol>
+  </execution>
+</task>

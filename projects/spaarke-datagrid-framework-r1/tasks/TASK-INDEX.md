@@ -76,11 +76,17 @@
 | 053 | Retire UniversalDatasetGrid PCF + solution version bump | STANDARD | 🔲 | 052 | — | 054 |
 | 054 | Phase F deploy + UAT (DashboardPage visual diff) | STANDARD | 🔲 | 051,053 | — | 090 |
 
+### Post-Phase-A Operational (1 task — added 2026-06-01)
+
+| ID | Title | Rigor | Status | Dependencies | Parallel | Blocks |
+|---|---|---|---|---|---|---|
+| 080 | Storybook hosting + living style guide workflow | STANDARD | 🔲 | 009 | — | 090 |
+
 ### Wrap-up (1 task)
 
 | ID | Title | Rigor | Status | Dependencies | Parallel | Blocks |
 |---|---|---|---|---|---|---|
-| 090 | Project wrap-up (code-review + adr-check + repo-cleanup + lessons-learned) | FULL | 🔲 | 009,017,026,035,042,054 | — | — |
+| 090 | Project wrap-up (code-review + adr-check + repo-cleanup + lessons-learned) | FULL | 🔲 | 009,017,026,035,042,054,080 | — | — |
 
 ---
 
