@@ -3,7 +3,7 @@
   <metadata>
     <title>Build Custom Pages sprk_kpiassessmentspage + sprk_invoicespage (~50 lines each)</title>
     <phase>3: Phase C — Matter UI Drill-throughs</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>015,021,022</dependencies>
     <blocks>025</blocks>

@@ -13,7 +13,7 @@
 | **Task** | none (B-Wave-3 = task 017 BFF deploy DEFERRED ⏸ pending insights-engine-r2 master merge; Phase C unblocked) |
 | **Step** | — |
 | **Status** | none |
-| **Next Action** | C-Wave-2 = task 023 (Custom Pages — both `sprk_kpiassessmentspage.html` + `sprk_invoicespage.html` bundled). Wire `<DataGrid configId={...} parentContext={{ matterId }}/>` using configIds: KPI=3019a06e-9b5e-f111-ab0c-7c1e521545d7, Invoice=d021827b-9b5e-f111-ab0c-7c1e521545d7. |
+| **Next Action** | C-Wave-3 = task 024 (VisualHost chart-def updates via Dataverse MCP). Update 2 sprk_chartdefinition records (Matter Health + Budget Performance) to point sprk_drillthroughtarget at the new Custom Page web resource names. Quick data-only change. Then C-Wave-4 = 025 (deploy) → C-Wave-5 = 026 (UAT). |
 
 ### Files Modified This Session
 
