@@ -196,12 +196,87 @@ public sealed class InsightsOrchestrator : IInsightsAi
         ArgumentException.ThrowIfNullOrWhiteSpace(request.MatterId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
 
+        // Phase 1.5 r2 Wave C5 (task 024): validate optional parameter overrides at the
+        // facade boundary so that bad inputs fail fast with a clear ArgumentException
+        // before any AI cost is incurred. The validation enforces well-formedness only;
+        // domain validation (e.g., practice-area code exists in sprk_practicearea_ref)
+        // happens downstream in the playbook node executor where Dataverse is reachable.
+        // See design-a5-universal-ingest-jps.md §6 for the parameter contract.
+        ValidateIngestParameters(request);
+
         // Task 040 (D-P7) delegates to IIngestOrchestrator, which composes the universal
         // ingest pipeline (Sanitizer → Layer 1 → conditional Layer 2 → mechanical gates →
         // emission → substrate write → mirror). The facade stays thin so Zone B callers
         // (D-P8 SPE-upload consumer per task 050) see a stable IInsightsAi contract while
         // the Zone A pipeline composition evolves freely.
+        //
+        // Wave C5 (task 024) parameter-propagation note: optional overrides
+        // (PracticeAreaHint, CostCapOverride, Layer2Threshold) are validated above and
+        // passed through on the InsightsIngestRequest record. The current internal
+        // IngestOrchestrator (code-defined Phase 1) does NOT consume them — Wave C4
+        // (task 023) rewires this method to invoke universal-ingest@v1 via the playbook
+        // engine, at which point the overrides take effect via
+        // PlaybookRunRequest.Parameters per universal-ingest.playbook.json's
+        // parameterSchema. Until C4 lands the parameters are accepted + validated but
+        // have no runtime effect — callers can prepare integrations against the stable
+        // facade signature now without coupling to the C3→C4 transition timing.
         return _ingestOrchestrator.RunAsync(request, cancellationToken);
+    }
+
+    /// <summary>
+    /// Validate the Wave C5 optional parameter overrides on
+    /// <see cref="InsightsIngestRequest"/>. Throws <see cref="ArgumentException"/> on
+    /// any malformed override; returns silently when overrides are absent or valid.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Rules per task 024 POML §step 2 + design-a5 §6 parameterSchema:
+    /// <list type="bullet">
+    ///   <item><c>PracticeAreaHint</c> — when supplied, must be non-whitespace. Domain
+    ///   validation against <c>sprk_practicearea_ref</c> codes happens in the playbook
+    ///   node executor (Wave D2) where Dataverse is reachable; the facade only enforces
+    ///   well-formedness.</item>
+    ///   <item><c>CostCapOverride</c> — when supplied, must be strictly positive
+    ///   (&gt; 0). Zero or negative caps are nonsensical; the schema default
+    ///   (<c>null</c>) means "use tenant monthly cap from D-P9".</item>
+    ///   <item><c>Layer2Threshold</c> — when supplied, must lie in <c>[0.0, 1.0]</c>
+    ///   inclusive. NaN and infinity are rejected. The schema default (<c>null</c>)
+    ///   means "use playbook default 0.7 per Phase 1 D-59".</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// Validation runs <em>before</em> any work is dispatched so that bad inputs fail
+    /// without incurring LLM cost or Dataverse round-trips. Internal-visible for unit
+    /// tests; not part of the public Zone B surface.
+    /// </para>
+    /// </remarks>
+    internal static void ValidateIngestParameters(InsightsIngestRequest request)
+    {
+        if (request.PracticeAreaHint is not null
+            && string.IsNullOrWhiteSpace(request.PracticeAreaHint))
+        {
+            throw new ArgumentException(
+                "PracticeAreaHint, when supplied, must be a non-whitespace practice-area code (e.g., 'CTRNS'). Pass null to omit and use the litigation-default per Phase 1 D-59.",
+                nameof(request));
+        }
+
+        if (request.CostCapOverride is { } cap && cap <= 0m)
+        {
+            throw new ArgumentException(
+                $"CostCapOverride, when supplied, must be strictly positive (got {cap}). Pass null to omit and use the tenant's monthly cap per D-P9.",
+                nameof(request));
+        }
+
+        if (request.Layer2Threshold is { } threshold)
+        {
+            if (double.IsNaN(threshold) || double.IsInfinity(threshold)
+                || threshold < 0.0 || threshold > 1.0)
+            {
+                throw new ArgumentException(
+                    $"Layer2Threshold, when supplied, must be a finite value in [0.0, 1.0] (got {threshold}). Pass null to omit and use the playbook default 0.7 per Phase 1 D-59.",
+                    nameof(request));
+            }
+        }
     }
 
     /// <inheritdoc />

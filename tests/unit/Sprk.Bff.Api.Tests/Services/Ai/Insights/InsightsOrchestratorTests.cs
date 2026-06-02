@@ -393,6 +393,173 @@ public class InsightsOrchestratorTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // RunIngestAsync — Wave C5 parameterization (task 024)
+    //
+    // The optional overrides (PracticeAreaHint, CostCapOverride, Layer2Threshold) wire
+    // design-a5 §6 / universal-ingest.playbook.json `parameterSchema` onto the Zone-B
+    // facade surface per D-P15-02 (ONE canonical playbook, parameterized — not many).
+    // Validation enforces well-formedness at the facade boundary so bad inputs fail
+    // fast BEFORE LLM cost is incurred. End-to-end effect verification (parameter →
+    // playbook node behavior) is covered by Wave C4 (task 023) once IInsightsAi.RunIngestAsync
+    // is rewired to invoke universal-ingest@v1 via the playbook engine.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunIngestAsync_WithAllOptionalParameters_DelegatesAndPreservesValues()
+    {
+        // Verify the parameter contract: required fields validated, optional overrides
+        // accepted unchanged, request passed verbatim to the downstream orchestrator so
+        // Wave C4's playbook-engine invocation receives all four parameters intact.
+        var req = new InsightsIngestRequest(
+            DocumentId: "doc-1",
+            MatterId: "M-1",
+            TenantId: TenantId,
+            PracticeAreaHint: "CTRNS",
+            CostCapOverride: 1.50m,
+            Layer2Threshold: 0.82);
+        var expectedResult = new InsightsIngestResult(
+            ObservationsEmitted: 2,
+            Layer1Classification: "Settlement",
+            Layer2Triggered: true);
+
+        InsightsIngestRequest? captured = null;
+        _ingestMock
+            .Setup(o => o.RunAsync(It.IsAny<InsightsIngestRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<InsightsIngestRequest, CancellationToken>((r, _) => captured = r)
+            .ReturnsAsync(expectedResult);
+
+        var sut = CreateSut();
+        var actual = await sut.RunIngestAsync(req);
+
+        actual.Should().Be(expectedResult);
+        captured.Should().NotBeNull();
+        captured!.PracticeAreaHint.Should().Be("CTRNS", "parameterization override flows verbatim to the downstream orchestrator");
+        captured.CostCapOverride.Should().Be(1.50m, "parameterization override flows verbatim");
+        captured.Layer2Threshold.Should().Be(0.82, "parameterization override flows verbatim");
+        captured.TenantId.Should().Be(TenantId, "required TenantId propagated unchanged");
+    }
+
+    [Fact]
+    public async Task RunIngestAsync_WithNoOptionalParameters_DelegatesWithNulls()
+    {
+        // Default-value contract: when callers omit the optional overrides, the request
+        // carries nulls (the playbook parameterSchema applies its own defaults). Verifies
+        // the record-with-default-null pattern is preserved through the facade boundary —
+        // no accidental "normalization" of null to a sentinel value.
+        var req = new InsightsIngestRequest(
+            DocumentId: "doc-2",
+            MatterId: "M-2",
+            TenantId: TenantId);
+        var expectedResult = new InsightsIngestResult(
+            ObservationsEmitted: 1,
+            Layer1Classification: "Correspondence",
+            Layer2Triggered: false);
+
+        InsightsIngestRequest? captured = null;
+        _ingestMock
+            .Setup(o => o.RunAsync(It.IsAny<InsightsIngestRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<InsightsIngestRequest, CancellationToken>((r, _) => captured = r)
+            .ReturnsAsync(expectedResult);
+
+        var sut = CreateSut();
+        await sut.RunIngestAsync(req);
+
+        captured.Should().NotBeNull();
+        captured!.PracticeAreaHint.Should().BeNull("omitted overrides remain null — playbook schema default applies");
+        captured.CostCapOverride.Should().BeNull("omitted overrides remain null");
+        captured.Layer2Threshold.Should().BeNull("omitted overrides remain null");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task RunIngestAsync_BlankPracticeAreaHint_ThrowsArgumentException(string hint)
+    {
+        // Rule per ValidateIngestParameters: PracticeAreaHint must be non-whitespace
+        // when supplied. Pass null to omit (litigation-default per Phase 1 D-59).
+        var req = new InsightsIngestRequest("doc-1", "M-1", TenantId, PracticeAreaHint: hint);
+        var sut = CreateSut();
+
+        Func<Task> act = () => sut.RunIngestAsync(req);
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .Where(ex => ex.Message.Contains("PracticeAreaHint", StringComparison.Ordinal));
+        _ingestMock.Verify(
+            o => o.RunAsync(It.IsAny<InsightsIngestRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "validation rejects bad input before any work is dispatched (no LLM cost)");
+    }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(-0.01)]
+    [InlineData(-100.0)]
+    public async Task RunIngestAsync_NonPositiveCostCapOverride_ThrowsArgumentException(double capValue)
+    {
+        // Rule: CostCapOverride must be strictly positive (> 0). Zero or negative is
+        // nonsensical; pass null to omit (uses tenant monthly cap from D-P9).
+        var req = new InsightsIngestRequest(
+            "doc-1", "M-1", TenantId,
+            CostCapOverride: (decimal)capValue);
+        var sut = CreateSut();
+
+        Func<Task> act = () => sut.RunIngestAsync(req);
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .Where(ex => ex.Message.Contains("CostCapOverride", StringComparison.Ordinal));
+        _ingestMock.Verify(
+            o => o.RunAsync(It.IsAny<InsightsIngestRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData(-0.01)]
+    [InlineData(1.01)]
+    [InlineData(2.0)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(double.NegativeInfinity)]
+    public async Task RunIngestAsync_OutOfRangeLayer2Threshold_ThrowsArgumentException(double threshold)
+    {
+        // Rule: Layer2Threshold must be finite and in [0.0, 1.0]. NaN + infinities
+        // rejected. Pass null to omit (uses playbook default 0.7 per Phase 1 D-59).
+        var req = new InsightsIngestRequest(
+            "doc-1", "M-1", TenantId,
+            Layer2Threshold: threshold);
+        var sut = CreateSut();
+
+        Func<Task> act = () => sut.RunIngestAsync(req);
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .Where(ex => ex.Message.Contains("Layer2Threshold", StringComparison.Ordinal));
+        _ingestMock.Verify(
+            o => o.RunAsync(It.IsAny<InsightsIngestRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(0.5)]
+    [InlineData(0.7)]
+    [InlineData(1.0)]
+    public async Task RunIngestAsync_BoundaryLayer2ThresholdValues_Accepted(double threshold)
+    {
+        // Boundary check: 0.0 + 1.0 are both inclusive per the [0.0, 1.0] range. The
+        // schema-default (0.7) is also exercised so any future tightening of the
+        // boundary check that incidentally moves the default would be caught here.
+        var req = new InsightsIngestRequest("doc-1", "M-1", TenantId, Layer2Threshold: threshold);
+        var expectedResult = new InsightsIngestResult(0, null, false);
+        _ingestMock
+            .Setup(o => o.RunAsync(It.IsAny<InsightsIngestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expectedResult);
+
+        var sut = CreateSut();
+        Func<Task> act = () => sut.RunIngestAsync(req);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // EmbedTextAsync — delegation to IOpenAiClient
     // ─────────────────────────────────────────────────────────────────────────
 
