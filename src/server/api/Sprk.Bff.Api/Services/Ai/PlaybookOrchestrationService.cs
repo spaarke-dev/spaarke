@@ -892,23 +892,23 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             ActionType actionType;
             ResolvedScopes scopes;
 
-            if (node.NodeType == NodeType.AIAnalysis)
+            // Per Insights Engine r2 Wave B (2026-06-02): when sprk_actionid is set,
+            // the action's ActionType is the canonical dispatch source REGARDLESS of
+            // nodeType. Insights nodes like checkSufficiency (Control), groundCitations
+            // (Control), ReturnInsightArtifactNode (Output), and declineInsufficient
+            // (Output) all need their specific executor (EvidenceSufficiency, GroundingVerify,
+            // ReturnInsightArtifact, DeclineToFind) — not the nodeType-based default
+            // (Condition / DeliverOutput) that the original logic fell back to.
+            //
+            // The legacy structural-node path is preserved for backward compat: when no
+            // action FK is set, fall back to ConfigJson __actionType (canvas-Designer
+            // convention) or nodeType-based default.
+            if (node.ActionId != Guid.Empty)
             {
-                // AI nodes: resolve scopes and load action from Dataverse
-                scopes = await _scopeResolver.ResolveNodeScopesAsync(
-                    node.Id, runContext.CancellationToken);
-
-                if (node.ActionId == Guid.Empty)
-                {
-                    var errorMsg = $"AI node '{node.Name}' requires an Action but has no ActionId";
-                    var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
-                    runContext.StoreNodeOutput(errorOutput);
-
-                    await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
-                        runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
-
-                    return errorOutput;
-                }
+                // Resolve scopes only for AI nodes (Control/Output/Workflow have none)
+                scopes = node.NodeType == NodeType.AIAnalysis
+                    ? await _scopeResolver.ResolveNodeScopesAsync(node.Id, runContext.CancellationToken)
+                    : new ResolvedScopes([], [], []);
 
                 var resolved = await _scopeResolver.GetActionAsync(
                     node.ActionId, runContext.CancellationToken);
@@ -928,13 +928,23 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 action = resolved;
                 actionType = action.ActionType;
             }
+            else if (node.NodeType == NodeType.AIAnalysis)
+            {
+                var errorMsg = $"AI node '{node.Name}' requires an Action but has no ActionId";
+                var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
+                runContext.StoreNodeOutput(errorOutput);
+
+                await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
+
+                return errorOutput;
+            }
             else
             {
-                // Structural nodes (Output, Control, Workflow): no Action record, no scopes
+                // Structural nodes (Output, Control, Workflow) WITHOUT an action FK:
+                // legacy path — uses ConfigJson __actionType or nodeType-based default.
                 scopes = new ResolvedScopes([], [], []);
 
-                // Read specific ActionType from ConfigJson (written during canvas sync)
-                // Falls back to NodeType-based default if not present
                 actionType = ExtractActionTypeFromConfig(node.ConfigJson) ?? node.NodeType switch
                 {
                     NodeType.Output => ActionType.DeliverOutput,
@@ -973,8 +983,18 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             // and collect UpdateRecord-type nodes with their ConfigJson (which contains fieldMappings).
             var downstreamNodes = CollectDownstreamNodeInfo(node, graph);
 
+            // Apply {{paramName}} template substitution to ConfigJson before the executor
+            // runs. Variables come from runContext.Parameters (populated by the caller +
+            // enriched by InsightsOrchestrator with matterId/projectId/invoiceId derived from
+            // Subject). Per Insights Engine r2 Wave B (2026-06-02 smoke trace): without this
+            // substitution, playbook nodes like resolveLiveFacts received the literal
+            // "matter:{{matterId}}" and failed at LiveFactResolver. Centralizing the fix here
+            // applies it to every node executor uniformly (LiveFact / IndexRetrieve /
+            // ReturnInsightArtifact all use {{matterId}} in synthesis playbooks).
+            var substitutedNode = ApplyConfigJsonTemplates(node, runContext.Parameters);
+
             // Create node execution context with streaming callback for per-token SSE events
-            var nodeContext = runContext.CreateNodeContext(node, action, scopes, actionType) with
+            var nodeContext = runContext.CreateNodeContext(substitutedNode, action, scopes, actionType) with
             {
                 DownstreamNodes = downstreamNodes,
                 OnTokenReceived = async text =>
@@ -1236,6 +1256,44 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Substitute <c>{{paramName}}</c> placeholders in the node's ConfigJson with values
+    /// from the run parameters. Returns a NEW PlaybookNodeDto record with the substituted
+    /// ConfigJson; never mutates the input. Idempotent — placeholders without matching
+    /// parameters are left intact (the executor surfaces the original string for clear
+    /// authoring feedback).
+    /// </summary>
+    /// <remarks>
+    /// Per Insights Engine r2 Wave B (2026-06-02): adds centralized template substitution
+    /// previously missing from the orchestration pipeline. Without it, playbook nodes like
+    /// <c>resolveLiveFacts</c> received literal <c>"matter:{{matterId}}"</c> from ConfigJson
+    /// and failed at <c>LiveFactResolver.ParseMatterSubject</c> with
+    /// <c>LiveFactNotSupportedException</c>, returning a scaffold "no-artifact-produced"
+    /// decline to the caller. Centralized fix applies uniformly to all executor types.
+    /// </remarks>
+    private static PlaybookNodeDto ApplyConfigJsonTemplates(
+        PlaybookNodeDto node,
+        IReadOnlyDictionary<string, string>? parameters)
+    {
+        if (parameters is null || parameters.Count == 0)
+            return node;
+        if (string.IsNullOrEmpty(node.ConfigJson) || !node.ConfigJson.Contains("{{", StringComparison.Ordinal))
+            return node;
+
+        var rendered = node.ConfigJson;
+        foreach (var kvp in parameters)
+        {
+            if (string.IsNullOrEmpty(kvp.Key)) continue;
+            var placeholder = "{{" + kvp.Key + "}}";
+            if (rendered.Contains(placeholder, StringComparison.Ordinal))
+            {
+                rendered = rendered.Replace(placeholder, kvp.Value ?? string.Empty, StringComparison.Ordinal);
+            }
+        }
+
+        return node with { ConfigJson = rendered };
     }
 
     #endregion

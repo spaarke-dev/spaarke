@@ -1,0 +1,62 @@
+<task id="035" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>D6 — spaarke-insights-index scope shape generalization (carry entityType + entityId)</title>
+    <status>not-started</status>
+    <wave>D</wave>
+    <estimated-effort>2d</estimated-effort>
+    <tags>azure-ai-search, index-schema, migration, multi-entity, infra</tags>
+    <dependencies>015</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <wave-item>D6</wave-item>
+  </metadata>
+
+  <prompt>
+    Evolve the spaarke-insights-index schema to carry scope.entityType + scope.entityId alongside the existing scope.matterId (hybrid backward-compat per A6 + spec.md Q-D6-1 option c). Migrate Phase 1 Observations so they remain queryable. New Observations written by universal-ingest@v1 carry the new fields.
+  </prompt>
+
+  <role>Azure AI Search engineer + index migration specialist.</role>
+
+  <goal>
+    spaarke-insights-index schema includes scope.entityType + scope.entityId (both filterable + searchable). Phase 1 Observations migrated (entityType defaulted to "matter", entityId populated from existing matterId). New Observations from universal-ingest carry both old (matterId for backward compat) and new (entityType + entityId) fields. Index-write path in BFF updated. Index-read path in BFF supports filtering by either field.
+  </prompt>
+
+  <inputs>
+    <file purpose="a6-design">projects/ai-spaarke-insights-engine-r2/design-a6-multi-entity.md (migration plan)</file>
+    <file purpose="r1-index-schema">infra/insights/schemas/spaarke-insights-index.json (current schema)</file>
+    <file purpose="r1-bicep">infra/insights/modules/ (index infra)</file>
+    <file purpose="knowledge">knowledge/azure-ai-search/ (AI Search migration patterns)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md NFR-08">Phase 1 Observations must remain queryable after migration</constraint>
+    <constraint source="ADR-013">Index changes flow through Zone A (Services/Ai/) infra</constraint>
+    <constraint source="ADR-029">Verify Bicep + publish-size impact</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Decide migration mechanism">In-place add nullable fields (cheaper) vs re-create index + reindex (cleaner). Initial leaning: in-place if Azure AI Search supports add-field; otherwise re-create.</step>
+    <step order="2" name="Update schema JSON">Add scope.entityType (filterable string) + scope.entityId (filterable string)</step>
+    <step order="3" name="Bicep update">Apply schema change via existing infra/insights/modules/</step>
+    <step order="4" name="Migrate Phase 1 Observations">Backfill entityType="matter" + entityId=matterId for existing Observations (may require batch update via Azure CLI / SDK)</step>
+    <step order="5" name="Update BFF index-write path">Universal-ingest emits both old (matterId) + new (entityType + entityId) fields</step>
+    <step order="6" name="Update BFF index-read path">Support filtering by either field; default new queries to entityType + entityId</step>
+    <step order="7" name="Smoke verify">(a) Phase 1 Observation still queryable by matterId; (b) New Observation queryable by entityType + entityId</step>
+    <step order="8" name="Quality gates">code-review + adr-check; coordinate with infra team for prod migration plan</step>
+  </steps>
+
+  <outputs>
+    <output type="config">infra/insights/schemas/spaarke-insights-index.json (modified)</output>
+    <output type="bicep">infra/insights/modules/ (modified)</output>
+    <output type="code">BFF index-write + index-read paths updated</output>
+    <output type="migration-script">scripts/Migrate-InsightsIndexScopeShape.ps1 (or similar)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">spaarke-insights-index carries scope.entityType + scope.entityId</criterion>
+    <criterion testable="true">Phase 1 Observations migrated and queryable by matterId (backward compat)</criterion>
+    <criterion testable="true">New Observations queryable by entityType + entityId</criterion>
+    <criterion testable="true">Bicep apply clean on Spaarke Dev</criterion>
+    <criterion testable="true">spec.md NFR-08 + FR-03 satisfied</criterion>
+  </acceptance-criteria>
+</task>

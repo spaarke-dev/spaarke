@@ -1,0 +1,52 @@
+<task id="011" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>A2 — Operator/developer guide refresh</title>
+    <status>not-started</status>
+    <wave>A</wave>
+    <estimated-effort>4h</estimated-effort>
+    <tags>docs, guides, operator-guide, phase-1.5-framing</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>MINIMAL</rigor>
+    <wave-item>A2</wave-item>
+  </metadata>
+
+  <prompt>
+    Refresh docs/guides/INSIGHTS-ENGINE-GUIDE.md to capture Phase 1.5 operator + developer guidance: how to add a new practice area, how to add a new subject-entity type (project, invoice, …), how to edit a prompt in sprk_analysisaction.sprk_systemprompt without a code deploy, the new playbook-vs-RAG decision tree, multi-tenant prompt-override patterns once A4 finalizes.
+  </prompt>
+
+  <role>Documentation maintainer + operator-perspective writer.</role>
+
+  <goal>
+    Operator/developer guide updated to reflect Phase 1.5 capabilities. The Wave E4 decision-tree task (043) will produce the final playbook-vs-RAG decision tree; this task can stub it with a placeholder pointing to E4.
+  </prompt>
+
+  <inputs>
+    <file purpose="existing-guide">docs/guides/INSIGHTS-ENGINE-GUIDE.md</file>
+    <file purpose="phase-1.5-design">projects/ai-spaarke-insights-engine-r2/design.md</file>
+    <file purpose="phase-1.5-spec">projects/ai-spaarke-insights-engine-r2/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="docs-guide-skill">Use docs-guide skill conventions</constraint>
+    <constraint source="spec.md PR-1">Prompt-iteration section explicitly references sprk_analysisaction.sprk_systemprompt — no new entity</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read existing guide">Identify sections to refresh (mental model, decision framework, add-a-practice-area, add-a-subject-entity, prompt-iteration)</step>
+    <step order="2" name="Invoke docs-guide skill">Or refresh inline</step>
+    <step order="3" name="Add Phase 1.5 sections">2D taxonomy, multi-entity, /api/insights/search (NEW), intent classifier, Assistant integration</step>
+    <step order="4" name="Stub playbook-vs-RAG decision tree">Placeholder + link to task 043 (E4) for final tree</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">docs/guides/INSIGHTS-ENGINE-GUIDE.md (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Guide includes "how to add a new practice area" (sources from sprk_practicearea_ref) section</criterion>
+    <criterion testable="true">Guide includes "how to add a new subject-entity type" section</criterion>
+    <criterion testable="true">Guide includes "how to edit a prompt in sprk_analysisaction.sprk_systemprompt" section (no new entity)</criterion>
+    <criterion testable="true">Cross-refs to design.md, spec.md, plan.md work</criterion>
+  </acceptance-criteria>
+</task>

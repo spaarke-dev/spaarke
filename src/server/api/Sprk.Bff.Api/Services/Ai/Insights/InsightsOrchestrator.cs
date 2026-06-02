@@ -87,10 +87,19 @@ public sealed class InsightsOrchestrator : IInsightsAi
 
         var sw = Stopwatch.StartNew();
 
+        // Derive well-known template variables from Subject so playbook node ConfigJson
+        // can reference them as {{matterId}} etc. without callers having to supply them
+        // redundantly. Per Insights Engine r2 Wave B (2026-06-02 smoke trace): playbook nodes
+        // like resolveLiveFacts have configJson `"subject": "matter:{{matterId}}"` — without
+        // this enrichment the literal "{{matterId}}" was passed to LiveFactResolver, which
+        // rejected the request as InvalidConfiguration. Wave B5 SC-01 unblock.
+        IReadOnlyDictionary<string, string>? enrichedParameters = EnrichParametersFromSubject(
+            request.Parameters, request.Subject);
+
         var cacheRequest = new InsightsPlaybookExecutionRequest(
             PlaybookId: request.Question,
             Subject: request.Subject,
-            Parameters: request.Parameters,
+            Parameters: enrichedParameters,
             AccessibleScopeHash: request.AccessibleScopeHash,
             TenantId: request.TenantId,
             Ttl: null); // Defer to InsightsPlaybookExecutionCache.DefaultTtl (D-P13: 5 min).
@@ -118,7 +127,7 @@ public sealed class InsightsOrchestrator : IInsightsAi
                         // ad-hoc DocumentIds. We pass an empty array to satisfy the
                         // engine's required[] contract; the playbook ignores it.
                         DocumentIds = Array.Empty<Guid>(),
-                        Parameters = request.Parameters
+                        Parameters = enrichedParameters
                     },
                     ct);
             },
@@ -212,5 +221,56 @@ public sealed class InsightsOrchestrator : IInsightsAi
             model: null,
             dimensions: null,
             cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Enrich the caller-supplied Parameters with well-known template variables derived
+    /// from the Subject ref, so playbook node ConfigJson can reference them as
+    /// <c>{{matterId}}</c>, <c>{{projectId}}</c>, etc. without callers having to supply
+    /// them redundantly alongside Subject. Phase 1 supports the <c>matter:</c> scheme;
+    /// Phase 1.5 multi-entity work (Wave D5) extends to <c>project:</c> / <c>invoice:</c>.
+    /// </summary>
+    /// <remarks>
+    /// Caller-supplied Parameters take precedence — if the caller explicitly supplied
+    /// "matterId" the derived value does NOT overwrite it. This preserves the
+    /// power-user override path while making the common case work without ceremony.
+    /// Returns a NEW dictionary; never mutates the caller's collection.
+    /// </remarks>
+    internal static IReadOnlyDictionary<string, string>? EnrichParametersFromSubject(
+        IReadOnlyDictionary<string, string>? callerParameters,
+        string? subject)
+    {
+        if (string.IsNullOrWhiteSpace(subject))
+            return callerParameters;
+
+        var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (callerParameters is not null)
+        {
+            foreach (var kvp in callerParameters)
+                merged[kvp.Key] = kvp.Value;
+        }
+
+        // Format: "<scheme>:<id>" — Phase 1 supports "matter:<guid>".
+        var colonIdx = subject.IndexOf(':');
+        if (colonIdx > 0 && colonIdx < subject.Length - 1)
+        {
+            var scheme = subject[..colonIdx].Trim().ToLowerInvariant();
+            var id = subject[(colonIdx + 1)..].Trim();
+            if (id.Length > 0)
+            {
+                // Well-known key per scheme. Caller-supplied value wins via TryAdd.
+                var key = scheme switch
+                {
+                    "matter" => "matterId",
+                    "project" => "projectId",
+                    "invoice" => "invoiceId",
+                    _ => null
+                };
+                if (key is not null && !merged.ContainsKey(key))
+                    merged[key] = id;
+            }
+        }
+
+        return merged;
     }
 }

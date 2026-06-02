@@ -1,0 +1,57 @@
+<task id="015" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>A6 — Multi-entity subject design (scheme parsing, resolver pattern, index scope evolution)</title>
+    <status>not-started</status>
+    <wave>A</wave>
+    <estimated-effort>6h</estimated-effort>
+    <tags>design, multi-entity, ILiveFactResolver, subject-scheme, index-shape</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>A6</wave-item>
+  </metadata>
+
+  <prompt>
+    Author the multi-entity subject design. Currently subject = "matter:&lt;guid&gt;" only. Phase 1.5 generalizes to "&lt;entityType&gt;:&lt;guid&gt;" where entityType ∈ {matter, project, invoice, …}. Decide: (a) subject parser shape; (b) ILiveFactResolver registration pattern (dictionary vs registry service vs CanResolve iteration — see Q-A6-1); (c) spaarke-insights-index scope shape evolution (Q-D6-1); (d) migration plan for Phase 1 Observations (preserve backward compat).
+  </prompt>
+
+  <role>Information architect + service-design specialist.</role>
+
+  <goal>
+    Design doc projects/ai-spaarke-insights-engine-r2/design-a6-multi-entity.md authored with: (1) Subject parser shape (validation, supported schemes from config-driven catalog); (2) ILiveFactResolver registration pattern (chosen + reasoning) — initial leaning: dictionary keyed by entityType (simplest, per spec.md assumption); (3) spaarke-insights-index scope shape — add scope.entityType + scope.entityId alongside existing scope.matterId (hybrid for backward compat per Q-D6-1 option c); (4) Migration plan; (5) Per-entity resolver responsibilities (matter, project, invoice).
+  </prompt>
+
+  <inputs>
+    <file purpose="r1-live-fact-resolver">src/server/api/Sprk.Bff.Api/Services/Insights/Graph/DataverseLiveFactResolver.cs (current single-entity matter implementation)</file>
+    <file purpose="r1-index-schema">infra/insights/schemas/ (current spaarke-insights-index schema)</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r2/spec.md (Wave D5 + D6; Q-A6-1; Q-D6-1)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — chosen resolver pattern must not blow the ≤15 non-framework registration target across project</constraint>
+    <constraint source="spec.md NFR-08">Phase 1 Observations (with scope.matterId only) must remain queryable after Wave D6 migration</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read current resolver">DataverseLiveFactResolver.cs — understand query patterns</step>
+    <step order="2" name="Read current index schema">infra/insights/schemas/ — identify scope fields</step>
+    <step order="3" name="Subject parser design">Format (validation, scheme catalog), error handling for unknown schemes</step>
+    <step order="4" name="Resolver registration pattern">Pick (a) IDictionary&lt;string, ILiveFactResolver&gt; (simplest), (b) registry service, (c) CanResolve iteration. Initial leaning: (a). Document reasoning.</step>
+    <step order="5" name="Index scope shape">Hybrid: keep scope.matterId; add scope.entityType + scope.entityId (Q-D6-1 option c — preserves Phase 1 backward compat)</step>
+    <step order="6" name="Migration plan">Index re-create vs in-place add nullable fields; coordinate with infra team; plan for Phase 1 Observation queryability</step>
+    <step order="7" name="Per-entity resolver responsibilities">matter (existing); project (new — sprk_project queries); invoice (new — sprk_invoice queries)</step>
+    <step order="8" name="Publish design-a6-multi-entity.md">In project root; feeds D5 + D6</step>
+  </steps>
+
+  <outputs>
+    <output type="design-doc">projects/ai-spaarke-insights-engine-r2/design-a6-multi-entity.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Subject parser shape defined with config-driven scheme catalog</criterion>
+    <criterion testable="true">ILiveFactResolver registration pattern picked with reasoning</criterion>
+    <criterion testable="true">Index scope shape evolution chosen (hybrid backward-compat)</criterion>
+    <criterion testable="true">Migration plan for Phase 1 Observations included</criterion>
+    <criterion testable="true">Per-entity resolver responsibilities documented</criterion>
+  </acceptance-criteria>
+</task>

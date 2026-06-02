@@ -1,0 +1,55 @@
+<task id="024" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>C5 — Universal-ingest parameterization (tenant override, practice-area hint, cost-cap override)</title>
+    <status>not-started</status>
+    <wave>C</wave>
+    <estimated-effort>4h</estimated-effort>
+    <tags>jps-playbook, parameterization, runtime-config, universal-ingest</tags>
+    <dependencies>020</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>C5</wave-item>
+  </metadata>
+
+  <prompt>
+    Wire end-to-end parameterization for universal-ingest@v1 so callers can override tenant settings, practice-area routing hints, and per-invocation cost caps at invocation time. The playbook's JPS parameterSchema (from task 020) is in place; this task wires the invocation path (IInsightsAi → PlaybookExecutionEngine) to pass parameters through correctly, plus tests for each parameter's effect.
+  </prompt>
+
+  <role>Senior .NET developer + JPS parameter-flow specialist.</role>
+
+  <goal>
+    universal-ingest@v1 invocations accept and respect the following parameters: (1) tenantId (overrides default tenant from auth context); (2) practiceAreaHint (overrides default practice-area lookup from sprk_matter.sprk_practicearea); (3) costCapOverride (overrides default cost cap for this invocation); (4) layer2Threshold (overrides default 0.7 confidence threshold for Layer 2 gate). Parameters validated, defaulted, and propagated to relevant nodes.
+  </prompt>
+
+  <inputs>
+    <file purpose="a5-design">projects/ai-spaarke-insights-engine-r2/design-a5-universal-ingest-jps.md (parameter schema)</file>
+    <file purpose="universal-ingest-config">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/universal-ingest.playbook.json</file>
+    <file purpose="facade">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs (from task 023)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md D-P15-02">Flexibility comes through parameters — not new playbook variants</constraint>
+    <constraint source="spec.md D-P15-08">Tenant ingest opt-in respects per-upload override header (X-Ai-Insights-Ingest: false)</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Extend RunIngestAsync signature">Add optional parameters object (or extend existing); document defaults</step>
+    <step order="2" name="Validate parameters">tenantId well-formed; practiceAreaHint resolves to a sprk_practicearea_ref code; costCapOverride positive; layer2Threshold in [0, 1]</step>
+    <step order="3" name="Propagate to PlaybookExecutionEngine">Pass via JPS parameter binding</step>
+    <step order="4" name="Verify each parameter's effect">(a) tenantId — observations carry the right tenantId on the index; (b) practiceAreaHint — Layer 1 classification uses the right per-area prompt; (c) costCapOverride — invocation respects the override; (d) layer2Threshold — gate uses the override</step>
+    <step order="5" name="Integration tests">One per parameter</step>
+    <step order="6" name="Quality gates">code-review + adr-check</step>
+  </steps>
+
+  <outputs>
+    <output type="code">InsightsOrchestrator.RunIngestAsync signature extended with parameter overrides</output>
+    <output type="code">Universal-ingest playbook JSON updated if any parameter schema gaps surface</output>
+    <output type="test">tests/integration/Services/Ai/Insights/UniversalIngestParameterizationTests.cs (4 tests, one per parameter)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 parameters accepted, validated, and propagated</criterion>
+    <criterion testable="true">Each parameter's effect verified via integration test</criterion>
+    <criterion testable="true">Per-upload header X-Ai-Insights-Ingest: false honored (existing behavior preserved)</criterion>
+  </acceptance-criteria>
+</task>
