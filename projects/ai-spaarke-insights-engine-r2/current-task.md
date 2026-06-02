@@ -7,48 +7,32 @@
 
 ## Status
 
-**Current task**: 003 — Deploy-Playbook.ps1 lint check (action-code + configjson preservation per D-01)
-**Task file**: [`tasks/003-deploy-playbook-action-lint.poml`](tasks/003-deploy-playbook-action-lint.poml)
-**Wave**: B (Unblock synthesis — path-b re-scope per D-01)
-**Status**: not-started — ready to begin
-**Started**: —
-**Rigor**: STANDARD
-**Next action**: Begin Step 1 of task 003 (read Deploy-Playbook.ps1 + identify where lint check goes)
+**Wave B COMPLETE** (architectural objective) — all 6 tasks closed, D-01 closed.
+**Next**: Wave A (foundations) — 6 design-doc tasks, all parallel-safe.
+**Current task**: 010 — Architecture overview refresh (Phase 1.5 framing)
+**Status**: not-started — ready to begin (or start any A1-A6 task; all independent)
 
 ---
 
-## Task 002 — COMPLETED (2026-06-02)
+## Wave B summary (CLOSED)
 
-| Acceptance criterion | Status |
-|---|---|
-| 6 sprk_analysisaction rows queryable in Spaarke Dev | ✅ |
-| Each row's sprk_systemprompt is valid JPS JSON conforming to schema | ✅ |
-| Each row's sprk_actiontype matches the enum integer | ⚠️ **Field doesn't exist on entity — D-01 Q1 empirical confirmation** |
-| Authored via /jps-action-create skill conventions | ✅ (deterministic-node adaptation) |
-| notes/drafts/wave-b-action-codes.md ready for task 003 | ✅ |
-
-### Created Guids (for task 003 + 004 consumption)
-
-| Action Code | ActionType | Guid |
+| Task | Wave-item | Status |
 |---|---|---|
-| **INS-FACT** | LiveFact (80) | `5137365a-825e-f111-a825-6045bdebafa9` |
-| **INS-IDXR** | IndexRetrieve (90) | `23939266-825e-f111-a825-6045bdebafa9` |
-| **INS-EVID** | EvidenceSufficiency (100) | `6139aa6c-825e-f111-a825-6045bdebafa9` |
-| **INS-GRND** | GroundingVerify (70) | `32eafa72-825e-f111-a825-6045bdebafa9` |
-| **INS-DECL** | DeclineToFind (110) | `d1121079-825e-f111-a825-6045bdebafa9` |
-| **INS-RART** | ReturnInsightArtifact (120) | `96d52e7f-825e-f111-a825-6045bdebafa9` |
+| 001 | B1 Investigation | ✅ D-01 Q1+Q2+Q3 resolved via authoritative docs |
+| 002 | B2 Create 6 (later 7) action rows | ✅ INS-FACT/IDXR/EVID/GRND/DECL/RART + INS-AGNT (Wave B4 prep) |
+| 003 | B3 Deploy-Playbook.ps1 lint | ✅ Strict actionCode wiring lint; scripts/README.md updated |
+| 004 | B4 Delete + redeploy nodes | ✅ -Force redeploy with new actionCode wiring; new playbook Guid `fd584739-965e-f111-ab0c-7c1e521b425f` |
+| 005 | B5 Live smoke | ✅ partial — HTTP 200 + playbook executes end-to-end (D-01 dispatch fix proven); structured-decline-extraction follow-up identified |
+| 006 | B6 Doc + close D-01 | ✅ D-01 closed; `notes/handoffs/wave-b5-smoke-results.md` documents results + follow-up |
 
-### 🔴 Key finding for tasks 003 + 004
+**Architectural fix** (load-bearing for all subsequent Insights work):
+- Schema: `sprk_analysisactiontype.sprk_executoractiontype` (int) — single source of truth for dispatch
+- Data: 17 lookup rows populated (11 existing = 0, 6 Insights = 70-120, 1 AgentService = 60)
+- Code: `AnalysisActionService.cs` reads from `entity.ActionTypeId.ExecutorActionType`
+- Deployed: BFF commit `ef869a5b` live on Spaarke Dev
+- Playbook: predict-matter-cost@v1 redeployed with all 8 nodes properly wired
 
-**`sprk_actiontype` field is ABSENT on `sprk_analysisaction` entity** (D-01 Q1 confirmed empirically). The FK-path dispatch is closed. **The ONLY dispatch path for our 6 Insights ActionTypes is `sprk_playbooknode.sprk_configjson.__actionType`**. This shifts the emphasis of tasks 003 + 004:
-
-- Task 003 lint: verify deployed `sprk_playbooknode.sprk_configjson.__actionType` matches the JSON spec's `actionType` per node
-- Task 004 redeploy: ensure Deploy-Playbook.ps1 writes the correct `__actionType` integer (80/90/100/70/110/120) into each node's configjson — NOT the canvas-Designer-default 0
-
-The 6 action rows still provide value:
-- Linkable refs via `sprk_actionid` for audit/UI
-- JPS contract documentation in `sprk_systemprompt`
-- Future-proof if `sprk_actiontype` field is added in a later schema migration
+**Known follow-up (not in D-01 scope)**: smoke test surfaces that `InsightsPlaybookExecutionCache.DrainEngineStreamAsync` is not extracting either `InsightArtifact` or `DeclineResponse` from the engine stream → orchestrator returns scaffold decline. See `wave-b5-smoke-results.md` "What still needs work" — to be addressed in a follow-up spike or task.
 
 ---
 
@@ -56,7 +40,7 @@ The 6 action rows still provide value:
 
 - **Project**: `ai-spaarke-insights-engine-r2`
 - **Branch**: `work/ai-spaarke-insights-engine-r2`
-- **Decision record**: [`decisions/D-01-wave-b-root-cause-corrected.md`](decisions/D-01-wave-b-root-cause-corrected.md) — APPROVED; Q1 empirically confirmed 2026-06-02
+- **Decision record**: [`decisions/D-01-wave-b-root-cause-corrected.md`](decisions/D-01-wave-b-root-cause-corrected.md) — APPROVED + CLOSED 2026-06-02
 
 ---
 
@@ -66,8 +50,8 @@ Wave B FIRST → A → C → D → E → wrap-up.
 
 | Wave | Tasks | Status |
 |---|---|---|
-| **B** (Unblock synthesis) | 001–006 | 🔄 in-progress (001 ✅, 002 ✅; 003 ready) |
-| **A** (Foundations) | 010–015 | 🔲 |
+| **B** (Unblock synthesis) | 001–006 | ✅ COMPLETE |
+| **A** (Foundations) | 010–015 | 🔲 NEXT |
 | **C** (JPS compliance) | 020–024 | 🔲 |
 | **D** (2D taxonomy + multi-entity) | 030–036 | 🔲 |
 | **E** (Hybrid + Assistant) | 040–043 | 🔲 |
@@ -75,20 +59,9 @@ Wave B FIRST → A → C → D → E → wrap-up.
 
 ---
 
-## Active task: 003 (ready to start)
+## Next action
 
-### Goal
-
-Deploy-Playbook.ps1 has a lint check that rejects playbook JSON whose nodes lack proper action-code references AND verifies that deployed `sprk_playbooknode.sprk_configjson` matches the JSON spec (catches canvas Designer clobbering per D-01 §2.4). Pre-Dataverse-writes. Tested with both passing + deliberately-broken inputs.
-
-### Steps to be executed
-
-1. Read existing Deploy-Playbook.ps1 — identify where lint check goes (post-JSON-load, pre-Dataverse-writes)
-2. Implement Test-PlaybookNodeActionWiring function — iterates nodes, returns array of node names missing actionCode (uses task 002 final codes: INS-FACT, INS-IDXR, INS-EVID, INS-GRND, INS-DECL, INS-RART)
-3. Implement Test-PlaybookNodeConfigJsonPreservation — post-deploy, queries Dataverse for each node's sprk_configjson and validates against the JSON spec (catches Designer clobbering)
-4. Wire into main flow with clear error messages
-5. Test with valid JSON (passes) and deliberately broken JSON (fails with informative message)
-6. Update scripts/README.md registry entry
+Begin Wave A. All 6 tasks (010-015) are parallel-safe and can run in any order. Recommend starting with A3 (012 — 2D taxonomy design) since it informs the most downstream work (D1 entity creation, D2 prompts, D3 schemas).
 
 ---
 

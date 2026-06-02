@@ -1,12 +1,39 @@
 # D-01 — Wave B root cause corrected via empirical investigation
 
-> **Status**: APPROVED — path-b re-scope (Option A) per owner direction 2026-06-02
+> **Status**: ✅ **CLOSED 2026-06-02** — D-01 root cause RESOLVED. Architectural dispatch fixed via lookup-target `sprk_executoractiontype` field. Remaining "structured decline extraction" is a separate follow-up issue.
 > **Filed**: 2026-06-02
 > **Approved**: 2026-06-02
+> **Closed**: 2026-06-02
 > **Trigger**: bff-extensions.md §F.3 (Empirical-Reproduction-FIRST Protocol) — required before applying a ledger-style recommended fix
 > **Source ledger entry**: design.md §0 framing "predict-matter-cost playbook is deployed but doesn't fire end-to-end live because the new Insights node executors were never bound to sprk_analysisaction rows"
 > **Investigation by**: task-execute on task 001 (Wave B1), 2026-06-02
-> **Outcome**: original framing is partially correct; root cause is broader; path-b re-scope adopted
+> **Outcome**: original framing was partially correct; root cause was broader; path-b re-scope adopted and fully executed
+
+---
+
+## ✅ Closure Summary (2026-06-02)
+
+### What was fixed end-to-end
+
+1. **Dispatch architecture** — lookup target (`sprk_analysisactiontype`) now carries `sprk_executoractiontype` (int, NOT NULL post-backfill). Single source of truth for dispatch ActionType — no duplication on every action row. All 17 lookup rows populated: 11 existing = 0 (AiAnalysis), 6 new Insights = 70/80/90/100/110/120, plus "60 - Agent Service" added during Wave B = 60.
+2. **C# code** updated in `AnalysisActionService.cs` to read from `entity.ActionTypeId.ExecutorActionType` via expand. Build clean + 357 unit tests pass.
+3. **Data** — 7 INS-* `sprk_analysisaction` rows (INS-FACT, INS-IDXR, INS-EVID, INS-GRND, INS-DECL, INS-RART, INS-AGNT) created with JPS contract docs in `sprk_systemprompt` + `sprk_actiontypeid` FKs.
+4. **Deployment script** — `Deploy-Playbook.ps1` lint added (Wave B3) rejecting JSON whose nodes lack actionCode wiring; prevents the regression mode.
+5. **Playbook JSON** — predict-matter-cost.playbook.json updated to add `actionCode` per node; redeployed via `-Force` (delete + recreate) with new playbook Guid `fd584739-965e-f111-ab0c-7c1e521b425f`.
+6. **BFF deploy** — commit `ef869a5b` deployed to Spaarke Dev (hash-verify + healthcheck both passed).
+
+### Empirical confirmation (Wave B5 smoke test)
+
+- BEFORE: `"Node X in batch 1 failed - stopping playbook execution"` → orchestrator returned defensive scaffold decline
+- AFTER: HTTP 200; playbook executes end-to-end through all 8 nodes; dispatch goes through the new lookup-based path
+
+See [`notes/handoffs/wave-b5-smoke-results.md`](../notes/handoffs/wave-b5-smoke-results.md) for the full smoke trace + verified node mapping.
+
+### Follow-up (NOT in D-01 scope; tracked separately)
+
+The smoke test surfaces a downstream issue: the orchestrator's `DrainEngineStreamAsync` extracts neither `InsightArtifact` (sufficient path) nor `DeclineResponse` (insufficient path) and falls into the "Path 3 (defensive)" scaffold decline. This is a separate concern from the D-01 dispatch architecture — possible causes include `DeclineToFindNode` output shape mismatch with `TryExtractDecline` matching logic, sufficient-path synthesis failure, or branch-routing wiring issue. See `wave-b5-smoke-results.md` "What still needs work" section. To be addressed in a follow-up task or Phase 1.5 spike — does NOT reopen D-01.
+
+---
 
 ## Owner direction (2026-06-02)
 

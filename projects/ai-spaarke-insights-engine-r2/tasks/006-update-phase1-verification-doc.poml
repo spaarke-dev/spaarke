@@ -1,7 +1,8 @@
 <task id="006" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>B6 — Update Phase 1 verification doc with closed-gap status (Wave B complete)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-02</completed>
     <wave>B</wave>
     <estimated-effort>30m</estimated-effort>
     <tags>docs, wave-b-close, traceability</tags>
