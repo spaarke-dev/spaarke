@@ -38,6 +38,7 @@ Architecture Decision Records capture important architectural decisions made dur
 | [ADR-026](ADR-026-full-page-custom-page-standard.md) | Full-Page Custom Page Standard | Frontend | Accepted |
 | [ADR-027](ADR-027-subscription-isolation-and-dataverse-solution-management.md) | Subscription Isolation & Dataverse Solution Management | Operations | Proposed |
 | [ADR-029](ADR-029-bff-publish-hygiene.md) | BFF Publish Hygiene (framework-dependent linux-x64, sourcemap exclusion, transitive CVE overrides, size baseline) | Backend / Operations | Accepted |
+| [ADR-030](ADR-030-bff-nullobject-kill-switch.md) | BFF Null-Object Kill-Switch Pattern (P1/P2/P3 patterns; `FeatureDisabledException` → 503 ProblemDetails; closes RB-T028 cluster) | Backend / API | Accepted |
 
 ## ADRs by Domain
 
@@ -61,6 +62,7 @@ Architecture Decision Records capture important architectural decisions made dur
 | [ADR-017](ADR-017-async-job-status-and-persistence.md) | Job status persistence |
 | [ADR-019](ADR-019-api-errors-and-problemdetails.md) | ProblemDetails for errors |
 | [ADR-029](ADR-029-bff-publish-hygiene.md) | BFF publish hygiene: framework-dependent linux-x64, sourcemap exclusion, surgical transitive CVE overrides, size baseline ratchet |
+| [ADR-030](ADR-030-bff-nullobject-kill-switch.md) | BFF Null-Object kill-switch pattern: conditional service consumed by unconditional endpoint → Null-Object in else-branch (P1/P2/P3); `FeatureDisabledException` → 503 ProblemDetails per ADR-018/019 |
 
 ### AI Features
 

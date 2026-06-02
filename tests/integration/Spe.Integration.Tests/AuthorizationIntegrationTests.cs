@@ -40,8 +40,8 @@ public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixt
         _fixture = fixture;
     }
 
-    [Fact(Skip = "RB-T028-06: Authorization endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) when Analysis:Enabled=false. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task Unauthorized_Request_Returns_401()
     {
         // Arrange
@@ -56,8 +56,8 @@ public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixt
             "requests without authentication should return 401");
     }
 
-    [Fact(Skip = "RB-T028-06: Authorization endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) when Analysis:Enabled=false. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task Authorized_Request_With_NoAccess_Returns_403()
     {
         // Arrange
@@ -133,8 +133,8 @@ public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixt
         response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.NoContent);
     }
 
-    [Fact(Skip = "RB-T028-06: Authorization endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) when Analysis:Enabled=false. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
+    [Trait("status", "repaired")]
     public async Task Authorization_NoAccessRights_Returns_403()
     {
         // Arrange - User has no access rights
@@ -167,8 +167,8 @@ public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixt
         response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.NoContent);
     }
 
-    [Theory(Skip = "RB-T028-06: Authorization endpoint DI binding gap. Endpoint param-inference fails (notificationService UNKNOWN) when Analysis:Enabled=false. See real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Theory]
+    [Trait("status", "repaired")]
     [InlineData("/api/containers")]
     [InlineData("/api/drives/test/children")]
     public async Task Authorization_ChecksDifferentPolicies_PerEndpoint(string endpoint)

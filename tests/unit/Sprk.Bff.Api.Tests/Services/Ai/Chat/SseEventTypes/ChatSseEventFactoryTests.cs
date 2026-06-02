@@ -194,8 +194,7 @@ public class ChatSseEventFactoryTests
         json.Should().Contain("\"excerpt\":\"The contract clause states...\"");
     }
 
-    [Fact(Skip = "real-bug-pending-fix RB-T050-01: SourcePaneSseEventData.CitationId lacks JsonIgnoreCondition.WhenWritingNull — production serializes citationId:null instead of omitting the field. Test asserts documented contract from XML doc comments (optional + WhenWritingNull). See ledgers/real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
     public void CreateSourcePaneEvent_WithNullCitationId_OmitsCitationIdField()
     {
         // Arrange

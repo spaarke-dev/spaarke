@@ -155,8 +155,7 @@ public class SessionRestoreServiceTests
         SessionRestoreService.GetEntitySetName(entityType).Should().Be(expected);
     }
 
-    [Theory(Skip = "real-bug-pending-fix RB-T012-01: SUT NormaliseETag uses Trim('\"') which is over-aggressive — strips embedded quotes inside the ETag value, not just the surrounding wrapper quotes. Test asserts documented contract; production has a real bug. See ledgers/real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Theory]
     [InlineData("W/\"1234\"", "W/\"1234\"")]          // no outer quotes
     [InlineData("\"W/\\\"1234\\\"\"", "W/\\\"1234\\\"")] // stripped outer quotes
     public void NormaliseETag_StripsOuterQuotes(string input, string expected)
@@ -164,8 +163,7 @@ public class SessionRestoreServiceTests
         SessionRestoreService.NormaliseETag(input).Should().Be(expected);
     }
 
-    [Fact(Skip = "real-bug-pending-fix RB-T012-01: SUT ExtractODataETag uses IndexOf('\"', start) which stops at the first JSON-escaped quote within the value, not at the closing wrapper quote. Test asserts documented contract; production has a real bug. See ledgers/real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
     public void ExtractODataETag_FindsETagInJsonBody()
     {
         var body = """{"@odata.etag":"W/\"12345\"","opportunityid":"abc"}""";

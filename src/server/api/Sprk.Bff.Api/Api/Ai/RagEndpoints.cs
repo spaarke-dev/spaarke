@@ -212,6 +212,11 @@ public static class RagEndpoints
             var response = await ragService.SearchAsync(request.Query, request.Options, cancellationToken);
             return Results.Ok(response);
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
+            return ex.AsFeatureDisabled503();
+        }
         catch (Exception ex)
         {
             return Results.Problem(
@@ -264,6 +269,11 @@ public static class RagEndpoints
             var indexed = await ragService.IndexDocumentAsync(document, cancellationToken);
             return Results.Ok(indexed);
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
+            return ex.AsFeatureDisabled503();
+        }
         catch (Exception ex)
         {
             return Results.Problem(
@@ -298,6 +308,11 @@ public static class RagEndpoints
             var results = await ragService.IndexDocumentsBatchAsync(docList, cancellationToken);
             return Results.Ok(results);
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
+            return ex.AsFeatureDisabled503();
+        }
         catch (Exception ex)
         {
             return Results.Problem(
@@ -331,6 +346,11 @@ public static class RagEndpoints
             var deleted = await ragService.DeleteDocumentAsync(documentId, query.TenantId, cancellationToken);
             return Results.Ok(new RagDeleteResult { Deleted = deleted, Count = deleted ? 1 : 0 });
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
+            return ex.AsFeatureDisabled503();
+        }
         catch (Exception ex)
         {
             return Results.Problem(
@@ -363,6 +383,11 @@ public static class RagEndpoints
         {
             var count = await ragService.DeleteBySourceDocumentAsync(sourceDocumentId, query.TenantId, cancellationToken);
             return Results.Ok(new RagDeleteResult { Deleted = count > 0, Count = count });
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
+            return ex.AsFeatureDisabled503();
         }
         catch (Exception ex)
         {
@@ -399,6 +424,11 @@ public static class RagEndpoints
                 Embedding = embedding,
                 Dimensions = embedding.Length
             });
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
+            return ex.AsFeatureDisabled503();
         }
         catch (Exception ex)
         {
@@ -492,6 +522,11 @@ public static class RagEndpoints
             }
 
             return Results.Ok(result);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 1.5 round 4 (D-02 cluster exception): NullFileIndexingService surfaced.
+            return ex.AsFeatureDisabled503();
         }
         catch (Exception ex)
         {
@@ -656,6 +691,14 @@ public static class RagEndpoints
                         ErrorMessage = indexResult.ErrorMessage
                     });
                 }
+            }
+            catch (FeatureDisabledException ex)
+            {
+                // Task 011 Phase 1b Tier 1.5 round 4 (D-02 cluster exception): NullFileIndexingService surfaced.
+                // Kill-switch state is request-global, not per-document — short-circuit the whole batch
+                // with a 503 ProblemDetails rather than recording per-document failures that would mislead
+                // operators into chasing N "indexing failed" entries when the root cause is one kill switch.
+                return ex.AsFeatureDisabled503();
             }
             catch (Exception ex)
             {

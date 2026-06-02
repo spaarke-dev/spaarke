@@ -401,7 +401,17 @@ public class SessionRestoreService : ISessionRestoreService
     /// <summary>
     /// Extracts the @odata.etag value from a Dataverse OData JSON response body.
     /// Returns null if the property is not present.
+    /// Returns the raw substring as it appears in the body between the value's
+    /// opening and closing quotes (JSON escape sequences preserved); callers that
+    /// need an unescaped value can run the result through their own JSON unescape.
     /// </summary>
+    /// <remarks>
+    /// 2026-06-01 — RB-T012-01 repaired. Prior implementation used
+    /// <c>IndexOf('"', start)</c> which stopped at the first JSON-escaped <c>\"</c>
+    /// inside the ETag value and returned a truncated result. The fix scans
+    /// character-by-character honoring backslash escapes so the closing quote is
+    /// correctly located on the unescaped boundary.
+    /// </remarks>
     internal static string? ExtractODataETag(string jsonBody)
     {
         if (string.IsNullOrWhiteSpace(jsonBody))
@@ -409,7 +419,6 @@ public class SessionRestoreService : ISessionRestoreService
             return null;
         }
 
-        // Simple substring approach — avoids a full JSON parse for a single field.
         // Format: "\"@odata.etag\":\"W/\\\"1234567\\\"\""
         const string marker = "\"@odata.etag\":\"";
         var start = jsonBody.IndexOf(marker, StringComparison.Ordinal);
@@ -419,7 +428,33 @@ public class SessionRestoreService : ISessionRestoreService
         }
 
         start += marker.Length;
-        var end = jsonBody.IndexOf('"', start);
+
+        // Escape-aware scan for the closing quote: skip any '"' preceded by an odd
+        // number of trailing backslashes (i.e., JSON-escaped quotes). Preserves
+        // the raw escaped substring in the returned value.
+        var end = -1;
+        for (var i = start; i < jsonBody.Length; i++)
+        {
+            if (jsonBody[i] != '"')
+            {
+                continue;
+            }
+
+            // Count trailing backslashes immediately before this quote.
+            var backslashes = 0;
+            for (var j = i - 1; j >= start && jsonBody[j] == '\\'; j--)
+            {
+                backslashes++;
+            }
+
+            // Even count (including zero) → this '"' is not escaped → it is the closing delimiter.
+            if (backslashes % 2 == 0)
+            {
+                end = i;
+                break;
+            }
+        }
+
         if (end < 0)
         {
             return null;
@@ -432,6 +467,25 @@ public class SessionRestoreService : ISessionRestoreService
     /// Strips surrounding double-quotes from an ETag value for comparison.
     /// e.g., <c>"W/\"1234\""</c> → <c>W/"1234"</c>.
     /// </summary>
+    /// <remarks>
+    /// 2026-06-01 — RB-T012-01 repaired. Prior implementation used
+    /// <c>etag.Trim('"')</c> which is greedy and over-stripped embedded quote
+    /// characters (e.g., <c>W/"1234"</c> became <c>W/"1234</c>). The fix strips at
+    /// most one matched leading + trailing <c>"</c> pair, leaving embedded quotes
+    /// intact and leaving values without an outer pair untouched.
+    /// </remarks>
     internal static string NormaliseETag(string etag)
-        => etag.Trim('"');
+    {
+        if (etag is null)
+        {
+            return etag!;
+        }
+
+        if (etag.Length >= 2 && etag[0] == '"' && etag[^1] == '"')
+        {
+            return etag[1..^1];
+        }
+
+        return etag;
+    }
 }

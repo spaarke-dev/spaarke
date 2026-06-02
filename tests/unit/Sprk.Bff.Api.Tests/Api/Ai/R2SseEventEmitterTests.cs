@@ -273,13 +273,7 @@ public class R2SseEventEmitterTests
         data.GetProperty("retryAfterSeconds").GetInt32().Should().Be(30);
     }
 
-    [Fact(Skip = "RB-T070-02: R2SseEventEmitter serializes CapabilityChangePayload with default " +
-                  "System.Text.Json options, which include null-valued optional properties. The " +
-                  "documented contract is that `retryAfterSeconds` is omitted when null. Production " +
-                  "fix required (add JsonIgnoreCondition.WhenWritingNull to CapabilityChangePayload " +
-                  "or set DefaultIgnoreCondition on the serializer used by EmitAsync). " +
-                  "See projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
     public async Task EmitCapabilityChangeAsync_OmitsRetryAfterSecondsWhenNull()
     {
         var captured = new List<ChatSseEvent>();

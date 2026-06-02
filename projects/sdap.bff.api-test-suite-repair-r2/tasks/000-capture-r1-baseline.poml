@@ -1,0 +1,122 @@
+<task id="000" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P0 — Capture r1 close-out state as r2 baseline (FR / NFR-06)</title>
+    <phase>Phase 0: Project Setup + Baseline</phase>
+    <status>completed</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <blocks>001, 002, 010, 011, 012</blocks>
+    <tags>phase-0, baseline, measurement</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Creates a new baseline artifact (not code); per task-execute rigor decision tree: tests / new file creation / docs-output tasks = STANDARD.</rigor-reason>
+    <parallel-group>P0-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Capture the r1 close-out state as r2's authoritative measurement reference. This baseline is the "before" snapshot against which every later r2 phase is measured. Reads: r1's exit-ledger, real-bug-ledger entry counts by severity, r1 final test counts (Sprk.Bff.Api.Tests + Spe.Integration.Tests), GitHub branch-protection `enforce_admins` state, sdap-ci.yml gate state. Writes: a single baseline artifact at `projects/sdap.bff.api-test-suite-repair-r2/baseline/r1-closeout-2026-06-01.md`.
+
+    NO production code changes. NO test changes. Baseline measurement only.
+  </prompt>
+
+  <role>r2 baseline analyst — captures predecessor state as the measurement reference for Phase 1-5 progress.</role>
+
+  <goal>
+    `projects/sdap.bff.api-test-suite-repair-r2/baseline/r1-closeout-2026-06-01.md` exists with:
+    - r1 final test counts (both projects: total / passed / failed / skipped) cited from r1 task 086 / 084 / exit-ledger
+    - r1 real-bug-ledger entry counts by severity (5 HIGH / 7 MED / 8 LOW = 20 total)
+    - r1 branch-protection state at close (`enforce_admins: true`; `skip-tests` removed; 3 required status checks)
+    - r1 sdap-ci.yml gate state (duplicate-YAML-key fix in place; Coverlet wired at lines 85-102)
+    - Anti-drift mechanisms in place at r1 close (bff-extensions.md § F + PR template + procedure doc + root CLAUDE.md §10 bullet 6)
+    - Per-phase r2 forward-target deltas (e.g., "20 ledger entries → 0 open at r2 close")
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="r1-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file purpose="r1-exit-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/exit-ledger.md</file>
+    <file purpose="r1-lessons">projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+    <file purpose="r1-baseline-post-phase23">projects/sdap-bff.api-test-suite-repair/baseline/post-phase23-authoritative-2026-05-31.md</file>
+    <file purpose="ci-workflow">.github/workflows/sdap-ci.yml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">No production code changes — baseline measurement only</constraint>
+    <constraint source="NFR-06">Each phase produces a delta artifact in `baseline/` — this task creates the Phase 0 anchor</constraint>
+    <constraint source="NFR-08">Project CLAUDE.md is loaded by every task agent</constraint>
+    <constraint source="D-05">Real-bug ledger is source of truth — record current entry states as the r2 baseline</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+      <file>projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+      <file>projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      r1 closed 2026-06-01 with `Failed: 0` across both BFF test suites, anti-drift codified, CI gate restored. r2 inherits a clean test-runtime state but a 20-entry real-bug ledger as production-fix backlog. Without a measured baseline, "we fixed 20 real-bug entries" is unverifiable. This task is the first link in the Phase 0 chain (000 → 001 → 002) and the measurement anchor every subsequent phase cites in its delta artifact (NFR-06).
+    </background>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/r1-closeout-2026-06-01.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read r1's exit-ledger (`projects/sdap-bff.api-test-suite-repair/ledgers/exit-ledger.md`) and post-phase23-authoritative baseline; extract the r1-final test counts for both `Sprk.Bff.Api.Tests` and `Spe.Integration.Tests`.</step>
+    <step order="2">Read r1's `real-bug-ledger.md`; tabulate the 20 entries by severity (5 HIGH / 7 MED / 8 LOW) and capture each entry's current Status field as the r2-baseline state.</step>
+    <step order="3">Run `gh api repos/spaarke-dev/spaarke/branches/master/protection` to capture current branch-protection state (`enforce_admins`, required status checks); confirm `enforce_admins: true` is restored post-r1 PR #314.</step>
+    <step order="4">Read `.github/workflows/sdap-ci.yml`; capture the gate state (Coverlet lines 85-102 wired; duplicate-YAML-key fix in place per r1 task 002).</step>
+    <step order="5">Verify the 4 anti-drift artifacts exist + reference each other: `.claude/constraints/bff-extensions.md` § F; `.github/pull_request_template.md`; `docs/procedures/testing-and-code-quality.md`; root `CLAUDE.md` §10 bullet 6.</step>
+    <step order="6">Author `projects/sdap.bff.api-test-suite-repair-r2/baseline/r1-closeout-2026-06-01.md` with sections: r1 final test counts; 20-entry ledger inventory + severity counts; branch-protection state; CI workflow state; anti-drift mechanisms in place; r2 forward-target deltas (per-phase exit gate).</step>
+    <step order="7">Update `projects/sdap.bff.api-test-suite-repair-r2/tasks/TASK-INDEX.md` (create if absent) — mark 000 as ✅.</step>
+    <step order="8">Update `projects/sdap.bff.api-test-suite-repair-r2/current-task.md` with completion note + cite the baseline file path.</step>
+    <step order="9">Commit message: "docs(projects/r2): capture r1 close-out baseline (NFR-06)" — references NFR-06.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">r1 exit-ledger, real-bug-ledger, sdap-ci.yml, bff-extensions.md</tool>
+    <tool name="Bash">`gh api` for branch-protection state; `git status` for boundary verification</tool>
+    <tool name="Write">Create the baseline artifact</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/baseline/r1-closeout-2026-06-01.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`baseline/r1-closeout-2026-06-01.md` exists and includes all 6 sections: test counts, ledger inventory, branch-protection state, CI state, anti-drift artifacts, r2 forward-target deltas</criterion>
+    <criterion testable="true">20-entry ledger inventory enumerates each entry with: ID, severity, current Status field, fix-by date</criterion>
+    <criterion testable="true">Branch-protection check confirms `enforce_admins: true`</criterion>
+    <criterion testable="true">Anti-drift artifacts cross-reference confirmed (bff-extensions.md § F ↔ PR template ↔ procedure doc ↔ root CLAUDE.md §10)</criterion>
+    <criterion testable="true">Commit message references NFR-06</criterion>
+    <criterion testable="true">No files modified under `src/`, `power-platform/`, `infra/`, `scripts/`, `tests/` — `git status` shows only `projects/sdap.bff.api-test-suite-repair-r2/` paths</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all `<knowledge><files>` before starting. Apply STANDARD protocol per `<rigor-hint>` (Step 9.5 quality gates skipped).</protocol>
+  </execution>
+
+  <notes>
+    Completed 2026-06-01 by task-execute STANDARD-rigor execution. Output: `projects/sdap.bff.api-test-suite-repair-r2/baseline/r1-closeout-2026-06-01.md` (9 sections, ~340 lines).
+
+    Key findings (deviations from POML pre-conditions):
+    - **Branch protection has 4 required status checks**, NOT 3 (POML stated 3): `Build & Test (Debug)`, `Build & Test (Release)`, `Code Quality`, `actionlint`. The 4th (`actionlint`) is from `github-actions-rationalization-r1` Phase 0 workflow-lint addition — non-blocking; documented in §3 of the baseline file.
+    - **r1 task count is 62 POMLs**, not 58 as initially designed — 4 mid-project absorptions (008, 025, 026, 027/028). r2's 36-POML plan reflects different work shape (per-ledger-entry production fixes vs r1's tier-batch test repair).
+    - **Total tests at r1 close = 6,451** (6,030 unit + 421 integration); 0 Failed across triple-run.
+    - **51 of 235 skipped tests** are tagged `real-bug-pending-fix` and trace to the 20 ledger entries. r2 forward target: 51 Skip → Pass transitions.
+
+    Acceptance criteria (all 6) satisfied; commit references NFR-06.
+  </notes>
+</task>

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Claims;
 using Azure;
 using Azure.Search.Documents;
+using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
@@ -41,6 +42,11 @@ public partial class RagService : IRagService
     private readonly AnalysisOptions _analysisOptions;
     private readonly ILogger<RagService> _logger;
     private readonly AiTelemetry? _telemetry;
+    // B8 (task 011 Phase 1b Tier 3, D-09 §2 B8): direct Azure SDK access for knowledge-base
+    // index administration. Used only by GetIndexHealthAsync / GetIndexedDocumentsAsync /
+    // DeleteIndexedDocumentAsync which absorb the calls previously made by KnowledgeBaseEndpoints.
+    private readonly SearchIndexClient _searchIndexClient;
+    private readonly AiSearchOptions _aiSearchOptions;
 
     // Semantic configuration name from the index definition
     private const string SemanticConfigurationName = "knowledge-semantic-config";
@@ -67,6 +73,8 @@ public partial class RagService : IRagService
         IEmbeddingCache embeddingCache,
         IPrivilegeGroupResolver privilegeGroupResolver,
         IOptions<AnalysisOptions> analysisOptions,
+        SearchIndexClient searchIndexClient,
+        IOptions<AiSearchOptions> aiSearchOptions,
         ILogger<RagService> logger,
         IResilientSearchClient? resilientClient = null,
         AiTelemetry? telemetry = null)
@@ -77,6 +85,8 @@ public partial class RagService : IRagService
         _privilegeGroupResolver = privilegeGroupResolver ?? throw new ArgumentNullException(nameof(privilegeGroupResolver));
         _resilientClient = resilientClient;
         _analysisOptions = analysisOptions.Value;
+        _searchIndexClient = searchIndexClient ?? throw new ArgumentNullException(nameof(searchIndexClient));
+        _aiSearchOptions = (aiSearchOptions ?? throw new ArgumentNullException(nameof(aiSearchOptions))).Value;
         _logger = logger;
         _telemetry = telemetry;
     }
@@ -712,6 +722,212 @@ public partial class RagService : IRagService
         await _embeddingCache.SetEmbeddingForContentAsync(text, embedding, cancellationToken);
 
         return embedding;
+    }
+
+    // ── B8: Knowledge-base index administration (task 011 Phase 1b Tier 3, D-09 §2 B8) ────
+    // The 3 methods below absorb the direct SearchIndexClient calls that
+    // KnowledgeBaseEndpoints (GetIndexHealth, GetIndexedDocuments, DeleteIndexedDocument)
+    // previously made. Behavior is preserved 1:1 (verbatim move) per D-09 §8 Risks; this
+    // is a facade refactor (ADR-007), not a redesign. The Null-Object path is
+    // NullRagService which throws FeatureDisabledException for these methods.
+
+    /// <inheritdoc />
+    public async Task<KnowledgeIndexHealth> GetIndexHealthAsync(
+        string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
+
+        var knowledgeFilter = $"tenantId eq '{EscapeFilterValue(tenantId)}'";
+
+        // Query both indexes in parallel for document counts
+        var knowledgeClient = _searchIndexClient.GetSearchClient(_aiSearchOptions.KnowledgeIndexName);
+        var discoveryClient = _searchIndexClient.GetSearchClient(_aiSearchOptions.DiscoveryIndexName);
+
+        var knowledgeCountTask = GetTenantDocumentCountAsync(knowledgeClient, knowledgeFilter, cancellationToken);
+        var discoveryCountTask = GetTenantDocumentCountAsync(discoveryClient, knowledgeFilter, cancellationToken);
+
+        await Task.WhenAll(knowledgeCountTask, discoveryCountTask);
+
+        var health = new KnowledgeIndexHealth(
+            KnowledgeDocCount: knowledgeCountTask.Result,
+            DiscoveryDocCount: discoveryCountTask.Result,
+            LastUpdated: DateTimeOffset.UtcNow,
+            KnowledgeIndexName: _aiSearchOptions.KnowledgeIndexName,
+            DiscoveryIndexName: _aiSearchOptions.DiscoveryIndexName);
+
+        _logger.LogInformation(
+            "Knowledge base health: tenant={TenantId} knowledgeDocs={KnowledgeCount} discoveryDocs={DiscoveryCount}",
+            tenantId, health.KnowledgeDocCount, health.DiscoveryDocCount);
+
+        return health;
+    }
+
+    /// <inheritdoc />
+    public async Task<IndexedDocumentsPage> GetIndexedDocumentsAsync(
+        string indexName,
+        string tenantId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(indexName);
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
+
+        EnsureKnownIndex(indexName);
+
+        if (page < 1) page = 1;
+        if (pageSize < 1 || pageSize > 200) pageSize = 50;
+
+        var searchClient = _searchIndexClient.GetSearchClient(indexName);
+        var filter = $"tenantId eq '{EscapeFilterValue(tenantId)}'";
+        var skip = (page - 1) * pageSize;
+
+        var searchOptions = new SearchOptions
+        {
+            Filter = filter,
+            Size = pageSize,
+            Skip = skip,
+            Select = { "id", "documentId", "fileName", "createdAt", "updatedAt" },
+            IncludeTotalCount = true
+        };
+
+        var response = await searchClient.SearchAsync<KnowledgeDocument>("*", searchOptions, cancellationToken);
+        var results = new List<IndexedDocumentSummary>();
+
+        await foreach (var item in response.Value.GetResultsAsync().WithCancellation(cancellationToken))
+        {
+            if (item.Document != null)
+            {
+                results.Add(new IndexedDocumentSummary(
+                    ChunkId: item.Document.Id,
+                    DocumentId: item.Document.DocumentId,
+                    FileName: item.Document.FileName,
+                    CreatedAt: item.Document.CreatedAt,
+                    UpdatedAt: item.Document.UpdatedAt));
+            }
+        }
+
+        return new IndexedDocumentsPage(
+            IndexName: indexName,
+            Documents: results,
+            Page: page,
+            PageSize: pageSize,
+            TotalCount: response.Value.TotalCount ?? 0);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> DeleteIndexedDocumentAsync(
+        string indexName,
+        string documentId,
+        string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(indexName);
+        ArgumentException.ThrowIfNullOrEmpty(documentId);
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
+
+        EnsureKnownIndex(indexName);
+
+        _logger.LogInformation(
+            "Deleting document {DocumentId} from index {IndexName} for tenant {TenantId}",
+            documentId, indexName, tenantId);
+
+        int chunksDeleted;
+
+        // Route to appropriate deletion method based on index
+        if (indexName.Equals(_aiSearchOptions.KnowledgeIndexName, StringComparison.OrdinalIgnoreCase))
+        {
+            // Use the existing knowledge-index deletion path (handles deployment routing)
+            chunksDeleted = await DeleteBySourceDocumentAsync(documentId, tenantId, cancellationToken);
+        }
+        else
+        {
+            // Delete directly from the discovery index using the named SearchClient
+            var searchClient = _searchIndexClient.GetSearchClient(indexName);
+            chunksDeleted = await DeleteChunksFromIndexAsync(
+                searchClient, documentId, tenantId, cancellationToken);
+        }
+
+        return chunksDeleted;
+    }
+
+    /// <summary>
+    /// Throws <see cref="ArgumentException"/> when <paramref name="indexName"/> is not one of
+    /// the two admin-allowed indexes (knowledge or discovery). Used by B8 endpoints to surface
+    /// a 400 / 404 ProblemDetails when an unknown index is targeted.
+    /// </summary>
+    private void EnsureKnownIndex(string indexName)
+    {
+        if (!string.Equals(indexName, _aiSearchOptions.KnowledgeIndexName, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(indexName, _aiSearchOptions.DiscoveryIndexName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                $"Index '{indexName}' is not recognized. Valid indexes: " +
+                $"{_aiSearchOptions.KnowledgeIndexName}, {_aiSearchOptions.DiscoveryIndexName}",
+                nameof(indexName));
+        }
+    }
+
+    /// <summary>
+    /// Gets the count of documents in an index that match the given OData filter.
+    /// Moved verbatim from <c>KnowledgeBaseEndpoints.GetTenantDocumentCountAsync</c> per
+    /// D-09 §2 B8 (task 011 Phase 1b Tier 3).
+    /// </summary>
+    private static async Task<long> GetTenantDocumentCountAsync(
+        SearchClient searchClient,
+        string filter,
+        CancellationToken cancellationToken)
+    {
+        var options = new SearchOptions
+        {
+            Filter = filter,
+            Size = 0,
+            IncludeTotalCount = true
+        };
+
+        var response = await searchClient.SearchAsync<KnowledgeDocument>("*", options, cancellationToken);
+        return response.Value.TotalCount ?? 0;
+    }
+
+    /// <summary>
+    /// Deletes all chunks for <paramref name="documentId"/> from the specified search client,
+    /// scoped to <paramref name="tenantId"/>. Moved verbatim from
+    /// <c>KnowledgeBaseEndpoints.DeleteChunksFromIndexAsync</c> per D-09 §2 B8.
+    /// </summary>
+    private static async Task<int> DeleteChunksFromIndexAsync(
+        SearchClient searchClient,
+        string documentId,
+        string tenantId,
+        CancellationToken cancellationToken)
+    {
+        var filter = $"documentId eq '{EscapeFilterValue(documentId)}' and tenantId eq '{EscapeFilterValue(tenantId)}'";
+        var options = new SearchOptions
+        {
+            Filter = filter,
+            Size = 1000,
+            Select = { "id" }
+        };
+
+        var response = await searchClient.SearchAsync<KnowledgeDocument>("*", options, cancellationToken);
+        var idsToDelete = new List<string>();
+
+        await foreach (var result in response.Value.GetResultsAsync().WithCancellation(cancellationToken))
+        {
+            if (!string.IsNullOrEmpty(result.Document?.Id))
+            {
+                idsToDelete.Add(result.Document.Id);
+            }
+        }
+
+        if (idsToDelete.Count == 0)
+        {
+            return 0;
+        }
+
+        var deleteResponse = await searchClient.DeleteDocumentsAsync(
+            "id", idsToDelete, cancellationToken: cancellationToken);
+        return deleteResponse.Value.Results.Count(r => r.Succeeded);
     }
 
     #region Private Methods

@@ -125,11 +125,15 @@ public class AnalysisContextBuilder : IAnalysisContextBuilder
         sb.AppendLine(currentWorkingDocument);
         sb.AppendLine();
 
-        // Conversation history (respect max messages limit)
+        // Conversation history (respect max messages limit).
+        // RB-T028-01: Use TakeLast to preserve caller-provided chronological order
+        // (history is supplied oldest-first per ChatHistoryManager.GetHistoryAsync and
+        // AnalysisOrchestrationService append order). The prior
+        // OrderByDescending(Timestamp).Take(N).Reverse() chain was non-deterministic
+        // when Timestamp ticks collided (burst chat / streaming) — dropping messages
+        // and inverting pairs.
         var messagesToInclude = history
-            .OrderByDescending(m => m.Timestamp)
-            .Take(_options.MaxChatHistoryMessages)
-            .Reverse()
+            .TakeLast(_options.MaxChatHistoryMessages)
             .ToArray();
 
         if (messagesToInclude.Length > 0)
@@ -207,11 +211,15 @@ public class AnalysisContextBuilder : IAnalysisContextBuilder
             sb.AppendLine();
         }
 
-        // Conversation history (respect max messages limit)
+        // Conversation history (respect max messages limit).
+        // RB-T028-01: Use TakeLast to preserve caller-provided chronological order
+        // (history is supplied oldest-first per ChatHistoryManager.GetHistoryAsync and
+        // AnalysisOrchestrationService append order). The prior
+        // OrderByDescending(Timestamp).Take(N).Reverse() chain was non-deterministic
+        // when Timestamp ticks collided (burst chat / streaming) — dropping messages
+        // and inverting pairs.
         var messagesToInclude = history
-            .OrderByDescending(m => m.Timestamp)
-            .Take(_options.MaxChatHistoryMessages)
-            .Reverse()
+            .TakeLast(_options.MaxChatHistoryMessages)
             .ToArray();
 
         if (messagesToInclude.Length > 0)

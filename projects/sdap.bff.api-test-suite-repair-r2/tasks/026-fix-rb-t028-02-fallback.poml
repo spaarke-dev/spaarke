@@ -1,0 +1,137 @@
+<task id="026" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P2.W1 — Fix RB-T028-02 (FALLBACK): Insights Layer 2 outcome-extraction — runs ONLY if task 012 returned "we-take-the-bug"</title>
+    <phase>Phase 2</phase>
+    <status>deferred</status>
+    <deferred-date>2026-06-01</deferred-date>
+    <deferred-reason>Subsumed by task 012 path-b — RB-T028-02 production fix was applied at Phase 1 task 012 directly (in src/server/api/Sprk.Bff.Api/Services/Ai/CitationVerification/GroundingVerifier.cs); the conditional Phase 2 fallback this task was designed for is no longer needed. RB-T028-02 ledger entry transitioned to `repaired` at task 012 close (2026-06-01). See decisions/D-07-insights-layer2-resolution.md for the full rationale.</deferred-reason>
+    <estimated-effort>0 hours (if task 012 took outcome (a) or (c)); 3-6 hours if outcome (b)</estimated-effort>
+    <dependencies>012,013</dependencies>
+    <blocks>029</blocks>
+    <tags>phase-2, bff-api, real-bug-ledger, medium-severity, production-fix, ai, conditional, sibling-coordination</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production code change in `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/Layer2OutcomeExtractor.cs` (if outcome b); affects sibling-owned domain — security/correctness sensitive; FULL rigor + Step 9.5 mandatory</rigor-reason>
+    <parallel-group>P2-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Conditional execution — usually SKIPPED. If runs: targets distinct file (`Services/Ai/Insights/Extraction/Layer2OutcomeExtractor.cs`) vs other Wave 1 peers. Parallel-safe.</parallel-reason>
+    <production-fix-per-ledger>true</production-fix-per-ledger>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    🚨 **CONDITIONAL TASK** — runs ONLY if Phase 1 task 012 (`012-resolve-insights-hold.poml`) returned outcome **(b) "we take the bug"** (per FR-05 sub-options in spec.md). For outcomes (a) sibling-takes-bug or (c) archived-pending-sibling-engagement, this task closes immediately with status `skipped-not-applicable` and a Notes entry pointing to `decisions/D-07-insights-layer2-resolution.md`.
+
+    **Step 0 gate**: read `projects/sdap.bff.api-test-suite-repair-r2/decisions/D-07-insights-layer2-resolution.md`. Confirm chosen outcome:
+    - **(a) sibling-takes-bug** → task closes; RB-T028-02 already `transferred-to-sibling` in r1 ledger via task 012. STOP.
+    - **(c) archived-pending-sibling-engagement** → task closes; RB-T028-02 already archived via task 012. STOP.
+    - **(b) we-take-the-bug** → proceed to Step 1.
+
+    If outcome (b): close real-bug-ledger entry **RB-T028-02** by fixing the Insights Layer 2 outcome-extraction LLM-mock fixture drift. 3 tests in the `Layer2OutcomeExtractionTests` class are Skip'd. The production file is `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/Layer2OutcomeExtractor.cs` (verify exact path) — owned by `ai-spaarke-insights-engine-r1` sibling project. Per the ledger §667: failures assert document-text round-trip through mock LLM — fixture-text drift, not production correctness issue.
+
+    Per NFR-04 cite `RB-T028-02` + resolution mode `repaired`. Sibling-coordination: notify `ai-spaarke-insights-engine-r1` owner BEFORE editing (D-07 should already have recorded the agreement to take the bug).
+  </prompt>
+
+  <role>Backend AI agent — conditional fallback executor for Insights Layer 2 outcome extraction; runs only on outcome (b).</role>
+
+  <goal>
+    EITHER closed immediately as `skipped-not-applicable` (outcomes a, c) OR 3 tests in `Layer2OutcomeExtractionTests` flip Skip → Pass + RB-T028-02 transitions to `repaired`.
+  </goal>
+
+  <inputs>
+    <file purpose="gate-decision">projects/sdap.bff.api-test-suite-repair-r2/decisions/D-07-insights-layer2-resolution.md</file>
+    <file purpose="target-production-file">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/Layer2OutcomeExtractor.cs (verify path; sibling-owned)</file>
+    <file purpose="target-test-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Layer2/Layer2OutcomeExtractionTests.cs (verify path)</file>
+    <file purpose="ledger-entry">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (RB-T028-02 section, lines 651-727)</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    <file purpose="predecessor-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">Insights Layer 2 extraction is part of in-process AI Insights surface per refined ADR-013</constraint>
+    <constraint source="ADR-010">DI minimalism — Layer 2 extractor uses existing observation emitter pipeline; no new DI registrations</constraint>
+    <constraint source="NFR-01">Production code IS in scope (r2 inverts r1); tests modified ONLY for Skip→Pass</constraint>
+    <constraint source="NFR-02"><50% line replacement per file (Layer2OutcomeExtractor is sibling-owned — likely small surgical fix)</constraint>
+    <constraint source="NFR-04">Commit message cites `RB-T028-02` + resolution mode `repaired` (or `skipped-not-applicable` if no code change)</constraint>
+    <constraint source="D-02">One production fix = one ledger entry closed</constraint>
+    <constraint source="FR-05 (spec.md)">3 outcomes a/b/c; task only runs on (b)</constraint>
+    <constraint source="design.md §5.3 Phase 1">RB-T028-02 resolution determined in Phase 1 task 012; this task is the conditional fallback</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per the ledger §651-727: RB-T028-02 was placed on HOLD by Wave 0 task 008 of the predecessor (r1) pending sibling project sign-off (`ai-spaarke-insights-engine-r1`). r2 Phase 1 task 012 resolves the HOLD via one of three outcomes (FR-05):
+      - **(a)** sibling project takes the bug — 3 tests transferred; T028-02 closed with cross-reference
+      - **(b)** r2 takes the bug — production fix here (this fallback task runs)
+      - **(c)** archived-pending-sibling-engagement (1-week timeout — sibling unresponsive)
+
+      Per ledger §667: failures assert document-text round-trip through mock LLM — this is fixture-text drift, NOT a production correctness issue. The documented zero-misroute invariant for Layer 2 is observed end-to-end via sibling integration tests. So if r2 takes the bug, the fix is likely surgical (fixture alignment or extractor projection adjustment) rather than a structural change.
+
+      Per `notes/lessons-learned.md` r1 sibling-coordination pattern: notify the sibling owner BEFORE editing — D-07 should have recorded the agreement. If sibling has not signed off on outcome (b), this task BLOCKS until they do.
+    </background>
+    <dependencies>
+      <dependency task="012" status="required-outcome-b">Phase 1 task 012 returned outcome (b); D-07 documents this</dependency>
+      <dependency task="013" status="required">Phase 1 exit triple-run validated</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/Layer2OutcomeExtractor.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Layer2/Layer2OutcomeExtractionTests.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">🚨 **GATE STEP** — read `projects/sdap.bff.api-test-suite-repair-r2/decisions/D-07-insights-layer2-resolution.md`. Confirm chosen outcome:
+      - (a) or (c): close task immediately as `skipped-not-applicable`; update `current-task.md` + RB-T028-02 Notes pointing to D-07. STOP.
+      - (b): proceed to Step 2.</step>
+    <step order="2">Verify sibling owner sign-off on r2 taking the bug. If absent: 🔔 **Human Input Required** — sibling owner ACK on (b); BLOCK task until received.</step>
+    <step order="3">Verify production file path: `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/Layer2OutcomeExtractor.cs` (or path-equivalent per ledger §658). Read the file + the `outcome-extraction@v1` prompt + projection chain.</step>
+    <step order="4">Read the test file `Layer2OutcomeExtractionTests.cs` + the 3 Skip'd tests. Examine the TRX failure messages (excerpted in ledger §667). Identify whether the drift is in: (a) fixture text, (b) prompt template, (c) projection logic, or (d) `IObservationEmitter` chain.</step>
+    <step order="5">Apply the surgical fix targeting the identified drift point. Coordinate with sibling owner if the fix touches sibling-internal contracts.</step>
+    <step order="6">Remove `Skip = "..."` + per-test traits on the 3 affected tests.</step>
+    <step order="7">Build: `dotnet build src/server/api/Sprk.Bff.Api/`. Verify 0 errors.</step>
+    <step order="8">Run targeted tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Layer2OutcomeExtraction"`. Confirm 3 tests pass.</step>
+    <step order="9">Step 9.5 quality gates: `code-review` + `adr-check`. Document sibling-coordination evidence in the PR description.</step>
+    <step order="10">Update RB-T028-02 ledger: Status → `repaired` (if outcome b executed); cross-reference D-07 + sibling owner sign-off. Commit: `fix(ai/insights): align Layer 2 outcome-extraction fixture drift (RB-T028-02; repaired)`. Update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">D-07 decision + ledger entry + Layer2OutcomeExtractor.cs + test file</tool>
+    <tool name="Edit">[Conditional] Production fix + test Skip removal</tool>
+    <tool name="Bash">`dotnet build` + targeted `dotnet test`</tool>
+    <tool name="Skill">Step 9.5 quality gate via `code-review` + `adr-check` skills (ADR-010 / ADR-013)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">[Conditional — only if outcome b] src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/Layer2OutcomeExtractor.cs</output>
+    <output type="test">[Conditional] tests/unit/.../Layer2OutcomeExtractionTests.cs (3 Skip→Pass)</output>
+    <output type="ledger">RB-T028-02 status: `repaired` (outcome b) OR `skipped-not-applicable` (outcomes a, c — already handled by task 012)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Step 1 gate executed BEFORE any code change; D-07 outcome recorded in `current-task.md`</criterion>
+    <criterion testable="true">If outcome (a)/(c): task closes as `skipped-not-applicable`; NO code change; RB-T028-02 status unchanged from task 012 outcome</criterion>
+    <criterion testable="true">If outcome (b): sibling owner ACK on r2-takes-the-bug recorded BEFORE production edit</criterion>
+    <criterion testable="true">If outcome (b): 3 Layer 2 outcome-extraction tests pass (no Skip)</criterion>
+    <criterion testable="true">If outcome (b): RB-T028-02 ledger Status transitions to `repaired`</criterion>
+    <criterion testable="true">Commit message (if code changed) includes `RB-T028-02` + resolution mode `repaired`</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <approach>Step 1 gate determines whether task runs at all. Default expectation: outcome (a) or (c) — task closes as no-op. Outcome (b) is the fallback execution path.</approach>
+  </execution>
+</task>

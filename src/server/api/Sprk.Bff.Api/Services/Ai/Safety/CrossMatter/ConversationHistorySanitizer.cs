@@ -59,19 +59,61 @@ public sealed class ConversationHistorySanitizer : IConversationHistorySanitizer
         var sanitized = new List<ChatMessage>(history.Count);
         var strippedCount = 0;
 
+        // RB-T044-01 fix (2026-06-01): the previous implementation inverted the strip window,
+        // causing previous-matter retrieval content to leak into new-matter LLM context.
+        //
+        // The corrected contract distinguishes two operating modes:
+        //
+        //   Matter-pivot mode — `history[fromTurnIndex]` is a matter marker (per
+        //   MatterContextDetector.ExtractMatterId). Messages BEFORE fromTurnIndex pass through
+        //   unchanged; from fromTurnIndex onward, retrieval messages are stripped UNTIL a
+        //   DIFFERENT matter marker is encountered (signalling entry into the new-matter zone),
+        //   after which messages pass through unchanged.
+        //
+        //   Legacy mode — `history[fromTurnIndex]` is not a matter marker (caller invoked the
+        //   sanitizer directly with an arbitrary window endpoint, no matter pivot involved).
+        //   Retrieval messages where i <= fromTurnIndex are stripped; messages where
+        //   i > fromTurnIndex pass through unchanged. Preserves the historical
+        //   Sanitizer_StripsRetrievalBlocks_PreservesConclusions contract.
+        var pivotMatterId = GetPivotMatterId(history, fromTurnIndex);
+        var inMatterPivotMode = pivotMatterId is not null;
+        var hasExitedOldMatterZone = false;
+
         for (var i = 0; i < history.Count; i++)
         {
             var message = history[i];
 
-            // Messages beyond the pivot turn index are passed through unchanged —
-            // they belong to the new matter context that has not yet generated content.
-            if (i > fromTurnIndex)
+            bool inStripWindow;
+            if (inMatterPivotMode)
+            {
+                // Detect transition out of the old-matter zone: a System-role message carrying
+                // a DIFFERENT matter id terminates stripping for the remainder of the history.
+                if (!hasExitedOldMatterZone
+                    && i > fromTurnIndex
+                    && message.Role == ChatMessageRole.System)
+                {
+                    var nextMarker = MatterContextDetector.ExtractMatterId(message.Content);
+                    if (nextMarker is not null
+                        && !string.Equals(nextMarker, pivotMatterId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        hasExitedOldMatterZone = true;
+                    }
+                }
+
+                inStripWindow = i >= fromTurnIndex && !hasExitedOldMatterZone;
+            }
+            else
+            {
+                inStripWindow = i <= fromTurnIndex;
+            }
+
+            if (!inStripWindow)
             {
                 sanitized.Add(message);
                 continue;
             }
 
-            // Within the pivot window: check whether this is a retrieval result message.
+            // Within the strip window: check whether this is a retrieval result message.
             if (IsRetrievalMessage(message))
             {
                 // ADR-015: log only the message identifier and sequence number, never the content.
@@ -84,7 +126,8 @@ public sealed class ConversationHistorySanitizer : IConversationHistorySanitizer
             }
             else
             {
-                // User messages and AI assistant conclusions are always retained.
+                // User messages, AI assistant conclusions, non-retrieval System messages
+                // (including matter markers themselves) are always retained.
                 sanitized.Add(message);
             }
         }
@@ -109,4 +152,23 @@ public sealed class ConversationHistorySanitizer : IConversationHistorySanitizer
     private static bool IsRetrievalMessage(ChatMessage message)
         => message.Role == ChatMessageRole.System
            && message.Content.StartsWith(RetrievalContentMarker, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Returns the matter id at <paramref name="fromTurnIndex"/> if that message is a System-role
+    /// matter marker (per <see cref="MatterContextDetector.ExtractMatterId"/>); otherwise
+    /// <c>null</c>. Indicates whether the caller is invoking the sanitizer in matter-pivot mode
+    /// (non-null) or in legacy single-window mode (null).
+    /// </summary>
+    private static string? GetPivotMatterId(IReadOnlyList<ChatMessage> history, int fromTurnIndex)
+    {
+        if (fromTurnIndex < 0 || fromTurnIndex >= history.Count)
+        {
+            return null;
+        }
+
+        var anchor = history[fromTurnIndex];
+        return anchor.Role == ChatMessageRole.System
+            ? MatterContextDetector.ExtractMatterId(anchor.Content)
+            : null;
+    }
 }

@@ -1,0 +1,123 @@
+<task id="031" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P3 — Fix RB-T034-01: AgentConfigurationService.GetExposedPlaybookIdsAsync honor CancellationToken</title>
+    <phase>Phase 3: LOW Severity + Integration Stability</phase>
+    <status>not-started</status>
+    <estimated-effort>30-60 minutes</estimated-effort>
+    <dependencies>029</dependencies>
+    <blocks>038</blocks>
+    <tags>phase-3, bff-api, real-bug-ledger, low-severity, production-fix, cancellation-token</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production code modification in src/server/api/Sprk.Bff.Api/Api/Agent/; per task-execute rigor decision tree FULL rigor required for .cs changes (code-review + adr-check at Step 9.5).</rigor-reason>
+    <parallel-group>P3-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <production-fix-per-ledger>true</production-fix-per-ledger>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Close ledger entry RB-T034-01 by repairing `AgentConfigurationService.GetExposedPlaybookIdsAsync` in
+    `src/server/api/Sprk.Bff.Api/Api/Agent/AgentConfigurationService.cs` to honor the `CancellationToken` parameter.
+
+    Production fix per ledger Recommended Fix section: add `cancellationToken.ThrowIfCancellationRequested();` as the FIRST statement
+    inside `GetExposedPlaybookIdsAsync` (line ~47). Defensively apply the same to the 3 sibling public async methods
+    (`IsCapabilityEnabledAsync`, `IsRolePermittedAsync`, `InvalidateCacheAsync`) since they share the gap — but the asserting test
+    only exercises `GetExposedPlaybookIdsAsync`.
+
+    Test impact: 1 Skip'd test (`AgentConfigurationServiceTests.GetExposedPlaybookIdsAsync_RespectsCancellationToken`) flips Skip -> Pass.
+    Per NFR-04: commit message MUST cite "RB-T034-01" + resolution mode `repaired`.
+  </prompt>
+
+  <role>BFF production-fix engineer closing a LOW-severity real-bug ledger entry under repair-not-rewrite discipline.</role>
+
+  <goal>
+    `src/server/api/Sprk.Bff.Api/Api/Agent/AgentConfigurationService.cs` calls `cancellationToken.ThrowIfCancellationRequested()` at the top of
+    `GetExposedPlaybookIdsAsync` (and the 3 sibling async public methods defensively). 1 Skip'd test in
+    `tests/unit/Sprk.Bff.Api.Tests/Api/Agent/AgentConfigurationServiceTests.cs` has its `Skip = "..."` removed and passes.
+    Ledger entry RB-T034-01 row updated to `repaired`.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="r1-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file purpose="production-target">src/server/api/Sprk.Bff.Api/Api/Agent/AgentConfigurationService.cs</file>
+    <file purpose="unit-tests">tests/unit/Sprk.Bff.Api.Tests/Api/Agent/AgentConfigurationServiceTests.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API + Workers — service signature unchanged; canonical .NET async cancellation pattern applied</constraint>
+    <constraint source="NFR-01">Production code IS in scope (r2); tests modified ONLY for Skip→Pass transitions</constraint>
+    <constraint source="NFR-02">&lt;50% line replacement per file; this is a 1-line addition × 1-4 methods</constraint>
+    <constraint source="NFR-04">Commit cites ledger entry ID + resolution mode</constraint>
+    <constraint source="D-02">One fix = one ledger entry closed</constraint>
+    <constraint source="D-05">Real-bug ledger source of truth; transition RB-T034-01 → `repaired`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per r1 ledger entry RB-T034-01 (filed 2026-05-31, fix-by 2026-07-31): the cancellation contract is unobserved in live traffic (M365 Copilot agent endpoint passes `CancellationToken.None`); the unit test surfaces the gap because `MemoryDistributedCache` (and Redis fast-path) does not raise `OperationCanceledException` synchronously on pre-cancelled tokens.
+
+      Recommended production fix is a single-line addition; the defensive extension to 3 sibling methods is good-citizen even though no test asserts them today. RB-T070-01 covers the same anti-pattern in `AgentConversationService` (task 035) — applying the same fix discipline.
+    </background>
+    <dependencies>
+      <dependency task="029" status="must-be-complete">Phase 2 exit triple-run validation (zero failures) before Phase 3 starts</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Api/Agent/AgentConfigurationService.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Api/Agent/AgentConfigurationServiceTests.cs</file>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Load r1 ledger entry RB-T034-01 (lines ~120-179 of `real-bug-ledger.md`) for the documented bug + recommended fix.</step>
+    <step order="2">Read `src/server/api/Sprk.Bff.Api/Api/Agent/AgentConfigurationService.cs`. Locate `GetExposedPlaybookIdsAsync` (~line 44) and the 3 sibling methods (`IsCapabilityEnabledAsync`, `IsRolePermittedAsync`, `InvalidateCacheAsync`).</step>
+    <step order="3">Add `cancellationToken.ThrowIfCancellationRequested();` as the FIRST statement of `GetExposedPlaybookIdsAsync`. Defensively add the same to the 3 sibling public async methods.</step>
+    <step order="4">Build BFF: `dotnet build src/server/api/Sprk.Bff.Api/`. Must succeed with zero new warnings.</step>
+    <step order="5">Edit `tests/unit/Sprk.Bff.Api.Tests/Api/Agent/AgentConfigurationServiceTests.cs`: remove `Skip = "..."` on `GetExposedPlaybookIdsAsync_RespectsCancellationToken` (~line 444); remove per-test `[Trait("status","real-bug-pending-fix")]` override.</step>
+    <step order="6">Run targeted tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~AgentConfigurationServiceTests"`. Re-enabled test must pass.</step>
+    <step order="7">Update `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` RB-T034-01 row: status → `repaired`, add fix-commit SHA placeholder + today's date.</step>
+    <step order="8">Commit: `fix(bff-api): honor CancellationToken in AgentConfigurationService (RB-T034-01; repaired)` — message cites ledger entry ID + resolution mode per NFR-04.</step>
+    <step order="9">Update `projects/sdap.bff.api-test-suite-repair-r2/current-task.md` with completion + commit SHA.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">AgentConfigurationService.cs + test file + ledger entry</tool>
+    <tool name="Edit">Production file (1-line additions) + test file (Skip removal) + ledger row</tool>
+    <tool name="Bash">`dotnet build`, `dotnet test --filter`, `git status`, `git commit`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Agent/AgentConfigurationService.cs (4 ThrowIfCancellationRequested calls added)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Api/Agent/AgentConfigurationServiceTests.cs (1 test un-Skip'd)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (RB-T034-01 row status → `repaired`)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AgentConfigurationService.cs builds successfully under `dotnet build src/server/api/Sprk.Bff.Api/` with zero new warnings</criterion>
+    <criterion testable="true">`GetExposedPlaybookIdsAsync` calls `cancellationToken.ThrowIfCancellationRequested()` as its first statement</criterion>
+    <criterion testable="true">3 sibling async public methods also call `cancellationToken.ThrowIfCancellationRequested()` defensively</criterion>
+    <criterion testable="true">`GetExposedPlaybookIdsAsync_RespectsCancellationToken` test passes when Skip removed</criterion>
+    <criterion testable="true">Commit message contains "RB-T034-01" + word "repaired" (NFR-04)</criterion>
+    <criterion testable="true">Ledger entry RB-T034-01 row status updated to `repaired`</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Invoke `task-execute` skill with this POML. Loads project CLAUDE.md + r1 ledger + ADR-001 + bff-extensions.md per knowledge files. Step 9.5 quality gate runs code-review + adr-check (FULL rigor).
+  </execution>
+</task>

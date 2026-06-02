@@ -37,6 +37,7 @@ This directory contains AI-optimized versions of Architecture Decision Records. 
 | ADR-027 | Subscription Isolation & Dataverse Solution Mgmt | Managed solutions for prod; env-separated subscriptions | Accepted |
 | ADR-028 | Spaarke Auth Architecture (v2) | Function-based contract; managed identity for outbound; named API key schemes; HMAC webhooks; audit middleware | Accepted (2026-05-19) |
 | ADR-029 | BFF Publish Hygiene | Framework-dependent linux-x64, sourcemap exclusion, transitive CVE override pattern, size baseline ratchet | Accepted (2026-05-26) |
+| ADR-030 | BFF Null-Object Kill-Switch Pattern | Conditional service consumed by unconditional endpoint → Null-Object in else-branch (P1/P2/P3); `FeatureDisabledException` → 503 ProblemDetails | Accepted (2026-06-01) |
 
 ---
 

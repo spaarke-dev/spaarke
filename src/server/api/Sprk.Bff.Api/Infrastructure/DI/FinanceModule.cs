@@ -67,6 +67,14 @@ public static class FinanceModule
         {
             services.AddScoped<IInvoiceSearchService, InvoiceSearchService>();
         }
+        else
+        {
+            // L2 — NullInvoiceSearchService (P3 Fail-Fast). Task 011 Phase 1b Tier 2, D-09 §2 L2.
+            // FinanceEndpoints.SearchInvoices consumes IInvoiceSearchService unconditionally;
+            // registering Null-Object here keeps DI param-inference green when
+            // DocumentIntelligence:Enabled=false. Endpoint catch converts to 503 ProblemDetails.
+            services.AddScoped<IInvoiceSearchService, NullInvoiceSearchService>();
+        }
 
         // ============================================================================
         // Spend Snapshot Service (deterministic financial aggregation, no AI)

@@ -70,9 +70,12 @@ public static partial class CitationExtractor
 
     /// <summary>
     /// Federal Regulation (CFR): "47 C.F.R. § 73.3999"  |  "21 CFR Part 312"
+    /// Inter-letter periods are optional to honor the documented no-period form (RB-T044-05):
+    /// the class XML doc (line 15) lists `21 CFR Part 312` as a supported input, but the original
+    /// regex required the period form `C.F.R.` so the no-period form was never matched.
     /// </summary>
     [GeneratedRegex(
-        @"\b(?<title>\d{1,3})\s+C\.F\.R\.?(?:\s+(?:Part|§)\s*)(?<part>\d[\d\-\.]*)",
+        @"\b(?<title>\d{1,3})\s+C\.?F\.?R\.?(?:\s+(?:Part|§)\s*)(?<part>\d[\d\-\.]*)",
         RegexOptions.Compiled | RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase,
         matchTimeoutMilliseconds: 500)]
     private static partial Regex RegulationPattern();
@@ -162,32 +165,46 @@ public static partial class CitationExtractor
 
     private static string NormalizeCaseLaw(Match m)
     {
-        // Canonical form: "{volume} {reporter} {page}" (strips year/court parenthetical)
+        // Canonical form: "{volume} {reporter} {page}" (strips year/court parenthetical).
+        // The reporter's trailing period is part of the canonical abbreviation (e.g., "U.S.") and MUST be preserved
+        // (RB-T044-02: prior TrimEnd('.') over-stripped reporter periods, breaking verification provider lookups).
         var volume = m.Groups["volume"].Value.Trim();
-        var reporter = m.Groups["reporter"].Value.Trim().TrimEnd('.');
+        var reporter = m.Groups["reporter"].Value.Trim();
         var page = m.Groups["page"].Value.Trim();
         return $"{volume} {reporter} {page}";
     }
 
     private static string NormalizeStatute(Match m)
     {
-        // Canonical form: "{title} U.S.C. § {section}"
+        // Canonical form: "{title} U.S.C. § {section}" — the canonical key is the bare section number,
+        // subsection parentheticals MUST be stripped (RB-T044-03: prior verbatim concatenation produced
+        // non-canonical keys like "17 U.S.C. § 512(c)(1)(A)" instead of the documented "17 U.S.C. § 512",
+        // breaking downstream verification provider lookups + UI dedup for any statute cited with a subsection).
+        // The regex capture `(?<section>\d[\d\-\.]*[a-z]?(?:\([a-z0-9]+\))*)` deliberately INCLUDES the subsection
+        // parenthetical in the raw match so the surface RawText is faithful; canonicalization happens here.
         var title = m.Groups["title"].Value.Trim();
         var section = m.Groups["section"].Value.Trim();
+        var parenStart = section.IndexOf('(');
+        if (parenStart >= 0) section = section[..parenStart];
         return $"{title} U.S.C. § {section}";
     }
 
     private static string NormalizePatent(Match m)
     {
         // US patents: strip commas and spaces → "US9123456"
+        // (US capture group is digits-only via `(?<us>[\d,]{5,15})`, so the "US" literal is correct here.)
         if (m.Groups["us"].Success)
             return "US" + m.Groups["us"].Value.Replace(",", "").Replace(" ", "");
 
+        // EP / WO capture groups ALREADY include the country-code prefix in the matched value
+        // (see PatentPattern: `(?<ep>EP\s*[\d\s]{7,12})` and `(?<wo>WO\s*\d{4}[/\-]\d{4,8})`).
+        // Do NOT prepend "EP" / "WO" again — that produced the documented `EPEP3456789` /
+        // `WOWO2021/123456` corruption (RB-T044-04: NormalizePatent EP/WO double-prefix).
         if (m.Groups["ep"].Success)
-            return "EP" + Regex.Replace(m.Groups["ep"].Value, @"[^\dA-Za-z]", "");
+            return Regex.Replace(m.Groups["ep"].Value, @"[^\dA-Za-z]", "");
 
         if (m.Groups["wo"].Success)
-            return "WO" + Regex.Replace(m.Groups["wo"].Value, @"[^\dA-Za-z/]", "");
+            return Regex.Replace(m.Groups["wo"].Value, @"[^\dA-Za-z/]", "");
 
         return m.Value.Trim();
     }

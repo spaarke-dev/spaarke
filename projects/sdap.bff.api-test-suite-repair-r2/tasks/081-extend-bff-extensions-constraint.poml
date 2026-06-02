@@ -1,0 +1,153 @@
+<task id="081" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P5.2 — CONDITIONAL: extend `.claude/constraints/bff-extensions.md` § F with unconditional-service-registration rule (main-session-only)</title>
+    <phase>Phase 5</phase>
+    <status>not-started</status>
+    <estimated-effort>45-90 minutes</estimated-effort>
+    <dependencies>011,080</dependencies>
+    <blocks>082,084</blocks>
+    <tags>phase-5, governance, anti-drift, constraint, main-session-only</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Binding constraint change in `.claude/constraints/bff-extensions.md` — must be precise; also touches `.claude/` which mandates main-session. Step 9.5 code-review + adr-check mandatory per CLAUDE.md §8 (binding rule addition; `.claude/` path; tags include `governance`).</rigor-reason>
+    <parallel-group>P5-main-seq</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ — main-session-only per CLAUDE.md §3 sub-agent write boundary</parallel-reason>
+    <main-session-only>true</main-session-only>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    **CONDITIONAL TASK** — only runs if Phase 1 RB-T028 root-cause analysis (task 011 outcome) warrants a NEW binding rule. Decision input: did the cluster fix root-cause point to a generalizable rule about service-registration / endpoint-mapping alignment?
+
+    If YES (Phase 1 task 011 found a binding-rule-worthy pattern): extend `.claude/constraints/bff-extensions.md` § F (added by r1) with a NEW bullet/section codifying the rule. Suggested rule text per FR-08 + spec.md: **"When an endpoint maps unconditionally (registered without feature-flag check), every service the endpoint depends on MUST also be registered unconditionally. Conditional registration of a transitively-required service while the endpoint is unconditional produces metadata-abort errors at request time."**
+
+    If NO (Phase 1 didn't surface a new generalizable rule; the cluster fix was case-specific): document the "no extension warranted" decision in `decisions/D-08-bff-extensions-no-extension.md` and skip the constraint edit.
+
+    🚨 CRITICAL — task-execute MUST refuse Agent delegation for this task. Main session edits `.claude/constraints/bff-extensions.md` directly via the Edit tool. Per CLAUDE.md §3, sub-agents launched via Agent tool CANNOT write to `.claude/` paths; attempting delegation will fail with "Edit denied on `.claude/...`". This is the boundary working correctly. The main session is the ONLY agent permitted to perform this edit. The pattern is established by r1 task 080.
+
+    Per CLAUDE.md §10 (BFF Hygiene), `bff-extensions.md` is the binding pre-merge checklist; any change here affects every BFF-touching task afterward. Precision required.
+  </prompt>
+
+  <role>Main-session AI agent extending the BFF-extensions constraint document with a new binding rule (or recording why no rule is warranted).</role>
+
+  <goal>
+    Conditional outcome based on Phase 1 task 011 findings:
+
+    **If extension warranted**:
+    - `.claude/constraints/bff-extensions.md` § F gains a NEW bullet/sub-section codifying the unconditional-service-registration rule
+    - Cross-reference to RB-T028-03/04/05/06 cluster + ADR-010 (DI minimalism) + ADR-018 (kill switches)
+    - Existing § F + all prior sections PRESERVED unchanged (additive edit only)
+    - Decision record `decisions/D-08-bff-extensions-extension-applied.md` documenting WHY
+
+    **If extension NOT warranted**:
+    - `.claude/constraints/bff-extensions.md` UNCHANGED
+    - Decision record `decisions/D-08-bff-extensions-no-extension.md` documenting WHY (case-specific cluster fix; no generalizable rule)
+    - Cross-reference to RB-T028 cluster resolution
+
+    Either path satisfies FR-08 (per spec.md: "either extension exists OR decision record explains why not").
+  </goal>
+
+  <inputs>
+    <file purpose="target-constraint-file">.claude/constraints/bff-extensions.md</file>
+    <file purpose="phase-1-cluster-fix-outcome">projects/sdap.bff.api-test-suite-repair-r2/tasks/011-fix-rb-t028-cluster.poml (read Status/completion notes)</file>
+    <file purpose="phase-1-decision-record">projects/sdap.bff.api-test-suite-repair-r2/decisions/ (look for D-07 + earlier T028-related decisions)</file>
+    <file purpose="r1-bff-extensions-task">projects/sdap-bff.api-test-suite-repair/tasks/080-update-bff-extensions-constraint.poml (pattern reference for main-session-only `.claude/` edit)</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-08">`.claude/constraints/bff-extensions.md` § F extended IF Phase 5 finds the unconditional-service-registration rule warranted; otherwise decision record explains why not</constraint>
+    <constraint source="CLAUDE.md §3">Sub-agent write boundary: sub-agents CANNOT write to `.claude/` paths. Main session ONLY for this edit.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — `bff-extensions.md` is the binding pre-merge checklist; any change here affects every BFF-touching task afterward</constraint>
+    <constraint source="ADR-010">DI minimalism — new rule (if added) MUST be consistent with ADR-010's minimal-DI principle</constraint>
+    <constraint source="ADR-018">Kill switches — new rule (if added) MUST be consistent with ADR-018's feature-flag handling</constraint>
+    <constraint source="NFR-01">No production code changes (`.claude/constraints/` is binding governance doc, not `src/`)</constraint>
+    <constraint source="D-04">Phase 4 outputs are pilot-grade; Phase 5 governance updates capture findings, NOT full remediation</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/tasks/080-update-bff-extensions-constraint.poml</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §5.5 + FR-08, this task is CONDITIONAL on Phase 1's root-cause finding. The RB-T028-03/04/05/06 cluster shared one root cause: services registered conditionally (behind feature flags), but the endpoints that depended on them mapped unconditionally. Result: at request time, the endpoint metadata builder aborts because the service can't be resolved.
+
+      The question for r2 Phase 5 is: does this root cause generalize to a binding pre-merge check? If YES, codify in `bff-extensions.md` § F so every future BFF-touching task is required to verify alignment. If NO (the cluster was an isolated case where 4 services shared one feature flag), document the decision and don't add rule weight.
+
+      Per CLAUDE.md §3, sub-agents CANNOT write to `.claude/` paths. This task is the second of r1+r2's main-session-only pattern (r1 task 080 established the pattern for the original § F addition; this task extends it).
+
+      The decision record path (D-08) captures EITHER outcome: extension applied OR not. This is binding per FR-08: "Acceptance: either extension exists OR decision record explains why not."
+    </background>
+    <dependencies>
+      <dependency task="011" status="not-started">Phase 1 RB-T028 cluster fix — provides root-cause finding</dependency>
+      <dependency task="080" status="not-started">Phase 5 task 080 (procedure doc update) — for cross-reference consistency</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>.claude/constraints/bff-extensions.md</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/decisions/D-08-bff-extensions-{applied|no-extension}.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read `projects/sdap.bff.api-test-suite-repair-r2/tasks/011-fix-rb-t028-cluster.poml` (or task-011's completion-notes) and Phase 1 decision records to determine: did the root-cause analysis surface a generalizable rule?</step>
+    <step order="2">Read `.claude/constraints/bff-extensions.md` in full to understand existing § F structure (added by r1 task 080).</step>
+    <step order="3">Decision: extension warranted? Apply criterion: (a) does the rule prevent a recurring class of bugs (not just the 4-entry T028 cluster); (b) is the rule clearly testable at PR review time; (c) is the rule consistent with ADR-010 + ADR-018?</step>
+    <step order="4a">**If EXTENSION WARRANTED**:
+      (i) Draft new sub-section in § F: bullet text + rationale + cross-reference to RB-T028 cluster + ADR-010 / ADR-018 / r1 lessons-learned.
+      (ii) Apply edit via main-session Edit tool. Verify existing § F + prior sections preserved.
+      (iii) Author `decisions/D-08-bff-extensions-extension-applied.md` documenting WHY + the verbatim new text + cross-references.
+    </step>
+    <step order="4b">**If NO EXTENSION**:
+      (i) Author `decisions/D-08-bff-extensions-no-extension.md` documenting WHY (e.g., cluster was case-specific; rule too narrow to add weight to every PR; existing ADR-010 + ADR-018 sufficient).
+      (ii) Cross-reference to RB-T028 cluster resolution; cite r1 task 011's findings.
+      (iii) `.claude/constraints/bff-extensions.md` UNCHANGED.
+    </step>
+    <step order="5">Step 9.5 — Run `code-review` + `adr-check` (FULL rigor for binding constraint addition). Verify rule consistency with ADR-010 + ADR-018; verify no ambiguity in rule text.</step>
+    <step order="6">Verify `git status` shows ONLY: `.claude/constraints/bff-extensions.md` (if extended) AND `decisions/D-08-*.md` (either path). NO `src/`, NO test, NO other files.</step>
+    <step order="7">Commit message:
+      - If extended: "docs(.claude): extend bff-extensions § F with unconditional-service-registration rule (FR-08; RB-T028 root cause)"
+      - If not: "docs(decisions): D-08 bff-extensions no extension warranted (FR-08; case-specific cluster)"
+    </step>
+    <step order="8">Update `current-task.md` with completion notes citing the decision path taken + new constraint text (if applied) + cross-references to r1's § F structure.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">task 011 outcome, existing constraint file, ADRs</tool>
+    <tool name="Edit">main-session-only — `.claude/constraints/bff-extensions.md` (if extension warranted)</tool>
+    <tool name="Write">`decisions/D-08-*.md` (either path)</tool>
+    <tool name="Skill">code-review (Step 9.5); adr-check (Step 9.5)</tool>
+    <tool name="Bash">`git status` for boundary verification; final commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs-conditional">.claude/constraints/bff-extensions.md (updated IF extension warranted)</output>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/decisions/D-08-bff-extensions-{applied|no-extension}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Decision record `D-08-bff-extensions-*.md` exists documenting the conditional outcome (applied OR no-extension)</criterion>
+    <criterion testable="true">If extension applied: `.claude/constraints/bff-extensions.md` § F shows new sub-section with unconditional-service-registration rule + cross-references to ADR-010, ADR-018, RB-T028 cluster</criterion>
+    <criterion testable="true">If extension applied: existing § F + all prior sections preserved unchanged (verified via diff)</criterion>
+    <criterion testable="true">`git status` shows ONLY `.claude/constraints/bff-extensions.md` (conditional) + `decisions/D-08-*.md` modified</criterion>
+    <criterion testable="true">Edit (if any) performed by main session, NOT delegated to Agent sub-agent — would fail with "Edit denied" per CLAUDE.md §3</criterion>
+    <criterion testable="true">Step 9.5 gates pass: code-review + adr-check (no HIGH findings); rule consistent with ADR-010 + ADR-018</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    🚨 MAIN-SESSION-ONLY. task-execute MUST refuse Agent delegation for this task. Main session executes directly. Pattern reference: `projects/sdap-bff.api-test-suite-repair/tasks/080-update-bff-extensions-constraint.poml` — same boundary handling.
+
+    FULL rigor: Step 9.5 code-review + adr-check required.
+  </execution>
+</task>
