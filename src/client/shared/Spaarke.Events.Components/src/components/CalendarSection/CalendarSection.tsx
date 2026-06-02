@@ -28,20 +28,9 @@
  * @see projects/spaarke-ai-platform-unification-r3/tasks/118-calendar-widget-r11-polish.poml
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  shorthands,
-  Text,
-  Button,
-  CounterBadge,
-} from "@fluentui/react-components";
-import {
-  DismissRegular,
-  Calendar24Regular,
-  ErrorCircle12Filled,
-} from "@fluentui/react-icons";
+import * as React from 'react';
+import { makeStyles, tokens, shorthands, Text, Button, CounterBadge } from '@fluentui/react-components';
+import { DismissRegular, Calendar24Regular, ErrorCircle12Filled } from '@fluentui/react-icons';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -388,24 +377,24 @@ const useStyles = makeStyles({
   // indicator (which sits bottom-right). Single-event days (count === 1)
   // skip the badge entirely (parity rule).
   countBadgeWrapper: {
-    position: "absolute",
-    top: "1px",
-    right: "1px",
-    pointerEvents: "none",
+    position: 'absolute',
+    top: '1px',
+    right: '1px',
+    pointerEvents: 'none',
   },
   // Task 064 (R4 B-8): overdue indicator — small danger-colored dot in the
   // bottom-right of the day cell. Uses Fluent v9 `colorStatusDangerForeground1`
   // (per ADR-021 — no hex). Only renders when IEventDateInfo.overdue === true;
   // absent or false preserves prior behavior (no indicator).
   overdueIndicator: {
-    position: "absolute",
-    bottom: "2px",
-    right: "2px",
+    position: 'absolute',
+    bottom: '2px',
+    right: '2px',
     color: tokens.colorStatusDangerForeground1,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    pointerEvents: "none",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'none',
     // When the day cell uses the dayWithEvents brand background, the
     // status-danger token may not contrast enough. Override to the
     // foreground-on-brand pair so the indicator stays visible.
@@ -600,7 +589,7 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
   // badge, and days without `overdue` skip the indicator.
   const eventDateMap = React.useMemo(() => {
     const map = new Map<string, IEventDateInfo>();
-    eventDates.forEach((info) => {
+    eventDates.forEach(info => {
       map.set(info.date, info);
     });
     return map;
@@ -829,9 +818,7 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
                       remains legible. */}
                   {eventInfo?.overdue === true && (
                     <span
-                      className={`${styles.overdueIndicator} ${
-                        showEventsTint ? styles.overdueIndicatorOnBrand : ""
-                      }`}
+                      className={`${styles.overdueIndicator} ${showEventsTint ? styles.overdueIndicatorOnBrand : ''}`}
                       aria-label="Overdue"
                     >
                       <ErrorCircle12Filled />

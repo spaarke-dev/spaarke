@@ -29,15 +29,15 @@
  *     to control the locateXrm() outcome.
  */
 
-import * as React from "react";
-import { render, screen } from "@testing-library/react";
+import * as React from 'react';
+import { render, screen } from '@testing-library/react';
 
 // Mock @spaarke/ui-components BEFORE importing the widget. The widget imports
 // `getDefaultWorkspaceRenderer` from this module — we substitute a real, in-test
 // slot so the test can register/clear renderers without touching the full
 // library barrel (which pulls in legacy `.js` files that Jest 30 cannot parse
 // in this runtime — documented under R4 task 068 / Jest+React 19 env fix).
-jest.mock("@spaarke/ui-components", () => {
+jest.mock('@spaarke/ui-components', () => {
   let _slot: unknown = null;
   return {
     setDefaultWorkspaceRenderer: (r: unknown) => {
@@ -54,27 +54,24 @@ jest.mock("@spaarke/ui-components", () => {
 // `WorkspaceRenderer` type alias is structural; we re-declare it locally to
 // avoid pulling in the full ui-components type tree (also impacted by the
 // barrel-import issue above).
-import {
-  setDefaultWorkspaceRenderer,
-  clearDefaultWorkspaceRenderer,
-} from "@spaarke/ui-components";
+import { setDefaultWorkspaceRenderer, clearDefaultWorkspaceRenderer } from '@spaarke/ui-components';
 type WorkspaceRenderer = React.ComponentType<unknown>;
 
-import { WorkspaceLayoutWidget } from "../WorkspaceLayoutWidget";
+import { WorkspaceLayoutWidget } from '../WorkspaceLayoutWidget';
 
 // ---------------------------------------------------------------------------
 // Mock Fluent UI (matches WorkspaceWidgetWrapper.test.tsx pattern)
 // ---------------------------------------------------------------------------
 
-jest.mock("@fluentui/react-components", () => ({
+jest.mock('@fluentui/react-components', () => ({
   makeStyles: () => () => ({
-    root: "mock-root",
-    emptyState: "mock-empty-state",
+    root: 'mock-root',
+    emptyState: 'mock-empty-state',
   }),
   tokens: {
-    colorNeutralBackground1: "#fff",
-    colorNeutralForeground3: "#666",
-    spacingVerticalXL: "24px",
+    colorNeutralBackground1: '#fff',
+    colorNeutralForeground3: '#666',
+    spacingVerticalXL: '24px',
   },
   Text: ({ children, size }: { children: React.ReactNode; size?: number }) => (
     <span data-testid="text" data-size={size}>
@@ -87,7 +84,7 @@ jest.mock("@fluentui/react-components", () => ({
 // Xrm fixture helpers — stub locateXrm() targets via window.Xrm
 // ---------------------------------------------------------------------------
 
-const FAKE_USER_ID = "11111111-2222-3333-4444-555555555555";
+const FAKE_USER_ID = '11111111-2222-3333-4444-555555555555';
 
 const makeFakeXrm = () => ({
   WebApi: {
@@ -121,99 +118,84 @@ function uninstallXrm(): void {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("WorkspaceLayoutWidget (C-4 renderer seam)", () => {
+describe('WorkspaceLayoutWidget (C-4 renderer seam)', () => {
   afterEach(() => {
     clearDefaultWorkspaceRenderer();
     uninstallXrm();
     jest.clearAllMocks();
   });
 
-  it("renders the registered default renderer with the same props the pre-refactor widget passed to LegalWorkspaceApp", () => {
+  it('renders the registered default renderer with the same props the pre-refactor widget passed to LegalWorkspaceApp', () => {
     installXrm();
 
-    const StubRenderer = jest
-      .fn()
-      .mockReturnValue(<div data-testid="stub-renderer" />);
+    const StubRenderer = jest.fn().mockReturnValue(<div data-testid="stub-renderer" />);
     setDefaultWorkspaceRenderer(StubRenderer as unknown as WorkspaceRenderer);
 
     render(
-      <WorkspaceLayoutWidget
-        data={{ layoutId: "layout-abc", layoutName: "Test Layout" }}
-        widgetType="workspace"
-      />
+      <WorkspaceLayoutWidget data={{ layoutId: 'layout-abc', layoutName: 'Test Layout' }} widgetType="workspace" />
     );
 
-    expect(screen.getByTestId("workspace-layout-widget-root")).toBeTruthy();
-    expect(screen.getByTestId("stub-renderer")).toBeTruthy();
+    expect(screen.getByTestId('workspace-layout-widget-root')).toBeTruthy();
+    expect(screen.getByTestId('stub-renderer')).toBeTruthy();
 
     // The first call's props must match the pre-refactor LegalWorkspaceApp invocation.
     expect(StubRenderer).toHaveBeenCalledTimes(1);
     const props = StubRenderer.mock.calls[0][0];
-    expect(props.version).toBe("embedded");
+    expect(props.version).toBe('embedded');
     expect(props.allocatedWidth).toBe(0);
     expect(props.allocatedHeight).toBe(0);
     expect(props.embedded).toBe(true);
-    expect(props.initialWorkspaceId).toBe("layout-abc");
+    expect(props.initialWorkspaceId).toBe('layout-abc');
     expect(props.userId).toBe(FAKE_USER_ID);
     // webApi reference is the frame-walked Xrm.WebApi — verify the methods are
     // exposed via structural-equality (not deep equality, which would fail on
     // jest mock-function identity).
-    expect(typeof props.webApi.retrieveMultipleRecords).toBe("function");
+    expect(typeof props.webApi.retrieveMultipleRecords).toBe('function');
   });
 
-  it("uses the injected renderer prop in preference to the registered default", () => {
+  it('uses the injected renderer prop in preference to the registered default', () => {
     installXrm();
 
-    const DefaultRenderer = jest
-      .fn()
-      .mockReturnValue(<div data-testid="default-renderer" />);
-    const InjectedRenderer = jest
-      .fn()
-      .mockReturnValue(<div data-testid="injected-renderer" />);
+    const DefaultRenderer = jest.fn().mockReturnValue(<div data-testid="default-renderer" />);
+    const InjectedRenderer = jest.fn().mockReturnValue(<div data-testid="injected-renderer" />);
 
     setDefaultWorkspaceRenderer(DefaultRenderer as unknown as WorkspaceRenderer);
 
     render(
       <WorkspaceLayoutWidget
-        data={{ layoutId: "layout-xyz", layoutName: "Test Layout" }}
+        data={{ layoutId: 'layout-xyz', layoutName: 'Test Layout' }}
         widgetType="workspace"
         renderer={InjectedRenderer as unknown as WorkspaceRenderer}
       />
     );
 
-    expect(screen.queryByTestId("default-renderer")).toBeNull();
-    expect(screen.getByTestId("injected-renderer")).toBeTruthy();
+    expect(screen.queryByTestId('default-renderer')).toBeNull();
+    expect(screen.getByTestId('injected-renderer')).toBeTruthy();
     expect(InjectedRenderer).toHaveBeenCalledTimes(1);
     expect(DefaultRenderer).not.toHaveBeenCalled();
   });
 
-  it("renders the no-Xrm empty state when Xrm is unavailable (pre-refactor behaviour preserved)", () => {
+  it('renders the no-Xrm empty state when Xrm is unavailable (pre-refactor behaviour preserved)', () => {
     // No installXrm() — leave window.Xrm undefined to exercise the dev-fallback branch.
     const StubRenderer = jest.fn().mockReturnValue(<div />);
     setDefaultWorkspaceRenderer(StubRenderer as unknown as WorkspaceRenderer);
 
     render(
-      <WorkspaceLayoutWidget
-        data={{ layoutId: "layout-abc", layoutName: "Test Layout" }}
-        widgetType="workspace"
-      />
+      <WorkspaceLayoutWidget data={{ layoutId: 'layout-abc', layoutName: 'Test Layout' }} widgetType="workspace" />
     );
 
-    expect(screen.getByTestId("workspace-layout-widget-no-xrm")).toBeTruthy();
+    expect(screen.getByTestId('workspace-layout-widget-no-xrm')).toBeTruthy();
     expect(StubRenderer).not.toHaveBeenCalled();
   });
 
-  it("renders the no-renderer empty state when neither injected nor default renderer is available (graceful degradation)", () => {
+  it('renders the no-renderer empty state when neither injected nor default renderer is available (graceful degradation)', () => {
     installXrm();
     // Do NOT register a default; do NOT inject a renderer.
 
     render(
-      <WorkspaceLayoutWidget
-        data={{ layoutId: "layout-abc", layoutName: "Test Layout" }}
-        widgetType="workspace"
-      />
+      <WorkspaceLayoutWidget data={{ layoutId: 'layout-abc', layoutName: 'Test Layout' }} widgetType="workspace" />
     );
 
-    expect(screen.getByTestId("workspace-layout-widget-no-renderer")).toBeTruthy();
+    expect(screen.getByTestId('workspace-layout-widget-no-renderer')).toBeTruthy();
   });
 });

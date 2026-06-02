@@ -93,7 +93,7 @@ function getXrm(): any | undefined {
   try {
     // SDK boundary: Xrm is injected by Dynamics 365 at runtime onto window/window.parent.
     // Not statically known; documented per `declare const Xrm: any` at module top.
-    if (typeof window !== "undefined" && window.parent && (window.parent as any).Xrm?.WebApi) {
+    if (typeof window !== 'undefined' && window.parent && (window.parent as any).Xrm?.WebApi) {
       return (window.parent as any).Xrm;
     }
   } catch (e) {

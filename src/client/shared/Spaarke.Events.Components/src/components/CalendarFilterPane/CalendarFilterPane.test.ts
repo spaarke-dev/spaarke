@@ -35,7 +35,7 @@ import {
   type CalendarFilterPaneSingle,
   type CalendarFilterPaneRange,
   type CalendarFilterPaneClear,
-} from "./CalendarFilterPane";
+} from './CalendarFilterPane';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Test runner shim — picks up jest/vitest globals at runtime, no-ops otherwise.
@@ -43,11 +43,13 @@ import {
 
 declare const describe: ((name: string, fn: () => void) => void) | undefined;
 declare const it: ((name: string, fn: () => void) => void) | undefined;
-declare const expect: ((value: unknown) => {
-  toBe: (other: unknown) => void;
-  toEqual: (other: unknown) => void;
-  toMatch: (regex: RegExp) => void;
-}) | undefined;
+declare const expect:
+  | ((value: unknown) => {
+      toBe: (other: unknown) => void;
+      toEqual: (other: unknown) => void;
+      toMatch: (regex: RegExp) => void;
+    })
+  | undefined;
 
 // Plain assertion helper (works without a test runner).
 function assert(condition: boolean, message: string): void {
@@ -85,43 +87,31 @@ function testUtcBugFix(): void {
   // serialization gives Feb 3 unconditionally.
   const dateAtMidnight = new Date(2026, 1, 3, 0, 0, 0, 0); // Local Feb 3 00:00
   const isoStr = toIsoDateString(dateAtMidnight);
-  assert(isoStr === "2026-02-03", `Expected "2026-02-03", got "${isoStr}"`);
+  assert(isoStr === '2026-02-03', `Expected "2026-02-03", got "${isoStr}"`);
 
   // Late-evening sensitivity: local Feb 3 23:30 — in positive offsets the
   // UTC equivalent is Feb 4, but local-component serialization stays Feb 3.
   const dateLateEvening = new Date(2026, 1, 3, 23, 30, 0, 0);
   const isoStr2 = toIsoDateString(dateLateEvening);
-  assert(
-    isoStr2 === "2026-02-03",
-    `Late-evening case: expected "2026-02-03", got "${isoStr2}"`
-  );
+  assert(isoStr2 === '2026-02-03', `Late-evening case: expected "2026-02-03", got "${isoStr2}"`);
 
   // Early-morning sensitivity: local Feb 3 01:00 — in negative offsets the
   // UTC equivalent is Feb 2, but local-component serialization stays Feb 3.
   const dateEarlyMorning = new Date(2026, 1, 3, 1, 0, 0, 0);
   const isoStr3 = toIsoDateString(dateEarlyMorning);
-  assert(
-    isoStr3 === "2026-02-03",
-    `Early-morning case: expected "2026-02-03", got "${isoStr3}"`
-  );
+  assert(isoStr3 === '2026-02-03', `Early-morning case: expected "2026-02-03", got "${isoStr3}"`);
 
   // Boundary: Dec 31 23:59 local — UTC may flip to next year, but local
   // serialization preserves 2025-12-31.
   const dateYearEnd = new Date(2025, 11, 31, 23, 59, 0, 0);
   const isoStr4 = toIsoDateString(dateYearEnd);
-  assert(
-    isoStr4 === "2025-12-31",
-    `Year-end case: expected "2025-12-31", got "${isoStr4}"`
-  );
+  assert(isoStr4 === '2025-12-31', `Year-end case: expected "2025-12-31", got "${isoStr4}"`);
 
   // Boundary: Jan 1 00:00 local — UTC may flip to previous year in
   // positive offsets, but local serialization preserves 2026-01-01.
   const dateYearStart = new Date(2026, 0, 1, 0, 0, 0, 0);
   const isoStr5 = toIsoDateString(dateYearStart);
-  assert(
-    isoStr5 === "2026-01-01",
-    `Year-start case: expected "2026-01-01", got "${isoStr5}"`
-  );
+  assert(isoStr5 === '2026-01-01', `Year-start case: expected "2026-01-01", got "${isoStr5}"`);
 
   // Format: zero-padded YYYY-MM-DD
   assert(/^\d{4}-\d{2}-\d{2}$/.test(isoStr), `Format must be YYYY-MM-DD`);
@@ -145,27 +135,27 @@ function testFilterOutputShape(): void {
   // These objects must be assignable to the filter types — proves
   // `dateFields` is required (omitting it would be a type error).
   const singleFilter: CalendarFilterPaneSingle = {
-    type: "single",
-    date: "2026-02-03",
-    dateFields: ["sprk_DueDate"], // REQUIRED — TS would error if omitted
+    type: 'single',
+    date: '2026-02-03',
+    dateFields: ['sprk_DueDate'], // REQUIRED — TS would error if omitted
   };
 
   const rangeFilter: CalendarFilterPaneRange = {
-    type: "range",
-    start: "2026-02-01",
-    end: "2026-02-28",
-    dateFields: ["sprk_DueDate", "CreatedOn"], // REQUIRED
+    type: 'range',
+    start: '2026-02-01',
+    end: '2026-02-28',
+    dateFields: ['sprk_DueDate', 'CreatedOn'], // REQUIRED
   };
 
   const clearFilter: CalendarFilterPaneClear = {
-    type: "clear",
+    type: 'clear',
     // dateFields NOT present on clear filter — by design
   };
 
   // Runtime structural check
-  assert(singleFilter.dateFields.length === 1, "single dateFields length");
-  assert(rangeFilter.dateFields.length === 2, "range dateFields length");
-  assert(clearFilter.type === "clear", "clear filter type");
+  assert(singleFilter.dateFields.length === 1, 'single dateFields length');
+  assert(rangeFilter.dateFields.length === 2, 'range dateFields length');
+  assert(clearFilter.type === 'clear', 'clear filter type');
 
   // The following compile-time negative test is commented out — uncomment
   // to verify TypeScript rejects single/range without dateFields:
@@ -201,22 +191,22 @@ function testFilterOutputShape(): void {
  */
 function testApplyButtonGating(): void {
   // Smoke check that the exported type names match the POML contract.
-  assert(true, "structural invariant — verified by code inspection");
+  assert(true, 'structural invariant — verified by code inspection');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Wire up to jest/vitest if available, else self-run.
 // ─────────────────────────────────────────────────────────────────────────────
 
-if (typeof describe === "function" && typeof it === "function") {
-  describe("CalendarFilterPane (R4 task 055)", () => {
-    it("toIsoDateString uses local date components (UTC bug fix)", () => {
+if (typeof describe === 'function' && typeof it === 'function') {
+  describe('CalendarFilterPane (R4 task 055)', () => {
+    it('toIsoDateString uses local date components (UTC bug fix)', () => {
       testUtcBugFix();
     });
-    it("filter output shape requires dateFields on single + range", () => {
+    it('filter output shape requires dateFields on single + range', () => {
       testFilterOutputShape();
     });
-    it("Apply button is the only emit path (documented invariant)", () => {
+    it('Apply button is the only emit path (documented invariant)', () => {
       testApplyButtonGating();
     });
   });
@@ -229,11 +219,11 @@ if (typeof describe === "function" && typeof it === "function") {
     testFilterOutputShape();
     testApplyButtonGating();
     // eslint-disable-next-line no-console
-    console.log("[CalendarFilterPane.test] All assertions passed.");
+    console.log('[CalendarFilterPane.test] All assertions passed.');
   } catch (e) {
     // eslint-disable-next-line no-console
-    console.error("[CalendarFilterPane.test] FAIL:", e);
-    if (typeof process !== "undefined") {
+    console.error('[CalendarFilterPane.test] FAIL:', e);
+    if (typeof process !== 'undefined') {
       process.exitCode = 1;
     }
   }

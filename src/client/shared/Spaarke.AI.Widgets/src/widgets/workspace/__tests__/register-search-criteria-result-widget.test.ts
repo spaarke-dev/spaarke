@@ -14,9 +14,7 @@ import {
   getWorkspaceWidgetMetadata,
   resolveWorkspaceWidget,
 } from '../../../registry/WorkspaceWidgetRegistry';
-import {
-  SEARCH_CRITERIA_RESULT_WIDGET_TYPE,
-} from '../register-search-criteria-result-widget';
+import { SEARCH_CRITERIA_RESULT_WIDGET_TYPE } from '../register-search-criteria-result-widget';
 
 // Side-effect import: ensure the registration has run before the assertions.
 // The package barrel does this in production; tests import directly so the

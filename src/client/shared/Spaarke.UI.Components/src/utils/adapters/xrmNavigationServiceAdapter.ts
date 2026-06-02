@@ -108,11 +108,7 @@ export function createXrmNavigationService(): INavigationService {
       await navigation.openForm({ entityName, entityId });
     },
 
-    async openDialog(
-      webresourceName: string,
-      data?: string,
-      options?: DialogOptions
-    ): Promise<DialogResult> {
+    async openDialog(webresourceName: string, data?: string, options?: DialogOptions): Promise<DialogResult> {
       const _navigation = getNavigation();
 
       // Build the navigateTo page input

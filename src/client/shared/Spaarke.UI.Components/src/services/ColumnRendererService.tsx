@@ -148,7 +148,11 @@ export class ColumnRendererService {
   /**
    * Render money with currency symbol
    */
-  private static renderMoney(value: unknown, record: IDatasetRecord, column: IDatasetColumn): React.ReactElement | string {
+  private static renderMoney(
+    value: unknown,
+    record: IDatasetRecord,
+    column: IDatasetColumn
+  ): React.ReactElement | string {
     if (value == null) return '';
 
     const num = Number(value);
@@ -230,7 +234,8 @@ export class ColumnRendererService {
     if (value == null) return '';
 
     // Use formatted value if available (e.g., "columnname@OData.Community.Display.V1.FormattedValue")
-    const formattedValue = (record[`${column.name}@OData.Community.Display.V1.FormattedValue`] as string) || String(value);
+    const formattedValue =
+      (record[`${column.name}@OData.Community.Display.V1.FormattedValue`] as string) || String(value);
 
     return (
       <Badge appearance="outline" color="informative">
@@ -250,7 +255,8 @@ export class ColumnRendererService {
     if (value == null) return '';
 
     // Multi-select values come as comma-separated string or array
-    const formattedValue = (record[`${column.name}@OData.Community.Display.V1.FormattedValue`] as string) || String(value);
+    const formattedValue =
+      (record[`${column.name}@OData.Community.Display.V1.FormattedValue`] as string) || String(value);
     const options = formattedValue.split(';').map((s: string) => s.trim());
 
     return (
@@ -273,7 +279,11 @@ export class ColumnRendererService {
   /**
    * Render lookup with entity reference
    */
-  private static renderLookup(value: unknown, record: IDatasetRecord, column: IDatasetColumn): React.ReactElement | string {
+  private static renderLookup(
+    value: unknown,
+    record: IDatasetRecord,
+    column: IDatasetColumn
+  ): React.ReactElement | string {
     if (value == null) return '';
 
     // Lookup formatted value is in columnname_formatted or @OData annotation

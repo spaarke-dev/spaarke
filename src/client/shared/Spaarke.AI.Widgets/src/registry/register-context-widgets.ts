@@ -53,7 +53,7 @@ registerContextWidget('playbook-gallery', {
     // Type-erasure cast: ContextWidgetComponent<unknown> at registry vs widget's
     // typed default (ContextWidgetComponent<PlaybookGalleryData>) — registry
     // boundary variance, see ../index.ts for the same pattern.
-    import('../widgets/context/PlaybookGalleryWidget').then((m) => ({
+    import('../widgets/context/PlaybookGalleryWidget').then(m => ({
       default: m.default as unknown as ContextWidgetComponent,
     })),
 });
@@ -73,7 +73,7 @@ registerContextWidget('playbook-gallery', {
 registerContextWidget('entity-info', {
   factory: () =>
     // Type-erasure cast: registry boundary variance (see playbook-gallery above).
-    import('../widgets/context/EntityInfoWidget').then((m) => ({
+    import('../widgets/context/EntityInfoWidget').then(m => ({
       default: m.default as unknown as ContextWidgetComponent,
     })),
 });
@@ -93,7 +93,7 @@ registerContextWidget('entity-info', {
 registerContextWidget('findings', {
   factory: () =>
     // Type-erasure cast: registry boundary variance (see playbook-gallery above).
-    import('../widgets/context/FindingsWidget').then((m) => ({
+    import('../widgets/context/FindingsWidget').then(m => ({
       default: m.default as unknown as ContextWidgetComponent,
     })),
 });

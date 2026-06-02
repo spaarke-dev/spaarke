@@ -6,7 +6,7 @@
  * widget `CalendarSection` — they serve different user intents.
  */
 
-export { CalendarFilterPane, toIsoDateString } from "./CalendarFilterPane";
+export { CalendarFilterPane, toIsoDateString } from './CalendarFilterPane';
 export type {
   CalendarFilterPaneProps,
   CalendarFilterPaneOutput,
@@ -15,4 +15,4 @@ export type {
   CalendarFilterPaneClear,
   CalendarFilterPaneFilterType,
   IEventDateInfo,
-} from "./CalendarFilterPane";
+} from './CalendarFilterPane';

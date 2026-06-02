@@ -64,7 +64,9 @@ export class PrivilegeService {
       const functionUrl = `${entityLogicalName}(${recordId})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess()`;
 
       // Execute the function using fetch API
-      const response = (await this.executeBoundFunction(webAPI, functionUrl)) as { AccessRights?: string | number } | null;
+      const response = (await this.executeBoundFunction(webAPI, functionUrl)) as {
+        AccessRights?: string | number;
+      } | null;
 
       if (response && response.AccessRights) {
         return this.parseAccessRights(response.AccessRights);
@@ -84,7 +86,10 @@ export class PrivilegeService {
   private static async executeBoundFunction(webAPI: ComponentFramework.WebApi, functionUrl: string): Promise<unknown> {
     // Since PCF WebAPI doesn't expose executeFunction, we need to use window.fetch
     // Get the organization URL from the webAPI context
-    const webApiInternal = webAPI as unknown as { _context?: { page?: { getClientUrl?: () => string } }; context?: { page?: { getClientUrl?: () => string } } };
+    const webApiInternal = webAPI as unknown as {
+      _context?: { page?: { getClientUrl?: () => string } };
+      context?: { page?: { getClientUrl?: () => string } };
+    };
     const context = webApiInternal._context || webApiInternal.context;
     const apiUrl = context?.page?.getClientUrl?.() || window.location.origin;
 
@@ -254,7 +259,9 @@ export class PrivilegeService {
    */
   static getPrivilegesFromDataset(dataset: ComponentFramework.PropertyTypes.DataSet): IEntityPrivileges {
     // PCF Dataset has a security property with privilege information
-    const security = (dataset as { security?: { editable?: boolean; readable?: boolean; createable?: boolean; deletable?: boolean } }).security;
+    const security = (
+      dataset as { security?: { editable?: boolean; readable?: boolean; createable?: boolean; deletable?: boolean } }
+    ).security;
 
     if (security) {
       return {

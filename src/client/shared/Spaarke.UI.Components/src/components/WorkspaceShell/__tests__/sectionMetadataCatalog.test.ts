@@ -19,41 +19,41 @@ import {
   SECTION_METADATA_IDS,
   getSectionMetadata,
   type SectionMetadata,
-} from "../sectionMetadataCatalog";
+} from '../sectionMetadataCatalog';
 
-describe("SECTION_METADATA_CATALOG", () => {
-  it("contains exactly the 7 canonical system sections in default order", () => {
+describe('SECTION_METADATA_CATALOG', () => {
+  it('contains exactly the 7 canonical system sections in default order', () => {
     const expectedIdsInOrder = [
-      "get-started",
-      "quick-summary",
-      "latest-updates",
-      "todo",
-      "documents",
-      "daily-briefing",
-      "calendar",
+      'get-started',
+      'quick-summary',
+      'latest-updates',
+      'todo',
+      'documents',
+      'daily-briefing',
+      'calendar',
     ];
-    expect(SECTION_METADATA_CATALOG.map((m) => m.id)).toEqual(expectedIdsInOrder);
+    expect(SECTION_METADATA_CATALOG.map(m => m.id)).toEqual(expectedIdsInOrder);
   });
 
-  it("includes Calendar with the correct label and category (FR-01)", () => {
-    const calendar = getSectionMetadata("calendar");
+  it('includes Calendar with the correct label and category (FR-01)', () => {
+    const calendar = getSectionMetadata('calendar');
     expect(calendar).toBeDefined();
-    expect(calendar?.label).toBe("Calendar");
-    expect(calendar?.category).toBe("data");
+    expect(calendar?.label).toBe('Calendar');
+    expect(calendar?.category).toBe('data');
   });
 
-  it("includes Daily Briefing with the correct label and category (FR-01)", () => {
-    const dailyBriefing = getSectionMetadata("daily-briefing");
+  it('includes Daily Briefing with the correct label and category (FR-01)', () => {
+    const dailyBriefing = getSectionMetadata('daily-briefing');
     expect(dailyBriefing).toBeDefined();
-    expect(dailyBriefing?.label).toBe("Daily Briefing");
-    expect(dailyBriefing?.category).toBe("ai");
+    expect(dailyBriefing?.label).toBe('Daily Briefing');
+    expect(dailyBriefing?.category).toBe('ai');
   });
 
-  it("getSectionMetadata returns undefined for unknown IDs", () => {
-    expect(getSectionMetadata("not-a-real-section")).toBeUndefined();
+  it('getSectionMetadata returns undefined for unknown IDs', () => {
+    expect(getSectionMetadata('not-a-real-section')).toBeUndefined();
   });
 
-  it("getSectionMetadata returns a result for every catalog ID", () => {
+  it('getSectionMetadata returns a result for every catalog ID', () => {
     for (const entry of SECTION_METADATA_CATALOG) {
       const lookup = getSectionMetadata(entry.id);
       expect(lookup).toBeDefined();
@@ -61,42 +61,42 @@ describe("SECTION_METADATA_CATALOG", () => {
     }
   });
 
-  it("SECTION_METADATA_IDS matches the catalog entries", () => {
-    const catalogIds = new Set(SECTION_METADATA_CATALOG.map((m) => m.id));
+  it('SECTION_METADATA_IDS matches the catalog entries', () => {
+    const catalogIds = new Set(SECTION_METADATA_CATALOG.map(m => m.id));
     expect(SECTION_METADATA_IDS.size).toBe(catalogIds.size);
     for (const id of catalogIds) {
       expect(SECTION_METADATA_IDS.has(id)).toBe(true);
     }
   });
 
-  it("every entry exposes a valid SectionCategory value", () => {
-    const validCategories = new Set(["overview", "data", "ai", "productivity"]);
+  it('every entry exposes a valid SectionCategory value', () => {
+    const validCategories = new Set(['overview', 'data', 'ai', 'productivity']);
     for (const entry of SECTION_METADATA_CATALOG) {
       expect(validCategories.has(entry.category)).toBe(true);
     }
   });
 
-  it("every entry has a non-empty label and description", () => {
+  it('every entry has a non-empty label and description', () => {
     for (const entry of SECTION_METADATA_CATALOG) {
       expect(entry.label.trim().length).toBeGreaterThan(0);
       expect(entry.description.trim().length).toBeGreaterThan(0);
     }
   });
 
-  it("entries have unique IDs (no duplicates)", () => {
-    const ids = SECTION_METADATA_CATALOG.map((m) => m.id);
+  it('entries have unique IDs (no duplicates)', () => {
+    const ids = SECTION_METADATA_CATALOG.map(m => m.id);
     const unique = new Set(ids);
     expect(unique.size).toBe(ids.length);
   });
 
-  it("SectionMetadata is a strict subset of SectionRegistration shape", () => {
+  it('SectionMetadata is a strict subset of SectionRegistration shape', () => {
     // This is a compile-time-style invariant; runtime check just ensures
     // the documented fields are present on every entry.
     const meta: SectionMetadata = SECTION_METADATA_CATALOG[0];
-    expect(typeof meta.id).toBe("string");
-    expect(typeof meta.label).toBe("string");
-    expect(typeof meta.description).toBe("string");
-    expect(typeof meta.category).toBe("string");
-    expect(typeof meta.icon).toBe("object"); // Fluent icon component
+    expect(typeof meta.id).toBe('string');
+    expect(typeof meta.label).toBe('string');
+    expect(typeof meta.description).toBe('string');
+    expect(typeof meta.category).toBe('string');
+    expect(typeof meta.icon).toBe('object'); // Fluent icon component
   });
 });

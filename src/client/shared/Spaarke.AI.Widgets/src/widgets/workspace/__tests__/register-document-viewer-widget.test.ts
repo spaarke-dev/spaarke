@@ -12,9 +12,7 @@ import {
   getWorkspaceWidgetMetadata,
   resolveWorkspaceWidget,
 } from '../../../registry/WorkspaceWidgetRegistry';
-import {
-  DOCUMENT_VIEWER_WIDGET_TYPE,
-} from '../register-document-viewer-widget';
+import { DOCUMENT_VIEWER_WIDGET_TYPE } from '../register-document-viewer-widget';
 
 // Side-effect import: ensure the registration has run before the assertions.
 // The package barrel does this in production; tests import directly so the

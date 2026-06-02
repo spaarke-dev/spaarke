@@ -36,27 +36,15 @@ import {
   Spinner,
   MessageBar,
   MessageBarBody,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import type {
   SliderOnChangeData,
   ComboboxProps,
   OptionOnSelectData,
   SelectionEvents,
-} from "@fluentui/react-components";
-import {
-  SaveRegular,
-  InfoRegular,
-  DeleteRegular,
-  CheckmarkRegular,
-  OpenRegular,
-} from "@fluentui/react-icons";
-import type {
-  ITodoRecord,
-  ITodoExtension,
-  IEventFieldUpdates,
-  ITodoExtensionUpdates,
-  IContactOption,
-} from "./types";
+} from '@fluentui/react-components';
+import { SaveRegular, InfoRegular, DeleteRegular, CheckmarkRegular, OpenRegular } from '@fluentui/react-icons';
+import type { ITodoRecord, ITodoExtension, IEventFieldUpdates, ITodoExtensionUpdates, IContactOption } from './types';
 
 // ---------------------------------------------------------------------------
 // To Do Score computation (self-contained — no cross-solution imports)
@@ -490,7 +478,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
     // Debounced contact search (uses onSearchContacts callback prop)
     const searchTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-    const handleContactInput: ComboboxProps["onInput"] = React.useCallback(
+    const handleContactInput: ComboboxProps['onInput'] = React.useCallback(
       (ev: React.FormEvent<HTMLInputElement>) => {
         const q = ev.currentTarget.value;
         setContactQuery(q);
@@ -509,12 +497,12 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       [onSearchContacts]
     );
 
-    const handleContactSelect: ComboboxProps["onOptionSelect"] = React.useCallback(
+    const handleContactSelect: ComboboxProps['onOptionSelect'] = React.useCallback(
       (_ev: SelectionEvents, data: OptionOnSelectData) => {
         if (data.optionValue && data.optionText) {
           setAssignedToId(data.optionValue);
           setAssignedToName(data.optionText);
-          setContactQuery("");
+          setContactQuery('');
           setContactOptions([]);
           setIsEditingAssignedTo(false);
         }

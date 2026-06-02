@@ -30,15 +30,7 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  mergeClasses,
-  tokens,
-  Card,
-  CardHeader,
-  Text,
-  Badge,
-} from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens, Card, CardHeader, Text, Badge } from '@fluentui/react-components';
 import { SearchRegular } from '@fluentui/react-icons';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 
@@ -225,9 +217,7 @@ function formatCapturedAt(iso: string | undefined): string | null {
 }
 
 /** Type guard for the widget payload — defensive narrowing at the boundary. */
-function isSearchCriteriaResultData(
-  value: unknown
-): value is SearchCriteriaResultWidgetData {
+function isSearchCriteriaResultData(value: unknown): value is SearchCriteriaResultWidgetData {
   if (value === null || typeof value !== 'object') return false;
   const obj = value as Record<string, unknown>;
   return typeof obj.query === 'string' && typeof obj.domain === 'string';
@@ -247,9 +237,13 @@ function isSearchCriteriaResultData(
  *
  * No BFF calls in v1 — the criteria are pure user input.
  */
-const SearchCriteriaResultWidget: React.FC<
-  WorkspaceWidgetProps<SearchCriteriaResultWidgetData>
-> = ({ data, widgetType, isLoading, error, className }) => {
+const SearchCriteriaResultWidget: React.FC<WorkspaceWidgetProps<SearchCriteriaResultWidgetData>> = ({
+  data,
+  widgetType,
+  isLoading,
+  error,
+  className,
+}) => {
   const styles = useStyles();
 
   // Defensive: subscribers may pass `unknown` payloads through; narrow here.
@@ -284,17 +278,9 @@ const SearchCriteriaResultWidget: React.FC<
       <Card className={styles.card}>
         <CardHeader
           image={<SearchRegular className={styles.headerIcon} />}
-          header={
-            <Text className={styles.headerTitle}>
-              Search criteria — {titleCase(domain || 'Unknown')}
-            </Text>
-          }
+          header={<Text className={styles.headerTitle}>Search criteria — {titleCase(domain || 'Unknown')}</Text>}
           description={
-            capturedAtLabel ? (
-              <Text className={styles.headerSubtitle}>
-                Captured at {capturedAtLabel}
-              </Text>
-            ) : undefined
+            capturedAtLabel ? <Text className={styles.headerSubtitle}>Captured at {capturedAtLabel}</Text> : undefined
           }
         />
 
@@ -327,9 +313,7 @@ const SearchCriteriaResultWidget: React.FC<
               {query.length > 0 ? (
                 <Text className={styles.sectionValue}>{query}</Text>
               ) : (
-                <Text className={mergeClasses(styles.sectionValue, styles.emptyValue)}>
-                  No query text
-                </Text>
+                <Text className={mergeClasses(styles.sectionValue, styles.emptyValue)}>No query text</Text>
               )}
             </div>
 
@@ -369,9 +353,8 @@ const SearchCriteriaResultWidget: React.FC<
             </div>
 
             <div className={styles.noticeBanner} data-testid="search-criteria-result-notice">
-              Demo widget. To run the search, use the Semantic Search button — the
-              modal results page is the production search surface. This tab is a
-              snapshot of the criteria promoted from the Context pane.
+              Demo widget. To run the search, use the Semantic Search button — the modal results page is the production
+              search surface. This tab is a snapshot of the criteria promoted from the Context pane.
             </div>
           </div>
         )}

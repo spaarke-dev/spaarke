@@ -43,18 +43,14 @@ describe('ViewToolbar', () => {
       // `({count})` only — no "records" word. Component was redesigned to omit
       // unit text inside the view-name button. Use textContent function matcher
       // because Fluent v9 Text splits children across multiple DOM nodes.
-      expect(
-        screen.getByText((_content, node) => node?.textContent === '(42)'),
-      ).toBeInTheDocument();
+      expect(screen.getByText((_content, node) => node?.textContent === '(42)')).toBeInTheDocument();
     });
 
-    it("should render count of 1 in viewName mode", () => {
+    it('should render count of 1 in viewName mode', () => {
       renderWithProvider(<ViewToolbar viewName="Active Records" recordCount={1} />);
 
       // Task 071: viewName mode renders `(1)`, NOT `(1 record)` (see note above).
-      expect(
-        screen.getByText((_content, node) => node?.textContent === '(1)'),
-      ).toBeInTheDocument();
+      expect(screen.getByText((_content, node) => node?.textContent === '(1)')).toBeInTheDocument();
     });
 
     it('should format large record counts with locale', () => {

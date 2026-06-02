@@ -14,4 +14,4 @@
  * driven, not standalone hooks).
  */
 
-export * from "./useEventsBulkActions";
+export * from './useEventsBulkActions';

@@ -480,24 +480,27 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
   );
 
   // Adapt IDataService to the IWebApi shape that CreateRecordWizard expects
-  const webApiAdapter = React.useMemo(() => ({
-    createRecord: async (entityName: string, data: Record<string, unknown>) => {
-      const id = await dataService.createRecord(entityName, data);
-      return { id };
-    },
-    retrieveRecord: (entityName: string, id: string, options?: string) =>
-      dataService.retrieveRecord(entityName, id, options),
-    retrieveMultipleRecords: (entityName: string, options?: string, _maxPageSize?: number) =>
-      dataService.retrieveMultipleRecords(entityName, options),
-    updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
-      await dataService.updateRecord(entityName, id, data);
-      return { id };
-    },
-    deleteRecord: async (entityName: string, id: string) => {
-      await dataService.deleteRecord(entityName, id);
-      return { id };
-    },
-  }), [dataService]);
+  const webApiAdapter = React.useMemo(
+    () => ({
+      createRecord: async (entityName: string, data: Record<string, unknown>) => {
+        const id = await dataService.createRecord(entityName, data);
+        return { id };
+      },
+      retrieveRecord: (entityName: string, id: string, options?: string) =>
+        dataService.retrieveRecord(entityName, id, options),
+      retrieveMultipleRecords: (entityName: string, options?: string, _maxPageSize?: number) =>
+        dataService.retrieveMultipleRecords(entityName, options),
+      updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
+        await dataService.updateRecord(entityName, id, data);
+        return { id };
+      },
+      deleteRecord: async (entityName: string, id: string) => {
+        await dataService.deleteRecord(entityName, id);
+        return { id };
+      },
+    }),
+    [dataService]
+  );
 
   return (
     <CreateRecordWizard open={open} onClose={onClose} webApi={webApiAdapter} config={config} embedded={embedded} />

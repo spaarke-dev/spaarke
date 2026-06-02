@@ -125,10 +125,7 @@ export const CalendarDrawer: React.FC<CalendarDrawerProps> = ({ isOpen, onClose,
           (recorded the drift) is preserved in the deploy notes archive at
           projects/spaarke-ai-platform-unification-r3/notes/deploys/2026-05-20-deploy.md.
         */}
-        <CalendarSection
-          eventDates={eventDates}
-          onFilterChange={onFilterChange}
-        />
+        <CalendarSection eventDates={eventDates} onFilterChange={onFilterChange} />
       </DrawerBody>
     </OverlayDrawer>
   );

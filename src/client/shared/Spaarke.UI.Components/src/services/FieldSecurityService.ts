@@ -272,7 +272,8 @@ export class FieldSecurityService {
 
     // PCF dataset columns have security information
     dataset.columns.forEach(column => {
-      const security = (column as { security?: { secured?: boolean; readable?: boolean; editable?: boolean } }).security;
+      const security = (column as { security?: { secured?: boolean; readable?: boolean; editable?: boolean } })
+        .security;
 
       if (security) {
         fieldSecurityMap.set(column.name, {

@@ -138,9 +138,7 @@ function emptySseResponse(): Response {
   // payload with a `type` field. The previous `event: done\ndata: {}\n\n`
   // form was silently skipped (no `type` → null), so streamDone never flipped
   // to true and clearAll was never invoked. Use the canonical SSE format.
-  const sseBytes = Uint8Array.from(
-    Buffer.from('data: {"type":"done","content":null}\n\n', 'utf-8'),
-  );
+  const sseBytes = Uint8Array.from(Buffer.from('data: {"type":"done","content":null}\n\n', 'utf-8'));
 
   let readCount = 0;
   const reader = {
@@ -373,7 +371,7 @@ describe('SprkChat — attachments payload wiring (task 026, FR-07)', () => {
       () => {
         expect(mockClearAll).toHaveBeenCalled();
       },
-      { timeout: 3000 },
+      { timeout: 3000 }
     );
   });
 });

@@ -99,20 +99,13 @@ import {
   Open24Regular,
 } from '@fluentui/react-icons';
 
-import {
-  EventsPageProvider,
-  useEventsPageContext,
-} from "../../context/EventsPageContext";
-import { CalendarSection } from "../../components/CalendarSection/CalendarSection";
-import type { IEventDateInfo } from "../../components/CalendarSection/CalendarSection";
-import { GridSection } from "../../components/GridSection/GridSection";
-import type { IEventRecord } from "../../components/GridSection/GridSection";
-import { addMonths, startOfMonth } from "../../utils/dateMath";
-import {
-  useEventsBulkActions,
-  EventStatus,
-  EVENT_ENTITY_NAME,
-} from "../../hooks/useEventsBulkActions";
+import { EventsPageProvider, useEventsPageContext } from '../../context/EventsPageContext';
+import { CalendarSection } from '../../components/CalendarSection/CalendarSection';
+import type { IEventDateInfo } from '../../components/CalendarSection/CalendarSection';
+import { GridSection } from '../../components/GridSection/GridSection';
+import type { IEventRecord } from '../../components/GridSection/GridSection';
+import { addMonths, startOfMonth } from '../../utils/dateMath';
+import { useEventsBulkActions, EventStatus, EVENT_ENTITY_NAME } from '../../hooks/useEventsBulkActions';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Xrm typing — host-provided global
@@ -447,11 +440,7 @@ function getXrm(): typeof Xrm | null {
  * has its own confirm-dialog handling. Delete is consumer territory (no
  * status-write semantics) so it stays inline.
  */
-async function confirmDialog(
-  title: string,
-  text: string,
-  confirmLabel: string,
-): Promise<boolean> {
+async function confirmDialog(title: string, text: string, confirmLabel: string): Promise<boolean> {
   const xrm = getXrm();
   if (xrm?.Navigation?.openConfirmDialog) {
     const result = await xrm.Navigation.openConfirmDialog({
@@ -706,13 +695,9 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
 
   // ── Bulk-action API (R4 task 063, B-7) ───────────────────────────────────
   // Single source of truth shared with EventsPage standalone code page.
-  const {
-    completeEvents,
-    closeEvents,
-    cancelEvents,
-    holdEvents,
-    archiveSelectedEvents,
-  } = useEventsBulkActions({ getXrm });
+  const { completeEvents, closeEvents, cancelEvents, holdEvents, archiveSelectedEvents } = useEventsBulkActions({
+    getXrm,
+  });
 
   // ── Toolbar handlers ─────────────────────────────────────────────────────
   const hasSelection = selectedIds.length > 0;
@@ -1019,7 +1004,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
           <div ref={stripRef} className={styles.calendarStrip}>
             <CalendarSection
               eventDates={eventDates}
-              onFilterChange={(filter) => setCalendarFilter(filter)}
+              onFilterChange={filter => setCalendarFilter(filter)}
               viewDate={viewDate}
               monthsToShow={monthsToShow}
               layout="horizontal"

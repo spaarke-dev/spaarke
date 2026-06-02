@@ -44,13 +44,10 @@
  *   - ADR-028: Renderer-owned auth — this widget never carries token snapshots.
  */
 
-import * as React from "react";
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import {
-  getDefaultWorkspaceRenderer,
-  type WorkspaceRenderer,
-} from "@spaarke/ui-components";
-import type { WorkspaceWidgetComponent } from "../../types/widget-types";
+import * as React from 'react';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import { getDefaultWorkspaceRenderer, type WorkspaceRenderer } from '@spaarke/ui-components';
+import type { WorkspaceWidgetComponent } from '../../types/widget-types';
 
 // ---------------------------------------------------------------------------
 // Widget data contract
@@ -181,8 +178,7 @@ function getUserIdSafe(): string {
  *   3. If neither is available, render a graceful "no renderer" empty state.
  */
 export const WorkspaceLayoutWidget: React.FC<
-  React.ComponentProps<WorkspaceWidgetComponent<WorkspaceLayoutWidgetData>> &
-    WorkspaceLayoutWidgetExtraProps
+  React.ComponentProps<WorkspaceWidgetComponent<WorkspaceLayoutWidgetData>> & WorkspaceLayoutWidgetExtraProps
 > = ({ data, renderer }) => {
   const styles = useStyles();
 
@@ -194,10 +190,7 @@ export const WorkspaceLayoutWidget: React.FC<
   // Resolve the renderer: injected prop wins; otherwise consult the default slot.
   // The slot is populated by the host at bootstrap (e.g. SpaarkeAi `main.tsx`
   // calls `setDefaultWorkspaceRenderer(LegalWorkspaceApp)`).
-  const Renderer: WorkspaceRenderer | null = React.useMemo(
-    () => renderer ?? getDefaultWorkspaceRenderer(),
-    [renderer]
-  );
+  const Renderer: WorkspaceRenderer | null = React.useMemo(() => renderer ?? getDefaultWorkspaceRenderer(), [renderer]);
 
   // Dev fallback: when Xrm isn't available (e.g. `npm run dev` in Vite),
   // render an empty-state message instead of crashing inside the renderer.
@@ -220,9 +213,8 @@ export const WorkspaceLayoutWidget: React.FC<
       <div className={styles.root} data-testid="workspace-layout-widget-no-renderer">
         <div className={styles.emptyState}>
           <Text size={300}>
-            No workspace renderer registered. The host application must call{" "}
-            <code>setDefaultWorkspaceRenderer()</code> from{" "}
-            <code>@spaarke/ui-components</code> at bootstrap.
+            No workspace renderer registered. The host application must call <code>setDefaultWorkspaceRenderer()</code>{' '}
+            from <code>@spaarke/ui-components</code> at bootstrap.
           </Text>
         </div>
       </div>

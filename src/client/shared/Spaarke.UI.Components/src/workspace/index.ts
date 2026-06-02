@@ -8,14 +8,10 @@
  * @see defaultWorkspaceRenderer.ts
  */
 
-export type {
-  WorkspaceRenderer,
-  WorkspaceRendererProps,
-  WorkspaceRendererWebApi,
-} from "./WorkspaceRenderer";
+export type { WorkspaceRenderer, WorkspaceRendererProps, WorkspaceRendererWebApi } from './WorkspaceRenderer';
 
 export {
   setDefaultWorkspaceRenderer,
   getDefaultWorkspaceRenderer,
   clearDefaultWorkspaceRenderer,
-} from "./defaultWorkspaceRenderer";
+} from './defaultWorkspaceRenderer';

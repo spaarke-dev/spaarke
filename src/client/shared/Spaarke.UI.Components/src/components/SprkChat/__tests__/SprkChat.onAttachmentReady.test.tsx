@@ -15,11 +15,7 @@
 import * as React from 'react';
 import { waitFor, act } from '@testing-library/react';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
-import type {
-  AttachmentChip,
-  ChatAttachment,
-  IUseChatFileAttachmentResult,
-} from '../hooks/useChatFileAttachment';
+import type { AttachmentChip, ChatAttachment, IUseChatFileAttachmentResult } from '../hooks/useChatFileAttachment';
 
 // ---------------------------------------------------------------------------
 // Mock useChatFileAttachment so the test drives chip state directly.
@@ -79,7 +75,7 @@ function makeChip(
   filename: string,
   mimeType: string,
   status: AttachmentChip['status'],
-  textContent: string | undefined = undefined,
+  textContent: string | undefined = undefined
 ): AttachmentChip {
   return {
     id,
@@ -95,13 +91,13 @@ function setHookResult(chips: AttachmentChip[]): void {
   mockHookResult = {
     files: chips,
     attachments: chips
-      .filter((c) => c.status === 'ready' && typeof c.textContent === 'string')
+      .filter(c => c.status === 'ready' && typeof c.textContent === 'string')
       .map(
         (c): ChatAttachment => ({
           filename: c.filename,
           contentType: c.mimeType,
           textContent: c.textContent ?? '',
-        }),
+        })
       ),
     errors: [],
     addFiles: mockAddFiles,
@@ -125,9 +121,7 @@ describe('SprkChat — onAttachmentReady (R4 task 042 / W-4)', () => {
     const onAttachmentReady = jest.fn();
 
     await act(async () => {
-      renderWithProviders(
-        <SprkChat {...defaultProps} onAttachmentReady={onAttachmentReady} />,
-      );
+      renderWithProviders(<SprkChat {...defaultProps} onAttachmentReady={onAttachmentReady} />);
     });
 
     // Give effects a tick to run.
@@ -141,9 +135,7 @@ describe('SprkChat — onAttachmentReady (R4 task 042 / W-4)', () => {
     setHookResult([makeChip('1', 'pending.pdf', 'application/pdf', 'extracting')]);
 
     await act(async () => {
-      renderWithProviders(
-        <SprkChat {...defaultProps} onAttachmentReady={onAttachmentReady} />,
-      );
+      renderWithProviders(<SprkChat {...defaultProps} onAttachmentReady={onAttachmentReady} />);
     });
 
     await waitFor(() => {
@@ -161,9 +153,7 @@ describe('SprkChat — onAttachmentReady (R4 task 042 / W-4)', () => {
     ]);
 
     await act(async () => {
-      renderWithProviders(
-        <SprkChat {...defaultProps} onAttachmentReady={onAttachmentReady} />,
-      );
+      renderWithProviders(<SprkChat {...defaultProps} onAttachmentReady={onAttachmentReady} />);
     });
 
     await waitFor(() => {
@@ -180,9 +170,7 @@ describe('SprkChat — onAttachmentReady (R4 task 042 / W-4)', () => {
     ]);
 
     await act(async () => {
-      renderWithProviders(
-        <SprkChat {...defaultProps} onAttachmentReady={onAttachmentReady} />,
-      );
+      renderWithProviders(<SprkChat {...defaultProps} onAttachmentReady={onAttachmentReady} />);
     });
 
     await waitFor(() => {
@@ -203,13 +191,9 @@ describe('SprkChat — onAttachmentReady (R4 task 042 / W-4)', () => {
 
   it('does NOT re-fire onAttachmentReady on re-render when chip set is unchanged', async () => {
     const onAttachmentReady = jest.fn();
-    setHookResult([
-      makeChip('chip-1', 'Contract.pdf', 'application/pdf', 'ready', 'text-content'),
-    ]);
+    setHookResult([makeChip('chip-1', 'Contract.pdf', 'application/pdf', 'ready', 'text-content')]);
 
-    const { rerender } = renderWithProviders(
-      <SprkChat {...defaultProps} onAttachmentReady={onAttachmentReady} />,
-    );
+    const { rerender } = renderWithProviders(<SprkChat {...defaultProps} onAttachmentReady={onAttachmentReady} />);
 
     await waitFor(() => {
       expect(onAttachmentReady).toHaveBeenCalledTimes(1);
@@ -217,13 +201,11 @@ describe('SprkChat — onAttachmentReady (R4 task 042 / W-4)', () => {
 
     // Re-render with no chip change — the host callback must NOT fire again.
     await act(async () => {
-      rerender(
-        <SprkChat {...defaultProps} onAttachmentReady={onAttachmentReady} />,
-      );
+      rerender(<SprkChat {...defaultProps} onAttachmentReady={onAttachmentReady} />);
     });
 
     // Allow effects to flush; assert the counter has NOT advanced.
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise(r => setTimeout(r, 0));
     expect(onAttachmentReady).toHaveBeenCalledTimes(1);
   });
 
@@ -231,15 +213,11 @@ describe('SprkChat — onAttachmentReady (R4 task 042 / W-4)', () => {
     const onAttachmentReady = jest.fn(() => {
       throw new Error('host-callback-broken');
     });
-    setHookResult([
-      makeChip('chip-1', 'a.pdf', 'application/pdf', 'ready', 'content'),
-    ]);
+    setHookResult([makeChip('chip-1', 'a.pdf', 'application/pdf', 'ready', 'content')]);
 
     // The test passes if rendering completes without an unhandled rejection.
     await act(async () => {
-      renderWithProviders(
-        <SprkChat {...defaultProps} onAttachmentReady={onAttachmentReady} />,
-      );
+      renderWithProviders(<SprkChat {...defaultProps} onAttachmentReady={onAttachmentReady} />);
     });
 
     await waitFor(() => {

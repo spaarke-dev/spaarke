@@ -255,7 +255,7 @@ export function AiProgressStepper({
   errorStepId,
   title,
   onCancel,
-  variant = "card",
+  variant = 'card',
 }: AiProgressStepperProps): React.JSX.Element {
   const styles = useStyles();
 

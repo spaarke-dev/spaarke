@@ -78,7 +78,7 @@ describe('renderMarkdown — XSS prevention (R2-066 security audit)', () => {
     const container = document.createElement('div');
     container.innerHTML = html;
     const allElements = container.querySelectorAll('*');
-    allElements.forEach((el) => {
+    allElements.forEach(el => {
       expect(el.getAttribute('onmouseover')).toBeNull();
     });
   });

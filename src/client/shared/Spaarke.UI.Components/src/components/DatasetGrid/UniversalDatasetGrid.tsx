@@ -190,8 +190,13 @@ export const UniversalDatasetGrid: React.FC<IUniversalDatasetGridProps> = props 
     return {
       selectedRecords: records.filter(r => props.selectedRecordIds.includes(r.id)),
       entityName: records[0]?.entityName || props.headlessConfig?.entityName || '',
-      webAPI: props.headlessConfig?.webAPI || (props.context as { webAPI?: ComponentFramework.WebApi })?.webAPI || ({} as ComponentFramework.WebApi),
-      navigation: (props.context as { navigation?: ComponentFramework.Navigation })?.navigation || ({} as ComponentFramework.Navigation),
+      webAPI:
+        props.headlessConfig?.webAPI ||
+        (props.context as { webAPI?: ComponentFramework.WebApi })?.webAPI ||
+        ({} as ComponentFramework.WebApi),
+      navigation:
+        (props.context as { navigation?: ComponentFramework.Navigation })?.navigation ||
+        ({} as ComponentFramework.Navigation),
       refresh: refresh,
       emitLastAction: action => {
         console.log(`Last action: ${action}`);

@@ -93,8 +93,8 @@ function resolveXrmNavigation(): any | null {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TARGET = 2 as const;
-const DEFAULT_WIDTH = { value: 60, unit: "%" as const };
-const DEFAULT_HEIGHT = { value: 70, unit: "%" as const };
+const DEFAULT_WIDTH = { value: 60, unit: '%' as const };
+const DEFAULT_HEIGHT = { value: 70, unit: '%' as const };
 
 // ---------------------------------------------------------------------------
 // Public types

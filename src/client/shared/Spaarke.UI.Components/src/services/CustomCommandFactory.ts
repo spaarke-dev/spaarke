@@ -201,7 +201,10 @@ export class CustomCommandFactory {
   /**
    * Interpolate parameter values with context tokens
    */
-  private static interpolateParameters(parameters: Record<string, unknown>, context: ICommandContext): Record<string, unknown> {
+  private static interpolateParameters(
+    parameters: Record<string, unknown>,
+    context: ICommandContext
+  ): Record<string, unknown> {
     const result: Record<string, unknown> = {};
 
     Object.entries(parameters).forEach(([key, value]) => {
@@ -223,7 +226,10 @@ export class CustomCommandFactory {
     result = result.replace(/\{selectedCount\}/g, String(context.selectedRecords.length));
     result = result.replace(/\{entityName\}/g, context.entityName);
     result = result.replace(/\{parentRecordId\}/g, context.parentRecord?.id?.guid ?? '');
-    result = result.replace(/\{parentTable\}/g, (context.parentRecord as { entityType?: string } | undefined)?.entityType ?? '');
+    result = result.replace(
+      /\{parentTable\}/g,
+      (context.parentRecord as { entityType?: string } | undefined)?.entityType ?? ''
+    );
     // Add more token replacements as needed
     return result;
   }

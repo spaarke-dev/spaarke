@@ -27,7 +27,7 @@
  * Standards: ADR-012 (shared components), ADR-021 (Fluent v9 icons).
  */
 
-import type { FluentIcon } from "@fluentui/react-icons";
+import type { FluentIcon } from '@fluentui/react-icons';
 import {
   RocketRegular,
   DataBarVerticalRegular,
@@ -36,8 +36,8 @@ import {
   DocumentRegular,
   SparkleRegular,
   CalendarLtr24Regular,
-} from "@fluentui/react-icons";
-import type { SectionCategory } from "./types";
+} from '@fluentui/react-icons';
+import type { SectionCategory } from './types';
 
 /**
  * Lightweight metadata for a workspace section. Strict subset of
@@ -79,67 +79,65 @@ export interface SectionMetadata {
  */
 export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
   {
-    id: "get-started",
-    label: "Get Started",
-    description: "Quick-action cards for common workflows",
-    category: "overview",
+    id: 'get-started',
+    label: 'Get Started',
+    description: 'Quick-action cards for common workflows',
+    category: 'overview',
     icon: RocketRegular,
-    defaultHeight: "200px",
+    defaultHeight: '200px',
   },
   {
-    id: "quick-summary",
-    label: "Quick Summary",
-    description: "Key metrics at a glance",
-    category: "overview",
+    id: 'quick-summary',
+    label: 'Quick Summary',
+    description: 'Key metrics at a glance',
+    category: 'overview',
     icon: DataBarVerticalRegular,
   },
   {
-    id: "latest-updates",
-    label: "Latest Updates",
-    description: "Recent activity feed with flagging",
-    category: "data",
+    id: 'latest-updates',
+    label: 'Latest Updates',
+    description: 'Recent activity feed with flagging',
+    category: 'data',
     icon: ClockRegular,
-    defaultHeight: "325px",
+    defaultHeight: '325px',
   },
   {
-    id: "todo",
-    label: "My To Do List",
-    description: "Embedded smart to-do list with flag sync",
-    category: "productivity",
+    id: 'todo',
+    label: 'My To Do List',
+    description: 'Embedded smart to-do list with flag sync',
+    category: 'productivity',
     icon: CheckmarkCircleRegular,
-    defaultHeight: "560px",
+    defaultHeight: '560px',
   },
   {
-    id: "documents",
-    label: "My Documents",
-    description: "Recent documents with quick actions",
-    category: "data",
+    id: 'documents',
+    label: 'My Documents',
+    description: 'Recent documents with quick actions',
+    category: 'data',
     icon: DocumentRegular,
   },
   {
-    id: "daily-briefing",
-    label: "Daily Briefing",
-    description: "AI-curated highlights from your day",
-    category: "ai",
+    id: 'daily-briefing',
+    label: 'Daily Briefing',
+    description: 'AI-curated highlights from your day',
+    category: 'ai',
     icon: SparkleRegular,
-    defaultHeight: "325px",
+    defaultHeight: '325px',
   },
   {
-    id: "calendar",
-    label: "Calendar",
-    description: "All events + tasks you have access to",
-    category: "data",
+    id: 'calendar',
+    label: 'Calendar',
+    description: 'All events + tasks you have access to',
+    category: 'data',
     icon: CalendarLtr24Regular,
-    defaultHeight: "720px",
+    defaultHeight: '720px',
   },
 ] as const;
 
 /** Look up section metadata by ID. Returns `undefined` if not found. */
 export function getSectionMetadata(id: string): SectionMetadata | undefined {
-  return SECTION_METADATA_CATALOG.find((m) => m.id === id);
+  return SECTION_METADATA_CATALOG.find(m => m.id === id);
 }
 
 /** Stable set of all registered section IDs (derived). */
-export const SECTION_METADATA_IDS: ReadonlySet<string> = new Set(
-  SECTION_METADATA_CATALOG.map((m) => m.id),
-);
+export const SECTION_METADATA_IDS: ReadonlySet<string> = new Set(SECTION_METADATA_CATALOG.map(m => m.id));

@@ -27,7 +27,7 @@
  * @see projects/spaarke-ai-platform-unification-r4/notes/c4-interface-design.md
  */
 
-import type { WorkspaceRenderer } from "./WorkspaceRenderer";
+import type { WorkspaceRenderer } from './WorkspaceRenderer';
 
 // ---------------------------------------------------------------------------
 // Internal module state
@@ -58,9 +58,7 @@ let _default: WorkspaceRenderer | null = null;
  * setDefaultWorkspaceRenderer(LegalWorkspaceApp);
  * ```
  */
-export function setDefaultWorkspaceRenderer(
-  renderer: WorkspaceRenderer
-): void {
+export function setDefaultWorkspaceRenderer(renderer: WorkspaceRenderer): void {
   _default = renderer;
 }
 

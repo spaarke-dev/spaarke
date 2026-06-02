@@ -200,12 +200,9 @@ export const RecordTypeFilter: React.FC<RecordTypeFilterProps> = ({
    * is read from `event.currentTarget.value`. Earlier ad-hoc `(event, data)`
    * handler shape was a v8 holdover; aligned with v9 in B-11 (task 067).
    */
-  const handleSearchChange = React.useCallback<React.FormEventHandler<HTMLInputElement>>(
-    (event) => {
-      setSearchText(event.currentTarget.value);
-    },
-    []
-  );
+  const handleSearchChange = React.useCallback<React.FormEventHandler<HTMLInputElement>>(event => {
+    setSearchText(event.currentTarget.value);
+  }, []);
 
   // Filter event types based on search text
   const filteredTypes = React.useMemo(() => {

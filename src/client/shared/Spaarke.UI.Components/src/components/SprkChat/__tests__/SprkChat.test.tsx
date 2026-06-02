@@ -160,7 +160,7 @@ describe('SprkChat', () => {
         () => {
           expect(screen.getByTestId('chat-error-banner')).toBeInTheDocument();
         },
-        { timeout: 3000 },
+        { timeout: 3000 }
       );
     });
   });
@@ -367,7 +367,7 @@ describe('SprkChat', () => {
           expect(errorBanner).toBeInTheDocument();
           expect(errorBanner.textContent).toContain('Network failure');
         },
-        { timeout: 3000 },
+        { timeout: 3000 }
       );
     });
   });

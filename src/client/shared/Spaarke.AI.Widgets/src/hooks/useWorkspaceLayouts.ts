@@ -43,8 +43,8 @@
  * @see projects/spaarke-ai-platform-unification-r4/notes/c3-consolidated-hook-design.md
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { buildBffApiUrl } from "@spaarke/auth";
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { buildBffApiUrl } from '@spaarke/auth';
 
 // ---------------------------------------------------------------------------
 // Types (mirror BFF WorkspaceLayoutDto shape)
@@ -83,17 +83,10 @@ export interface WorkspaceLayoutDto {
  *                  (only system layouts). Consumers may show an onboarding
  *                  banner. Only computed when `fallbackLayout` is supplied.
  */
-export type WorkspaceLoadingStatus =
-  | "loading"
-  | "loaded"
-  | "error"
-  | "first-visit";
+export type WorkspaceLoadingStatus = 'loading' | 'loaded' | 'error' | 'first-visit';
 
 /** Authenticated fetch function (ADR-028 — function-based contract). */
-export type AuthenticatedFetch = (
-  url: string,
-  init?: RequestInit,
-) => Promise<Response>;
+export type AuthenticatedFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 /**
  * Options accepted by `useWorkspaceLayouts`.
@@ -167,19 +160,19 @@ export interface UseWorkspaceLayoutsResult<TParsed = unknown> {
 // ending in "." use ".<key>"; otherwise default to ":<key>".
 // ---------------------------------------------------------------------------
 
-const DEFAULT_CACHE_PREFIX = "sprk:workspace";
+const DEFAULT_CACHE_PREFIX = 'sprk:workspace';
 
-function cacheKey(prefix: string, suffix: "activeLayout" | "layoutsList"): string {
+function cacheKey(prefix: string, suffix: 'activeLayout' | 'layoutsList'): string {
   // LW uses "sprk:workspace" + ":activeLayout" (colon joiner).
   // SpaarkeAi uses "spaarke.ai.workspace" + ".activeLayout" (dot joiner).
   // Detect the joiner from the prefix's terminal character convention.
-  const joiner = prefix.includes(".") && !prefix.includes(":") ? "." : ":";
+  const joiner = prefix.includes('.') && !prefix.includes(':') ? '.' : ':';
   return `${prefix}${joiner}${suffix}`;
 }
 
 function getCachedActiveLayout(prefix: string): WorkspaceLayoutDto | null {
   try {
-    const cached = sessionStorage.getItem(cacheKey(prefix, "activeLayout"));
+    const cached = sessionStorage.getItem(cacheKey(prefix, 'activeLayout'));
     return cached ? (JSON.parse(cached) as WorkspaceLayoutDto) : null;
   } catch {
     return null;
@@ -188,10 +181,7 @@ function getCachedActiveLayout(prefix: string): WorkspaceLayoutDto | null {
 
 function setCachedActiveLayout(prefix: string, layout: WorkspaceLayoutDto): void {
   try {
-    sessionStorage.setItem(
-      cacheKey(prefix, "activeLayout"),
-      JSON.stringify(layout),
-    );
+    sessionStorage.setItem(cacheKey(prefix, 'activeLayout'), JSON.stringify(layout));
   } catch {
     /* quota / privacy mode — ignore */
   }
@@ -199,22 +189,16 @@ function setCachedActiveLayout(prefix: string, layout: WorkspaceLayoutDto): void
 
 function getCachedLayoutsList(prefix: string): WorkspaceLayoutDto[] | null {
   try {
-    const cached = sessionStorage.getItem(cacheKey(prefix, "layoutsList"));
+    const cached = sessionStorage.getItem(cacheKey(prefix, 'layoutsList'));
     return cached ? (JSON.parse(cached) as WorkspaceLayoutDto[]) : null;
   } catch {
     return null;
   }
 }
 
-function setCachedLayoutsList(
-  prefix: string,
-  layouts: WorkspaceLayoutDto[],
-): void {
+function setCachedLayoutsList(prefix: string, layouts: WorkspaceLayoutDto[]): void {
   try {
-    sessionStorage.setItem(
-      cacheKey(prefix, "layoutsList"),
-      JSON.stringify(layouts),
-    );
+    sessionStorage.setItem(cacheKey(prefix, 'layoutsList'), JSON.stringify(layouts));
   } catch {
     /* quota / privacy mode — ignore */
   }
@@ -226,12 +210,10 @@ function setCachedLayoutsList(
  * LegalWorkspace's wizard save handlers call this directly (without a re-
  * render) to clear stale data so the next mount re-fetches fresh from the BFF.
  */
-export function invalidateLayoutCache(
-  cacheKeyPrefix: string = DEFAULT_CACHE_PREFIX,
-): void {
+export function invalidateLayoutCache(cacheKeyPrefix: string = DEFAULT_CACHE_PREFIX): void {
   try {
-    sessionStorage.removeItem(cacheKey(cacheKeyPrefix, "activeLayout"));
-    sessionStorage.removeItem(cacheKey(cacheKeyPrefix, "layoutsList"));
+    sessionStorage.removeItem(cacheKey(cacheKeyPrefix, 'activeLayout'));
+    sessionStorage.removeItem(cacheKey(cacheKeyPrefix, 'layoutsList'));
   } catch {
     /* ignore */
   }
@@ -264,7 +246,7 @@ export function invalidateLayoutCache(
  *     it; otherwise renders empty.
  */
 export function useWorkspaceLayouts<TParsed = unknown>(
-  options: UseWorkspaceLayoutsOptions<TParsed>,
+  options: UseWorkspaceLayoutsOptions<TParsed>
 ): UseWorkspaceLayoutsResult<TParsed> {
   const {
     bffBaseUrl,
@@ -279,9 +261,7 @@ export function useWorkspaceLayouts<TParsed = unknown>(
   } = options;
 
   const [layouts, setLayouts] = useState<WorkspaceLayoutDto[]>([]);
-  const [activeLayout, setActiveLayout] = useState<WorkspaceLayoutDto | null>(
-    null,
-  );
+  const [activeLayout, setActiveLayout] = useState<WorkspaceLayoutDto | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fetchKey, setFetchKey] = useState(0);
@@ -333,11 +313,8 @@ export function useWorkspaceLayouts<TParsed = unknown>(
       // share state through the cache.
       // -----------------------------------------------------------------
       const cachedList = embedded ? null : getCachedLayoutsList(cacheKeyPrefix);
-      const cachedActive = embedded
-        ? null
-        : getCachedActiveLayout(cacheKeyPrefix);
-      const hasCachedData =
-        cachedList && cachedList.length > 0 && cachedActive;
+      const cachedActive = embedded ? null : getCachedActiveLayout(cacheKeyPrefix);
+      const hasCachedData = cachedList && cachedList.length > 0 && cachedActive;
 
       if (hasCachedData && !cancelled && mountedRef.current) {
         setLayouts(cachedList);
@@ -350,16 +327,10 @@ export function useWorkspaceLayouts<TParsed = unknown>(
       setError(null);
 
       try {
-        const listUrl = buildBffApiUrl(bffBaseUrl, "/workspace/layouts");
-        const defaultUrl = buildBffApiUrl(
-          bffBaseUrl,
-          "/workspace/layouts/default",
-        );
+        const listUrl = buildBffApiUrl(bffBaseUrl, '/workspace/layouts');
+        const defaultUrl = buildBffApiUrl(bffBaseUrl, '/workspace/layouts/default');
 
-        const [listRes, defaultRes] = await Promise.all([
-          authenticatedFetch(listUrl),
-          authenticatedFetch(defaultUrl),
-        ]);
+        const [listRes, defaultRes] = await Promise.all([authenticatedFetch(listUrl), authenticatedFetch(defaultUrl)]);
 
         if (cancelled || !mountedRef.current) return;
 
@@ -368,9 +339,7 @@ export function useWorkspaceLayouts<TParsed = unknown>(
         if (listRes.ok) {
           allLayouts = (await listRes.json()) as WorkspaceLayoutDto[];
         } else {
-          console.warn(
-            `[useWorkspaceLayouts] Failed to fetch layouts list: ${listRes.status}`,
-          );
+          console.warn(`[useWorkspaceLayouts] Failed to fetch layouts list: ${listRes.status}`);
         }
 
         // Parse default layout
@@ -378,9 +347,7 @@ export function useWorkspaceLayouts<TParsed = unknown>(
         if (defaultRes.ok) {
           defaultLayout = (await defaultRes.json()) as WorkspaceLayoutDto;
         } else {
-          console.warn(
-            `[useWorkspaceLayouts] Failed to fetch default layout: ${defaultRes.status}`,
-          );
+          console.warn(`[useWorkspaceLayouts] Failed to fetch default layout: ${defaultRes.status}`);
         }
 
         if (cancelled || !mountedRef.current) return;
@@ -392,33 +359,27 @@ export function useWorkspaceLayouts<TParsed = unknown>(
 
         // 1. Deep-link via initialWorkspaceId (LegalWorkspace usage)
         if (initialWorkspaceId) {
-          const fromList = allLayouts.find(
-            (l) => l.id === initialWorkspaceId,
-          );
+          const fromList = allLayouts.find(l => l.id === initialWorkspaceId);
           if (fromList) {
             resolvedActive = fromList;
           } else {
             // Not in list — fetch by id (404 falls through silently)
             try {
               const deepLinkRes = await authenticatedFetch(
-                buildBffApiUrl(
-                  bffBaseUrl,
-                  `/workspace/layouts/${initialWorkspaceId}`,
-                ),
+                buildBffApiUrl(bffBaseUrl, `/workspace/layouts/${initialWorkspaceId}`)
               );
               if (cancelled || !mountedRef.current) return;
               if (deepLinkRes.ok) {
-                resolvedActive =
-                  (await deepLinkRes.json()) as WorkspaceLayoutDto;
+                resolvedActive = (await deepLinkRes.json()) as WorkspaceLayoutDto;
               } else {
                 console.warn(
-                  `[useWorkspaceLayouts] Deep-linked layout ${initialWorkspaceId} not found (${deepLinkRes.status}), falling back to default`,
+                  `[useWorkspaceLayouts] Deep-linked layout ${initialWorkspaceId} not found (${deepLinkRes.status}), falling back to default`
                 );
               }
             } catch (deepLinkErr) {
               console.warn(
-                "[useWorkspaceLayouts] Failed to fetch deep-linked layout, falling back to default:",
-                deepLinkErr,
+                '[useWorkspaceLayouts] Failed to fetch deep-linked layout, falling back to default:',
+                deepLinkErr
               );
             }
           }
@@ -428,14 +389,12 @@ export function useWorkspaceLayouts<TParsed = unknown>(
         if (!resolvedActive && pinnedLayoutIdKey) {
           let pinnedId: string | null = null;
           try {
-            pinnedId =
-              window.sessionStorage?.getItem(pinnedLayoutIdKey) ?? null;
+            pinnedId = window.sessionStorage?.getItem(pinnedLayoutIdKey) ?? null;
           } catch {
             /* ignore */
           }
           if (pinnedId) {
-            resolvedActive =
-              allLayouts.find((l) => l.id === pinnedId) ?? null;
+            resolvedActive = allLayouts.find(l => l.id === pinnedId) ?? null;
           }
         }
 
@@ -446,10 +405,7 @@ export function useWorkspaceLayouts<TParsed = unknown>(
 
         // 4. First default → first system → first layout
         if (!resolvedActive && allLayouts.length > 0) {
-          resolvedActive =
-            allLayouts.find((l) => l.isDefault) ??
-            allLayouts.find((l) => l.isSystem) ??
-            allLayouts[0];
+          resolvedActive = allLayouts.find(l => l.isDefault) ?? allLayouts.find(l => l.isSystem) ?? allLayouts[0];
         }
 
         // 5. Consumer-provided hardcoded fallback (LegalWorkspace usage)
@@ -474,12 +430,7 @@ export function useWorkspaceLayouts<TParsed = unknown>(
             if (resolvedActive) {
               setCachedActiveLayout(cacheKeyPrefix, resolvedActive);
             }
-            const listToCache =
-              allLayouts.length > 0
-                ? allLayouts
-                : fallbackLayout
-                  ? [fallbackLayout]
-                  : null;
+            const listToCache = allLayouts.length > 0 ? allLayouts : fallbackLayout ? [fallbackLayout] : null;
             if (listToCache) {
               setCachedLayoutsList(cacheKeyPrefix, listToCache);
             }
@@ -490,11 +441,8 @@ export function useWorkspaceLayouts<TParsed = unknown>(
       } catch (err) {
         if (cancelled || !mountedRef.current) return;
 
-        const message = err instanceof Error ? err.message : "Unknown error";
-        console.warn(
-          "[useWorkspaceLayouts] Layout fetch failed:",
-          message,
-        );
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        console.warn('[useWorkspaceLayouts] Layout fetch failed:', message);
 
         setError(message);
         if (fallbackLayout) {
@@ -535,7 +483,7 @@ export function useWorkspaceLayouts<TParsed = unknown>(
   const setActiveLayoutById = useCallback(
     (layoutId: string) => {
       // Look up in the current layouts list first
-      const found = layouts.find((l) => l.id === layoutId);
+      const found = layouts.find(l => l.id === layoutId);
       if (found) {
         setActiveLayout(found);
         if (!embedded) {
@@ -546,18 +494,13 @@ export function useWorkspaceLayouts<TParsed = unknown>(
 
       // Not found locally — fetch by ID from the BFF
       if (!isAuthenticated || !bffBaseUrl) {
-        console.warn(
-          "[useWorkspaceLayouts] setActiveLayoutById called before auth ready",
-        );
+        console.warn('[useWorkspaceLayouts] setActiveLayoutById called before auth ready');
         return;
       }
 
       (async () => {
         try {
-          const url = buildBffApiUrl(
-            bffBaseUrl,
-            `/workspace/layouts/${layoutId}`,
-          );
+          const url = buildBffApiUrl(bffBaseUrl, `/workspace/layouts/${layoutId}`);
           const res = await authenticatedFetch(url);
           if (res.ok) {
             const layout = (await res.json()) as WorkspaceLayoutDto;
@@ -568,26 +511,14 @@ export function useWorkspaceLayouts<TParsed = unknown>(
               }
             }
           } else {
-            console.warn(
-              `[useWorkspaceLayouts] Failed to fetch layout ${layoutId}: ${res.status}`,
-            );
+            console.warn(`[useWorkspaceLayouts] Failed to fetch layout ${layoutId}: ${res.status}`);
           }
         } catch (err) {
-          console.warn(
-            "[useWorkspaceLayouts] Failed to fetch layout by ID:",
-            err,
-          );
+          console.warn('[useWorkspaceLayouts] Failed to fetch layout by ID:', err);
         }
       })();
     },
-    [
-      layouts,
-      embedded,
-      cacheKeyPrefix,
-      isAuthenticated,
-      bffBaseUrl,
-      authenticatedFetch,
-    ],
+    [layouts, embedded, cacheKeyPrefix, isAuthenticated, bffBaseUrl, authenticatedFetch]
   );
 
   // -------------------------------------------------------------------------
@@ -596,7 +527,7 @@ export function useWorkspaceLayouts<TParsed = unknown>(
 
   const refetch = useCallback(() => {
     invalidateLayoutCache(cacheKeyPrefix);
-    setFetchKey((k) => k + 1);
+    setFetchKey(k => k + 1);
   }, [cacheKeyPrefix]);
 
   // -------------------------------------------------------------------------
@@ -612,10 +543,7 @@ export function useWorkspaceLayouts<TParsed = unknown>(
           }
           return parseLayoutJson(undefined);
         } catch (err) {
-          console.warn(
-            "[useWorkspaceLayouts] Failed to parse sectionsJson:",
-            err,
-          );
+          console.warn('[useWorkspaceLayouts] Failed to parse sectionsJson:', err);
           return parseLayoutJson(undefined);
         }
       })()
@@ -626,14 +554,14 @@ export function useWorkspaceLayouts<TParsed = unknown>(
   // -------------------------------------------------------------------------
 
   const status: WorkspaceLoadingStatus = (() => {
-    if (isLoading) return "loading";
-    if (error) return "error";
+    if (isLoading) return 'loading';
+    if (error) return 'error';
     // First visit: user has zero user-created layouts (only system layouts).
     // Only meaningful when consumer supplied a fallback (LW case) — otherwise
     // "no user layouts" is just "empty" and status stays "loaded".
-    const hasUserLayouts = layouts.some((l) => !l.isSystem);
-    if (!hasUserLayouts && fallbackLayout) return "first-visit";
-    return "loaded";
+    const hasUserLayouts = layouts.some(l => !l.isSystem);
+    if (!hasUserLayouts && fallbackLayout) return 'first-visit';
+    return 'loaded';
   })();
 
   return {

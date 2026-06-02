@@ -31,19 +31,8 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  mergeClasses,
-  tokens,
-  Card,
-  CardHeader,
-  Text,
-  Badge,
-} from '@fluentui/react-components';
-import {
-  DocumentRegular,
-  DocumentPdfRegular,
-} from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, tokens, Card, CardHeader, Text, Badge } from '@fluentui/react-components';
+import { DocumentRegular, DocumentPdfRegular } from '@fluentui/react-icons';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 
 // ---------------------------------------------------------------------------
@@ -186,16 +175,10 @@ function isPdf(contentType: string): boolean {
 }
 
 /** Type guard for the widget payload — defensive narrowing at the boundary. */
-function isDocumentViewerData(
-  value: unknown
-): value is DocumentViewerWidgetData {
+function isDocumentViewerData(value: unknown): value is DocumentViewerWidgetData {
   if (value === null || typeof value !== 'object') return false;
   const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.filename === 'string' &&
-    typeof obj.contentType === 'string' &&
-    typeof obj.textContent === 'string'
-  );
+  return typeof obj.filename === 'string' && typeof obj.contentType === 'string' && typeof obj.textContent === 'string';
 }
 
 // ---------------------------------------------------------------------------
@@ -264,9 +247,7 @@ const DocumentViewerWidget: React.FC<WorkspaceWidgetProps<DocumentViewerWidgetDa
                   {contentType}
                 </Badge>
               ) : null}
-              {sizeLabel ? (
-                <Text className={styles.headerSubtitle}>{sizeLabel}</Text>
-              ) : null}
+              {sizeLabel ? <Text className={styles.headerSubtitle}>{sizeLabel}</Text> : null}
             </div>
           }
         />
@@ -289,8 +270,8 @@ const DocumentViewerWidget: React.FC<WorkspaceWidgetProps<DocumentViewerWidgetDa
         {!isLoading && !error && textContent.length === 0 && (
           <div className={styles.emptyState}>
             <Text>
-              No preview available for this file. The attachment is still in
-              the chat and will be sent with your next message.
+              No preview available for this file. The attachment is still in the chat and will be sent with your next
+              message.
             </Text>
           </div>
         )}

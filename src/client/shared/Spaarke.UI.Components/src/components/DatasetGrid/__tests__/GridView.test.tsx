@@ -204,7 +204,7 @@ describe('GridView', () => {
       }));
 
       const { container } = renderWithProviders(
-        <GridView {...defaultProps} records={largeRecordSet} enableVirtualization={true} />,
+        <GridView {...defaultProps} records={largeRecordSet} enableVirtualization={true} />
       );
 
       // Task 071: VirtualizedGridView does not expose role="grid" — its body is

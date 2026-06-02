@@ -167,9 +167,7 @@ describe('useChatFileAttachment', () => {
           await result.current.addFiles([file]);
         });
 
-        expect(
-          result.current.errors.filter((e) => e.reason === 'too-large'),
-        ).toHaveLength(0);
+        expect(result.current.errors.filter(e => e.reason === 'too-large')).toHaveLength(0);
         // Chip should be accepted (status ready after text extraction)
         expect(result.current.files).toHaveLength(1);
       });
@@ -183,7 +181,7 @@ describe('useChatFileAttachment', () => {
         });
 
         expect(result.current.files).toHaveLength(0);
-        const tooLarge = result.current.errors.filter((e) => e.reason === 'too-large');
+        const tooLarge = result.current.errors.filter(e => e.reason === 'too-large');
         expect(tooLarge).toHaveLength(1);
         expect(tooLarge[0].message).toMatch(/25 MB/);
       });

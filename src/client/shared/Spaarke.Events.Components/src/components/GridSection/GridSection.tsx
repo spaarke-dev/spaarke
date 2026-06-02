@@ -50,7 +50,7 @@ function getXrm(): any | undefined {
   // Try parent.Xrm for Custom Pages running in iframe
   try {
     // SDK boundary: Xrm is injected by Dynamics 365 at runtime onto window/window.parent.
-    if (typeof window !== "undefined" && window.parent && (window.parent as any).Xrm?.WebApi) {
+    if (typeof window !== 'undefined' && window.parent && (window.parent as any).Xrm?.WebApi) {
       return (window.parent as any).Xrm;
     }
   } catch (e) {

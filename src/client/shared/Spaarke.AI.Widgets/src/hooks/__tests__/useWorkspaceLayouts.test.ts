@@ -17,49 +17,49 @@
  *     LegalWorkspace or SpaarkeAi specifics)
  */
 
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { renderHook, act, waitFor } from '@testing-library/react';
 import {
   useWorkspaceLayouts,
   invalidateLayoutCache,
   type WorkspaceLayoutDto,
   type AuthenticatedFetch,
-} from "../useWorkspaceLayouts";
+} from '../useWorkspaceLayouts';
 
 // ---------------------------------------------------------------------------
 // Test fixtures
 // ---------------------------------------------------------------------------
 
 const FIXTURE_LAYOUT_USER: WorkspaceLayoutDto = {
-  id: "11111111-1111-1111-1111-111111111111",
-  name: "My Custom Layout",
-  layoutTemplateId: "3-row-mixed",
+  id: '11111111-1111-1111-1111-111111111111',
+  name: 'My Custom Layout',
+  layoutTemplateId: '3-row-mixed',
   sectionsJson: JSON.stringify({ schemaVersion: 1, rows: [] }),
   isDefault: true,
   sortOrder: 0,
   isSystem: false,
-  modifiedOn: "2026-05-26T10:00:00+00:00",
+  modifiedOn: '2026-05-26T10:00:00+00:00',
 };
 
 const FIXTURE_LAYOUT_SYSTEM: WorkspaceLayoutDto = {
-  id: "22222222-2222-2222-2222-222222222222",
-  name: "System Default",
-  layoutTemplateId: "3-row-mixed",
+  id: '22222222-2222-2222-2222-222222222222',
+  name: 'System Default',
+  layoutTemplateId: '3-row-mixed',
   sectionsJson: JSON.stringify({ schemaVersion: 1, rows: [] }),
   isDefault: false,
   sortOrder: 1,
   isSystem: true,
-  modifiedOn: "1970-01-01T00:00:00+00:00",
+  modifiedOn: '1970-01-01T00:00:00+00:00',
 };
 
 const FALLBACK_LAYOUT: WorkspaceLayoutDto = {
-  id: "00000000-0000-0000-0000-000000000001",
-  name: "Hardcoded Fallback",
-  layoutTemplateId: "3-row-mixed",
+  id: '00000000-0000-0000-0000-000000000001',
+  name: 'Hardcoded Fallback',
+  layoutTemplateId: '3-row-mixed',
   sectionsJson: JSON.stringify({ schemaVersion: 1, rows: [] }),
   isDefault: true,
   sortOrder: 0,
   isSystem: true,
-  modifiedOn: "1970-01-01T00:00:00+00:00",
+  modifiedOn: '1970-01-01T00:00:00+00:00',
 };
 
 // ---------------------------------------------------------------------------
@@ -82,9 +82,7 @@ function mockErrorResponse(status: number): Response {
   } as Response;
 }
 
-function createMockFetch(
-  responses: Record<string, Response>,
-): jest.MockedFunction<AuthenticatedFetch> {
+function createMockFetch(responses: Record<string, Response>): jest.MockedFunction<AuthenticatedFetch> {
   return jest.fn(async (url: string) => {
     // Match on path suffix so tests don't have to specify the full base url
     for (const [pathSuffix, response] of Object.entries(responses)) {
@@ -107,30 +105,24 @@ beforeEach(() => {
 // Cache hit
 // ---------------------------------------------------------------------------
 
-describe("useWorkspaceLayouts — cache hit", () => {
-  it("hydrates immediately from sessionStorage cache when present", async () => {
+describe('useWorkspaceLayouts — cache hit', () => {
+  it('hydrates immediately from sessionStorage cache when present', async () => {
     // Pre-populate the LW cache namespace
-    sessionStorage.setItem(
-      "sprk:workspace:layoutsList",
-      JSON.stringify([FIXTURE_LAYOUT_USER]),
-    );
-    sessionStorage.setItem(
-      "sprk:workspace:activeLayout",
-      JSON.stringify(FIXTURE_LAYOUT_USER),
-    );
+    sessionStorage.setItem('sprk:workspace:layoutsList', JSON.stringify([FIXTURE_LAYOUT_USER]));
+    sessionStorage.setItem('sprk:workspace:activeLayout', JSON.stringify(FIXTURE_LAYOUT_USER));
 
     const fetchMock = createMockFetch({
-      "/workspace/layouts": mockOkResponse([FIXTURE_LAYOUT_USER]),
-      "/workspace/layouts/default": mockOkResponse(FIXTURE_LAYOUT_USER),
+      '/workspace/layouts': mockOkResponse([FIXTURE_LAYOUT_USER]),
+      '/workspace/layouts/default': mockOkResponse(FIXTURE_LAYOUT_USER),
     });
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "https://bff.test",
+        bffBaseUrl: 'https://bff.test',
         authenticatedFetch: fetchMock,
         isAuthenticated: true,
-        cacheKeyPrefix: "sprk:workspace",
-      }),
+        cacheKeyPrefix: 'sprk:workspace',
+      })
     );
 
     // Cache hit means initial render has data + isLoading=false
@@ -147,20 +139,20 @@ describe("useWorkspaceLayouts — cache hit", () => {
 // Cache miss
 // ---------------------------------------------------------------------------
 
-describe("useWorkspaceLayouts — cache miss", () => {
-  it("fetches from BFF when sessionStorage is empty", async () => {
+describe('useWorkspaceLayouts — cache miss', () => {
+  it('fetches from BFF when sessionStorage is empty', async () => {
     const fetchMock = createMockFetch({
-      "/workspace/layouts": mockOkResponse([FIXTURE_LAYOUT_USER]),
-      "/workspace/layouts/default": mockOkResponse(FIXTURE_LAYOUT_USER),
+      '/workspace/layouts': mockOkResponse([FIXTURE_LAYOUT_USER]),
+      '/workspace/layouts/default': mockOkResponse(FIXTURE_LAYOUT_USER),
     });
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "https://bff.test",
+        bffBaseUrl: 'https://bff.test',
         authenticatedFetch: fetchMock,
         isAuthenticated: true,
-        cacheKeyPrefix: "sprk:workspace",
-      }),
+        cacheKeyPrefix: 'sprk:workspace',
+      })
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -175,20 +167,20 @@ describe("useWorkspaceLayouts — cache miss", () => {
 // Fallback layout
 // ---------------------------------------------------------------------------
 
-describe("useWorkspaceLayouts — fallbackLayout", () => {
-  it("renders fallbackLayout when list is empty AND no default resolved", async () => {
+describe('useWorkspaceLayouts — fallbackLayout', () => {
+  it('renders fallbackLayout when list is empty AND no default resolved', async () => {
     const fetchMock = createMockFetch({
-      "/workspace/layouts": mockOkResponse([]),
-      "/workspace/layouts/default": mockErrorResponse(404),
+      '/workspace/layouts': mockOkResponse([]),
+      '/workspace/layouts/default': mockErrorResponse(404),
     });
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "https://bff.test",
+        bffBaseUrl: 'https://bff.test',
         authenticatedFetch: fetchMock,
         isAuthenticated: true,
         fallbackLayout: FALLBACK_LAYOUT,
-      }),
+      })
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -197,39 +189,39 @@ describe("useWorkspaceLayouts — fallbackLayout", () => {
     expect(result.current.activeLayout).toEqual(FALLBACK_LAYOUT);
   });
 
-  it("renders fallbackLayout on network error", async () => {
+  it('renders fallbackLayout on network error', async () => {
     const fetchMock = jest.fn(async () => {
-      throw new Error("Network failure");
+      throw new Error('Network failure');
     });
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "https://bff.test",
+        bffBaseUrl: 'https://bff.test',
         authenticatedFetch: fetchMock,
         isAuthenticated: true,
         fallbackLayout: FALLBACK_LAYOUT,
-      }),
+      })
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.activeLayout).toEqual(FALLBACK_LAYOUT);
     expect(result.current.error).toBeTruthy();
-    expect(result.current.status).toBe("error");
+    expect(result.current.status).toBe('error');
   });
 
-  it("renders empty when no fallbackLayout supplied + network error", async () => {
+  it('renders empty when no fallbackLayout supplied + network error', async () => {
     const fetchMock = jest.fn(async () => {
-      throw new Error("Network failure");
+      throw new Error('Network failure');
     });
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "https://bff.test",
+        bffBaseUrl: 'https://bff.test',
         authenticatedFetch: fetchMock,
         isAuthenticated: true,
         // No fallbackLayout — SpaarkeAi-style degrade-to-empty.
-      }),
+      })
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -244,25 +236,25 @@ describe("useWorkspaceLayouts — fallbackLayout", () => {
 // parseLayoutJson
 // ---------------------------------------------------------------------------
 
-describe("useWorkspaceLayouts — parseLayoutJson", () => {
-  it("invokes parseLayoutJson when supplied and returns parsedActiveLayout", async () => {
+describe('useWorkspaceLayouts — parseLayoutJson', () => {
+  it('invokes parseLayoutJson when supplied and returns parsedActiveLayout', async () => {
     const parser = jest.fn((raw: unknown) => ({
       parsed: true,
       raw,
     }));
 
     const fetchMock = createMockFetch({
-      "/workspace/layouts": mockOkResponse([FIXTURE_LAYOUT_USER]),
-      "/workspace/layouts/default": mockOkResponse(FIXTURE_LAYOUT_USER),
+      '/workspace/layouts': mockOkResponse([FIXTURE_LAYOUT_USER]),
+      '/workspace/layouts/default': mockOkResponse(FIXTURE_LAYOUT_USER),
     });
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "https://bff.test",
+        bffBaseUrl: 'https://bff.test',
         authenticatedFetch: fetchMock,
         isAuthenticated: true,
         parseLayoutJson: parser,
-      }),
+      })
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -271,18 +263,18 @@ describe("useWorkspaceLayouts — parseLayoutJson", () => {
     expect(result.current.parsedActiveLayout).toMatchObject({ parsed: true });
   });
 
-  it("returns parsedActiveLayout=undefined when no parser supplied", async () => {
+  it('returns parsedActiveLayout=undefined when no parser supplied', async () => {
     const fetchMock = createMockFetch({
-      "/workspace/layouts": mockOkResponse([FIXTURE_LAYOUT_USER]),
-      "/workspace/layouts/default": mockOkResponse(FIXTURE_LAYOUT_USER),
+      '/workspace/layouts': mockOkResponse([FIXTURE_LAYOUT_USER]),
+      '/workspace/layouts/default': mockOkResponse(FIXTURE_LAYOUT_USER),
     });
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "https://bff.test",
+        bffBaseUrl: 'https://bff.test',
         authenticatedFetch: fetchMock,
         isAuthenticated: true,
-      }),
+      })
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -295,31 +287,31 @@ describe("useWorkspaceLayouts — parseLayoutJson", () => {
 // Auth-not-ready deferral
 // ---------------------------------------------------------------------------
 
-describe("useWorkspaceLayouts — auth deferral", () => {
-  it("does not fetch when isAuthenticated=false", () => {
+describe('useWorkspaceLayouts — auth deferral', () => {
+  it('does not fetch when isAuthenticated=false', () => {
     const fetchMock = jest.fn();
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "https://bff.test",
+        bffBaseUrl: 'https://bff.test',
         authenticatedFetch: fetchMock as unknown as AuthenticatedFetch,
         isAuthenticated: false,
-      }),
+      })
     );
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.current.isLoading).toBe(true);
   });
 
-  it("does not fetch when bffBaseUrl is empty", () => {
+  it('does not fetch when bffBaseUrl is empty', () => {
     const fetchMock = jest.fn();
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "",
+        bffBaseUrl: '',
         authenticatedFetch: fetchMock as unknown as AuthenticatedFetch,
         isAuthenticated: true,
-      }),
+      })
     );
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -331,11 +323,11 @@ describe("useWorkspaceLayouts — auth deferral", () => {
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "",
+        bffBaseUrl: '',
         authenticatedFetch: fetchMock as unknown as AuthenticatedFetch,
         isAuthenticated: true,
         fallbackLayout: FALLBACK_LAYOUT,
-      }),
+      })
     );
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -348,21 +340,21 @@ describe("useWorkspaceLayouts — auth deferral", () => {
 // 401 / 403 error paths
 // ---------------------------------------------------------------------------
 
-describe("useWorkspaceLayouts — 401/403 paths", () => {
-  it("warns + treats list as empty when list endpoint returns 403", async () => {
+describe('useWorkspaceLayouts — 401/403 paths', () => {
+  it('warns + treats list as empty when list endpoint returns 403', async () => {
     const fetchMock = createMockFetch({
-      "/workspace/layouts": mockErrorResponse(403),
-      "/workspace/layouts/default": mockOkResponse(FIXTURE_LAYOUT_USER),
+      '/workspace/layouts': mockErrorResponse(403),
+      '/workspace/layouts/default': mockOkResponse(FIXTURE_LAYOUT_USER),
     });
 
-    const warnSpy = jest.spyOn(console, "warn").mockImplementation();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "https://bff.test",
+        bffBaseUrl: 'https://bff.test',
         authenticatedFetch: fetchMock,
         isAuthenticated: true,
-      }),
+      })
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -374,23 +366,20 @@ describe("useWorkspaceLayouts — 401/403 paths", () => {
     warnSpy.mockRestore();
   });
 
-  it("warns + falls through cascade when default endpoint returns 401", async () => {
+  it('warns + falls through cascade when default endpoint returns 401', async () => {
     const fetchMock = createMockFetch({
-      "/workspace/layouts": mockOkResponse([
-        FIXTURE_LAYOUT_USER,
-        FIXTURE_LAYOUT_SYSTEM,
-      ]),
-      "/workspace/layouts/default": mockErrorResponse(401),
+      '/workspace/layouts': mockOkResponse([FIXTURE_LAYOUT_USER, FIXTURE_LAYOUT_SYSTEM]),
+      '/workspace/layouts/default': mockErrorResponse(401),
     });
 
-    const warnSpy = jest.spyOn(console, "warn").mockImplementation();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "https://bff.test",
+        bffBaseUrl: 'https://bff.test',
         authenticatedFetch: fetchMock,
         isAuthenticated: true,
-      }),
+      })
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -407,48 +396,31 @@ describe("useWorkspaceLayouts — 401/403 paths", () => {
 // invalidateLayoutCache
 // ---------------------------------------------------------------------------
 
-describe("invalidateLayoutCache", () => {
-  it("removes both cache keys for the namespace", () => {
-    sessionStorage.setItem(
-      "sprk:workspace:activeLayout",
-      JSON.stringify(FIXTURE_LAYOUT_USER),
-    );
-    sessionStorage.setItem(
-      "sprk:workspace:layoutsList",
-      JSON.stringify([FIXTURE_LAYOUT_USER]),
-    );
+describe('invalidateLayoutCache', () => {
+  it('removes both cache keys for the namespace', () => {
+    sessionStorage.setItem('sprk:workspace:activeLayout', JSON.stringify(FIXTURE_LAYOUT_USER));
+    sessionStorage.setItem('sprk:workspace:layoutsList', JSON.stringify([FIXTURE_LAYOUT_USER]));
 
-    invalidateLayoutCache("sprk:workspace");
+    invalidateLayoutCache('sprk:workspace');
 
-    expect(sessionStorage.getItem("sprk:workspace:activeLayout")).toBeNull();
-    expect(sessionStorage.getItem("sprk:workspace:layoutsList")).toBeNull();
+    expect(sessionStorage.getItem('sprk:workspace:activeLayout')).toBeNull();
+    expect(sessionStorage.getItem('sprk:workspace:layoutsList')).toBeNull();
   });
 
-  it("does NOT touch other namespaces (LW vs SpaarkeAi isolation)", () => {
-    sessionStorage.setItem(
-      "spaarke.ai.workspace.activeLayout",
-      JSON.stringify(FIXTURE_LAYOUT_USER),
-    );
-    sessionStorage.setItem(
-      "sprk:workspace:activeLayout",
-      JSON.stringify(FIXTURE_LAYOUT_USER),
-    );
+  it('does NOT touch other namespaces (LW vs SpaarkeAi isolation)', () => {
+    sessionStorage.setItem('spaarke.ai.workspace.activeLayout', JSON.stringify(FIXTURE_LAYOUT_USER));
+    sessionStorage.setItem('sprk:workspace:activeLayout', JSON.stringify(FIXTURE_LAYOUT_USER));
 
-    invalidateLayoutCache("sprk:workspace");
+    invalidateLayoutCache('sprk:workspace');
 
-    expect(sessionStorage.getItem("sprk:workspace:activeLayout")).toBeNull();
-    expect(
-      sessionStorage.getItem("spaarke.ai.workspace.activeLayout"),
-    ).toBeTruthy();
+    expect(sessionStorage.getItem('sprk:workspace:activeLayout')).toBeNull();
+    expect(sessionStorage.getItem('spaarke.ai.workspace.activeLayout')).toBeTruthy();
   });
 
   it("uses default 'sprk:workspace' prefix when called without arg", () => {
-    sessionStorage.setItem(
-      "sprk:workspace:activeLayout",
-      JSON.stringify(FIXTURE_LAYOUT_USER),
-    );
+    sessionStorage.setItem('sprk:workspace:activeLayout', JSON.stringify(FIXTURE_LAYOUT_USER));
     invalidateLayoutCache();
-    expect(sessionStorage.getItem("sprk:workspace:activeLayout")).toBeNull();
+    expect(sessionStorage.getItem('sprk:workspace:activeLayout')).toBeNull();
   });
 });
 
@@ -456,51 +428,47 @@ describe("invalidateLayoutCache", () => {
 // cacheKeyPrefix namespace isolation
 // ---------------------------------------------------------------------------
 
-describe("useWorkspaceLayouts — cacheKeyPrefix isolation", () => {
+describe('useWorkspaceLayouts — cacheKeyPrefix isolation', () => {
   it("writes LW prefix as 'sprk:workspace:activeLayout' (colon joiner)", async () => {
     const fetchMock = createMockFetch({
-      "/workspace/layouts": mockOkResponse([FIXTURE_LAYOUT_USER]),
-      "/workspace/layouts/default": mockOkResponse(FIXTURE_LAYOUT_USER),
+      '/workspace/layouts': mockOkResponse([FIXTURE_LAYOUT_USER]),
+      '/workspace/layouts/default': mockOkResponse(FIXTURE_LAYOUT_USER),
     });
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "https://bff.test",
+        bffBaseUrl: 'https://bff.test',
         authenticatedFetch: fetchMock,
         isAuthenticated: true,
-        cacheKeyPrefix: "sprk:workspace",
-      }),
+        cacheKeyPrefix: 'sprk:workspace',
+      })
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(sessionStorage.getItem("sprk:workspace:activeLayout")).toBeTruthy();
-    expect(
-      sessionStorage.getItem("spaarke.ai.workspace.activeLayout"),
-    ).toBeNull();
+    expect(sessionStorage.getItem('sprk:workspace:activeLayout')).toBeTruthy();
+    expect(sessionStorage.getItem('spaarke.ai.workspace.activeLayout')).toBeNull();
   });
 
   it("writes SpaarkeAi prefix as 'spaarke.ai.workspace.activeLayout' (dot joiner)", async () => {
     const fetchMock = createMockFetch({
-      "/workspace/layouts": mockOkResponse([FIXTURE_LAYOUT_USER]),
-      "/workspace/layouts/default": mockOkResponse(FIXTURE_LAYOUT_USER),
+      '/workspace/layouts': mockOkResponse([FIXTURE_LAYOUT_USER]),
+      '/workspace/layouts/default': mockOkResponse(FIXTURE_LAYOUT_USER),
     });
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "https://bff.test",
+        bffBaseUrl: 'https://bff.test',
         authenticatedFetch: fetchMock,
         isAuthenticated: true,
-        cacheKeyPrefix: "spaarke.ai.workspace",
-      }),
+        cacheKeyPrefix: 'spaarke.ai.workspace',
+      })
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(
-      sessionStorage.getItem("spaarke.ai.workspace.activeLayout"),
-    ).toBeTruthy();
-    expect(sessionStorage.getItem("sprk:workspace:activeLayout")).toBeNull();
+    expect(sessionStorage.getItem('spaarke.ai.workspace.activeLayout')).toBeTruthy();
+    expect(sessionStorage.getItem('sprk:workspace:activeLayout')).toBeNull();
   });
 });
 
@@ -508,52 +476,49 @@ describe("useWorkspaceLayouts — cacheKeyPrefix isolation", () => {
 // embedded flag
 // ---------------------------------------------------------------------------
 
-describe("useWorkspaceLayouts — embedded flag", () => {
-  it("does NOT write cache when embedded=true", async () => {
+describe('useWorkspaceLayouts — embedded flag', () => {
+  it('does NOT write cache when embedded=true', async () => {
     const fetchMock = createMockFetch({
-      "/workspace/layouts": mockOkResponse([FIXTURE_LAYOUT_USER]),
-      "/workspace/layouts/default": mockOkResponse(FIXTURE_LAYOUT_USER),
+      '/workspace/layouts': mockOkResponse([FIXTURE_LAYOUT_USER]),
+      '/workspace/layouts/default': mockOkResponse(FIXTURE_LAYOUT_USER),
     });
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "https://bff.test",
+        bffBaseUrl: 'https://bff.test',
         authenticatedFetch: fetchMock,
         isAuthenticated: true,
         embedded: true,
-        cacheKeyPrefix: "sprk:workspace",
-      }),
+        cacheKeyPrefix: 'sprk:workspace',
+      })
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(sessionStorage.getItem("sprk:workspace:activeLayout")).toBeNull();
-    expect(sessionStorage.getItem("sprk:workspace:layoutsList")).toBeNull();
+    expect(sessionStorage.getItem('sprk:workspace:activeLayout')).toBeNull();
+    expect(sessionStorage.getItem('sprk:workspace:layoutsList')).toBeNull();
   });
 
-  it("does NOT read cache when embedded=true", async () => {
+  it('does NOT read cache when embedded=true', async () => {
     sessionStorage.setItem(
-      "sprk:workspace:activeLayout",
-      JSON.stringify(FIXTURE_LAYOUT_SYSTEM), // pretend cache has different layout
+      'sprk:workspace:activeLayout',
+      JSON.stringify(FIXTURE_LAYOUT_SYSTEM) // pretend cache has different layout
     );
-    sessionStorage.setItem(
-      "sprk:workspace:layoutsList",
-      JSON.stringify([FIXTURE_LAYOUT_SYSTEM]),
-    );
+    sessionStorage.setItem('sprk:workspace:layoutsList', JSON.stringify([FIXTURE_LAYOUT_SYSTEM]));
 
     const fetchMock = createMockFetch({
-      "/workspace/layouts": mockOkResponse([FIXTURE_LAYOUT_USER]),
-      "/workspace/layouts/default": mockOkResponse(FIXTURE_LAYOUT_USER),
+      '/workspace/layouts': mockOkResponse([FIXTURE_LAYOUT_USER]),
+      '/workspace/layouts/default': mockOkResponse(FIXTURE_LAYOUT_USER),
     });
 
     const { result } = renderHook(() =>
       useWorkspaceLayouts({
-        bffBaseUrl: "https://bff.test",
+        bffBaseUrl: 'https://bff.test',
         authenticatedFetch: fetchMock,
         isAuthenticated: true,
         embedded: true,
-        cacheKeyPrefix: "sprk:workspace",
-      }),
+        cacheKeyPrefix: 'sprk:workspace',
+      })
     );
 
     // embedded=true means cache is ignored — start fresh from fetch

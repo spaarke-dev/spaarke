@@ -379,8 +379,8 @@ export function AiSessionProvider({
   // ── Chat Session State (persisted to localStorage — R4 task 031) ───────
   // Initial state seeded via readSession() which performs the one-shot
   // sessionStorage → localStorage migration on first localStorage-aware load.
-  const [chatSessionId, setChatSessionIdState] = useState<string | null>(
-    () => readSession(AI_SESSION_CHAT_SESSION_KEY)
+  const [chatSessionId, setChatSessionIdState] = useState<string | null>(() =>
+    readSession(AI_SESSION_CHAT_SESSION_KEY)
   );
 
   const setChatSessionId = useCallback((sessionId: string): void => {

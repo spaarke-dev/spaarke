@@ -41,7 +41,7 @@
  * @see projects/spaarke-ai-platform-unification-r4/notes/b6-option-b-execution-2026-05-26.md
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -52,12 +52,8 @@ import {
   Dropdown,
   Option,
   Label,
-} from "@fluentui/react-components";
-import {
-  DismissRegular,
-  ChevronLeftRegular,
-  ChevronRightRegular,
-} from "@fluentui/react-icons";
+} from '@fluentui/react-components';
+import { DismissRegular, ChevronLeftRegular, ChevronRightRegular } from '@fluentui/react-icons';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -66,10 +62,10 @@ import {
 /**
  * Calendar filter output format
  */
-export type CalendarFilterPaneFilterType = "single" | "range" | "clear";
+export type CalendarFilterPaneFilterType = 'single' | 'range' | 'clear';
 
 export interface CalendarFilterPaneSingle {
-  type: "single";
+  type: 'single';
   date: string;
   /**
    * REQUIRED for the side-pane filter pane (different from the workspace
@@ -80,7 +76,7 @@ export interface CalendarFilterPaneSingle {
 }
 
 export interface CalendarFilterPaneRange {
-  type: "range";
+  type: 'range';
   start: string;
   end: string;
   /** REQUIRED — see note above. */
@@ -88,13 +84,10 @@ export interface CalendarFilterPaneRange {
 }
 
 export interface CalendarFilterPaneClear {
-  type: "clear";
+  type: 'clear';
 }
 
-export type CalendarFilterPaneOutput =
-  | CalendarFilterPaneSingle
-  | CalendarFilterPaneRange
-  | CalendarFilterPaneClear;
+export type CalendarFilterPaneOutput = CalendarFilterPaneSingle | CalendarFilterPaneRange | CalendarFilterPaneClear;
 
 /**
  * Event date info for calendar indicators
@@ -132,54 +125,64 @@ export interface CalendarFilterPaneProps {
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const VERSION = "2.4.0"; // Option B promotion to shared lib + UTC bug fix (R4 task 055)
+const VERSION = '2.4.0'; // Option B promotion to shared lib + UTC bug fix (R4 task 055)
 
-const DAYS_OF_WEEK = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+const DAYS_OF_WEEK = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
 // Session storage key for filter persistence — kept identical to the prior
 // local copy so existing user state survives the rollout (R4 task 055).
-const FILTER_STATE_KEY = "sprk_calendar_filter_state";
+const FILTER_STATE_KEY = 'sprk_calendar_filter_state';
 
 // Special value for "All Dates" option
-const ALL_DATES_VALUE = "__ALL_DATES__";
+const ALL_DATES_VALUE = '__ALL_DATES__';
 const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December"
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
 ];
 
 /**
  * Individual date fields on the Event entity
  */
 const INDIVIDUAL_DATE_FIELDS: DateFieldOption[] = [
-  { value: "sprk_DueDate", label: "Due Date" },
-  { value: "sprk_FinalDueDate", label: "Final Due Date" },
-  { value: "CreatedOn", label: "Created On" },
-  { value: "ModifiedOn", label: "Modified On" },
-  { value: "sprk_ActualEnd", label: "Actual End" },
-  { value: "sprk_ActualStart", label: "Actual Start" },
-  { value: "sprk_ApprovedDate", label: "Approved Date" },
-  { value: "sprk_BaseDate", label: "Base Date" },
-  { value: "sprk_CompletedDate", label: "Completed Date" },
-  { value: "sprk_MeetingDate", label: "Meeting Date" },
-  { value: "sprk_PlannedEnd", label: "Planned End" },
-  { value: "sprk_PlannedStart", label: "Planned Start" },
-  { value: "sprk_ReassignedDate", label: "Reassigned Date" },
-  { value: "sprk_RemindAt", label: "Remind At" },
-  { value: "sprk_RescheduledDate", label: "Rescheduled Date" },
+  { value: 'sprk_DueDate', label: 'Due Date' },
+  { value: 'sprk_FinalDueDate', label: 'Final Due Date' },
+  { value: 'CreatedOn', label: 'Created On' },
+  { value: 'ModifiedOn', label: 'Modified On' },
+  { value: 'sprk_ActualEnd', label: 'Actual End' },
+  { value: 'sprk_ActualStart', label: 'Actual Start' },
+  { value: 'sprk_ApprovedDate', label: 'Approved Date' },
+  { value: 'sprk_BaseDate', label: 'Base Date' },
+  { value: 'sprk_CompletedDate', label: 'Completed Date' },
+  { value: 'sprk_MeetingDate', label: 'Meeting Date' },
+  { value: 'sprk_PlannedEnd', label: 'Planned End' },
+  { value: 'sprk_PlannedStart', label: 'Planned Start' },
+  { value: 'sprk_ReassignedDate', label: 'Reassigned Date' },
+  { value: 'sprk_RemindAt', label: 'Remind At' },
+  { value: 'sprk_RescheduledDate', label: 'Rescheduled Date' },
 ];
 
 /**
  * All date field options including "All Dates" meta-option
  */
 const DATE_FIELD_OPTIONS: DateFieldOption[] = [
-  { value: ALL_DATES_VALUE, label: "All Dates" },
+  { value: ALL_DATES_VALUE, label: 'All Dates' },
   ...INDIVIDUAL_DATE_FIELDS,
 ];
 
 /**
  * Get all individual date field values (excludes ALL_DATES_VALUE)
  */
-const ALL_DATE_FIELD_VALUES = INDIVIDUAL_DATE_FIELDS.map((f) => f.value);
+const ALL_DATE_FIELD_VALUES = INDIVIDUAL_DATE_FIELDS.map(f => f.value);
 
 // Default: "All Dates" selected (filters by all date fields)
 const DEFAULT_DATE_FIELDS: string[] = [ALL_DATES_VALUE];
@@ -190,52 +193,52 @@ const DEFAULT_DATE_FIELDS: string[] = [ALL_DATES_VALUE];
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    width: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    ...shorthands.padding("12px", "16px"),
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke1),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shorthands.padding('12px', '16px'),
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
   },
   headerTitle: {
-    fontSize: "18px",
+    fontSize: '18px',
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
     fontFamily: "'Segoe UI', 'Segoe UI Web', Arial, sans-serif",
   },
   // Date field dropdown section
   dateFieldSection: {
-    ...shorthands.padding("12px", "16px"),
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke1),
+    ...shorthands.padding('12px', '16px'),
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
   },
   dateFieldLabel: {
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground2,
-    marginBottom: "4px",
-    display: "block",
+    marginBottom: '4px',
+    display: 'block',
   },
   dateFieldDropdown: {
-    width: "100%",
+    width: '100%',
   },
   // From/To input section
   dateInputSection: {
-    display: "flex",
-    ...shorthands.gap("12px"),
-    ...shorthands.padding("12px", "16px"),
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke1),
+    display: 'flex',
+    ...shorthands.gap('12px'),
+    ...shorthands.padding('12px', '16px'),
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
   },
   dateInputField: {
     flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.gap("4px"),
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap('4px'),
   },
   dateInputLabel: {
     fontSize: tokens.fontSizeBase200,
@@ -243,74 +246,74 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
   },
   dateInput: {
-    width: "100%",
+    width: '100%',
   },
   dateInputFocused: {
-    ...shorthands.outline("2px", "solid", tokens.colorBrandStroke1),
+    ...shorthands.outline('2px', 'solid', tokens.colorBrandStroke1),
   },
   // Navigation header
   navHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    ...shorthands.padding("8px", "16px"),
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke1),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shorthands.padding('8px', '16px'),
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
   },
   navTitle: {
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    minWidth: "140px",
-    textAlign: "center",
+    minWidth: '140px',
+    textAlign: 'center',
   },
   navButtons: {
-    display: "flex",
-    alignItems: "center",
-    ...shorthands.gap("4px"),
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('4px'),
   },
   // Calendar content
   calendarContent: {
     flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.padding("8px", "16px"),
-    overflowY: "auto",
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.padding('8px', '16px'),
+    overflowY: 'auto',
   },
   monthSection: {
-    marginBottom: "16px",
+    marginBottom: '16px',
   },
   monthTitle: {
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    ...shorthands.padding("8px", "0"),
-    textAlign: "center",
+    ...shorthands.padding('8px', '0'),
+    textAlign: 'center',
   },
   weekRow: {
-    display: "grid",
-    gridTemplateColumns: "repeat(7, 1fr)",
-    ...shorthands.gap("2px"),
+    display: 'grid',
+    gridTemplateColumns: 'repeat(7, 1fr)',
+    ...shorthands.gap('2px'),
   },
   dayHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground3,
-    ...shorthands.padding("4px", "0"),
+    ...shorthands.padding('4px', '0'),
   },
   dayCell: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-    minHeight: "32px",
-    ...shorthands.padding("2px"),
-    ...shorthands.borderRadius("4px"),
-    cursor: "pointer",
-    ":hover": {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    minHeight: '32px',
+    ...shorthands.padding('2px'),
+    ...shorthands.borderRadius('4px'),
+    cursor: 'pointer',
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
@@ -324,14 +327,14 @@ const useStyles = makeStyles({
   dayCellSelected: {
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorBrandBackgroundHover,
     },
   },
   dayCellInRange: {
     backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorBrandForeground1,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorBrandBackground2Hover,
     },
   },
@@ -339,30 +342,30 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
   },
   eventIndicator: {
-    position: "absolute",
-    bottom: "2px",
-    width: "4px",
-    height: "4px",
-    ...shorthands.borderRadius("50%"),
+    position: 'absolute',
+    bottom: '2px',
+    width: '4px',
+    height: '4px',
+    ...shorthands.borderRadius('50%'),
     backgroundColor: tokens.colorBrandBackground,
   },
   eventIndicatorSelected: {
     backgroundColor: tokens.colorNeutralForegroundOnBrand,
   },
   footer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    ...shorthands.padding("8px", "16px"),
-    ...shorthands.borderTop("1px", "solid", tokens.colorNeutralStroke1),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shorthands.padding('8px', '16px'),
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
     backgroundColor: tokens.colorNeutralBackground1,
   },
   applyButton: {
-    marginRight: "8px",
+    marginRight: '8px',
   },
   clearButton: {
     fontSize: tokens.fontSizeBase200,
-    minWidth: "auto",
+    minWidth: 'auto',
   },
   versionText: {
     fontSize: tokens.fontSizeBase100,
@@ -391,8 +394,8 @@ const useStyles = makeStyles({
  */
 export function toIsoDateString(date: Date): string {
   const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
 
@@ -403,7 +406,7 @@ function parseIsoDate(dateStr: string): Date | null {
   if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     return null;
   }
-  const [year, month, day] = dateStr.split("-").map(Number);
+  const [year, month, day] = dateStr.split('-').map(Number);
   return new Date(year, month - 1, day);
 }
 
@@ -479,7 +482,7 @@ function loadFilterState(): PersistedFilterState | null {
       return JSON.parse(stored) as PersistedFilterState;
     }
   } catch (e) {
-    console.warn("[CalendarFilterPane] Failed to load filter state:", e);
+    console.warn('[CalendarFilterPane] Failed to load filter state:', e);
   }
   return null;
 }
@@ -491,7 +494,7 @@ function saveFilterState(state: PersistedFilterState): void {
   try {
     sessionStorage.setItem(FILTER_STATE_KEY, JSON.stringify(state));
   } catch (e) {
-    console.warn("[CalendarFilterPane] Failed to save filter state:", e);
+    console.warn('[CalendarFilterPane] Failed to save filter state:', e);
   }
 }
 
@@ -502,7 +505,7 @@ function clearFilterState(): void {
   try {
     sessionStorage.removeItem(FILTER_STATE_KEY);
   } catch (e) {
-    console.warn("[CalendarFilterPane] Failed to clear filter state:", e);
+    console.warn('[CalendarFilterPane] Failed to clear filter state:', e);
   }
 }
 
@@ -537,15 +540,11 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
 
   // From/To date values
   // Priority: URL params > persisted state > empty
-  const [fromDate, setFromDate] = React.useState<string>(
-    initialRangeStart ?? persistedState?.fromDate ?? ""
-  );
-  const [toDate, setToDate] = React.useState<string>(
-    initialRangeEnd ?? persistedState?.toDate ?? ""
-  );
+  const [fromDate, setFromDate] = React.useState<string>(initialRangeStart ?? persistedState?.fromDate ?? '');
+  const [toDate, setToDate] = React.useState<string>(initialRangeEnd ?? persistedState?.toDate ?? '');
 
   // Which input field is currently focused (for click-to-select)
-  const [focusedField, setFocusedField] = React.useState<"from" | "to" | null>(null);
+  const [focusedField, setFocusedField] = React.useState<'from' | 'to' | null>(null);
 
   // Selected date fields to filter
   // Priority: persisted state > default (empty)
@@ -578,24 +577,23 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
           : persistedState.dateFields;
 
         if (persistedState.fromDate && persistedState.toDate) {
-          const start = persistedState.fromDate < persistedState.toDate
-            ? persistedState.fromDate : persistedState.toDate;
-          const end = persistedState.fromDate < persistedState.toDate
-            ? persistedState.toDate : persistedState.fromDate;
+          const start =
+            persistedState.fromDate < persistedState.toDate ? persistedState.fromDate : persistedState.toDate;
+          const end = persistedState.fromDate < persistedState.toDate ? persistedState.toDate : persistedState.fromDate;
           onFilterChange({
-            type: "range",
+            type: 'range',
             start,
             end,
             dateFields,
           });
         } else if (persistedState.fromDate) {
           onFilterChange({
-            type: "single",
+            type: 'single',
             date: persistedState.fromDate,
             dateFields,
           });
         }
-        console.log("[CalendarFilterPane] Restored persisted filter:", persistedState);
+        console.log('[CalendarFilterPane] Restored persisted filter:', persistedState);
       }, 200);
       return () => clearTimeout(timer);
     }
@@ -614,14 +612,14 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
    * Navigate to previous month (moves all 3 calendars)
    */
   const handlePrevMonth = React.useCallback(() => {
-    setViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+    setViewDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
   }, []);
 
   /**
    * Navigate to next month (moves all 3 calendars)
    */
   const handleNextMonth = React.useCallback(() => {
-    setViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+    setViewDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
   }, []);
 
   /**
@@ -633,10 +631,10 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
     (date: Date) => {
       const dateStr = toIsoDateString(date);
 
-      if (focusedField === "from") {
+      if (focusedField === 'from') {
         setFromDate(dateStr);
-        setFocusedField("to"); // Move focus to To field
-      } else if (focusedField === "to") {
+        setFocusedField('to'); // Move focus to To field
+      } else if (focusedField === 'to') {
         setToDate(dateStr);
         setFocusedField(null);
       } else {
@@ -644,7 +642,7 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
         if (!fromDate) {
           // First click sets From
           setFromDate(dateStr);
-          setFocusedField("to"); // Auto-focus To for next click
+          setFocusedField('to'); // Auto-focus To for next click
         } else if (!toDate) {
           // Second click sets To
           setToDate(dateStr);
@@ -652,8 +650,8 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
         } else {
           // Both set - start over with From
           setFromDate(dateStr);
-          setToDate("");
-          setFocusedField("to");
+          setToDate('');
+          setFocusedField('to');
         }
       }
     },
@@ -675,7 +673,7 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
         setSelectedDateFields([ALL_DATES_VALUE]);
       } else if (hadAllDates && newSelection.length > 1) {
         // User selected individual field while "All Dates" was selected - remove "All Dates"
-        setSelectedDateFields(newSelection.filter((v) => v !== ALL_DATES_VALUE));
+        setSelectedDateFields(newSelection.filter(v => v !== ALL_DATES_VALUE));
       } else if (newSelection.length === 0) {
         // Nothing selected - default back to "All Dates"
         setSelectedDateFields([ALL_DATES_VALUE]);
@@ -702,7 +700,7 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
    */
   const handleApplyFilter = React.useCallback(() => {
     if (!fromDate && !toDate) {
-      onFilterChange({ type: "clear" });
+      onFilterChange({ type: 'clear' });
       return;
     }
 
@@ -713,7 +711,7 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
       const start = fromDate < toDate ? fromDate : toDate;
       const end = fromDate < toDate ? toDate : fromDate;
       onFilterChange({
-        type: "range",
+        type: 'range',
         start,
         end,
         dateFields,
@@ -721,7 +719,7 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
     } else if (fromDate) {
       // Single date filter
       onFilterChange({
-        type: "single",
+        type: 'single',
         date: fromDate,
         dateFields,
       });
@@ -732,32 +730,32 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
    * Clear selection and persisted state
    */
   const handleClearSelection = React.useCallback(() => {
-    setFromDate("");
-    setToDate("");
+    setFromDate('');
+    setToDate('');
     setFocusedField(null);
     clearFilterState(); // Clear session storage
-    onFilterChange({ type: "clear" });
+    onFilterChange({ type: 'clear' });
   }, [onFilterChange]);
 
   /**
    * Check if a date is selected or in range
    */
   const getDateState = React.useCallback(
-    (date: Date): "selected" | "in-range" | null => {
+    (date: Date): 'selected' | 'in-range' | null => {
       const fromParsed = parseIsoDate(fromDate);
       const toParsed = parseIsoDate(toDate);
 
       if (fromParsed && toParsed) {
         if (isSameDay(date, fromParsed) || isSameDay(date, toParsed)) {
-          return "selected";
+          return 'selected';
         }
         if (isDateInRange(date, fromParsed, toParsed)) {
-          return "in-range";
+          return 'in-range';
         }
       } else if (fromParsed && isSameDay(date, fromParsed)) {
-        return "selected";
+        return 'selected';
       } else if (toParsed && isSameDay(date, toParsed)) {
-        return "selected";
+        return 'selected';
       }
 
       return null;
@@ -784,7 +782,7 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
 
         {/* Day headers */}
         <div className={styles.weekRow}>
-          {DAYS_OF_WEEK.map((day) => (
+          {DAYS_OF_WEEK.map(day => (
             <div key={day} className={styles.dayHeader}>
               {day}
             </div>
@@ -805,16 +803,16 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
                 <div
                   key={dayIdx}
                   className={`${styles.dayCell} ${
-                    isOtherMonth ? styles.dayCellOtherMonth : ""
-                  } ${isToday ? styles.dayCellToday : ""} ${
-                    dateState === "selected" ? styles.dayCellSelected : ""
-                  } ${dateState === "in-range" ? styles.dayCellInRange : ""}`}
+                    isOtherMonth ? styles.dayCellOtherMonth : ''
+                  } ${isToday ? styles.dayCellToday : ''} ${
+                    dateState === 'selected' ? styles.dayCellSelected : ''
+                  } ${dateState === 'in-range' ? styles.dayCellInRange : ''}`}
                   onClick={() => handleDateClick(day)}
                   role="button"
                   tabIndex={0}
-                  aria-label={`${day.toDateString()}${hasEvents ? " - has events" : ""}`}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
+                  aria-label={`${day.toDateString()}${hasEvents ? ' - has events' : ''}`}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
                       handleDateClick(day);
                     }
                   }}
@@ -823,9 +821,7 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
                   {hasEvents && (
                     <span
                       className={`${styles.eventIndicator} ${
-                        dateState === "selected"
-                          ? styles.eventIndicatorSelected
-                          : ""
+                        dateState === 'selected' ? styles.eventIndicatorSelected : ''
                       }`}
                     />
                   )}
@@ -838,7 +834,7 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
     );
   };
 
-  const hasSelection = fromDate !== "" || toDate !== "";
+  const hasSelection = fromDate !== '' || toDate !== '';
 
   // Get the 3 months to display (current view + next 2)
   const month1 = { year: viewDate.getFullYear(), month: viewDate.getMonth() };
@@ -861,7 +857,7 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
           onOptionSelect={handleDateFieldChange}
           placeholder="Select date fields..."
         >
-          {DATE_FIELD_OPTIONS.map((option) => (
+          {DATE_FIELD_OPTIONS.map(option => (
             <Option key={option.value} value={option.value}>
               {option.label}
             </Option>
@@ -874,10 +870,10 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
         <div className={styles.dateInputField}>
           <Label className={styles.dateInputLabel}>From</Label>
           <Input
-            className={`${styles.dateInput} ${focusedField === "from" ? styles.dateInputFocused : ""}`}
+            className={`${styles.dateInput} ${focusedField === 'from' ? styles.dateInputFocused : ''}`}
             value={fromDate}
             onChange={(_, data) => setFromDate(data.value)}
-            onFocus={() => setFocusedField("from")}
+            onFocus={() => setFocusedField('from')}
             placeholder="YYYY-MM-DD"
             appearance="outline"
           />
@@ -885,10 +881,10 @@ export const CalendarFilterPane: React.FC<CalendarFilterPaneProps> = ({
         <div className={styles.dateInputField}>
           <Label className={styles.dateInputLabel}>To</Label>
           <Input
-            className={`${styles.dateInput} ${focusedField === "to" ? styles.dateInputFocused : ""}`}
+            className={`${styles.dateInput} ${focusedField === 'to' ? styles.dateInputFocused : ''}`}
             value={toDate}
             onChange={(_, data) => setToDate(data.value)}
-            onFocus={() => setFocusedField("to")}
+            onFocus={() => setFocusedField('to')}
             placeholder="YYYY-MM-DD"
             appearance="outline"
           />

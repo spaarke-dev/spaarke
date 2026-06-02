@@ -19,22 +19,14 @@
 import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import SearchCriteriaResultWidget, {
-  type SearchCriteriaResultWidgetData,
-} from '../SearchCriteriaResultWidget';
+import SearchCriteriaResultWidget, { type SearchCriteriaResultWidgetData } from '../SearchCriteriaResultWidget';
 import type { WorkspaceWidgetProps } from '../../../types/widget-types';
 
 function renderWidget(
   data: WorkspaceWidgetProps<SearchCriteriaResultWidgetData>['data'],
   overrides: Partial<WorkspaceWidgetProps<SearchCriteriaResultWidgetData>> = {}
 ) {
-  return render(
-    <SearchCriteriaResultWidget
-      data={data}
-      widgetType="search-criteria-result"
-      {...overrides}
-    />
-  );
+  return render(<SearchCriteriaResultWidget data={data} widgetType="search-criteria-result" {...overrides} />);
 }
 
 describe('SearchCriteriaResultWidget — header rendering', () => {
@@ -156,27 +148,17 @@ describe('SearchCriteriaResultWidget — body rendering by domain', () => {
 
 describe('SearchCriteriaResultWidget — loading + error states', () => {
   it('renders the loading state when isLoading is true', () => {
-    renderWidget(
-      { query: 'q', domain: 'documents' },
-      { isLoading: true }
-    );
+    renderWidget({ query: 'q', domain: 'documents' }, { isLoading: true });
 
     expect(screen.getByText('Loading criteria…')).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('search-criteria-result-body')
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('search-criteria-result-body')).not.toBeInTheDocument();
   });
 
   it('renders the error state when error is set', () => {
-    renderWidget(
-      { query: 'q', domain: 'documents' },
-      { error: 'Failed to load criteria' }
-    );
+    renderWidget({ query: 'q', domain: 'documents' }, { error: 'Failed to load criteria' });
 
     expect(screen.getByText('Failed to load criteria')).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('search-criteria-result-body')
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('search-criteria-result-body')).not.toBeInTheDocument();
   });
 });
 
@@ -185,13 +167,9 @@ describe('SearchCriteriaResultWidget — defensive narrowing', () => {
     // Cast through unknown to simulate an upstream dispatcher sending a
     // wrong-shaped payload. The widget MUST not crash and SHOULD render a
     // safe empty state instead of falling through to the body section.
-    const bad = renderWidget(
-      { foo: 'bar' } as unknown as SearchCriteriaResultWidgetData
-    );
+    const bad = renderWidget({ foo: 'bar' } as unknown as SearchCriteriaResultWidgetData);
     expect(bad.container).toBeTruthy();
     expect(screen.getByText('No criteria captured.')).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('search-criteria-result-body')
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('search-criteria-result-body')).not.toBeInTheDocument();
   });
 });

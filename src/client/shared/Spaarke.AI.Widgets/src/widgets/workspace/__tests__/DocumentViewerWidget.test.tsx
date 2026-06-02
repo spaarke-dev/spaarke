@@ -16,22 +16,14 @@
 import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import DocumentViewerWidget, {
-  type DocumentViewerWidgetData,
-} from '../DocumentViewerWidget';
+import DocumentViewerWidget, { type DocumentViewerWidgetData } from '../DocumentViewerWidget';
 import type { WorkspaceWidgetProps } from '../../../types/widget-types';
 
 function renderWidget(
   data: WorkspaceWidgetProps<DocumentViewerWidgetData>['data'],
   overrides: Partial<WorkspaceWidgetProps<DocumentViewerWidgetData>> = {}
 ) {
-  return render(
-    <DocumentViewerWidget
-      data={data}
-      widgetType="document-viewer"
-      {...overrides}
-    />
-  );
+  return render(<DocumentViewerWidget data={data} widgetType="document-viewer" {...overrides} />);
 }
 
 describe('DocumentViewerWidget — header rendering', () => {
@@ -49,15 +41,12 @@ describe('DocumentViewerWidget — header rendering', () => {
   it('renders MIME type as a badge', () => {
     renderWidget({
       filename: 'memo.docx',
-      contentType:
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       textContent: 'Some text',
     });
 
     expect(
-      screen.getByText(
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      )
+      screen.getByText('application/vnd.openxmlformats-officedocument.wordprocessingml.document')
     ).toBeInTheDocument();
   });
 
@@ -104,12 +93,8 @@ describe('DocumentViewerWidget — content rendering', () => {
       textContent: '',
     });
 
-    expect(
-      screen.getByText(/No preview available/i)
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('document-viewer-preview')
-    ).not.toBeInTheDocument();
+    expect(screen.getByText(/No preview available/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('document-viewer-preview')).not.toBeInTheDocument();
   });
 
   it('truncates the inline preview for very large text payloads', () => {
@@ -140,9 +125,7 @@ describe('DocumentViewerWidget — error + loading states', () => {
     );
 
     expect(screen.getByText(/Loading preview/i)).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('document-viewer-preview')
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('document-viewer-preview')).not.toBeInTheDocument();
   });
 
   it('renders the error state when error is set', () => {
@@ -156,9 +139,7 @@ describe('DocumentViewerWidget — error + loading states', () => {
     );
 
     expect(screen.getByText('Extraction failed')).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('document-viewer-preview')
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('document-viewer-preview')).not.toBeInTheDocument();
   });
 });
 
@@ -168,9 +149,7 @@ describe('DocumentViewerWidget — defensive narrowing', () => {
     // dispatcher sending a wrong-shaped payload (e.g. legacy widget_load
     // signal that hasn't been migrated). The widget should still render
     // its empty state without throwing.
-    const bad = renderWidget(
-      { foo: 'bar' } as unknown as DocumentViewerWidgetData
-    );
+    const bad = renderWidget({ foo: 'bar' } as unknown as DocumentViewerWidgetData);
     expect(bad.container).toBeTruthy();
     // Empty-state copy is used as the fallback when filename/textContent
     // are missing.

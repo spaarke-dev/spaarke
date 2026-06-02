@@ -26,7 +26,7 @@
  * @see projects/spaarke-ai-platform-unification-r4/notes/b7-hook-api-sketch.md
  */
 
-import * as React from "react";
+import * as React from 'react';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants (re-exported — consumers drop their inline copies)
@@ -47,7 +47,7 @@ export const EventStatus = {
   ARCHIVED: 7,
 } as const;
 
-export type EventStatusValue = typeof EventStatus[keyof typeof EventStatus];
+export type EventStatusValue = (typeof EventStatus)[keyof typeof EventStatus];
 
 /**
  * OOB Dataverse state codes (only used when archiving).
@@ -60,7 +60,7 @@ export const StateCode = {
 /**
  * Default Dataverse logical name for the Event entity. Override via deps.
  */
-export const EVENT_ENTITY_NAME = "sprk_event";
+export const EVENT_ENTITY_NAME = 'sprk_event';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Minimal Xrm typing — host-injected via deps.getXrm
@@ -132,7 +132,7 @@ export interface UseEventsBulkActionsApi {
     eventIds: string[],
     newStatus: number,
     statusLabel: string,
-    additionalFields?: Record<string, unknown>,
+    additionalFields?: Record<string, unknown>
   ) => Promise<boolean>;
   /**
    * Low-level: archives — sets `sprk_eventstatus=ARCHIVED` then
@@ -163,7 +163,7 @@ async function confirmAction(
   title: string,
   text: string,
   confirmButtonLabel: string,
-  cancelButtonLabel: string,
+  cancelButtonLabel: string
 ): Promise<boolean> {
   if (xrm?.Navigation?.openConfirmDialog) {
     try {
@@ -178,9 +178,7 @@ async function confirmAction(
       // Fall through to window.confirm.
     }
   }
-  return typeof window !== "undefined" && typeof window.confirm === "function"
-    ? window.confirm(text)
-    : false;
+  return typeof window !== 'undefined' && typeof window.confirm === 'function' ? window.confirm(text) : false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -202,63 +200,57 @@ async function confirmAction(
  * }, [completeEvents, selectedIds, refreshGrid]);
  * ```
  */
-export function useEventsBulkActions(
-  deps: UseEventsBulkActionsDeps,
-): UseEventsBulkActionsApi {
+export function useEventsBulkActions(deps: UseEventsBulkActionsDeps): UseEventsBulkActionsApi {
   const { getXrm } = deps;
   const entityName = deps.entityName ?? EVENT_ENTITY_NAME;
 
   // ── Low-level primitives ──────────────────────────────────────────────────
 
-  const updateStatus = React.useCallback<UseEventsBulkActionsApi["updateStatus"]>(
+  const updateStatus = React.useCallback<UseEventsBulkActionsApi['updateStatus']>(
     async (eventIds, newStatus, statusLabel, additionalFields) => {
       const xrm = getXrm();
       if (!xrm?.WebApi) {
-        console.warn("[useEventsBulkActions] Xrm.WebApi not available. Cannot update status.");
+        console.warn('[useEventsBulkActions] Xrm.WebApi not available. Cannot update status.');
         return false;
       }
-      const cleanIds = eventIds.map((id) => id.replace(/[{}]/g, ""));
+      const cleanIds = eventIds.map(id => id.replace(/[{}]/g, ''));
       const payload: Record<string, unknown> = { sprk_eventstatus: newStatus };
       if (additionalFields) {
         Object.assign(payload, additionalFields);
       }
       try {
-        await Promise.all(
-          cleanIds.map((id) => xrm.WebApi.updateRecord(entityName, id, payload)),
-        );
+        await Promise.all(cleanIds.map(id => xrm.WebApi.updateRecord(entityName, id, payload)));
         xrm.App?.addGlobalNotification?.({
           type: 2,
           level: 1,
           message: `${eventIds.length} event(s) set to ${statusLabel}`,
           showCloseButton: true,
         });
-        console.log(
-          `[useEventsBulkActions] Successfully updated ${eventIds.length} events to ${statusLabel}`,
-        );
+        console.log(`[useEventsBulkActions] Successfully updated ${eventIds.length} events to ${statusLabel}`);
         return true;
       } catch (error) {
-        console.error("[useEventsBulkActions] Bulk status update failed:", error);
+        console.error('[useEventsBulkActions] Bulk status update failed:', error);
         xrm.Navigation?.openAlertDialog?.({
-          title: "Error",
+          title: 'Error',
           text: `Some events failed to update: ${error instanceof Error ? error.message : String(error)}`,
         });
         return false;
       }
     },
-    [getXrm, entityName],
+    [getXrm, entityName]
   );
 
-  const archiveEvents = React.useCallback<UseEventsBulkActionsApi["archiveEvents"]>(
-    async (eventIds) => {
+  const archiveEvents = React.useCallback<UseEventsBulkActionsApi['archiveEvents']>(
+    async eventIds => {
       const xrm = getXrm();
       if (!xrm?.WebApi) {
-        console.warn("[useEventsBulkActions] Xrm.WebApi not available. Cannot archive.");
+        console.warn('[useEventsBulkActions] Xrm.WebApi not available. Cannot archive.');
         return false;
       }
-      const cleanIds = eventIds.map((id) => id.replace(/[{}]/g, ""));
+      const cleanIds = eventIds.map(id => id.replace(/[{}]/g, ''));
       try {
         await Promise.all(
-          cleanIds.map(async (id) => {
+          cleanIds.map(async id => {
             // Two-step sequence (preserved verbatim from EventsPage inline impl).
             // 1) Set custom status to ARCHIVED.
             await xrm.WebApi.updateRecord(entityName, id, {
@@ -269,7 +261,7 @@ export function useEventsBulkActions(
               statecode: StateCode.INACTIVE,
               statuscode: 2,
             });
-          }),
+          })
         );
         xrm.App?.addGlobalNotification?.({
           type: 2,
@@ -280,107 +272,105 @@ export function useEventsBulkActions(
         console.log(`[useEventsBulkActions] Successfully archived ${eventIds.length} events`);
         return true;
       } catch (error) {
-        console.error("[useEventsBulkActions] Bulk archive failed:", error);
+        console.error('[useEventsBulkActions] Bulk archive failed:', error);
         xrm.Navigation?.openAlertDialog?.({
-          title: "Error",
+          title: 'Error',
           text: `Some events failed to archive: ${error instanceof Error ? error.message : String(error)}`,
         });
         return false;
       }
     },
-    [getXrm, entityName],
+    [getXrm, entityName]
   );
 
   // ── High-level confirm + action handlers ──────────────────────────────────
   // Confirm-dialog text + button labels: EventsPage canonical strings.
 
-  const completeEvents = React.useCallback<UseEventsBulkActionsApi["completeEvents"]>(
-    async (eventIds) => {
+  const completeEvents = React.useCallback<UseEventsBulkActionsApi['completeEvents']>(
+    async eventIds => {
       if (eventIds.length === 0) return false;
       const xrm = getXrm();
       const confirmed = await confirmAction(
         xrm,
-        "Complete Events",
+        'Complete Events',
         `Mark ${eventIds.length} event(s) as complete?`,
-        "Complete",
-        "Cancel",
+        'Complete',
+        'Cancel'
       );
       if (!confirmed) return false;
-      return updateStatus(eventIds, EventStatus.COMPLETED, "Completed", {
+      return updateStatus(eventIds, EventStatus.COMPLETED, 'Completed', {
         sprk_completeddate: new Date().toISOString(),
       });
     },
-    [getXrm, updateStatus],
+    [getXrm, updateStatus]
   );
 
-  const closeEvents = React.useCallback<UseEventsBulkActionsApi["closeEvents"]>(
-    async (eventIds) => {
+  const closeEvents = React.useCallback<UseEventsBulkActionsApi['closeEvents']>(
+    async eventIds => {
       if (eventIds.length === 0) return false;
       const xrm = getXrm();
       const confirmed = await confirmAction(
         xrm,
-        "Close Events",
+        'Close Events',
         `Close ${eventIds.length} event(s) without action?`,
-        "Close",
-        "Cancel",
+        'Close',
+        'Cancel'
       );
       if (!confirmed) return false;
-      return updateStatus(eventIds, EventStatus.CLOSED, "Closed");
+      return updateStatus(eventIds, EventStatus.CLOSED, 'Closed');
     },
-    [getXrm, updateStatus],
+    [getXrm, updateStatus]
   );
 
-  const cancelEvents = React.useCallback<UseEventsBulkActionsApi["cancelEvents"]>(
-    async (eventIds) => {
+  const cancelEvents = React.useCallback<UseEventsBulkActionsApi['cancelEvents']>(
+    async eventIds => {
       if (eventIds.length === 0) return false;
       const xrm = getXrm();
       const confirmed = await confirmAction(
         xrm,
-        "Cancel Events",
+        'Cancel Events',
         `Cancel ${eventIds.length} event(s)?`,
-        "Cancel Events",
-        "Keep Active",
+        'Cancel Events',
+        'Keep Active'
       );
       if (!confirmed) return false;
-      return updateStatus(eventIds, EventStatus.CANCELLED, "Cancelled");
+      return updateStatus(eventIds, EventStatus.CANCELLED, 'Cancelled');
     },
-    [getXrm, updateStatus],
+    [getXrm, updateStatus]
   );
 
-  const holdEvents = React.useCallback<UseEventsBulkActionsApi["holdEvents"]>(
-    async (eventIds) => {
+  const holdEvents = React.useCallback<UseEventsBulkActionsApi['holdEvents']>(
+    async eventIds => {
       if (eventIds.length === 0) return false;
       const xrm = getXrm();
       const confirmed = await confirmAction(
         xrm,
-        "Put Events On Hold",
+        'Put Events On Hold',
         `Put ${eventIds.length} event(s) on hold?`,
-        "Put On Hold",
-        "Cancel",
+        'Put On Hold',
+        'Cancel'
       );
       if (!confirmed) return false;
-      return updateStatus(eventIds, EventStatus.ON_HOLD, "On Hold");
+      return updateStatus(eventIds, EventStatus.ON_HOLD, 'On Hold');
     },
-    [getXrm, updateStatus],
+    [getXrm, updateStatus]
   );
 
-  const archiveSelectedEvents = React.useCallback<
-    UseEventsBulkActionsApi["archiveSelectedEvents"]
-  >(
-    async (eventIds) => {
+  const archiveSelectedEvents = React.useCallback<UseEventsBulkActionsApi['archiveSelectedEvents']>(
+    async eventIds => {
       if (eventIds.length === 0) return false;
       const xrm = getXrm();
       const confirmed = await confirmAction(
         xrm,
-        "Archive Events",
+        'Archive Events',
         `Archive ${eventIds.length} event(s)?\n\nThis will hide them from active views.`,
-        "Archive",
-        "Cancel",
+        'Archive',
+        'Cancel'
       );
       if (!confirmed) return false;
       return archiveEvents(eventIds);
     },
-    [getXrm, archiveEvents],
+    [getXrm, archiveEvents]
   );
 
   return {

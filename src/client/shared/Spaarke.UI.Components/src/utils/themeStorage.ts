@@ -416,15 +416,8 @@ export interface IThemeWebApi {
     options: string,
     maxPageSize?: number
   ): Promise<{ entities: Record<string, unknown>[] }>;
-  createRecord(
-    entityType: string,
-    data: Record<string, unknown>
-  ): Promise<{ id: string }>;
-  updateRecord(
-    entityType: string,
-    id: string,
-    data: Record<string, unknown>
-  ): Promise<void>;
+  createRecord(entityType: string, data: Record<string, unknown>): Promise<{ id: string }>;
+  updateRecord(entityType: string, id: string, data: Record<string, unknown>): Promise<void>;
 }
 
 /**

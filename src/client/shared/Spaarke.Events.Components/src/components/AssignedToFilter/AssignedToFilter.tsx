@@ -227,12 +227,9 @@ export const AssignedToFilter: React.FC<AssignedToFilterProps> = ({
    * is read from `event.currentTarget.value`. Earlier ad-hoc `(event, data)`
    * handler shape was a v8 holdover; aligned with v9 in B-11 (task 067).
    */
-  const handleSearchChange = React.useCallback<React.FormEventHandler<HTMLInputElement>>(
-    (event) => {
-      setSearchText(event.currentTarget.value);
-    },
-    []
-  );
+  const handleSearchChange = React.useCallback<React.FormEventHandler<HTMLInputElement>>(event => {
+    setSearchText(event.currentTarget.value);
+  }, []);
 
   // Filter users based on search text
   const filteredUsers = React.useMemo(() => {

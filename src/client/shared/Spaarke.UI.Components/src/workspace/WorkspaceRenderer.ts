@@ -34,7 +34,7 @@
  * @see projects/spaarke-ai-platform-unification-r4/notes/c4-pre-change-snapshot.md
  */
 
-import type * as React from "react";
+import type * as React from 'react';
 
 // ---------------------------------------------------------------------------
 // WorkspaceRendererWebApi — strict Dataverse WebApi shape (R4 task 072 / A.2)
@@ -94,11 +94,7 @@ export interface WorkspaceRendererWebApi {
    * `WebApiEntity` (a structural alias for the same shape) and ComponentFramework
    * variants are assignable.
    */
-  retrieveRecord: (
-    entityLogicalName: string,
-    id: string,
-    options?: string
-  ) => Promise<Record<string, unknown>>;
+  retrieveRecord: (entityLogicalName: string, id: string, options?: string) => Promise<Record<string, unknown>>;
 
   /**
    * Create a new record.
@@ -106,29 +102,19 @@ export interface WorkspaceRendererWebApi {
    * that pass a richer object (e.g. `{ id, entityType }`) remain assignable
    * because TypeScript's structural typing tolerates extra fields.
    */
-  createRecord: (
-    entityLogicalName: string,
-    data: Record<string, unknown>
-  ) => Promise<{ id: string }>;
+  createRecord: (entityLogicalName: string, data: Record<string, unknown>) => Promise<{ id: string }>;
 
   /**
    * Update an existing record by id.
    * Same id-only return contract as `createRecord` for the same reason.
    */
-  updateRecord: (
-    entityLogicalName: string,
-    id: string,
-    data: Record<string, unknown>
-  ) => Promise<{ id: string }>;
+  updateRecord: (entityLogicalName: string, id: string, data: Record<string, unknown>) => Promise<{ id: string }>;
 
   /**
    * Delete a record by id.
    * Same id-only return contract for parity with create/update.
    */
-  deleteRecord: (
-    entityLogicalName: string,
-    id: string
-  ) => Promise<{ id: string }>;
+  deleteRecord: (entityLogicalName: string, id: string) => Promise<{ id: string }>;
 }
 
 // ---------------------------------------------------------------------------

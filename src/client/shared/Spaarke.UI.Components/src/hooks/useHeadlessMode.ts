@@ -114,7 +114,9 @@ export function useHeadlessMode(props: IUseHeadlessModeProps): IDatasetResult {
         setTotalRecordCount(response.entities.length); // Note: FetchXML doesn't return total count
 
         // Extract paging cookie from response
-        const nextCookie = (response as unknown as Record<string, string>)['@Microsoft.Dynamics.CRM.fetchxmlpagingcookie'];
+        const nextCookie = (response as unknown as Record<string, string>)[
+          '@Microsoft.Dynamics.CRM.fetchxmlpagingcookie'
+        ];
         setPagingInfo({ pageNumber: page, pagingCookie: nextCookie });
 
         setLoading(false);
