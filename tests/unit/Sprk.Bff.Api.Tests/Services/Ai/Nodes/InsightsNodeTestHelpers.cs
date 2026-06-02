@@ -21,7 +21,9 @@ internal static class InsightsNodeTestHelpers
         string tenantId = DefaultTenantId,
         Guid? nodeId = null,
         Guid? runId = null,
-        Guid? playbookId = null)
+        Guid? playbookId = null,
+        string? nodeName = null,
+        IDictionary<string, string>? parameters = null)
     {
         var actionId = Guid.NewGuid();
         var node = new PlaybookNodeDto
@@ -29,7 +31,7 @@ internal static class InsightsNodeTestHelpers
             Id = nodeId ?? Guid.NewGuid(),
             PlaybookId = playbookId ?? Guid.NewGuid(),
             ActionId = actionId,
-            Name = $"{actionType} Node",
+            Name = nodeName ?? $"{actionType} Node",
             ExecutionOrder = 1,
             OutputVariable = outputVariable,
             ConfigJson = configJson,
@@ -52,7 +54,10 @@ internal static class InsightsNodeTestHelpers
             TenantId = tenantId,
             PreviousOutputs = previousOutputs is null
                 ? new Dictionary<string, NodeOutput>()
-                : new Dictionary<string, NodeOutput>(previousOutputs)
+                : new Dictionary<string, NodeOutput>(previousOutputs),
+            Parameters = parameters is null
+                ? new Dictionary<string, string>()
+                : new Dictionary<string, string>(parameters)
         };
     }
 }

@@ -27,6 +27,13 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 ///       "name": "confirmedPrecedent",
 ///       "from": "retrievePrecedent",
 ///       "requireNonEmpty": true                     // alternative — rule passes when array is non-empty
+///     },
+///     {
+///       "name": "outcomeBearingClassification",
+///       "from": "layer1",                           // upstream node output variable name
+///       "readFrom": "classification",                // dotted path into upstream StructuredData; reads as string
+///       "predicate": "in",                           // membership check (NEW in Wave C1 task 020 per design-a5 Gap #1)
+///       "value": ["Order", "Settlement", "Verdict", "Judgment"]  // array — rule passes when upstream.readFrom value is in this array
 ///     }
 ///   ]
 /// }
@@ -87,8 +94,19 @@ public sealed class EvidenceSufficiencyNode : INodeExecutor
                 errors.Add($"rules[{i}].name is required.");
             if (string.IsNullOrWhiteSpace(rule.From))
                 errors.Add($"rules[{i}].from is required (upstream node output variable name).");
-            if (rule.MinCount is null && rule.RequireNonEmpty != true)
-                errors.Add($"rules[{i}] must specify either minCount or requireNonEmpty=true.");
+            if (rule.MinCount is null && rule.RequireNonEmpty != true && string.IsNullOrWhiteSpace(rule.Predicate))
+                errors.Add($"rules[{i}] must specify minCount, requireNonEmpty=true, or predicate.");
+
+            // Wave C1 task 020 — predicate rules require Value + ReadFrom
+            if (!string.IsNullOrWhiteSpace(rule.Predicate))
+            {
+                if (rule.Value is null)
+                    errors.Add($"rules[{i}] predicate '{rule.Predicate}' requires a 'value' field.");
+                if (string.IsNullOrWhiteSpace(rule.ReadFrom))
+                    errors.Add($"rules[{i}] predicate '{rule.Predicate}' requires a 'readFrom' path into upstream StructuredData.");
+                if (!string.Equals(rule.Predicate, "in", StringComparison.OrdinalIgnoreCase))
+                    errors.Add($"rules[{i}] predicate '{rule.Predicate}' is not supported. Only 'in' is implemented in Wave C1.");
+            }
         }
 
         return errors.Count > 0
@@ -132,6 +150,27 @@ public sealed class EvidenceSufficiencyNode : INodeExecutor
                     Have = 0,
                     Need = rule.MinCount ?? 1
                 });
+                continue;
+            }
+
+            // Wave C1 task 020 — Gap #1 patch: predicate-based rules (membership "in").
+            // Per design-a5 §7.1: enables outcomeBearingClassification rule shape for universal-ingest@v1.
+            // Membership rules consult upstream.StructuredData via rule.ReadFrom path; pass when value
+            // matches any item in rule.Value array.
+            if (!string.IsNullOrWhiteSpace(rule.Predicate))
+            {
+                var (predicatePasses, observedValue) = EvaluatePredicate(upstream, rule);
+                if (!predicatePasses)
+                {
+                    gaps.Add(new EvidenceGap
+                    {
+                        RuleName = rule.Name!,
+                        From = rule.From!,
+                        Reason = $"Upstream '{rule.From}' value '{observedValue ?? "<null>"}' at path '{rule.ReadFrom}' did not match predicate '{rule.Predicate}'.",
+                        Have = 0,
+                        Need = 1
+                    });
+                }
                 continue;
             }
 
@@ -229,6 +268,97 @@ public sealed class EvidenceSufficiencyNode : INodeExecutor
             _ => 0
         };
     }
+
+    /// <summary>
+    /// Evaluates a predicate-based rule (Wave C1 Gap #1 per design-a5 §7.1). Currently supports
+    /// only <c>predicate: "in"</c> (membership check) — extends EvidenceSufficiencyNode beyond
+    /// the existing <c>minCount</c> / <c>requireNonEmpty</c> shapes so universal-ingest@v1's
+    /// <c>outcomeBearingClassification</c> rule can be declared in JPS data rather than computed
+    /// in the layer1Classify executor (the design's "Option (a)" choice — see §7.1).
+    /// </summary>
+    /// <param name="upstream">Upstream node output to read the value from.</param>
+    /// <param name="rule">Rule definition; <see cref="EvidenceSufficiencyRule.ReadFrom"/> is the dotted
+    /// path into <see cref="NodeOutput.StructuredData"/>; <see cref="EvidenceSufficiencyRule.Value"/>
+    /// is the array of strings the value must match.</param>
+    /// <returns>Tuple of (passes, observedValue). Observed value is the upstream's actual value at
+    /// ReadFrom (rendered as string for gap reasons). When the upstream has no StructuredData or
+    /// the path is missing, the predicate fails with observedValue=null.</returns>
+    private static (bool passes, string? observedValue) EvaluatePredicate(
+        NodeOutput upstream,
+        EvidenceSufficiencyRule rule)
+    {
+        if (upstream.StructuredData is null)
+            return (false, null);
+
+        var observed = ReadPathValue(upstream.StructuredData.Value, rule.ReadFrom!);
+        if (observed is null)
+            return (false, null);
+
+        // Only "in" supported in Wave C1; Validate() rejects other predicates upstream.
+        if (string.Equals(rule.Predicate, "in", StringComparison.OrdinalIgnoreCase))
+        {
+            var allowedValues = MaterializeValueArray(rule.Value);
+            var matches = allowedValues.Any(v => string.Equals(v, observed, StringComparison.OrdinalIgnoreCase));
+            return (matches, observed);
+        }
+
+        // Should not reach — Validate() catches this earlier.
+        return (false, observed);
+    }
+
+    /// <summary>
+    /// Reads a single string value from a JsonElement at the specified path. Returns null when the
+    /// path is missing or the value is not a primitive convertible to string. Used by
+    /// <see cref="EvaluatePredicate"/> for predicate-based rules.
+    /// </summary>
+    private static string? ReadPathValue(JsonElement data, string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !data.TryGetProperty(path, out var element))
+            return null;
+
+        return element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.Number => element.ToString(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Coerces <see cref="EvidenceSufficiencyRule.Value"/> (declared as <c>object</c> for JSON
+    /// flexibility) into a string array. Handles JsonElement (the typical deserialized shape),
+    /// IEnumerable, and single scalar fallback.
+    /// </summary>
+    private static IReadOnlyList<string> MaterializeValueArray(object? raw)
+    {
+        if (raw is null) return Array.Empty<string>();
+
+        if (raw is JsonElement json)
+        {
+            if (json.ValueKind == JsonValueKind.Array)
+            {
+                var list = new List<string>(json.GetArrayLength());
+                foreach (var item in json.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.String)
+                        list.Add(item.GetString() ?? string.Empty);
+                    else
+                        list.Add(item.ToString());
+                }
+                return list;
+            }
+            if (json.ValueKind == JsonValueKind.String)
+                return new[] { json.GetString() ?? string.Empty };
+            return new[] { json.ToString() };
+        }
+
+        if (raw is IEnumerable<object> enumerable)
+            return enumerable.Select(o => o?.ToString() ?? string.Empty).ToList();
+
+        return new[] { raw.ToString() ?? string.Empty };
+    }
 }
 
 /// <summary>
@@ -265,6 +395,32 @@ internal sealed record EvidenceSufficiencyRule
 
     [JsonPropertyName("requireNonEmpty")]
     public bool? RequireNonEmpty { get; init; }
+
+    /// <summary>
+    /// Wave C1 task 020 — predicate-based rule shape (Gap #1 per design-a5 §7.1).
+    /// Currently only <c>"in"</c> (membership check) is supported. Coexists with
+    /// <see cref="MinCount"/> / <see cref="RequireNonEmpty"/>; Validate() enforces
+    /// exactly one of the three shapes.
+    /// </summary>
+    [JsonPropertyName("predicate")]
+    public string? Predicate { get; init; }
+
+    /// <summary>
+    /// Value to test against — array for <c>"in"</c> predicate. Declared as <c>object</c>
+    /// to accept either a JsonElement array (typical) or a templated string array after
+    /// <c>{{var}}</c> substitution. Materialized via
+    /// <c>MaterializeValueArray</c>.
+    /// </summary>
+    [JsonPropertyName("value")]
+    public object? Value { get; init; }
+
+    /// <summary>
+    /// Dotted path into the upstream's StructuredData to read the value for predicate evaluation.
+    /// Example: <c>"classification"</c> reads <c>upstream.StructuredData.classification</c>.
+    /// Only single-property paths are supported in Wave C1 (no <c>"a.b.c"</c> deep paths).
+    /// </summary>
+    [JsonPropertyName("readFrom")]
+    public string? ReadFrom { get; init; }
 }
 
 /// <summary>

@@ -1,8 +1,10 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Sprk.Bff.Api.Services.Ai.Insights.Ingest;
 using Sprk.Bff.Api.Services.Ai.Insights.Mirror;
+using Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 using Sprk.Bff.Api.Services.Ai.Insights.Prompts;
 using Sprk.Bff.Api.Services.Ai.Insights.Sanitization;
+using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -78,6 +80,29 @@ public static class InsightsIngestModule
         // D-P7 orchestrator itself — bridges into the InsightsOrchestrator facade
         // (task 042's InsightsOrchestrator.RunIngestAsync delegates here).
         services.AddSingleton<IIngestOrchestrator, IngestOrchestrator>();
+
+        // ====================================================================
+        // Wave C1 task 020 — universal-ingest@v1 JPS playbook node executors.
+        // ====================================================================
+        // Two new INodeExecutor registrations for the universal-ingest@v1 playbook (D-P15-02
+        // ONE canonical playbook, parameterized — replaces code-defined IngestOrchestrator.cs
+        // on Wave C3). Auto-discovered by NodeExecutorRegistry via SupportedActionTypes:
+        //   - SanitizerNodeExecutor → ActionType.Sanitization (130) — wraps IInsightsContentSanitizer
+        //   - ObservationEmitterNodeExecutor → ActionType.ObservationEmit (140) — wraps
+        //     IObservationEmitter + IObservationIndexUpserter + IObservationMirror
+        //
+        // ADR-030 §F.1 inspection (Asymmetric-Registration Tier 1.5):
+        //   - These are UNCONDITIONAL registrations (no `if (flag)` block).
+        //   - Endpoint consumers: none direct — invoked via PlaybookExecutionEngine which is
+        //     itself unconditionally registered. No metadata-gen risk.
+        //   - Pattern P1 (Promote-to-unconditional) per ADR-030 — appropriate for executors
+        //     auto-discovered by NodeExecutorRegistry. Choice rationale: zero feature-gated
+        //     transitive deps (IInsightsContentSanitizer, IObservationEmitter, etc. are all
+        //     registered above unconditionally in this same module).
+        //
+        // Singleton: stateless executors per the GroundingVerifyNode pattern (Phase 1).
+        services.AddSingleton<INodeExecutor, SanitizerNodeExecutor>();
+        services.AddSingleton<INodeExecutor, ObservationEmitterNodeExecutor>();
 
         return services;
     }

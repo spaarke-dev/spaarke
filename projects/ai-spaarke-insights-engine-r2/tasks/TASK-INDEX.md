@@ -53,7 +53,7 @@
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [020](020-universal-ingest-jps-playbook.poml) | C1 | Author universal-ingest@v1 JPS playbook | 🔲 | 2d | ❌ | 013, 014 |
+| [020](020-universal-ingest-jps-playbook.poml) | C1 | Author universal-ingest@v1 JPS playbook | ✅ | 2d | ❌ | 013, 014 |
 | [021](021-prompts-to-jps-storage.poml) | C2 | Migrate prompts from .txt → sprk_analysisaction.sprk_systemprompt | 🔲 | 1d | ✅ | 013 |
 | [022](022-retire-ingest-orchestrator.poml) | C3 | Retire IngestOrchestrator.cs | 🔲 | 4h | ❌ | 020, 023 |
 | [023](023-iinsightsai-facade-rewire.poml) | C4 | Update IInsightsAi.RunIngestAsync to invoke JPS playbook | 🔲 | 4h | ❌ | 020 |
