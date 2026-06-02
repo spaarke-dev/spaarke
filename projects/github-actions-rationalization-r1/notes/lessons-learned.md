@@ -243,4 +243,36 @@ Things we didn't get to and that the next DevOps project might benefit from answ
 
 ---
 
-*This document is the closing artifact of the github-actions-rationalization-r1 project. For execution detail, see `tasks/TASK-INDEX.md` and the per-task POML files. For decisions, see `decisions/`. For pre/post state, see `baseline/`.*
+## Addendum — Closeout PRs (2026-06-02)
+
+After task 090 declared "project complete", the owner pushed back on the implicit-deferral pattern (some items were "tracked in lessons-learned" rather than explicitly deferred with owner-action steps). This drove a closeout series that genuinely closed the open items. Two new lessons emerged here that don't fit above:
+
+### 10. "Documented in lessons-learned" is NOT a deferral
+
+A project's closure isn't legitimate if it relies on hand-waves like "tracked in the assessment doc" or "to be addressed by a follow-on project" without a concrete owner-action plan. Per the owner's principle (2026-06-02): **every open item at project close must be in exactly one of three states — done, explicitly deferred with owner-action steps + signoff checkboxes + ideally a timeline, OR handed off to a new project with its own scope/plan/lifecycle.**
+
+Applied here: FR-12 routing → done (PR #322); MULTI-ENVIRONMENT-PROVISIONING-GUIDE.md → drafted (PR #322); actionlint path-filter deadlock → fixed (PR #322); prod/production naming mismatch → aligned (PR #323); D-11 OIDC federated credentials → added + verified working (PR #324, PR #325); D-12 deploy mechanics → verified end-to-end (PR #326); Service Bus placeholder + queue-naming gap → handed off to `production-environment-setup-r3` (PR #326's D-12 doc).
+
+This principle is now saved to project memory as `project-closure-discipline.md` for application in future projects.
+
+### 11. Do Azure CLI / Portal discovery yourself
+
+Pre-closeout pattern: I asked the owner for every Azure resource detail (PROD_APP_NAME, App Service name, Key Vault names, role assignments, etc.). The owner correction (2026-06-02): "by the way you can look all of this up on azure portal yourself."
+
+Right pattern: query `az ad app list`, `az webapp list`, `az role assignment list`, `az keyvault secret show`, etc. directly. Reserve questions for genuine judgment calls (which env to deploy to, whether to defer or fix now), not data lookups. Saved as memory note `use-azure-cli-autonomously.md`.
+
+### Closeout findings worth recording
+
+These don't fit the "lesson" frame but should be in the project's record:
+
+a. **AZURE_CLIENT_ID repo secret was misconfigured pre-closeout.** It pointed to an Entra app with no role assignments (`spe-github-actions` `e3d1bd6a-...`). Updated to point to the actual deploy app `github-actions-spe-infrastructure` (`8c85a481-...`) which has Contributor on the subscription. Likely net-positive for other workflows (deploy-bff-api.yml etc.) that were failing on OIDC before.
+
+b. **The deploy-promote.yml originally had a sequential `dev → staging → production` chain.** That model fights against per-environment App Service isolation (dev = `spaarke-bff-dev`, prod = `spaarke-bff-prod` in different RGs). Refactored to direct-target so any single environment can be triggered without forcing a re-deploy of others. The GitHub Environment protection rules (reviewer approval on production) provide the actual gates; workflow-internal chaining was unnecessary.
+
+c. **`production-environment-setup-r2` left "values are placeholders" as an inherited gap.** R2 made config parameterizable (KV refs, no hardcodes) but explicitly Out-of-Scope'd verifying that real production values were set. The follow-on `production-environment-setup-r3` is the proper home for that audit + replacement work.
+
+d. **Container exit code 134 (SIGABRT) within ~7 seconds is the diagnostic signature of unhandled startup exception in .NET hosted services.** Container starts, .NET runtime initializes, background workers throw on first iteration, host aborts. Useful for triaging future App Service deploy failures.
+
+---
+
+*This document is the closing artifact of the github-actions-rationalization-r1 project. Updated 2026-06-02 with closeout PR findings. For execution detail, see `tasks/TASK-INDEX.md` and the per-task POML files. For decisions, see `decisions/` (D-01 through D-12). For pre/post state, see `baseline/`.*
