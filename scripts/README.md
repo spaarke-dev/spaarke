@@ -60,6 +60,37 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 ---
 
+### `Setup-InsightsEngineSchema.ps1`
+**Purpose:** Idempotent setup for Insights Engine Dataverse schema + lookup-target dispatch rows. Creates `sprk_executoractiontype` (Whole Number) on `sprk_analysisactiontype` if missing, backfills existing rows to 0 (AiAnalysis), and seeds the 7 Insights ActionType lookup rows (60 - Agent Service, 70 - Grounding Verify, 80 - Live Fact Resolver, 90 - Index Retrieve, 100 - Evidence Sufficiency, 110 - Decline to Find, 120 - Return Insight Artifact).
+**Usage:** 🟢 Active - Run on a new Dataverse environment after `git pull` to bring it up to Wave B baseline
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Dataverse connection
+**Owner:** AI Team / Insights Engine
+**Last Used:** June 2026 (Insights Engine r2 Wave B post-merge protection)
+
+**When to Use:**
+- New developer's first-time Dataverse env setup
+- After merging an Insights Engine PR that depends on the lookup-target dispatch architecture
+- Spinning up a new Spaarke environment (test, demo, customer-prod)
+- Re-running after a Dataverse env reset / restore
+
+**Why this exists** (per amended ADR-027 2026-06-02): Spaarke uses unmanaged solutions everywhere — there is no managed-solution promotion path. Schema changes that need to travel between environments use either (a) unmanaged solution export, or (b) idempotent setup scripts like this one. This script implements (b) for the Insights Engine schema dependencies introduced by r2 Wave B.
+
+**Command:**
+```powershell
+# Preview without modifying (recommended first)
+.\scripts\Setup-InsightsEngineSchema.ps1 -DataverseUrl "https://spaarkedev1.crm.dynamics.com" -DryRun
+
+# Apply
+.\scripts\Setup-InsightsEngineSchema.ps1 -DataverseUrl "https://spaarkedev1.crm.dynamics.com"
+```
+
+**What is NOT included:**
+- The 7 INS-* `sprk_analysisaction` rows (with JPS prompt content) — see `projects/ai-spaarke-insights-engine-r2/notes/drafts/wave-b-action-codes.md`
+- The predict-matter-cost@v1 playbook deploy — use `Deploy-Playbook.ps1 -Force`
+
+---
+
 ### `Refresh-ScopeModelIndex.ps1`
 **Purpose:** Regenerate `.claude/catalogs/scope-model-index.json` from current Dataverse state — keeps the scope catalog in sync for Claude Code
 **Usage:** 🟡 Occasional - After adding new scopes to Dataverse
