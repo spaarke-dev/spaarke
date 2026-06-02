@@ -3,7 +3,7 @@
   <metadata>
     <title>RecordService + GET /api/dataverse/record/{entityLogicalName}/{id} (no cache, $select support)</title>
     <phase>2: Phase B — BFF Passthrough</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>015,016,017</blocks>

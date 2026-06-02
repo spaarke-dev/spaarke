@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (B-Wave-0 = task 010 just completed; 3 open questions with defaults need user sign-off before B-Wave-1) |
+| **Task** | none (B-Wave-1 COMPLETE — all 5 BFF endpoints live + filter + privilege checker + extractor; Program.cs aggregated; full build green) |
 | **Step** | — |
 | **Status** | none |
-| **Next Action** | Surface open questions (Q1 privilege-check API, Q2 FetchXML extractor, Q3 cache backend) to user. Then dispatch B-Wave-1 = tasks 011 + 012 + 013 + 014 (4 parallel agents) with sign-off OR with defaults if user delegates. After B-Wave-1: serial B2 (015 BffDataverseClient) → B3 (016 tests) → B4 (017 deploy). |
+| **Next Action** | B-Wave-2 = task 015 (BffDataverseClient — @spaarke/ui-components TypeScript implementation of IDataverseClient using @spaarke/auth.authenticatedFetch). Serial; depends on all 4 of 011-014 (✅). After 015: B-Wave-3 (task 016 integration tests + cross-entity privilege bypass test) → B-Wave-4 (task 017 BFF deploy via bff-deploy skill). |
 
 ### Files Modified This Session
 

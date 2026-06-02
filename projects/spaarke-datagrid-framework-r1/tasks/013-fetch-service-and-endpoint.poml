@@ -3,7 +3,7 @@
   <metadata>
     <title>FetchService + POST /api/dataverse/fetch (no cache, cross-entity privilege check)</title>
     <phase>2: Phase B — BFF Passthrough</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>015,016,017</blocks>

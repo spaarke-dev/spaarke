@@ -95,3 +95,18 @@ The filter logs `Warning` on deny. Existing `AuditEnrichmentMiddleware` (per `Sp
 | Q4 | Audit log path for deny events | TBD (project owner) | ☐ Open (informational) |
 
 **Default plan if no decisions land before Phase B dispatch**: task 011 owner proceeds with the recommendations embedded above (Q1 = option b/c, Q2 = new code, Q3 = existing Redis, Q4 = AuditEnrichmentMiddleware sufficient). Owner can correct course at PR review time without architectural rework.
+
+---
+
+## 2026-06-01 — User decisions (recorded)
+
+**Q1**: Use `RetrieveUserPrivileges` (per-user full set, cached 6h sliding / 24h absolute max, app-only ServiceClient with CallerId impersonation). Task 011 owns the IDataversePrivilegeChecker interface + UserPrivilegeChecker implementation since they're tightly coupled to the filter class.
+
+**Q2**: New code at `Services/Dataverse/FetchXml/FetchXmlEntityExtractor.cs` using `System.Xml.Linq.XDocument`. Task 013 owns this since FetchService is the only runtime consumer.
+
+**Q3**: Reuse existing Redis `IDistributedCache` registered in Sprk.Bff.Api (matches GraphMetadataCache precedent). No new cache instance.
+
+**Q4**: AuditEnrichmentMiddleware sufficient for deny events. No new audit code.
+
+These decisions are now binding for B-Wave-1 (tasks 011-014). Course-correction at PR review still permitted but design assumes these as final.
+
