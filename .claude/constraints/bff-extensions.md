@@ -90,6 +90,62 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 
 **Cross-reference**: See root [`CLAUDE.md`](../../CLAUDE.md) §10 for BFF Hygiene binding context including the test-update obligation.
 
+#### F.1 Asymmetric-Registration Tier 1.5 Anti-Pattern (Binding per r2 task 081 / D-13)
+
+**Codified 2026-06-01** from `sdap.bff.api-test-suite-repair-r2` task 011 + task 044 (Phase 4 Track E anti-drift effectiveness report) execution evidence: the original asymmetric-registration rule (cited above for RB-T028-03/04/05/06) catches the obvious BLOCKING cases but **misses LATENT cases where the missing service is only triggered by metadata-gen, not by a failing test**. r2 task 011 discovered **5 LATENT residuals iteratively** (ChatContextMappingService, DocxExportService, IWorkingDocumentService, IVisualizationService, IFileIndexingService) — each fix surfaced the next.
+
+**Binding rule extension**: For every NEW service registration added to a `*Module.cs` file inside an `if (flag) { ... }` block:
+
+1. **Identify all endpoint handlers** that inject the service (grep for the type as a method parameter in `src/server/api/Sprk.Bff.Api/Api/**`):
+   ```bash
+   # For a new service Foo:
+   rg -t cs -n "[\s,(]Foo\s+\w+[,)]" src/server/api/Sprk.Bff.Api/Api/
+   ```
+2. **For each consuming endpoint, verify**: Is the `MapXxxEndpoints()` call in `Infrastructure/DI/EndpointMappingExtensions.cs` ITSELF wrapped in the same `if (flag)` block? If NO → apply ADR-030.
+3. **Apply ADR-030 per the 3 patterns** (P1 Promote-to-unconditional / P2 Quiet no-op / P3 Fail-fast Null-Object). See [`.claude/adr/ADR-030-bff-nullobject-kill-switch.md`](../adr/ADR-030-bff-nullobject-kill-switch.md) §10 for the PR review checklist and full static-scan recipe.
+
+**Why this rule exists**: r2 task 011 Phase 1a inventory identified 13 conditional services + matching unconditional consumers via a static pass. Phase 1c + Step 9.5 surfaced 5 MORE that the static pass missed — because:
+- Phase 1a focused on "find conditional registrations" + "find unconditional endpoint mappings" but did NOT systematically cross-reference all CONSUMERS of conditional services across the full endpoint surface
+- The 5 missed services were consumed by endpoints whose tests did not exercise the kill-switch state, OR their fixtures stubbed them via Moq (papering over the latent bug)
+
+**The pattern is easy to introduce by accident** — it requires explicit reviewer discipline + the static-scan recipe to prevent. Apply to every PR touching `*Module.cs` DI files.
+
+**Cross-reference**:
+- ADR-030 (canonical pattern) — [`.claude/adr/ADR-030-bff-nullobject-kill-switch.md`](../adr/ADR-030-bff-nullobject-kill-switch.md)
+- r2 evidence — [`projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md`](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md) §2.1 + Appendix A
+- Phase 5 procedure-doc codification — [`docs/procedures/testing-and-code-quality.md`](../../docs/procedures/testing-and-code-quality.md) §18.1
+- Per-service inventory — [`projects/sdap.bff.api-test-suite-repair-r2/baseline/asymmetric-registration-inventory-2026-06-01.md`](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/asymmetric-registration-inventory-2026-06-01.md)
+
+#### F.2 Fixture-Config-FIRST Inspection Protocol (Binding per r2 task 081 / D-13)
+
+**Codified 2026-06-01** from r2 tasks 025 (RB-T028-07) + 037 (RB-T028-08) execution: in BOTH cases, the failing test was initially flagged as "verify subsumed by 011 cluster fix" but turned out to be a **fixture-config gap** (missing `CosmosPersistence:DatabaseName` in task 025; non-GUID `TestUserId` violating Entra ID `oid` contract in task 037).
+
+**Binding rule**: When a test is Skip'd due to suspected DI/registration issue:
+
+1. **FIRST inspect** the test fixture's config dictionary (`CustomWebAppFactory.cs`, `IntegrationTestFixture.cs`) for non-contract values vs production expectations
+2. **THEN inspect** claims / auth state / mock setups for contract violations
+3. **ONLY THEN** assume the bug is in production code
+
+DO NOT collapse fixture-config gaps into "upstream cluster fix subsumes it" — this leaves a latent contract violation in the test fixture that will resurface in other tests.
+
+**Cross-reference**: Phase 5 procedure-doc codification at [`docs/procedures/testing-and-code-quality.md`](../../docs/procedures/testing-and-code-quality.md) §18.2.
+
+#### F.3 Empirical-Reproduction-FIRST Protocol (Binding per r2 task 081 / D-13)
+
+**Codified 2026-06-01** from r2 tasks 010 (RB-T044-01), 011 (RB-T028-03/04/05/06 cluster), 012 (RB-T028-02) execution: **r1 ledger entries' recommended fixes were INCOMPLETE in 100% of investigated cases**. Each task's agent surfaced an empirical correction:
+- Task 010: ledger's one-line `fromTurnIndex` inversion would have broken `Sanitizer_StripsRetrievalBlocks_PreservesConclusions`. Two-mode semantic implemented instead.
+- Task 011: ledger framed as "4-entry cluster, shared root cause"; actual scope was 18 services across 5-layer asymmetric cascade.
+- Task 012: ledger cited `Layer2OutcomeExtractor.cs` which didn't exist; actual fix was in `GroundingVerifier.cs` (CRLF↔LF normalization gap).
+
+**Binding rule**: Before applying a ledger entry's recommended fix:
+
+1. **Read the production code path** from the test's failure point backward to the ledger's cited location
+2. **Hand-trace** the production behavior against the test's input
+3. **Reproduce the failure empirically** (run the test with the prior code; observe the actual error)
+4. **If actual root cause differs from ledger's hypothesis**: file a path-b decision record (`projects/{project}/decisions/D-XX-{ledger-id}-resolution.md`) documenting the corrected analysis BEFORE applying the fix
+
+**Cross-reference**: Phase 5 procedure-doc codification at [`docs/procedures/testing-and-code-quality.md`](../../docs/procedures/testing-and-code-quality.md) §18.3.
+
 ---
 
 ## MUST NOT Rules

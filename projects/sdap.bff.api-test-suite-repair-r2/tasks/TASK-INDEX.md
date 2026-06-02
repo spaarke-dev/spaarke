@@ -52,8 +52,8 @@
 | 042 | Track C — TestClock + seeded-Guid PoC in Services/Workspace | 4 | ✅ 2026-06-01 (PortfolioService PoC: TimeProvider + IGuidProvider; 5/5 tests pass; ADR-010 compliant) | 039 | P4-W1 | FULL | — |
 | 043 | Track D — Coverlet baseline measurement (waits on `github-actions-rationalization-r1`) | 4 | ✅ 2026-06-01 (CI baseline: 38.49% line / 29.98% branch debug; per-asm + per-ns breakdown; 3-phase r3 rollout) | 039 + external | P4-W1 | STANDARD | — |
 | 044 | Track E — Anti-drift effectiveness report (NFR-07 publish-regardless) | 4 | ✅ 2026-06-01 (4 mechanisms assessed: §F Effective, 3 Partial; 3 lessons codified for Phase 5 tasks 080/081) | 039 | P4-W1 | STANDARD | — |
-| 080 | Update `docs/procedures/testing-and-code-quality.md` (ledger lifecycle + TestClock pattern + Track E findings) | 5 | 🔲 | 040-044 | P5-W1 | STANDARD | — |
-| 081 | Extend `.claude/constraints/bff-extensions.md` § F (CONDITIONAL; **MAIN-SESSION-ONLY**) | 5 | 🔲 | 080, 011 | **sequential (.claude/ boundary)** | FULL | — |
+| 080 | Update `docs/procedures/testing-and-code-quality.md` (ledger lifecycle + TestClock pattern + Track E findings) | 5 | ✅ 2026-06-01 (4 new sections: 3 anti-drift lessons + TestClock pattern; +265 LOC; 15 cross-refs) | 040-044 | P5-W1 | STANDARD | — |
+| 081 | Extend `.claude/constraints/bff-extensions.md` § F (CONDITIONAL; **MAIN-SESSION-ONLY**) | 5 | ✅ 2026-06-01 (3 sub-sections F.1/F.2/F.3 added per D-13 warrant decision; cross-refs to procedure §§18.x + ADR-030) | 080, 011 | **sequential (.claude/ boundary)** | FULL | — |
 | 082 | Final triple-run validation — 6 TRX (FR-15) | 5 | 🔲 | 080, 081 | (sequential, phase-exit) | STANDARD | — |
 | 083 | PR + admin-merge cycle (FR-16; merge ≤ 2026-08-31) | 5 | 🔲 | 082 | (sequential) | STANDARD | — |
 | 084 | `doc-drift-audit` after procedure updates | 5 | 🔲 | 080, 081 | P5-W2 | STANDARD | — |
