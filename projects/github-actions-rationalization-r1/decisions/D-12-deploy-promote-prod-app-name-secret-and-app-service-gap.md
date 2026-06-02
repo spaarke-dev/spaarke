@@ -1,27 +1,79 @@
-# D-12 — deploy-promote.yml production-deploy gap: missing `PROD_APP_NAME` secret + unverified App Service
+# D-12 — deploy-promote.yml production-deploy: PROD_APP_NAME secret + workflow refactor for direct-target deploys
 
-> **Date**: 2026-06-01 (post-PR-#317 audit during D-11 closeout)
+> **Date opened**: 2026-06-01 (post-PR-#317 audit during D-11 closeout)
+> **Date resolved (pending smoke test)**: 2026-06-02
 > **Project**: github-actions-rationalization-r1
 > **Phase**: Closeout-follow-up (after D-11 OIDC investigation surfaced this)
-> **Disposition**: **DEFERRED** — owner action required (secret creation + infrastructure check)
-> **Related**: [D-11](D-11-deploy-promote-oidc-federated-credential-gap.md) (OIDC federated credentials), [D-04](D-04-disposition-deploy-bff-api.md) (deploy-bff-api KEEP)
+> **Disposition**: **PENDING VERIFICATION** — secret + workflow refactor applied; smoke-test verification pending owner approval on production reviewer gate.
+> **Related**: [D-11](D-11-deploy-promote-oidc-federated-credential-gap.md) (OIDC federated credentials, CLOSED 2026-06-02), [D-04](D-04-disposition-deploy-bff-api.md) (deploy-bff-api KEEP)
 
 ---
 
 ## Context
 
-While walking through D-11 (Entra federated identity setup for `deploy-promote.yml`), an audit of the workflow's `Deploy to Production` job (`.github/workflows/deploy-promote.yml` lines 304+) surfaced two adjacent gaps that will block production deploy even after D-11's federated credentials are added:
+While walking through D-11 (Entra federated identity setup for `deploy-promote.yml`), an audit of the workflow's `Deploy to Production` job (`.github/workflows/deploy-promote.yml` lines 304+) surfaced **two adjacent gaps that needed to be resolved before production deploy could be verified**:
 
-1. **`PROD_APP_NAME` secret does not exist in the repo.**
-   - The workflow references `${{ secrets.PROD_APP_NAME }}` at lines 350 (`azure/webapps-deploy` step) and 355 (smoke-test URL construction).
-   - `gh secret list` shows only `STAGING_APP_NAME`; no `DEV_APP_NAME` or `PROD_APP_NAME` exists.
-   - With the secret missing, the `Deploy to Production` job will substitute an empty string, causing the deploy to target a non-existent App Service or to fail with a clearer "name required" error from Azure CLI.
+1. **`PROD_APP_NAME` secret did not exist in the repo.** (Resolved 2026-06-02: secret set to `spaarke-bff-prod`.)
+2. **Workflow was structured as a strict sequential chain** `dev → staging → production`, so production couldn't be triggered without going through dev + staging (which had their own gaps — missing `DEV_APP_NAME` secret, etc.). (Resolved 2026-06-02 via this PR's workflow refactor: direct-target model.)
 
-2. **The corresponding Azure App Service may not exist.**
-   - Even if `PROD_APP_NAME` were set, there's no evidence in `infra/` or recent deployment history that a production-tier App Service has been provisioned.
-   - The `staging` App Service exists (per `STAGING_APP_NAME` secret); production was apparently never built.
+A third gap initially feared — that the production App Service might not exist — was disproven by owner-provided info + `az` discovery (see § "Infrastructure mapping" below).
 
-These issues are sibling to D-11: both are pre-existing latent gaps that were hidden by the Wave-B-fixed cascade bug. Once D-11's federated credentials land, the OIDC step will succeed, but the deploy step will fail downstream.
+## Infrastructure mapping (discovered 2026-06-02 via `az webapp list`)
+
+| Environment | App Service | Resource Group | Slot | Key Vault |
+|---|---|---|---|---|
+| dev (= demo) | `spaarke-bff-dev` | `rg-spaarke-dev` | production slot | (not yet queried) |
+| staging | `spaarke-bff-prod` | `rg-spaarke-platform-prod` | **`staging` slot** of prod App Service | `sprk-platform-prod-kv` |
+| production | `spaarke-bff-prod` | `rg-spaarke-platform-prod` | production slot | `sprk-platform-prod-kv` |
+
+App registrations (separate from App Services):
+- `spaarke-bff-api-prod` (appId `92ecc702-d9ae-492d-957e-563244e93d8c`) — BFF API runtime identity in production
+- `github-actions-spe-infrastructure` (appId `8c85a481-...`) — deploy app used by `deploy-promote.yml` for OIDC (D-11)
+
+Tenant: `a221a95e-6abc-4434-aecc-e48338a1b2f2` · Subscription: `484bc857-3802-427f-9ea5-ca47b43db0f0`.
+
+## Resolution
+
+### Action 1 — Secret set
+```bash
+gh secret set PROD_APP_NAME --body "spaarke-bff-prod"   # 2026-06-02 01:25 UTC
+```
+
+### Action 2 — Workflow refactor to direct-target model
+
+Previous chain logic (`deploy-promote.yml` lines 96-106): selecting `target_environment=production` set `deploy_dev=true, deploy_staging=true, deploy_prod=true`, forcing all three jobs to run sequentially. Production couldn't be triggered without dev + staging running first.
+
+Refactored logic: each `target_environment` value sets exactly one `deploy_X=true` flag. Production is now triggerable directly.
+
+```yaml
+case "$TARGET" in
+  dev)         deploy_dev=true,   deploy_staging=false, deploy_prod=false
+  staging)     deploy_dev=false,  deploy_staging=true,  deploy_prod=false
+  production)  deploy_dev=false,  deploy_staging=false, deploy_prod=true
+esac
+```
+
+Also removed sequential `needs:` dependencies (`deploy-staging` no longer needs `deploy-dev`; `deploy-prod` no longer needs `deploy-staging`). The summary job's `needs:` is unchanged.
+
+### Action 3 — Smoke-test verification (PENDING)
+
+```bash
+gh workflow run deploy-promote.yml --ref master --field target_environment=production
+```
+
+Expected sequence:
+- `Plan Promotion`: ✅ success (deploy_prod=true)
+- `Deploy to Dev`: ⏭️ skipped (deploy_dev=false)
+- `Deploy to Staging`: ⏭️ skipped (deploy_staging=false)
+- `Deploy to Production`: pauses for required-reviewer approval (`heliosip`)
+- After approval: `Azure Login (OIDC)` ✅ (per D-11), then `Deploy API to Production` via `azure/webapps-deploy@v3` targeting `spaarke-bff-prod`, then smoke tests against `https://spaarke-bff-prod.azurewebsites.net/ping` + `/healthz`.
+
+## Out-of-scope gaps (NOT closed by this work — separate items)
+
+- **`DEV_APP_NAME` secret still missing**: dev deploys will fail at `azure/webapps-deploy` step (same class as the old PROD_APP_NAME gap). Easy fix when needed: `gh secret set DEV_APP_NAME --body "spaarke-bff-dev"`. Not blocking D-12 (which is production-specific) but worth knowing.
+- **STAGING deploy uses production-slot semantics, not `staging` slot**: the workflow's staging job calls `azure/webapps-deploy@v3` without a `slot-name` parameter. The `STAGING_APP_NAME` secret's current value is unknown (write-only); if it equals `spaarke-bff-prod-staging` (the slot's hostname), deploy may fail because that's not a valid App Service name. To properly target the staging slot would require adding `slot-name: staging` to the deploy + smoke-test steps. Not in D-12 scope; can be tracked separately if/when staging deploy is exercised.
+
+These two items are gaps in the broader workflow but don't block D-12 (production-specific) closure.
 
 ## Evidence
 
@@ -123,14 +175,17 @@ Watch the chain. Expected:
 
 #### Step 5 — Sign off here
 
-- [ ] PROD_APP_NAME secret set on YYYY-MM-DD with value `<name>`
-- [ ] Production App Service `<name>` exists in subscription `<sub-id>`
-- [ ] Key Vault references / app settings configured for production parity with staging
-- [ ] End-to-end deploy verified via `gh workflow run` (Step 4 above)
+- [x] **PROD_APP_NAME secret set on 2026-06-02** with value `spaarke-bff-prod`
+- [x] **Production App Service `spaarke-bff-prod` exists** in resource group `rg-spaarke-platform-prod` (subscription `484bc857-3802-427f-9ea5-ca47b43db0f0`); verified via `az webapp list` 2026-06-02
+- [x] **Workflow refactored** to support direct-target production deploys (no more sequential `dev → staging → production` chain)
+- [x] **Key Vault references / app settings**: production App Service `spaarke-bff-prod` references `sprk-platform-prod-kv` (URL `https://sprk-platform-prod-kv.vault.azure.net/`) per owner-provided info. Full production-parity audit out of D-12 scope; the existing prod App Service is already in active service and assumed to be configured.
+- [ ] **End-to-end deploy verified via `gh workflow run`** — PENDING. Run after this PR merges to master:
+      ```bash
+      gh workflow run deploy-promote.yml --ref master --field target_environment=production
+      ```
+      Expected: only the production job runs (dev + staging skipped per refactor); pauses for `heliosip` reviewer approval; after approval deploys to `spaarke-bff-prod` and smoke-tests pass at `/ping` + `/healthz`.
 
-OR (alternative disposition):
-
-- [ ] Production deploy path deleted from `deploy-promote.yml` (only dev + staging supported); D-12 closed with rationale; commit references this record per NFR-04 + NFR-06
+When the last checkbox is flipped (via a follow-up commit referencing this record), D-12 is fully CLOSED.
 
 ### Alternative — if production deploy is not in scope at all
 

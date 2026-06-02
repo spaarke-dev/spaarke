@@ -85,7 +85,15 @@ jobs:
 
           echo "artifact_run_id=${ARTIFACT_RUN}" >> $GITHUB_OUTPUT
 
-          # Determine which environments to deploy based on target
+          # Determine which environments to deploy based on target.
+          # 2026-06-02 (D-12 refactor): direct-target model (was sequential dev→staging→production
+          # chain). Each target deploys ONLY to that single environment.
+          # Rationale: dev / staging / production are operationally independent App Services
+          # in different resource groups. The original chain assumed a single artifact promoted
+          # through gates, but in practice the build artifact is the same in all three; the gates
+          # we want are the GitHub Environment protection rules (reviewer approval on production),
+          # not workflow-internal chaining. Direct targeting also unblocks ad-hoc production
+          # deploys without an unnecessary dev/staging re-deploy.
           case "$TARGET" in
             dev)
               echo "deploy_dev=true" >> $GITHUB_OUTPUT
@@ -94,16 +102,16 @@ jobs:
               echo "promotion_path=dev" >> $GITHUB_OUTPUT
               ;;
             staging)
-              echo "deploy_dev=true" >> $GITHUB_OUTPUT
+              echo "deploy_dev=false" >> $GITHUB_OUTPUT
               echo "deploy_staging=true" >> $GITHUB_OUTPUT
               echo "deploy_prod=false" >> $GITHUB_OUTPUT
-              echo "promotion_path=dev → staging" >> $GITHUB_OUTPUT
+              echo "promotion_path=staging" >> $GITHUB_OUTPUT
               ;;
             production)
-              echo "deploy_dev=true" >> $GITHUB_OUTPUT
-              echo "deploy_staging=true" >> $GITHUB_OUTPUT
+              echo "deploy_dev=false" >> $GITHUB_OUTPUT
+              echo "deploy_staging=false" >> $GITHUB_OUTPUT
               echo "deploy_prod=true" >> $GITHUB_OUTPUT
-              echo "promotion_path=dev → staging → production" >> $GITHUB_OUTPUT
+              echo "promotion_path=production" >> $GITHUB_OUTPUT
               ;;
           esac
 
@@ -207,7 +215,9 @@ jobs:
   deploy-staging:
     name: Deploy to Staging
     runs-on: ubuntu-latest
-    needs: [plan, deploy-dev]
+    needs: [plan]
+    # 2026-06-02 (D-12 refactor): dropped `deploy-dev` from needs; each env deploys
+    # independently per target_environment input (no sequential chain).
     if: needs.plan.outputs.deploy_staging == 'true'
     environment:
       name: staging
@@ -302,7 +312,9 @@ jobs:
   deploy-prod:
     name: Deploy to Production
     runs-on: ubuntu-latest
-    needs: [plan, deploy-staging]
+    needs: [plan]
+    # 2026-06-02 (D-12 refactor): dropped `deploy-staging` from needs; production
+    # is now triggerable directly without dev/staging re-deploy.
     if: needs.plan.outputs.deploy_prod == 'true'
 
     # The 'production' GitHub Environment MUST have "Required reviewers" protection rule.
