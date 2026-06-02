@@ -1,0 +1,58 @@
+<task id="012" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>A3 — 2D taxonomy design (practice-area × document-type entity + matrix; initial 3 areas)</title>
+    <status>not-started</status>
+    <wave>A</wave>
+    <estimated-effort>1d</estimated-effort>
+    <tags>design, dataverse-schema, 2d-taxonomy, practice-area, document-type</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>A3</wave-item>
+  </metadata>
+
+  <prompt>
+    Author the 2D classification taxonomy design doc. Decide: (a) sprk_documenttype_ref entity shape (fields, code conventions), (b) sprk_practicearea_documenttype N:N matrix shape (relationship fields, ownership), (c) initial 3 practice areas for Wave D2 implementation (sourced from existing sprk_practicearea_ref — query Spaarke Dev first). Document selection rationale (SME readiness, document variety, strategic priority).
+  </prompt>
+
+  <role>Information architect + Dataverse schema designer.</role>
+
+  <goal>
+    Design doc projects/ai-spaarke-insights-engine-r2/design-a3-2d-taxonomy.md authored, covering: (1) Field-level design for sprk_documenttype_ref + sprk_practicearea_documenttype; (2) Naming conventions for document types (per practice area); (3) Initial 3 practice areas selected from the live sprk_practicearea_ref query (e.g., CTRNS, IPPAT, BNKF — confirmed with owner); (4) Initial document types per area (3-5 each, per spec.md Wave D3 scope of 3-5 high-value pairs); (5) Per-(practice-area, document-type) gate signal examples per design.md D-P15-09.
+  </prompt>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r2/spec.md (PA-1 + Wave D scope)</file>
+    <file purpose="design">projects/ai-spaarke-insights-engine-r2/design.md (D-P15-04, D-P15-09, Q-D2-1)</file>
+    <file purpose="live-data">sprk_practicearea_ref rows in Spaarke Dev (query via MCP)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md PA-1">Practice areas sourced from sprk_practicearea_ref; never hardcoded</constraint>
+    <constraint source="spec.md Q-D2-1">Initial Wave D2 scope = 3 practice areas based on SME readiness + variety + strategic priority</constraint>
+    <constraint source="ADR-027">Schema additions flow through managed-solution promotion path (Wave D1 task 030)</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Query sprk_practicearea_ref">Via mcp__dataverse__read_query — full list of rows with codes + names + any sprk_priority/sprk_active fields</step>
+    <step order="2" name="Score the rows">Per SME readiness + document variety + strategic priority; select top 3</step>
+    <step order="3" name="Confirm with owner">Brief owner check — top 3 selection lands as Owner Clarification PA-2 in spec.md</step>
+    <step order="4" name="Design sprk_documenttype_ref entity">Fields: code, name, description, sprk_practiceareaowner (FK or N:N via matrix), active</step>
+    <step order="5" name="Design sprk_practicearea_documenttype N:N matrix">Relationship fields, ownership semantics, valid combinations</step>
+    <step order="6" name="Author initial document types per area">3-5 per area (e.g., CTRNS: closing-statement, asset-purchase, financing-agreement, services-agreement)</step>
+    <step order="7" name="Author per-(area, type) gate signals">Per design.md D-P15-09 — illustrative initial set</step>
+    <step order="8" name="Publish design-a3-2d-taxonomy.md">In project root</step>
+  </steps>
+
+  <outputs>
+    <output type="design-doc">projects/ai-spaarke-insights-engine-r2/design-a3-2d-taxonomy.md</output>
+    <output type="spec-update">spec.md updated with confirmed Wave D2 initial practice areas (PA-2)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">design-a3-2d-taxonomy.md authored with sections (1)-(5) per goal</criterion>
+    <criterion testable="true">Initial 3 practice areas confirmed with owner + recorded in spec.md</criterion>
+    <criterion testable="true">Entity + matrix field-level design ready for Wave D1 (030) to implement</criterion>
+    <criterion testable="true">Per-(area, type) gate signals defined for ≥3 high-value pairs</criterion>
+  </acceptance-criteria>
+</task>

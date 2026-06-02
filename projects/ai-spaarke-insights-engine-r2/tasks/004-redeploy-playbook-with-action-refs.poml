@@ -1,0 +1,62 @@
+<task id="004" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>B4 — Re-deploy predict-matter-cost@v1 to Spaarke Dev with action references</title>
+    <status>not-started</status>
+    <wave>B</wave>
+    <estimated-effort>30m</estimated-effort>
+    <tags>deploy, dataverse, predict-matter-cost, unblock-synthesis</tags>
+    <dependencies>002, 003</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>B4</wave-item>
+  </metadata>
+
+  <prompt>
+    **Re-scoped 2026-06-02 per D-01 + owner direction**: per D-01 §2.4 the deployed nodes have wiped configjson — in-place update is NOT viable. This task MUST delete the existing 8 sprk_playbooknode rows (do NOT delete the sprk_analysisplaybook itself) before redeploy. Post-deploy verification (lint from task 003) MUST confirm both sprk_actionid AND sprk_configjson are populated correctly. After successful deploy, document the "do not open in Make Playbook Designer UI" operational rule (folded into task 006). See D-01 §4 path-b re-scope.
+
+    Run Deploy-Playbook.ps1 with the updated predict-matter-cost.playbook.json to recreate the 8 nodes (after deletion) in Spaarke Dev with proper action-code references AND complete configjson contents AND sprk_isactive=true on all nodes. The result must be 8 active nodes wired to the 6 INS-* action rows (from task 002) plus the existing AgentService synthesis action.
+  </prompt>
+
+  <role>Operator + Spaarke deployment specialist.</role>
+
+  <goal>
+    predict-matter-cost@v1 live in Spaarke Dev with: 8 sprk_playbooknode rows, each sprk_isactive=true, each carrying an action-code reference (FK to the matching sprk_analysisaction row). PlaybookExecutionEngine builds an 8-node execution graph at invocation time. Lint check from task 003 runs as part of the deploy and passes.
+  </prompt>
+
+  <inputs>
+    <file purpose="script">scripts/Deploy-Playbook.ps1 (lint-enhanced via task 003)</file>
+    <file purpose="config">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json (updated via task 002)</file>
+    <file purpose="env">Spaarke Dev — must be az-logged in to the target tenant</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="r1">Spaarke Dev only (single-tenant per D-52); no prod deploy in Wave B</constraint>
+    <constraint source="task-003">Lint check must pass before any Dataverse writes</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Verify env">az login; confirm correct subscription + Dataverse env</step>
+    <step order="2" name="Inspect existing playbook">Query Dataverse for current predict-matter-cost@v1 + its nodes; document state (likely 8 nodes with sprk_isactive=false from the original r1 deploy, now manually patched)</step>
+    <step order="3" name="Decide update strategy">Either delete + recreate (cleaner) or -Force update (if script supports). Document choice in handoff notes.</step>
+    <step order="4" name="Run Deploy-Playbook.ps1">With the updated JSON; lint check from task 003 runs first; if it passes, Dataverse writes proceed</step>
+    <step order="5" name="Verify post-deploy state">Query Dataverse: 8 sprk_playbooknode rows; all sprk_isactive=true; each carries an action-code reference; references resolve to the rows from task 001</step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">Deploy-Playbook.ps1 execution</tool>
+    <tool name="az">Auth + env selection</tool>
+    <tool name="mcp__dataverse__read_query">Verify post-deploy state</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse-state">predict-matter-cost@v1 live with 8 properly-wired active nodes</output>
+    <output type="notes">projects/ai-spaarke-insights-engine-r2/notes/handoffs/wave-b4-deploy-trace.md (deploy log + verification queries)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">8 sprk_playbooknode rows live for predict-matter-cost@v1</criterion>
+    <criterion testable="true">All 8 nodes have sprk_isactive=true</criterion>
+    <criterion testable="true">Each node carries an action-code reference resolving to a row from task 001 (or the existing AgentService synthesis action for the synthesis node)</criterion>
+    <criterion testable="true">PlaybookExecutionEngine builds an 8-active-node execution graph (verified via /api/insights/ask test in task 005)</criterion>
+  </acceptance-criteria>
+</task>

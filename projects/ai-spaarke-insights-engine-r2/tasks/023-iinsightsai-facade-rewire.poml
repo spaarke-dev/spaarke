@@ -1,0 +1,66 @@
+<task id="023" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>C4 — Update IInsightsAi.RunIngestAsync to invoke universal-ingest JPS playbook</title>
+    <status>not-started</status>
+    <wave>C</wave>
+    <estimated-effort>4h</estimated-effort>
+    <tags>facade, IInsightsAi, jps-invocation, zone-a, bff-api</tags>
+    <dependencies>020</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <wave-item>C4</wave-item>
+  </metadata>
+
+  <prompt>
+    Update the IInsightsAi facade implementation (InsightsOrchestrator in Services/Ai/Insights/) so RunIngestAsync invokes universal-ingest@v1 via PlaybookExecutionEngine instead of calling the legacy IngestOrchestrator.cs code path. After this task, the facade has parity with r1 from a contract perspective but executes the JPS playbook under the hood. Enables task 022 (retire IngestOrchestrator).
+  </prompt>
+
+  <role>Senior .NET developer + facade implementer (Zone A).</role>
+
+  <goal>
+    IInsightsAi.RunIngestAsync resolves to a call into PlaybookExecutionEngine.ExecuteBatchAsync with the universal-ingest@v1 playbook Guid + JPS parameters (tenantId, optional practiceAreaHint, optional costCapOverride). Output mirror behavior preserved (Observations land in spaarke-insights-index + sprk_analysis polymorphic mirror). Tests updated to mock PlaybookExecutionEngine instead of IngestOrchestrator.
+  </prompt>
+
+  <inputs>
+    <file purpose="r1-facade-impl">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs (the IInsightsAi impl)</file>
+    <file purpose="r1-facade-contract">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInsightsAi.cs</file>
+    <file purpose="universal-ingest">Guid of universal-ingest@v1 playbook in Spaarke Dev (from task 020)</file>
+    <file purpose="a5-design">projects/ai-spaarke-insights-engine-r2/design-a5-universal-ingest-jps.md (parameter schema)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013-refined">Facade IS the canonical CRUD ↔ AI seam. Do not break the contract; only change the implementation.</constraint>
+    <constraint source="bff-extensions.md">No new DI registrations beyond what's necessary; reuse PlaybookExecutionEngine + IInsightsPlaybookExecutionCache (already registered in r1)</constraint>
+    <constraint source="ADR-030 + bff-extensions F.1">If IInsightsAi or InsightsOrchestrator implementation registration is feature-gated (in a `*Module.cs` `if (flag)` block), verify endpoint consumers of IInsightsAi.RunIngestAsync are also conditionally mapped, OR apply ADR-030 P3 Fail-fast Null-Object via FeatureDisabledException. Verify by grepping endpoint param injection per F.1 recipe.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read current InsightsOrchestrator.RunIngestAsync">Identify legacy code path to replace</step>
+    <step order="2" name="Resolve universal-ingest@v1 Guid">From Spaarke Dev; pass via config (e.g., InsightsOptions.UniversalIngestPlaybookId)</step>
+    <step order="3" name="Compose JPS parameters">tenantId from request; optional practiceAreaHint + costCapOverride from InsightsOptions or request</step>
+    <step order="4" name="Invoke PlaybookExecutionEngine.ExecuteBatchAsync">With playbook Guid + parameters; pipe stream events through; capture Observations</step>
+    <step order="5" name="Preserve mirror behavior">Side-effect: write sprk_analysis rows; ensure not duplicated (universal-ingest playbook may now own Mirror node per A5)</step>
+    <step order="6" name="Update unit tests">Mock IPlaybookExecutionEngine instead of legacy types</step>
+    <step order="7" name="Integration smoke">RunIngestAsync against a fixture document → Observations appear in spaarke-insights-index</step>
+    <step order="8" name="Quality gates">code-review + adr-check + §3.5 grep</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test</tool>
+    <tool name="mcp__dataverse__read_query">Verify Observations + mirror rows</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs (modified — RunIngestAsync now invokes JPS playbook)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOptions.cs (added UniversalIngestPlaybookId)</output>
+    <output type="test">Unit tests updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RunIngestAsync invokes PlaybookExecutionEngine.ExecuteBatchAsync with universal-ingest@v1 playbook Guid</criterion>
+    <criterion testable="true">Observations produced match r1 baseline (smoke test parity)</criterion>
+    <criterion testable="true">Mirror behavior preserved (no duplicate sprk_analysis rows)</criterion>
+    <criterion testable="true">Unit tests pass; §3.5 grep clean</criterion>
+    <criterion testable="true">Facade contract (IInsightsAi.RunIngestAsync signature) unchanged</criterion>
+  </acceptance-criteria>
+</task>
