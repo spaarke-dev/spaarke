@@ -3,7 +3,7 @@
   <metadata>
     <title>Update VisualHost chart-def sprk_drillthroughtarget for Matter Health + Budget Performance</title>
     <phase>3: Phase C — Matter UI Drill-throughs</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>023</dependencies>
     <blocks>025</blocks>

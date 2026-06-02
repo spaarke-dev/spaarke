@@ -43,7 +43,7 @@
 | 021 | sprk_gridconfiguration record for sprk_kpiassessment | STANDARD | ✅ | 020 | C1 | 023,025 |
 | 022 | sprk_gridconfiguration record for sprk_invoice — UQ-05 deferred to R2 | STANDARD | ✅ | 020 | C1 | 023,025 |
 | 023 | Build Custom Pages sprk_kpiassessmentspage + sprk_invoicespage | FULL | ✅ | 015,021,022 | — | 025 |
-| 024 | Update VisualHost chart-def sprk_drillthroughtarget (2 records) | MINIMAL | 🔲 | 023 | — | 025 |
+| 024 | Update VisualHost chart-def sprk_drillthroughtarget (2 records) | MINIMAL | ✅ | 023 | — | 025 |
 | 025 | Phase C deploy (Custom Pages + Dataverse solution) | STANDARD | 🔲 | 021,022,023,024 | — | 026 |
 | 026 | Phase C UAT (Matter Health + Budget Performance drill-through) | STANDARD | 🔲 | 025 | — | — |
 

@@ -13,7 +13,7 @@
 | **Task** | none (B-Wave-3 = task 017 BFF deploy DEFERRED ⏸ pending insights-engine-r2 master merge; Phase C unblocked) |
 | **Step** | — |
 | **Status** | none |
-| **Next Action** | C-Wave-3 = task 024 (VisualHost chart-def updates via Dataverse MCP). Update 2 sprk_chartdefinition records (Matter Health + Budget Performance) to point sprk_drillthroughtarget at the new Custom Page web resource names. Quick data-only change. Then C-Wave-4 = 025 (deploy) → C-Wave-5 = 026 (UAT). |
+| **Next Action** | C-Wave-4 = task 025 (Phase C deploy via `code-page-deploy` skill). Uploads 2 single-file HTML bundles as Dataverse web resources + publishes. Web resource names MUST match sprk_kpiassessmentspage.html + sprk_invoicespage.html (already set in chart-defs by task 024). USER DECISION POINT: deploy operation — similar to task 017. |
 
 ### Files Modified This Session
 
