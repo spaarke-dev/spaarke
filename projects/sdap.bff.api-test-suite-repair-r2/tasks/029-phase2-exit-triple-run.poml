@@ -2,7 +2,7 @@
   <metadata>
     <title>P2.exit — Phase 2 exit triple-run validation gate (MEDIUM tier complete)</title>
     <phase>Phase 2</phase>
-    <status>not-started</status>
+    <status>completed-2026-06-01</status>
     <estimated-effort>1-2 hours (3 × ~5 min test runs + analysis + artifact write)</estimated-effort>
     <dependencies>020,021,022,023,024,025,026</dependencies>
     <blocks>030</blocks>
