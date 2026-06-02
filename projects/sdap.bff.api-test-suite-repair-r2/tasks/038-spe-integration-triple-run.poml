@@ -2,7 +2,7 @@
   <metadata>
     <title>P3 — Spe.Integration.Tests triple-run validation + flake quarantine (FR-10)</title>
     <phase>Phase 3: LOW Severity + Integration Stability</phase>
-    <status>not-started</status>
+    <status>completed-2026-06-01</status>
     <estimated-effort>3-6 hours (3 × ~30-60 min runs + verification + any flake triage)</estimated-effort>
     <dependencies>030, 031, 032, 033, 034, 035, 036, 037</dependencies>
     <blocks>039</blocks>
