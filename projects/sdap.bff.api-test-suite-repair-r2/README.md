@@ -1,8 +1,9 @@
 # sdap.bff.api-test-suite-repair-r2
 
 > **Last Updated**: 2026-06-01
-> **Status**: In Progress — Phase 0 (Project Setup)
-> **Target Date**: 2026-08-31
+> **Status**: ✅ **COMPLETE** — merged to master at commit `7b804d35` (PR #318 admin-merge, 2026-06-01)
+> **Target Date**: 2026-08-31 (closed ~3 months early)
+> **Completed Date**: 2026-06-01
 > **Predecessor**: [`sdap-bff.api-test-suite-repair`](../sdap-bff.api-test-suite-repair/) (r1, closed 2026-06-01)
 
 ## Overview
@@ -25,9 +26,10 @@ r2 is the closure project that converts the 20 real-bug ledger entries surfaced 
 
 | Metric | Value |
 |---|---|
-| **Phase** | Phase 0 — Project Setup |
-| **Progress** | 0% (initialization complete; tasks not yet started) |
-| **Target Date** | 2026-08-31 |
+| **Phase** | ✅ Complete (all 6 phases closed) |
+| **Progress** | 100% (35 of 35 active tasks complete; 1 partial closure with residual filed; 1 deferred) |
+| **Target Date** | 2026-08-31 (closed early 2026-06-01) |
+| **Merge Commit** | `7b804d35` (admin-merge of PR #318 to master) |
 | **Owner** | ralph.schroeder@hotmail.com |
 
 ## Problem Statement
@@ -49,20 +51,20 @@ A single 3-month closure project (2026-06-01 → 2026-08-31) executing 6 phases:
 
 The project is **complete** when all 14 criteria pass:
 
-- [ ] All 20 real-bug ledger entries closed (FR-01 — `repaired` / `transferred-to-sibling` / `archived-as-dead-target`)
-- [ ] 5 HIGH closed in Phase 1 incl. RB-T044-01 with security-review record (FR-02 / NFR-03)
-- [ ] 7 MED closed in Phase 2 (FR-03)
-- [ ] 8 LOW closed in Phase 3 (FR-04)
-- [ ] RB-T028-02 Insights HOLD resolved with `ai-spaarke-insights-engine-r1` (FR-05)
-- [ ] r1 `priority-order.md` TBD sibling sign-off slots populated (FR-06)
-- [ ] `Spe.Integration.Tests` triple-run validates ≤2 flakes (FR-10)
-- [ ] Anti-drift effectiveness report published — favorable or not (FR-09 / NFR-07)
-- [ ] PCF/Code Pages audit document published with r3 recommendation (FR-11)
-- [ ] Mutation testing pilot report published (FR-12)
-- [ ] TestClock/Guid PoC working in `Services/Workspace/*` (FR-13)
-- [ ] Coverlet baseline % published per project (FR-14)
-- [ ] Final triple-run on both suites: `Failed: 0` (FR-15)
-- [ ] PR merged to master on or before 2026-08-31 (FR-16)
+- [x] All 20 real-bug ledger entries closed (FR-01) — 19 `repaired` + 1 `partial-repair-residual-filed` (RB-T053-01 + RB-T053-01a LOW filed) + 1 inline closure (RB-T013-01 probabilistic flake)
+- [x] 5 HIGH closed in Phase 1 incl. RB-T044-01 with security-review record (FR-02 / NFR-03) — D-08 (`dev@spaarke.com`) for task 010; D-10 (`dev@spaarke.com`) for task 011 cluster
+- [x] 7 MED closed in Phase 2 (FR-03) — 6 `repaired` + 1 partial (RB-T053-01)
+- [x] 8 LOW closed in Phase 3 (FR-04) — all 8 `repaired`
+- [x] RB-T028-02 Insights HOLD resolved with `ai-spaarke-insights-engine-r1` (FR-05) — task 012 path-b, `GroundingVerifier.cs` production fix per D-07
+- [x] r1 `priority-order.md` TBD sibling sign-off slots populated (FR-06)
+- [x] `Spe.Integration.Tests` triple-run validates ≤2 flakes (FR-10) — task 038: 3 × 370 Passed / 0 Failed / 52 Skipped, **0 flakes**
+- [x] Anti-drift effectiveness report published — favorable or not (FR-09 / NFR-07) — task 044 / Track E baseline doc
+- [x] PCF/Code Pages audit document published with r3 recommendation (FR-11) — task 040 / Track A baseline doc; 2 r3 candidates filed (RB-CLIENT-001/002)
+- [x] Mutation testing pilot report published (FR-12) — task 041 / Track B baseline doc; 89.13% mutation score on `ConversationHistorySanitizer`
+- [x] TestClock/Guid PoC working in `Services/Workspace/*` (FR-13) — task 042 / Track C: `PortfolioService` PoC + 5 tests pass + ADR-010 compliant
+- [x] Coverlet baseline % published per project (FR-14) — task 043 / Track D: 38.49% line / 29.98% branch debug; per-asm + per-ns breakdown
+- [x] Final triple-run on both suites: `Failed: 0` (FR-15) — task 082: **18,906 cumulative executions / 0 Failed / 0 flakes** across 6 TRX (3 unit + 3 integration)
+- [x] PR merged to master on or before 2026-08-31 (FR-16) — **merged 2026-06-01 (3 months early)** at commit `7b804d35`
 
 ## Scope
 
