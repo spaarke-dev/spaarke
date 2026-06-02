@@ -58,14 +58,28 @@ function calculateDaysUntilDue(dueDate: Date): {
  * Map a Dataverse event record to EventDueDateCard props
  */
 function mapEventToCardProps(record: Record<string, unknown>): IEventDueDateCardProps {
-  // v1.4.12 — display sprk_duedate (the planned due date users see on the
-  // event form). Falls back to sprk_finalduedate only when duedate is null,
-  // so older events that never had duedate set still show something.
-  // Reverses the v1.4.5 precedence per UAT.
-  const dueDateRaw =
-    (record.sprk_duedate as string | undefined) ||
-    (record.sprk_finalduedate as string | undefined);
-  const dueDate = dueDateRaw ? new Date(dueDateRaw) : new Date();
+  // v1.4.15 — same "active date" selection as DueDateCardList: prefer
+  // sprk_duedate when it's today-or-future; fall back to sprk_finalduedate
+  // when sprk_duedate has passed (the extended date is the new active
+  // deadline). See DueDateCardList.tsx for full rationale.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+
+  const duedateStr = record.sprk_duedate as string | undefined;
+  const finalduedateStr = record.sprk_finalduedate as string | undefined;
+  const duedate = duedateStr ? new Date(duedateStr) : null;
+  const finalduedate = finalduedateStr ? new Date(finalduedateStr) : null;
+
+  let dueDate: Date;
+  if (duedate && duedate.getTime() >= todayMs) {
+    dueDate = duedate;
+  } else if (finalduedate && finalduedate.getTime() >= todayMs) {
+    dueDate = finalduedate;
+  } else {
+    dueDate = duedate || finalduedate || new Date();
+  }
+
   const { daysUntilDue, isOverdue } = calculateDaysUntilDue(dueDate);
 
   // Event type from FetchXML link-entity alias or formatted value

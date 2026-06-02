@@ -78,14 +78,34 @@ function calculateDaysUntilDue(dueDate: Date): {
  * Map a Dataverse event record to EventDueDateCard props
  */
 function mapEventToCardProps(record: Record<string, unknown>): IEventDueDateCardProps {
-  // v1.4.12 — display sprk_duedate (the planned due date users see on the
-  // event form). Falls back to sprk_finalduedate only when duedate is null,
-  // so older events that never had duedate set still show something.
-  // Reverses the v1.4.6 precedence per UAT.
-  const dueDateRaw =
-    (record.sprk_duedate as string | undefined) ||
-    (record.sprk_finalduedate as string | undefined);
-  const dueDate = dueDateRaw ? new Date(dueDateRaw) : new Date();
+  // v1.4.15 — Date selection for both the displayed date AND the days-left
+  // calc honors the chart's "5-day window" semantics:
+  //   - If sprk_duedate is today or in the future, use it (planned date is
+  //     still the active deadline).
+  //   - Else if sprk_finalduedate is today or in the future, use that
+  //     (the extended date is now the active deadline — sprk_duedate has
+  //     passed but the event is still within the 5-day window via finalduedate).
+  //   - Else fall back to whichever date exists (overdue edge case).
+  // This matches the FetchXML `next-x-days` OR filter so the card always
+  // shows + counts down to whichever date kept the event qualified.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+
+  const duedateStr = record.sprk_duedate as string | undefined;
+  const finalduedateStr = record.sprk_finalduedate as string | undefined;
+  const duedate = duedateStr ? new Date(duedateStr) : null;
+  const finalduedate = finalduedateStr ? new Date(finalduedateStr) : null;
+
+  let dueDate: Date;
+  if (duedate && duedate.getTime() >= todayMs) {
+    dueDate = duedate;
+  } else if (finalduedate && finalduedate.getTime() >= todayMs) {
+    dueDate = finalduedate;
+  } else {
+    dueDate = duedate || finalduedate || new Date();
+  }
+
   const { daysUntilDue, isOverdue } = calculateDaysUntilDue(dueDate);
 
   // Event type from FetchXML link-entity alias or formatted value

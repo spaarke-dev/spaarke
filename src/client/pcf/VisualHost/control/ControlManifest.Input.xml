@@ -2,9 +2,9 @@
 <manifest>
   <control namespace="Spaarke.Visuals"
            constructor="VisualHost"
-           version="1.4.14"
+           version="1.4.15"
            display-name-key="Visual Host"
-           description-key="Virtual PCF: React/Fluent externalized via platform-library; configuration-driven visualization (v1.4.14)"
+           description-key="Virtual PCF: React/Fluent externalized via platform-library; configuration-driven visualization (v1.4.15)"
            control-type="virtual">
 
     <external-service-usage enabled="false" />
