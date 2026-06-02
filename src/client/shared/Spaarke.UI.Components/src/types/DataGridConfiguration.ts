@@ -282,6 +282,42 @@ export interface ColumnOverride {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Parent-context filter overlay (task 020 D-020-02 follow-up)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Declares how the framework should overlay a parent-context filter onto the
+ * resolved FetchXML before fetching records. Used by drill-through Custom Pages
+ * that scope a grid to a parent record (e.g. Matter Health → KPIs for the
+ * current Matter).
+ *
+ * Why this exists: Dataverse server-side validation REJECTS placeholder syntax
+ * like `value='@MatterId'` in stored savedquery FetchXML — every condition
+ * value is parsed as a typed literal at save time. The standard Power Platform
+ * pattern is to store the BASE query (no parent filter) and have the consumer
+ * inject the parent filter at runtime. This config + the framework's
+ * `overlayParentContextFilter` helper implement that pattern.
+ *
+ * **Example**: for the Matter Health drill-through, the consuming
+ * Custom Page mounts `<DataGrid configId="..." parentContext={{ matterId: "..." }}/>`,
+ * and the configjson includes:
+ * ```json
+ * "behavior": {
+ *   "parentContextFilter": { "attribute": "sprk_matter", "parentContextKey": "matterId" }
+ * }
+ * ```
+ * The framework injects `<filter type='and'><condition attribute='sprk_matter' operator='eq' value='{matterId}'/></filter>` into the savedquery's FetchXML before calling `dataverseClient.retrieveMultipleRecords()`.
+ */
+export interface ParentContextFilter {
+  /** FetchXML attribute logical name to filter on (e.g. `'sprk_matter'`). */
+  attribute: string;
+  /** Key in `parentContext` to read the filter value from (e.g. `'matterId'`). */
+  parentContextKey: string;
+  /** Filter operator. Default `'eq'`. */
+  operator?: 'eq' | 'neq' | 'in' | 'eq-userid' | 'eq-userteams';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Behavior — grid-level interaction knobs
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -296,6 +332,13 @@ export interface BehaviorConfig {
   enableColumnResize?: boolean;
   /** Default `true`. */
   enableKeyboardNavigation?: boolean;
+  /**
+   * Parent-context filter overlay. When set AND `parentContext[parentContextKey]`
+   * is present, the framework injects a `<condition>` into the savedquery's
+   * top-level `<filter type='and'>` before calling `dataverseClient.retrieveMultipleRecords()`.
+   * See {@link ParentContextFilter} for details + rationale.
+   */
+  parentContextFilter?: ParentContextFilter;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

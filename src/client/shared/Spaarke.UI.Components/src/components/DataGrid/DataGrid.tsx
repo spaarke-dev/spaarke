@@ -64,6 +64,7 @@ import {
   type ResolvedColumn,
 } from './configResolution';
 import { useLazyLoad } from './useLazyLoad';
+import { overlayParentContextFilter } from './fetchXmlOverlay';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -493,7 +494,16 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
   }, [loadState.entityMetadata, loadState.configRecord, loadState.savedQuery, overrides]);
 
   // Lazy load — only kicks off once we have entityName + fetchXml
-  const fetchXml = loadState.savedQuery?.fetchXml ?? '';
+  // Apply parent-context filter overlay if both the configjson declares one AND
+  // the consumer passed a value for it (task 020 D-020-02 / FR-CON-01 / FR-CON-02).
+  // Memoized on (fetchXml, parentContextFilter, parentContext) so identical inputs
+  // produce identical results (idempotent for the lazy-load reset detector).
+  const fetchXml = React.useMemo(() => {
+    const baseFetchXml = loadState.savedQuery?.fetchXml ?? '';
+    const filter = resolved?.behavior?.parentContextFilter;
+    if (!baseFetchXml || !filter) return baseFetchXml;
+    return overlayParentContextFilter(baseFetchXml, filter, parentContext);
+  }, [loadState.savedQuery, resolved?.behavior?.parentContextFilter, parentContext]);
   const entityNameForLoad = resolved?.entityName ?? '';
   const pageSize = resolved?.behavior.pageSize ?? 100;
 

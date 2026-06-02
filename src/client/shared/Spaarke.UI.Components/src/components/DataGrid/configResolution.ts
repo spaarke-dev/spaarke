@@ -106,7 +106,15 @@ export interface ResolvedConfig {
 // Framework defaults
 // ─────────────────────────────────────────────────────────────────────────────
 
-const FRAMEWORK_DEFAULT_BEHAVIOR: Required<BehaviorConfig> = {
+/**
+ * Default behavior. `parentContextFilter` is intentionally kept optional in the
+ * resolved shape — it's a per-grid configuration (consumed when present, omitted
+ * when absent). Other fields have sensible framework defaults.
+ */
+type ResolvedBehavior = Required<Omit<BehaviorConfig, 'parentContextFilter'>>
+  & Pick<BehaviorConfig, 'parentContextFilter'>;
+
+const FRAMEWORK_DEFAULT_BEHAVIOR: ResolvedBehavior = {
   selectionMode: 'multi',
   // Lazy-load contexts default to 100 per FR-DG-12 ("page size default 100 ...
   // override via configjson.behavior.pageSize"). Non-lazy users may still override.
@@ -114,6 +122,7 @@ const FRAMEWORK_DEFAULT_BEHAVIOR: Required<BehaviorConfig> = {
   enableSorting: true,
   enableColumnResize: true,
   enableKeyboardNavigation: true,
+  // parentContextFilter: undefined by default (caller's configjson opts in)
 };
 
 const FRAMEWORK_DEFAULT_DENSITY: 'comfortable' | 'compact' = 'comfortable';

@@ -35,6 +35,10 @@ export type {
   ResolvedColumn,
 } from './configResolution';
 
+// ─── Parent-context FetchXML overlay (task 020 D-020-02 follow-up) ───
+export { overlayParentContextFilter } from './fetchXmlOverlay';
+export type { DataGridParentContextLike } from './fetchXmlOverlay';
+
 // ─── Column header primitives (task 004) ───
 export { ColumnHeaderMenu } from './columnHeader/ColumnHeaderMenu';
 export type {
