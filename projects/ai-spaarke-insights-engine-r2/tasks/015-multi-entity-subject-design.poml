@@ -1,7 +1,7 @@
 <task id="015" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>A6 — Multi-entity subject design (scheme parsing, resolver pattern, index scope evolution)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>A</wave>
     <estimated-effort>6h</estimated-effort>
     <tags>design, multi-entity, ILiveFactResolver, subject-scheme, index-shape</tags>
@@ -54,4 +54,29 @@
     <criterion testable="true">Migration plan for Phase 1 Observations included</criterion>
     <criterion testable="true">Per-entity resolver responsibilities documented</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-02 via task-execute (STANDARD rigor).
+
+    **Output**: `projects/ai-spaarke-insights-engine-r2/design-a6-multi-entity.md` (11 sections, ~360 lines).
+
+    **Key decisions made (8 — A6-D1..A6-D8 in design doc §9)**:
+    - Q-A6-1 resolved: Option (a) `IDictionary&lt;string, ILiveFactResolver&gt;` keyed by entity-type name (matches spec.md §Assumptions default; reuses r1's `NodeExecutorRegistry`-style pattern; minimal DI surface).
+    - Q-D6-1 resolved: Option (c) Hybrid — keep `scope.matterId` + add `scope.entityType` + `scope.entityId` (preserves NFR-08 backward-compat).
+    - Subject parser is **config-catalog-driven** via `IOptions&lt;SubjectSchemeCatalogOptions&gt;` so adding `client:` or `contract:` later doesn't require a code deploy.
+    - Index migration: re-create as `spaarke-insights-index-v2` with back-fill of Phase 1 Observations (`entityType="matter"` + `entityId=&lt;matterGuid&gt;`); dual-read filter logic in v2 readers preserves Phase 1 `scope.matterId`-only queries.
+    - r1's `DataverseLiveFactResolver` → renamed to `MatterLiveFactResolver`; behavior preserved 1:1.
+    - All 3 resolvers registered unconditionally in D5 (no ADR-030 gate by default — cost is minimal; revisit if needed via P3 Null-Object).
+    - Inter-entity references (e.g., `invoice.relatedMatter`) return `EntityReference {id, name}`; do NOT recurse — playbooks compose multi-entity fact-gathering.
+
+    **DI cost analysis**: Net +4 registrations (parser + dict factory + 3 concrete - 1 r1 single). Stays within ADR-010 ≤15 target per NFR-05.
+
+    **Backward-compat (NFR-08)**: Phase 1 Observations preserved via (1) `scope.matterId` field kept in record + index; (2) Phase 1 v1 → v2 back-fill sets `entityType="matter"`; (3) v2 readers use dual-read filter (`scope.matterId` OR `scope.entityType + scope.entityId`); (4) explicit D6 acceptance test #3 replays Phase 1 matterId-only RAG query against v2.
+
+    **Open implementation-time questions deferred to D5/D6 task authors**: D5-Q1 (initial project predicate set), D5-Q2 (invoice→matter lookup field name), D6-Q1 (soak period), D6-Q2 (back-fill batching).
+
+    **Files modified**: `projects/ai-spaarke-insights-engine-r2/design-a6-multi-entity.md` (created), this POML (status + notes), `tasks/TASK-INDEX.md` (🔲 → ✅ for 015).
+
+    **No `.claude/` writes attempted**.
+  </notes>
 </task>

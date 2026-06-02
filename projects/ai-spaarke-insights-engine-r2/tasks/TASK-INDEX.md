@@ -40,12 +40,12 @@
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [010](010-architecture-overview-refresh.poml) | A1 | Architecture overview refresh (Phase 1.5 framing) | 🔲 | 4h | ✅ | — |
-| [011](011-operator-guide-refresh.poml) | A2 | Operator/developer guide refresh | 🔲 | 4h | ✅ | — |
-| [012](012-2d-taxonomy-design.poml) | A3 | 2D taxonomy design + initial 3 practice areas | 🔲 | 1d | ✅ | — |
-| [013](013-prompt-variant-versioning-design.poml) | A4 | Prompt-variant + versioning + per-tenant-override design | 🔲 | 1d | ✅ | — |
-| [014](014-universal-ingest-jps-refactor-design.poml) | A5 | Universal-ingest JPS refactor design | 🔲 | 6h | ✅ | — |
-| [015](015-multi-entity-subject-design.poml) | A6 | Multi-entity subject design | 🔲 | 6h | ✅ | — |
+| [010](010-architecture-overview-refresh.poml) | A1 | Architecture overview refresh (Phase 1.5 framing) | ✅ | 4h | ✅ | — |
+| [011](011-operator-guide-refresh.poml) | A2 | Operator/developer guide refresh | ✅ | 4h | ✅ | — |
+| [012](012-2d-taxonomy-design.poml) | A3 | 2D taxonomy design + initial 3 practice areas | ✅ | 1d | ✅ | — |
+| [013](013-prompt-variant-versioning-design.poml) | A4 | Prompt-variant + versioning + per-tenant-override design | ✅ | 1d | ✅ | — |
+| [014](014-universal-ingest-jps-refactor-design.poml) | A5 | Universal-ingest JPS refactor design | ✅ | 6h | ✅ | — |
+| [015](015-multi-entity-subject-design.poml) | A6 | Multi-entity subject design | ✅ | 6h | ✅ | — |
 
 ---
 

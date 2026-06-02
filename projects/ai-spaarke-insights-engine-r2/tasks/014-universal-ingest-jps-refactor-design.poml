@@ -1,7 +1,7 @@
 <task id="014" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>A5 — Universal-ingest JPS refactor design (node breakdown + parameterization)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>A</wave>
     <estimated-effort>6h</estimated-effort>
     <tags>design, jps-playbook, universal-ingest, node-breakdown, parameterization</tags>
@@ -54,4 +54,31 @@
     <criterion testable="true">Parameterization schema defined</criterion>
     <criterion testable="true">PlaybookExecutionEngine gaps (if any) flagged with proposed patches</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completed-by>task-execute (Wave A, 2026-06-02)</completed-by>
+    <rigor-level>STANDARD (design doc task; no code changes; quality gates skipped per task-execute Step 0.5)</rigor-level>
+    <deliverables>
+      <deliverable type="design-doc" status="published">projects/ai-spaarke-insights-engine-r2/design-a5-universal-ingest-jps.md (10 sections, ~470 lines)</deliverable>
+      <deliverable type="spike-note" status="published" ephemeral="true">projects/ai-spaarke-insights-engine-r2/notes/spikes/engine-gap-analysis.md (engine-patch backlog for Wave C1)</deliverable>
+    </deliverables>
+    <key-decisions>
+      <decision id="D-A5-1">Node count = 6 (coalesced), NOT 1:1 with the orchestrator's 10 logical steps. Rationale in §3.1 — reuses existing INodeExecutor implementations, aligns with predict-matter-cost@v1 precedent (8 nodes there), satisfies D-P15-02 (one playbook, parameterized).</decision>
+      <decision id="D-A5-2">Layer 1 classification + L1 observation emission stay FUSED in one node (Node 2 layer1Classify). Splitting would force shared output shape across two nodes for no observability gain.</decision>
+      <decision id="D-A5-3">Layer 2 gate uses existing EvidenceSufficiencyNode + selectedBranch pattern (proven in predict-matter-cost@v1). No new ConditionNode usage required.</decision>
+      <decision id="D-A5-4">Parameterization schema: 9 properties (3 required: documentId/matterId/tenantId; 6 optional with defaults). Per-practice-area routing achieved via parameters.practiceAreaHint + parameters.outcomeBearingClassifications, NOT via variant playbooks.</decision>
+    </key-decisions>
+    <engine-gaps-surfaced>
+      <gap id="ENGINE-GAP-1" severity="low" file="EvidenceSufficiencyNode.cs">Missing predicate: "in" (membership) rule shape. Patch ~15-20 LOC. Filed for Wave C1.</gap>
+      <gap id="ENGINE-GAP-2" severity="medium" file="PlaybookOrchestrationService.cs">Missing branch-aware dependency resolution (dependsOn is AND-only; selectedBranch not consulted). Patch ~25-40 LOC + ~5-10 LOC in ExecutionGraph for edge-branch storage. Filed for Wave C1. Spec Risk-1 compliant — patch stays in the engine.</gap>
+    </engine-gaps-surfaced>
+    <handoffs>
+      <handoff to="Wave C1 (020)">Author universal-ingest@v1 playbook JSON per §4 + §5 + §8; implement both engine patches per §7; create 4 new action rows (INS-SANI, INS-L1C, INS-L2X, INS-OBSE) via /jps-action-create; create 2 new executors (SanitizerNodeExecutor, ObservationEmitterNodeExecutor).</handoff>
+      <handoff to="Wave C2 (021)">Wire prompt content from .txt files into INS-L1C.sprk_systemprompt + INS-L2X.sprk_systemprompt; depends on Wave A4 versioning model.</handoff>
+      <handoff to="Wave C4 (023)">IInsightsAi.RunIngestAsync interface change to accept InsightsIngestParameters record + invoke the JPS playbook (replacing direct IngestOrchestrator call).</handoff>
+      <handoff to="Wave C5 (024)">Per-invocation parameter override mechanism for layer2Threshold, practiceAreaHint, costCapOverride.</handoff>
+      <handoff to="Wave D2 (031)">Per-practice-area outcomeBearingClassifications source (sprk_practicearea_ref.sprk_outcomebearingjson?) — confirm during D2/A3.</handoff>
+    </handoffs>
+    <claude-write-boundary-hits>none</claude-write-boundary-hits>
+  </notes>
 </task>

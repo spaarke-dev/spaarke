@@ -1,13 +1,25 @@
 # Insights Engine Guide
 
 > **Audience**: developers + technical SMEs extending the Spaarke Insights Engine
-> **Last Updated**: 2026-05-30
+> **Last Updated**: 2026-06-02 (Phase 1.5 r2 framing — Wave A2 task 011)
 > **Companion documents**:
 > - [`docs/architecture/INSIGHTS-ENGINE-ARCHITECTURE.md`](../architecture/INSIGHTS-ENGINE-ARCHITECTURE.md) §0a — Phase 1 completion + Phase 1.5 framing
-> - [`projects/ai-spaarke-insights-engine-r2/design.md`](../../projects/ai-spaarke-insights-engine-r2/design.md) — Phase 1.5 project plan
+> - [`projects/ai-spaarke-insights-engine-r2/design.md`](../../projects/ai-spaarke-insights-engine-r2/design.md) — Phase 1.5 design (corrections + 9 architectural decisions)
+> - [`projects/ai-spaarke-insights-engine-r2/spec.md`](../../projects/ai-spaarke-insights-engine-r2/spec.md) — Phase 1.5 implementation specification
+> - [`projects/ai-spaarke-insights-engine-r2/plan.md`](../../projects/ai-spaarke-insights-engine-r2/plan.md) — Phase 1.5 wave structure + critical path
 > - [`projects/ai-spaarke-insights-engine-r1/SPEC.md`](../../projects/ai-spaarke-insights-engine-r1/SPEC.md) — Phase 1 deliverable contract
 
 This guide is the practical companion to the architecture doc. It answers "how do I add this?" and "when should I use this vs. that?" questions.
+
+## Phase 1.5 terminology (load-bearing)
+
+Earlier Phase 1 drafts conflated JPS-the-schema with the code that runs it. Phase 1.5 locks the meaning:
+
+- **JPS** (JSON Prompt Schema) — schema/data format for analysis actions and playbooks. **Data, not code.** Lives in Dataverse on `sprk_analysisaction.sprk_systemprompt` and `sprk_playbook` rows.
+- **`PlaybookExecutionEngine`** — the code component in `Sprk.Bff.Api` that executes JPS-defined work. (Earlier drafts loosely called this "the JPS engine.")
+- **`INodeExecutor`** — code-side handler for a specific analysis-action TYPE.
+- **`sprk_analysisaction`** — **IS** the prompt-bearing primitive. Carries a JPS-formatted JSON system prompt (`$schema`, `instruction { role, task, constraints, context }`, `input`, `parameters`) in `sprk_systemprompt`. r1 already uses this for non-Insights actions (e.g., "Classify Document"). Phase 1.5 retires `.txt` files by populating this field on Insights action rows. **No new `sprk_prompt` entity.**
+- **`sprk_playbook` + `sprk_configjson`** — JPS playbook definition with per-playbook config blob (cost cap, thresholds, inline prompt templates owned by exactly one playbook).
 
 ---
 
@@ -85,6 +97,8 @@ The dividing line: **Insights = cross-matter comparative reasoning grounded in a
 
 ### When to use a pre-authored JPS playbook vs. generic RAG (Phase 1.5+)
 
+> **🚧 Placeholder — final decision tree owned by [task 043 (Wave E4)](../../projects/ai-spaarke-insights-engine-r2/tasks/043-playbook-vs-rag-decision-tree.poml).** The table below is the working heuristic until E4 lands.
+
 | Indicator | → Playbook | → Generic RAG |
 |---|---|---|
 | Output shape matters for UI rendering (field needs `{p25, p50, p75}`) | ✅ | |
@@ -96,7 +110,7 @@ The dividing line: **Insights = cross-matter comparative reasoning grounded in a
 | Long-tail question with no pre-authored playbook | | ✅ |
 | Pure information retrieval ("show me 5 similar matters") | | ✅ (RAG returns retrieved evidence + a summary) |
 
-In practice: invest playbook-authoring effort in the top ~5-30 questions; everything else uses the generic RAG path. The same `spaarke-insights-index` substrate feeds both.
+In practice: invest playbook-authoring effort in the top ~5–30 questions; everything else uses the generic RAG path. The same `spaarke-insights-index` substrate feeds both. The Phase 1.5 **intent classifier** (Wave E2, task 041) routes between paths automatically when called from Spaarke Assistant; callers can override via `forceMode: "playbook" | "rag"`.
 
 ---
 
@@ -214,69 +228,109 @@ Expected: 200 OK with `{artifact: {...}, decline: null}` (sufficient evidence) O
 
 ## 4. Adding a new practice area (Phase 1.5 Wave D)
 
-Phase 1 only handles litigation-shaped documents implicitly. To add e.g. real-estate:
+> **Source of truth — `sprk_practicearea_ref` table** (per spec.md PA-1). Practice areas are NEVER hardcoded in code or docs. The table IS the catalog. Existing Spaarke Dev rows visible: APPL (Appellate), BNKF (Banking & Finance), CTRNS (Commercial Transactions), IPPAT (Intellectual Property Patents), IPTM (Intellectual Property Trademarks), MA (Mergers & Acquisitions). Query the table at task time to see the current full set.
 
-1. **Reference data**: confirm `sprk_practicearea_ref` row exists for "Real Estate" (or add it)
-2. **Document-type taxonomy**: define real-estate document types (lease, deed, financing, title insurance, closing statement, etc.) in `sprk_documenttype_ref` (new entity per Phase 1.5 design)
-3. **N:N matrix**: register which document types are valid for real estate via `sprk_practicearea_documenttype` (new N:N entity)
-4. **Layer 1 classification prompt** (per-practice-area): author `classification.real-estate.v1.txt` (Phase 1 location) or JPS scope record (Phase 1.5+ location)
-5. **Layer 2 extraction prompts** (per practice-area + document-type): author `extraction.real-estate.lease.v1.txt`, `extraction.real-estate.deed.v1.txt`, etc. with the appropriate field schemas
-6. **Update universal-ingest playbook**: route classification + extraction to the appropriate prompts based on `sprk_matter.sprk_practicearea`
-7. **Test fixtures**: add real-estate sample documents to `tests/Insights/fixtures/real-estate/`
+Phase 1 only handles litigation-shaped documents implicitly; "litigation" framing is **retired** in Phase 1.5 — the per-practice-area gate logic replaces the binary `outcomeBearing` flag (per D-P15-09).
 
-This is substantial — count 2-3 days per practice area for prompts + testing. The supporting Phase 1.5 infrastructure (taxonomy entities, per-practice-area prompt routing) lands once and amortizes across all subsequent practice areas.
+### 4.1 To onboard a new practice area (e.g., Real Estate)
 
----
+1. **Reference data** — confirm or insert a row in `sprk_practicearea_ref` (e.g., `code=RE`, `name=Real Estate`). Use the Dataverse MCP `mcp__dataverse__read_query` to confirm; `mcp__dataverse__create_record` to add if missing.
+2. **Document-type taxonomy** — define real-estate document types (lease, deed, financing, title insurance, closing statement, etc.) in `sprk_documenttype_ref` (Phase 1.5 Wave D1 entity, [task 030](../../projects/ai-spaarke-insights-engine-r2/tasks/030-document-type-and-matrix-schema.poml)).
+3. **N:N matrix** — register which document types are valid for real estate via `sprk_practicearea_documenttype` (Wave D1 N:N entity).
+4. **Layer 1 classification prompt** (per-practice-area) — create a `sprk_analysisaction` row with `sprk_actioncode = INSIGHTS.LAYER1_CLASSIFY.RE` (suffix per A4 variant pattern, [task 013](../../projects/ai-spaarke-insights-engine-r2/tasks/013-prompt-variant-versioning-design.poml)) and a JPS-formatted `sprk_systemprompt` JSON document with `instruction { role, task, constraints, context }`, `input.document`, `parameters.categories`. **NOT a `.txt` file** — Phase 1.5 Wave C2 ([task 021](../../projects/ai-spaarke-insights-engine-r2/tasks/021-prompts-to-jps-storage.poml)) retired Layer 1 `.txt` storage.
+5. **Layer 2 extraction prompts** (per practice-area + document-type) — create one `sprk_analysisaction` per `(area, doc-type)` pair (e.g., `INSIGHTS.LAYER2_EXTRACT.RE.LEASE`, `INSIGHTS.LAYER2_EXTRACT.RE.DEED`) carrying the appropriate field schemas in `sprk_systemprompt`.
+6. **Universal-ingest playbook routing** — the canonical `universal-ingest@v1` JPS playbook (Wave C1, [task 020](../../projects/ai-spaarke-insights-engine-r2/tasks/020-universal-ingest-jps-playbook.poml)) routes classification + extraction based on `sprk_matter.sprk_practicearea` (or per-entity equivalent). No new playbook needed — flexibility via parameters, not multiplication.
+7. **Test fixtures** — add LLM-generated synthetic fixtures (Wave D7, [task 036](../../projects/ai-spaarke-insights-engine-r2/tasks/036-synthetic-test-fixtures.poml)) for real-estate × (lease, deed, …) under `tests/Insights/fixtures/real-estate/`.
 
-## 5. Adding a new subject entity type (Phase 1.5 Wave C+D)
+### 4.2 Effort sizing
 
-Phase 1 hard-codes `subject: "matter:<guid>"`. To support project / invoice / etc.:
-
-1. **Subject scheme registration**: update endpoint validation to accept new scheme (e.g., `project:`, `invoice:`)
-2. **Live-fact resolver**: add per-entity resolver (e.g., `DataverseProjectLiveFactResolver`) implementing `ILiveFactResolver` interface, registered keyed by entity type
-3. **LiveFactNode config**: extend to know which entity type to query (subject scheme parsing)
-4. **Index scope shape**: extend `spaarke-insights-index` scope fields to carry per-entity context (e.g., `scope.projectId`, `scope.invoiceId` alongside `scope.matterId`)
-5. **Ingest playbook**: route ingest based on document parent entity (a document on a project → project-context Observations; on an invoice → invoice-context Observations)
-6. **Per-subject playbooks**: author Insights playbooks targeting the new entity type (e.g., `predict_project_completion_v1` taking `subject: "project:<guid>"`)
-
-The 4-tier taxonomy and JPS engine are unchanged. What changes is the input contract and the per-entity adapters.
+Count 2–3 days per practice area for prompts + testing. The supporting Phase 1.5 infrastructure (taxonomy entities, per-practice-area prompt routing, parameterized universal-ingest) lands once in Waves C+D and amortizes across all subsequent practice areas. Phase 1.5 ships initial coverage for **3 practice areas** (selected in [task 012](../../projects/ai-spaarke-insights-engine-r2/tasks/012-2d-taxonomy-design.poml) based on SME readiness + document variety); remaining areas land per customer cadence.
 
 ---
 
-## 6. Authoring + iterating prompts
+## 5. Adding a new subject entity type (Phase 1.5 Wave D5/D6)
 
-### Phase 1 (today): file-based
+Phase 1 hard-codes `subject: "matter:<guid>"`. Phase 1.5 generalizes to `matter:`, `project:`, `invoice:`, and future entities (Wave D5 [task 034](../../projects/ai-spaarke-insights-engine-r2/tasks/034-multi-entity-resolvers.poml) + Wave D6 [task 035](../../projects/ai-spaarke-insights-engine-r2/tasks/035-index-scope-shape-migration.poml); design [task 015](../../projects/ai-spaarke-insights-engine-r2/tasks/015-multi-entity-subject-design.poml)).
 
-Prompts live in `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/` as `.txt` files. Versioned in git; edited via PR; deployed atomically with code via `Deploy-BffApi.ps1`.
+### 5.1 To add a new subject entity (e.g., `invoice:`)
 
-Pros: PR review; deterministic deploy; test-friendly.
-Cons: requires deploy to change; no per-tenant variation; SMEs can't iterate.
+1. **Subject scheme parser** — extend `InsightAskRequest` subject-scheme parsing to accept the new scheme (e.g., `invoice:<guid>`).
+2. **Live-fact resolver** — add a per-entity `ILiveFactResolver` implementation (e.g., `DataverseInvoiceLiveFactResolver`) in `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/`. Register keyed by entity type — default pattern is `IDictionary<string, ILiveFactResolver>` per [task 015](../../projects/ai-spaarke-insights-engine-r2/tasks/015-multi-entity-subject-design.poml) Q-A6-1 option (a). **DI minimalism ceiling**: if the additions exceed ADR-010's ≤15 non-framework registration target, consolidate via a registry/factory.
+3. **`LiveFactNode` config** — extend to consult the registered resolver based on subject scheme parsed from the playbook input.
+4. **Index scope shape** — extend `spaarke-insights-index` scope fields to carry `entityType` + `entityId` alongside the existing `matterId` (backward compat per NFR-08; Phase 1 Observations remain queryable). Migration plan: Wave D6 ([task 035](../../projects/ai-spaarke-insights-engine-r2/tasks/035-index-scope-shape-migration.poml)) — new fields nullable; coordinate with infra team for index re-create.
+5. **Universal-ingest routing** — the JPS universal-ingest playbook (Wave C1) routes ingest based on document parent entity (a document on a project → project-context Observations; on an invoice → invoice-context Observations) via parameters, not new playbooks.
+6. **Per-subject playbooks** — author Insights playbooks targeting the new entity type (e.g., `predict_project_completion_v1` taking `subject: "project:<guid>"`). Each new playbook is a new `sprk_playbook` row + supporting `sprk_analysisaction` rows.
 
-### Phase 1.5+ (planned per Wave C2): JPS scope storage
+### 5.2 What's unchanged
 
-Prompts move to Dataverse-managed scope records (exact entity TBD per Wave C2 design — likely a new `sprk_prompt` entity OR per-playbook `sprk_configjson` storage). This enables:
-
-- SME edits without redeploy
-- Per-tenant prompt variants
-- Visible in maker portal alongside other JPS scope catalog
-- Future AI-assisted prompt authoring via builder UI
-
-The migration plan is part of the Phase 1.5 r2 project.
-
-### Prompt iteration discipline
-
-Regardless of storage, when changing a prompt:
-
-1. **Version bump**: `@v1` → `@v2`. Never edit in place — keep `@v1` for rollback.
-2. **Calibration run**: re-run the eval harness (`PredictMatterCostEvalHarnessTests` or its equivalent) against the new prompt; compare metrics to baseline.
-3. **SME review**: surface a sample of the new prompt's outputs in the Observation review queue (sprk_analysis with `sprk_disposition=PendingReview`) for SME validation before promoting to default.
-4. **Cutover**: update the playbook to reference the new prompt version; old playbook stays available for A/B comparison.
+The 4-tier `InsightArtifact` taxonomy (Fact / Observation / Precedent / Inference), the `PlaybookExecutionEngine`, the `IInsightsAi` facade, and the `spaarke-insights-index` substrate are all unchanged. What changes is the input contract (subject scheme), per-entity adapters (resolvers), and index scope-shape fields. The `IInsightGraph` stub remains; Cosmos NoSQL is explicitly out of Phase 1.5 scope (re-deferred to Phase 2 per spec.md Out of Scope).
 
 ---
 
-## 7. Querying the Insights index directly (Phase 1.5+)
+## 6. Authoring + iterating prompts (Phase 1.5)
 
-When the generic RAG endpoint lands (`POST /api/insights/search`), it will accept:
+### 6.1 Canonical storage: `sprk_analysisaction.sprk_systemprompt`
+
+**Phase 1.5 (Wave C2, [task 021](../../projects/ai-spaarke-insights-engine-r2/tasks/021-prompts-to-jps-storage.poml))** retires Phase 1's `.txt` files in `Services/Ai/Insights/Prompts/`. All prompt content lives in the **existing** `sprk_analysisaction.sprk_systemprompt` Dataverse field as a JPS-formatted JSON document:
+
+```jsonc
+{
+  "$schema": "https://spaarke/jps/v1",
+  "$version": "1",
+  "instruction": {
+    "role": "You are a Spaarke Insights extraction analyst …",
+    "task": "Extract leniency-clause indicators from this lease …",
+    "constraints": [
+      "Quote verbatim from the source document",
+      "Return null if the clause is not present"
+    ],
+    "context": "{ practiceArea, documentType, … }"
+  },
+  "input":      { "document": "…" },
+  "parameters": { "categories": ["…"], "practiceAreaContext": "…" }
+}
+```
+
+**Why `sprk_analysisaction` and not a new `sprk_prompt` entity** (spec.md PR-1):
+- It's the **existing** JPS dispatch + prompt primitive — r1 already uses it for non-Insights actions (e.g., "Classify Document" carries its full JPS prompt in `sprk_systemprompt`)
+- Adding a new entity would duplicate the JPS schema's prompt-bearing slot
+- Phase 1.5 leverages r1 infrastructure without a schema change
+
+### 6.2 Edit a prompt without a code deploy (operator/SME procedure)
+
+1. **Locate the row** — query Dataverse for the relevant `sprk_analysisaction`:
+   ```
+   mcp__dataverse__read_query
+   FROM sprk_analysisactions
+   WHERE sprk_actioncode = 'INSIGHTS.LAYER2_EXTRACT.RE.LEASE'
+   ```
+2. **Branch the variant (don't edit in place)** — per A4 variant + versioning design ([task 013](../../projects/ai-spaarke-insights-engine-r2/tasks/013-prompt-variant-versioning-design.poml)), either:
+   - Create a new variant row with a versioned action code (e.g., `…RE.LEASE.V2`), OR
+   - Update the version field on the row (A4 decides the exact mechanism).
+3. **Update `sprk_systemprompt`** — edit the JSON `instruction.task` / `instruction.constraints` / `parameters` content via Dataverse MCP `mcp__dataverse__update_record`.
+4. **Calibration run** — re-run the eval harness (`PredictMatterCostEvalHarnessTests` or `<question>EvalHarnessTests`) against the new variant; compare groundedness pass rate, decline correctness, cost-band overlap, cohort-size match to baseline.
+5. **SME review** — surface a sample of new outputs in the Observation review queue (`sprk_analysis` rows with `sprk_disposition=PendingReview`) for SME validation.
+6. **Cutover** — update the playbook to reference the new variant; old variant stays available for A/B comparison + rollback.
+7. **No App Service restart required** — next invocation of the dependent playbook reads the updated row directly (Dataverse-cached via existing JPS engine cache; cache TTL controls when the new content is picked up).
+
+### 6.3 Per-tenant + per-practice-area variation
+
+Phase 1.5 supports prompt variation by:
+
+- **Per-practice-area variants** — variant action rows resolved at invocation by action-code suffix (e.g., `INSIGHTS.LAYER1_CLASSIFY.CTRNS`, `…IPPAT`) OR parametric JPS injection (single action row + runtime `parameters.practiceAreaContext`). Wave A4 ([task 013](../../projects/ai-spaarke-insights-engine-r2/tasks/013-prompt-variant-versioning-design.poml)) selects the pattern.
+- **Per-tenant override** — tenant-scoped variant rows with fallthrough to default, OR override mapping table, OR tenant blocks within the JPS schema. Wave A4 finalizes; this guide will be refreshed to document the final shape once A4 lands.
+
+### 6.4 Per-playbook inline prompts
+
+For prompts that exist in exactly one playbook (e.g., the synthesis template owned by `predict-matter-cost@v1`), inline storage in `sprk_playbook.sprk_configjson` is still allowed. Reserve `sprk_analysisaction.sprk_systemprompt` for prompts that are dispatched by reference across one or more playbooks.
+
+---
+
+## 7. Querying the Insights index directly — `POST /api/insights/search` (Phase 1.5 NEW)
+
+Phase 1.5 Wave E1 ([task 040](../../projects/ai-spaarke-insights-engine-r2/tasks/040-insights-search-rag-endpoint.poml)) ships the generic RAG retrieval endpoint. Per the 2026-06-02 re-scope: the endpoint **wraps the existing `IRagService`** (in `src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs`) — no parallel implementation. If Insights-specific subject filtering needs extension, extend the existing service.
+
+### 7.1 Request shape
 
 ```jsonc
 {
@@ -285,15 +339,62 @@ When the generic RAG endpoint lands (`POST /api/insights/search`), it will accep
   "filters": {
     "artifactType": "observation",      // or "precedent"
     "predicate": "settlementAmount",    // optional
-    "scope.practiceArea": "ip-licensing"
+    "scope.practiceArea": "IPPAT",      // sourced from sprk_practicearea_ref code
+    "scope.entityType": "matter"        // optional — Phase 1.5 D6 generalized scope shape
   },
   "topK": 10
 }
 ```
 
-Return shape: top-N ranked Observations/Precedents with their full envelopes + an LLM-synthesized summary citing the retrieved evidence.
+### 7.2 Response shape
 
-Until that lands, ad-hoc index queries can use the Azure AI Search REST API directly with the per-environment admin key (operator runbook).
+Top-N ranked Observations/Precedents with full envelopes + an LLM-synthesized summary citing the retrieved evidence (each citation carries `observationId` + `predicate` + `confidence` per FR-04 acceptance).
+
+### 7.3 Auth + governance
+
+- **Auth filter**: same per-route endpoint filter as `/api/insights/ask` (per ADR-008 + ADR-028) — registered via the function-based contract; named API key scheme + audit middleware applied.
+- **Kill-switch**: if `IRagService` is feature-disabled per ADR-030, the endpoint returns 503 ProblemDetails via `FeatureDisabledException` → `FeatureDisabledResults.AsFeatureDisabled503()`.
+- **BFF placement**: endpoint lives in `Sprk.Bff.Api/Endpoints/` following the existing `/ask` pattern (per spec.md BFF Placement Review).
+
+### 7.4 Until E1 ships
+
+Ad-hoc index queries can use the Azure AI Search REST API directly with the per-environment admin key (operator runbook).
+
+---
+
+## 7A. Intent classifier (Phase 1.5 Wave E2)
+
+[Task 041](../../projects/ai-spaarke-insights-engine-r2/tasks/041-intent-classifier.poml) ships an **LLM-based** intent classifier (gpt-4o-mini per spec.md assumption) that routes Insights-shaped natural-language questions to the correct path:
+
+```
+caller question ──▶ IntentClassifier ──▶ { path: "playbook" | "rag",
+                                           playbookId?: string,
+                                           confidence: number }
+                            │
+                            ▼ (if confidence < threshold)
+                    fall through to generic RAG
+```
+
+- **Caller override**: any caller can bypass classification with `forceMode: "playbook" | "rag"` (FR-05 acceptance).
+- **Phase 1.5 = LLM-based only**: embedding-based routing is Phase 2 (per spec.md Out of Scope + assumptions).
+- **DI placement**: `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/` (reuses `IOpenAiClient` and Phase 1 facade plumbing per spec.md BFF Placement Review).
+- **Mitigation for mis-routing**: confidence threshold is tunable per environment; caller `forceMode` is the human-in-the-loop escape hatch.
+
+---
+
+## 7B. Spaarke Assistant integration (Phase 1.5 Wave E3)
+
+[Task 042](../../projects/ai-spaarke-insights-engine-r2/tasks/042-spaarke-assistant-integration.poml) integrates Insights as a callable tool in the existing Spaarke Assistant chat surface.
+
+### Sub-task A: Tool-call contract authoring (contract-first per AC-1)
+
+**No pre-existing contract** — Wave E3 owns authoring the schema. Phase 1.5 scope is **read-only tool-call semantics**; bidirectional integration is deferred to Phase 2.
+
+When the Assistant detects an Insights-shaped question, it calls into the BFF facade. The intent classifier routes to playbook OR RAG; the caller (Assistant) can pass `forceMode` to override.
+
+### Coordination
+
+Cross-team work with the Spaarke Assistant team is required. Coordinate early per spec.md Dependencies — E3 is the longest Wave E task (~1 week including coordination).
 
 ---
 
@@ -378,6 +479,8 @@ Phase 1 per-document hard cap: $0.10 (observability-only Phase 1; per-tenant mon
 | Ingest job never runs after upload | `AiProcessingOptions.InsightsIngest = true` not set on upload | Phase 1.5 needs producer-side surface; today no upload triggers Insights ingest |
 | `DataverseObservationMirror skipped: InsightsObservationActionId is unset` | Per-environment config GUID not configured | Follow §8.2 prerequisite checklist |
 | Insights tests pass locally but live smoke shows different behavior | Tests mock `IInsightsAi`; real DI graph never exercised | Phase 1.5: add a DI-resolution test that resolves `IInsightsAi` from real container without mocks |
+| `/api/insights/search` returns 503 ProblemDetails with `featureDisabled: true` | `IRagService` is `NullRagService` (kill-switch active per ADR-030) | Enable the RAG feature flag in App Service config; restart |
+| Intent classifier confidence is consistently low for in-domain questions | Threshold too high OR classifier prompt drift | Tune `Insights:IntentClassifier:ConfidenceThreshold`; consider caller `forceMode` override; re-calibrate against eval harness |
 
 ---
 
@@ -389,7 +492,10 @@ Phase 1 per-document hard cap: $0.10 (observability-only Phase 1; per-tenant mon
 | Facade interface | `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInsightsAi.cs` |
 | Orchestrator (Zone A impl of facade) | `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs` |
 | Insights node executors (6) | `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/{LiveFact,IndexRetrieve,EvidenceSufficiency,DeclineToFind,ReturnInsightArtifact,GroundingVerify}Node.cs` |
-| Layer 1/2 prompts (Phase 1 file-based) | `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/*.txt` |
+| Layer 1/2 prompts (Phase 1.5 → Dataverse) | `sprk_analysisaction.sprk_systemprompt` rows (action codes `INSIGHTS.LAYER1_CLASSIFY.*`, `INSIGHTS.LAYER2_EXTRACT.*.*`). Phase 1 `Services/Ai/Insights/Prompts/*.txt` files are **retired** by Wave C2 ([task 021](../../projects/ai-spaarke-insights-engine-r2/tasks/021-prompts-to-jps-storage.poml)). |
+| Universal-ingest JPS playbook (Phase 1.5) | Dataverse `sprk_playbook` row `universal-ingest@v1` (Wave C1 [task 020](../../projects/ai-spaarke-insights-engine-r2/tasks/020-universal-ingest-jps-playbook.poml)) — replaces `IngestOrchestrator.cs` |
+| RAG service (existing, wrapped by `/search`) | `src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs` + `RagService.cs` + `NullRagService.cs` (ADR-030 kill-switch) |
+| `FeatureDisabledException` plumbing | `src/server/api/Sprk.Bff.Api/Configuration/FeatureDisabledException.cs` + `FeatureDisabledResults.AsFeatureDisabled503()` |
 | Predict-matter-cost playbook spec | `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json` |
 | Universal-ingest orchestrator (code; Phase 1.5 refactors to JPS) | `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Ingest/IngestOrchestrator.cs` |
 | Dataverse live-fact resolver | `src/server/api/Sprk.Bff.Api/Services/Insights/LiveFacts/DataverseLiveFactResolver.cs` |
@@ -405,15 +511,23 @@ Phase 1 per-document hard cap: $0.10 (observability-only Phase 1; per-tenant mon
 
 ## 12. Glossary
 
-- **JPS** (JSON Prompt Schema) — Spaarke's canonical AI workflow architecture; Dataverse-stored playbook definitions + node executors + engine
-- **Zone A / Zone B** — architectural boundary; Zone A = `Services/Ai/`; Zone B = everything else. Only `Services/Ai/PublicContracts/` can be imported from Zone B
+- **JPS** (JSON Prompt Schema) — schema/data format for analysis actions and playbooks. **Data, not code.** Lives on `sprk_analysisaction.sprk_systemprompt` and `sprk_playbook` rows.
+- **`PlaybookExecutionEngine`** — the code component in `Sprk.Bff.Api` that executes JPS-defined work. (Earlier Phase 1 docs loosely called this "the JPS engine.")
+- **`INodeExecutor`** — code-side handler for a specific analysis-action TYPE. Phase 1.5 contributes new ones (LiveFactNode, IndexRetrieveNode, EvidenceSufficiencyNode, GroundingVerifyNode, DeclineToFindNode, ReturnInsightArtifactNode).
+- **`sprk_analysisaction`** — existing JPS dispatch + prompt row. **IS the prompt-bearing primitive** (`sprk_systemprompt` carries JPS-formatted JSON). Phase 1.5 retires `.txt` prompts by populating this field. **No new `sprk_prompt` entity** per PR-1.
+- **Zone A / Zone B** — architectural boundary; Zone A = `Services/Ai/`; Zone B = everything else. Only `Services/Ai/PublicContracts/` can be imported from Zone B.
 - **4-tier taxonomy** — Fact / Observation / Precedent / Inference. The data model spine.
-- **D-NN** — Numbered architectural decision (see `projects/.../decisions.md`)
-- **D-P-NN** — Numbered Phase 1 deliverable (see `projects/.../SPEC.md` §3.1)
-- **Layer 1** — Document classification (cheap LLM call; gates Layer 2)
-- **Layer 2** — Outcome extraction (expensive LLM call; only runs on classified outcome-bearing documents)
-- **Honesty contract** — D-04 + D-49; system returns structured `DeclineResponse` rather than hallucinating when evidence is insufficient
-- **GroundingVerifier** — Mechanical (zero-LLM) substring + sliding-window citation check; D-47
-- **EvidenceSufficiencyNode** — Playbook node that evaluates whether retrieved evidence meets the playbook's stated minimum (e.g., `comparableMatters: {min: 12}`)
-- **Hybrid pattern** — Phase 1.5+ consumption model: pre-authored JPS playbooks for high-value questions + generic RAG for long-tail; intent classifier routes between
-- **Multi-entity subjects** — Phase 1.5+ extension: questions can target Matter / Project / Invoice / future entities (Phase 1 hard-coded to Matter)
+- **2D taxonomy** — Phase 1.5 classification model: **practice-area × document-type**. Practice areas sourced from `sprk_practicearea_ref` (Phase 1.5 source of truth); document types in `sprk_documenttype_ref` (Wave D1).
+- **D-NN** — Numbered architectural decision (see `projects/.../decisions.md` or `projects/.../design.md`)
+- **D-P-NN** — Numbered Phase 1 deliverable (see r1 `SPEC.md` §3.1)
+- **D-P15-NN** — Numbered Phase 1.5 correction (see Phase 1.5 design.md)
+- **Layer 1** — Document classification (cheap LLM call; gates Layer 2). Phase 1.5: per-practice-area variant.
+- **Layer 2** — Outcome extraction (expensive LLM call). Phase 1.5: per-(practice-area, document-type) schema.
+- **Honesty contract** — D-04 + D-49; system returns structured `DeclineResponse` rather than hallucinating when evidence is insufficient.
+- **GroundingVerifier** — Mechanical (zero-LLM) substring + sliding-window citation check; D-47.
+- **EvidenceSufficiencyNode** — Playbook node that evaluates whether retrieved evidence meets the playbook's stated minimum (e.g., `comparableMatters: {min: 12}`).
+- **Hybrid pattern** — Phase 1.5 consumption model: pre-authored JPS playbooks for high-value questions + generic RAG (`/api/insights/search`) for long-tail; **intent classifier** (LLM-based, Wave E2) routes between. Caller `forceMode` override is the escape hatch.
+- **Multi-entity subjects** — Phase 1.5 extension: questions can target Matter / Project / Invoice / future entities (Phase 1 hard-coded to Matter). Per-entity `ILiveFactResolver` registered keyed by scheme.
+- **Universal-ingest@v1** — Phase 1.5 Wave C1 canonical JPS ingest playbook. Replaces Phase 1's `IngestOrchestrator.cs`. Parameterized (per-tenant, per-practice-area, cost-cap override) — flexibility via config, NOT via multiplication.
+- **`IRagService`** — existing RAG retrieval canonical entry point (per 2026-06-01 master refactor). Phase 1.5 `/api/insights/search` endpoint (Wave E1) wraps this; ADR-030 P3 kill-switch via `NullRagService` → 503 ProblemDetails.
+- **Wave B / A / C / D / E** — Phase 1.5 execution sequence (B first per WB-1 owner direction): Unblock synthesis → Foundations (design docs) → JPS compliance refactor → 2D taxonomy + multi-entity → Hybrid consumption + Assistant.

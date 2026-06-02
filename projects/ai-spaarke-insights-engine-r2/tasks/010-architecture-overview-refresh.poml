@@ -1,7 +1,8 @@
 <task id="010" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>A1 — Architecture overview refresh (Phase 1.5 framing)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-date>2026-06-02</completed-date>
     <wave>A</wave>
     <estimated-effort>4h</estimated-effort>
     <tags>docs, architecture, foundations, phase-1.5-framing</tags>
@@ -51,4 +52,24 @@
     <criterion testable="true">Practice-area examples reference real codes from sprk_practicearea_ref (no hardcoded "litigation/real-estate/patent/transactional")</criterion>
     <criterion testable="true">Cross-refs to design.md, spec.md, plan.md, CLAUDE.md work</criterion>
   </acceptance-criteria>
+
+  <notes date="2026-06-02">
+    Executed at MINIMAL rigor (docs-only refresh; no .cs/.ts/Bicep changes; no DI registrations).
+
+    Modified files:
+    - docs/architecture/INSIGHTS-ENGINE-ARCHITECTURE.md (frontmatter, §0a Terminology subsection added, §0a Correction 4 practice-area examples replaced with sprk_practicearea_ref codes, §0a Phase 1.5 scope table refreshed with wave-organized status, §0a Architectural anchors expanded with two new anchors, §0a Pointer summary expanded with spec.md/plan.md/CLAUDE.md/SPAARKE-REPOSITORY-ARCHITECTURE.md, §23.1 Related expanded with r2 project docs grouped by phase, §23.2 added SPAARKE-REPOSITORY-ARCHITECTURE.md, §23.3 added ADR-029 and ADR-030)
+
+    Acceptance criteria:
+    1. Terminology section accurately defines JPS / PlaybookExecutionEngine / INodeExecutor / sprk_analysisaction — PASS (new subsection in §0a, lifted from spec.md §Terminology to lock the canonical meanings in the architecture doc).
+    2. No reference to a "sprk_prompt" entity — PASS (grep confirms only negative-context mentions remain: "No new `sprk_prompt` entity" in the wave-status row and the architectural anchors list).
+    3. Practice-area examples reference real codes from sprk_practicearea_ref — PASS (Correction 4 now cites BNKF, CTRNS, IPPAT examples; new architectural anchor explicitly forbids hardcoding; §4.9 synthetic-corpus references kept as-is because they describe fictional corpus diversity, not Phase 1.5 taxonomy assertions).
+    4. Cross-refs to design.md, spec.md, plan.md, CLAUDE.md work — PASS (all four r2 project docs now present in §0a Pointer summary AND §23.1 Related; file existence verified at task close).
+
+    No `.claude/` writes attempted; permission-boundary clean.
+
+    Decisions worth documenting:
+    - Kept §4.9 (synthetic-corpus generation paragraph) untouched — its "IP licensing / employment / commercial litigation / regulatory / M&A / real estate" mix describes fictional matter diversity for fixture generation, not Phase 1.5 prescribed practice-area codes. Different from the POML's prohibited hardcoded set ("litigation/real-estate/patent/transactional") because the synthetic data context is about test-fixture realism, not taxonomy assertion.
+    - Body sections §§1–23 (r2 May-20 content) left untouched per Phase 1.5 doc strategy: §0a is the load-bearing callout; body remains historical reference. The new Terminology subsection in §0a explicitly tells readers "when body §§1–23 disagree with Terminology, Terminology wins" — avoids the large-scale body rewrite that would otherwise be needed.
+    - Wave-organized status reflects PR #330 (Wave B complete 2026-06-02 per MEMORY.md) and current Wave A in progress.
+  </notes>
 </task>
