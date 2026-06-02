@@ -1,0 +1,207 @@
+<task id="090" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>Project wrap-up: final quality gates, repo-cleanup, README + plan updates, lessons-learned, exit-ledger</title>
+    <phase>Phase 5 (final)</phase>
+    <status>not-started</status>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <dependencies>083,084</dependencies>
+    <blocks/>
+    <tags>wrap-up, governance, validation, final, lessons-learned, repo-cleanup</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final wrap-up runs `/code-review` + `/adr-check` skills (Step 9.5 quality gates) across all project code; multiple skill invocations (code-review, adr-check, repo-cleanup, doc-drift-audit); creates lessons-learned + exit-ledger (load-bearing project artifacts). FULL per CLAUDE.md §8 (wrap-up is the project's quality-validation pass).</rigor-reason>
+    <parallel-group>wrap-up</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final wrap-up; depends on all 080-084. Sequential by definition — single final task running all project-close checks.</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Close out the `sdap.bff.api-test-suite-repair-r2` project. This is the final task — no new functional work; project hygiene + retrospective + r3 scope recommendation.
+
+    Seven wrap-up actions (per task-create SKILL.md Step 3.7):
+
+    1. **Final quality gates**: invoke `/code-review` on all project code (Phase 1-5 production fixes); invoke `/adr-check` on all project code; fix any critical issues surfaced (HIGH findings only — MED/LOW deferred to r3).
+
+    2. **Repo hygiene**: invoke `/repo-cleanup projects/sdap.bff.api-test-suite-repair-r2` (cleans `notes/debug/`, `notes/spikes/`, `notes/drafts/`; archives `notes/handoffs/`; validates structure compliance).
+
+    3. **README.md update**: status → "Complete"; last-updated → today; phase → "Complete"; progress → 100%; completed-date → today; check all graduation criteria boxes; add changelog entry.
+
+    4. **plan.md update**: status → "Complete"; all milestone statuses → ✅ done.
+
+    5. **Lessons-learned**: create `projects/sdap.bff.api-test-suite-repair-r2/notes/lessons-learned.md` with r2 calibration data (what went well; what was harder than expected; sibling coordination outcomes; recommendations for any future closure project).
+
+    6. **Exit-ledger**: create `projects/sdap.bff.api-test-suite-repair-r2/ledgers/exit-ledger.md` with cumulative r2 state — all 20 entries' final disposition; cluster-wise summary; r3 recommendation per D-06 (whether r3 is warranted, scope sketch if so).
+
+    7. **Final verification**: confirm all task files marked completed in TASK-INDEX.md; confirm no critical code-review issues outstanding; confirm `/repo-cleanup` completed without blocking findings.
+
+    Hard dependency: tasks 083 (PR merged to master) + 084 (doc-drift audit PASS) MUST be complete before this task runs.
+
+    NO production code changes in this task. NO test changes. Hygiene + retrospective only.
+  </prompt>
+
+  <role>AI agent closing out the r2 project with final quality gates, repo-cleanup, README/plan updates, lessons-learned, exit-ledger, and final verification.</role>
+
+  <goal>
+    Project formally closed. Seven outputs:
+    1. Final code-review + adr-check outputs documented (skill outputs captured in this task's completion notes); any HIGH findings fixed
+    2. `/repo-cleanup` skill executed; output captured; ephemeral files removed if any
+    3. `README.md` updated: status / last-updated / phase / progress / completed-date / graduation criteria / changelog entry
+    4. `plan.md` updated: status → Complete; all milestones ✅
+    5. `notes/lessons-learned.md` written — sections: header, what-went-well, what-was-harder, sibling-coordination outcomes, anti-drift effectiveness reflection, Phase 4 pilot reflections, r3 recommendation rationale
+    6. `ledgers/exit-ledger.md` written — cumulative r2 state: all 20 entries' final disposition; cluster-wise summary (HIGH / MED / LOW); Coverlet baseline % cross-reference; Phase 4 deliverable cross-references; r3 scope recommendation per D-06
+    7. Final verification: TASK-INDEX.md fully ✅; no critical issues; cleanup complete
+
+    Project ready for shutdown.
+  </goal>
+
+  <inputs>
+    <file purpose="task-index">projects/sdap.bff.api-test-suite-repair-r2/tasks/TASK-INDEX.md</file>
+    <file purpose="readme">projects/sdap.bff.api-test-suite-repair-r2/README.md</file>
+    <file purpose="plan">projects/sdap.bff.api-test-suite-repair-r2/plan.md</file>
+    <file purpose="current-task">projects/sdap.bff.api-test-suite-repair-r2/current-task.md</file>
+    <file purpose="r1-real-bug-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (entries r2 closed)</file>
+    <file purpose="r1-lessons-learned">projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md (r1 calibration; pattern reference)</file>
+    <file purpose="r1-task-090">projects/sdap-bff.api-test-suite-repair/tasks/090-project-wrap-up.poml (r1 wrap-up pattern reference)</file>
+    <file purpose="phase-4-audits">projects/sdap.bff.api-test-suite-repair-r2/audits/ (Phase 4 deliverables)</file>
+    <file purpose="phase-4-baselines">projects/sdap.bff.api-test-suite-repair-r2/baseline/ (Phase 4 baseline reports + final triple-run)</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="task-create SKILL.md Step 3.7">Mandatory final task; 7 steps as listed</constraint>
+    <constraint source="D-06">r3 NOT pre-committed — exit-ledger r3 recommendation is a recommendation, not a commitment</constraint>
+    <constraint source="D-04">Phase 4 outputs are pilot-grade; exit-ledger captures the measurement findings, NOT remediation outputs</constraint>
+    <constraint source="NFR-01">No production code changes in this task — wrap-up only</constraint>
+    <constraint source="CLAUDE.md §7">After task complete: update `.poml` status → completed; update TASK-INDEX → ✅; reset `current-task.md` to "none — project closed"</constraint>
+    <constraint source="CLAUDE.md §3">Sub-agent write boundary: `/repo-cleanup` may flag `.claude/` issues; fixes applied in main session</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/doc-drift-audit/SKILL.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/tasks/090-project-wrap-up.poml</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The r2 wrap-up follows the pattern established by r1 task 090 (closed 2026-05-31): final quality gates + repo-cleanup + README/plan updates + lessons-learned + exit-ledger + final verification.
+
+      Key r2-specific contributions to capture in the lessons-learned:
+      - Inversion of NFR-01 worked cleanly (r1 was test-only; r2 was production-side; the inversion did NOT cause confusion because design.md §D-01 was explicit)
+      - Cluster exception (D-02) closed 4 ledger entries via 1 fix — confirms r1's cluster-classification pattern scales
+      - Phase 4 5-track parallel dispatch (per D-04 pilot-grade) — measure whether the parallel-track model worked or whether sequential tracks would have been simpler
+      - Anti-drift effectiveness finding (FR-09 / NFR-07) — was the empirical evidence high or low compliance? What does that tell us about D-05's design choice?
+      - TestClock PoC outcome — did it work cleanly in `Services/Workspace/*`? Is r3 generalization warranted?
+      - Mutation testing pilot outcome — what's the mutation score for `Services/Ai/Safety/*`? Is r3 expansion to Capabilities + Chat warranted?
+      - PCF/Code Pages audit outcome — is the BFF rot pattern present on the client side? r3 scope recommendation.
+      - Coverlet baseline — useful for r3 threshold gate calibration
+
+      The exit-ledger is the cumulative r2 close artifact — referenced for years by future projects. Quality matters. Use r1's exit-ledger as the structural template.
+
+      r3 recommendation per D-06: NOT pre-committed; the recommendation derives from r2 audit findings. If pilots scored well, r3 may not be needed. If pilots surfaced significant issues, r3 scope is well-motivated. Owner decides.
+    </background>
+    <dependencies>
+      <dependency task="083" status="not-started">PR + admin-merge cycle complete; project landed on master</dependency>
+      <dependency task="084" status="not-started">Doc-drift audit PASS verdict</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/README.md</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/plan.md</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/current-task.md</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/tasks/TASK-INDEX.md</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/notes/lessons-learned.md (new)</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/ledgers/exit-ledger.md (new)</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">**Final quality gates**: Invoke `/code-review` skill against all Phase 1-3 production-fix PRs (or against the cumulative project diff). Invoke `/adr-check` skill against all `src/` changes from r2. Capture skill outputs. Fix any HIGH severity findings; document MED/LOW findings in lessons-learned as r3 carry-forward.</step>
+    <step order="2">**Repo hygiene**: Invoke `/repo-cleanup projects/sdap.bff.api-test-suite-repair-r2` skill per its SKILL.md. Capture output. Remove ephemeral files (`notes/debug/`, `notes/spikes/`, `notes/drafts/`); archive `notes/handoffs/` to date-stamped subdirectory.</step>
+    <step order="3">**README.md update**: Edit `projects/sdap.bff.api-test-suite-repair-r2/README.md`:
+      - Status header: "🟢 Active" or current → "✅ Complete"
+      - Last-updated: today's date
+      - Phase: "Complete"
+      - Progress: 100%
+      - Completed-date: today
+      - Check all 12-14 graduation criteria boxes (cross-reference spec.md §Success Criteria)
+      - Add changelog entry: "2026-08-XX (date): project closed; 20 ledger entries closed; Phase 4 5-track deliverables published; final triple-run PASS; PR merged"
+    </step>
+    <step order="4">**plan.md update**: Edit `projects/sdap.bff.api-test-suite-repair-r2/plan.md`:
+      - Status: → "Complete"
+      - All milestone statuses (Phase 0, 1, 2, 3, 4, 5): → ✅ done
+    </step>
+    <step order="5">**Lessons-learned**: Write `projects/sdap.bff.api-test-suite-repair-r2/notes/lessons-learned.md` with these sections:
+      (a) **Header**: project name, closure date, person-hours actual vs estimate, wall-clock actual vs estimate (2026-06-01 → 2026-08-31)
+      (b) **What went well**: NFR-01 inversion worked cleanly; cluster exception (D-02) successful; parallel Phase 4 5-track dispatch outcome; ledger lifecycle held up under r2 use
+      (c) **What was harder than expected**: any Phase 1-3 production fix that took longer than estimated; sibling-coordination friction if any; Phase 4 track that surprised
+      (d) **Sibling-coordination outcomes**: per FR-06 — Action Engine / Insights / Communications outreach outcomes; any commitments persisting post-r2
+      (e) **Anti-drift effectiveness reflection**: per FR-09 / NFR-07 — empirical compliance rate; what it says about D-05 design choice
+      (f) **Phase 4 pilot reflections**: per-track outcome (audit findings, mutation score, TestClock PoC success/issues, Coverlet baseline, anti-drift report findings)
+      (g) **r3 recommendation rationale**: per D-06 — based on r2 findings, is r3 warranted? scope sketch if yes; defer-or-skip rationale if no
+      (h) **Carry-forward items**: anything r2 intentionally didn't do (per D-04); MED/LOW code-review findings; P2/P3 doc-drift items
+    </step>
+    <step order="6">**Exit-ledger**: Write `projects/sdap.bff.api-test-suite-repair-r2/ledgers/exit-ledger.md` (NEW file) with these sections:
+      (a) **Project overview**: dates, scope, predecessor link, total tasks executed
+      (b) **20 entries' final disposition table**: per RB-T044-* and RB-T028-*, final status (`repaired` / `transferred-to-sibling` / `archived-as-dead-target`), resolution mode, ledger entry cross-reference to r1's real-bug-ledger.md
+      (c) **Cluster-wise summary**: HIGH (5 entries; resolution by cluster); MED (7 entries); LOW (8 entries)
+      (d) **Coverlet baseline % per project**: copied from `baseline/coverlet-baseline-2026-08-XX.md` (task 043 output)
+      (e) **Phase 4 deliverable cross-references**: audit, mutation, TestClock, anti-drift links + brief outcome statements
+      (f) **Final triple-run summary**: cross-reference to `baseline/final-triple-run-2026-08-XX.md` (task 082 output)
+      (g) **r3 scope recommendation**: per D-06 — derivative of r2 audit findings; explicit recommendation (commission r3 / defer r3 / skip r3); rationale
+    </step>
+    <step order="7">**Final verification**:
+      - Read `tasks/TASK-INDEX.md` — confirm all task rows show ✅ (or appropriate completion marker)
+      - Verify no critical (HIGH severity) code-review issues outstanding from Step 1
+      - Verify `/repo-cleanup` Step 2 output had no blocking findings
+      - Update `current-task.md`: phase → "✅ Complete — project closed YYYY-MM-DD"; last-updated → today; current-task → "none — project closed"; next-action → "none — see `notes/lessons-learned.md` for r3 recommendation"
+      - Update `tasks/TASK-INDEX.md`: task 090 row → ✅; "Project COMPLETE" header line appended
+    </step>
+    <step order="8">Verify `git status` shows only files in `projects/sdap.bff.api-test-suite-repair-r2/` modified (README, plan, current-task, TASK-INDEX, lessons-learned, exit-ledger; possibly other cleanup-artifact files from `/repo-cleanup`). NO unintended `src/`, `.claude/`, `.github/` modifications.</step>
+    <step order="9">Step 9.5 — Run `code-review` + `adr-check` on the cumulative project diff (FULL rigor for wrap-up). Verify no HIGH findings remain. Document any deferred MED/LOW in lessons-learned § (h) Carry-forward.</step>
+    <step order="10">Final commit: "chore(close): sdap.bff.api-test-suite-repair-r2 project — 20 ledger entries closed, Phase 4 pilots published, lessons-learned + exit-ledger". Push to remote per `push-to-github` skill. Note: master already has the cumulative project commit from task 083; this is a small wrap-up follow-up commit.</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">code-review (Steps 1 + 9.5); adr-check (Steps 1 + 9.5); repo-cleanup (Step 2); doc-drift-audit (already run in task 084 — reference only)</tool>
+    <tool name="Read">all r1 + r2 ledgers, audits, baselines for exit-ledger construction</tool>
+    <tool name="Edit">README.md, plan.md, current-task.md, TASK-INDEX.md updates</tool>
+    <tool name="Write">notes/lessons-learned.md, ledgers/exit-ledger.md (new files)</tool>
+    <tool name="Bash">`git status` for boundary verification; final commit; push</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/notes/lessons-learned.md (new)</output>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/ledgers/exit-ledger.md (new)</output>
+    <output type="state">projects/sdap.bff.api-test-suite-repair-r2/README.md (status → Complete)</output>
+    <output type="state">projects/sdap.bff.api-test-suite-repair-r2/plan.md (status → Complete; milestones ✅)</output>
+    <output type="state">projects/sdap.bff.api-test-suite-repair-r2/current-task.md (status → "none — project closed")</output>
+    <output type="state">projects/sdap.bff.api-test-suite-repair-r2/tasks/TASK-INDEX.md (task 090 ✅; "Project COMPLETE" header)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/code-review` + `/adr-check` skills executed in Step 1; outputs captured in lessons-learned; no HIGH severity issues outstanding</criterion>
+    <criterion testable="true">`/repo-cleanup` skill executed; output documented; ephemeral files cleaned</criterion>
+    <criterion testable="true">`README.md` shows status "Complete"; completed-date set; all graduation criteria checked; changelog entry added</criterion>
+    <criterion testable="true">`plan.md` shows status "Complete"; all milestones ✅</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` exists with all 8 sections (header, went-well, harder, sibling-coordination, anti-drift, Phase 4 reflections, r3 recommendation, carry-forward)</criterion>
+    <criterion testable="true">`ledgers/exit-ledger.md` exists with cumulative r2 state: 20 entries' final disposition; cluster summary; Coverlet baseline; Phase 4 deliverables; r3 recommendation</criterion>
+    <criterion testable="true">`tasks/TASK-INDEX.md` shows task 090 ✅ and all other tasks ✅</criterion>
+    <criterion testable="true">`current-task.md` shows status "none — project closed"; phase "✅ Complete"</criterion>
+    <criterion testable="true">Step 9.5 gates pass: cumulative project code-review + adr-check (no HIGH findings)</criterion>
+    <criterion testable="true">Final commit references project close + lessons-learned + exit-ledger</criterion>
+    <criterion testable="true">No unintended modifications outside `projects/sdap.bff.api-test-suite-repair-r2/` (verified by `git status`)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. FULL rigor: Step 9.5 code-review + adr-check on cumulative project diff; multiple skill invocations (code-review, adr-check, repo-cleanup); load-bearing artifacts (lessons-learned, exit-ledger) per task-create SKILL.md Step 3.7.
+  </execution>
+</task>

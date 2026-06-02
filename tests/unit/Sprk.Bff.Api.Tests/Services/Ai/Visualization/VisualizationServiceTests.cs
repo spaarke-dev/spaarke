@@ -17,10 +17,13 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Visualization;
 /// Unit tests for VisualizationService - Document relationship visualization.
 /// Tests graph building, similarity scoring, filtering, and error handling.
 /// </summary>
+[Trait("status", "repaired")]
 public class VisualizationServiceTests
 {
     private readonly Mock<IKnowledgeDeploymentService> _deploymentServiceMock;
-    private readonly Mock<IDataverseService> _dataverseServiceMock;
+    private readonly Mock<IDocumentDataverseService> _documentServiceMock;
+    private readonly Mock<ITextExtractor> _textExtractorMock;
+    private readonly Mock<IOpenAiClient> _openAiClientMock;
     private readonly Mock<ILogger<VisualizationService>> _loggerMock;
     private readonly IOptions<DataverseOptions> _dataverseOptions;
 
@@ -34,7 +37,9 @@ public class VisualizationServiceTests
     public VisualizationServiceTests()
     {
         _deploymentServiceMock = new Mock<IKnowledgeDeploymentService>();
-        _dataverseServiceMock = new Mock<IDataverseService>();
+        _documentServiceMock = new Mock<IDocumentDataverseService>();
+        _textExtractorMock = new Mock<ITextExtractor>();
+        _openAiClientMock = new Mock<IOpenAiClient>();
         _loggerMock = new Mock<ILogger<VisualizationService>>();
         _dataverseOptions = Options.Create(new DataverseOptions
         {
@@ -54,9 +59,9 @@ public class VisualizationServiceTests
     {
         return new VisualizationService(
             _deploymentServiceMock.Object,
-            _dataverseServiceMock.Object, // IDocumentDataverseService (IDataverseService satisfies it)
-            Mock.Of<ITextExtractor>(),
-            Mock.Of<IOpenAiClient>(),
+            _documentServiceMock.Object,
+            _textExtractorMock.Object,
+            _openAiClientMock.Object,
             _dataverseOptions,
             _loggerMock.Object);
     }
@@ -706,7 +711,7 @@ public class VisualizationServiceTests
 
         // Assert - Should NOT call GetDocumentAsync for related documents (only source)
         // Source doc is always fetched (Step 1), but related doc metadata enrichment (Step 6) is skipped
-        _dataverseServiceMock.Verify(
+        _documentServiceMock.Verify(
             x => x.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once); // Only the source document call
     }
@@ -738,7 +743,7 @@ public class VisualizationServiceTests
         var options = new VisualizationOptions { TenantId = _tenantId, CountOnly = true };
 
         // Setup Dataverse to return null for source document
-        _dataverseServiceMock
+        _documentServiceMock
             .Setup(x => x.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((DocumentEntity?)null);
         SetupEmptySearchClient();
@@ -938,7 +943,7 @@ public class VisualizationServiceTests
 
     private void SetupDataverseMetadata()
     {
-        _dataverseServiceMock
+        _documentServiceMock
             .Setup(x => x.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string id, CancellationToken ct) => new DocumentEntity
             {
@@ -955,7 +960,7 @@ public class VisualizationServiceTests
     private void SetupDataverseMetadataWithKeywords(string sourceKeywords, string relatedKeywords)
     {
         var callCount = 0;
-        _dataverseServiceMock
+        _documentServiceMock
             .Setup(x => x.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string id, CancellationToken ct) =>
             {

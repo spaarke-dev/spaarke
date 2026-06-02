@@ -127,7 +127,7 @@ export const SprkChatExportWord: React.FC<ISprkChatExportWordProps> = ({
   const [isExporting, setIsExporting] = React.useState(false);
 
   // Button is disabled when: no sessionId, no assistant content, or currently exporting
-  const hasContent = messages.length > 0 && messages.some((m) => m.role === 'Assistant' && m.content.trim().length > 0);
+  const hasContent = messages.length > 0 && messages.some(m => m.role === 'Assistant' && m.content.trim().length > 0);
   const hasSession = Boolean(sessionId);
   const isDisabled = isExporting || !hasSession || !hasContent;
 
@@ -148,8 +148,8 @@ export const SprkChatExportWord: React.FC<ISprkChatExportWordProps> = ({
    */
   const assembleExportContent = React.useCallback((): string => {
     return messages
-      .filter((m) => m.role === 'Assistant' && m.content.trim().length > 0)
-      .map((m) => m.content.trim())
+      .filter(m => m.role === 'Assistant' && m.content.trim().length > 0)
+      .map(m => m.content.trim())
       .join('\n\n---\n\n');
   }, [messages]);
 

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Api.Reporting;
@@ -22,11 +23,25 @@ namespace Sprk.Bff.Api.Tests.Api.Reporting;
 ///
 /// ADR-008: Auth is enforced by ReportingAuthorizationFilter (tested separately).
 /// </summary>
+[Trait("status", "repaired")]
 public class ReportingEndpointsTests
 {
     // =========================================================================
     // Helpers
     // =========================================================================
+
+    /// <summary>
+    /// Builds a DefaultHttpContext suitable for executing an IResult.
+    /// ProblemHttpResult (returned by Results.Problem(...)) requires HttpContext.RequestServices
+    /// to resolve IProblemDetailsService / ILoggerFactory at ExecuteAsync time.
+    /// </summary>
+    private static DefaultHttpContext BuildResponseContext()
+    {
+        return new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider()
+        };
+    }
 
     private static DefaultHttpContext BuildHttpContext(
         ReportingPrivilegeLevel privilege = ReportingPrivilegeLevel.Viewer,
@@ -285,7 +300,7 @@ public class ReportingEndpointsTests
         result.Should().NotBeNull();
 
         // Execute the result into a fake response to capture the status code and body
-        var responseContext = new DefaultHttpContext();
+        var responseContext = BuildResponseContext();
         responseContext.Response.Body = new System.IO.MemoryStream();
         await result!.ExecuteAsync(responseContext);
 
@@ -328,7 +343,7 @@ public class ReportingEndpointsTests
         ])!;
 
         // Assert
-        var responseContext = new DefaultHttpContext();
+        var responseContext = BuildResponseContext();
         responseContext.Response.Body = new System.IO.MemoryStream();
         await result.ExecuteAsync(responseContext);
 
@@ -357,7 +372,7 @@ public class ReportingEndpointsTests
         ])!;
 
         // Assert
-        var responseContext = new DefaultHttpContext();
+        var responseContext = BuildResponseContext();
         responseContext.Response.Body = new System.IO.MemoryStream();
         await result.ExecuteAsync(responseContext);
 
@@ -395,7 +410,7 @@ public class ReportingEndpointsTests
         ])!;
 
         // Assert
-        var responseContext = new DefaultHttpContext();
+        var responseContext = BuildResponseContext();
         responseContext.Response.Body = new System.IO.MemoryStream();
         await result.ExecuteAsync(responseContext);
 
@@ -432,7 +447,7 @@ public class ReportingEndpointsTests
         ])!;
 
         // Assert
-        var responseContext = new DefaultHttpContext();
+        var responseContext = BuildResponseContext();
         responseContext.Response.Body = new System.IO.MemoryStream();
         await result.ExecuteAsync(responseContext);
 
@@ -464,7 +479,7 @@ public class ReportingEndpointsTests
         ])!;
 
         // Assert
-        var responseContext = new DefaultHttpContext();
+        var responseContext = BuildResponseContext();
         responseContext.Response.Body = new System.IO.MemoryStream();
         await result.ExecuteAsync(responseContext);
 
@@ -501,7 +516,7 @@ public class ReportingEndpointsTests
         ])!;
 
         // Assert
-        var responseContext = new DefaultHttpContext();
+        var responseContext = BuildResponseContext();
         responseContext.Response.Body = new System.IO.MemoryStream();
         await result.ExecuteAsync(responseContext);
 
@@ -535,7 +550,7 @@ public class ReportingEndpointsTests
         ])!;
 
         // Assert
-        var responseContext = new DefaultHttpContext();
+        var responseContext = BuildResponseContext();
         responseContext.Response.Body = new System.IO.MemoryStream();
         await result.ExecuteAsync(responseContext);
 
@@ -567,7 +582,7 @@ public class ReportingEndpointsTests
         ])!;
 
         // Assert
-        var responseContext = new DefaultHttpContext();
+        var responseContext = BuildResponseContext();
         responseContext.Response.Body = new System.IO.MemoryStream();
         await result.ExecuteAsync(responseContext);
 

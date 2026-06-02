@@ -19,6 +19,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat.SseEventTypes;
 ///   data: {json}\n\n
 /// where {json} is the serialized <see cref="ChatSseEvent"/>.
 /// </summary>
+[Trait("status", "repaired")]
 public class ChatSseEventFactoryTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

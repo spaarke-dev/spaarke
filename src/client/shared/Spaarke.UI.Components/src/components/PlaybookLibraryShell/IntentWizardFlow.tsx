@@ -12,29 +12,10 @@
  */
 
 import React from 'react';
-import {
-  Text,
-  MessageBar,
-  MessageBarBody,
-  Spinner,
-  Badge,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
-import {
-  DocumentArrowUpRegular,
-  BrainCircuit24Regular,
-  CheckmarkCircle24Regular,
-} from '@fluentui/react-icons';
+import { Text, MessageBar, MessageBarBody, Spinner, Badge, makeStyles, tokens } from '@fluentui/react-components';
+import { DocumentArrowUpRegular, BrainCircuit24Regular, CheckmarkCircle24Regular } from '@fluentui/react-icons';
 import { ScopeConfigurator } from '../Playbook/ScopeConfigurator';
-import type {
-  IPlaybook,
-  IAction,
-  ISkill,
-  IKnowledge,
-  ITool,
-  IPlaybookScopes,
-} from '../Playbook/types';
+import type { IPlaybook, IAction, ISkill, IKnowledge, ITool, IPlaybookScopes } from '../Playbook/types';
 
 // ---------------------------------------------------------------------------
 // Intent-to-playbook mapping
@@ -251,15 +232,7 @@ export const IntentWizardFlow: React.FC<IIntentWizardFlowProps> = ({
       <div className={styles.stepIndicator}>
         {INTENT_STEPS.map((step, idx) => (
           <React.Fragment key={step.id}>
-            {idx > 0 && (
-              <div
-                className={
-                  idx <= currentStepIndex
-                    ? styles.stepConnectorActive
-                    : styles.stepConnector
-                }
-              />
-            )}
+            {idx > 0 && <div className={idx <= currentStepIndex ? styles.stepConnectorActive : styles.stepConnector} />}
             <div
               className={
                 idx < currentStepIndex
@@ -282,10 +255,7 @@ export const IntentWizardFlow: React.FC<IIntentWizardFlowProps> = ({
               size={200}
               weight={idx === currentStepIndex ? 'semibold' : 'regular'}
               style={{
-                color:
-                  idx === currentStepIndex
-                    ? tokens.colorNeutralForeground1
-                    : tokens.colorNeutralForeground3,
+                color: idx === currentStepIndex ? tokens.colorNeutralForeground1 : tokens.colorNeutralForeground3,
               }}
             >
               {step.label}
@@ -302,11 +272,7 @@ export const IntentWizardFlow: React.FC<IIntentWizardFlowProps> = ({
             {playbook.name}
           </Text>
           {playbook.description && (
-            <Text
-              size={200}
-              block
-              style={{ color: tokens.colorNeutralForeground3 }}
-            >
+            <Text size={200} block style={{ color: tokens.colorNeutralForeground3 }}>
               {playbook.description}
             </Text>
           )}
@@ -328,9 +294,7 @@ export const IntentWizardFlow: React.FC<IIntentWizardFlowProps> = ({
         {currentStep === 'upload' && (
           <div className={styles.uploadPlaceholder}>
             <DocumentArrowUpRegular />
-            <Text size={300}>
-              Drop files here or click to upload
-            </Text>
+            <Text size={300}>Drop files here or click to upload</Text>
             <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
               File upload will be connected in integration tasks.
             </Text>

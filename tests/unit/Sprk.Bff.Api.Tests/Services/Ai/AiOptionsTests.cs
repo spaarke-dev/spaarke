@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai;
 
+[Trait("status", "repaired")]
 public class DocumentIntelligenceOptionsTests
 {
     [Fact]
@@ -200,6 +201,7 @@ public class DocumentIntelligenceOptionsTests
     }
 }
 
+[Trait("status", "repaired")]
 public class FileTypeConfigTests
 {
     [Fact]
@@ -225,6 +227,7 @@ public class FileTypeConfigTests
     }
 }
 
+[Trait("status", "repaired")]
 public class ExtractionMethodTests
 {
     [Fact]

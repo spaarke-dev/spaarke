@@ -5,5 +5,29 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
+
+    <!--
+      Centralized warning-suppression policy.
+      Full rationale + per-category removal criteria + follow-on tracking:
+      docs/assessments/bff-warning-suppression-analysis-2026-06-01.md
+
+      WarningsNotAsErrors: downgrades these specific codes from build-blocking errors
+      back to non-blocking warnings (still visible in build output).
+        CS0109: 1x unnecessary `new` keyword in test (stylistic; trivial cleanup)
+        CS0618: 7x obsolete DemoProvisioningOptions.Environments/DefaultEnvironment
+                callers — blocked on DemoExpirationService multi-env refactor + test
+                coverage. Obsolete-marker says "Will be removed after DemoExpirationService
+                migration." Suppression honors the planned-removal contract.
+        CS1998: 5x async-without-await methods (perf signal, not a correctness bug)
+        CS8601: 2x possible null-reference assignments (real NRE risk; needs per-site review)
+        CS8604: 1x possible null-reference argument (same risk class as CS8601)
+
+      NoWarn: fully suppresses NU1903 (Microsoft.Kiota.Abstractions 1.21.2 transitive CVE
+              GHSA-7j59-v9qr-6fq9 HIGH). Accepted-risk per ADR-029 pending Graph SDK 6.x /
+              Kiota 2.x major-bump project (estimated ~3 weeks; out of scope for current
+              workflow-rationalization PR).
+    -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS0109;CS0618;CS1998;CS8601;CS8604</WarningsNotAsErrors>
+    <NoWarn>$(NoWarn);NU1903</NoWarn>
   </PropertyGroup>
 </Project>

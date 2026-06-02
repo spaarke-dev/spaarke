@@ -346,4 +346,69 @@ This project does **NOT**:
 
 ---
 
+## 12. Pre-planning discussion synopsis (2026-05-28)
+
+Captured during the pre-planning review with the operator. Restates the design in a discussion-ready form and flags the architecturally hot spots to settle during `/design-to-spec`.
+
+### One-line framing
+
+How does code *outside* the SpaarkeAi React tree (other iframes, MDA forms, BFF workers, external SPAs, Office Add-ins) tell SpaarkeAi to mount a workspace tab — without using Power Automate or Dataverse plugins?
+
+### Core problem
+
+SpaarkeAi's `PaneEventBus` (ADR-030) is exposed via React context inside `<PaneEventBusProvider>`. `useDispatchPaneEvent()` is a no-op anywhere outside that tree. Today, ~5 surface categories all silently fail, force manual navigation, or just don't exist yet.
+
+### The 5 surfaces
+
+1. **Iframe wizards** (`CreateProjectWizard`, `WorkAssignmentWizardDialog`, etc.) — sibling iframes, not children of SpaarkeAi
+2. **MDA main forms** — no React at all; only `Xrm.WebApi`
+3. **BFF background jobs** — no browser context; need a push channel
+4. **External SPAs** — cross-origin (`mattermate.example.com`, Power Pages)
+5. **Office Add-ins** — entirely separate window family
+
+### Hard constraint (operator-set 2026-05-27)
+
+**No Power Automate. No Dataverse plugins. No plugin-triggered ServiceBus.** Solutions must use only web platform APIs (`postMessage`, `BroadcastChannel`, `CustomEvent`, storage events), BFF HTTP/SSE/WebSocket, `Xrm.WebApi`, or in-process React composition.
+
+### Recommended architecture — layered, per-surface
+
+A new `<MountSourceProvider>` sits **outside** `<PaneEventBusProvider>` and funnels external signals in:
+
+| Transport | Primary use | Why |
+|---|---|---|
+| **postMessage** | Surfaces 1, 2 (same window family) | Standards, zero-latency, no server |
+| **BroadcastChannel** | Same-origin cross-tab (Surf 2 variant) | Survives iframe + tab boundaries |
+| **BFF HTTP queue** (`/api/workspace/mount-pending`, Cosmos per-user, 30-min TTL) | Surfaces 3, 4, 5 — and fallback for 1+2 | Universal, cross-origin, survives reload |
+| **SSE/WebSocket push** | Optional upgrade from polling | Real-time; reuses existing chat SSE |
+| **In-process React migration** | Selective for low-cost wizards | Eliminates transport entirely |
+
+All transports carry one canonical `MountSignal` (typed: `widgetId`, `payload`, `correlationId`, `origin`); a single dispatcher dedups by `correlationId`, validates origin allowlist, validates widget-ID allowlist.
+
+### Phased rollout (7 phases, preliminary)
+
+1. Core `<MountSourceProvider>` + postMessage + BroadcastChannel + dedup + ADR-030 update
+2. Wizard PoC — `CreateProjectWizard` "Add to Workspace"
+3. BFF `mount-pending` queue (requires Placement Justification per CLAUDE.md §10)
+4. Roll out to remaining wizards
+5. MDA Ribbon "Open in Workspace"
+6. BFF worker → SpaarkeAi toast for job completions
+7. External SPA + Office Add-in patterns (documented in `docs/guides/`)
+
+### Discussion-worthy points to resolve in `/design-to-spec`
+
+1. **Phase 3 is the BFF-governance hot spot.** New endpoints + Cosmos partition + worker-enqueue path all touch [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) and the ≤60 MB publish-size ceiling (CLAUDE.md §10). Decide early whether the queue lives in `Sprk.Bff.Api` or a separate small service.
+2. **Phase 7 (external SPAs / Office Add-ins) is the most architecturally distinct.** Auth model and origin-trust assumptions differ enough that it may deserve its own sub-spec rather than being treated as the tail of the main project.
+3. **Phase 5 (MDA Ribbon)** depends on whether Ribbon JS counts as "core product". Ribbon customization is solution-shipped and is **not** PA/plugin, so it almost certainly qualifies — but worth confirming explicitly so the constraint isn't relitigated later.
+4. **Option 5 (in-process migration)** is a quiet "do-nothing-fancy" alternative for Surface 1. Worth a sharper per-wizard cost/benefit before committing the full transport layer for all four existing wizards — some may be cheaper to migrate than to bridge.
+
+### Open questions (also tracked in §9)
+
+- Office Add-in MSAL ↔ BFF auth composition for placing mount-pending
+- Whether to ship a small `@spaarke/mount-source` SDK or just document the postMessage protocol
+- Cosmos partition strategy + cost projection for per-user queue
+- Behavior when SpaarkeAi is closed (queue until TTL vs drop)
+- Whether to keep a `sessionStorage` flag so SpaarkeAi knows another tab might broadcast
+
+---
+
 *End of design document. Move to `/design-to-spec` to advance to spec.md.*

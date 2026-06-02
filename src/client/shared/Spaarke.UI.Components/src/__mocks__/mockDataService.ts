@@ -10,7 +10,7 @@
  * dataService.retrieveRecord.mockResolvedValue({ sprk_name: "Custom" });
  * ```
  */
-import type { IDataService } from "../types/serviceInterfaces";
+import type { IDataService } from '../types/serviceInterfaces';
 
 /**
  * Creates a mock IDataService with jest.fn() stubs and sensible defaults.
@@ -26,9 +26,7 @@ import type { IDataService } from "../types/serviceInterfaces";
  */
 export function createMockDataService(): jest.Mocked<IDataService> {
   return {
-    createRecord: jest
-      .fn()
-      .mockResolvedValue("00000000-0000-0000-0000-000000000001"),
+    createRecord: jest.fn().mockResolvedValue('00000000-0000-0000-0000-000000000001'),
     retrieveRecord: jest.fn().mockResolvedValue({}),
     retrieveMultipleRecords: jest.fn().mockResolvedValue({ entities: [] }),
     updateRecord: jest.fn().mockResolvedValue(undefined),

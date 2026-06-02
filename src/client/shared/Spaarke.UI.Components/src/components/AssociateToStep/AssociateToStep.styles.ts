@@ -8,20 +8,20 @@
  * @see ADR-021 — Fluent UI v9 design system; semantic tokens required
  */
 
-import { makeStyles, tokens } from "@fluentui/react-components";
+import { makeStyles, tokens } from '@fluentui/react-components';
 
 export const useAssociateToStepStyles = makeStyles({
   // ── Outer container ──────────────────────────────────────────────────────
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalL,
   },
 
   // ── Header section (title + subtitle) ───────────────────────────────────
   header: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
 
@@ -35,19 +35,19 @@ export const useAssociateToStepStyles = makeStyles({
 
   // ── Form row: dropdown + button side-by-side ────────────────────────────
   formRow: {
-    display: "flex",
-    alignItems: "flex-end",
+    display: 'flex',
+    alignItems: 'flex-end',
     gap: tokens.spacingHorizontalM,
-    flexWrap: "wrap",
+    flexWrap: 'wrap',
   },
 
   dropdownWrapper: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     flex: 1,
-    minWidth: "160px",
-    maxWidth: "300px",
+    minWidth: '160px',
+    maxWidth: '300px',
   },
 
   fieldLabel: {
@@ -56,8 +56,8 @@ export const useAssociateToStepStyles = makeStyles({
 
   // ── Selected record display card ─────────────────────────────────────────
   selectedRecord: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,

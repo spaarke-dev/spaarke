@@ -8,6 +8,7 @@ namespace Sprk.Bff.Api.Tests.Infrastructure.Resilience;
 /// <summary>
 /// Unit tests for CircuitBreakerRegistry.
 /// </summary>
+[Trait("status", "repaired")]
 public class CircuitBreakerRegistryTests
 {
     private readonly Mock<ILogger<CircuitBreakerRegistry>> _loggerMock;

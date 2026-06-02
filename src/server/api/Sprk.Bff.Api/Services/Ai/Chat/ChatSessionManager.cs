@@ -299,27 +299,27 @@ public class ChatSessionManager
         var messages = session.Messages
             .Select(m => new SessionMessage
             {
-                MessageId  = m.MessageId,
-                Role       = m.Role.ToString().ToLowerInvariant(),
-                Content    = m.Content,
-                Timestamp  = m.CreatedAt,
-                Metadata   = new Dictionary<string, string>
+                MessageId = m.MessageId,
+                Role = m.Role.ToString().ToLowerInvariant(),
+                Content = m.Content,
+                Timestamp = m.CreatedAt,
+                Metadata = new Dictionary<string, string>
                 {
-                    ["tokenCount"]      = m.TokenCount.ToString(),
-                    ["sequenceNumber"]  = m.SequenceNumber.ToString()
+                    ["tokenCount"] = m.TokenCount.ToString(),
+                    ["sequenceNumber"] = m.SequenceNumber.ToString()
                 }
             })
             .ToList();
 
         return new StoredSession
         {
-            Id           = session.SessionId,
-            SessionId    = session.SessionId,
-            TenantId     = session.TenantId,
-            PlaybookId   = session.PlaybookId,
-            Messages     = messages,
+            Id = session.SessionId,
+            SessionId = session.SessionId,
+            TenantId = session.TenantId,
+            PlaybookId = session.PlaybookId,
+            Messages = messages,
             WidgetStates = [],
-            CreatedAt    = session.CreatedAt,
+            CreatedAt = session.CreatedAt,
             LastActivity = session.LastActivity
         };
     }
@@ -347,24 +347,24 @@ public class ChatSessionManager
                     m.Metadata.GetValueOrDefault("sequenceNumber", index.ToString()), out var seqNum);
 
                 return new ChatMessage(
-                    MessageId:      m.MessageId,
-                    SessionId:      stored.SessionId,
-                    Role:           role,
-                    Content:        m.Content,
-                    TokenCount:     tokenCount,
-                    CreatedAt:      m.Timestamp,
+                    MessageId: m.MessageId,
+                    SessionId: stored.SessionId,
+                    Role: role,
+                    Content: m.Content,
+                    TokenCount: tokenCount,
+                    CreatedAt: m.Timestamp,
                     SequenceNumber: seqNum);
             })
             .ToList()
             .AsReadOnly();
 
         return new ChatSession(
-            SessionId:    stored.SessionId,
-            TenantId:     stored.TenantId,
-            DocumentId:   null,          // Not stored in Cosmos — Dataverse is authoritative for document associations
-            PlaybookId:   stored.PlaybookId,
-            CreatedAt:    stored.CreatedAt,
+            SessionId: stored.SessionId,
+            TenantId: stored.TenantId,
+            DocumentId: null,          // Not stored in Cosmos — Dataverse is authoritative for document associations
+            PlaybookId: stored.PlaybookId,
+            CreatedAt: stored.CreatedAt,
             LastActivity: stored.LastActivity,
-            Messages:     messages);
+            Messages: messages);
     }
 }

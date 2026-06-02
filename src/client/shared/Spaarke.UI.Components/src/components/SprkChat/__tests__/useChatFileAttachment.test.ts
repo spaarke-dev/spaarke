@@ -50,11 +50,7 @@ jest.mock(
 // Hook under test — imported AFTER the mocks above.
 // ---------------------------------------------------------------------------
 
-import {
-  useChatFileAttachment,
-  MAX_ATTACHMENTS,
-  MAX_FILE_BYTES,
-} from '../hooks/useChatFileAttachment';
+import { useChatFileAttachment, MAX_ATTACHMENTS, MAX_FILE_BYTES } from '../hooks/useChatFileAttachment';
 
 // ---------------------------------------------------------------------------
 // File helpers
@@ -112,9 +108,7 @@ describe('useChatFileAttachment', () => {
     it('rejects the 6th file with too-many error', async () => {
       const { result } = renderHook(() => useChatFileAttachment());
 
-      const sixFiles = Array.from({ length: 6 }, (_, i) =>
-        makeFile(`f${i}.txt`, 'text/plain', `body-${i}`)
-      );
+      const sixFiles = Array.from({ length: 6 }, (_, i) => makeFile(`f${i}.txt`, 'text/plain', `body-${i}`));
 
       await act(async () => {
         await result.current.addFiles(sixFiles);
@@ -123,7 +117,7 @@ describe('useChatFileAttachment', () => {
       // 5 chips accepted (eventually `ready` after extraction)
       expect(result.current.files).toHaveLength(MAX_ATTACHMENTS);
       // Exactly 1 too-many error
-      const tooMany = result.current.errors.filter((e) => e.reason === 'too-many');
+      const tooMany = result.current.errors.filter(e => e.reason === 'too-many');
       expect(tooMany).toHaveLength(1);
       expect(tooMany[0].filename).toBe('f5.txt');
       expect(tooMany[0].message).toMatch(/Maximum 5/);
@@ -139,7 +133,7 @@ describe('useChatFileAttachment', () => {
       });
 
       expect(result.current.files).toHaveLength(0);
-      const tooLarge = result.current.errors.filter((e) => e.reason === 'too-large');
+      const tooLarge = result.current.errors.filter(e => e.reason === 'too-large');
       expect(tooLarge).toHaveLength(1);
       expect(tooLarge[0].filename).toBe('huge.txt');
       // Error message must reference the 25 MB limit
@@ -205,7 +199,7 @@ describe('useChatFileAttachment', () => {
       });
 
       expect(result.current.files).toHaveLength(0);
-      const unsupported = result.current.errors.filter((e) => e.reason === 'unsupported-mime');
+      const unsupported = result.current.errors.filter(e => e.reason === 'unsupported-mime');
       expect(unsupported).toHaveLength(1);
     });
 
@@ -225,10 +219,10 @@ describe('useChatFileAttachment', () => {
         await result.current.addFiles([pdf]);
       });
 
-      const cap = result.current.errors.filter((e) => e.reason === 'pdf-too-many-pages');
+      const cap = result.current.errors.filter(e => e.reason === 'pdf-too-many-pages');
       expect(cap).toHaveLength(1);
       // Chip transitions to `error` state
-      const chip = result.current.files.find((c) => c.filename === 'huge.pdf');
+      const chip = result.current.files.find(c => c.filename === 'huge.pdf');
       expect(chip?.status).toBe('error');
     });
   });
@@ -319,9 +313,7 @@ describe('useChatFileAttachment', () => {
       mockGetDocumentPromise.mockRejectedValue(new Error('corrupted pdf'));
 
       const onExtractionError = jest.fn();
-      const { result } = renderHook(() =>
-        useChatFileAttachment({ onExtractionError })
-      );
+      const { result } = renderHook(() => useChatFileAttachment({ onExtractionError }));
 
       const pdf = makeFile('bad.pdf', 'application/pdf', new ArrayBuffer(1024));
 
@@ -337,7 +329,7 @@ describe('useChatFileAttachment', () => {
       expect((error as Error).message).toBe('corrupted pdf');
 
       // Chip ends in `error` state with `extraction-failed` reason
-      const errorEntries = result.current.errors.filter((e) => e.reason === 'extraction-failed');
+      const errorEntries = result.current.errors.filter(e => e.reason === 'extraction-failed');
       expect(errorEntries).toHaveLength(1);
     });
 
@@ -348,9 +340,7 @@ describe('useChatFileAttachment', () => {
         throw new Error('telemetry boom');
       });
 
-      const { result } = renderHook(() =>
-        useChatFileAttachment({ onExtractionError })
-      );
+      const { result } = renderHook(() => useChatFileAttachment({ onExtractionError }));
 
       const docx = makeFile(
         'bad.docx',
@@ -377,7 +367,7 @@ describe('useChatFileAttachment', () => {
       });
 
       expect(onExtractionError).toHaveBeenCalledTimes(1);
-      expect(result.current.errors.filter((e) => e.reason === 'extraction-failed')).toHaveLength(1);
+      expect(result.current.errors.filter(e => e.reason === 'extraction-failed')).toHaveLength(1);
     });
   });
 
@@ -436,10 +426,7 @@ describe('useChatFileAttachment', () => {
       // task 061 also verifies via bundle-analyzer output.
       const fs = require('fs');
       const path = require('path');
-      const source = fs.readFileSync(
-        path.resolve(__dirname, '..', 'hooks', 'useChatFileAttachment.ts'),
-        'utf-8'
-      );
+      const source = fs.readFileSync(path.resolve(__dirname, '..', 'hooks', 'useChatFileAttachment.ts'), 'utf-8');
 
       // Match top-level static `import ... from 'pdfjs-dist'` (any quote
       // style, optional default + named). The dynamic `await import('pdfjs-dist')`

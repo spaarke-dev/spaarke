@@ -15,9 +15,7 @@ import { AssociationResolverHost } from './AssociationResolverHost';
 
 const CONTROL_VERSION = '1.1.0';
 
-export class AssociationResolver
-  implements ComponentFramework.ReactControl<IInputs, IOutputs>
-{
+export class AssociationResolver implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   private notifyOutputChanged: () => void = () => undefined;
   private _regardingRecordId = '';
   private _regardingRecordName = '';

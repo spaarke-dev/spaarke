@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Sprk.Bff.Api.Infrastructure.Sse;
 
 namespace Sprk.Bff.Api.Api.Ai;
@@ -308,6 +309,7 @@ internal sealed record WorkspaceActionPayload(
 internal sealed record CapabilityChangePayload(
     string Capability,
     string Status,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     int? RetryAfterSeconds = null);
 
 /// <summary>Payload for <c>safety_annotation</c> events.</summary>

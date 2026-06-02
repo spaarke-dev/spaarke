@@ -39,6 +39,7 @@ This directory contains AI-optimized versions of Architecture Decision Records. 
 | ADR-029 | BFF Publish Hygiene | Framework-dependent linux-x64, sourcemap exclusion, transitive CVE override pattern, size baseline ratchet | Accepted (2026-05-26) |
 | ADR-030 | PaneEventBus pattern | Typed multi-subscriber cross-pane bus; four channels (workspace/context/conversation/safety); no `any` payloads; one provider at shell root | Accepted (2026-05-26) |
 | ADR-031 | Stage Lifecycle Pattern | Four stages (`welcome`/`loading`/`active-chat`/`review`); `determineStage()` canonical; transitions driven by PaneEventBus (ADR-030); client-side recompute wins over persisted state | Accepted (2026-05-26) |
+| ADR-032 | BFF Null-Object Kill-Switch Pattern | Conditional service consumed by unconditional endpoint → Null-Object in else-branch (P1/P2/P3); `FeatureDisabledException` → 503 ProblemDetails | Accepted (2026-06-01) — renumbered from ADR-030 during R4 merge per number-collision resolution |
 
 ---
 

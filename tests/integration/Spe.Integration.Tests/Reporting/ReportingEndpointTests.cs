@@ -49,8 +49,8 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
 
     // Pre-built test GUIDs for query parameters.
     private static readonly Guid TestWorkspaceId = new("11111111-1111-1111-1111-111111111111");
-    private static readonly Guid TestReportId    = new("22222222-2222-2222-2222-222222222222");
-    private static readonly Guid TestDatasetId   = new("33333333-3333-3333-3333-333333333333");
+    private static readonly Guid TestReportId = new("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid TestDatasetId = new("33333333-3333-3333-3333-333333333333");
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

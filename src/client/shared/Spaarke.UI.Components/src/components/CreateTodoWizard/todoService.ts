@@ -42,8 +42,8 @@ export class TodoService {
       sprk_eventname: formValues.title.trim(),
       sprk_priority: formValues.priority,
       sprk_todoflag: true,
-      sprk_todostatus: 0,  // Open
-      sprk_todosource: 0,  // User
+      sprk_todostatus: 0, // Open
+      sprk_todosource: 0, // User
     };
 
     if (formValues.description?.trim()) {

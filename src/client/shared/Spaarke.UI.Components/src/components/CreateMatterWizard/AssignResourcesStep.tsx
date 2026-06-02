@@ -11,12 +11,7 @@
  */
 
 import * as React from 'react';
-import {
-  Text,
-  Checkbox,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Text, Checkbox, makeStyles, tokens } from '@fluentui/react-components';
 import { LookupField } from './LookupField';
 import type { ILookupItem } from '../../types/LookupTypes';
 
@@ -138,8 +133,7 @@ export const AssignResourcesStep: React.FC<IAssignResourcesStepProps> = ({
           Assign Resources
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Search and assign internal and external resources to this matter.
-          All fields are optional.
+          Search and assign internal and external resources to this matter. All fields are optional.
         </Text>
       </div>
 

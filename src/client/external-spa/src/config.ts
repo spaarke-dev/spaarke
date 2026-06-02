@@ -35,8 +35,8 @@ function requireEnvVar(key: string, label: string): string {
   if (!value) {
     throw new Error(
       `[ExternalSPA] Missing required environment variable '${key}' (${label}). ` +
-        "Ensure .env.development exists for local dev, or CI/CD token substitution " +
-        "has run against .env.production before the Vite build."
+        'Ensure .env.development exists for local dev, or CI/CD token substitution ' +
+        'has run against .env.production before the Vite build.'
     );
   }
 
@@ -56,39 +56,27 @@ function requireEnvVar(key: string, label: string): string {
 // ---------------------------------------------------------------------------
 
 /** BFF API base URL — injected via .env.development or CI/CD token substitution. */
-export const BFF_API_URL: string = requireEnvVar(
-  "VITE_BFF_API_URL",
-  "BFF API base URL"
-);
+export const BFF_API_URL: string = requireEnvVar('VITE_BFF_API_URL', 'BFF API base URL');
 
 /**
  * MSAL client ID for the SPA app registration (spaarke-external-access-SPA).
  * Injected via .env.development or CI/CD token substitution.
  */
-export const MSAL_CLIENT_ID: string = requireEnvVar(
-  "VITE_MSAL_CLIENT_ID",
-  "MSAL SPA client ID"
-);
+export const MSAL_CLIENT_ID: string = requireEnvVar('VITE_MSAL_CLIENT_ID', 'MSAL SPA client ID');
 
 /**
  * Entra tenant ID (main Spaarke workforce tenant).
  * External users are B2B guests in this tenant — SSO with Microsoft 365 credentials.
  * Injected via .env.development or CI/CD token substitution.
  */
-export const MSAL_TENANT_ID: string = requireEnvVar(
-  "VITE_MSAL_TENANT_ID",
-  "Entra tenant ID"
-);
+export const MSAL_TENANT_ID: string = requireEnvVar('VITE_MSAL_TENANT_ID', 'Entra tenant ID');
 
 /**
  * BFF API OAuth scope for token acquisition.
  * Defined on SDAP-BFF-SPE-API app registration.
  * Injected via .env.development or CI/CD token substitution.
  */
-export const MSAL_BFF_SCOPE: string = requireEnvVar(
-  "VITE_MSAL_BFF_SCOPE",
-  "BFF API OAuth scope"
-);
+export const MSAL_BFF_SCOPE: string = requireEnvVar('VITE_MSAL_BFF_SCOPE', 'BFF API OAuth scope');
 
 /** App version — update on each release */
-export const APP_VERSION = "1.0.0";
+export const APP_VERSION = '1.0.0';

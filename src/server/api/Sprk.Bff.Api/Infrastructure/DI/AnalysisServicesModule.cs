@@ -1,8 +1,11 @@
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Insights;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -27,7 +30,13 @@ public static class AnalysisServicesModule
         }
         else
         {
-            Console.WriteLine("\u26a0 Document Intelligence services disabled (DocumentIntelligence:Enabled = false)");
+            // L4 \u2014 NullTextExtractor (P3 Fail-Fast). Task 011 Phase 1b Tier 2, D-09 \u00a72 L4.
+            // ITextExtractor is consumed unconditionally by WorkspaceFileEndpoints and
+            // ChatDocumentEndpoints; registering a Null-Object here keeps DI param-inference
+            // green when DocumentIntelligence:Enabled=false. Endpoint catches convert the
+            // FeatureDisabledException to 503 ProblemDetails.
+            services.AddSingleton<ITextExtractor, NullTextExtractor>();
+            Console.WriteLine("\u26a0 Document Intelligence services disabled (DocumentIntelligence:Enabled = false) \u2014 NullTextExtractor registered");
         }
 
         var analysisEnabled = configuration.GetValue<bool>("Analysis:Enabled", true);
@@ -54,19 +63,176 @@ public static class AnalysisServicesModule
             services.AddAiModule(configuration);
             Console.WriteLine("\u2713 AI Platform Foundation module enabled (DocumentParserRouter, SemanticDocumentChunker, RagQueryBuilder)");
 
+            AddInsightsCache(services);
+            Console.WriteLine("\u2713 Insights playbook execution cache enabled (D-P13, ADR-009)");
+
             Console.WriteLine("\u2713 Analysis services enabled");
         }
         else if (!documentIntelligenceEnabled)
         {
-            Console.WriteLine("\u26a0 Analysis services disabled (requires DocumentIntelligence:Enabled = true)");
+            // L1/L3/B6/B7 Null-Objects for compound-OFF (DocumentIntelligence:Enabled=false branch).
+            AddNullObjectsForCompoundOff(services);
+            Console.WriteLine("\u26a0 Analysis services disabled (requires DocumentIntelligence:Enabled = true) \u2014 Null-Objects registered");
         }
         else
         {
-            Console.WriteLine("\u26a0 Analysis services disabled (Analysis:Enabled = false)");
+            // L1/L3/B6/B7 Null-Objects for compound-OFF (Analysis:Enabled=false branch).
+            AddNullObjectsForCompoundOff(services);
+            Console.WriteLine("\u26a0 Analysis services disabled (Analysis:Enabled = false) \u2014 Null-Objects registered");
         }
 
         AddRecordMatchingServices(services, configuration);
+
+        // Unconditional chat-CRUD + notification services (task 011 Phase 1b Tier 1, D-09 §2 B1/B4/B5/L5).
+        // These services have ZERO AI dependencies; their previous conditional registration was
+        // misclassification (they were placed inside compound-gated helpers because AI features
+        // CONSUME them, but their constructor deps are CRUD-only — IGenericEntityService,
+        // IDistributedCache, IFieldMappingDataverseService, all unconditional per GraphModule).
+        // Promotion-to-unconditional eliminates 8 startup metadata-gen abort sites and unblocks
+        // ~36 currently-Skipped integration tests (RB-T028-03/04/05 + collateral RB-T028-06).
+        // See projects/sdap.bff.api-test-suite-repair-r2/decisions/D-09-nullobject-design.md.
+        AddUnconditionalChatAndNotificationServices(services);
+
         return services;
+    }
+
+    /// <summary>
+    /// Registers chat-CRUD + notification services UNCONDITIONALLY (task 011, D-09 §2 B1/B4/B5/L5).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// These 6 services were previously registered inside the compound
+    /// <c>Analysis:Enabled &amp;&amp; DocumentIntelligence:Enabled</c> gate but have ZERO AI
+    /// dependencies in their constructors. Promotion is per ADR-010 (DI minimalism favors
+    /// unconditional registration when feature gating adds no value) and ADR-018 (kill switches
+    /// must not gate CRUD-only services that AI features happen to consume).
+    /// </para>
+    /// <para>
+    /// Items promoted:
+    /// <list type="bullet">
+    /// <item>B1: <see cref="Services.NotificationService"/> — was AnalysisServicesModule.AddPlaybookServices line 108</item>
+    /// <item>B4: <see cref="IChatDataverseRepository"/> + <see cref="ChatDataverseRepository"/> — was AiModule line 230</item>
+    /// <item>B4: <see cref="ChatSessionManager"/> — was AiModule lines 238–242</item>
+    /// <item>B5: <see cref="ChatHistoryManager"/> — was AiModule line 247</item>
+    /// <item>L5: <see cref="AnalysisChatContextResolver"/> — was AiModule line 261</item>
+    /// <item>L5: <see cref="StandaloneChatContextProvider"/> — was AiModule line 266</item>
+    /// </list>
+    /// </para>
+    /// </remarks>
+    private static void AddUnconditionalChatAndNotificationServices(IServiceCollection services)
+    {
+        // B1 — NotificationService (deps: IGenericEntityService, ILogger — both unconditional).
+        services.AddSingleton<Sprk.Bff.Api.Services.NotificationService>();
+
+        // B4 — IChatDataverseRepository + ChatDataverseRepository
+        // (deps: IGenericEntityService, IFieldMappingDataverseService, ILogger — all unconditional).
+        services.AddScoped<IChatDataverseRepository, ChatDataverseRepository>();
+
+        // B4 — ChatSessionManager (deps: IDistributedCache, IChatDataverseRepository,
+        // ILogger, optional ISessionPersistenceService — last is null-tolerant via GetService).
+        services.AddScoped<ChatSessionManager>(sp => new ChatSessionManager(
+            cache: sp.GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(),
+            dataverseRepository: sp.GetRequiredService<IChatDataverseRepository>(),
+            logger: sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChatSessionManager>>(),
+            persistence: sp.GetService<Sprk.Bff.Api.Services.Ai.Sessions.ISessionPersistenceService>()));
+
+        // B5 — ChatHistoryManager (deps: ChatSessionManager + IChatDataverseRepository + ILogger — all unconditional).
+        services.AddScoped<ChatHistoryManager>();
+
+        // Tier 1.5 residual — ChatContextMappingService (deps: IDistributedCache + IGenericEntityService +
+        // ILogger + optional IConnectionMultiplexer — all unconditional). Originally classified as
+        // compound-gated in D-09; Phase 1c triage 2026-06-01 surfaced ChatEndpoints.GetContextMappingsAsync
+        // + EvictContextMappingsCacheAsync inject this unconditionally → metadata-gen abort when AI flags off.
+        // Promoted under D-02 cluster exception (still attributed to RB-T028-04 cluster fix). ADR-010 (AIPL-053).
+        services.AddScoped<ChatContextMappingService>();
+
+        // Tier 1.5 round 2 residual — DocxExportService (deps: ILogger + IOptions<AnalysisOptions> —
+        // AnalysisOptions is bound unconditionally in ConfigurationModule.cs:55-59). Originally registered
+        // inside AddAnalysisOrchestrationServices (conditional); Phase 1c re-triage 2026-06-01 surfaced
+        // ChatWordExportEndpoints.ExportToWordAsync injects the concrete DocxExportService unconditionally
+        // → metadata-gen abort when Analysis:Enabled=false. Same root cause as ChatContextMappingService.
+        // Promoted under D-02 cluster exception. ADR-010.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.DocxExportService>();
+
+        // Tier 1.5 round 3 residual — IWorkingDocumentService (deps: IGenericEntityService + IServiceProvider +
+        // IOptions<AnalysisOptions> + ILogger — all unconditional). Originally registered inside
+        // AddAnalysisOrchestrationServices (conditional); Phase 1c re-re-triage 2026-06-01 surfaced
+        // ChatEndpoints.SendMessageAsync line 318 injects IWorkingDocumentService as a hard [FromServices]
+        // parameter → DI resolve failure (500 NoServiceFound) when Analysis:Enabled=false. Same root cause
+        // pattern as ChatContextMappingService + DocxExportService. Note: ChatEndpoints.ApprovePlanAsync
+        // line 1334 uses defensive RequestServices.GetService<>() — that path was tolerant; SendMessageAsync
+        // was not. Promoted under D-02 cluster exception. ADR-010.
+        services.AddScoped<IWorkingDocumentService, WorkingDocumentService>();
+
+        // L5 — AnalysisChatContextResolver (deps: IGenericEntityService + IDistributedCache + ILogger).
+        services.AddScoped<AnalysisChatContextResolver>();
+
+        // L5 — StandaloneChatContextProvider (deps: IDistributedCache + ILogger).
+        services.AddScoped<StandaloneChatContextProvider>();
+    }
+
+    /// <summary>
+    /// Registers P3 Fail-Fast Null-Objects for compound-AI-OFF state (task 011 Phase 1b Tier 2,
+    /// D-09 §2 L1/L3/B6/B7). Called from BOTH compound-off branches (DocIntel-off + Analysis-off).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Each Null-Object throws <see cref="Configuration.FeatureDisabledException"/> on every
+    /// public method; consumer endpoints catch this and convert to 503 ProblemDetails per
+    /// ADR-018 + ADR-019. Logger-only deps keep these Null-Objects safe to register even when
+    /// AI deps (<see cref="IOpenAiClient"/>, etc.) are absent.
+    /// </para>
+    /// <para>
+    /// Per D-09 §8 Risks: <see cref="NullPlaybookService"/> is registered via plain
+    /// <c>AddSingleton</c> (NOT <c>AddHttpClient</c>); the real <c>PlaybookService</c> uses
+    /// typed HttpClient but the Null-Object has no need for HttpClient machinery.
+    /// </para>
+    /// </remarks>
+    private static void AddNullObjectsForCompoundOff(IServiceCollection services)
+    {
+        // L1 — IBriefingAi (P3 Fail-Fast). Real impl registered in AddPublicContractsFacade.
+        services.AddScoped<IBriefingAi, NullBriefingAi>();
+
+        // L3 — IPlaybookOrchestrationService (P3 Fail-Fast). Real impl registered in AddPlaybookServices.
+        services.AddScoped<IPlaybookOrchestrationService, NullPlaybookOrchestrationService>();
+
+        // B6 — IPlaybookService (P3 Fail-Fast). Real impl registered in AddPlaybookServices as typed HttpClient.
+        services.AddSingleton<IPlaybookService, NullPlaybookService>();
+
+        // B7 — IRagService (P3 Fail-Fast). Real impl registered in AddRagServices behind AI Search keys gate.
+        services.AddSingleton<IRagService, NullRagService>();
+
+        // ── Tier 1.5 round 4 — flushed by Step 9.5 latent-bug scan 2026-06-01 ─────────────────
+        // Two additional P3 Fail-Fast Null-Objects surfaced by the same anti-pattern that the
+        // 3 prior Tier 1.5 rounds fixed: unconditional endpoint mappings whose handlers inject
+        // services that AddRagServices registers behind a compound + AI Search keys sub-gate.
+        // Absorbed under D-02 cluster exception per user approval. Same root cause pattern as
+        // the prior residuals (ChatContextMappingService, DocxExportService, IWorkingDocumentService).
+        //
+        // IVisualizationService — consumed by VisualizationEndpoints (EndpointMappingExtensions.cs:159
+        //   app.MapVisualizationEndpoints() — unconditional). Real impl registered AddRagServices line 423.
+        //   Lifetime: singleton (matches real VisualizationService).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService, NullVisualizationService>();
+
+        // IFileIndexingService — consumed by RagEndpoints handlers IndexFile + SendToIndex
+        //   (EndpointMappingExtensions.cs:133 app.MapRagEndpoints() — unconditional) AND by
+        //   IndexingWorkerHostedService / RagIndexingJobHandler / BulkRagIndexingJobHandler. Real
+        //   impl registered AddRagServices line 422. Lifetime: scoped (matches real FileIndexingService).
+        services.AddScoped<IFileIndexingService, NullFileIndexingService>();
+
+        // B2 — SprkChatAgentFactory (P3 Fail-Fast subclass). Task 011 Phase 1b Tier 3, D-09 §2 B2.
+        // Real impl registered unconditionally inside AddAiModule (only invoked on compound-ON path).
+        // The Null subclass uses the protected base ctor that bypasses AI deps; consumed unconditionally
+        // by ChatEndpoints (MapChatEndpoints) which catches FeatureDisabledException → SSE error / 503.
+        services.AddSingleton<SprkChatAgentFactory>(sp =>
+            new NullSprkChatAgentFactory(sp.GetRequiredService<ILogger<SprkChatAgentFactory>>()));
+
+        // B3 — PendingPlanManager (P3 Fail-Fast subclass). Task 011 Phase 1b Tier 3, D-09 §2 B3.
+        // Real impl registered scoped inside AddAiModule (compound-ON only). The Null subclass
+        // surfaces compound-intent plan operations as FeatureDisabledException; ChatEndpoints
+        // SendMessageAsync + ApprovePlanAsync catch and emit SSE error chunks per ADR-018.
+        services.AddScoped<PendingPlanManager>(sp =>
+            new NullPendingPlanManager(sp.GetRequiredService<ILogger<PendingPlanManager>>()));
     }
 
     private static void AddAnalysisOrchestrationServices(IServiceCollection services, IConfiguration configuration)
@@ -79,9 +245,16 @@ public static class AnalysisServicesModule
         services.AddHttpClient<IScopeResolverService, ScopeResolverService>();
         services.AddScoped<IScopeManagementService, ScopeManagementService>();
         services.AddScoped<IAnalysisContextBuilder, AnalysisContextBuilder>();
-        services.AddScoped<IWorkingDocumentService, WorkingDocumentService>();
+        // IWorkingDocumentService promoted to unconditional (task 011 Phase 1b Tier 1.5 round 3,
+        // RB-T028-04 cluster residual — 2026-06-01). Phase 1c re-re-triage surfaced
+        // ChatEndpoints.SendMessageAsync line 318 injects IWorkingDocumentService as a hard
+        // [FromServices] parameter → DI resolve failure (500 NoServiceFound) when Analysis:Enabled=false.
+        // See AddUnconditionalChatAndNotificationServices below.
         services.AddHttpContextAccessor();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.DocxExportService>();
+        // DocxExportService promoted to unconditional (task 011 Phase 1b Tier 1.5 round 2, RB-T028-04
+        // cluster residual — 2026-06-01). Phase 1c re-triage surfaced ChatWordExportEndpoints.ExportToWordAsync
+        // injects the concrete DocxExportService unconditionally → metadata-gen abort when Analysis:Enabled=false.
+        // See AddUnconditionalChatAndNotificationServices below.
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.DocxExportService>();
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.PdfExportService>();
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.EmailExportService>();
@@ -100,7 +273,8 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutorRegistry, Sprk.Bff.Api.Services.Ai.Nodes.NodeExecutorRegistry>();
         services.AddScoped<IPlaybookOrchestrationService, PlaybookOrchestrationService>();
         services.AddHttpClient<IPlaybookSharingService, PlaybookSharingService>();
-        services.AddSingleton<Sprk.Bff.Api.Services.NotificationService>();
+        // NotificationService promoted to unconditional registration (task 011 Phase 1b Tier 1, D-09 §2 B1).
+        // See AddUnconditionalChatAndNotificationServices below.
         services.AddHostedService<Sprk.Bff.Api.Services.PlaybookSchedulerService>();
     }
 
@@ -193,6 +367,59 @@ public static class AnalysisServicesModule
         // CodeInterpreterTools are NOT registered here — they are factory-instantiated by SprkChatAgentFactory
         // following the WebSearchTools pattern (ADR-010: no unnecessary DI registrations).
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Foundry.CodeInterpreterBridge>();
+
+        // GroundingVerifier — D-P9 / D-47 / LAVERN ADR 10.6 platform primitive (Insights Engine Phase 1).
+        // Mechanical zero-LLM citation verifier (substring + sliding-window, 10K-char DoS cap).
+        // Singleton: stateless, thread-safe; shared across Insights synthesis (D-P14) and Action Engine consumers.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.CitationVerification.IGroundingVerifier,
+            Sprk.Bff.Api.Services.Ai.CitationVerification.GroundingVerifier>();
+
+        // GroundingVerifyNode — D-P9 + D-P12 node executor (ActionType.GroundingVerify = 70).
+        // Wraps IGroundingVerifier as INodeExecutor for the node-based playbook system.
+        // Singleton matches the other INodeExecutor registrations above (executors are stateless).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor,
+            Sprk.Bff.Api.Services.Ai.Nodes.GroundingVerifyNode>();
+
+        // D-P12 task 022 — Five new Insights-mode node executors (ActionType 80–120).
+        // All five are stateless and follow the GroundingVerifyNode singleton pattern.
+        // - LiveFactNode (80)           — wraps ILiveFactResolver; emits FactArtifact
+        // - IndexRetrieveNode (90)      — config-driven AI Search query against spaarke-insights-index
+        // - EvidenceSufficiencyNode (100) — deterministic rule evaluator (D-49 LAVERN Pattern #7)
+        // - DeclineToFindNode (110)     — emits typed DeclineResponse (D-49)
+        // - ReturnInsightArtifactNode (120) — final node; serializes envelope + D-A23/D-48 EvidenceGuard
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor,
+            Sprk.Bff.Api.Services.Ai.Nodes.LiveFactNode>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor,
+            Sprk.Bff.Api.Services.Ai.Nodes.IndexRetrieveNode>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor,
+            Sprk.Bff.Api.Services.Ai.Nodes.EvidenceSufficiencyNode>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor,
+            Sprk.Bff.Api.Services.Ai.Nodes.DeclineToFindNode>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor,
+            Sprk.Bff.Api.Services.Ai.Nodes.ReturnInsightArtifactNode>();
+    }
+
+    /// <summary>
+    /// Registers the D-P13 Insights playbook execution cache (SPEC §3.1) wrapping
+    /// <see cref="IPlaybookExecutionEngine"/> calls in a Redis layer per ADR-009.
+    /// </summary>
+    /// <remarks>
+    /// Two singletons:
+    /// <list type="bullet">
+    /// <item><see cref="InsightsCacheMetrics"/> — OpenTelemetry meter for cache hit/miss/eviction
+    /// counters. Singleton because the underlying <see cref="System.Diagnostics.Metrics.Meter"/>
+    /// is intended to be long-lived.</item>
+    /// <item><see cref="IInsightsPlaybookExecutionCache"/> — stateless wrapper over
+    /// <see cref="Microsoft.Extensions.Caching.Distributed.IDistributedCache"/> (singleton)
+    /// + <see cref="InsightsCacheMetrics"/> (singleton). Singleton is the correct lifetime
+    /// per ADR-010 (no per-request state). The future <c>InsightsOrchestrator</c> facade
+    /// (task 042 D-P9) will consume it.</item>
+    /// </list>
+    /// </remarks>
+    private static void AddInsightsCache(IServiceCollection services)
+    {
+        services.AddSingleton<InsightsCacheMetrics>();
+        services.AddSingleton<IInsightsPlaybookExecutionCache, InsightsPlaybookExecutionCache>();
     }
 
     private static void AddRagServices(IServiceCollection services, IConfiguration configuration)
@@ -216,7 +443,19 @@ public static class AnalysisServicesModule
         }
         else
         {
-            Console.WriteLine("\u26a0 RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key)");
+            // B7 fallback \u2014 compound gate ON but AI Search keys missing. Register Null-Object
+            // so IRagService consumers (RagEndpoints, KnowledgeBaseEndpoints TestSearch + delete)
+            // can still resolve their DI graph. Endpoint catches convert FeatureDisabledException
+            // to 503 ProblemDetails. Task 011 Phase 1b Tier 2, D-09 \u00a72 B7.
+            services.AddSingleton<IRagService, NullRagService>();
+
+            // Tier 1.5 round 4 (2026-06-01) \u2014 IVisualizationService + IFileIndexingService share
+            // the same AI-Search-keys sub-gate as IRagService. Mirror the fallback registration
+            // so the AI-Search-keys-missing branch also resolves these consumers' DI graph.
+            services.AddSingleton<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService, NullVisualizationService>();
+            services.AddScoped<IFileIndexingService, NullFileIndexingService>();
+
+            Console.WriteLine("\u26a0 RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key) \u2014 NullRagService + NullVisualizationService + NullFileIndexingService registered");
         }
 
         services.AddSingleton<ITextChunkingService, TextChunkingService>();

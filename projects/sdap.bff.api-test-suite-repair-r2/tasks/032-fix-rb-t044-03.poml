@@ -1,0 +1,130 @@
+<task id="032" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P3 — Fix RB-T044-03: CitationExtractor.NormalizeStatute trim subsections from canonical key</title>
+    <phase>Phase 3: LOW Severity + Integration Stability</phase>
+    <status>not-started</status>
+    <estimated-effort>30-60 minutes</estimated-effort>
+    <dependencies>029</dependencies>
+    <blocks>033, 038</blocks>
+    <tags>phase-3, bff-api, real-bug-ledger, low-severity, production-fix, ai-safety, citations</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production code modification in src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/; per task-execute rigor decision tree FULL rigor required for .cs changes (code-review + adr-check at Step 9.5).</rigor-reason>
+    <parallel-group>P3-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <production-fix-per-ledger>true</production-fix-per-ledger>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Close ledger entry RB-T044-03 by repairing `CitationExtractor.NormalizeStatute` in
+    `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs`. The normalizer concatenates the regex section
+    capture verbatim (including subsection parentheticals), yielding `17 U.S.C. § 512(c)(1)(A)` instead of the canonical `17 U.S.C. § 512`.
+
+    Production fix per ledger Recommended Fix section: strip the parenthetical in the normalizer:
+
+    ```
+    var section = m.Groups["section"].Value.Trim();
+    var parenStart = section.IndexOf('(');
+    if (parenStart >= 0) section = section[..parenStart];
+    return $"{title} U.S.C. § {section}";
+    ```
+
+    Test impact: 1 Skip'd test (`ExtractCitations_Statute_StripsSubsectionsInNormalizedKey` Fact) flips Skip -> Pass.
+    Per NFR-04: commit message MUST cite "RB-T044-03" + resolution mode `repaired`.
+
+    Coordination: `CitationExtractor.cs` is SHARED with task 033 (RB-T044-05 RegulationPattern). Task 033 is marked
+    `parallel-safe: false` and waits for THIS task to land first.
+  </prompt>
+
+  <role>BFF production-fix engineer closing a LOW-severity real-bug ledger entry under repair-not-rewrite discipline.</role>
+
+  <goal>
+    `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs` `NormalizeStatute` truncates the section capture at the first
+    `(` before concatenating. 1 Skip'd test in the corresponding test file passes when re-enabled. Ledger row RB-T044-03 status → `repaired`.
+
+    Existing passing Statute Theory cases continue to pass (no regression on canonical `§ 101`-style cites).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="r1-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file purpose="production-target">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs</file>
+    <file purpose="unit-tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/Citations/CitationExtractorTests.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013-refined">AI extends BFF (2026-05-20) — fix is in-process under BFF Services/Ai/Safety; no extraction</constraint>
+    <constraint source="NFR-01">Production code IS in scope (r2); tests modified ONLY for Skip→Pass transitions</constraint>
+    <constraint source="NFR-02">&lt;50% line replacement per file; targeted 3-4 line edit inside one method</constraint>
+    <constraint source="NFR-04">Commit cites ledger entry ID + resolution mode</constraint>
+    <constraint source="D-02">One fix = one ledger entry closed</constraint>
+    <constraint source="D-05">Real-bug ledger source of truth; transition RB-T044-03 → `repaired`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per r1 ledger entry RB-T044-03 (filed 2026-05-31, fix-by 2026-07-31): the regex captures `(?<section>\d[\d\-\.]*[a-z]?(?:\([a-z0-9]+\))*)` including subsection parentheticals; the bug is only in the NORMALIZER (canonical key), not the regex itself. Per Phase 2 work, tasks 020 (RB-T044-02 NormalizeCaseLaw) and 021 (RB-T044-04 NormalizePatent) already touched this file. Phase 2 is COMPLETE before Phase 3 starts (Phase 1/2/3 are strictly sequential at phase boundaries), so no parallelism risk with those Phase 2 tasks.
+
+      Within Phase 3: task 033 (RB-T044-05 RegulationPattern) ALSO touches this file. Task 033 is marked `parallel-safe: false` and serialized after this task.
+    </background>
+    <dependencies>
+      <dependency task="029" status="must-be-complete">Phase 2 exit triple-run validation (zero failures) before Phase 3 starts</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/Citations/CitationExtractorTests.cs</file>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Load r1 ledger entry RB-T044-03 (lines ~325-358) for documented bug + recommended fix.</step>
+    <step order="2">Read `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs` focusing on `NormalizeStatute(Match m)` (~line 172).</step>
+    <step order="3">Implement the fix: extract `section` from `m.Groups["section"].Value.Trim()`; truncate at first `(`; concatenate. Preserve method signature and return shape.</step>
+    <step order="4">Build BFF: `dotnet build src/server/api/Sprk.Bff.Api/`. Zero new warnings.</step>
+    <step order="5">Edit `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/Citations/CitationExtractorTests.cs`: remove `Skip = "..."` on `ExtractCitations_Statute_StripsSubsectionsInNormalizedKey`; remove per-test `[Trait("status","real-bug-pending-fix")]` override.</step>
+    <step order="6">Run targeted tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~CitationExtractorTests"`. Re-enabled test must pass; existing Statute Theory cases must still pass.</step>
+    <step order="7">Update `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` RB-T044-03 row: status → `repaired`, fix-commit SHA placeholder + today's date.</step>
+    <step order="8">Commit: `fix(bff-api): trim subsection parenthetical in NormalizeStatute (RB-T044-03; repaired)` — message cites entry ID + resolution mode per NFR-04.</step>
+    <step order="9">Update `projects/sdap.bff.api-test-suite-repair-r2/current-task.md` with completion + commit SHA. Flag that task 033 may now proceed (file conflict cleared).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">CitationExtractor.cs + test file + ledger</tool>
+    <tool name="Edit">Production file (3-4 line edit) + test file (Skip removal) + ledger row</tool>
+    <tool name="Bash">`dotnet build`, `dotnet test --filter`, `git status`, `git commit`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs (NormalizeStatute fix)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/Citations/CitationExtractorTests.cs (1 test un-Skip'd)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (RB-T044-03 row → `repaired`)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CitationExtractor.cs builds successfully with zero new warnings</criterion>
+    <criterion testable="true">`NormalizeStatute` returns canonical key without subsection parentheticals (e.g., `17 U.S.C. § 512` not `17 U.S.C. § 512(c)(1)(A)`)</criterion>
+    <criterion testable="true">`ExtractCitations_Statute_StripsSubsectionsInNormalizedKey` passes when Skip removed</criterion>
+    <criterion testable="true">Existing Statute Theory cases (canonical `§ 101`-style) still pass — no regression</criterion>
+    <criterion testable="true">Commit message contains "RB-T044-03" + word "repaired" (NFR-04)</criterion>
+    <criterion testable="true">Ledger entry RB-T044-03 row status updated to `repaired`</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Invoke `task-execute` skill with this POML. Loads project CLAUDE.md + r1 ledger + ADR-013 + ai.md per knowledge files. Step 9.5 quality gate runs code-review + adr-check (FULL rigor).
+  </execution>
+</task>

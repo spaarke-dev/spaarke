@@ -2,9 +2,9 @@
 
 > **Purpose**: Authoritative guide for the Spaarke code quality system, covering the full quality lifecycle: pre-commit hooks, PR quality gates, nightly sweeps, weekly summaries, quarterly audits, and task-level quality gates within Claude Code.
 >
-> **Last Updated**: April 5, 2026
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
+> **Last Updated**: 2026-06-01 (r2 task 080 — added BFF test suite repair lessons + TestClock pattern)
+> **Last Reviewed**: 2026-06-01
+> **Reviewed By**: `sdap.bff.api-test-suite-repair-r2` Phase 5 task 080 (codifies FR-07, FR-13, FR-09 + Track E lessons)
 > **Status**: Current
 
 ---
@@ -55,8 +55,13 @@ This guide explains the complete code quality system in the Spaarke development 
 15. [Test Selection Matrix](#test-selection-matrix)
 16. [Coverage Targets](#coverage-targets)
 17. [Architecture Test Enforcement](#architecture-test-enforcement)
-18. [Complete Quality Flow](#complete-quality-flow)
-19. [Skill Reference](#skill-reference)
+18. [BFF Test Suite Repair Lessons (2026-06-01 — r2 codification)](#bff-test-suite-repair-lessons-2026-06-01--r2-codification)
+    - [Asymmetric-Registration Pre-Commit Check](#asymmetric-registration-pre-commit-check-lesson-1)
+    - [Fixture-Config-FIRST Inspection Protocol](#fixture-config-first-inspection-protocol-lesson-2)
+    - [Empirical-Reproduction-FIRST Protocol](#empirical-reproduction-first-protocol-lesson-3)
+    - [Deterministic Test Data: TestClock + IGuidProvider Pattern](#deterministic-test-data-testclock--iguidprovider-pattern-fr-13)
+19. [Complete Quality Flow](#complete-quality-flow)
+20. [Skill Reference](#skill-reference)
 
 ---
 
@@ -1300,6 +1305,262 @@ When a new ADR is created that has enforceable structural constraints:
 
 ---
 
+## BFF Test Suite Repair Lessons (2026-06-01 — r2 codification)
+
+> **Source**: `projects/sdap.bff.api-test-suite-repair-r2/` Phase 4 Tracks C and E.
+> **Codifies**: FR-07 (procedure-doc update obligation), FR-09 (anti-drift findings cross-reference), FR-13 (TestClock pattern).
+> **Evidence base**:
+> - [Phase 4 Track E — Anti-drift effectiveness report](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md)
+> - [Phase 4 Track C — TestClock + seeded-Guid PoC findings](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-c-testclock-poc-2026-06-01.md)
+> - [ADR-030 — BFF Null-Object Kill-Switch Pattern](../../.claude/adr/ADR-030-bff-nullobject-kill-switch.md)
+>
+> r2 closed 20 r1 ledger entries (5 HIGH + 8 MED + 7 LOW) across 19 commits and exposed three repeatable pre-execution governance gaps. These four subsections codify the patterns so future BFF-touching projects inherit them without re-discovery. Phase 5 task 080 is the canonical merge of these lessons into this procedure doc.
+
+### Asymmetric-Registration Pre-Commit Check (Lesson #1)
+
+**Source**: r2 task 011 RB-T028 cluster + [`asymmetric-registration-inventory-2026-06-01.md`](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/asymmetric-registration-inventory-2026-06-01.md) + [ADR-030 §10](../../.claude/adr/ADR-030-bff-nullobject-kill-switch.md#pr-review-checklist-governance-enforcement--phase-5-of-source-project-codifies-in-docsproceduretesting-and-code-qualitymd).
+
+**Why this lives here**: `CLAUDE.md` §10 bullet 6 says "endpoints that map unconditionally must have unconditional service registration." That catches the **Tier 1 BLOCKING** category (8 of 13 services in r2's inventory) but **misses the Tier 1.5 LATENT** category (5 of 13 — endpoint unconditional + conditional service injected as `[FromServices]` parameter, with or without `IServiceX? = null` nullable default). The Tier 1.5 anti-pattern compiles, local tests pass when the feature flag is on, and fails only at startup metadata-generation when the flag is off. The rule wording was insufficient prevention; r2 task 011 discovered the latent surface AFTER execution began, through 4 follow-up commits (`d932f355`, `43ca4f9b`, `dbd3888e`, `56e74b84`). The static-scan recipe below makes it author-side preventable.
+
+**When to run**: Before opening any PR that adds a new service registration to a `*Module.cs` DI helper under `src/server/api/Sprk.Bff.Api/Infrastructure/DI/`. Also run if the PR adds a new endpoint that depends on an existing conditional service.
+
+**The 4-step static-scan recipe** (lifted from ADR-030 §10):
+
+1. **Enumerate conditional registrations**:
+
+   ```bash
+   rg -t cs -n "if .*Enabled" src/server/api/Sprk.Bff.Api/Infrastructure/DI/
+   ```
+
+   Each match identifies a candidate conditional service (`AddScoped<IServiceX, ServiceX>()` inside an `if (flag)` block).
+
+2. **Enumerate endpoint consumers** for each conditional service `IServiceX`:
+
+   ```bash
+   # find endpoint param injection of conditional services
+   rg -t cs -n "[\s,(]IServiceX\s+\w+[,)]" src/server/api/Sprk.Bff.Api/Api/
+   ```
+
+3. **Verify endpoint-map symmetry**. For each consumer match, locate the `app.MapXxxEndpoints()` call in `EndpointMappingExtensions.cs` (or equivalent). Confirm whether that map call is itself inside an `if (flag)` block.
+
+4. **Classify and choose remediation**:
+
+   | Endpoint map | Service registration | Classification | Required action |
+   |---|---|---|---|
+   | Unconditional | Unconditional | Symmetric (safe) | None |
+   | Conditional | Conditional (same flag) | Symmetric-gated | None |
+   | Unconditional | Conditional | **Tier 1.5 anti-pattern** | Apply one of three remediations below |
+   | Conditional | Unconditional | Asymmetric (wasteful, not broken) | Optional cleanup |
+
+**Three remediations for Tier 1.5** (decision per ADR-030):
+
+- **(a) Promote service to unconditional** — preferred when the service has zero AI/external deps. See ADR-010 DI minimalism + ADR-030 §4.4.
+- **(b) Apply Null-Object kill-switch** — when the service has conditional deps preventing unconditional registration. See ADR-030 §4.1–4.3 + `FeatureDisabledException` + endpoint catch + 503 ProblemDetails.
+- **(c) Refactor endpoint signature** — consume a different service that doesn't have the conditional surface. See r2's `KnowledgeBaseEndpoints` B8 refactor (commit `5613b8ad`) where the endpoint stopped injecting `SearchIndexClient` directly and consumed only `IRagService`.
+
+**Anti-pattern to avoid (do not do this)**:
+
+```csharp
+// FAILS metadata-gen at startup when DocumentIntelligence:Enabled=false
+app.MapGet("/api/finance/invoices/search", async (
+    string query,
+    IInvoiceSearchService searchService) =>  // ← conditional service as hard param
+{ ... });
+
+// In FinanceModule:
+if (documentIntelligenceEnabled)
+{
+    services.AddScoped<IInvoiceSearchService, InvoiceSearchService>();
+}
+// else: NOT registered → endpoint metadata-gen fails
+```
+
+`IInvoiceSearchService? = null` does **not** suppress the failure. The .NET 8 minimal-API metadata generator resolves the dependency at startup independent of the runtime null-check.
+
+**Cross-references**:
+- [`.claude/adr/ADR-030-bff-nullobject-kill-switch.md`](../../.claude/adr/ADR-030-bff-nullobject-kill-switch.md) — full pattern definition + the 3 remediation choices.
+- [`.claude/constraints/bff-extensions.md` § F](../../.claude/constraints/bff-extensions.md) — binding rule (extended by Phase 5 task 081 with the Tier 1.5 language).
+- [`CLAUDE.md` §10 bullet 6](../../CLAUDE.md) — root governance pointer.
+- r2 worked example: [asymmetric-registration-inventory-2026-06-01.md](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/asymmetric-registration-inventory-2026-06-01.md) §5.B (LATENT pairs L1–L5).
+
+---
+
+### Fixture-Config-FIRST Inspection Protocol (Lesson #2)
+
+**Source**: r2 task 025 (RB-T028-07) + r2 task 037 (RB-T028-08). Both ledger entries were initially flagged as "verify subsumed by task 011 cluster fix." Both still failed AFTER task 011 closed. The cluster fix had UNMASKED separate fixture-config gaps, not caused them.
+
+**Why this lives here**: When a test is `Skip`'d under suspicion of a DI / registration root cause, the natural assumption is that fixing the upstream root cause auto-resolves the Skip. r2 evidence shows this assumption fails when the test fixture itself has latent contract gaps that the Skip was hiding:
+
+- **RB-T028-07**: The cluster fix correctly registered `IRagService` and `SearchIndexClient`, but `KnowledgeBaseEndpointsTests` fixture was ALSO missing a `CosmosPersistence:DatabaseName` config key the now-running endpoint needed at request time. The cluster fix **unmasked** the fixture-config gap.
+- **RB-T028-08**: The cluster fix correctly resolved the conditional-service problem, but `AuthorizationIntegrationTests` used `TestUserId = "test-user"` (non-GUID literal) which failed GUID-shape claim validation in newly-reachable Auth filters. The fixture's claims state was the contract gap.
+
+**When to apply**: Before declaring a ledger entry "subsumed by" an upstream root-cause repair (cluster fix, kill-switch, refactor). Run this protocol FIRST, even if the upstream change looks like a clean superset.
+
+**The 3-step inspection checklist**:
+
+Before declaring any ledger entry "subsumed by" a cluster fix or upstream root-cause repair, inspect the test fixture's:
+
+1. **Configuration values** — every config key the test or its production code path reads must be present in the fixture's `appsettings.json`, `IConfigurationBuilder` overrides, OR explicit `fixture.Configuration` setup. Walk the production code path from endpoint → service → infrastructure and list every `IConfiguration.GetValue<T>("...")` and `IOptions<T>` consumer. Compare against the fixture's known keys.
+
+2. **Claims / state** — every value bound to a `ClaimsPrincipal`, `TestUserId`, fake auth token, or simulated user identity MUST satisfy the production contract shape. GUIDs must be GUIDs (use `Guid.NewGuid().ToString()`, never literal `"test-user"`). Emails must be valid emails. OIDs must be GUIDs. Anything the production code parses or validates is a contract surface.
+
+3. **Service mocks** — every method the test exercises must have an explicit `.Setup(...)` (Strict mode) OR be tolerated by the `Loose` mock default. After an upstream root-cause repair, methods previously short-circuited by `Skip` may now execute — what was unreachable becomes reachable. Re-verify mock coverage.
+
+**If any of these gaps exist**, file the fixture-config gap as a SEPARATE ledger entry. Do **NOT** collapse it into the upstream cluster fix.
+
+- Use STANDARD rigor (the fix is usually 1–3 lines).
+- Cite both ledger entries in the commit body (`RB-T028-07 + RB-T028-08` per NFR-04 convention).
+- Update the ledger row "Actual root cause (corrected from r1's hypothesis)" section so future auditors see why the entry didn't collapse.
+
+**Anti-pattern in mental model**: "If a test was Skipped because of a known root cause, and we fix that root cause, the test will pass." This is wrong when the test fixture has multiple latent contract gaps that the Skip was hiding.
+
+**Cross-references**:
+- r2 worked examples: [Phase 4 Track E report §2.2](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md) (RB-T028-07 / RB-T028-08 canonical cases).
+- r1 sibling-fixture pattern: [`projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md`](../../projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md) — the 5 fixture sites sharing 7 missing DI config keys.
+- r2 per-fix triple-run convention: project NFR-09 + [`projects/sdap.bff.api-test-suite-repair-r2/baseline/`](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/).
+
+---
+
+### Empirical-Reproduction-FIRST Protocol (Lesson #3)
+
+**Source**: r2 task 010 (RB-T044-01) + r2 task 011 (RB-T028 cluster) + r2 task 012 (RB-T028-02). In **all 3** cases r1's ledger described the symptom accurately, but r1's HYPOTHESIZED FIX was incomplete or wrong:
+
+- **Task 010 (RB-T044-01)**: r1 ledger recommended a 1-line `if (i > fromTurnIndex)` → `if (i < fromTurnIndex)` inversion in `ConversationHistorySanitizer`. r2 hand-trace + reproduction showed that inversion would BREAK the existing `Sanitizer_StripsRetrievalBlocks_PreservesConclusions` test. True fix: matter-pivot-aware semantic, 37% line replacement.
+- **Task 011 (RB-T028-03/04/05/06 cluster)**: r1 ledger recommended "conditional endpoint mapping" (Approach 1) OR "register a no-op `INotificationService`" (Approach 2). r2 attempt at Approach 1 surfaced E-01's 5-layer failure cascade. True fix: Null-Object kill-switch pattern across **18** services (not the 4 r1 captured), codified as ADR-030. Both r1 approaches were incomplete.
+- **Task 012 (RB-T028-02)**: r1 ledger hypothesized "fixture-text-drift after sibling-project edits." r2 byte-level inspection + temporary Skip removal showed the actual cause was CRLF↔LF whitespace mismatch in `GroundingVerifier.Normalize` semantics — the test was asserting a stricter invariant than production enforced. True fix: 1-line visibility promotion + 16 lines of XML doc + 7 test assertions migrated.
+
+**Why this lives here**: Ledger hypotheses are written without hand-trace + reproduction during the FILE phase (when discovery is hot but root cause may be obscured). When a downstream agent applies the recommended fix without verifying the root cause first, they discover late that the fix is incomplete, wrong, or regresses neighboring tests. This protocol makes empirical reproduction the GATE before fix application.
+
+**When to apply**: Before applying any ledger entry's recommended fix when the fix involves more than a trivial 1-line change. (For 1-line literal changes — e.g., flipping a comparison operator with no production-code touch surface — skip this protocol.)
+
+**The 4-step empirical-reproduction protocol**:
+
+1. **Reproduce the failure locally**. Temporarily remove `Skip = "..."` from the failing test, run it, capture the TRX message verbatim. Compare against the ledger's documented symptom. If they don't match, the ledger is stale or wrong — file a hypothesis-correction note and re-investigate.
+
+2. **Hand-trace the production code path**. Identify the call graph from test entry to the failure site. Verify the recommended fix actually changes the failing assertion's outcome. Use Read on every file in the call chain.
+
+3. **Verify the recommended fix doesn't regress sibling tests**. The same test file's neighboring tests are the first regression risk. Run the whole test file BEFORE applying the fix to capture baseline; re-run AFTER to confirm only the targeted test transitions Skip→Pass.
+
+4. **Run the unit suite Failed-target=0 once with the proposed fix** before opening the PR. `dotnet test tests/unit/Sprk.Bff.Api.Tests/` must report 0 failures.
+
+**If steps 1–4 reveal the ledger's recommended fix is incomplete or wrong**, file a "path-b" decision record:
+
+```
+projects/{project}/decisions/D-XX-{ledger-entry}-actual-fix.md
+```
+
+The path-b record documents:
+
+- The ledger's original hypothesis (preserved verbatim for audit traceability).
+- The empirically-verified actual root cause.
+- The corrected fix path with citations to the call graph and the failing assertion.
+- 3 lines of cross-reference back to the ledger entry (so the ledger row's "Actual root cause (corrected from r1's hypothesis)" section can link forward).
+
+Then proceed with the corrected fix. Cluster exceptions (per the source project's cluster-exception decision) allow bundling the corrected analysis with the production change.
+
+**Worked examples from r2**:
+- [`D-07-insights-layer2-resolution.md`](../../projects/sdap.bff.api-test-suite-repair-r2/decisions/D-07-insights-layer2-resolution.md) — path-b for RB-T028-02 (hypothesis correction).
+- [`D-09-nullobject-design.md`](../../projects/sdap.bff.api-test-suite-repair-r2/decisions/D-09-nullobject-design.md) — per-service Null-Object design (path-b for RB-T028 cluster).
+- [`baseline/per-fix-triple-run-rb-t028-02-2026-06-01.md`](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/per-fix-triple-run-rb-t028-02-2026-06-01.md) — empirical reproduction evidence.
+
+**Cross-references**:
+- [Phase 4 Track E report §2.3](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md) — full Lesson #3 statement with 3 r2 cases.
+- [Phase 4 Track E report §2.4](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md) — discovery-during-execution vs prevention-at-design synthesis.
+
+---
+
+### Deterministic Test Data: TestClock + IGuidProvider Pattern (FR-13)
+
+**Source**: r2 Phase 4 Track C PoC ([phase4-track-c-testclock-poc-2026-06-01.md](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-c-testclock-poc-2026-06-01.md)). Pilot-grade per design decision D-04; ONE consuming class (`PortfolioService`) converted in r2 and the abstractions shipped greenfield. Generalization to other consumers is r3 / steady-state scope.
+
+**When to use**: NEW BFF code (Phase 5 forward) that calls `DateTimeOffset.UtcNow`, `DateTime.UtcNow`, or `Guid.NewGuid()` directly in production paths where tests need to assert exact timestamps or IDs. Existing code is NOT rewritten preemptively — rollout follows the wave plan in §5 of the Track C report.
+
+**Pattern**:
+
+1. **Time seam** — use `System.TimeProvider` (BCL, .NET 8+). Do NOT introduce a custom `IClock`, `ISystemClock`, or sibling interface. `TimeProvider` is abstract (BCL provides `TimeProvider.System`), needs no NuGet package, and matches the existing precedent in `tests/unit/Sprk.Bff.Api.Tests/Services/Insights/Precedents/PrecedentProjectionSyncTests.cs` (which already subclasses `TimeProvider` with a fixed `GetUtcNow()`).
+
+2. **Identity seam** — use a minimal custom `IGuidProvider` interface (no BCL equivalent of `TimeProvider` for `Guid.NewGuid()`):
+
+   ```csharp
+   public interface IGuidProvider { Guid NewGuid(); }
+
+   public sealed class DefaultGuidProvider : IGuidProvider {
+       public Guid NewGuid() => Guid.NewGuid();
+   }
+   ```
+
+   This is an ADR-010 "allowed seam" (single-impl + genuine test-seam requirement; no BCL alternative).
+
+3. **DI registration** — in the feature module (NOT inline in `Program.cs`):
+
+   ```csharp
+   services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+   services.TryAddSingleton<IGuidProvider, DefaultGuidProvider>();
+   ```
+
+   Use `TryAddSingleton` (not `AddSingleton`) so other feature modules can pre-register without conflict.
+
+4. **Production consumer** — inject the seam via constructor, default to the platform implementation so existing call sites stay backward-compatible:
+
+   ```csharp
+   public PortfolioService(
+       IDistributedCache cache,
+       IGenericEntityService entities,
+       ILogger<PortfolioService> logger,
+       TimeProvider? timeProvider = null)  // ← optional; defaults to TimeProvider.System
+   {
+       _timeProvider = timeProvider ?? TimeProvider.System;
+       ...
+   }
+
+   // Replace direct call:
+   //   CachedAt: DateTimeOffset.UtcNow
+   // With:
+       CachedAt: _timeProvider.GetUtcNow()
+   ```
+
+5. **Test-side helpers** — inline `private sealed class` at the bottom of the test file (no shared assembly until 2+ consumers exist; promote then per the Wave 2 plan in Track C §5):
+
+   ```csharp
+   private sealed class FixedTimeProvider : TimeProvider {
+       private readonly DateTimeOffset _utcNow;
+       public FixedTimeProvider(DateTimeOffset utcNow) => _utcNow = utcNow;
+       public override DateTimeOffset GetUtcNow() => _utcNow;
+   }
+
+   private sealed class FakeGuidProvider : IGuidProvider {
+       private readonly Queue<Guid> _seeds;
+       public FakeGuidProvider(params Guid[] seeds) => _seeds = new(seeds);
+       public Guid NewGuid() => _seeds.Count > 0
+           ? _seeds.Dequeue()
+           : throw new InvalidOperationException("FakeGuidProvider exhausted — add more seeds to the test.");
+   }
+   ```
+
+   The `FakeGuidProvider` throws on exhaustion (rather than degrading to `Guid.Empty`) so missing seeds surface as a failed test, not a silent zero-Guid assertion.
+
+**Canonical example in production code**:
+- [`src/server/api/Sprk.Bff.Api/Services/Workspace/PortfolioService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Workspace/PortfolioService.cs) — adopts `TimeProvider` for 2 timestamp seams (`CachedAt`, `Timestamp`).
+- [`src/server/api/Sprk.Bff.Api/Services/Workspace/IGuidProvider.cs`](../../src/server/api/Sprk.Bff.Api/Services/Workspace/IGuidProvider.cs) — the seam definition with XML docs citing ADR-010 allowed-seam pattern.
+- [`src/server/api/Sprk.Bff.Api/Infrastructure/DI/WorkspaceModule.cs`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/WorkspaceModule.cs) — DI registration (the `TryAdd` discipline).
+- [`tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/PortfolioServiceTests.cs`](../../tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/PortfolioServiceTests.cs) — 5-test PoC including both inline helpers.
+
+**Rollout to existing code**: r3 / steady-state scope. The canonical wave plan (Track C §5) is:
+
+- **Wave 1** — same-module non-determinisms in `Services/Workspace/` (`MatterPreFillService`, `ProjectPreFillService`, `BriefingService`, `WorkspaceAiService`, `TodoGenerationService`).
+- **Wave 2** — promote `FixedTimeProvider` + `FakeGuidProvider` to a shared `tests/unit/Sprk.Bff.Api.Tests/TestUtilities/Determinism/` namespace once 2+ test classes adopt the pattern. Evaluate `Microsoft.Extensions.TimeProvider.Testing` NuGet at this point (justify per `bff-extensions.md` §B if adopted).
+- **Wave 3** — cross-module generalization across `Services/Ai/`, `Services/Insights/`, `Services/Jobs/Handlers/`. If `IGuidProvider` migrates beyond Workspace, promote it to `Spaarke.Core`.
+
+**Pattern applies preemptively to NEW code from Phase 5 forward**. Do not rewrite existing direct `*UtcNow` / `Guid.NewGuid()` call sites until they are explicitly in scope for a determinism investment.
+
+**Cross-references**:
+- [Phase 4 Track C PoC report](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-c-testclock-poc-2026-06-01.md) — full PoC findings + ADR compliance audit + r3 wave plan.
+- [`.claude/adr/ADR-010-di-minimalism.md`](../../.claude/adr/ADR-010-di-minimalism.md) — allowed-seam pattern justification.
+- [`.claude/constraints/bff-extensions.md` § A/§ B/§ F](../../.claude/constraints/bff-extensions.md) — placement + package + test-update obligations satisfied by the PoC.
+- spec FR-13 + design.md §5.5 Track C — original design intent in `projects/sdap.bff.api-test-suite-repair-r2/`.
+
+---
+
 ## Complete Quality Flow
 
 ### Task-Level Flow (Every Task)
@@ -1462,6 +1723,10 @@ Project Complete ✅
 2. **Address warnings before PR** - Avoid accumulating debt
 3. **Document skipped suggestions** - Explain why in task notes
 
+**Per-PR reviewer checklist:**
+
+- [ ] Verify test-update obligation per [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md).
+
 ### For UI Testing
 
 1. **Start Claude with `--chrome`** when working on PCF/frontend
@@ -1525,7 +1790,11 @@ claude --chrome
 - [ui-test Skill](../../.claude/skills/ui-test/SKILL.md) - Browser testing details
 - [repo-cleanup Skill](../../.claude/skills/repo-cleanup/SKILL.md) - Cleanup procedures
 - [ci-cd Skill](../../.claude/skills/ci-cd/SKILL.md) - CI/CD pipeline management
+- [ADR-030 — BFF Null-Object Kill-Switch Pattern](../../.claude/adr/ADR-030-bff-nullobject-kill-switch.md) — referenced by the Asymmetric-Registration Pre-Commit Check section
+- [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) — binding test-update + placement governance for `Sprk.Bff.Api/`
+- [Phase 4 Track E — Anti-drift effectiveness report](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md) — evidence base for Lessons #1 / #2 / #3
+- [Phase 4 Track C — TestClock + seeded-Guid PoC findings](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-c-testclock-poc-2026-06-01.md) — evidence base for FR-13 pattern section
 
 ---
 
-*Last updated: April 5, 2026*
+*Last updated: 2026-06-01 (r2 task 080 — added BFF test suite repair lessons + TestClock pattern)*

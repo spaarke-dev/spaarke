@@ -12,10 +12,17 @@ import { SearchResult, SearchFilters, SearchScope, SearchState, SearchError, Sea
 import { SemanticSearchApiService } from '../services';
 
 /**
- * Default search options
+ * Default search options.
+ *
+ * v1.1.49 — `limit` raised from 8 → 25 to power the lazy-load infinite scroll
+ * (Item 9). The PCF requests 25 docs per page on initial load AND each
+ * `loadMore` call; the sentinel-driven hook in the parent fires `loadMore`
+ * as the user scrolls. The BFF already supports `offset`/`count` on the
+ * /api/ai/search endpoint (SemanticSearchEndpoints → BuildSearchOptions
+ * passes `Skip = offset`, `Size = limit`).
  */
 const DEFAULT_OPTIONS: SearchOptions = {
-  limit: 8,
+  limit: 25,
   offset: 0,
   includeHighlights: true,
 };
@@ -131,7 +138,12 @@ export function useSemanticSearch(
       setTotalCount(0);
 
       try {
-        const response = await apiService.search({
+        // v1.1.49 — route through `searchUnion` so "All Documents" mode
+        // (associatedOnly=false on an entity-scoped surface) returns the
+        // union of semantic + associated docs (Item 8 Part B). The wrapper
+        // delegates to plain `search()` for all other paths so existing
+        // behavior is preserved verbatim.
+        const response = await apiService.searchUnion({
           query: searchQuery,
           scope,
           scopeId,
@@ -167,6 +179,12 @@ export function useSemanticSearch(
     setState('loadingMore');
 
     try {
+      // v1.1.49 — loadMore uses plain `search()` (NOT searchUnion). The
+      // initial union returns up to N (semantic) + M (associated) docs at
+      // offset=0; subsequent pages continue paginating the SEMANTIC path
+      // only — the Dataverse-associated path returns its full small N up
+      // front and has no meaningful "next page". Newly appended semantic
+      // docs are deduped by id below so the union remains coherent.
       const response = await apiService.search({
         query,
         scope,
@@ -178,8 +196,13 @@ export function useSemanticSearch(
         },
       });
 
-      // Append new results to existing
-      setResults(prev => [...prev, ...response.results]);
+      // Append new results to existing, defensive-deduping by documentId so
+      // any overlap with the initial associated-only page is collapsed.
+      setResults(prev => {
+        const seen = new Set(prev.map(r => r.documentId));
+        const fresh = response.results.filter(r => !seen.has(r.documentId));
+        return [...prev, ...fresh];
+      });
       setTotalCount(response.totalCount);
       setState('success');
     } catch (err) {

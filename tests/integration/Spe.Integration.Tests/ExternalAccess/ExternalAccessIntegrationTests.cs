@@ -110,8 +110,11 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     {
         // Arrange
         var validRequest = new InviteExternalUserRequest(
-            ContactId: Guid.NewGuid(),
+            Email: "external.user@example.com",
             ProjectId: Guid.NewGuid(),
+            AccessLevel: 100000000,
+            FirstName: null,
+            LastName: null,
             ExpiryDate: null,
             AccountId: null);
 
@@ -373,10 +376,16 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     [Fact]
     public async Task InviteExternalUser_EmptyContactId_Returns400WithProblemDetails()
     {
-        // Arrange
+        // Arrange — InviteExternalUserRequest no longer has a ContactId field (renamed/removed
+        // when the endpoint switched to email-based Contact resolution). The closest semantic
+        // 400-validation path is now an empty Email; this test continues to assert the
+        // request-validation 400 path on the invite endpoint. Test name retained for git history.
         var request = new InviteExternalUserRequest(
-            ContactId: Guid.Empty,
+            Email: "",
             ProjectId: Guid.NewGuid(),
+            AccessLevel: 100000000,
+            FirstName: null,
+            LastName: null,
             ExpiryDate: null,
             AccountId: null);
 
@@ -385,9 +394,9 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "empty ContactId must be rejected with 400");
+            "empty Email must be rejected with 400");
 
-        await AssertIsProblemDetailsAsync(response, "invite with empty ContactId");
+        await AssertIsProblemDetailsAsync(response, "invite with empty Email");
     }
 
     [Fact]
@@ -395,8 +404,11 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     {
         // Arrange
         var request = new InviteExternalUserRequest(
-            ContactId: Guid.NewGuid(),
+            Email: "external.user@example.com",
             ProjectId: Guid.Empty,
+            AccessLevel: 100000000,
+            FirstName: null,
+            LastName: null,
             ExpiryDate: null,
             AccountId: null);
 
@@ -417,8 +429,11 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         // The test fixture does NOT set this configuration key, so the handler returns 500
         // with a "Configuration Error" detail before creating any Dataverse records.
         var request = new InviteExternalUserRequest(
-            ContactId: Guid.NewGuid(),
+            Email: "external.user@example.com",
             ProjectId: Guid.NewGuid(),
+            AccessLevel: 100000000,
+            FirstName: null,
+            LastName: null,
             ExpiryDate: null,
             AccountId: null);
 

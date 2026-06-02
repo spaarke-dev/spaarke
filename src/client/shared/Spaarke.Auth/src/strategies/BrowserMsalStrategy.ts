@@ -1,8 +1,4 @@
-import type {
-  AuthenticationResult,
-  Configuration,
-  PublicClientApplication,
-} from '@azure/msal-browser';
+import type { AuthenticationResult, Configuration, PublicClientApplication } from '@azure/msal-browser';
 import type { IAuthConfig, TokenResult } from '../types';
 import type { AuthStrategy } from './AuthStrategy';
 
@@ -46,8 +42,16 @@ function resolveLoginHint(msal: PublicClientApplication | null): string | undefi
   if (typeof window === 'undefined') return undefined;
 
   const frames: Window[] = [window];
-  try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-  try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
+  try {
+    if (window.parent !== window) frames.push(window.parent);
+  } catch {
+    /* cross-origin */
+  }
+  try {
+    if (window.top && window.top !== window) frames.push(window.top);
+  } catch {
+    /* cross-origin */
+  }
 
   for (const frame of frames) {
     try {
@@ -122,8 +126,8 @@ export class BrowserMsalStrategy implements AuthStrategy {
         redirectUri: config.redirectUri,
       },
       cache: {
-        cacheLocation: 'localStorage',     // INV-1 — MUST be localStorage
-        storeAuthStateInCookie: true,      // INV-2 — MUST be true for ssoSilent
+        cacheLocation: 'localStorage', // INV-1 — MUST be localStorage
+        storeAuthStateInCookie: true, // INV-2 — MUST be true for ssoSilent
       },
       system: {
         loggerOptions: {
@@ -184,7 +188,7 @@ export class BrowserMsalStrategy implements AuthStrategy {
     // MSAL v3: clearCache() clears the entire cache for this PCA instance
     // (accounts, tokens, telemetry). Fire-and-forget — logout is the primary caller
     // and doesn't need to await per-account cleanup.
-    void this._instance.clearCache().catch((err) => {
+    void this._instance.clearCache().catch(err => {
       console.warn('[BrowserMsalStrategy] clearCache failed:', err);
     });
   }

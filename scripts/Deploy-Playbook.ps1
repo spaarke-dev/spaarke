@@ -688,6 +688,7 @@ foreach ($node in $definition.nodes) {
             sprk_name           = $nodeName
             sprk_nodetype       = $nodeTypeValue
             sprk_executionorder = $nodeIndex
+            sprk_isactive       = $true   # MUST set explicitly — Dataverse column default is false, so omitting this causes PlaybookOrchestrationService.ExecutionGraph to filter out the node ("0 active nodes"). Surfaced during 2026-05-30 live smoke of predict-matter-cost@v1.
             'sprk_playbookid@odata.bind' = "sprk_analysisplaybooks($playbookId)"
         }
 

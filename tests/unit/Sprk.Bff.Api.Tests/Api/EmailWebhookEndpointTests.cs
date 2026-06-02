@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api;
 
+[Trait("status", "repaired")]
 public class EmailWebhookEndpointTests
 {
     private readonly IOptions<EmailProcessingOptions> _options;
@@ -22,7 +23,7 @@ public class EmailWebhookEndpointTests
         _options = Options.Create(new EmailProcessingOptions
         {
             EnableWebhook = true,
-            WebhookSigningKey = "test-secret-12345" // replaces deprecated WebhookSecret (task 044)
+            WebhookSigningKey = "test-secret-12345"
         });
     }
 
@@ -191,20 +192,20 @@ public class EmailWebhookEndpointTests
     [Fact]
     public void EmailProcessingOptions_HasWebhookSigningKeyProperty()
     {
-        // Arrange — task 044 replaced WebhookSecret with WebhookSigningKey
+        // Arrange
         var options = new EmailProcessingOptions
         {
-            WebhookSigningKey = "my-signing-key"
+            WebhookSigningKey = "my-secret-key"
         };
 
         // Assert
-        options.WebhookSigningKey.Should().Be("my-signing-key");
+        options.WebhookSigningKey.Should().Be("my-secret-key");
     }
 
     [Fact]
     public void EmailProcessingOptions_WebhookSigningKeyDefaultsToNull()
     {
-        // Arrange — task 044 replaced WebhookSecret with WebhookSigningKey
+        // Arrange
         var options = new EmailProcessingOptions();
 
         // Assert

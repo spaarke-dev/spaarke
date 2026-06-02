@@ -64,7 +64,10 @@ import type { DocumentNode } from './types/graph';
 // folder directly, so we drop the '/dist/' prefix here (otherwise we'd resolve
 // to dist/dist/...). Same anti-barrel intent as elsewhere — avoids pulling
 // lexical + the full Fluent icon library (15.8 MB) for one component import.
-import { DocumentEmailWizard, type IDocumentEmailWizardItem } from '@spaarke/ui-components/components/DocumentEmailWizard';
+import {
+  DocumentEmailWizard,
+  type IDocumentEmailWizardItem,
+} from '@spaarke/ui-components/components/DocumentEmailWizard';
 import type { IDataService } from '@spaarke/ui-components/types/serviceInterfaces';
 
 /** Inline SVG icon: table/grid view (matches Fluent 20px icon style) */
@@ -440,42 +443,55 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
   // IDataService adapter for the email wizard's recipient picker.
   // Code Pages don't have PCF's context.webAPI, so we frame-walk to the parent
   // window's Xrm.WebApi (same pattern used by @spaarke/auth's resolveTenantFromXrm).
-  const dataService: IDataService = useMemo(
-    () => {
+  const dataService: IDataService = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const resolveXrm = (): any => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const resolveXrm = (): any => {
+      const frames: any[] = [window];
+      try {
+        if (window.parent !== window) frames.push(window.parent);
+      } catch {
+        /* cross-origin */
+      }
+      try {
+        if (window.top && window.top !== window) frames.push(window.top);
+      } catch {
+        /* cross-origin */
+      }
+      for (const frame of frames) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const frames: any[] = [window];
-        try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-        try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
-        for (const frame of frames) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const xrm = (frame as any).Xrm;
-          if (xrm?.WebApi) return xrm.WebApi;
-        }
-        throw new Error('[DRV] Xrm.WebApi not reachable — cannot run recipient picker queries.');
-      };
+        const xrm = (frame as any).Xrm;
+        if (xrm?.WebApi) return xrm.WebApi;
+      }
+      throw new Error('[DRV] Xrm.WebApi not reachable — cannot run recipient picker queries.');
+    };
 
-      return {
-        createRecord: (entityName, data) =>
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          resolveXrm().createRecord(entityName, data as any).then((r: any) => r.id),
-        retrieveRecord: (entityName, id, options) =>
-          resolveXrm().retrieveRecord(entityName, id, options ?? '') as Promise<Record<string, unknown>>,
-        retrieveMultipleRecords: (entityName, options) =>
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          resolveXrm().retrieveMultipleRecords(entityName, options ?? '').then((r: any) => ({
+    return {
+      createRecord: (entityName, data) =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        resolveXrm()
+          .createRecord(entityName, data as any)
+          .then((r: any) => r.id),
+      retrieveRecord: (entityName, id, options) =>
+        resolveXrm().retrieveRecord(entityName, id, options ?? '') as Promise<Record<string, unknown>>,
+      retrieveMultipleRecords: (entityName, options) =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        resolveXrm()
+          .retrieveMultipleRecords(entityName, options ?? '')
+          .then((r: any) => ({
             entities: r.entities as Record<string, unknown>[],
           })),
-        updateRecord: (entityName, id, data) =>
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          resolveXrm().updateRecord(entityName, id, data as any).then(() => undefined),
-        deleteRecord: (entityName, id) =>
-          resolveXrm().deleteRecord(entityName, id).then(() => undefined),
-      };
-    },
-    []
-  );
+      updateRecord: (entityName, id, data) =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        resolveXrm()
+          .updateRecord(entityName, id, data as any)
+          .then(() => undefined),
+      deleteRecord: (entityName, id) =>
+        resolveXrm()
+          .deleteRecord(entityName, id)
+          .then(() => undefined),
+    };
+  }, []);
 
   const handleCopyLink = useCallback(() => {
     if (!previewDocumentId) return;
@@ -808,6 +824,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
       {previewDocumentId && (
         <FilePreviewDialog
           open={isPreviewOpen}
+          documentId={previewDocumentId}
           documentName={previewDocumentName}
           onClose={handlePreviewClose}
           fetchPreviewUrl={fetchPreviewUrl}

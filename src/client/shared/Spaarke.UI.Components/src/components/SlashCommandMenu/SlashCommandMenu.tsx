@@ -39,17 +39,8 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  mergeClasses,
-  tokens,
-  Text,
-} from '@fluentui/react-components';
-import {
-  SettingsRegular,
-  BookTemplateRegular,
-  GlobeRegular,
-} from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, tokens, Text } from '@fluentui/react-components';
+import { SettingsRegular, BookTemplateRegular, GlobeRegular } from '@fluentui/react-icons';
 import { type SlashCommandMenuProps, type SlashCommand, type SlashCommandSource } from './slashCommandMenu.types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -249,9 +240,7 @@ function groupCommandsBySource(commands: SlashCommand[]): Array<{
  * Builds a flat ordered list of commands from the grouped categories.
  * This ensures keyboard navigation indices stay consistent with visual order.
  */
-function buildFlatCommandList(
-  groups: Array<{ config: CategoryConfig; commands: SlashCommand[] }>,
-): SlashCommand[] {
+function buildFlatCommandList(groups: Array<{ config: CategoryConfig; commands: SlashCommand[] }>): SlashCommand[] {
   const flat: SlashCommand[] = [];
   for (const group of groups) {
     flat.push(...group.commands);
@@ -394,8 +383,7 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
       // pass through without dismissing — the button's own onClick handler
       // re-triggers slash mode and would otherwise fight this handler.
       const isStripPromptButton =
-        target instanceof Element &&
-        target.closest('[data-testid="strip-prompt-menu-button"]') !== null;
+        target instanceof Element && target.closest('[data-testid="strip-prompt-menu-button"]') !== null;
 
       if (!insideMenu && !insideAnchor && !isStripPromptButton) {
         onDismiss();
@@ -438,26 +426,22 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
           break;
       }
     },
-    [flatCommands, focusedIndex, onSelect, onDismiss],
+    [flatCommands, focusedIndex, onSelect, onDismiss]
   );
 
   const handleItemClick = React.useCallback(
     (command: SlashCommand) => {
       onSelect(command);
     },
-    [onSelect],
+    [onSelect]
   );
 
-  const handleItemMouseEnter = React.useCallback(
-    (index: number) => {
-      setFocusedIndex(index);
-    },
-    [],
-  );
+  const handleItemMouseEnter = React.useCallback((index: number) => {
+    setFocusedIndex(index);
+  }, []);
 
   // Derive the active descendant id for aria
-  const activeDescendantId =
-    flatCommands.length > 0 ? `slash-cmd-item-${flatCommands[focusedIndex]?.id}` : undefined;
+  const activeDescendantId = flatCommands.length > 0 ? `slash-cmd-item-${flatCommands[focusedIndex]?.id}` : undefined;
 
   /**
    * Returns the style class for a category header icon based on source type.
@@ -479,12 +463,9 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
       id={`slash-cmd-item-${command.id}`}
       role="option"
       aria-selected={absoluteIndex === focusedIndex}
-      className={mergeClasses(
-        styles.item,
-        absoluteIndex === focusedIndex && styles.itemFocused,
-      )}
+      className={mergeClasses(styles.item, absoluteIndex === focusedIndex && styles.itemFocused)}
       onMouseEnter={() => handleItemMouseEnter(absoluteIndex)}
-      onMouseDown={(e) => {
+      onMouseDown={e => {
         // Use mousedown to avoid losing input focus
         e.preventDefault();
         handleItemClick(command);
@@ -560,10 +541,7 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
                     data-testid={`slash-cmd-category-${group.config.key}`}
                   >
                     <span
-                      className={mergeClasses(
-                        styles.categoryIcon,
-                        getCategoryIconClass(group.config.key),
-                      )}
+                      className={mergeClasses(styles.categoryIcon, getCategoryIconClass(group.config.key))}
                       aria-hidden="true"
                     >
                       {group.config.icon}
@@ -571,9 +549,7 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
                     {group.config.label}
                   </li>
                 )}
-                {group.commands.map((cmd, idx) =>
-                  renderItem(cmd, startIndex + idx),
-                )}
+                {group.commands.map((cmd, idx) => renderItem(cmd, startIndex + idx))}
               </React.Fragment>
             );
           })}

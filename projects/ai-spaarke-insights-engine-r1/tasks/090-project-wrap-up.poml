@@ -1,0 +1,75 @@
+<task id="090" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>Project wrap-up — Phase 1 complete; lessons-learned; Phase 1.5 outline</title>
+    <status>not-started</status>
+    <wave>wrap-up</wave>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>wrap-up, lessons-learned, documentation, project-completion</tags>
+    <dependencies>080</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>MINIMAL</rigor>
+    <d-p>wrap-up</d-p>
+  </metadata>
+
+  <prompt>
+    Mark Phase 1 complete. Create lessons-learned documenting what worked, what surprised us, what's worth replicating in Phase 1.5 + sister projects. Outline Phase 1.5 spec (Cosmos as first deliverable per SPEC §3.3). Archive intermediate working artifacts. Update README + TASK-INDEX statuses. Per CLAUDE.md §7 task completion + transition discipline.
+  </prompt>
+
+  <role>Project owner / tech lead familiar with retrospective writing + multi-phase project transitions.</role>
+
+  <goal>
+    Phase 1 marked complete. lessons-learned.md captures the 5-10 most valuable insights (especially: any decisions that played out differently than expected, any first-step blockers that turned out non-trivial, any code patterns that should propagate to Action Engine via shared primitives). Phase 1.5 spec outlined (Cosmos NoSQL graph + IInsightGraph implementation first; then additional extraction layers, system-proposed Tentative Precedents, etc.). README updated to "Phase 1 complete; Phase 1.5 next: Cosmos NoSQL graph". current-task.md reset to "Phase 1 complete; next action: run /repo-cleanup or initialize Phase 1.5".
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.3 Phase 1.5 deferrals)</file>
+    <file purpose="rationale">projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md (§8 Phase 1.5 enumeration)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/ai-spaarke-insights-engine-r1/tasks/TASK-INDEX.md (verify all Phase 1 tasks ✅)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="claude-md-§7">Reset current-task.md per task completion + transition discipline</constraint>
+    <constraint source="lessons-learned-discipline">Capture decisions that played out differently — these are the highest-leverage insights for Phase 1.5 + sister projects</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-retrospective, lessons-learned, multi-phase-transition</topic>
+    <files>
+      <file>CLAUDE.md (root)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Verify all tasks complete">Open TASK-INDEX.md; confirm all D-P tasks 001..080 are ✅</step>
+    <step order="2" name="Write lessons-learned.md">5-10 entries covering: (a) what worked smoothly; (b) what was harder than expected; (c) first-step blockers that turned out non-trivial; (d) code patterns to propagate (e.g., IDistributedCacheExtensions.GetOrCreateAsync helper); (e) decisions to revisit at Phase 1.5</step>
+    <step order="3" name="Outline Phase 1.5 spec">Brief sketch in notes/phase-1.5-outline.md: Cosmos NoSQL graph (first deliverable), entity/deal-terms/decision/risk layers, system-proposed Tentative Precedents, cluster job + review queue UI</step>
+    <step order="4" name="Update README">Status: "Phase 1 complete (date)"; next action: "Initialize Phase 1.5: Cosmos NoSQL graph"</step>
+    <step order="5" name="Update TASK-INDEX.md">All Phase 1 tasks ✅; final-state summary at top</step>
+    <step order="6" name="Reset current-task.md">Status: "Phase 1 complete"; next action: "Run /repo-cleanup or initialize Phase 1.5"</step>
+    <step order="7" name="Archive intermediate notes">Move notes/cost-projection-d-p8.md, notes/sprk-analysis-polymorphic-confirmation.md, notes/acceptance-criteria-verification.md, notes/deployment-verification-phase1.md to notes/archived/phase-1/ (preserve as Phase 1 record)</step>
+    <step order="8" name="Suggest /schedule for Phase 1.5">If user has a target date, offer /schedule reminder</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Final commit + push for Phase 1 wrap-up</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-insights-engine-r1/notes/lessons-learned.md</output>
+    <output type="docs">projects/ai-spaarke-insights-engine-r1/notes/phase-1.5-outline.md</output>
+    <output type="docs-update">projects/ai-spaarke-insights-engine-r1/README.md (Phase 1 complete status)</output>
+    <output type="docs-update">projects/ai-spaarke-insights-engine-r1/tasks/TASK-INDEX.md (all tasks ✅; final-state summary)</output>
+    <output type="docs-update">projects/ai-spaarke-insights-engine-r1/current-task.md (Phase 1 complete; next action)</output>
+    <output type="archive">projects/ai-spaarke-insights-engine-r1/notes/archived/phase-1/ (intermediate working artifacts)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">lessons-learned.md exists with 5-10 substantive entries (not boilerplate)</criterion>
+    <criterion testable="true">phase-1.5-outline.md exists with Cosmos NoSQL graph as first deliverable</criterion>
+    <criterion testable="true">README.md status updated to "Phase 1 complete"</criterion>
+    <criterion testable="true">TASK-INDEX.md shows all D-P tasks ✅</criterion>
+    <criterion testable="true">current-task.md reset with next-action guidance</criterion>
+    <criterion testable="true">Notes archived under notes/archived/phase-1/</criterion>
+  </acceptance-criteria>
+</task>

@@ -36,8 +36,7 @@ import type { ContextWidgetComponent } from '../types/widget-types';
 // ---------------------------------------------------------------------------
 
 registerContextWidget('progress-tracker', {
-  factory: () =>
-    import('../widgets/context/ProgressTrackerWidget').then((m) => ({ default: m.default })),
+  factory: () => import('../widgets/context/ProgressTrackerWidget').then(m => ({ default: m.default })),
 });
 
 // ---------------------------------------------------------------------------

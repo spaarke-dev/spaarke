@@ -64,7 +64,9 @@ const WIDGET_TYPE = {
  * serialize/restore.
  */
 function wrapFactory<T>(
-  loaderFn: () => Promise<{ default: React.ComponentType<{ data: T; isLoading?: boolean; error?: string; className?: string }> }>,
+  loaderFn: () => Promise<{
+    default: React.ComponentType<{ data: T; isLoading?: boolean; error?: string; className?: string }>;
+  }>,
   widgetType: string
 ): () => Promise<{ default: WorkspaceWidgetComponent }> {
   return () =>
@@ -560,9 +562,9 @@ registerWorkspaceWidget(
     defaultOrder: 140,
   },
   () =>
-    import('./WorkspaceLayoutWidget').then((m) => ({
+    import('./WorkspaceLayoutWidget').then(m => ({
       default: m.WorkspaceLayoutWidget as import('../../types/widget-types').WorkspaceWidgetComponent,
-    })),
+    }))
 );
 
 // ---------------------------------------------------------------------------

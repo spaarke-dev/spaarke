@@ -54,11 +54,7 @@ import {
   mergeClasses,
   tokens,
 } from '@fluentui/react-components';
-import {
-  ArrowLeft24Regular,
-  CheckmarkCircle24Regular,
-  Search24Regular,
-} from '@fluentui/react-icons';
+import { ArrowLeft24Regular, CheckmarkCircle24Regular, Search24Regular } from '@fluentui/react-icons';
 
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import type { WidgetState } from '../../types/shared';
@@ -337,37 +333,43 @@ const SearchSelectWizardWidget: React.FC<WorkspaceWidgetProps<SearchSelectWizard
   // ── Debounced search ─────────────────────────────────────────────────────
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const runSearch = useCallback(async (query: string) => {
-    if (!data?.onSearch) return;
-    if (!query.trim()) {
-      setResults([]);
-      return;
-    }
+  const runSearch = useCallback(
+    async (query: string) => {
+      if (!data?.onSearch) return;
+      if (!query.trim()) {
+        setResults([]);
+        return;
+      }
 
-    setIsSearching(true);
-    setSearchError(null);
+      setIsSearching(true);
+      setSearchError(null);
 
-    try {
-      const items = await data.onSearch(query.trim());
-      setResults(items);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Search failed. Please try again.';
-      setSearchError(message);
-      setResults([]);
-    } finally {
-      setIsSearching(false);
-    }
-  }, [data]);
+      try {
+        const items = await data.onSearch(query.trim());
+        setResults(items);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Search failed. Please try again.';
+        setSearchError(message);
+        setResults([]);
+      } finally {
+        setIsSearching(false);
+      }
+    },
+    [data]
+  );
 
-  const handleSearchQueryChange = useCallback((newQuery: string) => {
-    setSearchQuery(newQuery);
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-    debounceTimerRef.current = setTimeout(() => {
-      void runSearch(newQuery);
-    }, DEBOUNCE_MS);
-  }, [runSearch]);
+  const handleSearchQueryChange = useCallback(
+    (newQuery: string) => {
+      setSearchQuery(newQuery);
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      debounceTimerRef.current = setTimeout(() => {
+        void runSearch(newQuery);
+      }, DEBOUNCE_MS);
+    },
+    [runSearch]
+  );
 
   // Cleanup debounce on unmount
   useEffect(() => {
@@ -379,41 +381,47 @@ const SearchSelectWizardWidget: React.FC<WorkspaceWidgetProps<SearchSelectWizard
   }, []);
 
   // ── PaneEventBus: wizard_step events ─────────────────────────────────────
-  usePaneEvent('workspace', useCallback((event) => {
-    if (event.type !== 'wizard_step') return;
-    const wizardEvent = event as WizardStepEvent;
-    if (wizardEvent.wizardId !== wizardId) return;
+  usePaneEvent(
+    'workspace',
+    useCallback(
+      event => {
+        if (event.type !== 'wizard_step') return;
+        const wizardEvent = event as WizardStepEvent;
+        if (wizardEvent.wizardId !== wizardId) return;
 
-    switch (wizardEvent.wizardAction) {
-      case 'next':
-        if (stepIndex === 0 && selectedItem) {
-          setStepIndex(1);
-          dispatch('context', {
-            type: 'stage_change',
-            contextType: 'wizard-step',
-            contextData: { wizardId, wizardType: 'search-select', stepIndex: 1, stepLabel: 'Confirm' },
-          });
-        }
-        break;
+        switch (wizardEvent.wizardAction) {
+          case 'next':
+            if (stepIndex === 0 && selectedItem) {
+              setStepIndex(1);
+              dispatch('context', {
+                type: 'stage_change',
+                contextType: 'wizard-step',
+                contextData: { wizardId, wizardType: 'search-select', stepIndex: 1, stepLabel: 'Confirm' },
+              });
+            }
+            break;
 
-      case 'back':
-        if (stepIndex === 1) {
-          setStepIndex(0);
-          dispatch('context', {
-            type: 'stage_change',
-            contextType: 'wizard-step',
-            contextData: { wizardId, wizardType: 'search-select', stepIndex: 0, stepLabel: 'Search' },
-          });
-        }
-        break;
+          case 'back':
+            if (stepIndex === 1) {
+              setStepIndex(0);
+              dispatch('context', {
+                type: 'stage_change',
+                contextType: 'wizard-step',
+                contextData: { wizardId, wizardType: 'search-select', stepIndex: 0, stepLabel: 'Search' },
+              });
+            }
+            break;
 
-      case 'set-field':
-        if (wizardEvent.fieldName === 'searchQuery' && typeof wizardEvent.fieldValue === 'string') {
-          handleSearchQueryChange(wizardEvent.fieldValue);
+          case 'set-field':
+            if (wizardEvent.fieldName === 'searchQuery' && typeof wizardEvent.fieldValue === 'string') {
+              handleSearchQueryChange(wizardEvent.fieldValue);
+            }
+            break;
         }
-        break;
-    }
-  }, [wizardId, stepIndex, selectedItem, dispatch, handleSearchQueryChange]));
+      },
+      [wizardId, stepIndex, selectedItem, dispatch, handleSearchQueryChange]
+    )
+  );
 
   // ── Item selection ────────────────────────────────────────────────────────
   const handleSelectItem = useCallback((item: SearchResultItem) => {
@@ -547,9 +555,7 @@ const SearchSelectWizardWidget: React.FC<WorkspaceWidgetProps<SearchSelectWizard
               {isSearching && <Spinner size="tiny" />}
             </div>
 
-            {searchError && (
-              <Text style={{ color: tokens.colorStatusDangerForeground1 }}>{searchError}</Text>
-            )}
+            {searchError && <Text style={{ color: tokens.colorStatusDangerForeground1 }}>{searchError}</Text>}
 
             {!isSearching && results.length === 0 && searchQuery.trim() && (
               <div className={styles.noResults}>
@@ -580,9 +586,7 @@ const SearchSelectWizardWidget: React.FC<WorkspaceWidgetProps<SearchSelectWizard
                       }}
                     >
                       <Text className={styles.resultName}>{item.name}</Text>
-                      {item.subtitle && (
-                        <Text className={styles.resultSubtitle}>{item.subtitle}</Text>
-                      )}
+                      {item.subtitle && <Text className={styles.resultSubtitle}>{item.subtitle}</Text>}
                     </ListItem>
                   ))}
                 </List>
@@ -603,9 +607,7 @@ const SearchSelectWizardWidget: React.FC<WorkspaceWidgetProps<SearchSelectWizard
             <div className={styles.confirmCard}>
               <CheckmarkCircle24Regular className={styles.confirmIcon} />
               <Text className={styles.confirmName}>{selectedItem.name}</Text>
-              {selectedItem.subtitle && (
-                <Text className={styles.confirmSubtitle}>{selectedItem.subtitle}</Text>
-              )}
+              {selectedItem.subtitle && <Text className={styles.confirmSubtitle}>{selectedItem.subtitle}</Text>}
               <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
                 Type: {selectedItem.entityType}
               </Text>

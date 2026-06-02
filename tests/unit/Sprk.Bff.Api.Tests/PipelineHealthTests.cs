@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests;
 
+[Trait("status", "repaired")]
 public class PipelineHealthTests : IClassFixture<CustomWebAppFactory>
 {
     private readonly CustomWebAppFactory _factory;
@@ -44,7 +45,7 @@ public class PipelineHealthTests : IClassFixture<CustomWebAppFactory>
 
         var content = await response.Content.ReadAsStringAsync();
         content.Should().Contain("Sprk.Bff.Api");
-        content.Should().Contain("1.0.1");
+        content.Should().Contain("1.0.2");
         response.Content.Headers.ContentType!.MediaType.Should().Be("application/json");
     }
 

@@ -267,16 +267,12 @@ export { serializeFindSimilarWizardState } from './widgets/workspace/FindSimilar
 // ---------------------------------------------------------------------------
 
 export { default as ProgressTrackerWidget } from './widgets/context/ProgressTrackerWidget';
-export type {
-  ProgressTrackerData,
-  WorkflowStep,
-} from './widgets/context/ProgressTrackerWidget';
+export type { ProgressTrackerData, WorkflowStep } from './widgets/context/ProgressTrackerWidget';
 
 import { registerContextWidget } from './registry/ContextWidgetRegistry';
 import type { ContextWidgetComponent } from './types/widget-types';
 registerContextWidget('progress-tracker', {
-  factory: () =>
-    import('./widgets/context/ProgressTrackerWidget').then((m) => ({ default: m.default })),
+  factory: () => import('./widgets/context/ProgressTrackerWidget').then(m => ({ default: m.default })),
 });
 
 // ---------------------------------------------------------------------------
@@ -287,10 +283,7 @@ registerContextWidget('progress-tracker', {
 // ---------------------------------------------------------------------------
 
 export { default as PlaybookGalleryWidget } from './widgets/context/PlaybookGalleryWidget';
-export type {
-  PlaybookGalleryData,
-  PlaybookSummary,
-} from './widgets/context/PlaybookGalleryWidget';
+export type { PlaybookGalleryData, PlaybookSummary } from './widgets/context/PlaybookGalleryWidget';
 
 registerContextWidget('playbook-gallery', {
   factory: () =>
@@ -324,14 +317,11 @@ registerContextWidget('playbook-gallery', {
 // ---------------------------------------------------------------------------
 
 export { GetStartedCardsWidget } from './widgets/context/GetStartedCardsWidget';
-export type {
-  GetStartedCardId,
-  GetStartedCardsWidgetProps,
-} from './widgets/context/GetStartedCardsWidget';
+export type { GetStartedCardId, GetStartedCardsWidgetProps } from './widgets/context/GetStartedCardsWidget';
 
 registerContextWidget('get-started-cards', {
   factory: () =>
-    import('./widgets/context/GetStartedCardsWidget').then((m) => ({
+    import('./widgets/context/GetStartedCardsWidget').then(m => ({
       // Intentional cast: GetStartedCardsWidget's prop shape differs from
       // ContextWidgetComponent's (it takes `onCardClick` + `className` instead
       // of `data` + `widgetType` + `isLoading`). The registry entry exists
@@ -351,12 +341,7 @@ registerContextWidget('get-started-cards', {
 // ---------------------------------------------------------------------------
 
 export { default as FindingsWidget } from './widgets/context/FindingsWidget';
-export type {
-  FindingsData,
-  Finding,
-  Citation,
-  RiskLevel,
-} from './widgets/context/FindingsWidget';
+export type { FindingsData, Finding, Citation, RiskLevel } from './widgets/context/FindingsWidget';
 
 registerContextWidget('findings', {
   factory: () =>
@@ -397,11 +382,7 @@ export type {
 
 // AiSessionProvider — replaces R1 StandaloneAiProvider; routes SSE events to PaneEventBus
 export { AiSessionProvider } from './providers/AiSessionProvider';
-export type {
-  AiSessionContextValue,
-  AiSessionProviderProps,
-  AiContextMapping,
-} from './providers/AiSessionProvider';
+export type { AiSessionContextValue, AiSessionProviderProps, AiContextMapping } from './providers/AiSessionProvider';
 export { AI_SESSION_CHAT_SESSION_KEY, AI_SESSION_PLAYBOOK_KEY } from './providers/AiSessionProvider';
 
 // useAiSession — consumer hook for AiSessionContext (replaces R1 useStandaloneAi)
@@ -498,10 +479,7 @@ export type { DispatchPaneEvent } from './events/useDispatchPaneEvent';
 
 export { default as SafetyAnnotationOverlay } from './components/SafetyAnnotationOverlay';
 export { AnnotatedMessageContent } from './components/SafetyAnnotationOverlay';
-export type {
-  SafetyAnnotationOverlayProps,
-  AnnotatedMessageContentProps,
-} from './components/SafetyAnnotationOverlay';
+export type { SafetyAnnotationOverlayProps, AnnotatedMessageContentProps } from './components/SafetyAnnotationOverlay';
 
 export { CitationBadge } from './components/CitationBadge';
 export type {
@@ -511,10 +489,7 @@ export type {
 } from './components/CitationBadge';
 
 export { GroundednessHighlight } from './components/GroundednessHighlight';
-export type {
-  GroundednessHighlightProps,
-  GroundednessSegment,
-} from './components/GroundednessHighlight';
+export type { GroundednessHighlightProps, GroundednessSegment } from './components/GroundednessHighlight';
 
 // ---------------------------------------------------------------------------
 // Interactions: TabContextMapping (AIPU2-103 — cross-pane tab/context adapter)

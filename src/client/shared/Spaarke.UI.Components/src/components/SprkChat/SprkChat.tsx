@@ -955,11 +955,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           textContent: a.textContent,
         }));
       }
-      startStream(
-        `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/messages`,
-        body,
-        getAccessToken
-      );
+      startStream(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/messages`, body, getAccessToken);
     },
     [
       session,
@@ -1050,7 +1046,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       // the UI thread stays responsive.
       void addAttachmentFiles(list);
     },
-    [addAttachmentFiles],
+    [addAttachmentFiles]
   );
 
   // FR-09: opens the slash command menu from the strip-mounted [Prompt] button.
@@ -2266,19 +2262,19 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                 ? `${styles.attachmentChip} ${styles.attachmentChipError}`
                 : styles.attachmentChip;
               const statusNode =
-                file.status === 'extracting'
-                  ? <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
-                  : file.status === 'ready'
-                    ? <CheckmarkCircleRegular aria-label="Ready" data-testid={`attachment-chip-status-ready-${index}`} />
-                    : <WarningRegular aria-label="Extraction failed" data-testid={`attachment-chip-status-error-${index}`} />;
+                file.status === 'extracting' ? (
+                  <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
+                ) : file.status === 'ready' ? (
+                  <CheckmarkCircleRegular aria-label="Ready" data-testid={`attachment-chip-status-ready-${index}`} />
+                ) : (
+                  <WarningRegular
+                    aria-label="Extraction failed"
+                    data-testid={`attachment-chip-status-error-${index}`}
+                  />
+                );
 
               const chipBody = (
-                <div
-                  key={file.id}
-                  className={chipClassName}
-                  role="listitem"
-                  data-testid={`attachment-chip-${index}`}
-                >
+                <div key={file.id} className={chipClassName} role="listitem" data-testid={`attachment-chip-${index}`}>
                   <span className={styles.attachmentChipStatus} aria-hidden={file.status === 'ready'}>
                     {statusNode}
                   </span>
@@ -2299,24 +2295,24 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
               );
 
               // For error chips, wrap in a Tooltip exposing the parse error.
-              return isError && file.error
-                ? (
-                    <Tooltip
-                      key={file.id}
-                      content={file.error}
-                      relationship="description"
-                      withArrow
-                    >
-                      {chipBody}
-                    </Tooltip>
-                  )
-                : chipBody;
+              return isError && file.error ? (
+                <Tooltip key={file.id} content={file.error} relationship="description" withArrow>
+                  {chipBody}
+                </Tooltip>
+              ) : (
+                chipBody
+              );
             })}
           </div>
         )}
 
         {/* Region 2: controls strip — [ Prompt ▾ ] [ + Attach ] (FR-09) */}
-        <div className={styles.controlsStrip} role="toolbar" aria-label="Chat input actions" data-testid="chat-input-controls-strip">
+        <div
+          className={styles.controlsStrip}
+          role="toolbar"
+          aria-label="Chat input actions"
+          data-testid="chat-input-controls-strip"
+        >
           <Button
             appearance="subtle"
             icon={<PromptRegular />}

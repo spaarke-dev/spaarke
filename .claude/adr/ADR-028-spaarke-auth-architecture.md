@@ -21,7 +21,7 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 - **MUST** use tenant-specific Azure AD authority (NOT `common` or `organizations`) — resolved via `sprk_TenantId` env var → Xrm frame-walk fallback
 - **MUST** preserve INV-1..INV-8 MSAL configuration invariants (see `.claude/patterns/auth/spaarke-sso-binding.md`)
 - **MUST** rebuild AND redeploy every consumer of `@spaarke/auth` when the library version changes (INV-8 "Bundling Reality")
-- **MUST** use `DefaultAzureCredential` (managed identity) for all server outbound — Graph app-only, Dataverse service identity, Cosmos, Key Vault. NOT `ClientSecretCredential`. Per-tenant SpeAdmin container-type ops are the only exception (per-customer secrets, BFF MI cannot impersonate)
+- **MUST** use `DefaultAzureCredential` (managed identity) for all server outbound — Graph app-only, Dataverse service identity, Cosmos, Key Vault. NOT `ClientSecretCredential`. Documented exceptions: (1) Per-tenant SpeAdmin container-type ops (per-customer secrets, BFF MI cannot impersonate); (2) **Azure OpenAI / AI Services data plane** — see "Documented MI exceptions" below.
 - **MUST** validate inbound webhooks via HMAC-SHA256 signature header — fail-closed if signing key missing
 - **MUST** route admin + bulk API key endpoints through named `AuthenticationHandler<>` schemes (`AuthSchemes.BuilderAdminApiKey`, `AuthSchemes.RagApiKey`) with `CryptographicOperations.FixedTimeEquals` compare
 - **MUST** enrich every authenticated server log with `oid`, `appid`, `obo`, `tenantId`, `correlationId` via `ILogger.BeginScope` (AuditEnrichmentMiddleware)
@@ -35,6 +35,25 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 - **MUST NOT** reference removed symbols: `BridgeStrategy`, `XrmStrategy`, `window.__SPAARKE_BFF_TOKEN__`, `tokenBridge.ts`, `publishToken`, `bffAuthProvider` (deleted in v2)
 - **MUST NOT** add `/debug/*` endpoints on the BFF (all removed in v2)
 - **MUST NOT** add plaintext secrets to `appsettings*.json` — Key Vault references only (production); dev OK with plain values
+
+## Documented MI exceptions
+
+When MI is genuinely unworkable for a specific outbound surface, the **only** sanctioned alternative is a **Key Vault–backed secret reference** (`@Microsoft.KeyVault(SecretUri=...)`) — never plain text in App Service config. Each exception is enumerated here with rationale, scope, and a remediation TODO. Adding an exception requires a PR that updates this list.
+
+### E-1: SpeAdmin per-tenant container-type ops
+
+- **Scope**: SpeAdmin endpoints performing per-customer container-type management.
+- **Why**: Per-customer secrets; the BFF MI cannot impersonate per-customer admin identities.
+- **Remediation TODO**: None (architectural). Tracked as a known design exception.
+
+### E-2: Azure OpenAI / AI Services data plane (2026-05-28)
+
+- **Scope**: `BFF → spaarke-openai-dev` (`kind=AIServices`) chat completions and embeddings. Config: `AzureOpenAI:ApiKey` (KV reference). Code path: `AiModule.BuildInnerClient` chooses `ApiKeyCredential` over `TokenCredential` when this setting is present.
+- **Why**: MI auth returned persistent HTTP 401 `PermissionDenied` ("Principal does not have access to API/Operation") for chat completions despite `mi-bff-api-dev` (object id `9fd47efb-7962-492b-ac44-e5ccd0268ebb`) holding **both** `Cognitive Services User` (wildcard data action `Microsoft.CognitiveServices/*`) and `Cognitive Services OpenAI User` at the resource scope. App Insights diagnostic logging (`LoggingTokenCredential`, removed after diagnosis) confirmed the MI token carried correct `oid`, `appid`, `aud=https://cognitiveservices.azure.com`, `iss=https://sts.windows.net/{tid}/`, `tid`, `idtyp=app`, and requested scope `.default`. Direct curl with the same audience using my own bearer token returned HTTP 200 to the same URL. No deny assignments. RBAC propagation past window. MI is healthy on the same App Service for Graph, Dataverse, Cosmos, Key Vault. The community-documented Microsoft escape hatch is API key authentication (see [Microsoft Q&A 2168038](https://learn.microsoft.com/en-us/answers/questions/2168038/how-to-fix-openai-authenticationerror-error-code-4) and adjacent threads).
+- **Storage**: `AzureOpenAI-ApiKey` secret in `spaarke-spekvcert` Key Vault. Sourced from the OpenAI account's `key1`. Referenced from App Service via `@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/AzureOpenAI-ApiKey/)`.
+- **Rotation**: 90-day cadence (operator responsibility — track alongside other KV-backed secrets in [`docs/guides/auth-deployment-setup.md`](../../docs/guides/auth-deployment-setup.md)).
+- **Restore-to-MI**: Single config change — clear `AzureOpenAI__ApiKey` app setting; code falls back to `TokenCredential` (MI) automatically. Do this when AIServices-kind MI auth is consistently reliable (track via Microsoft Foundry product updates).
+- **Remediation TODO**: Restore MI when reliable. No filed ticket yet (the failure mode is widely documented but Microsoft has not published a confirmed fix).
 
 ## Key Patterns
 

@@ -467,24 +467,29 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
     }));
 
     return (
-      <div
-        className={styles.structuredContainer}
-        role="listitem"
-        aria-label="AI plan preview"
-      >
+      <div className={styles.structuredContainer} role="listitem" aria-label="AI plan preview">
         <PlanPreviewCard
           planTitle={message.metadata?.planTitle ?? 'Proposed Plan'}
           steps={planSteps}
           isExecuting={isPlanExecuting ?? false}
-          onProceed={onProceed ?? (() => {
-            console.log('[SprkChatMessage] onProceed stub');
-          })}
-          onCancel={onCancel ?? (() => {
-            console.log('[SprkChatMessage] onCancel stub');
-          })}
-          onEditPlan={onEditPlan ?? ((editMessage) => {
-            console.log('[SprkChatMessage] onEditPlan stub — edit message:', editMessage);
-          })}
+          onProceed={
+            onProceed ??
+            (() => {
+              console.log('[SprkChatMessage] onProceed stub');
+            })
+          }
+          onCancel={
+            onCancel ??
+            (() => {
+              console.log('[SprkChatMessage] onCancel stub');
+            })
+          }
+          onEditPlan={
+            onEditPlan ??
+            (editMessage => {
+              console.log('[SprkChatMessage] onEditPlan stub — edit message:', editMessage);
+            })
+          }
           onCancelExecution={onCancelExecution}
         />
         {onInsert && message.content && (
@@ -513,9 +518,7 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
     // or 'summary' field. For entity_card and action_confirmation, use message.content
     // as the fallback — these card types rarely carry a free-text body to insert.
     const structuredInsertContent =
-      (structuredData as { text?: string }).text ??
-      (structuredData as { summary?: string }).summary ??
-      message.content;
+      (structuredData as { text?: string }).text ?? (structuredData as { summary?: string }).summary ?? message.content;
 
     return (
       <div
@@ -530,7 +533,7 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
             // ADR-012: MUST NOT call Xrm directly — dispatch BroadcastChannel event
             dispatchNavigateEntity(entityType, entityId);
           }}
-          onOpenDiff={(proposedText) => {
+          onOpenDiff={proposedText => {
             // Dispatch open_diff event so host layer opens DiffReviewPanel
             dispatchOpenDiff(proposedText);
           }}
@@ -562,10 +565,7 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
   return (
     <div className={containerClass} role="listitem" aria-label={`${message.role} message`}>
       {markdownHtml ? (
-        <div
-          className={styles.markdownContent}
-          dangerouslySetInnerHTML={{ __html: markdownHtml }}
-        />
+        <div className={styles.markdownContent} dangerouslySetInnerHTML={{ __html: markdownHtml }} />
       ) : (
         <Text className={styles.messageContent}>{renderedContent}</Text>
       )}

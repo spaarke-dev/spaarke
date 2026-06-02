@@ -78,7 +78,7 @@ async function detectNaaSupport(): Promise<boolean> {
     }
 
     // Wait for Office to be ready (idempotent if already initialized).
-    await new Promise<void>((resolve) => {
+    await new Promise<void>(resolve => {
       if (OfficeRef.onReady) {
         OfficeRef.onReady(() => resolve());
       } else {
@@ -228,7 +228,7 @@ export class OfficeNaaStrategy implements AuthStrategy {
     // MSAL v3 clearCache() — clears accounts + tokens for this PCA instance.
     // Fire-and-forget per AuthStrategy contract; the SpaarkeAuthProvider's
     // own logout() awaits the full chain.
-    void this._instance.clearCache().catch((err) => {
+    void this._instance.clearCache().catch(err => {
       console.warn('[OfficeNaaStrategy] clearCache failed:', err);
     });
   }
@@ -289,10 +289,10 @@ export class OfficeNaaStrategy implements AuthStrategy {
       // ERROR (not WARN): MSAL handed us a token that's structurally near its
       // `exp` claim. Same diagnostic policy as BrowserMsalStrategy — this
       // surfaces stale-refresh / clock-skew problems to Application Insights.
-      console.error(
-        '[OfficeNaaStrategy] acquired token already within expiry buffer; rejecting and falling through',
-        { msToExpiry: expiresOn - Date.now(), bufferMs: EXPIRY_BUFFER_MS }
-      );
+      console.error('[OfficeNaaStrategy] acquired token already within expiry buffer; rejecting and falling through', {
+        msToExpiry: expiresOn - Date.now(),
+        bufferMs: EXPIRY_BUFFER_MS,
+      });
       return null;
     }
     return { accessToken: result.accessToken, expiresOn };
@@ -318,9 +318,7 @@ export class OfficeNaaStrategy implements AuthStrategy {
           const msalModule = await import('@azure/msal-browser');
 
           if (useNaa) {
-            const instance = await msalModule.createNestablePublicClientApplication(
-              this._buildNaaConfig()
-            );
+            const instance = await msalModule.createNestablePublicClientApplication(this._buildNaaConfig());
             // createNestablePublicClientApplication returns an already-initialized
             // instance; no extra .initialize() call required.
             await this._drainRedirectIfAny(instance);
@@ -328,9 +326,7 @@ export class OfficeNaaStrategy implements AuthStrategy {
             this._isNaaActive = true;
             console.info('[OfficeNaaStrategy] initialized via NAA broker');
           } else {
-            const pca: PublicClientApplication = new msalModule.PublicClientApplication(
-              this._buildFallbackConfig()
-            );
+            const pca: PublicClientApplication = new msalModule.PublicClientApplication(this._buildFallbackConfig());
             await pca.initialize();
             await this._drainRedirectIfAny(pca);
             this._instance = pca;
@@ -362,9 +358,7 @@ export class OfficeNaaStrategy implements AuthStrategy {
         authority: this._config.authority,
         // NAA always uses the brk-multihub broker URI regardless of caller-provided redirectUri.
         // Honor caller override only if it's the canonical brk-multihub form, otherwise force.
-        redirectUri: this._config.redirectUri?.startsWith('brk-')
-          ? this._config.redirectUri
-          : NAA_REDIRECT_URI,
+        redirectUri: this._config.redirectUri?.startsWith('brk-') ? this._config.redirectUri : NAA_REDIRECT_URI,
         supportsNestedAppAuth: true,
         navigateToLoginRequestUrl: false,
       },

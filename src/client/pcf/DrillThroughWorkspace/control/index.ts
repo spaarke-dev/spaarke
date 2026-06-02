@@ -19,10 +19,7 @@ import { IInputs, IOutputs } from './generated/ManifestTypes';
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
 import { FluentProvider, webLightTheme, Theme } from '@fluentui/react-components';
-import {
-  resolveThemeWithUserPreference,
-  setupThemeListener,
-} from '@spaarke/ui-components';
+import { resolveThemeWithUserPreference, setupThemeListener } from '@spaarke/ui-components';
 import { DrillThroughWorkspaceApp } from './components/DrillThroughWorkspaceApp';
 import { logger } from './utils/logger';
 

@@ -154,16 +154,13 @@ export function replaceWorkspaceWidget(
  * @param type - Widget type string as sent by the server.
  * @returns Promise resolving to the widget component (never rejects).
  */
-export async function resolveWorkspaceWidget(
-  type: string
-): Promise<WorkspaceWidgetComponent> {
+export async function resolveWorkspaceWidget(type: string): Promise<WorkspaceWidgetComponent> {
   const entry = _registry.get(type);
 
   // Unknown type — fall back to GenericTextWidget.
   if (!entry) {
     console.warn(
-      `[ai-widgets] WorkspaceWidgetRegistry: unknown widget type "${type}". ` +
-        'Falling back to GenericTextWidget.'
+      `[ai-widgets] WorkspaceWidgetRegistry: unknown widget type "${type}". ` + 'Falling back to GenericTextWidget.'
     );
     return _loadGenericTextWidget();
   }
@@ -180,8 +177,7 @@ export async function resolveWorkspaceWidget(
     return entry.resolved;
   } catch (err) {
     console.error(
-      `[ai-widgets] WorkspaceWidgetRegistry: failed to load widget "${type}". ` +
-        'Falling back to GenericTextWidget.',
+      `[ai-widgets] WorkspaceWidgetRegistry: failed to load widget "${type}". ` + 'Falling back to GenericTextWidget.',
       err
     );
     return _loadGenericTextWidget();

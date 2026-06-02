@@ -238,9 +238,7 @@ const CitationPopoverContent: React.FC<{ citation: ICitation }> = ({ citation })
 
         {/* Snippet (web search result preview) */}
         {citation.snippet && (
-          <Text className={styles.snippet}>
-            {truncateExcerpt(citation.snippet, MAX_EXCERPT_LENGTH)}
-          </Text>
+          <Text className={styles.snippet}>{truncateExcerpt(citation.snippet, MAX_EXCERPT_LENGTH)}</Text>
         )}
 
         {/* Clickable URL (opens in new tab — constraint from spec) */}

@@ -121,11 +121,7 @@ export function TextSelectionListener({
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Stable PaneEventBus dispatch callbacks from the hook layer.
-  const { dispatchSelection, dispatchClear } = useTextSelection(
-    widgetId,
-    widgetType,
-    contextLabel
-  );
+  const { dispatchSelection, dispatchClear } = useTextSelection(widgetId, widgetType, contextLabel);
 
   // ── Debounce timer ref ───────────────────────────────────────────────────
   //

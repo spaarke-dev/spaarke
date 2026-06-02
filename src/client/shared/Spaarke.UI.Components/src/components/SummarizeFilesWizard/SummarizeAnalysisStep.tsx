@@ -16,18 +16,8 @@
  * user via a warning MessageBar.
  */
 import * as React from 'react';
-import {
-  MessageBar,
-  MessageBarBody,
-  Spinner,
-  Text,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
-import {
-  PlaybookCardGrid,
-  loadPlaybooks,
-} from '../Playbook';
+import { MessageBar, MessageBarBody, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { PlaybookCardGrid, loadPlaybooks } from '../Playbook';
 import type { IPlaybook, AuthenticatedFetchFn } from '../Playbook';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { INavigationService } from '../../types/serviceInterfaces';
@@ -82,8 +72,16 @@ async function getBusinessUnitContainerId(dataService: IDataService): Promise<st
   // Since this code runs inside a Dataverse Code Page iframe, Xrm is available.
   let userId: string | null = null;
   const frames: Window[] = [window];
-  try { if (window.parent && window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-  try { if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!); } catch { /* cross-origin */ }
+  try {
+    if (window.parent && window.parent !== window) frames.push(window.parent);
+  } catch {
+    /* cross-origin */
+  }
+  try {
+    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
+  } catch {
+    /* cross-origin */
+  }
 
   for (const frame of frames) {
     try {
@@ -103,11 +101,7 @@ async function getBusinessUnitContainerId(dataService: IDataService): Promise<st
   }
 
   // Step 1: Get the user's business unit ID
-  const userRecord = await dataService.retrieveRecord(
-    'systemuser',
-    userId,
-    '?$select=_businessunitid_value'
-  );
+  const userRecord = await dataService.retrieveRecord('systemuser', userId, '?$select=_businessunitid_value');
 
   const buId = userRecord['_businessunitid_value'] as string | undefined;
   if (!buId) {
@@ -115,17 +109,13 @@ async function getBusinessUnitContainerId(dataService: IDataService): Promise<st
   }
 
   // Step 2: Get the business unit's sprk_containerid
-  const buRecord = await dataService.retrieveRecord(
-    'businessunit',
-    buId,
-    '?$select=sprk_containerid'
-  );
+  const buRecord = await dataService.retrieveRecord('businessunit', buId, '?$select=sprk_containerid');
 
   const containerId = buRecord['sprk_containerid'] as string | undefined;
   if (!containerId) {
     throw new Error(
       `${LOG_PREFIX} Business unit ${buId} does not have a container configured (sprk_containerid is empty). ` +
-      'Ask your administrator to configure the SPE container for your business unit.'
+        'Ask your administrator to configure the SPE container for your business unit.'
     );
   }
 
@@ -144,7 +134,7 @@ async function createDocumentRecord(
   authenticatedFetch: AuthenticatedFetchFn,
   bffBaseUrl: string,
   fileName: string,
-  containerId: string,
+  containerId: string
 ): Promise<string> {
   const url = `${bffBaseUrl}/api/v1/documents`;
 
@@ -167,10 +157,7 @@ async function createDocumentRecord(
   const json: any = await response.json();
 
   // Try common ID field names in the response
-  const documentId: string | undefined =
-    json?.data?.sprk_documentid ??
-    json?.data?.id ??
-    json?.id;
+  const documentId: string | undefined = json?.data?.sprk_documentid ?? json?.data?.id ?? json?.id;
 
   if (!documentId) {
     throw new Error(`${LOG_PREFIX} BFF response did not include a document ID for "${fileName}".`);
@@ -191,20 +178,20 @@ async function createDocumentRecords(
   authenticatedFetch: AuthenticatedFetchFn,
   bffBaseUrl: string,
   files: IUploadedFile[],
-  containerId: string,
+  containerId: string
 ): Promise<ICreateDocumentResult[]> {
   const settled = await Promise.allSettled(
-    files.map((f) =>
+    files.map(f =>
       createDocumentRecord(authenticatedFetch, bffBaseUrl, f.name, containerId)
-        .then((id) => ({ fileName: f.name, documentId: id }))
-        .catch((err) => ({
+        .then(id => ({ fileName: f.name, documentId: id }))
+        .catch(err => ({
           fileName: f.name,
           error: err instanceof Error ? err.message : String(err),
         }))
     )
   );
 
-  return settled.map((result) =>
+  return settled.map(result =>
     result.status === 'fulfilled'
       ? result.value
       : { fileName: 'unknown', error: (result.reason as Error)?.message ?? 'Unknown error' }
@@ -301,7 +288,9 @@ export const SummarizeAnalysisStep: React.FC<ISummarizeAnalysisStepProps> = ({
     };
 
     void load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [dataService]);
 
   // ── Handle playbook card click ─────────────────────────────────────────
@@ -315,18 +304,14 @@ export const SummarizeAnalysisStep: React.FC<ISummarizeAnalysisStepProps> = ({
       try {
         // ── Guard: need auth + BFF ───────────────────────────────────────
         if (!authenticatedFetch || !bffBaseUrl) {
-          setErrorMessage(
-            'Authentication is not available. Please reload the page and try again.'
-          );
+          setErrorMessage('Authentication is not available. Please reload the page and try again.');
           setLaunchStatus('error');
           return;
         }
 
         // ── Guard: need files ────────────────────────────────────────────
         if (uploadedFiles.length === 0) {
-          setErrorMessage(
-            'No files have been uploaded. Please go back and upload at least one file.'
-          );
+          setErrorMessage('No files have been uploaded. Please go back and upload at least one file.');
           setLaunchStatus('error');
           return;
         }
@@ -338,12 +323,7 @@ export const SummarizeAnalysisStep: React.FC<ISummarizeAnalysisStepProps> = ({
         // ── Step 2: Create sprk_document records (parallel, ≤3 s for ≤10) ─
         setLaunchStatusLabel(`Creating ${uploadedFiles.length} document record${uploadedFiles.length > 1 ? 's' : ''}…`);
 
-        const createResults = await createDocumentRecords(
-          authenticatedFetch,
-          bffBaseUrl,
-          uploadedFiles,
-          containerId,
-        );
+        const createResults = await createDocumentRecords(authenticatedFetch, bffBaseUrl, uploadedFiles, containerId);
 
         // ── Step 3: Collect IDs and gather warnings ──────────────────────
         const successfulIds: string[] = [];
@@ -364,7 +344,7 @@ export const SummarizeAnalysisStep: React.FC<ISummarizeAnalysisStepProps> = ({
         if (successfulIds.length === 0) {
           setErrorMessage(
             'All document records failed to create. ' +
-            'Check your connection and try again, or contact your administrator.'
+              'Check your connection and try again, or contact your administrator.'
           );
           setLaunchStatus('error');
           return;
@@ -383,19 +363,16 @@ export const SummarizeAnalysisStep: React.FC<ISummarizeAnalysisStepProps> = ({
           return;
         }
 
-        await navigationService.openDialog(
-          PLAYBOOK_LIBRARY_WEBRESOURCE,
-          data,
-          { width: { value: 85, unit: '%' }, height: { value: 85, unit: '%' } }
-        );
+        await navigationService.openDialog(PLAYBOOK_LIBRARY_WEBRESOURCE, data, {
+          width: { value: 85, unit: '%' },
+          height: { value: 85, unit: '%' },
+        });
 
         setLaunchStatus('idle');
         setSelectedId(undefined);
       } catch (err) {
         console.error(`${LOG_PREFIX} Failed to launch analysis:`, err);
-        setErrorMessage(
-          err instanceof Error ? err.message : 'Failed to create document records. Please try again.'
-        );
+        setErrorMessage(err instanceof Error ? err.message : 'Failed to create document records. Please try again.');
         setLaunchStatus('error');
       }
     },
@@ -409,8 +386,8 @@ export const SummarizeAnalysisStep: React.FC<ISummarizeAnalysisStepProps> = ({
           Work on Analysis
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Choose a playbook to run analysis on the uploaded files.
-          Document records will be created automatically, then PlaybookLibrary will open.
+          Choose a playbook to run analysis on the uploaded files. Document records will be created automatically, then
+          PlaybookLibrary will open.
         </Text>
       </div>
 
@@ -438,12 +415,7 @@ export const SummarizeAnalysisStep: React.FC<ISummarizeAnalysisStepProps> = ({
           <Spinner size="large" label={launchStatusLabel} labelPosition="below" />
         </div>
       ) : (
-        <PlaybookCardGrid
-          playbooks={playbooks}
-          selectedId={selectedId}
-          onSelect={handleSelect}
-          isLoading={isLoading}
-        />
+        <PlaybookCardGrid playbooks={playbooks} selectedId={selectedId} onSelect={handleSelect} isLoading={isLoading} />
       )}
     </div>
   );

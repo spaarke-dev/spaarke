@@ -97,7 +97,9 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
       .catch(err => {
         logger.error('UniversalDatasetGridRoot', 'Failed to resolve BFF API URL', err);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [context.webAPI]);
 
   // Track previous filter to detect changes (avoid unnecessary re-filtering)

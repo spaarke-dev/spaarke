@@ -22,17 +22,29 @@ function resolveTenantFromXrm(): string | undefined {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const frames: Window[] = [window as Window];
-    try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-    try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
+    try {
+      if (window.parent !== window) frames.push(window.parent);
+    } catch {
+      /* cross-origin */
+    }
+    try {
+      if (window.top && window.top !== window) frames.push(window.top);
+    } catch {
+      /* cross-origin */
+    }
     for (const frame of frames) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const xrm = (frame as any).Xrm;
         const tid = xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId;
         if (tid && typeof tid === 'string') return tid;
-      } catch { /* cross-origin */ }
+      } catch {
+        /* cross-origin */
+      }
     }
-  } catch { /* swallow */ }
+  } catch {
+    /* swallow */
+  }
   return undefined;
 }
 
@@ -89,10 +101,7 @@ export function resolveConfig(userConfig?: IAuthConfig): Required<IAuthConfig> {
     authority = `https://login.microsoftonline.com/${userConfig.tenantId.trim()}`;
   } else {
     if (userConfig?.tenantId !== undefined && typeof userConfig.tenantId !== 'string') {
-      console.warn(
-        '[SpaarkeAuth] resolveConfig: tenantId is not a string; ignoring. Got:',
-        typeof userConfig.tenantId
-      );
+      console.warn('[SpaarkeAuth] resolveConfig: tenantId is not a string; ignoring. Got:', typeof userConfig.tenantId);
     }
     authority = resolveDefaultAuthority();
   }

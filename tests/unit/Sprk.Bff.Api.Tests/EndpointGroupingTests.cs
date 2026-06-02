@@ -12,6 +12,7 @@ namespace Sprk.Bff.Api.Tests;
 /// Tests for endpoint grouping and consistent ProblemDetails responses.
 /// Ensures endpoints are properly organized and return RFC 7807 compliant errors.
 /// </summary>
+[Trait("status", "repaired")]
 public class EndpointGroupingTests : IClassFixture<CustomWebAppFactory>
 {
     private readonly HttpClient _client;

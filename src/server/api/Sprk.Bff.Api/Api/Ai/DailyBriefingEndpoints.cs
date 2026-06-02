@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -106,6 +107,14 @@ public static class DailyBriefingEndpoints
                 CategoryCount = request.Categories.Length,
                 PriorityItemCount = request.PriorityItems.Length
             });
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 L1): NullBriefingAi surfaced.
+            logger.LogDebug(
+                "Daily briefing summarize called while AI feature disabled. ErrorCode={ErrorCode}",
+                ex.ErrorCode);
+            return ex.AsFeatureDisabled503();
         }
         catch (OpenAiCircuitBrokenException ex)
         {
@@ -260,6 +269,14 @@ public static class DailyBriefingEndpoints
                 ChannelNarratives = channelResults.ToArray(),
                 GeneratedAtUtc = DateTimeOffset.UtcNow
             });
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 L1): NullBriefingAi surfaced.
+            logger.LogDebug(
+                "Daily briefing narrate called while AI feature disabled. ErrorCode={ErrorCode}",
+                ex.ErrorCode);
+            return ex.AsFeatureDisabled503();
         }
         catch (OpenAiCircuitBrokenException ex)
         {

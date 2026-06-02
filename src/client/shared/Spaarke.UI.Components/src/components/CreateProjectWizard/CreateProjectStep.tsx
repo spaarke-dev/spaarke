@@ -39,10 +39,7 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import {
-  ICreateProjectFormState,
-  EMPTY_PROJECT_FORM,
-} from './projectFormTypes';
+import { ICreateProjectFormState, EMPTY_PROJECT_FORM } from './projectFormTypes';
 import { ProjectService } from './projectService';
 import { DataverseLookupField } from '../LookupField';
 import { AiFieldTag } from '../AiFieldTag';
@@ -218,8 +215,8 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
   // user navigated back), start from those to preserve user edits and
   // Assign Resources overrides. Otherwise start empty for first mount.
   const hasInitialValues = initialFormValues && initialFormValues.projectName.trim() !== '';
-  const [formState, setFormState] = React.useState<ICreateProjectFormState>(
-    () => hasInitialValues ? { ...initialFormValues } : { ...EMPTY_PROJECT_FORM }
+  const [formState, setFormState] = React.useState<ICreateProjectFormState>(() =>
+    hasInitialValues ? { ...initialFormValues } : { ...EMPTY_PROJECT_FORM }
   );
 
   // ── AI pre-fill state ───────────────────────────────────────────────────
@@ -251,31 +248,28 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
   }, [formState]);
 
   // ── AI Pre-fill via shared hook ────────────────────────────────────────
-  const handlePrefillApply = React.useCallback(
-    (resolved: IResolvedPrefillFields, _prefilledFieldNames: string[]) => {
-      const updates: Partial<ICreateProjectFormState> = {};
-      const pfFields = new Set<keyof ICreateProjectFormState>();
+  const handlePrefillApply = React.useCallback((resolved: IResolvedPrefillFields, _prefilledFieldNames: string[]) => {
+    const updates: Partial<ICreateProjectFormState> = {};
+    const pfFields = new Set<keyof ICreateProjectFormState>();
 
-      for (const [key, value] of Object.entries(resolved)) {
-        if (typeof value === 'string') {
-          (updates as Record<string, string>)[key] = value;
-          pfFields.add(key as keyof ICreateProjectFormState);
-        } else {
-          // Lookup resolved: set both id and name fields
-          const idKey = key.replace(/Name$/, 'Id');
-          (updates as Record<string, string>)[idKey] = value.id;
-          (updates as Record<string, string>)[key] = value.name;
-          pfFields.add(idKey as keyof ICreateProjectFormState);
-        }
+    for (const [key, value] of Object.entries(resolved)) {
+      if (typeof value === 'string') {
+        (updates as Record<string, string>)[key] = value;
+        pfFields.add(key as keyof ICreateProjectFormState);
+      } else {
+        // Lookup resolved: set both id and name fields
+        const idKey = key.replace(/Name$/, 'Id');
+        (updates as Record<string, string>)[idKey] = value.id;
+        (updates as Record<string, string>)[key] = value.name;
+        pfFields.add(idKey as keyof ICreateProjectFormState);
       }
+    }
 
-      if (Object.keys(updates).length > 0) {
-        setFormState((prev) => ({ ...prev, ...updates }));
-      }
-      setAiState({ status: 'success', prefilledFields: pfFields });
-    },
-    []
-  );
+    if (Object.keys(updates).length > 0) {
+      setFormState(prev => ({ ...prev, ...updates }));
+    }
+    setAiState({ status: 'success', prefilledFields: pfFields });
+  }, []);
 
   // Only run AI pre-fill if authenticatedFetch and bffBaseUrl are provided
   const prefill = useAiPrefill({
@@ -283,7 +277,7 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
     uploadedFiles,
     authenticatedFetch: authFetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args)),
     bffBaseUrl: bffBaseUrl ?? '',
-    fieldExtractor: (data) => ({
+    fieldExtractor: data => ({
       textFields: {
         projectName: data.projectName as string | undefined,
         description: data.description as string | undefined,
@@ -297,11 +291,11 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
       },
     }),
     lookupResolvers: {
-      projectTypeName: (v) => serviceRef.current.searchProjectTypes(v),
-      practiceAreaName: (v) => serviceRef.current.searchPracticeAreas(v),
-      assignedAttorneyName: (v) => serviceRef.current.searchContacts(v),
-      assignedParalegalName: (v) => serviceRef.current.searchContacts(v),
-      assignedOutsideCounselName: (v) => serviceRef.current.searchOrganizations(v),
+      projectTypeName: v => serviceRef.current.searchProjectTypes(v),
+      practiceAreaName: v => serviceRef.current.searchPracticeAreas(v),
+      assignedAttorneyName: v => serviceRef.current.searchContacts(v),
+      assignedParalegalName: v => serviceRef.current.searchContacts(v),
+      assignedOutsideCounselName: v => serviceRef.current.searchOrganizations(v),
     },
     onApply: handlePrefillApply,
     skipIfInitialized: !!hasInitialValues,
@@ -331,57 +325,41 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
 
   // ── Lookup change handlers ─────────────────────────────────────────────
 
-  const handleProjectTypeChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setFormState((prev) => ({
-        ...prev,
-        projectTypeId: item?.id ?? '',
-        projectTypeName: item?.name ?? '',
-      }));
-    },
-    []
-  );
+  const handleProjectTypeChange = React.useCallback((item: ILookupItem | null) => {
+    setFormState(prev => ({
+      ...prev,
+      projectTypeId: item?.id ?? '',
+      projectTypeName: item?.name ?? '',
+    }));
+  }, []);
 
-  const handlePracticeAreaChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setFormState((prev) => ({
-        ...prev,
-        practiceAreaId: item?.id ?? '',
-        practiceAreaName: item?.name ?? '',
-      }));
-    },
-    []
-  );
+  const handlePracticeAreaChange = React.useCallback((item: ILookupItem | null) => {
+    setFormState(prev => ({
+      ...prev,
+      practiceAreaId: item?.id ?? '',
+      practiceAreaName: item?.name ?? '',
+    }));
+  }, []);
 
   // ── Text field change handlers ─────────────────────────────────────────
 
-  const handleProjectNameChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setFormState((prev) => ({ ...prev, projectName: e.target.value }));
-    },
-    []
-  );
+  const handleProjectNameChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormState(prev => ({ ...prev, projectName: e.target.value }));
+  }, []);
 
-  const handleDescriptionChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setFormState((prev) => ({ ...prev, description: e.target.value }));
-    },
-    []
-  );
+  const handleDescriptionChange = React.useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setFormState(prev => ({ ...prev, description: e.target.value }));
+  }, []);
 
-  const handleSecureChange = React.useCallback(
-    (value: boolean) => {
-      setFormState((prev) => ({ ...prev, isSecure: value }));
-    },
-    []
-  );
+  const handleSecureChange = React.useCallback((value: boolean) => {
+    setFormState(prev => ({ ...prev, isSecure: value }));
+  }, []);
 
   // ── Derived ───────────────────────────────────────────────────────────
   const isLoading = aiState.status === 'loading';
   const hasAnyPrefill = aiState.prefilledFields.size > 0;
 
-  const isAiField = (field: keyof ICreateProjectFormState): boolean =>
-    aiState.prefilledFields.has(field);
+  const isAiField = (field: keyof ICreateProjectFormState): boolean => aiState.prefilledFields.has(field);
 
   // Build lookup value objects from form state
   const projectTypeValue: ILookupItem | null = formState.projectTypeId
@@ -409,24 +387,14 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
         </div>
 
         {hasAnyPrefill && (
-          <Badge
-            className={styles.aiBadge}
-            appearance="tint"
-            color="brand"
-            icon={<span aria-hidden="true" />}
-          >
+          <Badge className={styles.aiBadge} appearance="tint" color="brand" icon={<span aria-hidden="true" />}>
             AI Pre-filled
           </Badge>
         )}
       </div>
 
       {/* ── Secure Project toggle ── */}
-      {!isLoading && (
-        <SecureProjectSection
-          isSecure={formState.isSecure}
-          onSecureChange={handleSecureChange}
-        />
-      )}
+      {!isLoading && <SecureProjectSection isSecure={formState.isSecure} onSecureChange={handleSecureChange} />}
 
       {/* 2-column form grid */}
       {isLoading ? (

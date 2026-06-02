@@ -12,16 +12,10 @@
 export { CreateProjectWizard, type ICreateProjectWizardProps } from './CreateProjectWizard';
 
 // ── Form types ──────────────────────────────────────────────────────────────
-export {
-  type ICreateProjectFormState,
-  EMPTY_PROJECT_FORM,
-} from './projectFormTypes';
+export { type ICreateProjectFormState, EMPTY_PROJECT_FORM } from './projectFormTypes';
 
 // ── Services ────────────────────────────────────────────────────────────────
-export {
-  ProjectService,
-  type ICreateProjectResult,
-} from './projectService';
+export { ProjectService, type ICreateProjectResult } from './projectService';
 
 export {
   provisionSecureProject,
@@ -48,7 +42,4 @@ export {
   type IProvisioningStepState,
   type ProvisioningStepStatus,
 } from './ProvisioningProgressStep';
-export {
-  CloseProjectDialog,
-  type ICloseProjectDialogProps,
-} from './CloseProjectDialog';
+export { CloseProjectDialog, type ICloseProjectDialogProps } from './CloseProjectDialog';

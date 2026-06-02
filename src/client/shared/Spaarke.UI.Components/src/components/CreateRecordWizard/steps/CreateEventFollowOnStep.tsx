@@ -88,8 +88,7 @@ export const CreateEventFollowOnStep: React.FC<ICreateEventFollowOnStepProps> = 
           Create Event
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Enter details for the event. It will be created and linked to the record when you click
-          Finish.
+          Enter details for the event. It will be created and linked to the record when you click Finish.
         </Text>
       </div>
 

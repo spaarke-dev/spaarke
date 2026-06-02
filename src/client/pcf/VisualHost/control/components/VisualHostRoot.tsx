@@ -520,9 +520,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
     // caller explicitly sets showTitle=true (Phase 3+ Matter cards), CardChrome
     // takes over both the title bar AND the expand icon.
     const chromeOptIn = showTitlePcf === true;
-    const chromeTitle: string | undefined = chromeOptIn
-      ? (chartDefinition.sprk_name || undefined)
-      : undefined;
+    const chromeTitle: string | undefined = chromeOptIn ? chartDefinition.sprk_name || undefined : undefined;
 
     // Wire expand to existing handleExpandClick so chart-def Drill Through
     // Settings continue to apply (no new ClickActionHandler).
@@ -534,11 +532,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
         : undefined;
 
     return (
-      <CardChrome
-        title={chromeTitle}
-        onExpand={chromeOnExpand}
-        showAiSparkle={false}
-      >
+      <CardChrome title={chromeTitle} onExpand={chromeOnExpand} showAiSparkle={false}>
         <ChartRenderer
           chartDefinition={chartDefinition}
           chartData={chartData || undefined}

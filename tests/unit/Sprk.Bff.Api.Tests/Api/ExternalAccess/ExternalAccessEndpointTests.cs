@@ -32,6 +32,7 @@ namespace Sprk.Bff.Api.Tests.Api.ExternalAccess;
 /// ADR-001: Minimal API patterns.
 /// ADR-008: Auth filters are applied per-endpoint and are NOT tested here — integration tests cover those.
 /// </summary>
+[Trait("status", "repaired")]
 public class ExternalAccessEndpointTests
 {
     // =========================================================================
@@ -373,11 +374,6 @@ public class ExternalAccessEndpointTests
 
     #region InviteExternalUser — Validation
 
-    // NOTE: InviteExternalUserRequest contract changed — `ContactId` was replaced with
-    // `Email` (Azure AD B2B invitation flow). Tests below cover the current contract:
-    //   record InviteExternalUserRequest(string Email, Guid ProjectId, int AccessLevel,
-    //       string? FirstName, string? LastName, DateOnly? ExpiryDate, Guid? AccountId)
-
     [Fact]
     public void InviteExternalUser_EmptyEmail_ShouldFailValidation()
     {
@@ -386,7 +382,7 @@ public class ExternalAccessEndpointTests
             ProjectId: Guid.NewGuid(),
             AccessLevel: 100000000,
             FirstName: null,
-            LastName: null,
+            LastName: "Doe",
             ExpiryDate: null,
             AccountId: null);
 
@@ -402,7 +398,7 @@ public class ExternalAccessEndpointTests
             ProjectId: Guid.Empty,
             AccessLevel: 100000000,
             FirstName: null,
-            LastName: null,
+            LastName: "Doe",
             ExpiryDate: null,
             AccountId: null);
 
@@ -416,7 +412,7 @@ public class ExternalAccessEndpointTests
         var request = new InviteExternalUserRequest(
             Email: "user@example.com",
             ProjectId: Guid.NewGuid(),
-            AccessLevel: 100000001,
+            AccessLevel: 100000000,
             FirstName: "Jane",
             LastName: "Doe",
             ExpiryDate: DateOnly.FromDateTime(DateTime.UtcNow.AddDays(14)),
@@ -430,14 +426,7 @@ public class ExternalAccessEndpointTests
     public void InviteExternalUser_NullExpiryDate_DefaultsTo30Days()
     {
         // Handler behaviour: when ExpiryDate is null, default to UtcNow + 30 days.
-        var request = new InviteExternalUserRequest(
-            Email: "user@example.com",
-            ProjectId: Guid.NewGuid(),
-            AccessLevel: 100000000,
-            FirstName: null,
-            LastName: null,
-            ExpiryDate: null,
-            AccountId: null);
+        var request = new InviteExternalUserRequest("user@example.com", Guid.NewGuid(), 100000000, null, "Doe", null, null);
 
         // Simulate the handler's default logic.
         const int defaultExpiryDays = 30;
@@ -489,14 +478,11 @@ public class ExternalAccessEndpointTests
 
     #region InviteExternalUserResponse — DTO
 
-    // NOTE: InviteExternalUserResponse contract changed — was `(InvitationId, InvitationCode,
-    // ExpiryDate)`, now `(ContactId, InviteRedeemUrl, Status)` for the Azure AD B2B flow.
-
     [Fact]
     public void InviteExternalUserResponse_HoldsAllFields()
     {
         var contactId = Guid.NewGuid();
-        var redeemUrl = "https://login.microsoftonline.com/redeem?code=ABC-12345";
+        var redeemUrl = "https://login.microsoftonline.com/redeem/ABC-12345";
         var status = "PendingAcceptance";
         var response = new InviteExternalUserResponse(contactId, redeemUrl, status);
 
@@ -508,9 +494,10 @@ public class ExternalAccessEndpointTests
     [Fact]
     public void InviteExternalUserResponse_EmptyRedeemUrl_IsAccepted()
     {
-        // Empty redeem URL is valid (occurs when the user already exists in the tenant).
+        // Empty redeem URL signals the user is already in the tenant — no invitation needed.
         var response = new InviteExternalUserResponse(Guid.NewGuid(), string.Empty, "Completed");
         response.InviteRedeemUrl.Should().BeEmpty();
+        response.Status.Should().Be("Completed");
     }
 
     #endregion

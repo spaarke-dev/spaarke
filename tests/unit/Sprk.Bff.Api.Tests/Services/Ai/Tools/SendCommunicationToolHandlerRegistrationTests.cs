@@ -20,6 +20,12 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Tools;
 /// explicitly via CommunicationModule (or similar DI registration).
 /// These tests confirm correct tool identity and interface implementation.
 /// </summary>
+/// <remarks>
+/// 2026-05-31 (task 012 / P1.A3 verify-only): file already compiles clean (Phase 0 baseline
+/// confirms 0 compile errors). All 8 tests pass at runtime. §6.2 trait tagged `repaired`.
+/// No test logic changes; SUT constructor + interface contracts intact.
+/// </remarks>
+[Trait("status", "repaired")]
 public class SendCommunicationToolHandlerRegistrationTests
 {
     /// <summary>
@@ -58,9 +64,9 @@ public class SendCommunicationToolHandlerRegistrationTests
         var communicationService = new CommunicationService(
             Mock.Of<IGraphClientFactory>(),
             senderValidator,
-            Mock.Of<IDataverseService>(),
-            Mock.Of<IDataverseService>(),
-            Mock.Of<IDataverseService>(), // IDocumentDataverseService (IDataverseService satisfies it)
+            Mock.Of<ICommunicationDataverseService>(),
+            Mock.Of<IGenericEntityService>(),
+            Mock.Of<IDocumentDataverseService>(),
             null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here
             null!, // CommunicationAccountService — not tested here
@@ -167,9 +173,9 @@ public class SendCommunicationToolHandlerRegistrationTests
         var communicationService = new CommunicationService(
             Mock.Of<IGraphClientFactory>(),
             senderValidator,
-            Mock.Of<IDataverseService>(),
-            Mock.Of<IDataverseService>(),
-            Mock.Of<IDataverseService>(), // IDocumentDataverseService (IDataverseService satisfies it)
+            Mock.Of<ICommunicationDataverseService>(),
+            Mock.Of<IGenericEntityService>(),
+            Mock.Of<IDocumentDataverseService>(),
             null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here
             null!, // CommunicationAccountService — not tested here

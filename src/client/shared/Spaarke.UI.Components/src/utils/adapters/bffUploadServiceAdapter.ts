@@ -35,11 +35,7 @@
  * ```
  */
 
-import type {
-  IUploadService,
-  UploadOptions,
-  UploadResult,
-} from '../../types/serviceInterfaces';
+import type { IUploadService, UploadOptions, UploadResult } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetch } from './bffDataServiceAdapter';
 
 /**
@@ -113,12 +109,7 @@ export function createBffUploadService(
   const baseUrl = bffBaseUrl.replace(/\/+$/, '');
 
   return {
-    uploadFile(
-      entityName: string,
-      entityId: string,
-      file: File,
-      options?: UploadOptions
-    ): Promise<UploadResult> {
+    uploadFile(entityName: string, entityId: string, file: File, options?: UploadOptions): Promise<UploadResult> {
       const url = `${baseUrl}/api/documents/upload`;
 
       const formData = new FormData();
@@ -137,18 +128,16 @@ export function createBffUploadService(
           xhr.open('POST', url);
 
           // Attach auth token if a getter was provided
-          const tokenPromise = getBearerToken
-            ? getBearerToken()
-            : Promise.resolve(undefined);
+          const tokenPromise = getBearerToken ? getBearerToken() : Promise.resolve(undefined);
 
           tokenPromise
-            .then((token) => {
+            .then(token => {
               if (token) {
                 xhr.setRequestHeader('Authorization', `Bearer ${token}`);
               }
               xhr.setRequestHeader('Accept', 'application/json');
 
-              xhr.upload.addEventListener('progress', (event) => {
+              xhr.upload.addEventListener('progress', event => {
                 if (event.lengthComputable && options.onProgress) {
                   options.onProgress(event.loaded, event.total);
                 }
@@ -163,11 +152,7 @@ export function createBffUploadService(
                     reject(new Error('Failed to parse upload response'));
                   }
                 } else {
-                  reject(
-                    new Error(
-                      `Upload failed with status ${xhr.status}: ${xhr.statusText}`
-                    )
-                  );
+                  reject(new Error(`Upload failed with status ${xhr.status}: ${xhr.statusText}`));
                 }
               });
 
@@ -181,7 +166,7 @@ export function createBffUploadService(
 
               xhr.send(formData);
             })
-            .catch((err) => {
+            .catch(err => {
               reject(
                 new Error(
                   `Failed to acquire auth token for upload: ${err instanceof Error ? err.message : String(err)}`
@@ -195,20 +180,15 @@ export function createBffUploadService(
       return authenticatedFetch(url, {
         method: 'POST',
         body: formData,
-      }).then(async (response) => {
+      }).then(async response => {
         if (!response.ok) {
-          throw new Error(
-            `Upload failed with status ${response.status}: ${response.statusText}`
-          );
+          throw new Error(`Upload failed with status ${response.status}: ${response.statusText}`);
         }
         return (await response.json()) as UploadResult;
       });
     },
 
-    async getContainerIdForEntity(
-      entityName: string,
-      entityId: string
-    ): Promise<string> {
+    async getContainerIdForEntity(entityName: string, entityId: string): Promise<string> {
       const url = `${baseUrl}/api/containers/${encodeURIComponent(entityName)}/${encodeURIComponent(entityId)}`;
 
       const response = await authenticatedFetch(url, {
@@ -217,9 +197,7 @@ export function createBffUploadService(
       });
 
       if (!response.ok) {
-        throw new Error(
-          `Failed to retrieve container ID (${response.status}): ${response.statusText}`
-        );
+        throw new Error(`Failed to retrieve container ID (${response.status}): ${response.statusText}`);
       }
 
       const data = (await response.json()) as { containerId: string };

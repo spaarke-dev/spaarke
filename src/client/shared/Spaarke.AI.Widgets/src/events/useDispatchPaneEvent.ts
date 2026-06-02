@@ -46,10 +46,7 @@ import { usePaneEventBus } from './PaneEventBusContext';
  * // Type error — 'citationId' is not on WorkspacePaneEvent:
  * dispatch('workspace', { type: 'tab_change', citationId: 'ref-1' });
  */
-export type DispatchPaneEvent = <C extends PaneChannel>(
-  channel: C,
-  event: PaneChannelEventMap[C]
-) => void;
+export type DispatchPaneEvent = <C extends PaneChannel>(channel: C, event: PaneChannelEventMap[C]) => void;
 
 // ---------------------------------------------------------------------------
 // Hook

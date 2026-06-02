@@ -1,67 +1,57 @@
-import * as React from "react";
-import { useNavigate } from "react-router-dom";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Switch,
-  Divider,
-  Button,
-  Label,
-  Field,
-  Input,
-} from "@fluentui/react-components";
-import { ArrowLeftRegular, Person24Regular } from "@fluentui/react-icons";
-import { PageContainer } from "../components/PageContainer";
-import { SectionCard } from "../components/SectionCard";
-import type { PortalUser } from "../types";
+import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { makeStyles, tokens, Text, Switch, Divider, Button, Label, Field, Input } from '@fluentui/react-components';
+import { ArrowLeftRegular, Person24Regular } from '@fluentui/react-icons';
+import { PageContainer } from '../components/PageContainer';
+import { SectionCard } from '../components/SectionCard';
+import type { PortalUser } from '../types';
 
 const useStyles = makeStyles({
   backRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     marginBottom: tokens.spacingVerticalM,
   },
   avatar: {
-    width: "56px",
-    height: "56px",
-    borderRadius: "50%",
+    width: '56px',
+    height: '56px',
+    borderRadius: '50%',
     backgroundColor: tokens.colorBrandBackground,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     color: tokens.colorNeutralForegroundInverted,
     flexShrink: 0,
   },
   profileRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalL,
     paddingBottom: tokens.spacingVerticalM,
   },
   profileInfo: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
   settingRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
   },
   settingLabel: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
   fieldGrid: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
     gap: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
-    "@media (max-width: 600px)": {
-      gridTemplateColumns: "1fr",
+    '@media (max-width: 600px)': {
+      gridTemplateColumns: '1fr',
     },
   },
 });
@@ -81,27 +71,17 @@ interface SettingsPageProps {
  *
  * Accessible via the user name button in AppHeader → #/settings.
  */
-export const SettingsPage: React.FC<SettingsPageProps> = ({
-  isDark,
-  onToggleDark,
-  portalUser,
-}) => {
+export const SettingsPage: React.FC<SettingsPageProps> = ({ isDark, onToggleDark, portalUser }) => {
   const styles = useStyles();
   const navigate = useNavigate();
 
-  const initialsFromName = `${portalUser?.firstName?.[0] ?? ""}${portalUser?.lastName?.[0] ?? ""}`.toUpperCase();
-  const initials = portalUser
-    ? (initialsFromName || portalUser.displayName?.[0]?.toUpperCase() || "?")
-    : "?";
+  const initialsFromName = `${portalUser?.firstName?.[0] ?? ''}${portalUser?.lastName?.[0] ?? ''}`.toUpperCase();
+  const initials = portalUser ? initialsFromName || portalUser.displayName?.[0]?.toUpperCase() || '?' : '?';
 
   return (
     <PageContainer>
       <div className={styles.backRow}>
-        <Button
-          appearance="subtle"
-          icon={<ArrowLeftRegular />}
-          onClick={() => navigate(-1)}
-        >
+        <Button appearance="subtle" icon={<ArrowLeftRegular />} onClick={() => navigate(-1)}>
           Back
         </Button>
       </div>
@@ -115,7 +95,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         <div className={styles.profileRow}>
           <div className={styles.avatar} aria-hidden="true">
             {portalUser ? (
-              <Text size={500} weight="semibold" style={{ color: "inherit" }}>
+              <Text size={500} weight="semibold" style={{ color: 'inherit' }}>
                 {initials}
               </Text>
             ) : (
@@ -124,10 +104,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           </div>
           <div className={styles.profileInfo}>
             <Text size={500} weight="semibold">
-              {portalUser?.displayName ?? "—"}
+              {portalUser?.displayName ?? '—'}
             </Text>
             <Text size={300} style={{ color: tokens.colorNeutralForeground3 }}>
-              {portalUser?.userName ?? "—"}
+              {portalUser?.userName ?? '—'}
             </Text>
             <Text size={200} style={{ color: tokens.colorNeutralForeground4 }}>
               External user · Entra B2B
@@ -139,22 +119,22 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
 
         <div className={styles.fieldGrid} style={{ marginTop: tokens.spacingVerticalM }}>
           <Field label="First name">
-            <Input value={portalUser?.firstName ?? ""} readOnly appearance="outline" />
+            <Input value={portalUser?.firstName ?? ''} readOnly appearance="outline" />
           </Field>
           <Field label="Last name">
-            <Input value={portalUser?.lastName ?? ""} readOnly appearance="outline" />
+            <Input value={portalUser?.lastName ?? ''} readOnly appearance="outline" />
           </Field>
-          <Field label="Email address" style={{ gridColumn: "1 / -1" }}>
-            <Input value={portalUser?.userName ?? ""} readOnly appearance="outline" type="email" />
+          <Field label="Email address" style={{ gridColumn: '1 / -1' }}>
+            <Input value={portalUser?.userName ?? ''} readOnly appearance="outline" type="email" />
           </Field>
         </div>
 
         <Text
           size={200}
-          style={{ color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalS, display: "block" }}
+          style={{ color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalS, display: 'block' }}
         >
-          Contact information is managed by your Entra identity. To update your profile,
-          contact your system administrator.
+          Contact information is managed by your Entra identity. To update your profile, contact your system
+          administrator.
         </Text>
       </SectionCard>
 
@@ -167,8 +147,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             </Label>
             <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
               {isDark
-                ? "Currently using dark theme"
-                : "Currently using light theme — switches automatically with your system preference"}
+                ? 'Currently using dark theme'
+                : 'Currently using light theme — switches automatically with your system preference'}
             </Text>
           </div>
           <Switch
@@ -176,7 +156,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             onChange={(_ev, data) => {
               if (data.checked !== isDark) onToggleDark();
             }}
-            label={isDark ? "On" : "Off"}
+            label={isDark ? 'On' : 'Off'}
             labelPosition="before"
           />
         </div>

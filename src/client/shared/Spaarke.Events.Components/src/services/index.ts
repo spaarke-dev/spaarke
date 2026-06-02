@@ -15,4 +15,4 @@ export {
   type FetchXmlResult,
   type ViewDefinition,
   type LayoutColumn,
-} from "./FetchXmlService";
+} from './FetchXmlService';

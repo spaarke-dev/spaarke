@@ -65,7 +65,5 @@ export async function initializeAuth(
 
   await initAuth(config);
 
-  console.info(
-    `[authInit] @spaarke/auth initialized successfully for SpeDocumentViewer (redirectUri=${redirectUri})`
-  );
+  console.info(`[authInit] @spaarke/auth initialized successfully for SpeDocumentViewer (redirectUri=${redirectUri})`);
 }

@@ -13,7 +13,7 @@
  * @see projects/events-workspace-apps-UX-r1/tasks/091-move-calendar-to-sidepane.poml
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   OverlayDrawer,
   DrawerHeader,
@@ -23,9 +23,9 @@ import {
   makeStyles,
   tokens,
   shorthands,
-} from "@fluentui/react-components";
-import { Dismiss24Regular, Calendar24Regular } from "@fluentui/react-icons";
-import { CalendarSection, CalendarFilterOutput, IEventDateInfo } from "./CalendarSection";
+} from '@fluentui/react-components';
+import { Dismiss24Regular, Calendar24Regular } from '@fluentui/react-icons';
+import { CalendarSection, CalendarFilterOutput, IEventDateInfo } from './CalendarSection';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -61,22 +61,22 @@ export interface CalendarDrawerProps {
 const useStyles = makeStyles({
   drawer: {
     // Drawer width to accommodate calendar
-    width: "340px",
+    width: '340px',
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   headerTitle: {
-    display: "flex",
-    alignItems: "center",
-    ...shorthands.gap("8px"),
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('8px'),
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
   body: {
-    ...shorthands.padding("0"),
+    ...shorthands.padding('0'),
     backgroundColor: tokens.colorNeutralBackground1,
   },
 });
@@ -92,12 +92,7 @@ const useStyles = makeStyles({
  * slides in from the right side of the screen. The grid underneath
  * remains at full width.
  */
-export const CalendarDrawer: React.FC<CalendarDrawerProps> = ({
-  isOpen,
-  onClose,
-  eventDates,
-  onFilterChange,
-}) => {
+export const CalendarDrawer: React.FC<CalendarDrawerProps> = ({ isOpen, onClose, eventDates, onFilterChange }) => {
   const styles = useStyles();
 
   return (
@@ -119,12 +114,7 @@ export const CalendarDrawer: React.FC<CalendarDrawerProps> = ({
               Calendar Filter
             </span>
           </DrawerHeaderTitle>
-          <Button
-            appearance="subtle"
-            aria-label="Close calendar"
-            icon={<Dismiss24Regular />}
-            onClick={onClose}
-          />
+          <Button appearance="subtle" aria-label="Close calendar" icon={<Dismiss24Regular />} onClick={onClose} />
         </div>
       </DrawerHeader>
       <DrawerBody className={styles.body}>

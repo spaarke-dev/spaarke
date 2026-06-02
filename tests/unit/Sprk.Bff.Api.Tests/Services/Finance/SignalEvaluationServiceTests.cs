@@ -14,6 +14,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// Unit tests for SignalEvaluationService.
 /// Tests threshold-based signal detection rules: BudgetExceeded, BudgetWarning, VelocitySpike.
 /// </summary>
+[Trait("status", "repaired")]
 public class SignalEvaluationServiceTests : IDisposable
 {
     private readonly Mock<IDataverseService> _dataverseServiceMock;

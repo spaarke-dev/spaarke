@@ -1,20 +1,20 @@
-import * as React from "react";
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
+import * as React from 'react';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
 
 const useStyles = makeStyles({
   outer: {
-    width: "100%",
-    boxSizing: "border-box",
+    width: '100%',
+    boxSizing: 'border-box',
     paddingLeft: tokens.spacingHorizontalXL,
     paddingRight: tokens.spacingHorizontalXL,
     paddingTop: tokens.spacingVerticalXL,
     paddingBottom: tokens.spacingVerticalXL,
   },
   inner: {
-    maxWidth: "1200px",
-    margin: "0 auto",
-    display: "flex",
-    flexDirection: "column",
+    maxWidth: '1200px',
+    margin: '0 auto',
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalL,
   },
   title: {

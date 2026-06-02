@@ -18,10 +18,7 @@
 
 import { initAuth } from '@spaarke/auth';
 import type { IAuthConfig } from '@spaarke/auth';
-import {
-  getEnvironmentVariable,
-  getApiBaseUrl,
-} from '../../shared/utils/environmentVariables';
+import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
 
 // ============================================================================
 // Xrm context resolution (for redirect URI)
@@ -66,7 +63,7 @@ function resolveClientUrl(): string {
 
   throw new Error(
     '[authInit] Xrm.Utility.getGlobalContext().getClientUrl() not available. ' +
-    'Ensure the control is running within a Dataverse model-driven app.'
+      'Ensure the control is running within a Dataverse model-driven app.'
   );
 }
 
@@ -91,9 +88,7 @@ function resolveClientUrl(): string {
  *
  * @param webApi - PCF WebAPI instance for querying Dataverse environment variables
  */
-export async function initializeAuth(
-  webApi: ComponentFramework.WebApi
-): Promise<void> {
+export async function initializeAuth(webApi: ComponentFramework.WebApi): Promise<void> {
   console.info('[authInit] Initializing @spaarke/auth for UniversalDatasetGrid...');
 
   // Resolve redirect URI from Xrm context (Dataverse org URL)
@@ -109,8 +104,8 @@ export async function initializeAuth(
 
   console.info(
     `[authInit] Resolved: clientId=${clientId.substring(0, 8)}..., ` +
-    `bffApiUrl=${bffApiUrl.substring(0, 30)}..., ` +
-    `bffAppId=${bffAppId.substring(0, 8)}...`
+      `bffApiUrl=${bffApiUrl.substring(0, 30)}..., ` +
+      `bffAppId=${bffAppId.substring(0, 8)}...`
   );
 
   const config: IAuthConfig = {
@@ -136,8 +131,6 @@ export async function initializeAuth(
  * @param webApi - PCF WebAPI instance for querying Dataverse environment variables
  * @returns BFF API base URL
  */
-export async function resolveBffApiUrl(
-  webApi: ComponentFramework.WebApi
-): Promise<string> {
+export async function resolveBffApiUrl(webApi: ComponentFramework.WebApi): Promise<string> {
   return getApiBaseUrl(webApi);
 }

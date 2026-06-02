@@ -28,6 +28,7 @@ internal class FakeTokenCredential : TokenCredential
 /// Unit tests for EmailToEmlConverter.ExtractAttachments method.
 /// Tests extraction of attachments from .eml files using MimeKit.
 /// </summary>
+[Trait("status", "repaired")]
 public class EmailAttachmentExtractionTests
 {
     private readonly Mock<ILogger<EmailToEmlConverter>> _loggerMock;

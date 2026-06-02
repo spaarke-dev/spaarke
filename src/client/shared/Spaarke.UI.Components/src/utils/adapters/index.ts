@@ -50,8 +50,4 @@ export type { AuthenticatedFetch } from './bffDataServiceAdapter';
 export { createBffUploadService } from './bffUploadServiceAdapter';
 export type { GetBearerToken } from './bffUploadServiceAdapter';
 export { createBffNavigationService } from './bffNavigationServiceAdapter';
-export type {
-  NavigateFunction,
-  DialogRenderer,
-  DialogCloser,
-} from './bffNavigationServiceAdapter';
+export type { NavigateFunction, DialogRenderer, DialogCloser } from './bffNavigationServiceAdapter';

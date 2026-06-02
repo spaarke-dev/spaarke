@@ -12,12 +12,7 @@
 
 import { initAuth } from '@spaarke/auth';
 import type { IAuthConfig } from '@spaarke/auth';
-import {
-  getApiBaseUrl,
-  getMsalClientId,
-  getBffApiAppId,
-  getTenantId,
-} from '../../shared/utils/environmentVariables';
+import { getApiBaseUrl, getMsalClientId, getBffApiAppId, getTenantId } from '../../shared/utils/environmentVariables';
 
 /**
  * Get the Dataverse client URL from the Xrm global.

@@ -1,0 +1,132 @@
+<task id="042" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P4.C — TestClock + seeded-Guid PoC in Services/Workspace/* (greenfield abstraction)</title>
+    <phase>Phase 4</phase>
+    <status>not-started</status>
+    <estimated-effort>6-10 hours</estimated-effort>
+    <dependencies>039</dependencies>
+    <blocks>080</blocks>
+    <tags>phase-4, testing, testclock, deterministic, workspace</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Introduces NEW abstraction in `src/` (greenfield IClock + seeded-Guid provider per design.md §5.5 Track C intent); .cs files added/modified in `src/server/api/Sprk.Bff.Api/Services/Workspace/`. Step 9.5 code-review + adr-check mandatory per CLAUDE.md §8 FULL rigor decision tree (tags include `testing` AND modifies `.cs` in `src/`).</rigor-reason>
+    <parallel-group>P4-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Track C target is `src/server/api/Sprk.Bff.Api/Services/Workspace/` + `tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/`. Disjoint write path from Track A (audits/), B (stryker-config.json + baseline/), D (.github/workflows + baseline/coverlet), E (baseline/anti-drift). No Phase 1-3 fix touches Workspace/ — fully disjoint.</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Design + apply the TestClock + seeded-Guid provider pattern to ≥1 test class in `tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/`. **No existing TestClock/IClock/ISystemClock/TimeProvider abstraction in `src/` — this is greenfield.** Per design.md §5.5 Track C intent, the src-side abstraction is the load-bearing scope: introduce an `IClock` (or equivalent) interface + default implementation in `src/server/api/Sprk.Bff.Api/Services/Workspace/` (or shared `Spaarke.Core` if more appropriate), then wire the PoC test class to inject a `TestClock` implementation.
+
+    Reference (read-only, NOT a template — these are test-internal TimeProvider uses that didn't propagate to src):
+    - `tests/unit/Sprk.Bff.Api.Tests/Services/Insights/Precedents/PrecedentProjectionSyncTests.cs`
+    - `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Ingest/IngestOrchestratorTests.cs`
+
+    Target candidate: `src/server/api/Sprk.Bff.Api/Services/Workspace/` (10 files / 4194 LOC; pick the highest-leverage file based on test-dependency analysis — likely a file whose tests currently have flake risk from time-of-day or Guid-randomness assumptions).
+
+    Per D-04, this is **pilot-grade**: ONE test class converted to demonstrate the pattern. Pattern documentation is captured in this task's commit + cross-referenced by Phase 5 task 080 (which merges the pattern into `docs/procedures/testing-and-code-quality.md`).
+
+    Per FR-13, the deliverables are: (a) at least 1 Workspace test class using the pattern; (b) pattern documentation drafted (Phase 5 task 080 merges into procedure doc); (c) r3 migration plan referenced.
+  </prompt>
+
+  <role>Backend AI agent introducing the TestClock + seeded-Guid abstraction in `Services/Workspace/` and demonstrating it in ≥1 test class.</role>
+
+  <goal>
+    Three deliverables:
+    1. **Greenfield abstraction**: `IClock` (or equivalent — `ISystemClock`, `TimeProvider` adapter) + default implementation registered in DI, residing in `src/server/api/Sprk.Bff.Api/Services/Workspace/` OR `src/server/shared/Spaarke.Core/` (decision depends on consumer breadth). Plus a seeded-Guid provider (`IGuidProvider` or similar) with default implementation.
+    2. **PoC test class**: ≥1 existing test class in `tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/` updated to inject `TestClock` + `TestGuidProvider`, demonstrating deterministic time + ID assertions.
+    3. **Pattern documentation draft**: a short markdown excerpt staged for Phase 5 task 080's merge into `docs/procedures/testing-and-code-quality.md`. Reference r3 migration plan: which other Workspace test classes are next, which Workspace src files need refactor.
+
+    Acceptance per FR-13: PoC working in at least 1 Workspace test class; pattern doc draft exists; r3 migration plan referenced.
+  </goal>
+
+  <inputs>
+    <file purpose="target-src-surface">src/server/api/Sprk.Bff.Api/Services/Workspace/</file>
+    <file purpose="target-test-surface">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/</file>
+    <file purpose="reference-test-timeprovider-1">tests/unit/Sprk.Bff.Api.Tests/Services/Insights/Precedents/PrecedentProjectionSyncTests.cs</file>
+    <file purpose="reference-test-timeprovider-2">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Ingest/IngestOrchestratorTests.cs</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — IClock + IGuidProvider added as MINIMAL pair of registrations; do NOT proliferate abstractions in this PoC</constraint>
+    <constraint source="D-04">Phase 4 tracks are pilot-grade — ONE test class converted; r3 generalizes</constraint>
+    <constraint source="FR-13">Output: PoC working in ≥1 Workspace test class; pattern doc drafted (Phase 5 task 080 merges); r3 migration plan referenced</constraint>
+    <constraint source="NFR-01">Production code IS in scope for the abstraction; test changes ONLY for the PoC test class (per design.md §5.5 Track C explicit allowance)</constraint>
+    <constraint source="NFR-02">Each new file or modified file <50% line replacement; abstraction files are new (additive)</constraint>
+    <constraint source="design.md §5.5 Track C">Greenfield abstraction; canonical-implementation source = Microsoft `TimeProvider` adapter pattern or hand-roll `IClock`. Choose based on consumer fit.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §2.3 long-term item 13, deterministic test data is the path to lower flake rates and clearer time-based assertions. Microsoft introduced `TimeProvider` in .NET 8 as the canonical clock abstraction; some Spaarke test files already inject `TimeProvider` in test scope but the SRC side has not adopted any clock abstraction. This is the gap r2 Track C closes via a pilot.
+
+      The Workspace area was chosen for the PoC because: (a) it has 10 files / 4194 LOC — enough surface to demonstrate the pattern; (b) it's not on the RB-T028 / RB-T044 hot paths (Phase 1-3 doesn't touch it); (c) its tests likely have time-based assertions (workspace timestamps, last-modified fields).
+
+      Per D-04, this task ships the PoC — ONE test class showing the pattern works. r3 generalizes if r2 findings warrant it. The pattern doc draft from this task feeds directly into Phase 5 task 080 (which updates `docs/procedures/testing-and-code-quality.md` with both the ledger lifecycle section AND the TestClock pattern from this task).
+    </background>
+    <dependencies>
+      <dependency task="039" status="not-started">Phase 3 exit (all 20 ledger entries closed) — Phase 4 starts when Phase 3 exits</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Workspace/ (new IClock + IGuidProvider abstraction files; possibly shared/Spaarke.Core)</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/ (one test class converted to use TestClock + TestGuidProvider)</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/notes/testclock-pattern-draft.md (pattern doc draft for Phase 5 task 080)</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read all 10 files in `src/server/api/Sprk.Bff.Api/Services/Workspace/`; identify which use `DateTime.UtcNow`, `DateTimeOffset.UtcNow`, or `Guid.NewGuid()` directly (these are the candidates for the abstraction).</step>
+    <step order="2">Read the 2 reference test files (PrecedentProjectionSyncTests.cs, IngestOrchestratorTests.cs) to see existing `TimeProvider` usage pattern. Decision: hand-roll `IClock` OR use `Microsoft.Extensions.Time.Testing` if available + register `TimeProvider` directly. Choose based on consumer fit + ADR-010 minimalism.</step>
+    <step order="3">Read all test files in `tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/`; identify the highest-leverage test class to convert (one with the most time-based or Guid-based assertions; likely flake risk).</step>
+    <step order="4">Create the abstraction file(s) in `src/server/api/Sprk.Bff.Api/Services/Workspace/` (or `src/server/shared/Spaarke.Core/` if cross-module). Choose between hand-rolled `IClock` interface OR direct `TimeProvider` adoption. Register in DI (`Program.cs` or scoped Workspace DI module).</step>
+    <step order="5">Refactor target Workspace src file(s) (1-2 max) to consume the new abstraction via constructor injection; replace direct `DateTime.UtcNow` / `Guid.NewGuid()` calls.</step>
+    <step order="6">Refactor target test class to inject `TestClock` + `TestGuidProvider`; assert against deterministic values; remove any flake-prone time/Guid assertions.</step>
+    <step order="7">Run `dotnet test --filter "FullyQualifiedName~Workspace"` to verify the converted class + adjacent Workspace tests still pass. Run the full suite at least once to verify no regression elsewhere.</step>
+    <step order="8">Draft `projects/sdap.bff.api-test-suite-repair-r2/notes/testclock-pattern-draft.md` documenting: abstraction signature, DI registration, TestClock + TestGuidProvider test-side implementations, when to use the pattern, r3 migration plan (next Workspace tests to convert).</step>
+    <step order="9">Step 9.5 — Run `code-review` + `adr-check` against the new files (FULL rigor mandatory per ADR-010 + greenfield abstraction). Address any HIGH findings before commit.</step>
+    <step order="10">Verify `git status` shows only: new abstraction file(s) in `src/`; refactored Workspace src file(s); refactored test class; pattern draft doc. Commit: "test(workspace): TestClock + seeded-Guid PoC pattern in Services/Workspace/* (FR-13)".</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">enumerate Workspace src + tests; reference TimeProvider files</tool>
+    <tool name="Edit">refactor target Workspace src file + test class</tool>
+    <tool name="Write">new abstraction file(s) in src/; pattern draft doc</tool>
+    <tool name="Bash">`dotnet test --filter "FullyQualifiedName~Workspace"`; full suite verification; `git status`; final commit</tool>
+    <tool name="Skill">code-review (Step 9.5); adr-check (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/ (new IClock/IGuidProvider abstraction; refactored consumer file)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/ (one test class converted to TestClock/TestGuidProvider)</output>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/notes/testclock-pattern-draft.md (pattern draft for Phase 5 task 080 merge)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">New `IClock`-equivalent abstraction file(s) exist in `src/server/api/Sprk.Bff.Api/Services/Workspace/` (or `Spaarke.Core`) with default implementation</criterion>
+    <criterion testable="true">New seeded-Guid provider abstraction exists alongside (greenfield)</criterion>
+    <criterion testable="true">At least 1 test class in `tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/` uses `TestClock` + `TestGuidProvider`</criterion>
+    <criterion testable="true">Pattern documentation draft exists at `projects/sdap.bff.api-test-suite-repair-r2/notes/testclock-pattern-draft.md`</criterion>
+    <criterion testable="true">Full test suite passes (`Failed: 0`) after the changes; converted Workspace test class is green</criterion>
+    <criterion testable="true">Step 9.5 gates pass: `code-review` + `adr-check` against new abstraction files (no HIGH findings)</criterion>
+    <criterion testable="true">Commit message references FR-13</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. FULL rigor: greenfield `src/` abstraction + test refactor; Step 9.5 code-review + adr-check mandatory.
+  </execution>
+</task>

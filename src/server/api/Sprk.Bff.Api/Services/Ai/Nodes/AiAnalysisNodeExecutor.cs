@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.RecordSearch;
+using Sprk.Bff.Api.Services.Ai.Insights.Composition;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.Ai.Schemas;
 
@@ -1240,18 +1241,10 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
     /// Combined knowledge context string, or null if both inputs are null/empty.
     /// </returns>
     private static string? MergeKnowledgeContext(string? referenceKnowledge, string? scopeKnowledge)
-    {
-        if (string.IsNullOrWhiteSpace(referenceKnowledge) && string.IsNullOrWhiteSpace(scopeKnowledge))
-            return null;
-
-        if (string.IsNullOrWhiteSpace(referenceKnowledge))
-            return scopeKnowledge;
-
-        if (string.IsNullOrWhiteSpace(scopeKnowledge))
-            return referenceKnowledge;
-
-        return $"{referenceKnowledge}\n\n{scopeKnowledge}";
-    }
+        // Delegates to the shared Q5-audit-extracted helper so IndexRetrieveNode (D-P12) and this
+        // executor compose multi-tier knowledge identically. Behavior is unchanged from the prior
+        // inline implementation; the helper is the only future evolution point.
+        => MultiIndexComposer.Merge(referenceKnowledge, scopeKnowledge);
 
     /// <summary>
     /// Converts a ToolResult to NodeOutput.
