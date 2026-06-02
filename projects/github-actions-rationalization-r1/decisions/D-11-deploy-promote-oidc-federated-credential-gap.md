@@ -94,17 +94,45 @@ This decision is the explicit deferral. Owner action is tracked in:
 
 When owner applies the federated credentials, add a sign-off checkbox here similar to FR-12's owner sign-off in `.github/WORKFLOWS.md`.
 
-## Owner sign-off
+## Owner sign-off (CLOSED 2026-06-02)
 
-- [ ] Owner added federated credential for `repo:spaarke-dev/spaarke:environment:dev` on YYYY-MM-DD
-- [ ] Owner added federated credential for `repo:spaarke-dev/spaarke:environment:staging` on YYYY-MM-DD
-- [ ] Owner added federated credential for `repo:spaarke-dev/spaarke:environment:production` on YYYY-MM-DD (env was renamed `prod` → `production` in this PR to align with the existing GitHub Environment `production` which already has reviewer + wait-timer + branch-policy protections)
-- [ ] Verified by triggering `gh workflow run deploy-promote.yml --ref master` and confirming all 3 deploy jobs reach Azure Login successfully
+- [x] Owner added federated credential for `repo:spaarke-dev/spaarke:environment:dev` on **2026-06-02** (`spaarke-dev-deploy-promote-dev`)
+- [x] Owner added federated credential for `repo:spaarke-dev/spaarke:environment:staging` on **2026-06-02** (`spaarke-dev-deploy-promote-staging`)
+- [x] Owner added federated credential for `repo:spaarke-dev/spaarke:environment:production` on **2026-06-02** (`spaarke-dev-deploy-promote-production`) — env was renamed `prod` → `production` in PR #323 to align with the existing GitHub Environment of that name (which already has reviewer + wait-timer + branch-policy protections preserved).
+- [x] Verified by triggering `gh workflow run deploy-promote.yml --ref master --field target_environment=dev` (run 26791872812) and confirming `Deploy to Dev → Azure Login (OIDC)` step succeeded.
 
-OR
+## Resolution notes
 
-- [ ] `deploy-promote.yml` removed via `git rm` + commit referencing D-11 (alternative disposition)
+Three things happened during the owner-action walkthrough on 2026-06-02 that are worth recording for the record:
+
+### 1. App-identification ambiguity → resolved via role-assignment signal
+
+Two candidate Entra apps in the tenant looked plausible from naming alone:
+- `spe-github-actions` (appId `e3d1bd6a-ce61-450c-97fb-5e6f0c4f0ac2`) — generic GitHub Actions OIDC name
+- `github-actions-spe-infrastructure` (appId `8c85a481-f3a0-46de-b84e-3ede8a4d60c3`) — infrastructure-deploy-named
+
+Neither had any pre-existing federated credentials. Decisive signal came from `az role assignment list`:
+- `spe-github-actions`: no role assignments
+- `github-actions-spe-infrastructure`: `Contributor` on subscription `484bc857-3802-427f-9ea5-ca47b43db0f0`
+
+The Contributor-bearing app is the actual deploy app. Federated credentials were added to it.
+
+### 2. `AZURE_CLIENT_ID` repo secret was misconfigured
+
+After adding federated credentials to `github-actions-spe-infrastructure` and running the smoke test, OIDC still failed with AADSTS700213. Root cause: the `AZURE_CLIENT_ID` repo secret was pointing to a different Entra app (most likely `spe-github-actions` — the one with no permissions), so the OIDC handshake was checking the credential list on the wrong app.
+
+Resolution: `gh secret set AZURE_CLIENT_ID --body "8c85a481-f3a0-46de-b84e-3ede8a4d60c3"` (point the secret at the actual deploy app).
+
+After the secret update, the smoke test passed: `Azure Login (OIDC)` step succeeded on run `26791872812`.
+
+**Implication for other workflows**: `AZURE_CLIENT_ID` is a repo-wide secret. If any other workflow (`deploy-bff-api.yml`, `deploy-infrastructure.yml`, etc.) was previously authenticating OIDC against the OLD client-id, that workflow will now use the new client-id. Per Wave A inventory, those workflows were also failing (0% success in last 30 days), so this is most likely a net improvement, not a regression. To monitor: watch for next runs of those workflows post-secret-update.
+
+### 3. Downstream failure expected (D-12 / dev variant)
+
+The `Deploy API to Dev` step (which runs AFTER `Azure Login (OIDC)`) failed on the smoke run because `DEV_APP_NAME` secret doesn't exist in the repo (only `STAGING_APP_NAME` exists). This is the same class of issue as [D-12](D-12-deploy-promote-prod-app-name-secret-and-app-service-gap.md) but for the dev environment. **Out of D-11 scope**: D-11 only owned the OIDC authentication gate.
+
+If dev deploy capability is wanted, an additional dev-side App Service + `DEV_APP_NAME` secret are needed (mirroring D-12's plan for prod). Track as a follow-on; not currently filed as its own D-record because it's not blocking.
 
 ---
 
-*Authored 2026-06-01 in closeout PR for github-actions-rationalization-r1.*
+*Authored 2026-06-01 in closeout PR for github-actions-rationalization-r1; closed 2026-06-02 in D-11 signoff PR.*
