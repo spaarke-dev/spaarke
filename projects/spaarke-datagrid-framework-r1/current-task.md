@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-01 (checkpoint after Step 8.7 grep gates)
+> **Last Updated**: 2026-06-02 (after C-Wave-4 deploy lands)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (B-Wave-3 = task 017 BFF deploy DEFERRED ⏸ pending insights-engine-r2 master merge; Phase C unblocked) |
+| **Task** | none (C-Wave-4 = task 025 ✅ deploy verified via API smoke test; B-Wave-3 = task 017 BFF deploy DEFERRED ⏸ pending insights-engine-r2 master merge) |
 | **Step** | — |
 | **Status** | none |
-| **Next Action** | C-Wave-4 = task 025 (Phase C deploy via `code-page-deploy` skill). Uploads 2 single-file HTML bundles as Dataverse web resources + publishes. Web resource names MUST match sprk_kpiassessmentspage.html + sprk_invoicespage.html (already set in chart-defs by task 024). USER DECISION POINT: deploy operation — similar to task 017. |
+| **Next Action** | C-Wave-5 = task 026 (Phase C UAT). REQUIRES HUMAN IN THE LOOP — open Power Apps, navigate to a Matter detail page, click VisualHost CardChrome expand on Matter Health card → verify `sprk_kpiassessmentspage` opens with Matter filter; same on Budget Performance → `sprk_invoicespage`. Verify dark mode + portal styling (NFR-11). Sub-agent cannot drive browser MDA. Web resources deployed: KPI=`8329ddcf-9e5e-f111-ab0c-7c1e521b425f`, Invoice=`b329ddcf-9e5e-f111-ab0c-7c1e521b425f`. |
 
 ### Files Modified This Session
 

@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy Phase C: 2 Custom Pages + Dataverse solution with config records</title>
     <phase>3: Phase C — Matter UI Drill-throughs</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>021,022,023,024</dependencies>
     <blocks>026</blocks>
