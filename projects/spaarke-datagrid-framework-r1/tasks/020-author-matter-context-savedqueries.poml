@@ -3,7 +3,7 @@
   <metadata>
     <title>Author Matter-context savedqueries for sprk_kpiassessment + sprk_invoice (UQ-04 resolution)</title>
     <phase>3: Phase C — Matter UI Drill-throughs</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>021,022,025</blocks>
