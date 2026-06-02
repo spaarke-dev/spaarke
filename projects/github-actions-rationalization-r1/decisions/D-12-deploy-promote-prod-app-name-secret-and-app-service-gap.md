@@ -1,11 +1,11 @@
 # D-12 — deploy-promote.yml production-deploy: PROD_APP_NAME secret + workflow refactor for direct-target deploys
 
 > **Date opened**: 2026-06-01 (post-PR-#317 audit during D-11 closeout)
-> **Date resolved (pending smoke test)**: 2026-06-02
+> **Date resolved (deploy mechanics scope)**: 2026-06-02
 > **Project**: github-actions-rationalization-r1
 > **Phase**: Closeout-follow-up (after D-11 OIDC investigation surfaced this)
-> **Disposition**: **PENDING VERIFICATION** — secret + workflow refactor applied; smoke-test verification pending owner approval on production reviewer gate.
-> **Related**: [D-11](D-11-deploy-promote-oidc-federated-credential-gap.md) (OIDC federated credentials, CLOSED 2026-06-02), [D-04](D-04-disposition-deploy-bff-api.md) (deploy-bff-api KEEP)
+> **Disposition**: **CLOSED — deploy mechanics verified working**. The production-environment infrastructure-completion work (which prevents the deployed app from starting cleanly) is recognized as a separate scope and handed off to a follow-on project (suggested name: `production-environment-setup-r3`).
+> **Related**: [D-11](D-11-deploy-promote-oidc-federated-credential-gap.md) (OIDC federated credentials, CLOSED 2026-06-02), [D-04](D-04-disposition-deploy-bff-api.md) (deploy-bff-api KEEP), [`projects/production-environment-setup-r2/`](../../production-environment-setup-r2/) (predecessor: parameterized config — closed 2026-03-20)
 
 ---
 
@@ -179,13 +179,44 @@ Watch the chain. Expected:
 - [x] **Production App Service `spaarke-bff-prod` exists** in resource group `rg-spaarke-platform-prod` (subscription `484bc857-3802-427f-9ea5-ca47b43db0f0`); verified via `az webapp list` 2026-06-02
 - [x] **Workflow refactored** to support direct-target production deploys (no more sequential `dev → staging → production` chain)
 - [x] **Key Vault references / app settings**: production App Service `spaarke-bff-prod` references `sprk-platform-prod-kv` (URL `https://sprk-platform-prod-kv.vault.azure.net/`) per owner-provided info. Full production-parity audit out of D-12 scope; the existing prod App Service is already in active service and assumed to be configured.
-- [ ] **End-to-end deploy verified via `gh workflow run`** — PENDING. Run after this PR merges to master:
-      ```bash
-      gh workflow run deploy-promote.yml --ref master --field target_environment=production
-      ```
-      Expected: only the production job runs (dev + staging skipped per refactor); pauses for `heliosip` reviewer approval; after approval deploys to `spaarke-bff-prod` and smoke-tests pass at `/ping` + `/healthz`.
+- [x] **Deploy mechanics verified end-to-end** via `gh workflow run deploy-promote.yml --field target_environment=production` (run [26793051300](https://github.com/spaarke-dev/spaarke/actions/runs/26793051300)) on 2026-06-02:
+  - ✅ `Plan Promotion`: success
+  - ⏭️ `Deploy to Dev` / `Deploy to Staging`: correctly skipped (direct-target refactor working)
+  - ✅ `Deploy to Production → Azure Login (OIDC)`: success (D-11 federated credentials honored)
+  - ✅ `Deploy to Production → Deploy API to Production` (`azure/webapps-deploy@v3`): "Successfully deployed web package to App Service"
+  - ❌ `Deploy to Production → Smoke tests`: failed — but for reasons OUTSIDE github-actions-rationalization-r1 scope (see "Post-deploy smoke-test failure" below).
 
-When the last checkbox is flipped (via a follow-up commit referencing this record), D-12 is fully CLOSED.
+D-12's original scope (PROD_APP_NAME secret + verified deploy mechanics) is **CLOSED**.
+
+### Post-deploy smoke-test failure → handed off to `production-environment-setup-r3` follow-on
+
+The smoke test failed because the production app cannot start (HTTP 503 after container starts). Root cause investigated 2026-06-02:
+
+- Container starts (image pulled, .NET 8 host runs) but `dotnet` process aborts within ~7 seconds with exit code 134 (SIGABRT).
+- Background workers (`ProfileSummaryWorker`, `UploadFinalizationWorker`, `JobSubmissionService`, `ScheduledRagIndexingService`, `IndexingWorkerHostedService`) throw `Azure.Messaging.ServiceBus.ServiceBusException: Name or service not known` on first iteration → unhandled exception in hosted-service host → process aborts.
+- Root cause: `ServiceBus__ConnectionString` Key Vault secret in `sprk-platform-prod-kv` is set to a literal placeholder value (`Endpoint=sb://placeholder.servicebus.windows.net/...`). This was never replaced with a real Service Bus connection string during production setup.
+- Adjacent issues: the BFF code expects a queue named `document-processing`, but the two available Service Bus namespaces in the subscription (`spaarke-servicebus-dev` and `spaarke-demo-prod-sbus`) don't have that queue; their queues are named differently (`office-indexing`, `office-jobs`, `office-profile`, `ai-indexing`, `document-indexing`, etc.). So even if the connection string were corrected, the queue contracts don't align.
+
+Why this is outside github-actions-rationalization-r1 scope:
+- The project's NFR-01 forbids `src/` changes (this would require either provisioning new Service Bus infrastructure OR updating BFF code to match existing queues OR both).
+- The predecessor project [`production-environment-setup-r2`](../../production-environment-setup-r2/) explicitly listed *"Redis/Service Bus configuration (already parameterized)"* as **Out of Scope** (lines 53-54 of its README). R2 made the config mechanism parameterizable but did NOT verify that the actual values weren't placeholders. That's an r3-class gap.
+
+### Recommended follow-on: `production-environment-setup-r3`
+
+Suggested scope:
+1. Audit ALL Key Vault secrets in `sprk-platform-prod-kv` for placeholder values (this Service Bus secret is one known instance; others are likely).
+2. Decide on production Service Bus naming + queue naming convention:
+   - Option A: provision new Service Bus in `rg-spaarke-platform-prod` (matches the App Service's RG; standard practice).
+   - Option B: reuse `spaarke-demo-prod-sbus` and align BFF code to its queue names.
+   - Option C: rename queues to match BFF code expectations.
+3. Replace placeholder values with real connection strings via `az keyvault secret set`.
+4. Verify all other config gaps (Redis, OpenAI, Dataverse, etc.) are real values, not placeholders.
+5. Re-trigger deploy-promote.yml smoke test → confirm `Deploy to Production → Smoke tests` passes.
+6. Document the production environment's actual provisioning state in `docs/guides/PRODUCTION-DEPLOYMENT-GUIDE.md` or a new doc.
+
+Initialize via `/design-to-spec` → `/project-pipeline` whenever ready.
+
+D-12 is **CLOSED**. The above is **NOT** a deferred owner-action — it's a handoff to a new project with its own scope, plan, and lifecycle.
 
 ### Alternative — if production deploy is not in scope at all
 
