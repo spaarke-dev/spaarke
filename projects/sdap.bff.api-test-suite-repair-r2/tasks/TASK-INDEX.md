@@ -47,11 +47,11 @@
 | 037 | Fix RB-T028-08 — PrecedentAdmin endpoint binding (verify subsumed by 011) | 3 | ✅ 2026-06-01 (NOT subsumed by 011 — distinct fixture-config gap; 1 Skip→Pass via `IntegrationTestFixture` `TestUserId` valid-GUID fix; mirror of task 025 pattern) | 029, 011 | P3-W2 | FULL→STANDARD (test-only fix) | ✓ |
 | 038 | `Spe.Integration.Tests` triple-run (FR-10; flake quarantine ≤2) | 3 | ✅ 2026-06-01 (PASS; 3 × Failed: 0 / 370 Passed / 52 Skipped / 422 Total; zero variance; zero flakes; Δ vs r1 close-out = +1 Total / +47 Passed / −46 Skipped) | 030-037 | (sequential, phase-exit) | STANDARD | — |
 | 039 | Phase 3 exit validation — cumulative ledger audit | 3 | ✅ 2026-06-01 (PASS; 19/20 r1 entries `repaired` + 1 `partial-repair-residual-filed` + 1 new residual `RB-T053-01a` open by design + 1 inline-flake-fix `RB-T013-01` closed + 1 deferred 026; NFR-04 commit chain 100% compliant; trait taxonomy 2 active `real-bug-pending-fix` (both pointing at RB-T053-01a) / 0 flaky-quarantined; Phase 4 P4-W1 dispatch authorized) | 038 | (sequential, phase-exit) | STANDARD | — |
-| 040 | Track A — PCF/Code Pages test rot audit (read-only) | 4 | 🔲 | 039 | P4-W1 | STANDARD | — |
-| 041 | Track B — Mutation testing pilot (Stryker.NET on Services/Ai/Safety) | 4 | 🔲 | 039 | P4-W1 | STANDARD | — |
-| 042 | Track C — TestClock + seeded-Guid PoC in Services/Workspace | 4 | 🔲 | 039 | P4-W1 | FULL | — |
-| 043 | Track D — Coverlet baseline measurement (waits on `github-actions-rationalization-r1`) | 4 | 🔲 | 039 + external | P4-W1 | STANDARD | — |
-| 044 | Track E — Anti-drift effectiveness report (NFR-07 publish-regardless) | 4 | 🔲 | 039 | P4-W1 | STANDARD | — |
+| 040 | Track A — PCF/Code Pages test rot audit (read-only) | 4 | ✅ 2026-06-01 (2 rot pockets: SemanticSearch orphan HIGH + AnalysisWorkspace deprecated MED; 2 Phase 5 gov recs) | 039 | P4-W1 | STANDARD | — |
+| 041 | Track B — Mutation testing pilot (Stryker.NET on Services/Ai/Safety) | 4 | ✅ 2026-06-01 (89.13% mutation score on ConversationHistorySanitizer; 5 mutants analyzed; r3 expansion proposed) | 039 | P4-W1 | STANDARD | — |
+| 042 | Track C — TestClock + seeded-Guid PoC in Services/Workspace | 4 | ✅ 2026-06-01 (PortfolioService PoC: TimeProvider + IGuidProvider; 5/5 tests pass; ADR-010 compliant) | 039 | P4-W1 | FULL | — |
+| 043 | Track D — Coverlet baseline measurement (waits on `github-actions-rationalization-r1`) | 4 | ✅ 2026-06-01 (CI baseline: 38.49% line / 29.98% branch debug; per-asm + per-ns breakdown; 3-phase r3 rollout) | 039 + external | P4-W1 | STANDARD | — |
+| 044 | Track E — Anti-drift effectiveness report (NFR-07 publish-regardless) | 4 | ✅ 2026-06-01 (4 mechanisms assessed: §F Effective, 3 Partial; 3 lessons codified for Phase 5 tasks 080/081) | 039 | P4-W1 | STANDARD | — |
 | 080 | Update `docs/procedures/testing-and-code-quality.md` (ledger lifecycle + TestClock pattern + Track E findings) | 5 | 🔲 | 040-044 | P5-W1 | STANDARD | — |
 | 081 | Extend `.claude/constraints/bff-extensions.md` § F (CONDITIONAL; **MAIN-SESSION-ONLY**) | 5 | 🔲 | 080, 011 | **sequential (.claude/ boundary)** | FULL | — |
 | 082 | Final triple-run validation — 6 TRX (FR-15) | 5 | 🔲 | 080, 081 | (sequential, phase-exit) | STANDARD | — |
