@@ -1,32 +1,35 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-01 (initial state from project-pipeline)
+> **Last Updated**: 2026-06-01 (checkpoint after Step 8.7 grep gates)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
 
 ## Quick Recovery (READ THIS FIRST)
 
-<!-- This section is for FAST context restoration after compaction -->
-<!-- Must be readable in < 30 seconds -->
-
 | Field | Value |
 |-------|-------|
-| **Task** | none (project ready for execution) |
-| **Step** | — |
-| **Status** | none |
-| **Next Action** | Invoke `task-execute` skill on `tasks/001-foundation-contracts.poml` (Phase A foundation; blocks all of Phase A) |
+| **Task** | 001 — Foundation contracts (IDataverseClient + DataGridConfiguration + tokens) |
+| **Step** | 8 of 9 (Build verification — awaiting `npm install` background completion) |
+| **Status** | in-progress |
+| **Next Action** | When npm install bg job completes: re-run `npm run build` in `src/client/shared/Spaarke.UI.Components/`; if zero errors → Step 9 quality gates → Step 10 update TASK-INDEX (001 ✅) |
 
 ### Files Modified This Session
-<!-- Only files touched in CURRENT session, not all time -->
 
-*None yet — project initialized.*
+- `src/client/shared/Spaarke.UI.Components/src/services/IDataverseClient.ts` (CREATED, 196 lines) — 5-method contract per design.md §6.2
+- `src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts` (CREATED, 364 lines) — v1.0 schema per design.md §6.3 (renamed from spec FR-DG-03 `GridConfigJson_v1_0`)
+- `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/tokens.ts` (CREATED, 93 lines) — MDA parity tokens per design.md §11.5.2
+- `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/index.ts` (CREATED, 12 lines) — Component barrel
+- `src/client/shared/Spaarke.UI.Components/src/services/index.ts` (MODIFIED) — Barrel export for IDataverseClient + 7 supporting types
+- `src/client/shared/Spaarke.UI.Components/src/types/index.ts` (MODIFIED) — Barrel export for DataGridConfiguration module
+- `src/client/shared/Spaarke.UI.Components/src/components/index.ts` (MODIFIED) — Barrel export for DataGrid module
+- `src/client/shared/Spaarke.UI.Components/src/types/ConfigurationTypes.ts` (MODIFIED) — Added `**LEGACY**` JSDoc note on existing `IGridConfigJson` pointing readers to new `DataGridConfiguration`
+- `projects/spaarke-datagrid-framework-r1/notes/drafts/001-deviations.md` (CREATED) — Documents type-rename deviation (D1)
 
 ### Critical Context
-<!-- 1-3 sentences of essential context for continuation -->
 
-Project fully initialized via `/project-pipeline`. README, plan.md, CLAUDE.md, current-task.md, and 39 POML tasks generated across 6 phases + wrap-up. Ready to begin execution starting with task 001 (Foundation contracts — IDataverseClient interface + GridConfigJson v1.0 types + DataGrid/tokens.ts). After 001 completes, tasks 002 + 003 unblock for parallel execution (Wave A1).
+Task 001 implementation is COMPLETE pending build verification. Brownfield discovery during Step 4 (knowledge load) found `IDataService` + `IGridConfigJson` already exist in the shared library. Per user direction, the new types coexist with the legacy ones: `DataGridConfiguration` (NOT `GridConfigJson_v1_0`) lives in `types/DataGridConfiguration.ts`; the runtime guard is `isValidDataGridConfiguration`. JSDoc cross-references added on both sides. The renames are spec deviations (FR-DG-03 named the type differently) but have zero ripple on downstream tasks 002-090 (none reference the specific TypeScript type name in prose). Grep gates all pass: zero raw hex in DataGrid/, zero React-18-only APIs in new files, zero `@fluentui/react` v8 imports. `npm install` is running in background because the worktree had no node_modules.
 
 ---
 
@@ -34,12 +37,12 @@ Project fully initialized via `/project-pipeline`. README, plan.md, CLAUDE.md, c
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
-| **Started** | — |
+| **Task ID** | 001 |
+| **Task File** | `tasks/001-foundation-contracts.poml` |
+| **Title** | Foundation contracts: IDataverseClient interface + GridConfigJson v1.0 types + design tokens |
+| **Phase** | 1: Phase A — Foundation |
+| **Status** | in-progress (Step 8 of 9 — awaiting build verification) |
+| **Started** | 2026-06-01 |
 
 ---
 
@@ -47,48 +50,67 @@ Project fully initialized via `/project-pipeline`. README, plan.md, CLAUDE.md, c
 
 ### Completed Steps
 
-*No steps completed yet*
+- [x] Step 0.5: Rigor declared (FULL — code, tags, blocks 8 downstream)
+- [x] Step 0–7: Context loading + brownfield discovery (IDataService + IGridConfigJson exist)
+- [x] Step 8.1: `/fluent-v9-component` skill checklist reviewed (knowledge already loaded; tokens.ts is constants-only so makeStyles rules N/A)
+- [x] Step 8.2: Authored `services/IDataverseClient.ts` (196 lines, 5-method contract + 7 supporting types)
+- [x] Step 8.3: Authored `types/DataGridConfiguration.ts` (364 lines, full v1.0 schema + runtime guard) — RENAMED from spec (see deviations doc)
+- [x] Step 8.4: Authored `components/DataGrid/tokens.ts` (93 lines) + `components/DataGrid/index.ts` (12 lines, barrel)
+- [x] Step 8.4b: Added `**LEGACY**` JSDoc cross-ref on existing `IGridConfigJson` in `types/ConfigurationTypes.ts`
+- [x] Step 8.5: Updated 3 barrel exports (services/index, types/index, components/index)
+- [x] Step 8.6 (partial): npm install kicked off in background (`bfp6p0jt8`) — worktree had no node_modules
+- [x] Step 8.7: Grep verification — zero raw hex, zero React-18 APIs, zero @fluentui/react v8 imports ✅
+- [x] Step 8.9: Deviations documented in `notes/drafts/001-deviations.md`
 
 ### Current Step
 
-*No active step — project just initialized.*
+**Step 8.6 (build verification)** — awaiting `npm install` completion in background. Once complete:
+1. Re-run `npm run build` in `src/client/shared/Spaarke.UI.Components/`
+2. Expect zero TypeScript errors related to my new files
+3. Pre-existing files may still have issues unrelated to this task
 
 ### Files Modified (All Task)
 
-*No files modified yet*
+(See "Files Modified This Session" above.)
 
 ### Decisions Made
 
-*No decisions recorded yet — see README.md "Key Decisions" for design-phase decisions.*
+- 2026-06-01: Renamed type from `GridConfigJson_v1_0` → `DataGridConfiguration`. Reason: brownfield collision avoidance with existing `IGridConfigJson` in `types/ConfigurationTypes.ts`. User explicitly approved after implications review.
+- 2026-06-01: Authored `IDataverseClient` as a standalone interface (NOT extending `IDataService`). Reason: spec FR-DG-02 says standalone; tasks 002 + 015 wrap underlying APIs directly (no IDataService coupling). JSDoc cross-references make the relationship between IDataverseClient and IDataService explicit for future readers.
+- 2026-06-01: Added reciprocal JSDoc on legacy `IGridConfigJson` pointing readers to `DataGridConfiguration` for new code. Scope-creep avoided: no rename / no deprecation of `IGridConfigJson` — just a cross-reference comment.
 
 ---
 
 ## Next Action
 
-**Next Step**: Begin task 001 (Foundation contracts) via `task-execute` skill.
+**Next Step**: When npm install bg job completes (notification will arrive):
+1. `cd src/client/shared/Spaarke.UI.Components && npm run build` — verify zero TypeScript errors related to new files
+2. Run Step 9 (verify all 5 acceptance criteria)
+3. Run Step 9.5 (quality gates — `/code-review` + `/adr-check` on the new files)
+4. Run Step 10 (update task status — `<status>completed</status>` in POML metadata) + TASK-INDEX.md (🔲 → ✅)
+5. Run Step 11 (transition — tasks 002 + 003 unblock for Wave A1 parallel execution)
 
 **Pre-conditions**:
-- README.md, plan.md, CLAUDE.md present ✓
-- 39 POML tasks generated ✓
-- TASK-INDEX.md with parallel execution waves ✓
-- Spec + design committed (PR #329) ✓
+- All 4 new files authored ✓
+- 3 barrel exports updated ✓
+- Legacy JSDoc cross-ref added ✓
+- Grep gates passed ✓
+- Deviations documented ✓
+- npm install running ⏳
 
 **Key Context**:
-- Refer to [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md) for full task registry + parallel waves
-- ADR-012 (shared components home) + ADR-021 (Fluent v9 + tokens) + ADR-022 (React-16-safe framework code) all apply to task 001
-- Task 001 blocks tasks 002-009 — foundation lynchpin
-- After 001 completes: Wave A1 (002 + 003 parallel), then Wave A2 (004-008 parallel, 5 agents)
+- Build failures BEFORE npm install were all "Cannot find module" errors from missing node_modules — NOT errors caused by my new files.
+- New files have no novel dependencies (`@fluentui/react-components` was already used everywhere; `tokens` is the standard import).
 
-**Expected Output for task 001**:
-- 3 new files in `@spaarke/ui-components`: `services/IDataverseClient.ts`, `types/GridConfigJson.ts`, `components/DataGrid/tokens.ts`
-- Updated `src/index.ts` barrel exports
-- `npm run build` passes; zero raw hex in `tokens.ts`; no React-18-only APIs
+**Expected Output**:
+- `npm run build` zero errors related to `services/IDataverseClient.ts`, `types/DataGridConfiguration.ts`, `components/DataGrid/tokens.ts`, `components/DataGrid/index.ts`.
+- Pre-existing files (`FieldSecurityService.ts`, `PrivilegeService.ts`, etc.) may continue to have issues unrelated to this task. If new errors appear specifically in my files, address those.
 
 ---
 
 ## Blockers
 
-**Status**: None
+**Status**: None (npm install is expected to take 1-3 minutes; not a blocker)
 
 ---
 
@@ -96,15 +118,21 @@ Project fully initialized via `/project-pipeline`. README, plan.md, CLAUDE.md, c
 
 ### Current Session
 - Started: 2026-06-01
-- Focus: Project initialization via `/project-pipeline`
+- Focus: Task 001 execution (Foundation contracts)
 
 ### Key Learnings
 
-*None yet — initial state.*
+- **Brownfield is real**: Spec assumed greenfield foundation; actual library has `IDataService`, `IGridConfigJson`, `ViewService`, `FetchXmlService`, `ConfigurationService`, `EntityConfigurationService`, `ColumnRendererService` already in place. Design.md §5.3 explicitly enumerates these as "Reuse, extend" / "Generalize to IDataverseClient" — NOT replace. The new framework wraps them.
+- **Naming matters more in brownfield**: `DataGridConfiguration` vs the spec's `GridConfigJson_v1_0` is a small change with outsized clarity benefit. Future readers won't conflate the new type with the existing `IGridConfigJson`.
+- **JSDoc cross-references are cheap insurance**: Adding `**LEGACY**` note on `IGridConfigJson` cost 1 minute of editing but saves future readers from chasing the wrong type.
 
 ### Handoff Notes
 
-*No handoff notes — initial state.*
+If session ends before build completes: the new files are self-contained and correctly structured. Resume by:
+1. Wait for / check `bfp6p0jt8` (npm install bg job) — see [Quick Recovery](#quick-recovery) for the temp file path.
+2. Re-run `cd src/client/shared/Spaarke.UI.Components && npm run build`.
+3. Inspect any errors involving the new files (IDataverseClient.ts, DataGridConfiguration.ts, tokens.ts, DataGrid/index.ts) — pre-existing errors elsewhere are NOT this task's concern.
+4. Run `/code-review` + `/adr-check` on the 4 new files only.
 
 ---
 
@@ -113,42 +141,41 @@ Project fully initialized via `/project-pipeline`. README, plan.md, CLAUDE.md, c
 ### Project Context
 - **Project**: spaarke-datagrid-framework-r1
 - **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md) (to be created by task-create)
+- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
 - **Spec**: [`spec.md`](spec.md)
 - **Design**: [`design.md`](design.md)
+- **Deviations**: [`notes/drafts/001-deviations.md`](./notes/drafts/001-deviations.md)
 
 ### Applicable ADRs
-- ADR-008: Endpoint authorization filter pattern (Phase B)
-- ADR-012: `@spaarke/ui-components` canonical shared library (Phase A)
-- ADR-021: Fluent UI v9 + dark mode + tokens-only (all UI phases)
-- ADR-022: React version boundaries (Phase A — framework is React-16-safe)
-- ADR-026: Full-page Custom Page standard (Phase C, D Custom Pages)
-- ADR-028: Spaarke Auth v2 — `authenticatedFetch` only (Phase B)
-- ADR-029: BFF publish hygiene (Phase B)
+- ADR-012: Shared component library — `@spaarke/ui-components` canonical home ✓
+- ADR-021: Fluent v9 + dark mode + tokens-only (no raw hex in tokens.ts ✓)
+- ADR-022: React-16-safe in framework code (no React-18 APIs in new files ✓)
 
 ### Knowledge Files Loaded
-<!-- Populated by task-execute when a task starts -->
 
-*None loaded yet.*
+- `.claude/adr/ADR-012-shared-components.md`
+- `.claude/adr/ADR-021-fluent-design-system.md`
+- `.claude/adr/ADR-022-pcf-platform-libraries.md`
+- `.claude/patterns/ui/fluent-v9-component-authoring.md`
+- `.claude/patterns/ui/fluent-v9-react-version-boundaries.md`
+- `.claude/patterns/dataverse/web-api-client.md`
+- `src/client/shared/CLAUDE.md` (module conventions)
+- `projects/spaarke-datagrid-framework-r1/spec.md`
+- `projects/spaarke-datagrid-framework-r1/design.md` (full + targeted reads of §6.2, §6.3, §11.5.2)
+- `src/client/shared/Spaarke.UI.Components/src/types/serviceInterfaces.ts` (existing IDataService)
+- `src/client/shared/Spaarke.UI.Components/src/types/ConfigurationTypes.ts` (existing IGridConfigJson)
+- `src/client/shared/Spaarke.UI.Components/src/services/ConfigurationService.ts` (consumer of legacy)
+- `src/client/shared/Spaarke.UI.Components/src/services/index.ts` (existing barrel)
+- `src/client/shared/Spaarke.UI.Components/src/types/index.ts` (existing barrel)
+- `src/client/shared/Spaarke.UI.Components/src/components/index.ts` (existing barrel)
+- `src/client/shared/Spaarke.Events.Components/src/components/GridSection/GridSection.tsx` (source of tokens lift)
+- `scripts/README.md` (no relevant scripts for this task)
 
 ---
 
 ## Recovery Instructions
 
-**To recover context after compaction or new session:**
-
-1. **Quick Recovery**: Read the "Quick Recovery" section above (< 30 seconds)
-2. **If more context needed**: Read Active Task and Progress sections
-3. **Load task file**: `tasks/{task-id}-*.poml` (once task-create has run)
-4. **Load knowledge files**: From task's `<knowledge>` section
-5. **Resume**: From the "Next Action" section
-
-**Commands**:
-- `/project-continue` - Full project context reload + master sync
-- `/context-handoff` - Save current state before compaction
-- "where was I?" - Quick context recovery
-
-**For full protocol**: See [docs/procedures/context-recovery.md](../../docs/procedures/context-recovery.md)
+(Same as previous version — see CLAUDE.md `## Context Recovery Protocol`)
 
 ---
 

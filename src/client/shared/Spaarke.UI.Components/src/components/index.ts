@@ -132,3 +132,6 @@ export * from './TagFilter';
 
 // DocumentRowMenu - 3-dot row-action menu for document grids (FR-SC-02, matter-ui-r1 task 011)
 export * from './DocumentRowMenu';
+
+// DataGrid - Spaarke DataGrid Framework R1 (task 001: tokens; tasks 003-008: component + chips + command bar)
+export * from './DataGrid';

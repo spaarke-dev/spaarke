@@ -1,3 +1,18 @@
+// IDataverseClient - Spaarke DataGrid Framework R1 contract (task 001)
+// (Type names chosen to avoid collision with the existing `DataverseAttributeType` enum
+//  in types/ColumnRendererTypes.ts and `RetrieveMultipleResult` in utils/xrmContext.ts —
+//  those are PCF-dataset / raw-Xrm shapes, distinct from these Web-API-metadata projections.)
+export type {
+  IDataverseClient,
+  SavedQueryResult,
+  SavedQuerySummary,
+  EntityMetadata,
+  EntityAttributeMetadata,
+  MetadataAttributeType,
+  OptionSetOption,
+  FetchMultipleResult,
+} from './IDataverseClient';
+
 export { AppInsightsService } from './AppInsightsService';
 export { EntityCreationService } from './EntityCreationService';
 export type {
