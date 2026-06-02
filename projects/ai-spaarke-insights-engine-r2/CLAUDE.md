@@ -63,6 +63,7 @@ Earlier drafts conflated JPS-the-schema with the code that runs it. The terms be
 | [ADR-027](../../.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-mgmt.md) — Solution management | Wave D1 schema → managed solution path | 030 |
 | [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — Spaarke Auth v2 | New endpoint auth filter | 040 |
 | [ADR-029](../../.claude/adr/ADR-029-bff-publish-hygiene.md) — Publish hygiene + CVE override | Any wave adding NuGet packages | 020, 040 |
+| [ADR-030](../../.claude/adr/ADR-030-bff-nullobject-kill-switch.md) — **NEW** BFF Null-Object Kill-Switch Pattern (2026-06-01) | Any service in a `*Module.cs` `if (flag)` block consumed by unconditionally-mapped endpoints. Choose P1 (Promote-to-unconditional), P2 (Quiet no-op — query services FORBIDDEN), or P3 (Fail-fast — throws `FeatureDisabledException`). | 020, 023, 034, 040, 041 |
 
 ---
 
@@ -97,6 +98,8 @@ Earlier drafts conflated JPS-the-schema with the code that runs it. The terms be
 |---|---|---|
 | Insights node executors (Phase 1 — LiveFactNode, IndexRetrieveNode, EvidenceSufficiencyNode, etc.) | [`src/server/api/Sprk.Bff.Api/Services/Insights/Graph/`](../../src/server/api/Sprk.Bff.Api/Services/Insights/Graph/) | Wave C/D extend |
 | Existing JPS-action-row prompt pattern (e.g., "Classify Document") in `sprk_analysisaction.sprk_systemprompt` | Spaarke Dev Dataverse → Analysis Action: "Classify Document" | Wave B1, C2, D2, D3 |
+| **`IRagService` facade (existing per 2026-06-01)** — RAG retrieval canonical entry point + 3 knowledge-base ops | `src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs` + `RagService.cs` + `NullRagService.cs` (ADR-030 kill-switch) | Wave E1 (040) — extend if needed; do NOT inject `SearchIndexClient` directly into endpoints |
+| **`FeatureDisabledException` (existing per 2026-06-01)** — uniform 503 ProblemDetails plumbing for ADR-030 P3 Null-Objects | `src/server/api/Sprk.Bff.Api/Configuration/FeatureDisabledException.cs` + `FeatureDisabledResults.AsFeatureDisabled503()` extension | Wave E1, E2, D5 (any P3 kill-switch in new services) |
 | Endpoint pattern (`/api/insights/ask`) | Sprk.Bff.Api/Endpoints (r1) | Wave E1 (040) |
 | DI registration | `InsightsServiceCollectionExtensions.cs` (r1) | All wave additions |
 | `IInsightsAi` facade | `Services/Ai/PublicContracts/IInsightsAi.cs` (r1) | Wave E1, D5 extend |
@@ -122,7 +125,7 @@ This project is an **extension of r1's BFF work**. The 2026-05-20 BFF AI extract
 
 **Decision is load-bearing** — re-evaluate if a future phase adds non-BFF Insights consumers.
 
-`.claude/constraints/bff-extensions.md` MUST be loaded by each Wave C/D/E task adding endpoints, services, DI registrations, or NuGet packages.
+`.claude/constraints/bff-extensions.md` MUST be loaded by each Wave C/D/E task adding endpoints, services, DI registrations, or NuGet packages. The 2026-06-01 update adds three binding sections to load: **F.1 Asymmetric-Registration Tier 1.5 Anti-Pattern** (codifies ADR-030 enforcement for every new `*Module.cs` registration), **F.2 Fixture-Config-FIRST Inspection Protocol** (relevant to Wave D7 fixtures + any new test fixture), **F.3 Empirical-Reproduction-FIRST Protocol** (verify-before-fix when r2 references r1 RB-T ledger entries — applies if Wave C/D bug-fixes reference r1 work).
 
 ---
 

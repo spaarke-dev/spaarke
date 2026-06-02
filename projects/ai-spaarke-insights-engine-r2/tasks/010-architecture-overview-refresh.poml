@@ -25,6 +25,8 @@
     <file purpose="canonical-arch">docs/architecture/INSIGHTS-ENGINE-ARCHITECTURE.md</file>
     <file purpose="phase-1.5-design">projects/ai-spaarke-insights-engine-r2/design.md</file>
     <file purpose="phase-1.5-spec">projects/ai-spaarke-insights-engine-r2/spec.md</file>
+    <file purpose="repo-architecture-NEW">docs/architecture/SPAARKE-REPOSITORY-ARCHITECTURE.md (NEW per 2026-06-01 — cross-reference for repo-wide context)</file>
+    <file purpose="new-adr-030">.claude/adr/ADR-030-bff-nullobject-kill-switch.md (NEW 2026-06-01 — surfaces in INSIGHTS-ENGINE-ARCHITECTURE.md "Operational" section if applicable)</file>
   </inputs>
 
   <constraints>

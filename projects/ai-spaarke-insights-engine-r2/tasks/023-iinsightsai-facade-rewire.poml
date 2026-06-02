@@ -31,6 +31,7 @@
   <constraints>
     <constraint source="ADR-013-refined">Facade IS the canonical CRUD ↔ AI seam. Do not break the contract; only change the implementation.</constraint>
     <constraint source="bff-extensions.md">No new DI registrations beyond what's necessary; reuse PlaybookExecutionEngine + IInsightsPlaybookExecutionCache (already registered in r1)</constraint>
+    <constraint source="ADR-030 + bff-extensions F.1">If IInsightsAi or InsightsOrchestrator implementation registration is feature-gated (in a `*Module.cs` `if (flag)` block), verify endpoint consumers of IInsightsAi.RunIngestAsync are also conditionally mapped, OR apply ADR-030 P3 Fail-fast Null-Object via FeatureDisabledException. Verify by grepping endpoint param injection per F.1 recipe.</constraint>
   </constraints>
 
   <steps>

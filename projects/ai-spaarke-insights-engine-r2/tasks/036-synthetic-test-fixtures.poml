@@ -29,6 +29,8 @@
   <constraints>
     <constraint source="spec.md TF-1">Synthetic / LLM-generated; no PII concerns; no anonymization pipeline needed</constraint>
     <constraint source="spec.md NFR-09">≥3 practice areas × 2 entity types (≥6 combinations) for eval harness baseline</constraint>
+    <constraint source="bff-extensions.md F.2 (NEW 2026-06-01)">Fixture-Config-FIRST Inspection Protocol: when a test fails or is Skip'd, FIRST inspect the test fixture's config dictionary (CustomWebAppFactory.cs, IntegrationTestFixture.cs) for non-contract values vs production expectations; THEN claims/auth/mock setups; ONLY THEN production code. Applies to any new fixture authored in D7.</constraint>
+    <constraint source="bff-extensions.md F.1">If D7 fixtures register any new test-only service (e.g., a synthetic-doc generator), ensure it follows the unconditional/Null-Object pattern symmetrically.</constraint>
   </constraints>
 
   <steps>

@@ -31,6 +31,7 @@
     <constraint source="ADR-010">DI minimalism — multiple resolver registrations must stay within ≤15 non-framework target; consolidate via registry pattern if exceeded</constraint>
     <constraint source="bff-extensions.md">BFF placement justified (per project CLAUDE.md table); load before adding DI registrations</constraint>
     <constraint source="ADR-013-refined">Resolvers are Zone A; do not leak to Zone B</constraint>
+    <constraint source="ADR-030 + bff-extensions F.1">Per-entity ILiveFactResolver registrations are likely behind the Insights feature gate (`if (flag)` in InsightsServicesModule). If LiveFactNode (which consumes them) is invoked by endpoints mapped unconditionally, apply ADR-030 P3 Fail-fast Null-Object per F.1 inspection. Recipe: `rg -t cs -n "[\s,(]ILiveFactResolver" src/server/api/Sprk.Bff.Api/Api/` to find endpoint consumers; cross-check MapXxx() conditionality. For each new resolver (Project, Invoice), ensure Null variants throw FeatureDisabledException("ai.insights.disabled", "...") if applicable.</constraint>
   </constraints>
 
   <steps>

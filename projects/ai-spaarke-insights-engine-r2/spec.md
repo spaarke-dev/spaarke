@@ -153,6 +153,7 @@ This section is non-decorative — terms below define exactly what is and isn't 
 - **ADR-027** — Subscription Isolation + Dataverse Solution Management. Phase 1.5 schema additions (`sprk_documenttype_ref`, `sprk_practicearea_documenttype`, possibly `sprk_prompt`) MUST flow through the managed-solution promotion path to prod.
 - **ADR-028** — Spaarke Auth v2. New `/api/insights/search` endpoint MUST register via the function-based contract and use a named API key scheme + audit middleware where applicable.
 - **ADR-029** — BFF Publish Hygiene. Phase 1.5 wave merges MUST verify publish-size impact + the transitive CVE override pattern.
+- **ADR-030** — BFF Null-Object Kill-Switch Pattern (NEW 2026-06-01). Any new service in a `*Module.cs` `if (flag) { ... }` block consumed by an unconditionally-mapped endpoint MUST apply one of: P1 (Promote-to-unconditional if no AI-deps), P2 (Quiet no-op — FORBIDDEN for query services), P3 (Fail-fast Null-Object via `FeatureDisabledException` → 503 ProblemDetails). Affects Wave C (020 universal-ingest service additions, 023 facade re-wire), Wave D (034 multi-entity resolvers), Wave E (040 search endpoint, 041 intent classifier).
 
 ### MUST Rules (from ADRs + CLAUDE.md §10)
 
@@ -176,7 +177,7 @@ This project extends Phase 1 (r1) BFF work in-place. The 2026-05-20 BFF AI extra
 | Universal-ingest JPS playbook (C1) | Dataverse (not source code) | Playbook is data, not code; deployed via `Deploy-Playbook.ps1`. Code is in JPS node executors (already in BFF) |
 | Per-entity `ILiveFactResolver` implementations (D5) | `Sprk.Bff.Api/Services/Ai/Insights/` | Resolvers depend on `Spaarke.Dataverse` types + JPS engine context; consistent with Phase 1 placement |
 | Intent classifier (E2) | `Sprk.Bff.Api/Services/Ai/Insights/` | LLM-based classifier reuses `IOpenAiClient` and Phase 1 facade plumbing |
-| RAG retriever (E1 internal) | `Sprk.Bff.Api/Services/Ai/Insights/` | Reuses the `spaarke-insights-index` substrate + Azure AI Search client already wired in BFF |
+| RAG retriever (E1) | **Existing `Sprk.Bff.Api/Services/Ai/IRagService` + `RagService` + `NullRagService` per 2026-06-01 master refactor.** Wave E1 endpoint wraps `IRagService` — no parallel implementation. If Insights-specific subject filtering needs extension, extend the existing service. | Avoids duplicating substrate access; aligns with refined ADR-013 facade pattern |
 | `IInsightsAi` facade extensions (E1, D5) | `Sprk.Bff.Api/Services/Ai/PublicContracts/` | Facade is the canonical CRUD ↔ AI seam per refined ADR-013 |
 | Schema additions (D1) | Dataverse managed solution | Standard Dataverse promotion path per ADR-027 |
 | Prompts (C2) | Dataverse — `sprk_analysisaction.sprk_systemprompt` (existing field, JPS-formatted JSON) | Existing JPS primitive already used in r1 (see Terminology). Phase 1.5 retires `.txt` files by populating action rows. **No new entity needed for prompt content.** Per-playbook inline templates still allowed in `sprk_playbook.sprk_configjson` for prompts that exist in exactly one playbook. |

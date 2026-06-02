@@ -32,6 +32,7 @@
     <constraint source="ADR-013-refined">Classifier is Zone A; consumed via facade by Assistant + endpoints</constraint>
     <constraint source="spec.md Risk-5">Mis-routing mitigated by confidence threshold + forceMode override</constraint>
     <constraint source="ADR-010">Stay within DI ≤15 non-framework target</constraint>
+    <constraint source="ADR-030 + bff-extensions F.1">InsightsIntentClassifier is a query-like service (returns routing decision). If registered behind `if (flag)` AND consumed by an unconditionally-mapped endpoint, apply ADR-030 **P3 Fail-fast Null-Object** (NOT P2 Quiet — query services that return empty results mislead consumers about kill-switch state). Throw `FeatureDisabledException("ai.intent-classification.disabled", "Insights intent classification requires Insights feature enabled.")`. Endpoint catches and returns 503 via AsFeatureDisabled503().</constraint>
   </constraints>
 
   <steps>

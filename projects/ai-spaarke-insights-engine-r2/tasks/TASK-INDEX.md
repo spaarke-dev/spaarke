@@ -77,7 +77,7 @@
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [040](040-insights-search-rag-endpoint.poml) | E1 | POST /api/insights/search (RAG endpoint) | 🔲 | 3d | ✅ | 035 |
+| [040](040-insights-search-rag-endpoint.poml) | E1 | POST /api/insights/search (wraps existing IRagService — re-scoped 2026-06-02) | 🔲 | 1.5d | ✅ | 035 |
 | [041](041-intent-classifier.poml) | E2 | Intent classifier (LLM-based) | 🔲 | 2d | ✅ | 040 |
 | [042](042-spaarke-assistant-integration.poml) | E3 | Spaarke Assistant integration (contract first) | 🔲 | 1w | ❌ | 040, 041 |
 | [043](043-playbook-vs-rag-decision-tree.poml) | E4 | Playbook-vs-RAG decision-tree doc | 🔲 | 4h | ✅ | 040, 041 |

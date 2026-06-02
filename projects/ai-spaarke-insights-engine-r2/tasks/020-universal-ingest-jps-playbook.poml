@@ -34,6 +34,7 @@
     <constraint source="spec.md NFR-04">Stay within ratcheted size baseline</constraint>
     <constraint source="design.md D-P15-02">ONE canonical universal-ingest playbook — parameterized, not multiplied</constraint>
     <constraint source="ADR-013-refined">Facade pattern preserved — CRUD code never injects AI-internal types</constraint>
+    <constraint source="ADR-030 + bff-extensions F.1">If C1 adds any new service to a `*Module.cs` `if (flag)` block (e.g., a new node-executor wrapper service consumed by an unconditionally-mapped endpoint), apply ADR-030 P1/P2/P3 pattern. Run the F.1 Tier 1.5 inspection: grep endpoint consumers; verify MapXxx() is in same conditional block; choose P3 Fail-fast for query-like services.</constraint>
   </constraints>
 
   <knowledge>
