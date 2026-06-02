@@ -2,7 +2,7 @@
   <metadata>
     <title>P5.3 — Final triple-run validation: both projects × 3 runs each (6 TRX artifacts)</title>
     <phase>Phase 5</phase>
-    <status>not-started</status>
+    <status>completed-2026-06-01</status>
     <estimated-effort>2-4 hours</estimated-effort>
     <dependencies>080,081</dependencies>
     <blocks>083</blocks>
