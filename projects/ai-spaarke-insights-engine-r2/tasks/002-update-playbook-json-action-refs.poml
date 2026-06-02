@@ -1,7 +1,8 @@
 <task id="002" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>B2 — Create 6 sprk_analysisaction rows in Spaarke Dev via jps-action-create skill (one per Insights ActionType)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-02</completed>
     <wave>B</wave>
     <estimated-effort>4h</estimated-effort>
     <tags>dataverse, jps-action-create, sprk_analysisaction, insights-actiontypes, unblock-synthesis</tags>
