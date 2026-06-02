@@ -1,10 +1,10 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-01 (Task 029 Phase 2 P2-W3 exit triple-run executed — verdict PASS)
+> **Last Updated**: 2026-06-01 (Task 036 Phase 3 P3-W1 — RB-T070-02 LOW closure executed; awaiting commit by main session)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
-> **Last commit (project work)**: `9828711a` — HEAD at task 029 execution time (no commits this task; main session bundles)
-> **Last PR #318 activity**: tasks 010 / 011 / 012 (Phase 1 closures) + 020 / 021 / 022 / 023 / 024 / 025 (Phase 2 closures) — Phase 2 production work complete
+> **Last commit (project work)**: `9828711a` — HEAD when task 036 began (no commits this task; main session bundles)
+> **Last PR #318 activity**: tasks 010 / 011 / 012 (Phase 1) + 020 / 021 / 022 / 023 / 024 / 025 (Phase 2) — Phase 2 production work complete; Phase 3 P3-W1 in flight
 
 ---
 
@@ -12,10 +12,22 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 029 — Phase 2 P2-W3 exit triple-run validation gate; **PASS** |
-| **Step** | 10 of 10 (artifact written; TASK-INDEX flipped; POML status updated; ready for next phase dispatch) |
-| **Status** | completed-2026-06-01 |
-| **Next Action** | Dispatch Phase 3 P3-W1 (6-agent parallel wave: tasks 030, 031, 032, 034, 035, 036). All Phase 3 P3-W1 tasks are unblocked. |
+| **Task** | 036 — Phase 3 P3-W1 — RB-T070-02 (LOW) repaired |
+| **Step** | 9 of 9 (production fix applied; test un-Skip'd; targeted run 21/21 PASS; ledger row updated; Step 9.5 FULL rigor gates PASS; awaiting main-session commit per NFR-04) |
+| **Status** | completed-2026-06-01 (no commit by this task; main session bundles per project convention) |
+| **Next Action** | Continue P3-W1 dispatch (sibling tasks 030, 031, 032, 034, 035 in parallel; all touch disjoint files). Main session bundles commits citing each ledger entry per NFR-04. |
+
+### Task 036 outcome (2026-06-01) — REPAIRED
+
+- **Production change**: `src/server/api/Sprk.Bff.Api/Api/Ai/R2SseEventEmitter.cs` — added `using System.Text.Json.Serialization;` (line 2) + `[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]` decoration on `CapabilityChangePayload.RetryAfterSeconds` record parameter (~line 311). Property-level attribute chosen over global serializer option per POML guidance (minimum blast radius); guarantees omission regardless of which JsonSerializerOptions any downstream serializer uses.
+- **Why a fix was needed** (despite EmitAsync's JsonOptions already setting `DefaultIgnoreCondition = WhenWritingNull`): the `ChatSseEvent.Data` field carries the raw payload object; downstream serializers (test capture + SSE writer) may re-serialize with different options. The property-level attribute makes the omission guarantee travel WITH the type.
+- **Test change**: `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/R2SseEventEmitterTests.cs` — `EmitCapabilityChangeAsync_OmitsRetryAfterSecondsWhenNull` (~line 276) flipped Skip→`[Fact]`; per-test `[Trait("status","real-bug-pending-fix")]` removed (class-level `[Trait("status","repaired")]` applies).
+- **Build**: `dotnet build src/server/api/Sprk.Bff.Api/` succeeds, 0 errors, 2 warnings (both pre-existing NU1903 Microsoft.Kiota.Abstractions vulnerability warnings; zero new warnings).
+- **Targeted test run**: `dotnet test --filter "FullyQualifiedName~R2SseEventEmitterTests"` → 21 Passed / 0 Failed / 0 Skipped. Both the new-passing test AND the existing positive case (`EmitCapabilityChangeAsync_SerializesCapabilityAndStatus` asserting `retryAfterSeconds=30` when non-null) pass.
+- **Ledger transition**: `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` — RB-T070-02 row updated with Status=`repaired`, transition date 2026-06-01, Tests Skip'd → Pass row showing 21/21 targeted-run result; resolution commit placeholder TBD pending main-session commit.
+- **Step 9.5 FULL rigor gates**: code-review PASS (1-attribute addition, minimal-blast-radius, matches POML), adr-check PASS (ADR-001 SSE wire contract preserved at the contract level; bug fix brings impl into compliance with documented contract; ADR-013 BFF-internal infra unaffected; bff-extensions.md not triggered — no new endpoint/package/DI/background work).
+- **NFR-04 commit message (for main session)**: `fix(bff-api): omit null RetryAfterSeconds in CapabilityChangePayload (RB-T070-02; repaired)`
+- **No commit by this task** — main session bundles per project convention (sibling tasks 030/031/032/034/035 in same P3-W1 wave).
 
 ### Task 029 outcome (2026-06-01) — PASS
 

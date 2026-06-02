@@ -73,8 +73,7 @@ public class CitationExtractorTests
             c.NormalizedKey == expectedKey);
     }
 
-    [Fact(Skip = "RB-T044-03: CitationExtractor.NormalizeStatute does not trim subsections from the canonical section number. Input '17 U.S.C. § 512(c)(1)(A)' yields '17 U.S.C. § 512(c)(1)(A)' but the canonical form documented in tests is '17 U.S.C. § 512'. See ledger.")]
-    [Trait("status", "real-bug-pending-fix")]
+    [Fact]
     public void ExtractCitations_Statute_StripsSubsectionsInNormalizedKey()
     {
         var results = CitationExtractor.ExtractCitations("See 17 U.S.C. § 512(c)(1)(A).");

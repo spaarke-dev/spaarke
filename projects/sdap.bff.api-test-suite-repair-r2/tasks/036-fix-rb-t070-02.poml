@@ -2,7 +2,7 @@
   <metadata>
     <title>P3 — Fix RB-T070-02: R2SseEventEmitter.CapabilityChangePayload omit RetryAfterSeconds when null</title>
     <phase>Phase 3: LOW Severity + Integration Stability</phase>
-    <status>not-started</status>
+    <status>completed-2026-06-01</status>
     <estimated-effort>30-45 minutes</estimated-effort>
     <dependencies>029</dependencies>
     <blocks>038</blocks>

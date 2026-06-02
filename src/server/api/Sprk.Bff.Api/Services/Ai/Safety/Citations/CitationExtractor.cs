@@ -173,9 +173,16 @@ public static partial class CitationExtractor
 
     private static string NormalizeStatute(Match m)
     {
-        // Canonical form: "{title} U.S.C. § {section}"
+        // Canonical form: "{title} U.S.C. § {section}" — the canonical key is the bare section number,
+        // subsection parentheticals MUST be stripped (RB-T044-03: prior verbatim concatenation produced
+        // non-canonical keys like "17 U.S.C. § 512(c)(1)(A)" instead of the documented "17 U.S.C. § 512",
+        // breaking downstream verification provider lookups + UI dedup for any statute cited with a subsection).
+        // The regex capture `(?<section>\d[\d\-\.]*[a-z]?(?:\([a-z0-9]+\))*)` deliberately INCLUDES the subsection
+        // parenthetical in the raw match so the surface RawText is faithful; canonicalization happens here.
         var title   = m.Groups["title"].Value.Trim();
         var section = m.Groups["section"].Value.Trim();
+        var parenStart = section.IndexOf('(');
+        if (parenStart >= 0) section = section[..parenStart];
         return $"{title} U.S.C. § {section}";
     }
 

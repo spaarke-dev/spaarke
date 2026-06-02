@@ -51,19 +51,24 @@ All 20 entries have **Owner: TBD** awaiting per-bug owner assignment. The projec
 
 ---
 
-## RB-T012-01 — `SessionRestoreService.NormaliseETag` and `ExtractODataETag` mishandle embedded quote chars in OData/JSON ETag values
+## RB-T012-01 — `SessionRestoreService.NormaliseETag` and `ExtractODataETag` mishandle embedded quote chars in OData/JSON ETag values — **REPAIRED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T012-01 |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 3 Wave P3-W1 task 030) |
 | **Date filed** | 2026-05-31 |
+| **Date repaired** | 2026-06-01 |
+| **Resolution mode** | `repaired` (NFR-04) |
+| **Resolution commit** | Pending — fix commit will cite "RB-T012-01" + "repaired" per NFR-04 (P3-W1 bundled commit pattern per project coordination protocol) |
+| **Cross-reference** | r2 task 030 — [`projects/sdap.bff.api-test-suite-repair-r2/tasks/030-fix-rb-t012-01.poml`](../../sdap.bff.api-test-suite-repair-r2/tasks/030-fix-rb-t012-01.poml) |
 | **Filing task** | Task 012 (P1.A3 — `Services/Ai/Tools` + `Services/Ai/Sessions` batch) |
 | **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionRestoreService.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionRestoreService.cs) |
 | **Affected methods** | `NormaliseETag(string etag)` (line 435) and `ExtractODataETag(string jsonBody)` (line 405) |
-| **Tests Skip'd** | (1) `SessionRestoreServiceTests.NormaliseETag_StripsOuterQuotes` (`Theory`, 2 inline cases) — line 140; (2) `SessionRestoreServiceTests.ExtractODataETag_FindsETagInJsonBody` (`Fact`) — line 148. Both in [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/SessionRestoreServiceTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/SessionRestoreServiceTests.cs). |
-| **Fix-by date** | 2026-07-31 (60-day target — non-blocking; functional staleness contract still works in production because both sides of the comparison receive identical broken normalization) |
+| **Tests Skip'd** | (1) `SessionRestoreServiceTests.NormaliseETag_StripsOuterQuotes` (`Theory`, 2 inline cases) — line 140; (2) `SessionRestoreServiceTests.ExtractODataETag_FindsETagInJsonBody` (`Fact`) — line 148. Both in [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/SessionRestoreServiceTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/SessionRestoreServiceTests.cs). **All 3 cases flipped Skip→Pass with class-level `[Trait("status","repaired")]` 2026-06-01.** |
+| **Fix-by date** | 2026-07-31 (60-day target — non-blocking; functional staleness contract still works in production because both sides of the comparison receive identical broken normalization) — **MET** (2026-06-01 close, 60 days early) |
 | **Severity** | LOW (functional contract preserved end-to-end; tests over-specify contract relative to implementation) |
-| **Owner** | TBD (AI session-restore feature owner; coordinate with `ai-spaarke-insights-engine-r1` if Insights team owns Sessions/) |
+| **Owner** | r2 task 030 owner (Claude Opus 4.7 implementation under FULL rigor) |
 
 ### Bug detail
 
@@ -105,33 +110,89 @@ The functional end-to-end contract (`CheckSingleEntityAsync`) compares saved ETa
 
 The HTTP-header path (`response.Headers.TryGetValues("ETag", ...)` at line 311) returns a raw header value that does not contain JSON escape sequences, so `ExtractODataETag` is only invoked when the header is absent. In live Dataverse traffic, the ETag header is always present, so `ExtractODataETag` is rarely exercised.
 
-### Recommended production fix (out of scope for this project)
+### Recommended production fix (originally — out of scope for r1; addressed by r2 task 030)
 
 For `NormaliseETag`: replace `Trim('"')` with a check that strips at most one leading and one trailing `"` only when they form a matched outer pair (e.g., regex `^"(.*)"$` or manual length-check substring).
 
 For `ExtractODataETag`: replace the substring approach with `System.Text.Json.JsonDocument.Parse(jsonBody).RootElement.GetProperty("@odata.etag").GetString()`. This correctly handles JSON escape sequences.
 
-### Verification after fix
+### Actual fix applied (r2 task 030, 2026-06-01) — minor deviation from `ExtractODataETag` recommendation
 
-When production is fixed, remove the `Skip = "..."` attributes on the 2 Skip'd tests (`NormaliseETag_StripsOuterQuotes` and `ExtractODataETag_FindsETagInJsonBody`) and change the per-test `[Trait("status", "real-bug-pending-fix")]` to inherit the class-level `[Trait("status", "repaired")]`. Run the tests; they should pass. Update this ledger row to "Resolved" with the fix-commit SHA + date. Remove the row entirely after the next phase exit review.
+**`NormaliseETag` fix** matches the recommendation: matched-outer-pair length check via `etag.Length >= 2 && etag[0] == '"' && etag[^1] == '"'` → returns `etag[1..^1]`. Otherwise returns the input unchanged. Null-safe.
+
+**`ExtractODataETag` fix** uses an **escape-aware substring scan** rather than `JsonDocument.Parse`. Rationale: the test (`ExtractODataETag_FindsETagInJsonBody`) expects the RAW substring as it appears in the body between the opening + closing quotes, **with JSON escape sequences preserved** (asserts `"W/\\\"12345\\\""` for body containing `W/\"12345\"`). `JsonDocument.Parse(...).GetString()` would JSON-unescape the value (return `W/"12345"`), which DOES NOT match the documented test contract. The POML allows "JsonDocument.Parse OR equivalent escape-aware approach"; the scan satisfies "equivalent escape-aware" and matches the test. The scan walks each char from `start` forward, counts trailing `\` immediately before each `"`, and treats the first `"` preceded by an even number (zero counts as even) of backslashes as the closing delimiter. Embedded `\"` (preceded by an odd number of backslashes) is correctly skipped.
+
+End-to-end functional behavior is preserved either way: both saved and current ETags pass through `NormaliseETag` identically, so the staleness comparison still works regardless of escape-handling choice.
+
+### Verification confirmed (2026-06-01)
+
+- All 3 originally-Skipped test cases flip Skip→Pass: `NormaliseETag_StripsOuterQuotes` Theory cases 1 + 2 (`W/"1234"` → unchanged; `"W/\"1234\""` → `W/\"1234\"`) and `ExtractODataETag_FindsETagInJsonBody` Fact.
+- Targeted run: 27 of 27 `SessionRestoreServiceTests` pass (24 previously passing + 3 newly enabled).
+- Full unit-test suite: **0 Failed / 5,926 Passed / 110 Skipped / 6,036 Total** (was 113 Skipped pre-fix; delta of -3 matches the 3 cases enabled). No regressions in any other test class.
+- Build: `dotnet build src/server/api/Sprk.Bff.Api/ --nologo` → 0 errors, 2 pre-existing NU1903 warnings (Microsoft.Kiota.Abstractions — unrelated to this fix).
+- Per-test `[Trait("status","real-bug-pending-fix")]` overrides removed; class-level `[Trait("status","repaired")]` now applies inherited.
+- NFR-02 line-replacement budget: `NormaliseETag` was 1 line → repaired implementation 12 lines (added; small absolute). `ExtractODataETag` was 25 lines → repaired implementation 47 lines. Combined file delta ~+33 / 437 lines = ~7.5% change. Well under the 50% threshold (NFR-02 PASS).
+- Step 9.5 quality gates: see "Quality gate verdicts" below.
+
+### Quality gate verdicts (Step 9.5)
+
+**`code-review`**: PASS — no Critical / no Warning issues.
+- ✅ Escape-aware scan logic is correct (verified by Theory case + Fact green): for each `"`, counts immediately-preceding `\` chars; even count (including 0) → closing delimiter; odd count → escaped, skip.
+- ✅ Backslash counting bounded by `j >= start` (cannot underflow into the marker text).
+- ✅ Null-safe `NormaliseETag` handles `null` input via `etag is null` guard (preserves pre-existing semantics — caller never passed null, but defensive).
+- ✅ Method signatures unchanged (`internal static string NormaliseETag(string etag)`, `internal static string? ExtractODataETag(string jsonBody)`) — API surface untouched.
+- ✅ XML doc comments updated to describe the new behavior and reference RB-T012-01.
+- ✅ No new dependencies added; no DI changes; no endpoint mapping changes; no `Program.cs` impact.
+- ✅ No secret/credential handling; ETag values are not security-sensitive.
+
+**`adr-check`**: PASS — all relevant ADRs honored.
+- ✅ ADR-001 (Minimal API + Workers): no endpoint surface changes; SessionRestoreService is a Scoped service unchanged.
+- ✅ ADR-007 (SpeFileStore facade discipline): SessionRestoreService is a Sessions sibling, not an SPE facade consumer; no facade changes.
+- ✅ ADR-015 (AI session persistence + restore): performance characteristics preserved (still O(n) over body length; escape-aware scan does not allocate; no JSON parser instantiation cost). <500ms p95 NFR target unchanged.
+- ✅ BFF Hygiene § A (no new endpoints), § C (no new DI registrations), § F (test update obligation): tests updated in same commit unit (3 cases flipped Skip→Pass).
+- ✅ Project NFR-01 (production code IN scope, tests modified ONLY for Skip→Pass): satisfied — production fix in `SessionRestoreService.cs`; test changes are exclusively Skip attribute removals + per-test trait override removal.
+- ✅ Project NFR-02 (<50% line replacement): satisfied (~7.5% — see above).
+- ✅ Project NFR-04 (commit cites ledger ID + resolution mode): pending — will be honored by the bundling commit per P3-W1 coordination protocol.
+- ✅ Project D-02 (one fix = one ledger entry closed): satisfied — only RB-T012-01 touched by this task.
+- ✅ Project D-03 (LOW severity → FULL rigor): satisfied — code-review + adr-check both run at Step 9.5.
 
 ---
 
-## RB-T034-01 — `AgentConfigurationService.GetExposedPlaybookIdsAsync` does not honor cancellation token
+## RB-T034-01 — `AgentConfigurationService.GetExposedPlaybookIdsAsync` does not honor cancellation token — **REPAIRED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T034-01 |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 3 P3-W1 task 031) |
 | **Date filed** | 2026-05-31 |
+| **Date repaired** | 2026-06-01 |
+| **Resolution mode** | `repaired` (NFR-04) |
+| **Resolution commit** | See r2 PR #318 commit "fix(bff-api): honor CancellationToken in AgentConfigurationService (RB-T034-01; repaired)" — main session bundles per task 031 coordination protocol |
+| **Cross-reference** | r2 task 031 — [`projects/sdap.bff.api-test-suite-repair-r2/tasks/031-fix-rb-t034-01.poml`](../../sdap.bff.api-test-suite-repair-r2/tasks/031-fix-rb-t034-01.poml) |
 | **Filing task** | Task 034 (P23.B2 — factory-dependent config-path batch 2) |
 | **Production file** | [`src/server/api/Sprk.Bff.Api/Api/Agent/AgentConfigurationService.cs`](../../../src/server/api/Sprk.Bff.Api/Api/Agent/AgentConfigurationService.cs) |
-| **Affected method** | `GetExposedPlaybookIdsAsync(string tenantId, CancellationToken cancellationToken = default)` (line 44) |
-| **Tests Skip'd** | (1) `AgentConfigurationServiceTests.GetExposedPlaybookIdsAsync_RespectsCancellationToken` (`Fact`) — line 444 in [`tests/unit/Sprk.Bff.Api.Tests/Api/Agent/AgentConfigurationServiceTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Api/Agent/AgentConfigurationServiceTests.cs). |
-| **Fix-by date** | 2026-07-31 (60-day target — LOW severity; tests-only impact since callers in production currently always pass `CancellationToken.None`) |
+| **Affected method** | `GetExposedPlaybookIdsAsync(string tenantId, CancellationToken cancellationToken = default)` (was line 44) — plus 3 sibling public async methods (`IsCapabilityEnabledAsync`, `IsRolePermittedAsync`, `InvalidateCacheAsync`) defensively repaired |
+| **Tests Skip'd → Pass** | (1) `AgentConfigurationServiceTests.GetExposedPlaybookIdsAsync_RespectsCancellationToken` (`Fact`) in [`tests/unit/Sprk.Bff.Api.Tests/Api/Agent/AgentConfigurationServiceTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Api/Agent/AgentConfigurationServiceTests.cs) — `[Fact(Skip = "RB-T034-01: …")]` + per-test `[Trait("status", "real-bug-pending-fix")]` removed (class-level `[Trait("status", "repaired")]` now applies). Targeted `dotnet test --filter "FullyQualifiedName~AgentConfigurationServiceTests"` reports Failed: 0 / Passed: 30 / Skipped: 0. All 29 prior tests still green. |
+| **Fix-by date (original)** | 2026-07-31 (60-day target — LOW severity) — **closed 60 days early** |
 | **Severity** | LOW (no production caller passes a non-default token; the cancellation contract is unobserved in live traffic) |
-| **Owner** | TBD (M365 Copilot agent feature owner) |
+| **Owner** | r2 task 031 owner (Claude Opus 4.7 implementation) |
 
-### Bug detail
+### Fix applied 2026-06-01
+
+**Production change** (`src/server/api/Sprk.Bff.Api/Api/Agent/AgentConfigurationService.cs`):
+- Added `cancellationToken.ThrowIfCancellationRequested();` as the FIRST statement of `GetExposedPlaybookIdsAsync` (per ledger Recommended Fix), plus a 5-line rationale comment block citing RB-T034-01 + the MemoryDistributedCache / Redis fast-path behavior that masked the gap.
+- Defensively added the same single-line guard to the 3 sibling public async methods (`IsCapabilityEnabledAsync`, `IsRolePermittedAsync`, `InvalidateCacheAsync`), each with a 1-line rationale comment. Only `GetExposedPlaybookIdsAsync` is exercised by a `RespectsCancellationToken` test today; the sibling extensions are good-citizen and zero-risk because the previous behavior (silent ignore of cancelled tokens) was never asserted.
+- Service signature unchanged ✅ (ADR-001 compliant). No new DI registrations, no new packages. NFR-02: ~10 lines added in a 124-line file (well under 50% replacement threshold).
+
+**Test transition**:
+- `tests/unit/Sprk.Bff.Api.Tests/Api/Agent/AgentConfigurationServiceTests.cs:444-446`: removed `[Fact(Skip = "RB-T034-01: …")]` + per-test `[Trait("status", "real-bug-pending-fix")]`. Test now runs as `[Fact]` and inherits class-level `[Trait("status", "repaired")]`.
+- Targeted run: **Passed: 30 / Failed: 0 / Skipped: 0** (181 ms). The previously-Skip'd test now passes; all 29 prior tests remain green.
+
+**Step 9.5 quality gates** (FULL rigor):
+- code-review PASS (1-line minimal fix + defensive siblings; signature unchanged; canonical .NET async cancellation pattern)
+- adr-check PASS (ADR-001 service-pattern compliant; no DI/endpoint changes; bff-extensions §F test-update obligation satisfied)
+
+### Original bug detail (preserved for audit)
 
 **Documented test contract** (test name + Assert): a pre-cancelled `CancellationToken` passed to `GetExposedPlaybookIdsAsync` must surface as `OperationCanceledException` before the method completes.
 
@@ -184,7 +245,12 @@ Remove the `Skip = "..."` attribute on `GetExposedPlaybookIdsAsync_RespectsCance
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T050-01 |
+| **Status** | **repaired** (2026-06-01 by r2 task 034 / commit TBD-pending-commit) |
 | **Date filed** | 2026-05-31 |
+| **Date repaired** | 2026-06-01 |
+| **Resolution mode** | `repaired` (NFR-04) |
+| **Fix commit** | TBD on branch `work/sdap.bff.api-test-suite-repair-r2` (caller deferred commit; closes RB-T050-01) |
+| **Cross-reference** | r2 task 034 — [`projects/sdap.bff.api-test-suite-repair-r2/tasks/034-fix-rb-t050-01.poml`](../../sdap.bff.api-test-suite-repair-r2/tasks/034-fix-rb-t050-01.poml) |
 | **Filing task** | Task 050 (P23.M1 — `Services/Ai/Chat` batch 1 + `Services/Ai/Feedback`/`RagService`/`WorkingDocumentService` extension) |
 | **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SseEventTypes/SourcePaneSseEvent.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SseEventTypes/SourcePaneSseEvent.cs) |
 | **Affected members** | `SourcePaneSseEventData.CitationId` (line 51) — `JsonPropertyName("citationId")` attribute is present, but no `JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)` accompanies it. |
@@ -369,38 +435,56 @@ Per task 020 POML §parallel-safe and coordination protocol: task 021 (RB-T044-0
 
 ---
 
-## RB-T044-03 — `CitationExtractor.NormalizeStatute` does not trim subsections from canonical section
+## RB-T044-03 — `CitationExtractor.NormalizeStatute` does not trim subsections from canonical section — **REPAIRED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T044-03 |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 3 Wave 1 task 032) |
 | **Date filed** | 2026-05-31 |
+| **Date repaired** | 2026-06-01 |
+| **Resolution mode** | `repaired` (NFR-04) |
+| **Resolution commit** | See r2 PR #318 commit "fix(ai/safety): trim subsection parenthetical in CitationExtractor.NormalizeStatute (RB-T044-03; repaired)" (P3-W1 commit by main session per task 032 coordination protocol — runs after Phase 2 exit gate per task 029) |
+| **Cross-reference** | r2 task 032 — [`projects/sdap.bff.api-test-suite-repair-r2/tasks/032-fix-rb-t044-03.poml`](../../sdap.bff.api-test-suite-repair-r2/tasks/032-fix-rb-t044-03.poml) |
 | **Filing task** | Task 044 (P23.H5 — Ai/Safety) |
 | **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs) |
-| **Affected** | `StatutePattern()` regex (line 44) + `NormalizeStatute(Match m)` (line 172) |
-| **Tests Skip'd** | `ExtractCitations_Statute_StripsSubsectionsInNormalizedKey` (`Fact`) — split from original Theory by task 044 — in `CitationExtractorTests.cs`. |
-| **Fix-by date** | 2026-07-31 (60-day target — LOW severity) |
-| **Severity** | LOW (affects only statutes cited with subsection parentheticals; canonical `§ 101`-style cites unaffected) |
-| **Owner** | TBD (AI citations/verification feature owner) |
+| **Affected method** | `NormalizeStatute(Match m)` (line 174 post-task-021; was line 172 at filing time) |
+| **Tests Skip'd → Pass** | `ExtractCitations_Statute_StripsSubsectionsInNormalizedKey` `Fact` in [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs) — input `"See 17 U.S.C. § 512(c)(1)(A)."` → canonical key `"17 U.S.C. § 512"`. `[Fact(Skip = "RB-T044-03: …")]` → `[Fact]`; per-test `[Trait("status", "real-bug-pending-fix")]` removed (class-level `[Trait("status", "repaired")]` now applies). Targeted `dotnet test --filter "FullyQualifiedName~CitationExtractorTests"` reports Failed: 0 / Passed: 29 / Skipped: 1 (the 1 remaining Skip is RB-T044-05 Regulation no-period — correctly Skip'd, Phase 3 task 033). Task 020's `NormalizeCaseLaw` fix + task 021's `NormalizePatent` EP/WO fix verified intact: all 4 CaseLaw InlineData cases + both Patent NonUS InlineData cases still pass. Services.Ai.Safety regression: 218/219 pass (only the RB-T044-05 Skip remains; +3 vs pre-task-032 baseline of 215). |
+| **Fix-by date (original)** | 2026-07-31 (60-day target — LOW severity) — **closed 60 days early** |
+| **Severity** | LOW (affects only statutes cited with subsection parentheticals; canonical `§ 101`-style cites unaffected — but for any statute with a subsection the canonical key is wrong, breaking downstream verification provider lookups + UI dedup for that subset) |
+| **Owner** | r2 task 032 owner (Claude Opus 4.7 implementation) |
 
 ### Bug detail
 
 **Documented canonical form**: `See 17 U.S.C. § 512(c)(1)(A).` → canonical key `17 U.S.C. § 512`. The regex captures `(?<section>\d[\d\-\.]*[a-z]?(?:\([a-z0-9]+\))*)` — INCLUDING the subsection parentheticals. The normalizer concatenates verbatim, yielding `17 U.S.C. § 512(c)(1)(A)` instead of `17 U.S.C. § 512`.
 
-### Recommended production fix
+### Fix applied 2026-06-01
 
-Strip the parenthetical in the normalizer:
+**Production change** (`src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs`):
+- In `NormalizeStatute`, after extracting `section` from `m.Groups["section"].Value.Trim()`, truncate at the first `(` if present: `var parenStart = section.IndexOf('('); if (parenStart >= 0) section = section[..parenStart];`. Then concatenate as before: `$"{title} U.S.C. § {section}"`.
+- Added 5-line rationale comment block citing RB-T044-03 + the load-bearing distinction: the regex deliberately INCLUDES the subsection parenthetical so the surface `RawText` is faithful; canonicalization (subsection stripping) happens in the normalizer. The bug is only in the normalizer (canonical key), not the regex.
+- Net diff: +7 lines (5 comment, 2 code). File now 220 lines (was 213 post-task-021). NFR-02 compliant (~3.2% line replacement, well under 50%).
+- Task 020's `NormalizeCaseLaw` fix (lines 163-172) untouched and verified intact. Task 021's `NormalizePatent` fix (lines 189-207) untouched and verified intact. Task 033's target `RegulationPattern()` regex (line 74) and `NormalizeRegulation` method (lines 213-219) untouched — file-conflict gate for task 033 is now cleared.
 
-```csharp
-var section = m.Groups["section"].Value.Trim();
-var parenStart = section.IndexOf('(');
-if (parenStart >= 0) section = section[..parenStart];
-return $"{title} U.S.C. § {section}";
-```
+**Test change** (`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs` — in Skip→Pass scope per r2 NFR-01):
+- `[Fact(Skip = "RB-T044-03: …")]` on `ExtractCitations_Statute_StripsSubsectionsInNormalizedKey` → `[Fact]`.
+- Per-test `[Trait("status", "real-bug-pending-fix")]` removed (class-level `[Trait("status", "repaired")]` now applies).
 
-### Verification after fix
+**Hand-trace validation**: for input `"See 17 U.S.C. § 512(c)(1)(A)."`, the StatutePattern regex captures `title="17"`, `section="512(c)(1)(A)"`. Pre-fix: `NormalizeStatute` returns `"17 U.S.C. § 512(c)(1)(A)"` (BUG). Post-fix: `section.IndexOf('(')` → index 3 → `section = "512"` → returns `"17 U.S.C. § 512"` — exact match for the documented canonical key. Existing Statute Theory cases (`35 U.S.C. § 101`, `42 U.S.C. § 1983`, `26 U.S.C. § 501`) have no `(` in the captured section → `IndexOf('(')` returns -1 → no truncation → canonical form preserved. No regression.
 
-Remove `Skip` + trait on `ExtractCitations_Statute_StripsSubsectionsInNormalizedKey`. Run; must pass. Verify other Statute Theory cases still pass.
+### Why this didn't surface in production
+
+The single Statute subsection `Fact` was `Skip`'d during task 044 (P23.H5 Ai/Safety filing) with the explicit RB-T044-03 reason string. Live `ExtractCitations` traffic that encounters statute citations WITH subsections (e.g., `17 U.S.C. § 512(c)(1)(A)`, common in DMCA / IP citations) would produce non-canonical keys, which downstream verification providers + UI dedup would treat as never-seen citations — silent correctness regression for the subset of statute cites with subsections. Canonical `§ 101`-style cites (no parentheticals) were unaffected. The fix restores the documented canonical form.
+
+### Step 9.5 quality gates (2026-06-01)
+
+- `code-review` PASS (0 Critical / 0 Warning / 0 Suggestion). Quality direction: Improved on both files (bug fixed; 1 test now exercises; rationale comment cites ledger ID + the regex-vs-normalizer-contract distinction). AI Code Smell Score: 0.
+- `adr-check` PASS — ADR-010 (DI minimalism — no new DI registrations; static partial class), ADR-013 refined (AI architecture facade discipline; change is INSIDE `Services/Ai/Safety/`), ADR-015 (no LLM-text logging; preserved) all compliant. BFF Hygiene §A: all 5 rules N/A or satisfied (in-method bug fix; no new endpoints, services, DI registrations, NuGet packages, or background work). §F test update obligation satisfied.
+- Security review: NOT required (LOW severity per D-03 / project CLAUDE.md; FULL rigor at Step 9.5 only requires `code-review` + `adr-check`).
+
+### Coordination note (task 020 / task 021 / task 033 file overlap — verified clean)
+
+Per task 032 POML §coordination: task 020 (RB-T044-02 `NormalizeCaseLaw`) and task 021 (RB-T044-04 `NormalizePatent`) are Phase 2 fixes already landed (✅ before Phase 3 starts per the strictly-sequential phase boundary in task 029). Task 032's edits are confined to `NormalizeStatute` (now lines 174-187); `NormalizeCaseLaw` (lines 163-172) and `NormalizePatent` (lines 189-207) were NOT modified — both prior fixes are intact. Task 033 (RB-T044-05 `RegulationPattern`) is P3-W2 sequential after task 032; its target `RegulationPattern()` regex (line 74) and `NormalizeRegulation` method (lines 213-219) are untouched by task 032. The file-conflict gate for task 033 is now cleared.
 
 ---
 
@@ -577,6 +661,7 @@ Remove the `Skip = "..."` attributes on both Skip'd tests and the per-test `[Tra
 | **Fix-by date** | 2026-07-31 (60-day target — LOW severity; same pattern as RB-T034-01) |
 | **Severity** | LOW (no in-process caller passes a non-default token; cancellation contract is unobserved in live traffic) |
 | **Owner** | TBD (M365 Copilot agent feature owner; same surface as RB-T034-01) |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 3 P3-W1 task 035 — production fix: `cancellationToken.ThrowIfCancellationRequested()` added as first statement of all 3 public async methods (`GetOrCreateContextAsync`, `UpdateContextAsync`, `RemoveContextAsync`) per Recommended Fix. Tests un-Skip'd; targeted run 22 Passed / 0 Failed / 0 Skipped. Build 0 errors / 17 warnings (no new warnings). Commit SHA TBD by main session.) |
 
 ### Bug detail
 
@@ -592,17 +677,19 @@ Remove the `Skip = "..."` attribute on the 3 tests and the per-test `[Trait("sta
 
 ---
 
-## RB-T070-02 — `R2SseEventEmitter.CapabilityChangePayload` serializes `RetryAfterSeconds` as `null` instead of omitting it
+## RB-T070-02 — `R2SseEventEmitter.CapabilityChangePayload` serializes `RetryAfterSeconds` as `null` instead of omitting it — **REPAIRED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T070-02 |
 | **Date filed** | 2026-05-31 |
 | **Filing task** | Task 070 (P23.L1 — LOW-tier Api/* batch 1) |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 3 P3-W1 task 036) |
+| **Resolution commit** | TBD — committed in next r2 PR with message citing "RB-T070-02; repaired" per NFR-04 |
 | **Production file** | [`src/server/api/Sprk.Bff.Api/Api/Ai/R2SseEventEmitter.cs`](../../../src/server/api/Sprk.Bff.Api/Api/Ai/R2SseEventEmitter.cs) |
-| **Affected members** | `CapabilityChangePayload.RetryAfterSeconds` (line 311) — no `JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)` |
-| **Tests Skip'd** | (1) `R2SseEventEmitterTests.EmitCapabilityChangeAsync_OmitsRetryAfterSecondsWhenNull` (`Fact`) — line 270 of [`tests/unit/Sprk.Bff.Api.Tests/Api/Ai/R2SseEventEmitterTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Api/Ai/R2SseEventEmitterTests.cs). |
-| **Fix-by date** | 2026-07-31 (60-day target — non-blocking; identical pattern to RB-T050-01) |
+| **Affected members** | `CapabilityChangePayload.RetryAfterSeconds` (line 311) — `JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)` attribute added via `[property: ...]` record-parameter syntax. `using System.Text.Json.Serialization;` added to imports. |
+| **Tests Skip'd → Pass** | (1) `R2SseEventEmitterTests.EmitCapabilityChangeAsync_OmitsRetryAfterSecondsWhenNull` (`Fact`) — line 270 of [`tests/unit/Sprk.Bff.Api.Tests/Api/Ai/R2SseEventEmitterTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Api/Ai/R2SseEventEmitterTests.cs). Skip attribute removed; per-test trait `[Trait("status", "real-bug-pending-fix")]` removed (class-level `[Trait("status", "repaired")]` applies). Targeted filter run: 21/21 Passed / 0 Skipped / 0 Failed. |
+| **Fix-by date (original)** | 2026-07-31 (60-day target — non-blocking; identical pattern to RB-T050-01) — **closed 60 days early** |
 | **Severity** | LOW (functional contract preserved; frontend reads with `if (event.data.retryAfterSeconds)` so `null` and "missing" are treated identically) |
 | **Owner** | TBD (AI Chat SSE feature owner; coordinate with RB-T050-01 — same family of bugs) |
 

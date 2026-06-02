@@ -43,7 +43,7 @@
 | 033 | Fix RB-T044-05 — `RegulationPattern` CFR no-period | 3 | 🔲 | 029, 032 | (sequential after 032 — same file CitationExtractor.cs) | FULL | ✓ |
 | 034 | Fix RB-T050-01 — `SourcePaneSseEventData.CitationId` JsonIgnore | 3 | 🔲 | 029 | P3-W1 | FULL | ✓ |
 | 035 | Fix RB-T070-01 — `AgentConversationService` CancellationToken (3 methods) | 3 | 🔲 | 029 | P3-W1 | FULL | ✓ |
-| 036 | Fix RB-T070-02 — `R2SseEventEmitter` RetryAfterSeconds null omission | 3 | 🔲 | 029 | P3-W2 | FULL | ✓ |
+| 036 | Fix RB-T070-02 — `R2SseEventEmitter` RetryAfterSeconds null omission | 3 | ✅ | 029 | P3-W1 | FULL | ✓ |
 | 037 | Fix RB-T028-08 — PrecedentAdmin endpoint binding (verify subsumed by 011) | 3 | 🔲 | 029, 011 | P3-W2 | FULL | ✓ |
 | 038 | `Spe.Integration.Tests` triple-run (FR-10; flake quarantine ≤2) | 3 | 🔲 | 030-037 | (sequential, phase-exit) | STANDARD | — |
 | 039 | Phase 3 exit validation — cumulative ledger audit | 3 | 🔲 | 038 | (sequential, phase-exit) | STANDARD | — |

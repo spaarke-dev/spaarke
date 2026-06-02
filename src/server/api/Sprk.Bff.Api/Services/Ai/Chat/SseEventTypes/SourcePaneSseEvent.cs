@@ -48,4 +48,6 @@ public static class SourcePaneSseEvent
 public record SourcePaneSseEventData(
     [property: JsonPropertyName("widgetType")] string WidgetType,
     [property: JsonPropertyName("widgetData")] JsonElement WidgetData,
-    [property: JsonPropertyName("citationId")] string? CitationId = null);
+    [property: JsonPropertyName("citationId")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? CitationId = null);

@@ -2,7 +2,7 @@
   <metadata>
     <title>P3 — Fix RB-T070-01: AgentConversationService 3 async methods honor CancellationToken</title>
     <phase>Phase 3: LOW Severity + Integration Stability</phase>
-    <status>not-started</status>
+    <status>completed-2026-06-01</status>
     <estimated-effort>30-60 minutes</estimated-effort>
     <dependencies>029</dependencies>
     <blocks>038</blocks>
