@@ -1,7 +1,8 @@
 <task id="003" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>B3 — Deploy-Playbook.ps1 action-wiring lint check (prevents future regressions)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-02</completed>
     <wave>B</wave>
     <estimated-effort>1h</estimated-effort>
     <tags>scripts, powershell, lint, deploy-playbook, regression-prevention</tags>

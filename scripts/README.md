@@ -32,7 +32,9 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 **Lifecycle:** ✅ Maintained
 **Dependencies:** Azure CLI (`az login`), Dataverse connection
 **Owner:** AI Team
-**Last Used:** March 2026
+**Last Used:** June 2026 (Insights Engine r2 Wave B)
+
+**Lint behavior (Wave B B3 — Insights Engine r2 D-01 path-b)**: Every node in the playbook definition MUST have an `actionCode` field referencing a `sprk_analysisaction` row. The script lints this immediately after JSON load (before any Dataverse writes) and FAILS the deploy with an explicit error listing nodes that lack action-code wiring. This prevents the regression mode described in `projects/ai-spaarke-insights-engine-r2/decisions/D-01-wave-b-root-cause-corrected.md` §2.4 (deployed nodes with no `sprk_actionid` FK → orchestrator falls into the canvas-Designer-clobbered configjson path → dispatch defaults to AiAnalysis(0) → "Node X in batch 1 failed" → defensive scaffold decline).
 
 **When to Use:**
 - After designing a playbook with `/jps-playbook-design` skill

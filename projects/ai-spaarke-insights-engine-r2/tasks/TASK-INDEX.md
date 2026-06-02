@@ -29,7 +29,7 @@
 |---|---|---|---|---|---|---|
 | [001](001-create-insights-action-rows.poml) | B1 | **Investigate playbook-architecture + scope-model-index** (resolve D-01 Q1+Q2+Q3 via authoritative docs) | ✅ | 2h | ❌ | — |
 | [002](002-update-playbook-json-action-refs.poml) | B2 | **Create 6 sprk_analysisaction rows via `/jps-action-create` skill** (one per Insights ActionType) — INS-FACT/IDXR/EVID/GRND/DECL/RART live in Spaarke Dev | ✅ | 4h | ❌ | 001 |
-| [003](003-deploy-playbook-action-lint.poml) | B3 | Deploy-Playbook.ps1 lint check (action-code + configjson preservation per D-01) | 🔲 | 2h | ✅ | — |
+| [003](003-deploy-playbook-action-lint.poml) | B3 | Deploy-Playbook.ps1 lint check (action-code + playbook JSON updated) | ✅ | 2h | ✅ | — |
 | [004](004-redeploy-playbook-with-action-refs.poml) | B4 | **Delete + re-deploy 8 nodes** (clean clobbered configjson per D-01 §2.4) | 🔲 | 1h | ❌ | 002, 003 |
 | [005](005-live-smoke-predict-matter-cost.poml) | B5 | Live smoke verification (SC-01) | 🔲 | 1h | ❌ | 004 |
 | [006](006-update-phase1-verification-doc.poml) | B6 | Update verification doc + document "do not open in Designer" rule + close D-01 | 🔲 | 1h | ❌ | 005 |
