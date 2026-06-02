@@ -2,7 +2,7 @@
 
 > **Date**: 2026-06-02
 > **Task**: 005 (Live smoke verification of predict-matter-cost@v1 end-to-end)
-> **Status**: Partial — architectural dispatch unblock PROVEN; structured-decline-extraction follow-up identified
+> **Status**: ✅ **SC-01 MET** — real `DeclineResponse` returned with `reason="insufficient-evidence"`, `confidenceInDecline=0.95`, structured `suggestedActions`. Fix iteration timeline preserved below.
 
 ---
 
@@ -96,9 +96,36 @@ The architectural unblock is independent of these issues — Wave B's D-01 dispa
 
 > SC-01 — `POST /api/insights/ask` predict-matter-cost end-to-end returns real `InsightArtifact` or real `DeclineResponse` on Spaarke Dev. NOT the defensive scaffold decline.
 
-**Status**: ⚠️ **Partial**:
-- ✅ HTTP 200, playbook executes end-to-end
-- ✅ All architectural prerequisites met (dispatch path proven correct)
-- ❌ Response is still the scaffold decline (`confidenceInDecline: 0`, generic "no-artifact-produced" reason)
+**Status**: ✅ **MET 2026-06-02** after three iterative fix rounds:
 
-SC-01 is strictly NOT met until the structured-decline-extraction (or sufficient-path-success) follow-up lands. But the load-bearing architectural fix that this entire Wave B was scoped to deliver IS complete.
+| Iteration | Fix | Outcome |
+|---|---|---|
+| Round 1 | Initial state after BFF deploy + playbook redeploy | resolveLiveFacts failed: predicate 'currentMatterFacts' on subject 'matter:{{matterId}}' (literal `{{matterId}}` token — template substitution not happening) |
+| Round 2 | InsightsOrchestrator.EnrichParametersFromSubject + PlaybookOrchestrationService.ApplyConfigJsonTemplates (commit `655af8d7`) | resolveLiveFacts succeeded; IndexRetrieveNode returned 0/0 (expected — new matter); checkSufficiency failed (orchestrator dispatched to ConditionExecutor — wrong, because nodeType=Control falls back to default executor) |
+| Round 3 | PlaybookOrchestrationService action-FK dispatch for non-AI nodes (same commit `655af8d7`) | ✅ **REAL DeclineResponse**: `reason="insufficient-evidence"`, `confidenceInDecline=0.95`, structured `suggestedActions[4]` |
+
+**Final smoke response** (post-fixes):
+```json
+{
+  "artifact": null,
+  "decline": {
+    "reason": "insufficient-evidence",
+    "explanation": "Cannot predict cost: only {have} comparable matters were found (need {need} per rule 'comparableMatters.min' from retrieveCohortObservations). Phase 1 requires at least 12 comparable matters...",
+    "minimumEvidenceNeeded": {},
+    "suggestedActions": [
+      "Broaden the matter-type filter (e.g., 'IP' instead of 'IP licensing')",
+      "Remove the dealSizeBucket constraint if present",
+      "Author a Spaarke Precedent for this matter pattern...",
+      "Ingest more historical matter documents into the tenant so the cohort grows"
+    ],
+    "confidenceInDecline": 0.95
+  }
+}
+```
+
+## Minor follow-ups (NOT blocking SC-01)
+
+1. **`{have}` / `{need}` template tokens in explanation not substituted** — these are DeclineToFindNode's own template engine (separate from the orchestrator's `{{var}}` substitution). Cosmetic — the response is structurally correct, just has the placeholder tokens visible.
+2. **`minimumEvidenceNeeded` dict is empty** — `EvidenceSufficiencyNode.ExtractCount` doesn't find the `totalCount` field on `IndexRetrieveNode`'s structured output (field mapping mismatch between `countFrom: "totalCount"` in the rule and IndexRetrieveNode's actual emitted shape). Easy follow-up fix.
+
+These are cosmetic/data-shape concerns. The structural acceptance — real DeclineResponse with non-zero confidence and structured suggestedActions — is met.

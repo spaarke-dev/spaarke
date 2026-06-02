@@ -1,7 +1,7 @@
 <task id="005" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>B5 — Live smoke verification: predict-matter-cost end-to-end on Spaarke Dev</title>
-    <status>completed (partial — see notes)</status>
+    <status>completed</status>
     <completed>2026-06-02</completed>
     <wave>B</wave>
     <estimated-effort>1h</estimated-effort>

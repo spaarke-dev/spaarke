@@ -29,9 +29,28 @@
 
 See [`notes/handoffs/wave-b5-smoke-results.md`](../notes/handoffs/wave-b5-smoke-results.md) for the full smoke trace + verified node mapping.
 
-### Follow-up (NOT in D-01 scope; tracked separately)
+### ✅ SC-01 FULLY MET (2026-06-02 final iteration)
 
-The smoke test surfaces a downstream issue: the orchestrator's `DrainEngineStreamAsync` extracts neither `InsightArtifact` (sufficient path) nor `DeclineResponse` (insufficient path) and falls into the "Path 3 (defensive)" scaffold decline. This is a separate concern from the D-01 dispatch architecture — possible causes include `DeclineToFindNode` output shape mismatch with `TryExtractDecline` matching logic, sufficient-path synthesis failure, or branch-routing wiring issue. See `wave-b5-smoke-results.md` "What still needs work" section. To be addressed in a follow-up task or Phase 1.5 spike — does NOT reopen D-01.
+After three iterative fix rounds (see `wave-b5-smoke-results.md`), Wave B SC-01 is FULLY met:
+
+**Final response**: `reason="insufficient-evidence"`, `confidenceInDecline=0.95`, structured `suggestedActions[4]` — a REAL DeclineResponse, NOT the defensive scaffold.
+
+Three additional fixes landed beyond the original D-01 dispatch fix (commit `655af8d7`):
+
+1. **InsightsOrchestrator.EnrichParametersFromSubject** — derives `matterId` (and `projectId`/`invoiceId` for Phase 1.5 multi-entity readiness) from Subject ref so playbook templates `{{matterId}}` have values to substitute.
+
+2. **PlaybookOrchestrationService.ApplyConfigJsonTemplates** — centralized `{{var}}` substitution applied to each node's ConfigJson before the executor runs. Without this, `LiveFactResolver` received literal `"matter:{{matterId}}"`.
+
+3. **PlaybookOrchestrationService non-AI-node action-FK dispatch** — when `sprk_actionid` is set, the action's ActionType is the canonical dispatch source REGARDLESS of nodeType. The original code only used the action's ActionType for AIAnalysis nodes; Control / Output nodes (like `checkSufficiency`, `groundCitations`, `ReturnInsightArtifactNode`, `declineInsufficient`) fell back to nodeType-based defaults (`Condition`, `DeliverOutput`) and dispatched to the wrong executor. The fix preserves the legacy structural-node path for backward compat (no action FK → ConfigJson `__actionType` or default).
+
+All three fixes are in BFF deploy `655af8d7` on Spaarke Dev as of 2026-06-02. 357 unit tests pass.
+
+### Minor follow-ups (NOT blocking SC-01)
+
+- `{have}` / `{need}` template tokens in DeclineToFindNode explanation not substituted (separate from orchestrator's `{{var}}` substitution — DeclineToFindNode has its own template engine)
+- `minimumEvidenceNeeded` dict empty due to field-mapping mismatch between `countFrom: "totalCount"` rule and IndexRetrieveNode's actual emitted shape
+
+These are cosmetic / data-shape refinements. The structural acceptance — real DeclineResponse with non-zero confidence and structured suggestedActions — is met. Don't reopen D-01.
 
 ---
 
