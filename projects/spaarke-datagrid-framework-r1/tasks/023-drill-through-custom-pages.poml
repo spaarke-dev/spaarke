@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Build Custom Pages sprk_kpiassessmentspage + sprk_invoicespage (~50 lines each)</title>
+    <phase>3: Phase C — Matter UI Drill-throughs</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>015,021,022</dependencies>
+    <blocks>025</blocks>
+    <tags>fluent-ui, frontend, react, e2e-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>UI implementation; ADR-026 Custom Page standard + ADR-021 + NFR-11 applyStylesToPortals; consumer-facing</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches two Custom Page solutions; bundled to share the ~50-line shell pattern</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build two new Custom Pages: `sprk_kpiassessmentspage.html` and `sprk_invoicespage.html` — each ~50 lines following the ADR-026 standard (Vite + vite-plugin-singlefile + React 19). Each mounts `<FluentProvider applyStylesToPortals theme={...}>` wrapping `<DataGrid configId={...} parentContext={fromUrlParams}/>`. Parses URL params `entityName / filterField / filterValue` for Matter-context filter. For the Invoice page, register the Mark Paid custom command handler if UQ-05 was R1.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ADR-026 Custom Page standard, Vite singlefile bundling, React 19 + Fluent v9 + applyStylesToPortals.
+  </role>
+
+  <goal>
+    Two Custom Page web resources (single-file HTML bundles) deploy to Dataverse; both open correctly in dialog + standalone modes with Matter context filter applied; both register correct handlers; ~50 lines of TypeScript each (excluding boilerplate).
+  </goal>
+
+  <context>
+    <background>
+      Per FR-CON-03 + FR-CON-04 + NFR-11. The Custom Page shell pattern is ~50 lines: parse URL params, build `parentContext`, mount FluentProvider + DataGrid. Reuses task 021/022 configIds. For Invoice page: if UQ-05 is R1, register the Mark Paid handler via `registerCommandHandler`. Either page can default `dataverseClient` to `XrmDataverseClient` (host is MDA Custom Page).
+    </background>
+    <relevant-files>
+      <file>src/solutions/sprk_kpiassessmentspage/src/main.tsx</file>
+      <file>src/solutions/sprk_kpiassessmentspage/vite.config.ts</file>
+      <file>src/solutions/sprk_kpiassessmentspage/index.html</file>
+      <file>src/solutions/sprk_kpiassessmentspage/package.json</file>
+      <file>src/solutions/sprk_invoicespage/src/main.tsx</file>
+      <file>src/solutions/sprk_invoicespage/vite.config.ts</file>
+      <file>src/solutions/sprk_invoicespage/index.html</file>
+      <file>src/solutions/sprk_invoicespage/package.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-026">Vite + `vite-plugin-singlefile` + React 19 + Fluent v9; output is a single .html file uploaded as Dataverse web resource.</constraint>
+    <constraint source="ADR-021">Fluent v9 + tokens; dark mode required.</constraint>
+    <constraint source="NFR-11">`applyStylesToPortals={true}` on root `FluentProvider` — non-negotiable.</constraint>
+    <constraint source="project">Each page ~50 lines of TypeScript (excluding Vite config + index.html scaffolding). Shell only — no business logic.</constraint>
+    <constraint source="project">URL param parsing: `entityName / filterField / filterValue / matterId` (whatever VisualHost CardChrome passes).</constraint>
+    <constraint source="project">Default `dataverseClient = new XrmDataverseClient()` since host is MDA.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/guides/CONFIGURATION-MATRIX.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/021-config-record-id.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/022-config-record-id.md</file>
+    </files>
+    <patterns>
+      <pattern name="Custom Page shell" location=".claude/patterns/webresource/full-page-custom-page.md">~50-line React SPA bundled to single HTML; URL param parse → FluentProvider → component mount.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/fluent-v9-component` skill Step 0.5 checklist.</step>
+    <step order="2">Scaffold `src/solutions/sprk_kpiassessmentspage/` per ADR-026 pattern: Vite config, package.json, index.html, src/main.tsx (~50 lines).</step>
+    <step order="3">In `main.tsx`: parse URL params (`entityName / filterField / filterValue / matterId`); build `parentContext = { matterId }`; mount `<FluentProvider applyStylesToPortals theme={webLightTheme}>` wrapping `<DataGrid configId="<from task 021>" parentContext={parentContext}/>`.</step>
+    <step order="4">Same pattern for `sprk_invoicespage/`. If UQ-05 is R1, additionally register Mark Paid handler via `registerCommandHandler("mark-paid", handler)`.</step>
+    <step order="5">Run `npm run build` in each — verify single-file HTML output is generated.</step>
+    <step order="6">Smoke test locally via Vite dev server (`npm run dev`).</step>
+    <step order="7">Local Storybook story or harness: pass mock URL params + verify renders correctly with mock data.</step>
+    <step order="8">Update TASK-INDEX (023 ✅).</step>
+    <step order="9">Document any deviations.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + Vite</tool>
+    <tool name="Edit">Author shell files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/sprk_kpiassessmentspage/src/main.tsx</output>
+    <output type="code">src/solutions/sprk_kpiassessmentspage/vite.config.ts</output>
+    <output type="code">src/solutions/sprk_kpiassessmentspage/index.html</output>
+    <output type="code">src/solutions/sprk_kpiassessmentspage/package.json</output>
+    <output type="code">src/solutions/sprk_invoicespage/src/main.tsx</output>
+    <output type="code">src/solutions/sprk_invoicespage/vite.config.ts</output>
+    <output type="code">src/solutions/sprk_invoicespage/index.html</output>
+    <output type="code">src/solutions/sprk_invoicespage/package.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `npm run build` in each solution, when complete, then a single-file HTML web resource is produced.</criterion>
+    <criterion testable="true">Given each Custom Page mounted in Vite dev with mock URL params, when rendered, then DataGrid renders with Matter context filter applied.</criterion>
+    <criterion testable="true">Given each Custom Page's main.tsx, when grepped, then `applyStylesToPortals={true}` is on the root FluentProvider.</criterion>
+    <criterion testable="true">Given line count, when measured (excluding boilerplate), then each main.tsx is ≤60 lines.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Custom Page loads in dialog mode">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=webresource&amp;webresourceName=sprk_kpiassessmentspage.html&amp;data=matterId%3D{guid}</url>
+      <steps>
+        <step>Open Custom Page in dialog mode</step>
+        <step>Verify DataGrid renders with KPI rows filtered to current Matter</step>
+        <step>Click a row → verify navigateToForm opens</step>
+        <step>Toggle dark mode → verify portals adapt (NFR-11)</step>
+      </steps>
+      <expected>Renders correctly, filter applied, dark mode portal-clean</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Both Custom Pages share a shell pattern — only differences are configId + Invoice's Mark Paid handler registration (if UQ-05 is R1). Keep them lean per FR-CON-03/04 "~50 lines". Resist adding logic here — anything beyond URL parse + mount belongs in the framework, not the shell.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Mandatory `/fluent-v9-component` Step 0.5. Verify applyStylesToPortals + line count + dark mode before marking complete.</protocol>
+  </execution>
+</task>

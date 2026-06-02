@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Author sprk_gridconfiguration record for sprk_invoice (Budget Performance drill-through)</title>
+    <phase>3: Phase C — Matter UI Drill-throughs</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>023,025</blocks>
+    <tags>dataverse, schema</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Dataverse record + JSON configjson; UQ-05 resolution (Mark Paid custom command)</rigor-reason>
+    <parallel-group>C1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author the `sprk_gridconfiguration` record for `sprk_invoice` (Budget Performance drill-through). Configjson v1.0: `source.type = "savedquery-set"` (auto-discover all sprk_invoice savedqueries) per design.md Appendix; commandBar includes custom "Mark Paid" handler + Export; secondary actions for sprkchat + Review playbook. Resolve UQ-05 (Mark Paid handler specifics).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in configjson v1.0 schema (task 001) and Dataverse record creation. Familiar with custom command handler registry pattern (task 008).
+  </role>
+
+  <goal>
+    1 new `sprk_gridconfiguration` record for `sprk_invoice`; UQ-05 documented (Mark Paid handler design); configjson validates; downstream Custom Page (task 023) consumes it.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-CON-02 and UQ-05. The Mark Paid handler is mentioned in design.md Appendix as example; Ralph needs to confirm whether R1 implements it now or defers to R2. If R1: register handler in Custom Page host (task 023). If deferred: leave commandBar.actions = ["refresh", "export-excel"] only.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/020-savedquery-ids.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/022-invoice-configjson.json</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/022-mark-paid-decision.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">configjson MUST validate against v1.0 schema.</constraint>
+    <constraint source="project">Reference task 020's Invoice savedQueryId(s).</constraint>
+    <constraint source="project">If Mark Paid is R1: handler registered via `registerCommandHandler` in Custom Page host (task 023); if R2: out of scope here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>docs/guides/CONFIGURATION-MATRIX.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/design.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/020-savedquery-ids.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">🔔 Resolve UQ-05 with Ralph: does R1 include "Mark Paid" custom command? Document decision in `notes/drafts/022-mark-paid-decision.md`.</step>
+    <step order="2">Author configjson v1.0 in `notes/drafts/022-invoice-configjson.json`: source = savedquery-set; commandBar actions per UQ-05; secondary actions for sprkchat + Review playbook.</step>
+    <step order="3">Validate configjson via `isValidConfigJson`.</step>
+    <step order="4">Create `sprk_gridconfiguration` record in Dataverse: `sprk_name = "Invoice Matter Budget Performance"`, `sprk_entitylogicalname = "sprk_invoice"`, `sprk_configjson = <JSON>`, `sprk_isdefault = true`.</step>
+    <step order="5">Document record ID in `notes/drafts/022-config-record-id.md`.</step>
+    <step order="6">Smoke test via Web API.</step>
+    <step order="7">Update TASK-INDEX (022 ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-create-schema">Skill</tool>
+    <tool name="dataverse MCP">create_record</tool>
+    <tool name="Edit">Document</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/022-mark-paid-decision.md</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/022-invoice-configjson.json</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/022-config-record-id.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given UQ-05 resolution documented, when commandBar configured, then it matches Ralph's decision (Mark Paid in or out).</criterion>
+    <criterion testable="true">Given the configjson, when validated, then it returns true.</criterion>
+    <criterion testable="true">Given the new record, when retrieved via Web API, then `sprk_configjson` matches authored JSON.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallels task 021. UQ-05 is the only escalation point — if Mark Paid is R2, simplifies this task significantly.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Begin with UQ-05 resolution. Validate JSON before Dataverse create.</protocol>
+  </execution>
+</task>

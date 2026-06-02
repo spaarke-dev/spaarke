@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>SpaarkeAi Calendar workspace widget migrated to consume new DataGrid (FR-MIG-05)</title>
+    <phase>4: Phase D — EventsPage Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030,031</dependencies>
+    <blocks>034</blocks>
+    <tags>fluent-ui, frontend, react, migration</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Cross-project migration; SpaarkeAi widget consumer touch; ADR-021/022; UQ-06 coordination needed</rigor-reason>
+    <parallel-group>D1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Migrate the SpaarkeAi Calendar workspace widget to consume `<DataGrid configId={EVENT_CONFIG_ID} />` instead of `@spaarke/events-components/GridSection`. Reuses the same `sprk_gridconfiguration` record (task 030). Resolves UQ-06 — coordinate with widget owner before changes.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Familiar with SpaarkeAi workspace widget pattern + ADR-012 shared library consumption.
+  </role>
+
+  <goal>
+    Calendar widget renders identically before/after migration; SpaarkeAi workspace integration test passes; widget owner sign-off documented.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-MIG-05 + UQ-06. The SpaarkeAi Calendar widget currently consumes `GridSection` (which task 032 retires). After migration, it consumes the framework `<DataGrid />`. Same configId means the widget gets the same Event grid configjson as EventsPage. Calendar widget owner sign-off (Ralph or designate) required before changes.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/@spaarke/legal-workspace/src/widgets/Calendar/Calendar.tsx</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/033-widget-owner-signoff.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only.</constraint>
+    <constraint source="ADR-022">React-16-safe consumption.</constraint>
+    <constraint source="project">Widget owner sign-off (Ralph or designate) BEFORE changes.</constraint>
+    <constraint source="project">Visual diff vs. pre-migration: zero regression.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/030-config-record-id.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">🔔 Get widget owner sign-off (UQ-06). Document in `notes/drafts/033-widget-owner-signoff.md`.</step>
+    <step order="2">Capture pre-migration visual reference: screenshot widget at default state.</step>
+    <step order="3">Find Calendar widget Calendar.tsx (or equivalent); identify the `GridSection` import.</step>
+    <step order="4">Replace `GridSection` consumption with `<DataGrid configId={EVENT_CONFIG_ID} dataverseClient={new XrmDataverseClient()}/>`.</step>
+    <step order="5">Preserve widget chrome (header, side controls) — only the grid surface changes.</step>
+    <step order="6">Build the widget (`npm run build`); verify zero TypeScript errors.</step>
+    <step order="7">Local dev test: widget renders in SpaarkeAi workspace shell.</step>
+    <step order="8">Capture post-migration screenshot; visual diff vs. pre.</step>
+    <step order="9">Update TASK-INDEX (033 ✅).</step>
+    <step order="10">Document deviations in `notes/drafts/033-deviations.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + Storybook</tool>
+    <tool name="Edit">Replace consumption</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/@spaarke/legal-workspace/src/widgets/Calendar/Calendar.tsx (modified)</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/033-widget-owner-signoff.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given widget owner sign-off documented, when proceeding, then UQ-06 is closed.</criterion>
+    <criterion testable="true">Given pre/post screenshots, when compared, then zero visual regression.</criterion>
+    <criterion testable="true">Given `npm run build`, when run, then zero errors.</criterion>
+    <criterion testable="true">Given grep for `GridSection` import in widget code, when run, then zero matches.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallels task 032. UQ-06 is the escalation point — widget owner is the gate. If they want to delay, escalate to Ralph and consider deferring this task to a follow-up project.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Mandatory owner sign-off step. Visual diff verification post-migration.</protocol>
+  </execution>
+</task>

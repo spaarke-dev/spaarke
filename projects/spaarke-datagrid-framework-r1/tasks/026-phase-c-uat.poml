@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Phase C UAT: Matter Health + Budget Performance drill-through end-to-end</title>
+    <phase>3: Phase C — Matter UI Drill-throughs</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>025</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, e2e-test, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>UAT; testing + e2e-test tags; graduation criteria 1 verification</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final Phase C acceptance gate</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Run UAT for Phase C: on a Matter detail page, click VisualHost CardChrome expand on the Matter Health and Budget Performance cards. Verify each opens a dialog with the new Custom Page rendering the related KPI Assessments / Invoices grid, filtered by the current Matter. Verify row click opens the record. Test in light + dark.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer / UAT tester. Familiar with VisualHost CardChrome drill-through dialog behavior.
+  </role>
+
+  <goal>
+    Two UAT scenarios pass: (a) Matter Health drill-through → KPI grid; (b) Budget Performance drill-through → Invoice grid. Both with light + dark mode + matter context filter + row open behavior verified.
+  </goal>
+
+  <context>
+    <background>
+      Per spec graduation criteria 1 + FR-CON-05 acceptance criterion. Phase C closes with this UAT — if it fails, the drill-through user journey is broken end-to-end.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-datagrid-framework-r1/notes/phase-c-uat-report.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-01">MDA visual parity light + dark.</constraint>
+    <constraint source="NFR-03">Dark mode popovers must render correctly (already verified in Phase A but re-confirm in Custom Page context).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open MDA app → navigate to a Matter detail record with related KPI Assessments and Invoices.</step>
+    <step order="2">Verify Matter Health VisualHost card displays. Click expand → verify dialog opens to `sprk_kpiassessmentspage`.</step>
+    <step order="3">Verify KPI grid renders rows filtered to the current Matter; verify columns match task 020 layout.</step>
+    <step order="4">Click a KPI row → verify `navigateToForm` opens the KPI Assessment form.</step>
+    <step order="5">Back to Matter → repeat for Budget Performance → Invoice grid.</step>
+    <step order="6">Toggle MDA dark mode → re-run both scenarios; verify dark theme renders correctly (no portal bleed).</step>
+    <step order="7">Test responsiveness: open the dialog at multiple browser zoom levels (75/100/125/150%) — confirm renders correctly per NFR-01.</step>
+    <step order="8">Document UAT findings in `notes/phase-c-uat-report.md`.</step>
+    <step order="9">Update TASK-INDEX (026 ✅); mark Phase C complete.</step>
+  </steps>
+
+  <tools>
+    <tool name="ui-test">Skill for browser-based testing if Chrome integration available</tool>
+    <tool name="browser">Manual UAT</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/phase-c-uat-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given VisualHost CardChrome expand on Matter Health, when clicked, then KPI grid renders with Matter context filter.</criterion>
+    <criterion testable="true">Given KPI grid row click, when triggered, then KPI Assessment form opens.</criterion>
+    <criterion testable="true">Same for Budget Performance → Invoice grid.</criterion>
+    <criterion testable="true">Given dark mode, when both scenarios re-run, then no visual regression vs. light mode.</criterion>
+    <criterion testable="true">Given 4 zoom levels (75/100/125/150%), when tested, then all render correctly per NFR-01.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Matter Health drill-through">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={appid}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={matterId}</url>
+      <steps>
+        <step>Navigate to Matter detail page</step>
+        <step>Find Matter Health VisualHost card; click expand</step>
+        <step>Verify dialog opens to sprk_kpiassessmentspage.html</step>
+        <step>Verify KPI rows filtered to current Matter</step>
+        <step>Click a row; verify navigateToForm opens KPI Assessment form</step>
+        <step>Close dialog; toggle dark mode; repeat</step>
+      </steps>
+      <expected>Drill-through works; rows filtered; dark mode portal-clean</expected>
+    </test>
+    <test name="Budget Performance drill-through">
+      <url>same matter URL</url>
+      <steps>
+        <step>Click expand on Budget Performance card</step>
+        <step>Verify Invoice grid renders with Matter filter</step>
+        <step>Verify command bar shows correct actions per UQ-05 decision</step>
+      </steps>
+      <expected>Invoice grid works; command bar correct</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    This is the validation gate for graduation criterion 1 ("Matter Health + Budget Performance drill-through to working data grids"). If UAT fails, debug — could be VisualHost chart-def update (task 024), Custom Page URL params (task 023), or config record source (tasks 021/022).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Use ui-test skill if Chrome integration available; otherwise manual. Document findings.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Remove DatasetGrid/{GridView, CardView, ListView, VirtualizedGridView, VirtualizedListView}.tsx + barrel update</title>
+    <phase>6: Phase F — Legacy Retirement</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>054</blocks>
+    <tags>refactoring, frontend, migration</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Code deletion; barrel export update; verify no remaining consumers</rigor-reason>
+    <parallel-group>F1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Remove `@spaarke/ui-components/components/DatasetGrid/{GridView, CardView, ListView, VirtualizedGridView, VirtualizedListView}.tsx`. Update `src/index.ts` barrel exports. Keep `ViewSelector.tsx` (generalized — used by framework). Verify build passes per FR-MIG-08.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer.
+  </role>
+
+  <goal>
+    5 files deleted; barrel exports updated; build passes.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-MIG-08. Task 050 audited consumers; this task does the deletion. All listed consumers must have been migrated (by task 052 if SpeAdminApp, by earlier phases for others).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/GridView.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/CardView.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/ListView.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/VirtualizedGridView.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/VirtualizedListView.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All consumers from task 050 audit MUST have been migrated FIRST.</constraint>
+    <constraint source="project">Keep `ViewSelector.tsx`.</constraint>
+    <constraint source="project">Build MUST pass post-deletion.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/050-datasetgrid-consumer-audit.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify task 050 audit shows all consumers migrated.</step>
+    <step order="2">Re-grep for the 5 components: `grep -r 'GridView\|CardView\|ListView\|VirtualizedGridView\|VirtualizedListView' src/ --include='*.ts' --include='*.tsx'`. Expect zero non-test matches.</step>
+    <step order="3">Delete 5 files: `git rm src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/{GridView,CardView,ListView,VirtualizedGridView,VirtualizedListView}.tsx`.</step>
+    <step order="4">Update `src/index.ts`: remove barrel exports for the 5 components.</step>
+    <step order="5">Build (`npm run build`); verify zero errors.</step>
+    <step order="6">Update TASK-INDEX (051 ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Final consumer check</tool>
+    <tool name="git">Remove files</tool>
+    <tool name="npm">Build verification</tool>
+    <tool name="Edit">Update barrel</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given grep, when run post-deletion, then zero consumer imports.</criterion>
+    <criterion testable="true">Given build, when run, then zero errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallels task 052. Safe parallelization because task 050 audit gave us confidence + task 052 only touches SpeAdminApp.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Re-audit before delete. Build verify.</protocol>
+  </execution>
+</task>

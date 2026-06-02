@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Audit consumers of @spaarke/ui-components/DatasetGrid removed exports + migration list</title>
+    <phase>6: Phase F — Legacy Retirement</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>009</dependencies>
+    <blocks>051,052</blocks>
+    <tags>refactoring, frontend, migration</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Audit task; produces decision list for downstream retirements; no code changes here</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Foundation audit for retirement decisions in Phase F</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Audit the repo for all consumers of `@spaarke/ui-components/DatasetGrid/{GridView, CardView, ListView, VirtualizedGridView, VirtualizedListView}.tsx`. Document the migration list — which consumers exist, what they need to migrate to, who owns them. Produces the input for tasks 051 + 052.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Familiar with `@spaarke/ui-components` API surface and how to grep for component consumption patterns.
+  </role>
+
+  <goal>
+    `notes/drafts/050-datasetgrid-consumer-audit.md` lists every consumer; each consumer has a migration target (framework `<DataGrid />`, or other) and owner identified.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-MIG-08. The 5 retiring components (GridView, CardView, ListView, VirtualizedGridView, VirtualizedListView) may have stray consumers we haven't tracked. Audit is non-negotiable — delete-first-ask-later breaks the build.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/050-datasetgrid-consumer-audit.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Audit MUST cover entire `src/` tree.</constraint>
+    <constraint source="project">Each consumer has a migration target or escalation flag.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep entire `src/` for each of the 5 component imports: `grep -r 'GridView\|CardView\|ListView\|VirtualizedGridView\|VirtualizedListView' src/ --include='*.ts' --include='*.tsx'`.</step>
+    <step order="2">For each match, note file path + component used + intent (consumer not subclass).</step>
+    <step order="3">Identify the migration target for each consumer:
+      - Most should migrate to framework `<DataGrid />`
+      - Some may already be retired (e.g. SemanticSearch's SearchResultsGrid retired in task 041)
+      - Unexpected: escalate.
+    </step>
+    <step order="4">Document owners (which project / branch / who).</step>
+    <step order="5">Write `notes/drafts/050-datasetgrid-consumer-audit.md` with table: file, component, migration target, owner, status.</step>
+    <step order="6">Update TASK-INDEX (050 ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Repo-wide consumer search</tool>
+    <tool name="Edit">Document audit</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/050-datasetgrid-consumer-audit.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the audit doc, when reviewed, then every consumer is listed with a migration target.</criterion>
+    <criterion testable="true">Given grep across `src/`, when run, then no consumer is missed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Read-only task — no code changes. Foundation for the actual retirement in task 051.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Thorough grep. Document each consumer.</protocol>
+  </execution>
+</task>

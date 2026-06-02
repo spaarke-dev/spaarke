@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>DateRangeFilterChip + TextFilterChip + BoolFilterChip (3 primitives bundled)</title>
+    <phase>1: Phase A — Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>009</blocks>
+    <tags>fluent-ui, frontend, react, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>3 UI primitives bundled; date conversion logic (localDateToUtcBounds); ADR-021 + NFR-03</rigor-reason>
+    <parallel-group>A2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build three simpler filter chip primitives in one task: `<DateRangeFilterChip />` (Fluent v9 `Popover` + `Calendar` with LOCAL→UTC bounds conversion), `<TextFilterChip />` (Fluent v9 `Popover` + `Input` with `contains` operator), `<BoolFilterChip />` (Fluent v9 `Dropdown` Yes / No / Any). Each gets Storybook stories in light + dark.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent v9 `Popover` + `Calendar` + `Input` + `Dropdown` + JavaScript date math (LOCAL → UTC bounds conversion).
+  </role>
+
+  <goal>
+    Three new files under `src/components/DataGrid/chips/`; Storybook stories for each; axe a11y passes; dark mode correct; date chip's LOCAL→UTC bounds conversion ports the proven logic from `GridSection.tsx:358`.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-DG-07 (chip primitives). DateRangeFilterChip's `localDateToUtcBounds` is critical: user picks Jan 1–Jan 31 LOCAL but FetchXML queries UTC; conversion must use the user's timezone offset to ensure midnight-LOCAL maps to correct UTC boundaries. Port the existing logic from [GridSection.tsx:358] verbatim. TextFilterChip uses `contains` semantics; BoolFilterChip is a 3-option dropdown.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/chips/DateRangeFilterChip.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/chips/TextFilterChip.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/chips/BoolFilterChip.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/storybook/SimpleFilterChips.stories.tsx</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/GridSection/GridSection.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9; tokens; dark mode.</constraint>
+    <constraint source="ADR-022">React-16-safe.</constraint>
+    <constraint source="NFR-03">`applyStylesToPortals` on Popover/Dropdown inner FluentProvider for the two popover-bearing primitives (date + text).</constraint>
+    <constraint source="project">DateRange `localDateToUtcBounds` MUST port the existing logic from `GridSection.tsx:358` — DO NOT re-invent timezone math.</constraint>
+    <constraint source="project">Text chip operator: `contains` (FetchXML `operator='like' value='%X%'`).</constraint>
+    <constraint source="project">Bool chip: 3 options (Any/Yes/No); emits `null | true | false`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="localDateToUtcBounds" location="src/client/shared/Spaarke.Events.Components/src/components/GridSection/GridSection.tsx#L358">Port verbatim — handles LOCAL midnight → UTC start/end conversion.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/fluent-v9-component` skill Step 0.5 checklist.</step>
+    <step order="2">Author `DateRangeFilterChip.tsx`: Popover + `<Calendar showWeekNumbers={false}>` for start, second Calendar for end; helper `localDateToUtcBounds(start, end): {startUtc, endUtc}` lifted from GridSection.tsx:358; emit `{ startUtc, endUtc }` to parent.</step>
+    <step order="3">Author `TextFilterChip.tsx`: Popover + `<Input value={search} onChange>` + Clear button; emit `string | undefined` (empty = cleared).</step>
+    <step order="4">Author `BoolFilterChip.tsx`: `<Dropdown>` with 3 options (Any/Yes/No); emit `null | true | false`.</step>
+    <step order="5">Wrap Popover content (date + text) in inner `<FluentProvider applyStylesToPortals theme={inheritedTheme}>`. (Bool's Dropdown handles its own portal.)</step>
+    <step order="6">Author `SimpleFilterChips.stories.tsx` with stories for each chip × light/dark.</step>
+    <step order="7">axe-core scan; verify zero serious/critical.</step>
+    <step order="8">Unit test for `localDateToUtcBounds`: given LOCAL `2026-06-01..2026-06-30` with `-04:00` offset (EDT), then UTC bounds are `2026-06-01T04:00:00Z..2026-07-01T03:59:59.999Z`.</step>
+    <step order="9">Build + verify; update TASK-INDEX (007 ✅).</step>
+    <step order="10">Document deviations if any.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + Storybook + axe + Jest</tool>
+    <tool name="Edit">Author the files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/chips/DateRangeFilterChip.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/chips/TextFilterChip.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/chips/BoolFilterChip.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/storybook/SimpleFilterChips.stories.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/tests/dateUtils.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given LOCAL date range `2026-06-01..2026-06-30` in EDT, when `localDateToUtcBounds` runs, then UTC bounds are correct (covering full LOCAL days).</criterion>
+    <criterion testable="true">Given Text chip with value "Acme", when user clears, then `onChange(undefined)` fires.</criterion>
+    <criterion testable="true">Given Bool chip showing "Any", when user picks "Yes", then `onChange(true)` fires; "No" → `false`; "Any" → `null`.</criterion>
+    <criterion testable="true">Given dark mode, when Date or Text chip popover opens, then dark theme renders correctly.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="DateRangeFilterChip">
+      <url>http://localhost:6006/?path=/story/simplefilterchips--daterange</url>
+      <steps>
+        <step>Open chip; pick start and end dates on Calendar</step>
+        <step>Verify chip closes showing date range</step>
+        <step>Verify console shows UTC bounds emitted</step>
+      </steps>
+      <expected>Range picked, UTC conversion correct</expected>
+    </test>
+    <test name="Dark mode (NFR-03)">
+      <steps>
+        <step>Toggle dark; open Date popover</step>
+        <step>Verify Calendar renders dark-themed</step>
+      </steps>
+      <expected>No light-mode bleed</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Bundling 3 simpler chips into one task because (a) they share the same Popover pattern, (b) they're each small (50–80 lines), and (c) they all depend only on task 003. Parallels tasks 004, 005, 006, 008 (Wave A2). The unit test for `localDateToUtcBounds` is the only non-trivial test in this task — the rest are visual/Storybook coverage.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Mandatory `/fluent-v9-component` Step 0.5. Run unit test for date conversion + verify dark mode before marking complete.</protocol>
+  </execution>
+</task>

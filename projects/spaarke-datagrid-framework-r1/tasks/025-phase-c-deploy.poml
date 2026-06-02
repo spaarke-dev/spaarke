@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Deploy Phase C: 2 Custom Pages + Dataverse solution with config records</title>
+    <phase>3: Phase C — Matter UI Drill-throughs</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>021,022,023,024</dependencies>
+    <blocks>026</blocks>
+    <tags>deploy, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task; multiple artifacts; uses code-page-deploy + dataverse-deploy skills</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment task; depends on all Phase C authoring</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the two new Custom Pages (`sprk_kpiassessmentspage.html`, `sprk_invoicespage.html`) to Dataverse via `code-page-deploy` skill. Deploy the Dataverse solution containing the 3 new `sprk_gridconfiguration` records (tasks 021, 022, plus the EventsPage record from Phase D will deploy in task 034) and any savedquery records from task 020.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in `code-page-deploy` and `dataverse-deploy` skills.
+  </role>
+
+  <goal>
+    Both Custom Pages live as web resources in Dataverse; configjson records visible; smoke test confirms VisualHost CardChrome → dialog → new page rendering works.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-CON-03/04 + FR-CON-05. Two deploy targets: (1) web resources via code-page-deploy; (2) Dataverse solution with config records + savedqueries via dataverse-deploy.
+    </background>
+    <relevant-files>
+      <file>scripts/deploy/Deploy-CodePage.ps1</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy to DEV only.</constraint>
+    <constraint source="project">Custom Pages deploy via code-page-deploy skill; Dataverse records via dataverse-deploy skill (or MCP if already created direct).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build both Custom Pages (`npm run build` in each `src/solutions/sprk_*page/`).</step>
+    <step order="2">Invoke `code-page-deploy` skill for `sprk_kpiassessmentspage` — uploads bundled HTML as Dataverse web resource.</step>
+    <step order="3">Invoke `code-page-deploy` skill for `sprk_invoicespage`.</step>
+    <step order="4">If config records from tasks 021/022 were authored directly via MCP, they're already in Dataverse — verify presence. Otherwise invoke `dataverse-deploy` for the solution containing them.</step>
+    <step order="5">Smoke test: open each Custom Page directly via URL with mock URL params; verify DataGrid renders.</step>
+    <step order="6">Smoke test: open Matter Health / Budget Performance via VisualHost CardChrome expand; verify dialog opens to the correct new page.</step>
+    <step order="7">Update TASK-INDEX (025 ✅).</step>
+    <step order="8">Document deploy artifact versions in `notes/phase-c-deploy-report.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="code-page-deploy">Skill</tool>
+    <tool name="dataverse-deploy">Skill</tool>
+    <tool name="curl">Smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/phase-c-deploy-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given both Custom Pages deployed, when opened via direct URL, then each renders correctly.</criterion>
+    <criterion testable="true">Given VisualHost CardChrome expand on Matter Health card, when clicked, then dialog opens to `sprk_kpiassessmentspage` with Matter context filter applied.</criterion>
+    <criterion testable="true">Same for Budget Performance → `sprk_invoicespage`.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    DEV deploy only. Production deploy gated on UAT (task 026).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Use code-page-deploy + dataverse-deploy skills. Smoke test both pages after deploy.</protocol>
+  </execution>
+</task>

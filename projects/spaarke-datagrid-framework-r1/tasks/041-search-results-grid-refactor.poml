@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Refactor SearchResultsGrid.tsx to consume new DataGrid (or retire if framework covers all features)</title>
+    <phase>5: Phase E — SemanticSearch Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>015,040</dependencies>
+    <blocks>042</blocks>
+    <tags>fluent-ui, frontend, react, migration</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code refactor of consumer; may retire if framework covers all features; ADR-021/022</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches SearchResultsGrid.tsx exclusively; serial</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Refactor `src/client/code-pages/SemanticSearch/src/components/SearchResultsGrid.tsx` to consume the new `<DataGrid configId={SS_CONFIG_ID}/>`. If the new framework covers all existing SS features (likely yes per FR-DG-11 native exploitation), retire the file. Otherwise, refactor in place. Either way, `searchResultAdapter.ts` and `useSearchViewDefinitions.ts` may be lifted into the framework as the `IDataverseClient` projection layer.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in SemanticSearch code page architecture and refactoring/retirement decisions.
+  </role>
+
+  <goal>
+    SS code page consumes the framework `<DataGrid />`; existing UAT scenarios pass with zero visual regression.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-MIG-07. The existing `SearchResultsGrid.tsx` was actually the model for the new framework (per design.md §11.5.1) — the closest existing Fluent v9 native DataGrid usage. So the refactor is largely a delete-and-mount: replace SearchResultsGrid with DataGrid. The adapter files may be lifted into framework as the projection layer.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/SemanticSearch/src/components/SearchResultsGrid.tsx</file>
+      <file>src/client/code-pages/SemanticSearch/src/components/searchResultAdapter.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/components/useSearchViewDefinitions.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/App.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9; tokens; dark mode.</constraint>
+    <constraint source="ADR-022">React-16-safe in framework code; SS Custom Page is React 18.</constraint>
+    <constraint source="NFR-06">`SemanticSearchControl` PCF code NOT touched.</constraint>
+    <constraint source="project">Visual diff: zero regression vs. pre-migration screenshot.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/040-ss-post-migration-configjson.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/fluent-v9-component` skill Step 0.5 checklist.</step>
+    <step order="2">Capture pre-migration screenshot of SS code page.</step>
+    <step order="3">Audit `SearchResultsGrid.tsx`: identify features used (Fluent v9 DataGrid props, custom adapters). Compare to framework `<DataGrid />` props. Decide: retire or refactor.</step>
+    <step order="4">If RETIRE: delete `SearchResultsGrid.tsx`; update `App.tsx` to mount `<DataGrid configId={SS_CONFIG_ID} dataverseClient={existingDataverseClient}/>` directly.</step>
+    <step order="5">If REFACTOR: replace internal `<DataGrid>` instance with framework version; preserve any SS-specific wrappers.</step>
+    <step order="6">Consider lifting `searchResultAdapter.ts` and `useSearchViewDefinitions.ts` to framework — IF they're generally useful. Document decision in `notes/drafts/041-lift-decision.md`.</step>
+    <step order="7">Build (`npm run build` in SS code page); verify zero TypeScript errors.</step>
+    <step order="8">Local dev test: SS code page renders with mock data.</step>
+    <step order="9">Visual diff vs. pre-migration screenshot.</step>
+    <step order="10">Update TASK-INDEX (041 ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + dev</tool>
+    <tool name="Edit">Refactor or retire</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/SearchResultsGrid.tsx (modified or deleted)</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/App.tsx (modified)</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/041-lift-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the refactor/retire decision documented, when reviewed, then it justifies the choice.</criterion>
+    <criterion testable="true">Given build, when run, then zero errors.</criterion>
+    <criterion testable="true">Given pre/post screenshots, when compared, then zero visual regression.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="SS code page renders post-migration">
+      <url>SS code page URL with mock query</url>
+      <steps>
+        <step>Open SS code page with mock query</step>
+        <step>Verify results grid renders with same columns as before</step>
+        <step>Toggle dark mode; verify parity</step>
+      </steps>
+      <expected>No visual regression</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    The retire-vs-refactor decision depends on what SS-specific features SearchResultsGrid has. If it's a thin wrapper, retire is the right call (-100 LOC). If it has SS-specific augmentations (e.g., relevance score badges), refactor in place. Document in `notes/drafts/041-lift-decision.md`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Mandatory `/fluent-v9-component` Step 0.5. Visual diff before marking complete.</protocol>
+  </execution>
+</task>

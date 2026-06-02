@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Author sprk_gridconfiguration record for sprk_event (EventsPage migration anchor)</title>
+    <phase>4: Phase D — EventsPage Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>009</dependencies>
+    <blocks>031,033,034</blocks>
+    <tags>dataverse, schema</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Dataverse record + configjson; design.md Appendix has the exact shape to follow</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Foundation for Phase D — blocks EventsPage rewrite (031) and Calendar widget migrate (033)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author the `sprk_gridconfiguration` record for `sprk_event` per [design.md Appendix]. Configjson v1.0: `source.type = "savedquery-set"`; `filterChips.mode = "allowlist"` with `[_ownerid_value, sprk_eventtype_ref, sprk_eventstatus, sprk_duedate]`; full command bar; `rowOpen.type = "webResource"` (closes record-link bug); sprkchat secondary action.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in configjson v1.0 schema; familiar with EventsPage Event domain.
+  </role>
+
+  <goal>
+    1 `sprk_gridconfiguration` record for `sprk_event` exists in Dataverse; configjson validates; record ID documented for task 031.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-MIG-01. The configjson shape is fully specified in design.md Appendix — translate that into the v1.0 schema authored in task 001. The critical detail: `rowOpen.type = "webResource"` (not `sidePane`) — this closes the record-link-not-opening bug because `webResource` uses `Xrm.Navigation.navigateTo({pageType:"webresource"})` which works in dialog mode.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/030-event-configjson.json</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/030-config-record-id.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">configjson MUST validate via `isValidConfigJson` (task 001).</constraint>
+    <constraint source="project">`rowOpen.type = "webResource"` — non-negotiable (closes record-link bug per FR-DG-14, FR-MIG-04).</constraint>
+    <constraint source="project">`filterChips.mode = "allowlist"` with the 4 specific chips: `_ownerid_value, sprk_eventtype_ref, sprk_eventstatus, sprk_duedate`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>docs/guides/CONFIGURATION-MATRIX.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design.md Appendix for the full `sprk_event` configjson shape.</step>
+    <step order="2">Author configjson in `notes/drafts/030-event-configjson.json` per design.md Appendix.</step>
+    <step order="3">Validate via `isValidConfigJson`.</step>
+    <step order="4">Create `sprk_gridconfiguration` record: `sprk_name = "Event Default"`, `sprk_entitylogicalname = "sprk_event"`, `sprk_configjson = <JSON>`, `sprk_isdefault = true`.</step>
+    <step order="5">Document record ID in `notes/drafts/030-config-record-id.md`.</step>
+    <step order="6">Smoke test: `<DataGrid configId="<new id>" />` renders in a harness.</step>
+    <step order="7">Update TASK-INDEX (030 ✅); unblock 031, 033.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse MCP">create_record</tool>
+    <tool name="Edit">Document</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/030-event-configjson.json</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/030-config-record-id.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given configjson, when validated, then `isValidConfigJson` returns true.</criterion>
+    <criterion testable="true">Given the record, when retrieved, then `sprk_configjson` matches authored JSON.</criterion>
+    <criterion testable="true">Given `rowOpen.type`, when inspected, then it is `"webResource"` (not `sidePane`).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The `rowOpen.type` choice is the load-bearing element — `webResource` closes the record-link bug. Anything else would re-introduce the bug. Do NOT skip step 1 (read design.md Appendix verbatim).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Read design.md Appendix first. Validate JSON before Dataverse create.</protocol>
+  </execution>
+</task>

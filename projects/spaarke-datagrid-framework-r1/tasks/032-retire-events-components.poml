@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Retire @spaarke/events-components/{GridSection, AssignedToFilter, RecordTypeFilter, StatusFilter}</title>
+    <phase>4: Phase D — EventsPage Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>034</blocks>
+    <tags>refactoring, frontend, typescript, migration</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Refactoring; deletion of legacy components; verify no remaining consumers</rigor-reason>
+    <parallel-group>D1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Delete `@spaarke/events-components/components/{GridSection, AssignedToFilter, RecordTypeFilter, StatusFilter}/` directories. Keep `{CalendarSection, ViewSelectorDropdown}/`, `EventsPageContext`, `useViewSelection`. Audit for remaining consumers — if any import the retiring components, migrate them to framework equivalents first (or escalate).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Familiar with `@spaarke/events-components` API surface.
+  </role>
+
+  <goal>
+    4 directories removed; barrel exports updated; `npm run build` passes; grep across repo for retired imports returns zero matches.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-MIG-03. After task 031, EventsPage no longer imports these. The Calendar widget (task 033 — SpaarkeAi) doesn't import them either. SemanticSearch doesn't (it has its own). The audit step is precautionary — could be a stray consumer.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/GridSection/</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/AssignedToFilter/</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/RecordTypeFilter/</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/StatusFilter/</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/index.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Audit consumers BEFORE deleting — repo-wide grep.</constraint>
+    <constraint source="project">If non-trivial consumer found (i.e. not EventsPage/App.tsx which task 031 already migrated), STOP and escalate.</constraint>
+    <constraint source="project">Build MUST pass after deletion (`@spaarke/events-components` + EventsPage solution).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/032-consumer-audit.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Repo-wide grep for imports of each retiring component: `grep -r 'GridSection\|AssignedToFilter\|RecordTypeFilter\|StatusFilter' src/ --include='*.ts' --include='*.tsx' | grep import`.</step>
+    <step order="2">Document remaining consumers in `notes/drafts/032-consumer-audit.md`. Expected: zero (or only the EventsPage that task 031 already migrated).</step>
+    <step order="3">If unexpected consumer found, STOP and escalate to Ralph.</step>
+    <step order="4">Delete the 4 directories: `git rm -rf src/client/shared/Spaarke.Events.Components/src/components/{GridSection,AssignedToFilter,RecordTypeFilter,StatusFilter}/`.</step>
+    <step order="5">Update `src/client/shared/Spaarke.Events.Components/src/index.ts`: remove barrel exports for the retired components.</step>
+    <step order="6">Build `@spaarke/events-components` (`npm run build`); verify zero TypeScript errors.</step>
+    <step order="7">Build `src/solutions/EventsPage/` separately; verify still builds.</step>
+    <step order="8">Update TASK-INDEX (032 ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Audit consumers</tool>
+    <tool name="git">Remove directories</tool>
+    <tool name="npm">Build verification</tool>
+    <tool name="Edit">Update barrel exports</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/032-consumer-audit.md</output>
+    <output type="code">src/client/shared/Spaarke.Events.Components/src/index.ts (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given grep for retired component imports, when run post-deletion, then zero matches.</criterion>
+    <criterion testable="true">Given `npm run build` in `@spaarke/events-components`, when run, then zero errors.</criterion>
+    <criterion testable="true">Given `npm run build` in `src/solutions/EventsPage/`, when run, then zero errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallels task 033 (SpaarkeAi Calendar widget migrate) — they touch different surfaces. The audit step is non-negotiable — delete-first-ask-later breaks the build.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Audit FIRST. Don't delete until consumer audit is clean. Verify both builds post-delete.</protocol>
+  </execution>
+</task>

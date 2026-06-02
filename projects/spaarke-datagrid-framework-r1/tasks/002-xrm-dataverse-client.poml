@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>XrmDataverseClient implementation (Xrm.WebApi wrapper for MDA hosts)</title>
+    <phase>1: Phase A — Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>005,009</blocks>
+    <tags>fluent-ui, frontend, typescript, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation of IDataverseClient contract; ADR-012 constraint; unit tests required</rigor-reason>
+    <parallel-group>A1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement `XrmDataverseClient` — the MDA-host implementation of `IDataverseClient` — by wrapping `Xrm.WebApi` + `Xrm.Utility.getEntityMetadata`. The client must walk `window` / `window.parent` to find `Xrm` (so it works in Custom Page iframe contexts) and gracefully no-op when `Xrm` is unavailable (Storybook). Unit tests pass against a mocked `Xrm`.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse Web API, `Xrm.WebApi`, `Xrm.Utility.getEntityMetadata`, and TypeScript. Follow ADR-012 (shared components home) and ADR-022 (React-16-safe).
+  </role>
+
+  <goal>
+    `src/services/XrmDataverseClient.ts` implements the 5-method `IDataverseClient` interface; works in MDA Custom Page iframe context (walks `window.parent`); has Jest unit tests with mocked `Xrm` that pass `npm test`.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-DG-02. Lift the Xrm-finding pattern from existing Spaarke code where `window.parent.Xrm` is walked. In an iframe (Custom Page in dialog mode), the top window does NOT have `Xrm` but the parent does. `retrieveEntityMetadata` uses `Xrm.Utility.getEntityMetadata(entityLogicalName, ['Attributes'])`. `retrieveMultipleRecords` uses `Xrm.WebApi.retrieveMultipleRecords` with fetchXml. `retrieveRecord` uses `Xrm.WebApi.retrieveRecord`. `retrieveSavedQuery` calls `Xrm.WebApi.retrieveRecord('savedquery', id, '?$select=name,fetchxml,layoutxml,returnedtypecode')`. `retrieveSavedQueriesForEntity` calls `Xrm.WebApi.retrieveMultipleRecords('savedquery', '?$filter=...')`.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/XrmDataverseClient.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/IDataverseClient.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/tests/services/XrmDataverseClient.test.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Implementation lives in `@spaarke/ui-components/services/` per shared-component canonical home.</constraint>
+    <constraint source="ADR-022">React-16-safe (no React-18-only APIs). This file has no React deps so trivially safe.</constraint>
+    <constraint source="project">MUST walk `window` then `window.parent` to find `Xrm` (Custom Page iframe context). If neither has `Xrm`, throw a clear error: `"XrmDataverseClient requires Xrm context. Use BffDataverseClient outside MDA."`</constraint>
+    <constraint source="project">NO direct `fetch()` — that's `BffDataverseClient`'s job. This client is `Xrm.WebApi` only.</constraint>
+    <constraint source="project">Unit tests use mocked `Xrm` global, not a live tenant.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Xrm walking pattern" location="src/client/pcf/SemanticSearchControl/components/">Look at existing Xrm context detection in SSC for the `window.parent.Xrm` walk.</pattern>
+      <pattern name="Mocked Xrm in tests" location=".claude/patterns/testing/mocking-patterns.md">Define `global.Xrm = { WebApi: { ... }, Utility: { ... } }` in test setup.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `src/services/IDataverseClient.ts` (created in task 001) to lock the interface signatures.</step>
+    <step order="2">Author `src/services/XrmDataverseClient.ts`: private `getXrm()` helper that walks `window` then `window.parent`, throws clear error if neither found. Implement all 5 interface methods routing to `Xrm.WebApi.*` and `Xrm.Utility.getEntityMetadata`.</step>
+    <step order="3">Update `src/index.ts` barrel export.</step>
+    <step order="4">Author `tests/services/XrmDataverseClient.test.ts` with mocked `Xrm` global. Test cases: each of 5 methods with happy path; `getXrm()` fallback to `window.parent`; clear error when `Xrm` absent.</step>
+    <step order="5">Run `npm test`. Verify all tests pass.</step>
+    <step order="6">Run `npm run build`. Verify zero TypeScript errors.</step>
+    <step order="7">Update `projects/spaarke-datagrid-framework-r1/tasks/TASK-INDEX.md`: change task 002 status to ✅ completed.</step>
+    <step order="8">If any deviations from `design.md §6.2`, document in `projects/spaarke-datagrid-framework-r1/notes/drafts/002-deviations.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="jest">Run unit tests</tool>
+    <tool name="Edit">Author the file</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/XrmDataverseClient.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/tests/services/XrmDataverseClient.test.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given mocked Xrm, when all 5 IDataverseClient methods are invoked, then they return the documented shapes and unit tests pass.</criterion>
+    <criterion testable="true">Given `Xrm` exists on `window.parent` only (not `window`), when `getXrm()` is called, then it returns `window.parent.Xrm` without error.</criterion>
+    <criterion testable="true">Given neither `window` nor `window.parent` has `Xrm`, when `getXrm()` is called, then it throws with message "XrmDataverseClient requires Xrm context. Use BffDataverseClient outside MDA."</criterion>
+    <criterion testable="true">Given `npm run build`, when TypeScript compiles, then there are zero errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The Xrm walk is important — Custom Pages in dialog mode are nested iframes and `window.Xrm` is undefined there but `window.parent.Xrm` is the MDA Xrm. Storybook never has Xrm at all, which is why a clear error message matters (devs see it and know to pass `BffDataverseClient` in stories). This task parallels task 003 (DataGrid core) — both depend on task 001 and don't touch the same files.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load files in `<knowledge>`. Implement per `<constraints>`. Verify with unit tests + build before marking complete.</protocol>
+  </execution>
+</task>

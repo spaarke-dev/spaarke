@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>BffDataverseClient implementation using @spaarke/auth.authenticatedFetch</title>
+    <phase>2: Phase B — BFF Passthrough</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>011,012,013,014</dependencies>
+    <blocks>017,023,024,041,052</blocks>
+    <tags>fluent-ui, frontend, typescript, dataverse, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation of IDataverseClient contract; ADR-028 binding; consumer-facing API</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on all 4 endpoint tasks completing — serial integration point</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement `BffDataverseClient` in `@spaarke/ui-components/services/BffDataverseClient.ts`. Same 5-method `IDataverseClient` contract as `XrmDataverseClient`. Uses `@spaarke/auth.authenticatedFetch` for ALL HTTP calls (no direct `fetch`). Configurable `bffBaseUrl`. R1 is READ-ONLY: writes throw `BffDataverseClient.WritesNotSupportedError`.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in `@spaarke/auth.authenticatedFetch`, ADR-028 Spaarke Auth, and async TypeScript clients.
+  </role>
+
+  <goal>
+    `BffDataverseClient` implements `IDataverseClient` interface; routes all 5 methods to the corresponding BFF endpoints (011-014); uses `authenticatedFetch`; ProblemDetails responses unwrapped to typed errors; consumer can swap `XrmDataverseClient` ↔ `BffDataverseClient` without code change.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-BFF-06. The framework's `<DataGrid />` accepts `dataverseClient` prop; defaults to `XrmDataverseClient` (MDA host). Custom Page hosts and workspace widgets can pass `new BffDataverseClient({ bffBaseUrl })` instead. Both impls satisfy the same `IDataverseClient` contract from task 001. R1 BffDataverseClient is READ-ONLY — there's no write endpoint yet; calling write methods throws a clear error so devs know to use Xrm impl for writes.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/BffDataverseClient.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/IDataverseClient.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/tests/services/BffDataverseClient.test.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>src/client/shared/@spaarke/auth/src/authenticatedFetch.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">ALL HTTP calls via `@spaarke/auth.authenticatedFetch`. NO raw `fetch`. NO manual `Authorization` headers.</constraint>
+    <constraint source="ADR-012">Lives in `@spaarke/ui-components/services/` per shared library home.</constraint>
+    <constraint source="ADR-022">React-16-safe (this file has no React deps so trivially safe).</constraint>
+    <constraint source="project">R1 = READ-ONLY. There's no write contract on `IDataverseClient` so this is a non-issue for the 5 methods. Document the limitation in JSDoc.</constraint>
+    <constraint source="project">ProblemDetails responses → typed errors: `BffNotFoundError` (404), `BffForbiddenError` (403), `BffBadRequestError` (400), `BffServerError` (5xx).</constraint>
+    <constraint source="project">`bffBaseUrl` configurable; defaults to `process.env.SPAARKE_BFF_URL` or `window.SPAARKE_BFF_URL` if available.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/guides/DATAVERSE-AUTHENTICATION-GUIDE.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="authenticatedFetch usage" location="src/client/pcf/SemanticSearchControl/SemanticSearchControl.tsx">Existing canonical usage pattern for `@spaarke/auth.authenticatedFetch`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `IDataverseClient.ts` (task 001) for the 5 method signatures.</step>
+    <step order="2">Author `BffDataverseClient.ts` with constructor `(options: { bffBaseUrl?: string })`; resolve `bffBaseUrl` from options → `window.SPAARKE_BFF_URL` → `process.env.SPAARKE_BFF_URL` → throw if none.</step>
+    <step order="3">Implement each method routing to BFF endpoint:
+      - `retrieveSavedQuery(id)` → `GET /api/dataverse/savedquery/{id}`
+      - `retrieveSavedQueriesForEntity(entity)` → `GET /api/dataverse/savedqueries/{entity}`
+      - `retrieveEntityMetadata(entity)` → `GET /api/dataverse/metadata/{entity}`
+      - `retrieveMultipleRecords(entity, fetchXml)` → `POST /api/dataverse/fetch`
+      - `retrieveRecord(entity, id, columnSet)` → `GET /api/dataverse/record/{entity}/{id}?$select=...`
+    </step>
+    <step order="4">Implement ProblemDetails error unwrap helper: on non-2xx response, parse `{ type, title, status, detail }` and throw typed error.</step>
+    <step order="5">Update `src/index.ts` barrel export.</step>
+    <step order="6">Author Jest tests with mocked `authenticatedFetch` (via Jest mock or msw); test happy path for each method, 404/403/400 error mapping, missing `bffBaseUrl` error.</step>
+    <step order="7">Build (`npm run build`); verify zero TypeScript errors. Run tests (`npm test`); verify pass.</step>
+    <step order="8">Update TASK-INDEX (015 ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="Edit">Author code + tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/BffDataverseClient.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/tests/services/BffDataverseClient.test.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `BffDataverseClient` and `XrmDataverseClient`, when both implement `IDataverseClient`, then consumer swap requires zero code change.</criterion>
+    <criterion testable="true">Given `authenticatedFetch` mock returning 403 ProblemDetails, when method called, then `BffForbiddenError` is thrown.</criterion>
+    <criterion testable="true">Given `bffBaseUrl` unset (no options + no env + no window), when constructor called, then clear error thrown.</criterion>
+    <criterion testable="true">Given `npm run build`, when run, then zero TypeScript errors.</criterion>
+    <criterion testable="true">Given grep for `fetch(` (raw fetch) in `BffDataverseClient.ts`, when run, then zero matches.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The 5 methods are 1:1 with the 5 BFF endpoints. Keep this client thin — no caching at this layer (server caches via IDistributedCache). The ProblemDetails error unwrap is the key affordance for consumers; without typed errors, consumers can't differentiate "not found" from "no privilege" from "bad request" without parsing strings.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Verify all 5 endpoints integrated + tests pass + grep for raw `fetch(` returns zero before marking complete.</protocol>
+  </execution>
+</task>

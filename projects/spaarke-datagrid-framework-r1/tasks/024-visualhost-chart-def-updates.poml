@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Update VisualHost chart-def sprk_drillthroughtarget for Matter Health + Budget Performance</title>
+    <phase>3: Phase C — Matter UI Drill-throughs</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>023</dependencies>
+    <blocks>025</blocks>
+    <tags>dataverse, schema</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Two Dataverse records updated (data change only); no code changes; no test surface beyond UAT</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after Custom Pages exist (tasks 023) — points to deployed page URLs</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Update two `sprk_chartdefinition` records via Dataverse MCP `update_record`: Matter Health (`a8b8df8b-f359-f111-a825-3833c5d9bcab`) and Budget Performance (`7bf5b79e-f359-f111-a825-3833c5d9bcab`). Set each one's `sprk_drillthroughtarget` to the new Custom Page web resource name from task 023.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in VisualHost chart-def schema, Dataverse MCP `update_record`.
+  </role>
+
+  <goal>
+    Both chart-def records have updated `sprk_drillthroughtarget` pointing to the new pages; verified by VisualHost CardChrome opening the new pages.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-CON-05 + NFR-06. VisualHost PCF code does NOT change — only the chart-def record data. The `sprk_drillthroughtarget` field tells CardChrome which page to open on expand. Confirm via UAT in task 026.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/024-chart-def-update-log.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-06">VisualHost PCF code MUST NOT be touched — only chart-def data.</constraint>
+    <constraint source="project">Update via `mcp__dataverse__update_record` — keep audit trail in notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm new web resource names from task 023 deploy (will be deployed in task 025; here we just update the chart-def to reference the expected names).</step>
+    <step order="2">Use Dataverse MCP `update_record` for Matter Health (`a8b8df8b-f359-f111-a825-3833c5d9bcab`): set `sprk_drillthroughtarget = "sprk_kpiassessmentspage.html"`.</step>
+    <step order="3">Same for Budget Performance (`7bf5b79e-f359-f111-a825-3833c5d9bcab`): set `sprk_drillthroughtarget = "sprk_invoicespage.html"`.</step>
+    <step order="4">Document the updates in `notes/drafts/024-chart-def-update-log.md` (record IDs, before/after values, timestamps).</step>
+    <step order="5">Update TASK-INDEX (024 ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse MCP">update_record</tool>
+    <tool name="Edit">Audit log</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/024-chart-def-update-log.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given chart-def records retrieved post-update, when reviewed, then `sprk_drillthroughtarget` shows the new web resource names.</criterion>
+    <criterion testable="true">Given the audit log, when reviewed, then both updates are recorded with before/after values.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Data change only — fastest task in Phase C. The actual VisualHost behavior change is verified by UAT in task 026 (CardChrome expand opens the new page).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Use MCP update_record. Audit before/after in notes.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Retire UniversalDatasetGrid PCF + solution manifest version bump</title>
+    <phase>6: Phase F — Legacy Retirement</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>052</dependencies>
+    <blocks>054</blocks>
+    <tags>pcf, dataverse, deploy, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>PCF retirement + solution version bump; PCF-DEPLOYMENT-GUIDE.md mandatory</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on task 052 (SpeAdminApp migration); solution version bump is unique operation</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Retire `src/client/pcf/UniversalDatasetGrid/` PCF: delete the directory, remove from solution manifest, bump solution version. Per FR-MIG-09. Verify no remaining consumers per task 052 completion.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in PCF deployment (PCF-DEPLOYMENT-GUIDE.md) + solution version bump.
+  </role>
+
+  <goal>
+    UDG PCF removed; solution version bumped per PCF-DEPLOYMENT-GUIDE.md (4 locations); manifest updated; ready for deploy.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-MIG-09. After task 052, SpeAdminApp DashboardPage no longer uses UDG. The PCF can be retired. Note: PCF-DEPLOYMENT-GUIDE.md requires version bump in 4 locations + footer update — DO NOT skip.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/UniversalDatasetGrid/</file>
+      <file>src/dataverse/solutions/SpaarkeControls/Solution.xml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">PCF only for form binding; UDG was canvas-binding (now retired).</constraint>
+    <constraint source="project">Version bump in 4 locations per PCF-DEPLOYMENT-GUIDE.md.</constraint>
+    <constraint source="project">No remaining consumers (verified by task 052).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify task 052 complete + DashboardPage no longer imports UDG.</step>
+    <step order="2">Grep repo for UDG references: `grep -r 'UniversalDatasetGrid' src/ --include='*.ts' --include='*.tsx' --include='*.xml'`. Expect only solution manifest matches.</step>
+    <step order="3">Delete `src/client/pcf/UniversalDatasetGrid/` directory.</step>
+    <step order="4">Update solution manifest: remove UDG from `Solution.xml`; bump solution version per PCF-DEPLOYMENT-GUIDE.md (4 locations).</step>
+    <step order="5">Verify build of solution pack (`pac solution check` or `dotnet build` if applicable).</step>
+    <step order="6">Update TASK-INDEX (053 ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Consumer check</tool>
+    <tool name="git">Remove directory</tool>
+    <tool name="Edit">Solution manifest</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/dataverse/solutions/SpaarkeControls/Solution.xml (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given grep for `UniversalDatasetGrid`, when run, then only solution manifest matches (and those reference the removed entry).</criterion>
+    <criterion testable="true">Given solution version, when checked, then bumped per PCF-DEPLOYMENT-GUIDE.md (4 locations).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    PCF-DEPLOYMENT-GUIDE.md is MANDATORY reading per the task-create skill's tag-to-knowledge mapping. The 4-location version bump is the canonical Spaarke gotcha — skipping it ships stale code.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Read PCF-DEPLOYMENT-GUIDE.md before bumping version. Verify 4 locations updated.</protocol>
+  </execution>
+</task>

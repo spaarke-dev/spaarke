@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>BFF Placement Justification + ADR-008 authorization filter shape design</title>
+    <phase>2: Phase B — BFF Passthrough</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>011,012,013,014,015,016,017</blocks>
+    <tags>bff-api, api, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Binding pre-design step required by bff-extensions.md before any code; blocks all Phase B endpoints; ADR-008 + ADR-028 + ADR-029 constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Foundation task — every Phase B endpoint task depends on the placement decision + filter shape designed here</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author the Placement Justification document for adding `Api/Dataverse/` + `Services/Dataverse/` to `Sprk.Bff.Api`, and design the canonical authorization filter shape used by all 5 endpoints. The Placement Justification answers the decision criteria in `.claude/constraints/bff-extensions.md` and is required in the PR description per the binding pre-merge checklist. The filter shape becomes the model implemented in tasks 011–014.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, ADR-008 endpoint filter pattern, ADR-028 Spaarke Auth (authenticatedFetch + managed identity), ADR-029 BFF publish hygiene. Familiar with `.claude/constraints/bff-extensions.md` decision criteria.
+  </role>
+
+  <goal>
+    Two artifacts: (1) `notes/drafts/010-bff-placement-justification.md` containing the binding-checklist answers per `bff-extensions.md`; (2) `notes/drafts/010-authorization-filter-shape.md` containing the canonical `DataverseAuthorizationFilter` pattern that tasks 011–014 will instantiate per endpoint.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-BFF-08 and the CLAUDE.md §10 BFF Hygiene rule: any task adding NEW endpoints/services to `Sprk.Bff.Api` MUST document Placement Justification before authoring code. This task is the pre-design step. It produces: (a) the section that will be copy-pasted into the PR description, (b) the filter pattern documented in `notes/` that the endpoint tasks reference. The filter pattern is modeled on `SemanticSearchAuthorizationFilter` (existing).
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/010-bff-placement-justification.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/010-authorization-filter-shape.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">All BFF endpoints have an authorization filter rejecting unauthorized callers with 403 ProblemDetails.</constraint>
+    <constraint source="ADR-028">All authentication via `@spaarke/auth.authenticatedFetch` on the client side; BFF validates JWT + applies authorization filter.</constraint>
+    <constraint source="ADR-029">BFF publish hygiene maintained: no new HIGH-severity CVE introduced by added NuGet packages; size baseline ratchet honored.</constraint>
+    <constraint source="project">`bff-extensions.md` checklist: every checkbox must be answered (Yes / No / N/A with reason). No skipping.</constraint>
+    <constraint source="project">Filter pattern must check caller has `Read` privilege on target entity via cached metadata — no privilege bypass possible via FetchXML `<link-entity>` cross-entity access.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="ADR-008 endpoint filter" location=".claude/patterns/api/endpoint-filters.md">Filter inspects HttpContext, resolves caller identity, queries privilege metadata, returns 403 ProblemDetails on deny.</pattern>
+      <pattern name="SemanticSearchAuthorizationFilter (reference)" location="src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs">Existing implementation — model new `DataverseAuthorizationFilter` shape on this.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load `.claude/constraints/bff-extensions.md` and walk through its checklist for adding `Api/Dataverse/` + `Services/Dataverse/` + DataverseAuthorizationFilter.</step>
+    <step order="2">Author `notes/drafts/010-bff-placement-justification.md` answering every item: WHY here (cross-cutting Dataverse projection used by Custom Pages + workspace widgets), WHY not elsewhere (no separate service warranted; tight coupling to existing `ServiceClient` infra), no new NuGet packages required (existing `Microsoft.PowerPlatform.Dataverse.Client` covers it), size impact (estimated &lt;200KB compiled), test obligation acknowledged (integration tests in task 016).</step>
+    <step order="3">Read existing `SemanticSearchAuthorizationFilter` shape to model the new filter on.</step>
+    <step order="4">Author `notes/drafts/010-authorization-filter-shape.md`: canonical `DataverseAuthorizationFilter` class signature, constructor params (entityName, requiredPrivilege), `InvokeAsync` flow (resolve caller → check cached metadata for entity privilege → 403 ProblemDetails on deny), unit test points.</step>
+    <step order="5">Cross-entity privilege check note: when filter applies to `/api/dataverse/fetch` (POST), FetchXML may include `<link-entity>` accessing other entities. Document that the filter must parse FetchXML and check Read privilege on EVERY entity referenced (not just the primary one). This is critical to prevent privilege bypass.</step>
+    <step order="6">Document the cache strategy for privilege metadata (likely 6-hour TTL same as entity metadata cache) to avoid per-request Dataverse round-trips.</step>
+    <step order="7">Update TASK-INDEX (010 ✅); mark tasks 011-015 ready.</step>
+    <step order="8">Document any open questions in `notes/drafts/010-open-questions.md` for review before Phase B starts.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load constraints + ADRs + existing filter code</tool>
+    <tool name="Edit">Author the two design documents</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/010-bff-placement-justification.md</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/010-authorization-filter-shape.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `bff-extensions.md` checklist, when the Placement Justification doc is reviewed, then every checklist item has an explicit answer (no skipped items).</criterion>
+    <criterion testable="true">Given the filter shape doc, when reviewed, then the cross-entity FetchXML privilege check is explicitly addressed (no privilege bypass via `&lt;link-entity&gt;`).</criterion>
+    <criterion testable="true">Given ADR-008 + ADR-019, when filter shape matches, then 403 ProblemDetails is the failure mode (not raw 403).</criterion>
+    <criterion testable="true">Given size impact estimate, when reviewed, then it stays under the BFF size baseline budget per ADR-029.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Do NOT skip this task. CLAUDE.md §10 explicitly requires Placement Justification before any BFF additions. PRs without it get flagged in code review. This is also where you catch placement mistakes early — e.g., if these Dataverse projections actually belong in a separate service rather than `Sprk.Bff.Api`, the answer should come out here, not at code-review time.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all `<knowledge>` files including `bff-extensions.md`. Walk through checklist item by item. Do not skip steps.</protocol>
+  </execution>
+</task>
