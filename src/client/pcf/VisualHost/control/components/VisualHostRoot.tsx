@@ -650,7 +650,8 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
       <CardChrome
         title={chromeTitle}
         onExpand={chromeOnExpand}
-        showAiSparkle={false}
+        showAiSparkle={chromeOptIn && !!aiSummaryField}
+        onAiSummary={aiSummaryField ? handleFetchAiSummary : undefined}
       >
         <ChartRenderer
           chartDefinition={chartDefinition}
@@ -768,7 +769,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
       )}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.15 • 2026-06-01</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.16 • 2026-06-01</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>
