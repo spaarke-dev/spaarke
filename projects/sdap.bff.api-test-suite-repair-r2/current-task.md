@@ -12,10 +12,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 013 — Phase 1 P1-S3 exit triple-run validation gate — **EXECUTED 2026-06-01 → VERDICT: FAIL (owner triage required)** |
-| **Step** | All 3 runs completed; 3 TRX captured; summary doc authored. Run 3 surfaced 1 pre-existing probabilistic flake. |
-| **Status** | gate-failed-pending-owner-triage |
-| **Next Action** | **Owner decision required**: Option A (file RB-T013-01, fix in Phase 3, re-run gate) / Option B (quarantine + proceed) / Option C (run a 4th time — NOT recommended). See `baseline/phase1-exit-triple-run-2026-06-01.md` §6 for full triage options. **DO NOT dispatch Phase 2 (tasks 020+) until owner decides.** |
+| **Task** | 021 — RB-T044-04 CitationExtractor.NormalizePatent EP/WO double-prefix; **work complete (uncommitted per caller instruction)** |
+| **Step** | 9 of 10 — Production fix applied; test Skip→Pass; build PASS (0 errors); targeted tests Failed: 0 / Passed: 29 / Skipped: 2; Step 9.5 gates PASS; ledger transitioned to `repaired`. Step 10 (commit) deferred to caller. |
+| **Status** | work-complete-uncommitted |
+| **Next Action** | Caller / main-session commits the bundle (task 021's diff: 2 files, +12/-8 lines). Verify task 020's `NormalizeCaseLaw` fix still intact (confirmed — all 4 CaseLaw InlineData cases pass in same targeted run). |
 
 ### Task 013 outcome (2026-06-01)
 

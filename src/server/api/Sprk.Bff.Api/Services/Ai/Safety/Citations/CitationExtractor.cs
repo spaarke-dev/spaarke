@@ -182,14 +182,19 @@ public static partial class CitationExtractor
     private static string NormalizePatent(Match m)
     {
         // US patents: strip commas and spaces → "US9123456"
+        // (US capture group is digits-only via `(?<us>[\d,]{5,15})`, so the "US" literal is correct here.)
         if (m.Groups["us"].Success)
             return "US" + m.Groups["us"].Value.Replace(",", "").Replace(" ", "");
 
+        // EP / WO capture groups ALREADY include the country-code prefix in the matched value
+        // (see PatentPattern: `(?<ep>EP\s*[\d\s]{7,12})` and `(?<wo>WO\s*\d{4}[/\-]\d{4,8})`).
+        // Do NOT prepend "EP" / "WO" again — that produced the documented `EPEP3456789` /
+        // `WOWO2021/123456` corruption (RB-T044-04: NormalizePatent EP/WO double-prefix).
         if (m.Groups["ep"].Success)
-            return "EP" + Regex.Replace(m.Groups["ep"].Value, @"[^\dA-Za-z]", "");
+            return Regex.Replace(m.Groups["ep"].Value, @"[^\dA-Za-z]", "");
 
         if (m.Groups["wo"].Success)
-            return "WO" + Regex.Replace(m.Groups["wo"].Value, @"[^\dA-Za-z/]", "");
+            return Regex.Replace(m.Groups["wo"].Value, @"[^\dA-Za-z/]", "");
 
         return m.Value.Trim();
     }

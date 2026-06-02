@@ -404,39 +404,59 @@ Remove `Skip` + trait on `ExtractCitations_Statute_StripsSubsectionsInNormalized
 
 ---
 
-## RB-T044-04 — `CitationExtractor.NormalizePatent` double-prefixes EP/WO country codes
+## RB-T044-04 — `CitationExtractor.NormalizePatent` double-prefixes EP/WO country codes — **REPAIRED** 2026-06-01
 
 | Field | Value |
 |---|---|
 | **Bug ID** | RB-T044-04 |
+| **Status** | **`repaired`** (transitioned 2026-06-01 by r2 Phase 2 Wave 2 task 021) |
 | **Date filed** | 2026-05-31 |
+| **Date repaired** | 2026-06-01 |
+| **Resolution mode** | `repaired` (NFR-04) |
+| **Resolution commit** | See r2 PR #318 commit "fix(ai/safety): remove double country-code prefix in CitationExtractor.NormalizePatent EP/WO (RB-T044-04; repaired)" (Wave 2 commit by main session per task 021 coordination protocol — runs sequentially after task 020 commit `c7d7019b`) |
+| **Cross-reference** | r2 task 021 — [`projects/sdap.bff.api-test-suite-repair-r2/tasks/021-fix-rb-t044-04.poml`](../../sdap.bff.api-test-suite-repair-r2/tasks/021-fix-rb-t044-04.poml) |
 | **Filing task** | Task 044 (P23.H5 — Ai/Safety) |
 | **Production file** | [`src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs) |
-| **Affected method** | `NormalizePatent(Match m)` (line 180), EP + WO branches |
-| **Tests Skip'd** | `ExtractCitations_Patent_NonUS_MatchedAndNormalized` Theory (2 InlineData: EP, WO) — split from original Theory by task 044 — in `CitationExtractorTests.cs`. |
-| **Fix-by date** | 2026-07-31 (60-day target — MEDIUM severity) |
+| **Affected method** | `NormalizePatent(Match m)` (line 182), EP + WO branches |
+| **Tests Skip'd → Pass** | `ExtractCitations_Patent_NonUS_MatchedAndNormalized` Theory in [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs) — 2 InlineData cases (`EP3456789` → `EP3456789`; `WO2021/123456` → `WO2021/123456`). `[Theory(Skip = "RB-T044-04: …")]` → `[Theory]`; per-Theory `[Trait("status", "real-bug-pending-fix")]` removed (class-level `[Trait("status", "repaired")]` now applies). Both InlineData cases pass; targeted `dotnet test --filter "FullyQualifiedName~CitationExtractor"` reports Failed: 0 / Passed: 29 / Skipped: 2 (the 2 remaining Skips are RB-T044-03 Statute subsection + RB-T044-05 Regulation no-period — both correctly Skip'd, Phase 3 tasks 032/033). Task 020's `NormalizeCaseLaw` fix verified intact: all 4 CaseLaw InlineData cases still pass. |
+| **Fix-by date (original)** | 2026-07-31 (60-day target — MEDIUM severity) — **closed 60 days early** |
 | **Severity** | MEDIUM (100% regression for non-US patent normalization: `EP3456789` → `EPEP3456789`) |
-| **Owner** | TBD (AI citations/verification feature owner) |
+| **Owner** | r2 task 021 owner (Claude Opus 4.7 implementation) |
 
 ### Bug detail
 
 The regex's `ep` and `wo` capture groups include the country-code prefix in the captured value. The normalizer then PREPENDS the literal `"EP"` (or `"WO"`) again. Result: `EP3456789` becomes `EPEP3456789`. The US branch is correct because the regex `(?<us>[\d,]{5,15})` captures digits-only.
 
-### Recommended production fix
+### Fix applied 2026-06-01
 
-Drop the literal prefix in the EP and WO branches of the normalizer:
+**Production change** (`src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs`):
+- Removed literal `"EP" +` and `"WO" +` prefix concatenations in `NormalizePatent` EP and WO branches (were lines 189, 192). The regex capture groups `(?<ep>EP\s*[\d\s]{7,12})` and `(?<wo>WO\s*\d{4}[/\-]\d{4,8})` already include the country-code prefix in the captured value — prepending the literal again produced the documented `EPEP3456789` / `WOWO2021/123456` corruption.
+- Added 5-line rationale comment block citing RB-T044-04 + the load-bearing regex-contract distinction between the US branch (digits-only capture; literal "US" prefix correct) and the EP/WO branches (country-code-included capture; literal prefix must NOT be re-added).
+- Net diff: +5 lines (4 comment, 0 modified lines from a net-replacement standpoint — 2 lines mutated). File now 213 lines (was 208). NFR-02 compliant (~0.9% line replacement, well under 50%).
+- Task 020's `NormalizeCaseLaw` fix (lines 163-172) untouched and verified intact.
 
-```csharp
-if (m.Groups["ep"].Success)
-    return Regex.Replace(m.Groups["ep"].Value, @"[^\dA-Za-z]", "");
+**Test change** (`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs` — in Skip→Pass scope per r2 NFR-01):
+- `[Theory(Skip = "RB-T044-04: …")]` on `ExtractCitations_Patent_NonUS_MatchedAndNormalized` → `[Theory]`.
+- Per-Theory `[Trait("status", "real-bug-pending-fix")]` removed (class-level `[Trait("status", "repaired")]` now applies).
 
-if (m.Groups["wo"].Success)
-    return Regex.Replace(m.Groups["wo"].Value, @"[^\dA-Za-z/]", "");
-```
+**Hand-trace validation**:
+- EP: input `EP3456789` — regex captures `ep="EP3456789"`. Pre-fix: `"EP" + Regex.Replace("EP3456789", @"[^\dA-Za-z]", "")` = `"EPEP3456789"` (BUG). Post-fix: `Regex.Replace("EP3456789", @"[^\dA-Za-z]", "")` = `"EP3456789"` — exact match for documented canonical key.
+- WO: input `WO2021/123456` — regex captures `wo="WO2021/123456"`. Pre-fix: `"WO" + Regex.Replace("WO2021/123456", @"[^\dA-Za-z/]", "")` = `"WOWO2021/123456"` (BUG). Post-fix: `Regex.Replace("WO2021/123456", @"[^\dA-Za-z/]", "")` = `"WO2021/123456"` — exact match for documented canonical key.
+- US branch unchanged (regex contract differs: `(?<us>[\d,]{5,15})` is digits-only, so the literal "US" prefix in `"US" + m.Groups["us"].Value...` is correct).
 
-### Verification after fix
+### Why this didn't surface in production
 
-Remove `Skip` + trait on `ExtractCitations_Patent_NonUS_MatchedAndNormalized`. Run; both EP and WO InlineData cases must pass. Verify US Patent Theory cases still pass.
+The EP and WO InlineData cases of `ExtractCitations_Patent_NonUS_MatchedAndNormalized` were `Skip`'d during task 044 (P23.H5 Ai/Safety filing) with the explicit RB-T044-04 reason string. Live `ExtractCitations` traffic that encounters non-US patent citations would produce non-canonical keys (`EPEP3456789`, `WOWO2021/123456`), which downstream verification providers + UI dedup would treat as never-seen citations — silent correctness regression for non-US patent citation lookups (100% regression for that citation class). The fix restores the documented canonical form.
+
+### Step 9.5 quality gates (2026-06-01)
+
+- `code-review` PASS (0 Critical / 0 Warning / 0 Suggestion). Quality direction: Improved on both files (bug fixed; 2 tests now exercise; rationale comments cite ledger ID + regex contract). AI Code Smell Score: 0.
+- `adr-check` PASS — ADR-010 (DI minimalism — no new DI registrations; static partial class), ADR-013 refined (AI architecture facade discipline; change is INSIDE `Services/Ai/Safety/`), ADR-015 (no LLM-text logging; preserved) all compliant. BFF Hygiene §A: all 5 rules N/A or satisfied (in-method bug fix; no new endpoints, services, DI registrations, NuGet packages, or background work). §F test update obligation satisfied.
+- Security review: NOT required (MEDIUM severity per D-03 / project CLAUDE.md; FULL rigor at Step 9.5 only requires `code-review` + `adr-check`).
+
+### Coordination note (task 020 / task 021 file overlap — verified clean)
+
+Per task 021 POML §parallel-safe and coordination protocol: task 021 edits are confined to `NormalizePatent` (lines 182-200 post-fix) — a DIFFERENT method from task 020's `NormalizeCaseLaw` (lines 163-172). Verified post-fix: task 020's removal of `.TrimEnd('.')` on `NormalizeCaseLaw` is intact; all 4 CaseLaw InlineData cases pass in the targeted test run. No merge race.
 
 ---
 
