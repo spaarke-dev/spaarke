@@ -2,11 +2,14 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Insights;
+using Sprk.Bff.Api.Services.Ai.Insights.Ingest;
+using Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Insights;
@@ -44,7 +47,22 @@ public class InsightsOrchestratorTests
     // ctor for D-P7 universal ingest wiring). These tests cover AnswerQuestionAsync + EmbedTextAsync
     // (which don't touch ingest); strict mode would over-constrain. Task 040's own tests cover
     // RunIngestAsync exercising this dependency.
-    private readonly Mock<Sprk.Bff.Api.Services.Ai.Insights.Ingest.IIngestOrchestrator> _ingestMock = new();
+    private readonly Mock<IIngestOrchestrator> _ingestMock = new();
+    // Wave C4 (task 023) — IPlaybookOrchestrationService + IIngestDocumentSource were added to
+    // InsightsOrchestrator's ctor for the universal-ingest@v1 JPS playbook path. Loose mocks so
+    // the legacy-path tests below (which DO NOT exercise the playbook route) don't need to set
+    // up unused expectations. The dedicated Wave C4 tests at the bottom of this file set up
+    // these mocks explicitly with strict behavior on the assertions that matter.
+    private readonly Mock<IPlaybookOrchestrationService> _playbookOrchestrationMock = new();
+    private readonly Mock<IIngestDocumentSource> _ingestDocumentSourceMock = new();
+    // Wave C4 — default options leave UseUniversalIngestPlaybook=false (legacy path), so the
+    // task 040 + Wave C5 existing tests still exercise the legacy IIngestOrchestrator delegation.
+    // Wave C4 tests below construct their own options instance with the playbook path enabled.
+    private readonly IOptions<InsightsIngestOptions> _ingestOptions = Options.Create(new InsightsIngestOptions
+    {
+        UseUniversalIngestPlaybook = false,
+        UniversalIngestPlaybookId = Guid.Empty
+    });
 
     private InsightsOrchestrator CreateSut()
         => new(
@@ -52,6 +70,9 @@ public class InsightsOrchestratorTests
             _cacheMock.Object,
             _openAiMock.Object,
             _ingestMock.Object,
+            _playbookOrchestrationMock.Object,
+            _ingestDocumentSourceMock.Object,
+            _ingestOptions,
             NullLogger<InsightsOrchestrator>.Instance);
 
     private static InsightsAgentRequest MakeAgentRequest(
@@ -90,7 +111,9 @@ public class InsightsOrchestratorTests
     public void Constructor_NullEngine_Throws()
     {
         Action act = () => new InsightsOrchestrator(
-            null!, _cacheMock.Object, _openAiMock.Object, _ingestMock.Object, NullLogger<InsightsOrchestrator>.Instance);
+            null!, _cacheMock.Object, _openAiMock.Object, _ingestMock.Object,
+            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object, _ingestOptions,
+            NullLogger<InsightsOrchestrator>.Instance);
         act.Should().Throw<ArgumentNullException>().WithParameterName("engine");
     }
 
@@ -98,7 +121,9 @@ public class InsightsOrchestratorTests
     public void Constructor_NullCache_Throws()
     {
         Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, null!, _openAiMock.Object, _ingestMock.Object, NullLogger<InsightsOrchestrator>.Instance);
+            _engineMock.Object, null!, _openAiMock.Object, _ingestMock.Object,
+            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object, _ingestOptions,
+            NullLogger<InsightsOrchestrator>.Instance);
         act.Should().Throw<ArgumentNullException>().WithParameterName("cache");
     }
 
@@ -106,15 +131,54 @@ public class InsightsOrchestratorTests
     public void Constructor_NullOpenAi_Throws()
     {
         Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, null!, _ingestMock.Object, NullLogger<InsightsOrchestrator>.Instance);
+            _engineMock.Object, _cacheMock.Object, null!, _ingestMock.Object,
+            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object, _ingestOptions,
+            NullLogger<InsightsOrchestrator>.Instance);
         act.Should().Throw<ArgumentNullException>().WithParameterName("openAi");
+    }
+
+    [Fact]
+    public void Constructor_NullPlaybookOrchestration_Throws()
+    {
+        // Wave C4 (task 023) — new ctor dep for the universal-ingest@v1 playbook path.
+        Action act = () => new InsightsOrchestrator(
+            _engineMock.Object, _cacheMock.Object, _openAiMock.Object, _ingestMock.Object,
+            null!, _ingestDocumentSourceMock.Object, _ingestOptions,
+            NullLogger<InsightsOrchestrator>.Instance);
+        act.Should().Throw<ArgumentNullException>().WithParameterName("playbookOrchestration");
+    }
+
+    [Fact]
+    public void Constructor_NullIngestDocumentSource_Throws()
+    {
+        // Wave C4 (task 023) — new ctor dep used by the playbook path to fetch document
+        // content (parameters.documentText / parameters.chunksJson assembly).
+        Action act = () => new InsightsOrchestrator(
+            _engineMock.Object, _cacheMock.Object, _openAiMock.Object, _ingestMock.Object,
+            _playbookOrchestrationMock.Object, null!, _ingestOptions,
+            NullLogger<InsightsOrchestrator>.Instance);
+        act.Should().Throw<ArgumentNullException>().WithParameterName("ingestDocumentSource");
+    }
+
+    [Fact]
+    public void Constructor_NullIngestOptions_Throws()
+    {
+        // Wave C4 (task 023) — new ctor dep carrying the universal-ingest playbook Guid
+        // + UseUniversalIngestPlaybook feature flag.
+        Action act = () => new InsightsOrchestrator(
+            _engineMock.Object, _cacheMock.Object, _openAiMock.Object, _ingestMock.Object,
+            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object, null!,
+            NullLogger<InsightsOrchestrator>.Instance);
+        act.Should().Throw<ArgumentNullException>().WithParameterName("ingestOptions");
     }
 
     [Fact]
     public void Constructor_NullLogger_Throws()
     {
         Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, _openAiMock.Object, _ingestMock.Object, null!);
+            _engineMock.Object, _cacheMock.Object, _openAiMock.Object, _ingestMock.Object,
+            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object, _ingestOptions,
+            null!);
         act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
     }
 
@@ -624,6 +688,467 @@ public class InsightsOrchestratorTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // RunIngestAsync — Wave C4 task 023 (universal-ingest@v1 playbook route)
+    //
+    // Verify the rewire path: when InsightsIngestOptions enables the playbook AND a
+    // playbook Guid is configured, RunIngestAsync invokes
+    // IPlaybookOrchestrationService.ExecuteAppOnlyAsync with the universal-ingest@v1
+    // Guid + parameter dictionary assembled per design-a5 §6 parameterSchema, drains the
+    // resulting stream looking for the emitObservations node's structured output, and
+    // returns it adapted to InsightsIngestResult. Verifies the fallback path activates
+    // when the playbook fails (engine throws or RunFailed event).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid UniversalIngestPlaybookId =
+        Guid.Parse("11111111-2222-3333-4444-555555555555");
+
+    private InsightsOrchestrator CreateSutWithPlaybookEnabled(Guid? playbookIdOverride = null)
+    {
+        var options = Options.Create(new InsightsIngestOptions
+        {
+            UseUniversalIngestPlaybook = true,
+            UniversalIngestPlaybookId = playbookIdOverride ?? UniversalIngestPlaybookId
+        });
+        return new InsightsOrchestrator(
+            _engineMock.Object,
+            _cacheMock.Object,
+            _openAiMock.Object,
+            _ingestMock.Object,
+            _playbookOrchestrationMock.Object,
+            _ingestDocumentSourceMock.Object,
+            options,
+            NullLogger<InsightsOrchestrator>.Instance);
+    }
+
+    private static IngestDocumentContent MakeIngestContent(
+        string documentRef = "doc:M-1:test.pdf",
+        string fullText = "Document body text.",
+        int chunkCount = 2)
+    {
+        var chunks = new List<Sprk.Bff.Api.Services.Ai.CitationVerification.ChunkRef>();
+        for (int i = 0; i < chunkCount; i++)
+        {
+            chunks.Add(new Sprk.Bff.Api.Services.Ai.CitationVerification.ChunkRef(
+                ChunkId: $"chunk-{i}",
+                Text: $"chunk text {i}"));
+        }
+        return new IngestDocumentContent(documentRef, fullText, chunks);
+    }
+
+    /// <summary>
+    /// Build a 4-event stream that mimics the universal-ingest@v1 happy-path:
+    /// RunStarted → NodeCompleted(layer1) → NodeCompleted(emitObservations) → RunCompleted.
+    /// </summary>
+    private static IAsyncEnumerable<PlaybookStreamEvent> BuildEmissionStream(
+        ObservationEmissionResult emission,
+        Guid playbookId,
+        string layer1Classification = "Settlement")
+    {
+        var runId = Guid.NewGuid();
+        var layer1NodeId = Guid.NewGuid();
+        var emissionNodeId = Guid.NewGuid();
+
+        var layer1Output = NodeOutput.Ok(
+            nodeId: layer1NodeId,
+            outputVariable: "layer1",
+            data: new { classification = layer1Classification, confidence = 0.85 });
+        var emissionOutput = NodeOutput.Ok(
+            nodeId: emissionNodeId,
+            outputVariable: "emission",
+            data: emission);
+
+        var events = new[]
+        {
+            PlaybookStreamEvent.RunStarted(runId, playbookId, 6),
+            PlaybookStreamEvent.NodeCompleted(runId, playbookId, layer1NodeId, "layer1Classify", layer1Output),
+            PlaybookStreamEvent.NodeCompleted(runId, playbookId, emissionNodeId, "emitObservations", emissionOutput),
+            PlaybookStreamEvent.RunCompleted(runId, playbookId, new PlaybookRunMetrics())
+        };
+        return ToAsyncEnumerable(events);
+    }
+
+    private static async IAsyncEnumerable<PlaybookStreamEvent> ToAsyncEnumerable(
+        IEnumerable<PlaybookStreamEvent> events,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        foreach (var evt in events)
+        {
+            await Task.Yield();
+            ct.ThrowIfCancellationRequested();
+            yield return evt;
+        }
+    }
+
+    [Fact]
+    public async Task RunIngestAsync_PlaybookPath_HappyPath_AdaptsEmissionToInsightsIngestResult()
+    {
+        // Arrange — Wave C4 sufficient-evidence path: document fetched, playbook invoked,
+        // emission node emits a result, adapter projects 1:1 to InsightsIngestResult.
+        var req = new InsightsIngestRequest("doc-1", "M-1", TenantId);
+        var content = MakeIngestContent();
+        var expectedEmission = new ObservationEmissionResult
+        {
+            ObservationsEmitted = 3, // 1 L1 + 2 L2 candidates surviving grounding
+            Layer1Classification = "Settlement",
+            Layer2Triggered = true
+        };
+
+        _ingestDocumentSourceMock
+            .Setup(s => s.FetchAsync("doc-1", TenantId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(content);
+
+        PlaybookRunRequest? capturedRequest = null;
+        string? capturedTenantId = null;
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAppOnlyAsync(
+                It.IsAny<PlaybookRunRequest>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, string, CancellationToken>((r, t, _) =>
+            {
+                capturedRequest = r;
+                capturedTenantId = t;
+                return BuildEmissionStream(expectedEmission, r.PlaybookId);
+            });
+
+        var sut = CreateSutWithPlaybookEnabled();
+
+        // Act
+        var result = await sut.RunIngestAsync(req);
+
+        // Assert — adapter projection 1:1 to InsightsIngestResult
+        result.ObservationsEmitted.Should().Be(3);
+        result.Layer1Classification.Should().Be("Settlement");
+        result.Layer2Triggered.Should().BeTrue();
+
+        // Playbook invocation invariants
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.PlaybookId.Should().Be(UniversalIngestPlaybookId);
+        capturedRequest.DocumentIds.Should().BeEmpty("playbook reads from parameters, not ad-hoc DocumentIds");
+        capturedTenantId.Should().Be(TenantId);
+
+        // Legacy IngestOrchestrator NOT invoked
+        _ingestMock.Verify(o => o.RunAsync(It.IsAny<InsightsIngestRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunIngestAsync_PlaybookPath_AssemblesRequiredParametersPerDesignA5()
+    {
+        // Verify parameter assembly per design-a5 §6 parameterSchema "required" array:
+        // documentId, matterId, tenantId, plus documentText + chunksJson + documentRef
+        // (consumed by SanitizerNodeExecutor + ObservationEmitterNodeExecutor).
+        var req = new InsightsIngestRequest("doc-42", "M-42", TenantId);
+        var content = MakeIngestContent("doc:M-42:contract.pdf", "Some contract content.", chunkCount: 1);
+
+        _ingestDocumentSourceMock
+            .Setup(s => s.FetchAsync("doc-42", TenantId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(content);
+
+        IReadOnlyDictionary<string, string>? capturedParams = null;
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAppOnlyAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, string, CancellationToken>((r, _, _) =>
+            {
+                capturedParams = r.Parameters;
+                return BuildEmissionStream(new ObservationEmissionResult
+                {
+                    ObservationsEmitted = 1,
+                    Layer1Classification = null,
+                    Layer2Triggered = false
+                }, r.PlaybookId);
+            });
+
+        var sut = CreateSutWithPlaybookEnabled();
+        await sut.RunIngestAsync(req);
+
+        capturedParams.Should().NotBeNull();
+        capturedParams!.Should().ContainKey("documentId").WhoseValue.Should().Be("doc-42");
+        capturedParams.Should().ContainKey("matterId").WhoseValue.Should().Be("M-42");
+        capturedParams.Should().ContainKey("tenantId").WhoseValue.Should().Be(TenantId);
+        capturedParams.Should().ContainKey("documentText").WhoseValue.Should().Be("Some contract content.");
+        capturedParams.Should().ContainKey("documentRef").WhoseValue.Should().Be("doc:M-42:contract.pdf");
+        capturedParams.Should().ContainKey("chunksJson");
+        var chunksJsonValue = capturedParams!["chunksJson"];
+        chunksJsonValue.Should().StartWith("[", "chunks serialize as JSON array per SanitizerNodeExecutor.ParamChunksJson contract");
+        chunksJsonValue.Should().Contain("chunk-0", "chunk identifiers should be present in the serialized array");
+    }
+
+    [Fact]
+    public async Task RunIngestAsync_PlaybookPath_OptionalOverridesFlowThroughAsInvariantStrings()
+    {
+        // Verify Wave C5 optional overrides (PracticeAreaHint, CostCapOverride, Layer2Threshold)
+        // are propagated into the playbook parameters dictionary AND numerics serialize with
+        // InvariantCulture (0.7 not 0,7; 1.50 not 1,50) regardless of host culture.
+        var req = new InsightsIngestRequest(
+            DocumentId: "doc-1", MatterId: "M-1", TenantId: TenantId,
+            PracticeAreaHint: "CTRNS",
+            CostCapOverride: 1.50m,
+            Layer2Threshold: 0.82);
+        _ingestDocumentSourceMock
+            .Setup(s => s.FetchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeIngestContent());
+
+        IReadOnlyDictionary<string, string>? capturedParams = null;
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAppOnlyAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, string, CancellationToken>((r, _, _) =>
+            {
+                capturedParams = r.Parameters;
+                return BuildEmissionStream(new ObservationEmissionResult
+                { ObservationsEmitted = 0, Layer1Classification = null, Layer2Triggered = false }, r.PlaybookId);
+            });
+
+        var sut = CreateSutWithPlaybookEnabled();
+        await sut.RunIngestAsync(req);
+
+        capturedParams.Should().NotBeNull();
+        capturedParams!.Should().ContainKey("practiceAreaHint").WhoseValue.Should().Be("CTRNS");
+        capturedParams.Should().ContainKey("costCapOverride").WhoseValue.Should().Be("1.50");
+        capturedParams.Should().ContainKey("layer2Threshold").WhoseValue.Should().Be("0.82");
+    }
+
+    [Fact]
+    public async Task RunIngestAsync_PlaybookPath_OmittedOverridesAreAbsentFromParameters()
+    {
+        // When optional overrides are null on the request, they MUST be absent from the
+        // parameters dictionary (NOT present with empty/null string) so the playbook's
+        // parameterSchema defaults apply per design-a5 §6.
+        var req = new InsightsIngestRequest("doc-1", "M-1", TenantId);
+        _ingestDocumentSourceMock
+            .Setup(s => s.FetchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeIngestContent());
+
+        IReadOnlyDictionary<string, string>? capturedParams = null;
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAppOnlyAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, string, CancellationToken>((r, _, _) =>
+            {
+                capturedParams = r.Parameters;
+                return BuildEmissionStream(new ObservationEmissionResult
+                { ObservationsEmitted = 0, Layer1Classification = null, Layer2Triggered = false }, r.PlaybookId);
+            });
+
+        var sut = CreateSutWithPlaybookEnabled();
+        await sut.RunIngestAsync(req);
+
+        capturedParams.Should().NotBeNull();
+        capturedParams!.Should().NotContainKey("practiceAreaHint", "null → omit so the playbook schema default applies");
+        capturedParams.Should().NotContainKey("costCapOverride", "null → omit");
+        capturedParams.Should().NotContainKey("layer2Threshold", "null → omit; playbook applies the 0.7 default per Phase 1 D-59");
+    }
+
+    [Fact]
+    public async Task RunIngestAsync_PlaybookPath_DocumentNotIndexable_ReturnsEmptyResultWithoutInvokingPlaybook()
+    {
+        // r1 parity: when IIngestDocumentSource.FetchAsync returns null (non-indexable
+        // document), the orchestrator surfaces an empty result WITHOUT invoking the
+        // playbook. Matches IngestOrchestrator.cs line 165-176 early-return semantics.
+        var req = new InsightsIngestRequest("doc-skip", "M-1", TenantId);
+        _ingestDocumentSourceMock
+            .Setup(s => s.FetchAsync("doc-skip", TenantId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IngestDocumentContent?)null);
+
+        var sut = CreateSutWithPlaybookEnabled();
+        var result = await sut.RunIngestAsync(req);
+
+        result.ObservationsEmitted.Should().Be(0);
+        result.Layer1Classification.Should().BeNull();
+        result.Layer2Triggered.Should().BeFalse();
+
+        _playbookOrchestrationMock.Verify(
+            o => o.ExecuteAppOnlyAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "non-indexable document short-circuits BEFORE the playbook engine is invoked");
+    }
+
+    [Fact]
+    public async Task RunIngestAsync_PlaybookPath_NoEmissionNodeOutput_SurfacesEmptyResultWithLayer1Fallback()
+    {
+        // Defensive case: playbook completed but the emitObservations node did not run
+        // (e.g., sanitize short-circuited). Adapter MUST surface an empty result + the
+        // Layer 1 classification IF the layer1 node ran. Caller sees a valid result
+        // honoring the "no observations, no Layer 2" facade contract.
+        var req = new InsightsIngestRequest("doc-1", "M-1", TenantId);
+        _ingestDocumentSourceMock
+            .Setup(s => s.FetchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeIngestContent());
+
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAppOnlyAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, string, CancellationToken>((r, _, _) =>
+            {
+                // Stream with layer1 only — NO emitObservations output.
+                var runId = Guid.NewGuid();
+                var layer1NodeId = Guid.NewGuid();
+                var layer1 = NodeOutput.Ok(layer1NodeId, "layer1",
+                    new { classification = "Correspondence", confidence = 0.95 });
+                var events = new[]
+                {
+                    PlaybookStreamEvent.RunStarted(runId, r.PlaybookId, 6),
+                    PlaybookStreamEvent.NodeCompleted(runId, r.PlaybookId, layer1NodeId, "layer1Classify", layer1),
+                    PlaybookStreamEvent.RunCompleted(runId, r.PlaybookId, new PlaybookRunMetrics())
+                };
+                return ToAsyncEnumerable(events);
+            });
+
+        var sut = CreateSutWithPlaybookEnabled();
+        var result = await sut.RunIngestAsync(req);
+
+        result.ObservationsEmitted.Should().Be(0);
+        result.Layer1Classification.Should().Be("Correspondence",
+            "fallback path surfaces Layer 1 classification when captured");
+        result.Layer2Triggered.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RunIngestAsync_PlaybookPath_RunFailed_FallsBackToLegacyIngestOrchestrator()
+    {
+        // When the playbook engine emits a RunFailed event, the orchestrator logs Error
+        // and falls back to the legacy IIngestOrchestrator. This is the "playbook is new,
+        // legacy is proven" safety net. Wave C-G4 (task 022) removes this fallback once
+        // the playbook path is production-validated.
+        var req = new InsightsIngestRequest("doc-1", "M-1", TenantId);
+        var legacyResult = new InsightsIngestResult(
+            ObservationsEmitted: 2,
+            Layer1Classification: "closing_letter",
+            Layer2Triggered: true);
+
+        _ingestDocumentSourceMock
+            .Setup(s => s.FetchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeIngestContent());
+
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAppOnlyAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, string, CancellationToken>((r, _, _) =>
+            {
+                var runId = Guid.NewGuid();
+                var events = new[]
+                {
+                    PlaybookStreamEvent.RunStarted(runId, r.PlaybookId, 6),
+                    PlaybookStreamEvent.RunFailed(runId, r.PlaybookId, "Simulated playbook engine failure")
+                };
+                return ToAsyncEnumerable(events);
+            });
+
+        _ingestMock
+            .Setup(o => o.RunAsync(It.IsAny<InsightsIngestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(legacyResult);
+
+        var sut = CreateSutWithPlaybookEnabled();
+        var actual = await sut.RunIngestAsync(req);
+
+        actual.Should().Be(legacyResult, "playbook failure → fallback to legacy path");
+        _ingestMock.Verify(o => o.RunAsync(req, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RunIngestAsync_PlaybookPath_PlaybookThrows_FallsBackToLegacyIngestOrchestrator()
+    {
+        // Same fallback policy when the engine throws an exception (vs emitting RunFailed).
+        var req = new InsightsIngestRequest("doc-1", "M-1", TenantId);
+        var legacyResult = new InsightsIngestResult(1, "Correspondence", false);
+
+        _ingestDocumentSourceMock
+            .Setup(s => s.FetchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeIngestContent());
+
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAppOnlyAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, string, CancellationToken>((r, _, _) =>
+                ThrowingStreamAsync(new InvalidOperationException("Simulated engine boom")));
+
+        _ingestMock
+            .Setup(o => o.RunAsync(It.IsAny<InsightsIngestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(legacyResult);
+
+        var sut = CreateSutWithPlaybookEnabled();
+        var actual = await sut.RunIngestAsync(req);
+
+        actual.Should().Be(legacyResult);
+        _ingestMock.Verify(o => o.RunAsync(req, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RunIngestAsync_PlaybookPathDisabled_DelegatesToLegacyIngestOrchestrator()
+    {
+        // Feature flag UseUniversalIngestPlaybook=false → orchestrator routes ALL traffic
+        // to the legacy path (kill-switch behavior).
+        var req = new InsightsIngestRequest("doc-1", "M-1", TenantId);
+        var legacyResult = new InsightsIngestResult(0, null, false);
+
+        var options = Options.Create(new InsightsIngestOptions
+        {
+            UseUniversalIngestPlaybook = false,
+            UniversalIngestPlaybookId = UniversalIngestPlaybookId // Guid set but flag off
+        });
+        var sut = new InsightsOrchestrator(
+            _engineMock.Object, _cacheMock.Object, _openAiMock.Object, _ingestMock.Object,
+            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object, options,
+            NullLogger<InsightsOrchestrator>.Instance);
+
+        _ingestMock
+            .Setup(o => o.RunAsync(req, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(legacyResult);
+
+        var actual = await sut.RunIngestAsync(req);
+
+        actual.Should().Be(legacyResult);
+        _playbookOrchestrationMock.Verify(
+            o => o.ExecuteAppOnlyAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never, "kill-switch off → playbook never invoked");
+        _ingestDocumentSourceMock.Verify(
+            s => s.FetchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never, "legacy path owns its own document fetch — facade does NOT pre-fetch");
+    }
+
+    [Fact]
+    public async Task RunIngestAsync_PlaybookGuidEmpty_DelegatesToLegacyIngestOrchestrator()
+    {
+        // Even with UseUniversalIngestPlaybook=true, an empty Guid → legacy path. Defensive
+        // default for misconfigured environments (e.g., Test env without the Dataverse row).
+        var req = new InsightsIngestRequest("doc-1", "M-1", TenantId);
+        var legacyResult = new InsightsIngestResult(0, null, false);
+
+        var options = Options.Create(new InsightsIngestOptions
+        {
+            UseUniversalIngestPlaybook = true,
+            UniversalIngestPlaybookId = Guid.Empty
+        });
+        var sut = new InsightsOrchestrator(
+            _engineMock.Object, _cacheMock.Object, _openAiMock.Object, _ingestMock.Object,
+            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object, options,
+            NullLogger<InsightsOrchestrator>.Instance);
+
+        _ingestMock
+            .Setup(o => o.RunAsync(req, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(legacyResult);
+
+        var actual = await sut.RunIngestAsync(req);
+
+        actual.Should().Be(legacyResult);
+        _playbookOrchestrationMock.Verify(
+            o => o.ExecuteAppOnlyAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public void AssemblePlaybookParameters_ChunksSerializedAsJsonArray()
+    {
+        // Static helper test — verifies chunks serialize to a JSON array that the
+        // SanitizerNodeExecutor can parse back via parameters.chunksJson.
+        var req = new InsightsIngestRequest("doc-1", "M-1", TenantId);
+        var content = MakeIngestContent(chunkCount: 3);
+
+        var parameters = InsightsOrchestrator.AssemblePlaybookParameters(req, content);
+
+        parameters.Should().ContainKey("chunksJson");
+        var chunksJson = parameters["chunksJson"];
+        using var doc = JsonDocument.Parse(chunksJson);
+        doc.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
+        doc.RootElement.GetArrayLength().Should().Be(3);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -635,5 +1160,17 @@ public class InsightsOrchestratorTests
         yield return PlaybookStreamEvent.RunStarted(runId, playbookId, 1);
         await Task.Yield();
         yield return PlaybookStreamEvent.RunCompleted(runId, playbookId, new PlaybookRunMetrics());
+    }
+
+    private static async IAsyncEnumerable<PlaybookStreamEvent> ThrowingStreamAsync(
+        Exception ex,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await Task.Yield();
+        ct.ThrowIfCancellationRequested();
+        // Yield at least one event so the C# compiler treats this as an iterator before
+        // throwing — matches realistic engine behavior (RunStarted then mid-stream throw).
+        yield return PlaybookStreamEvent.RunStarted(Guid.NewGuid(), Guid.NewGuid(), 0);
+        throw ex;
     }
 }

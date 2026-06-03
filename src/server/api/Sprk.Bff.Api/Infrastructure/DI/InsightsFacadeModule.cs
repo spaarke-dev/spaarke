@@ -84,6 +84,16 @@ public static class InsightsFacadeModule
         // never called" gap (see XML doc above for the 2026-05-29 incident).
         services.AddScoped<IPlaybookExecutionEngine, PlaybookExecutionEngine>();
 
+        // Wave C4 (task 023) — InsightsIngestOptions binds Spaarke:Insights:Ingest.
+        // Carries the universal-ingest@v1 playbook Guid (per-env) + UseUniversalIngestPlaybook
+        // feature flag. Consulted at runtime inside InsightsOrchestrator.RunIngestAsync to
+        // route between the new playbook path and the legacy IIngestOrchestrator path.
+        // ADR-030 + bff-extensions §F.1 inspection: NO conditional registration. The flag
+        // is a runtime choice between two unconditionally-registered implementations —
+        // not an asymmetric-registration pattern. See InsightsIngestOptions XML doc.
+        services.AddOptions<InsightsIngestOptions>()
+            .BindConfiguration(InsightsIngestOptions.SectionName);
+
         // IInsightsAi — the only Zone-A surface Zone B code may import per SPEC §3.5.
         // Scoped: matches the lifetime of its transitive Scoped dependencies (engine →
         // IPlaybookOrchestrationService). Per ADR-010 §Exceptions the interface seam

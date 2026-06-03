@@ -59,12 +59,22 @@ public class PredictMatterCostPlaybookTests
     private readonly Mock<IInsightsPlaybookExecutionCache> _cacheMock = new(MockBehavior.Strict);
     private readonly Mock<IOpenAiClient> _openAiMock = new(MockBehavior.Strict);
     private readonly Mock<Sprk.Bff.Api.Services.Ai.Insights.Ingest.IIngestOrchestrator> _ingestMock = new();
+    // Wave C4 (task 023) — IInsightsAi facade ctor extended with the playbook-path deps.
+    // These tests cover the AnswerQuestion path only (predict-matter-cost@v1 is a synthesis
+    // playbook, not ingest), so loose mocks suffice — they're never invoked.
+    private readonly Mock<Sprk.Bff.Api.Services.Ai.IPlaybookOrchestrationService> _playbookOrchestrationMock = new();
+    private readonly Mock<Sprk.Bff.Api.Services.Ai.Insights.Ingest.IIngestDocumentSource> _ingestDocumentSourceMock = new();
+    private readonly Microsoft.Extensions.Options.IOptions<Sprk.Bff.Api.Services.Ai.Insights.InsightsIngestOptions> _ingestOptions =
+        Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Services.Ai.Insights.InsightsIngestOptions());
 
     private InsightsOrchestrator CreateSut() => new(
         _engineMock.Object,
         _cacheMock.Object,
         _openAiMock.Object,
         _ingestMock.Object,
+        _playbookOrchestrationMock.Object,
+        _ingestDocumentSourceMock.Object,
+        _ingestOptions,
         NullLogger<InsightsOrchestrator>.Instance);
 
     private static InsightsAgentRequest MakeRequest(
