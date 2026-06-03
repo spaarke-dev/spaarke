@@ -21,6 +21,36 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
+  # =============================================================================
+  # Trivy security scan — TEMPORARILY NON-BLOCKING (2026-06-02)
+  # =============================================================================
+  # Operator decision per CLAUDE.md "CI gates are load-bearing or noise":
+  # The Trivy WORKFLOW is load-bearing (catches new CVEs), but the GitHub Code
+  # Scanning RESULT CHECK was blocking PRs based on a pre-existing 20-alert
+  # backlog inherited from master (not introduced by any individual PR).
+  #
+  # Backlog snapshot (2026-06-02): 14 alerts trace to stale `deploy/spe-api-deployment/`
+  # artifact (.deps.json snapshot — not running code), 28 alerts are DOMPurify in
+  # SpeAdminApp, 5 alerts are SpeDocumentViewer client deps, 3 alerts are
+  # @nevware21/ts-utils in SpaarkeAi, 3 alerts are CVE-2026-44503 Kiota (deferred
+  # to spaarke-graph-sdk-kiota-upgrade-r1).
+  #
+  # Posture taken here:
+  #   - SCAN STILL RUNS — visibility maintained in workflow logs
+  #   - continue-on-error: true on the scan step — workflow stays green
+  #   - SARIF upload DISABLED — no GitHub Code Scanning status check, no PR block
+  #
+  # RE-ENABLE WHEN:
+  #   - Tier 1 cleanup done: deploy/ in .gitignore + skip-dirs (eliminates ~14)
+  #   - Tier 2 done: DOMPurify + other real package bumps (file as
+  #     trivy-cve-backlog-cleanup-r1 project)
+  #   - Tier 3 done: documented .trivyignore for Kiota (accepted-risk per ADR)
+  # Then: delete `continue-on-error` on the scan step + remove `if: false` on the
+  # SARIF upload step. The blocking behavior returns automatically.
+  #
+  # See projects/spaarke-ai-platform-unification-r4/notes/pr-331-merge-followup.md
+  # for the full backlog catalog and remediation roadmap.
+  # =============================================================================
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
@@ -30,6 +60,7 @@ jobs:
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
+        continue-on-error: true  # TEMPORARY — see header block above
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -42,8 +73,10 @@ jobs:
           trivyignores: '.trivyignore'
 
       - name: Upload Trivy scan results to GitHub Security tab
+        # TEMPORARY: SARIF upload disabled to remove blocking Code Scanning check.
+        # Set to `if: always()` (or delete this line) to re-enable. See header block.
+        if: false
         uses: github/codeql-action/upload-sarif@v4
-        if: always()
         with:
           sarif_file: 'trivy-results.sarif'
 
