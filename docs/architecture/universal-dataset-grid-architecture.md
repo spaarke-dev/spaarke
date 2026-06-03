@@ -1,13 +1,23 @@
 # Universal Dataset Grid Architecture
 
-> **Status**: Current
+> ## ⚠ Superseded by the Spaarke DataGrid Framework (R1)
+>
+> This document describes the **legacy `UniversalDatasetGrid` PCF + `DatasetGrid` React component**, which **retires in Phase F** of project [`spaarke-datagrid-framework-r1`](../../projects/spaarke-datagrid-framework-r1/).
+>
+> **For new work, use the framework instead**:
+> - Architecture → [`SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md`](SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md)
+> - Configuration guide → [`DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md`](../guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md)
+>
+> This document is retained for context on existing consumers (SemanticSearch — Phase E migration) and the schema mapping legacy `IGridConfigJson` → new `DataGridConfiguration` (v1.0).
+
+> **Status**: Legacy (retires Phase F of spaarke-datagrid-framework-r1)
 > **Created**: 2026-02-05
 > **Domain**: UI Components / PCF / React Code Pages
 > **Related ADRs**: [ADR-012](../adr/ADR-012-shared-components.md), [ADR-021](../adr/ADR-021-fluent-ui-design-system.md), [ADR-022](../adr/ADR-022-pcf-platform-libraries.md)
 
 > **Last Reviewed**: 2026-04-05
 > **Reviewed By**: ai-procedure-refactoring-r2
-> **Status**: Current (updated)
+> **Status**: Legacy — superseded 2026-06-03 by the Spaarke DataGrid Framework R1
 >
 > Verified against code: `src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/` contains `UniversalDatasetGrid.tsx`, `ViewSelector.tsx`, `GridView.tsx`, `ListView.tsx`, `CardView.tsx`, `VirtualizedGridView.tsx`, `VirtualizedListView.tsx`. Shared services present: `FetchXmlService.ts`, `ViewService.ts`, `ConfigurationService.ts`. Type definitions `FetchXmlTypes.ts` and `ConfigurationTypes.ts` present. Production PCF consumer: `src/client/pcf/UniversalDatasetGrid/` (UniversalDatasetGridRoot.tsx). Code Page consumer: `SemanticSearch`. Status moved from Draft → Current given active production use. Updated the "React 16 API only" section to reflect the actual dual-entry-point model (`pcf-safe.ts` for PCF, main barrel for React 18/19 Code Pages).
 
