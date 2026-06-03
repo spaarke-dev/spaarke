@@ -117,7 +117,7 @@ public static class InsightsModule
         services.AddScoped<IReadOnlyDictionary<string, ILiveFactResolver>>(sp =>
             new Dictionary<string, ILiveFactResolver>(StringComparer.OrdinalIgnoreCase)
             {
-                ["matter"]  = sp.GetRequiredService<MatterLiveFactResolver>(),
+                ["matter"] = sp.GetRequiredService<MatterLiveFactResolver>(),
                 ["project"] = sp.GetRequiredService<ProjectLiveFactResolver>(),
                 ["invoice"] = sp.GetRequiredService<InvoiceLiveFactResolver>()
             });

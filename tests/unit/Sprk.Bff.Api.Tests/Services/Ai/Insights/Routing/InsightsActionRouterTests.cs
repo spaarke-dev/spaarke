@@ -40,9 +40,9 @@ public class InsightsActionRouterTests
     private static readonly Guid GenericLayer1ActionId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid PerAreaLayer1ActionId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid PerPairLayer2ActionId = Guid.Parse("33333333-3333-3333-3333-333333333333");
-    private static readonly Guid PracticeAreaRefId    = Guid.Parse("44444444-4444-4444-4444-444444444444");
-    private static readonly Guid DocumentTypeRefId    = Guid.Parse("55555555-5555-5555-5555-555555555555");
-    private static readonly Guid MatrixRowId          = Guid.Parse("66666666-6666-6666-6666-666666666666");
+    private static readonly Guid PracticeAreaRefId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+    private static readonly Guid DocumentTypeRefId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+    private static readonly Guid MatrixRowId = Guid.Parse("66666666-6666-6666-6666-666666666666");
 
     private static AnalysisAction DefaultLayer1Action() => new()
     {
