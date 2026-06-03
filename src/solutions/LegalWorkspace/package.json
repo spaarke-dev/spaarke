@@ -37,7 +37,7 @@
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
     "@types/dompurify": "^3.0.5",
     "diff": "^8.0.3",
-    "dompurify": "^3.3.3",
+    "dompurify": "^3.4.0",
     "lexical": "^0.41.0",
     "marked": "^17.0.4",
     "react-window": "^1.8.11",
@@ -58,5 +58,8 @@
   "peerDependencies": {
     "react": "^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0",
     "react-dom": "^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0"
+  },
+  "overrides": {
+    "@nevware21/ts-utils": "^0.14.0"
   }
 }

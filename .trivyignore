@@ -23,3 +23,65 @@
 # Workflow also skips `knowledge/` from Trivy scan (sdap-ci.yml); this entry is a
 # defense-in-depth backstop in case the skip-dirs config changes.
 azure-storage-account-key
+
+# ---------------------------------------------------------------------------
+# Deferred — pending sibling project
+# ---------------------------------------------------------------------------
+
+# CVE-2026-44503 — Microsoft.Kiota.Abstractions HIGH
+# Source: Directory.Packages.props + Sprk.Bff.Api.csproj (Kiota 1.21.2)
+# Reason: Fix requires Microsoft.Graph SDK 6.x / Kiota 2.x major version bump with
+#         breaking API changes throughout the BFF. Out of scope for the chore PR that
+#         introduced this suppression.
+# Reference: projects/spaarke-graph-sdk-kiota-upgrade-r1/ (sibling project)
+#            projects/trivy-cve-backlog-cleanup-r1/design.md §3 Cluster F
+#            ADR-029 (Graph 5.x / Kiota 1.x stack pending major-bump)
+# Mitigation: minimize Kiota-touching code paths during deferral window.
+CVE-2026-44503
+
+# ---------------------------------------------------------------------------
+# Deferred — build-tooling transitives (not in runtime bundles)
+# ---------------------------------------------------------------------------
+# The CVEs below all trace to transitive dev/build dependencies inside the
+# PCF tooling tree (eslint, glob, rimraf, pcf-scripts). They are:
+#   - Not in any runtime bundle that ships to users.
+#   - DoS / ReDoS classes — require attacker-controlled pattern input. CI build
+#     context has no untrusted glob input, so exploitability is effectively zero.
+#   - Parent-pinned (consumers explicitly require ^3.x). Forcing a transitive
+#     bump via `overrides` would conflict with typescript-eslint's ^9.x branch.
+# Re-evaluate when parent packages (eslint, glob, pcf-scripts) ship patched
+# releases that consume the fixed versions naturally.
+
+# CVE-2026-26996 — minimatch 3.1.2 HIGH (DoS via crafted glob)
+# Source: src/client/pcf/SpeDocumentViewer/package-lock.json (transitive: eslint, glob)
+CVE-2026-26996
+
+# CVE-2026-27903 — minimatch 3.1.2 HIGH (DoS)
+# Source: src/client/pcf/SpeDocumentViewer/package-lock.json (transitive: eslint, glob)
+CVE-2026-27903
+
+# CVE-2026-27904 — minimatch 3.1.2 HIGH (DoS)
+# Source: src/client/pcf/SpeDocumentViewer/package-lock.json (transitive: eslint, glob)
+CVE-2026-27904
+
+# CVE-2026-33750 — brace-expansion 1.1.12 MEDIUM (ReDoS in pattern expansion)
+# Source: src/client/pcf/SpeDocumentViewer/package-lock.json (transitive: minimatch dep)
+CVE-2026-33750
+
+# ---------------------------------------------------------------------------
+# Deferred — tarball-bundled in VisualHost PCF (LOW severity)
+# ---------------------------------------------------------------------------
+
+# CVE-2026-24001 — diff 7.0.0 LOW (ReDoS)
+# Source: src/client/pcf/VisualHost/package-lock.json (transitive via packed
+#         @spaarke/ui-components-2.0.0.tgz)
+# Reason: VisualHost consumes Spaarke.UI.Components as a packed tarball
+#         (`file:../../shared/Spaarke.UI.Components/spaarke-ui-components-2.0.0.tgz`),
+#         not a workspace symlink. Spaarke.UI.Components has been bumped to diff 8.0.4
+#         in this same PR; clearing this alert requires regenerating the tarball
+#         (`npm pack` in Spaarke.UI.Components, then commit the new .tgz, then
+#         npm install in VisualHost). That workflow is out of scope for the chore PR.
+#         LOW severity ReDoS in a diff-rendering code path with no untrusted input
+#         in PCF context.
+# Re-evaluate: file as part of the next VisualHost or Spaarke.UI.Components tarball-refresh task.
+CVE-2026-24001
