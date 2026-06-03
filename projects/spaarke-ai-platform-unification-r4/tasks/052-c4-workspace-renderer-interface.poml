@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>C-4: Introduce WorkspaceRenderer interface; LegalWorkspaceApp as default renderer</title>
+    <phase>Phase 5 — Substantive code changes</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>051</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, react, refactoring, architecture</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag 'frontend' + 'refactoring' + 'architecture'; introduces a new abstraction interface across packages; modifies .ts/.tsx code; depends on 051 hook consolidation. Risk R-4 mitigation (subtle behavioral diff in LegalWorkspaceApp mount). Per Step 3.5.5 decision tree, FULL rigor.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>depends on 051 hook consolidation — `WorkspaceLayoutWidget` should consume the consolidated hook before the renderer interface is added so the abstraction reflects the real surface</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Introduce a new `WorkspaceRenderer` interface in `@spaarke/ui-components`. `LegalWorkspaceApp` implements
+    it as the default renderer. `WorkspaceLayoutWidget` accepts an injected renderer (or uses a renderer
+    registry). Default registration points to `LegalWorkspaceApp`. ZERO BEHAVIORAL CHANGE TODAY — today's
+    pipeline (WorkspaceLayoutWidget → LegalWorkspaceApp embedded → section registry → section factories)
+    works identically to pre-refactor. Future hosts can register an alternate renderer without modifying
+    `WorkspaceLayoutWidget`.
+  </prompt>
+
+  <role>
+    Senior React/TypeScript developer with shared-lib abstraction experience. Familiar with the
+    two-wrapper model (task 010 W-1 doc). Bias toward minimal-surface interface design — the interface
+    must accommodate `LegalWorkspaceApp` today AND a hypothetical alternate renderer tomorrow without
+    overfitting.
+  </role>
+
+  <goal>
+    (a) `WorkspaceRenderer` interface defined in `@spaarke/ui-components/src/workspace/` (or appropriate
+    subdirectory); (b) `LegalWorkspaceApp` exports a `LegalWorkspaceRenderer` (or equivalent) that implements
+    the interface; (c) `WorkspaceLayoutWidget` accepts an injected renderer prop OR consults a renderer
+    registry with `LegalWorkspaceApp` registered as default; (d) ZERO behavioral diff from pre-refactor —
+    SpaarkeAi Workspace pane + standalone LegalWorkspace (if not retired) render identically; (e)
+    `tsc --noEmit` passes; (f) operator-visible smoke test confirms identical behavior.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-14 (C-4) + plan §4 Phase 5: SPAARKEAI-COMPONENTIZATION-AUDIT.md surfaced the dashboard
+      coupling — `WorkspaceLayoutWidget` directly imports + renders `LegalWorkspaceApp`. The two-wrapper
+      model (task 010 W-1) frames `LegalWorkspaceApp` as "the default dashboard renderer," with the
+      explicit understanding that future hosts (e.g., a SharePoint webpart, a Power Pages portal) might
+      register alternate renderers. This task introduces the seam — but does NOT add an alternate renderer.
+      Default registration points to `LegalWorkspaceApp`. Today's behavior is identical to pre-refactor.
+
+      Risk R-4 (subtle behavioral diff in LegalWorkspaceApp mount): the seam introduction must not change
+      mount semantics, prop shape, or auth-source assumptions. Test via SpaarkeAi smoke before merge.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/workspace/ (new — interface location)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (export interface)</file>
+      <file>src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx (implement interface)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx (accept renderer)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts (default registration)</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md (task 010 — concept frame)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Shared components MUST live in `@spaarke/*` lib family. The interface lives in `@spaarke/ui-components`; the implementation `LegalWorkspaceApp` lives in `src/solutions/LegalWorkspace/` — that's OK because the implementation is consumed via injection, not imported by the widget itself.</constraint>
+    <constraint source="ADR-021">Fluent v9 only — no hex / no rgba / no v8. The interface defines a contract; concrete renderers (LegalWorkspaceApp) MUST already comply.</constraint>
+    <constraint source="ADR-022">React 19 only for Code Pages. Interface uses standard React component types (`ComponentType&lt;Props&gt;` or render-prop function).</constraint>
+    <constraint source="ADR-028">Function-based auth — the interface MUST NOT require renderers to receive token snapshots. If auth is needed, pass `authenticatedFetch` via context or props (per task 051's pattern).</constraint>
+    <constraint source="project">Risk R-4 (mandatory mitigation): ZERO BEHAVIORAL CHANGE TODAY. The refactor introduces a seam; default registration points to `LegalWorkspaceApp`; SpaarkeAi behaves identically pre- and post-merge. Snapshot before; verify after.</constraint>
+    <constraint source="project">Interface design: minimal surface. Required props/methods should match what `WorkspaceLayoutWidget` already passes to `LegalWorkspaceApp` today. Do NOT speculatively over-design (no abstract base class, no plugin lifecycle hooks unless `LegalWorkspaceApp` already uses them).</constraint>
+    <constraint source="project">Default registration: `WorkspaceLayoutWidget` MUST default to `LegalWorkspaceApp` when no renderer is injected. Behavior unchanged for ALL existing consumers.</constraint>
+    <constraint source="project">Documentation: cross-link the new interface from `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` (task 010 doc) under "Two wrappers — Dashboard wrapper" section. Add a code-example showing how a future host would register an alternate renderer.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Rigor declaration">Output rigor declaration: 🔒 RIGOR LEVEL: FULL — architecture refactor across 3 packages, Risk R-4 mitigation, depends on task 051. Step 9.5 quality gates MANDATORY.</step>
+    <step order="1" name="Confirm dependency 051 landed">Verify task 051 (C-3 hook consolidation) is ✅ in TASK-INDEX.md. The consolidated hook should already be in `@spaarke/ai-widgets`. If 051 is in-progress, BLOCK and wait.</step>
+    <step order="2" name="Read WorkspaceLayoutWidget surface">Read `WorkspaceLayoutWidget.tsx`. Document the EXACT props/context it passes to `LegalWorkspaceApp` today. This is the surface the `WorkspaceRenderer` interface must accommodate.</step>
+    <step order="3" name="Pre-change behavioral snapshot">Open SpaarkeAi → Workspace pane → switch through 3 layouts → record screenshot or written description of UI state. Stash in `notes/c4-pre-change-snapshot.md`. This is the Risk R-4 reference.</step>
+    <step order="4" name="Design interface">Draft the `WorkspaceRenderer` interface in `notes/c4-interface-design.md`. Minimum-viable contract: a React component type or render-prop accepting (a) layout object, (b) authenticatedFetch dep (per ADR-028), (c) sessionStorage sentinels if LegalWorkspaceApp uses them today. Do NOT speculate beyond what `LegalWorkspaceApp` already needs.</step>
+    <step order="5" name="Implement interface">Create `src/client/shared/Spaarke.UI.Components/src/workspace/WorkspaceRenderer.ts` (or `.tsx` if it includes default-component definition). Export from `src/client/shared/Spaarke.UI.Components/src/index.ts`.</step>
+    <step order="6" name="Wrap LegalWorkspaceApp as renderer">Update `src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx` (or create a sibling `LegalWorkspaceRenderer.tsx`) to satisfy the interface. The implementation MUST be a thin wrap — do NOT change LegalWorkspaceApp internals.</step>
+    <step order="7" name="Update WorkspaceLayoutWidget">Update `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx` to accept an injected `renderer?: WorkspaceRenderer` prop OR consult a renderer registry. Default = `LegalWorkspaceRenderer` (imported from LegalWorkspace OR registered via `WorkspaceWidgetRegistry`). Behavior: when no renderer is injected, render exactly like today.</step>
+    <step order="8" name="Default registration">In `WorkspaceWidgetRegistry.ts` (or wherever defaults are set), register `LegalWorkspaceRenderer` as the default. Confirm: existing consumers (SpaarkeAi) work without ANY code change on their side.</step>
+    <step order="9" name="Build verification">Run `tsc --noEmit` + `npm run build` on `@spaarke/ui-components`, `@spaarke/ai-widgets`, `LegalWorkspace`, and `SpaarkeAi`. Verify 0 errors.</step>
+    <step order="9.5" name="Quality gates">Invoke `code-review` skill and `adr-check` skill. Verify ADR-012 placement, ADR-022 React 19 patterns, ADR-028 no token snapshots in interface contract or renderer wrap. Fix any HIGH-severity before proceeding.</step>
+    <step order="10" name="UI tests (Risk R-4 verification)">Invoke `ui-test` skill for the two parity tests defined below.</step>
+    <step order="11" name="Post-change behavioral verification">Open SpaarkeAi → Workspace pane → switch through the same 3 layouts as step 3. Compare against the pre-change snapshot. Expected: IDENTICAL.</step>
+    <step order="12" name="Cross-link in W-1 doc">Edit `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` (task 010): add a paragraph under "Two wrappers — Dashboard wrapper" noting `WorkspaceRenderer` interface + example of registering an alternate. Cite task 052.</step>
+    <step order="13" name="Deploy">Deploy SpaarkeAi via `code-page-deploy` skill.</step>
+    <step order="14" name="Update TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 052 status 🔲 → ✅.</step>
+    <step order="15" name="Document deviations">If any divergence between pre- and post-change behavior was discovered, record root cause + fix in `projects/spaarke-ai-platform-unification-r4/notes/` for R4 lessons-learned.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + tsc --noEmit per package</tool>
+    <tool name="Read">Read WorkspaceLayoutWidget surface + LegalWorkspaceApp</tool>
+    <tool name="Write">Create WorkspaceRenderer interface + LegalWorkspaceRenderer wrap + design notes</tool>
+    <tool name="Edit">Update WorkspaceLayoutWidget + WorkspaceWidgetRegistry + W-1 doc cross-link</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/workspace/WorkspaceRenderer.ts (new interface)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (export)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx (or sibling — implement interface)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx (accept renderer prop)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts (default registration)</output>
+    <output type="docs">docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md (cross-link + example)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/c4-interface-design.md</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/c4-pre-change-snapshot.md</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="LegalWorkspace renders identically (Risk R-4 verification)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Open SpaarkeAi page → Workspace pane</step>
+        <step>Switch through 3 layouts (matching the pre-change snapshot)</step>
+        <step>For each layout: verify all sections render at the same positions as pre-change</step>
+        <step>Verify scroll behavior, drag-and-drop, section close/expand interactions unchanged</step>
+        <step>Verify console has no new warnings or errors</step>
+        <step>Compare side-by-side (or pixel-diff) against pre-change snapshot</step>
+      </steps>
+      <expected>UI IDENTICAL to pre-change snapshot. ZERO observable behavioral diff (Risk R-4 mitigation).</expected>
+    </test>
+
+    <test name="Default renderer registered (no host code change needed)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Confirm SpaarkeAi consumer code was NOT modified by this task (only @spaarke/* libs + LegalWorkspace)</step>
+        <step>Open SpaarkeAi page → Workspace pane</step>
+        <step>Verify default rendering uses `LegalWorkspaceRenderer` (visually identical to before)</step>
+        <step>Open dev console and inspect WorkspaceLayoutWidget mount — confirm renderer prop is either absent (defaulted) OR resolved to LegalWorkspaceRenderer from the registry</step>
+      </steps>
+      <expected>SpaarkeAi works without any code changes on its side; the default-renderer registration is the seam.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the new interface, When inspected, Then `WorkspaceRenderer` is defined in `@spaarke/ui-components` and exported from its public surface.</criterion>
+    <criterion testable="true">Given `LegalWorkspaceApp`, When inspected, Then it (or a thin sibling) implements `WorkspaceRenderer`.</criterion>
+    <criterion testable="true">Given `WorkspaceLayoutWidget`, When inspected, Then it accepts an injected `renderer?` prop OR consults a renderer registry, with `LegalWorkspaceRenderer` as the registered default.</criterion>
+    <criterion testable="true">Given Risk R-4 (zero behavioral diff today), When SpaarkeAi Workspace pane is exercised end-to-end, Then UI is IDENTICAL to the pre-change snapshot.</criterion>
+    <criterion testable="true">Given SpaarkeAi as the existing consumer, When this task lands, Then SpaarkeAi source code is UNCHANGED — the seam is transparent.</criterion>
+    <criterion testable="true">Given `tsc --noEmit`, When run on `@spaarke/ui-components`, `@spaarke/ai-widgets`, `LegalWorkspace`, and `SpaarkeAi`, Then 0 type errors.</criterion>
+    <criterion testable="true">Given the W-1 doc, When inspected, Then it includes a cross-link to the new `WorkspaceRenderer` interface under "Two wrappers — Dashboard wrapper".</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The interface is a SEAM, not a feature. Do NOT add capabilities beyond what `LegalWorkspaceApp` already
+    provides. The future-host extensibility framing (per spec) is forward-looking; today's behavior is
+    the only behavior. Risk R-4 is real because seam introductions often subtly change mount timing, prop
+    resolution, or context inheritance — the pre/post snapshot is the only reliable mitigation.
+
+    If a renderer registry pattern is chosen (vs prop injection), keep it minimal: one registry, one
+    default, one override point. Avoid plugin architectures, lifecycle hooks, or composition primitives.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply FULL rigor protocol: rigor declaration at Step 0; pre-change snapshot is MANDATORY (Risk R-4 mitigation); Step 9.5 quality gates MANDATORY. ADR-012 + ADR-028 are LOAD-BEARING — verify interface remains context-agnostic and contains no token-snapshot expectations.</protocol>
+  </execution>
+</task>

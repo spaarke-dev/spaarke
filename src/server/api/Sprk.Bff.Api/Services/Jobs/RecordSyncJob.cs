@@ -213,12 +213,12 @@ public class RecordSyncJob : BackgroundService
         TokenCredential credential,
         ILogger<RecordSyncJob> logger)
     {
-        _cache             = cache             ?? throw new ArgumentNullException(nameof(cache));
+        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-        _configuration     = configuration     ?? throw new ArgumentNullException(nameof(configuration));
-        _options           = options?.Value    ?? throw new ArgumentNullException(nameof(options));
-        _credential        = credential        ?? throw new ArgumentNullException(nameof(credential));
-        _logger            = logger            ?? throw new ArgumentNullException(nameof(logger));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _credential = credential ?? throw new ArgumentNullException(nameof(credential));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <summary>
@@ -430,9 +430,9 @@ public class RecordSyncJob : BackgroundService
         // ISO 8601 OData-compatible datetime literal (no timezone suffix — Dataverse expects UTC Z)
         var watermarkStr = watermark.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
 
-        var odataFilter   = Uri.EscapeDataString($"modifiedon gt {watermarkStr}");
-        var odataSelect   = Uri.EscapeDataString(entity.SelectFields);
-        var odataOrderBy  = Uri.EscapeDataString("modifiedon asc");
+        var odataFilter = Uri.EscapeDataString($"modifiedon gt {watermarkStr}");
+        var odataSelect = Uri.EscapeDataString(entity.SelectFields);
+        var odataOrderBy = Uri.EscapeDataString("modifiedon asc");
 
         var url = $"{baseUrl.TrimEnd('/')}/api/data/v9.2/{entity.EntitySetName}" +
                   $"?$filter={odataFilter}" +
@@ -495,10 +495,10 @@ public class RecordSyncJob : BackgroundService
 
     public static RecordSearchDocument MapToSearchDocument(JsonElement record, EntityConfig entity)
     {
-        var recordId   = GetString(record, entity.IdField);
+        var recordId = GetString(record, entity.IdField);
         var recordName = GetString(record, entity.NameField);
-        var desc       = entity.DescriptionField is not null ? GetString(record, entity.DescriptionField) : string.Empty;
-        var reference  = entity.ReferenceField   is not null ? GetString(record, entity.ReferenceField)  : string.Empty;
+        var desc = entity.DescriptionField is not null ? GetString(record, entity.DescriptionField) : string.Empty;
+        var reference = entity.ReferenceField is not null ? GetString(record, entity.ReferenceField) : string.Empty;
 
         DateTimeOffset lastModified = DateTimeOffset.UtcNow;
         if (record.TryGetProperty("modifiedon", out var modifiedProp) &&
@@ -510,7 +510,7 @@ public class RecordSyncJob : BackgroundService
         // keywords: name + reference for keyword search (mirrors the PS1 script logic)
         var keywordParts = new List<string>();
         if (!string.IsNullOrEmpty(recordName)) keywordParts.Add(recordName);
-        if (!string.IsNullOrEmpty(reference))  keywordParts.Add(reference);
+        if (!string.IsNullOrEmpty(reference)) keywordParts.Add(reference);
         var keywords = string.Join(" ", keywordParts);
 
         var refNumbers = new List<string>();
@@ -518,18 +518,18 @@ public class RecordSyncJob : BackgroundService
 
         return new RecordSearchDocument
         {
-            Id                  = $"{entity.EntityLogicalName}_{recordId}",
-            RecordType          = entity.EntityLogicalName,
-            RecordName          = recordName,
-            RecordDescription   = desc,
-            Organizations       = new List<string>(),  // TODO: expand lookup joins
-            People              = new List<string>(),
-            ReferenceNumbers    = refNumbers,
-            Keywords            = keywords,
-            LastModified        = lastModified,
-            DataverseRecordId   = recordId,
+            Id = $"{entity.EntityLogicalName}_{recordId}",
+            RecordType = entity.EntityLogicalName,
+            RecordName = recordName,
+            RecordDescription = desc,
+            Organizations = new List<string>(),  // TODO: expand lookup joins
+            People = new List<string>(),
+            ReferenceNumbers = refNumbers,
+            Keywords = keywords,
+            LastModified = lastModified,
+            DataverseRecordId = recordId,
             DataverseEntityName = entity.EntityLogicalName,
-            PrivilegeGroupIds   = new List<string>(),
+            PrivilegeGroupIds = new List<string>(),
         };
     }
 
@@ -634,7 +634,7 @@ public class RecordSyncJob : BackgroundService
 
     public virtual async Task<DateTimeOffset> ReadWatermarkAsync(string entityType, CancellationToken ct)
     {
-        var key  = $"{WatermarkKeyPrefix}{entityType}";
+        var key = $"{WatermarkKeyPrefix}{entityType}";
         var data = await _cache.GetStringAsync(key, ct);
 
         if (string.IsNullOrEmpty(data) || !DateTimeOffset.TryParse(data, out var watermark))
@@ -668,7 +668,7 @@ public class RecordSyncJob : BackgroundService
 
     private SearchClient BuildSearchClient()
     {
-        var endpoint   = new Uri(_options.AiSearchEndpoint);
+        var endpoint = new Uri(_options.AiSearchEndpoint);
         var credential = new AzureKeyCredential(_options.AiSearchApiKey);
         return new SearchClient(endpoint, IndexName, credential);
     }

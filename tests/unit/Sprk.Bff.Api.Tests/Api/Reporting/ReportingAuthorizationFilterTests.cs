@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Api.Reporting;
@@ -19,11 +20,25 @@ namespace Sprk.Bff.Api.Tests.Api.Reporting;
 ///   3. Security role (sprk_ReportingAccess) → 403 when role absent
 ///   4. Privilege extraction (Viewer / Author / Admin) → stored in HttpContext.Items
 /// </summary>
+[Trait("status", "repaired")]
 public class ReportingAuthorizationFilterTests
 {
     // =========================================================================
     // Helpers
     // =========================================================================
+
+    /// <summary>
+    /// Builds a DefaultHttpContext suitable for executing an IResult.
+    /// ProblemHttpResult (returned by Results.Problem(...)) requires HttpContext.RequestServices
+    /// to resolve IProblemDetailsService / ILoggerFactory at ExecuteAsync time.
+    /// </summary>
+    private static DefaultHttpContext BuildResponseContext()
+    {
+        return new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider()
+        };
+    }
 
     private static IConfiguration BuildConfig(bool? moduleEnabled)
     {
@@ -110,7 +125,7 @@ public class ReportingAuthorizationFilterTests
         problemResult.Should().NotBeNull();
 
         // Execute the result and verify status code
-        var fakeHttpContext = new DefaultHttpContext();
+        var fakeHttpContext = BuildResponseContext();
         fakeHttpContext.Response.Body = new System.IO.MemoryStream();
         await problemResult!.ExecuteAsync(fakeHttpContext);
         fakeHttpContext.Response.StatusCode.Should().Be(404);
@@ -138,7 +153,7 @@ public class ReportingAuthorizationFilterTests
         // Assert
         nextCalled.Should().BeFalse();
 
-        var fakeHttpContext = new DefaultHttpContext();
+        var fakeHttpContext = BuildResponseContext();
         fakeHttpContext.Response.Body = new System.IO.MemoryStream();
         await ((IResult)result!).ExecuteAsync(fakeHttpContext);
         fakeHttpContext.Response.StatusCode.Should().Be(404);
@@ -170,7 +185,7 @@ public class ReportingAuthorizationFilterTests
         // Assert
         nextCalled.Should().BeFalse("next should not be called for unauthenticated users");
 
-        var fakeHttpContext = new DefaultHttpContext();
+        var fakeHttpContext = BuildResponseContext();
         fakeHttpContext.Response.Body = new System.IO.MemoryStream();
         await ((IResult)result!).ExecuteAsync(fakeHttpContext);
         fakeHttpContext.Response.StatusCode.Should().Be(401);
@@ -204,7 +219,7 @@ public class ReportingAuthorizationFilterTests
         // Assert
         nextCalled.Should().BeFalse();
 
-        var fakeHttpContext = new DefaultHttpContext();
+        var fakeHttpContext = BuildResponseContext();
         fakeHttpContext.Response.Body = new System.IO.MemoryStream();
         await ((IResult)result!).ExecuteAsync(fakeHttpContext);
         fakeHttpContext.Response.StatusCode.Should().Be(401);
@@ -237,7 +252,7 @@ public class ReportingAuthorizationFilterTests
         // Assert
         nextCalled.Should().BeFalse("next should not be called for users without the access role");
 
-        var fakeHttpContext = new DefaultHttpContext();
+        var fakeHttpContext = BuildResponseContext();
         fakeHttpContext.Response.Body = new System.IO.MemoryStream();
         await ((IResult)result!).ExecuteAsync(fakeHttpContext);
         fakeHttpContext.Response.StatusCode.Should().Be(403);

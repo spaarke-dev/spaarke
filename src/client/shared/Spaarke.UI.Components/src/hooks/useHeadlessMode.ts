@@ -75,9 +75,9 @@ export function useHeadlessMode(props: IUseHeadlessModeProps): IDatasetResult {
         const response = await webAPI.retrieveMultipleRecords(entityName, `?fetchXml=${encodeURIComponent(query)}`);
 
         // Extract records
-        const fetchedRecords: IDatasetRecord[] = response.entities.map((entity: any) => {
+        const fetchedRecords: IDatasetRecord[] = response.entities.map((entity: Record<string, unknown>) => {
           const record: IDatasetRecord = {
-            id: entity[`${entityName}id`] || entity.id,
+            id: String(entity[`${entityName}id`] ?? entity.id ?? ''),
             entityName,
           };
 
@@ -114,7 +114,9 @@ export function useHeadlessMode(props: IUseHeadlessModeProps): IDatasetResult {
         setTotalRecordCount(response.entities.length); // Note: FetchXML doesn't return total count
 
         // Extract paging cookie from response
-        const nextCookie = (response as any)['@Microsoft.Dynamics.CRM.fetchxmlpagingcookie'];
+        const nextCookie = (response as unknown as Record<string, string>)[
+          '@Microsoft.Dynamics.CRM.fetchxmlpagingcookie'
+        ];
         setPagingInfo({ pageNumber: page, pagingCookie: nextCookie });
 
         setLoading(false);

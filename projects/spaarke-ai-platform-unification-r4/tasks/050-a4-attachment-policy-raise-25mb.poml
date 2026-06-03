@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>A-4: Raise chat attachment cap (client + server) to 25 MB and publish CHAT-ATTACHMENT-POLICY.md</title>
+    <phase>Phase 5 — Substantive code changes</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, frontend, react, fluent-ui, e2e-test, deploy, documentation</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'frontend' + 'react'; modifies both .cs and .ts code; 6+ steps; touches user-facing chat surface AND BFF endpoint. Per Step 3.5.5 decision tree, FULL rigor is mandatory. CLAUDE.md §10 Placement Justification REQUIRED.</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Raise the chat attachment cap end-to-end from the current values to 25 MB. (1) Client-side: update
+    `MAX_FILE_BYTES` in `useChatFileAttachment.ts` (currently 10 MB) to 25 MB; update tests and user-facing
+    error string. (2) Server-side: update `MaxAttachmentSizeBytes` (or equivalent constant) in
+    `ChatEndpoints.cs`; review `MaxAttachmentTextCharsPerFile` (currently 2.5M) and `MaxAttachmentTextCharsTotal`
+    (currently 5M) and scale proportionally if warranted; update tests. (3) Publish
+    `docs/standards/CHAT-ATTACHMENT-POLICY.md` covering size cap rationale, MIME allow-list, total-text cap,
+    PDF page cap, upgrade path. (4) Boundary tests at 1 MB / 10 MB / 24 MB / 26 MB. (5) Verify CLAUDE.md §10
+    Placement Justification in PR notes; verify publish-size ≤60 MB compressed.
+  </prompt>
+
+  <role>
+    Full-stack developer with .NET 8 Minimal API + React 19 / Fluent UI v9 expertise. Familiar with BFF
+    §10 hygiene rules and ADR-013 AI-architecture placement criteria. Bias toward minimal blast radius:
+    raise the cap, don't redesign the attachment pipeline.
+  </role>
+
+  <goal>
+    (a) `MAX_FILE_BYTES` in `useChatFileAttachment.ts` raised to `25 * 1024 * 1024` with the user-facing
+    error string updated to "exceeds 25 MB"; (b) server-side `MaxAttachmentSizeBytes` and char-cap constants
+    in `ChatEndpoints.cs` aligned with 25 MB cap and proportional text-char scaling decision documented;
+    (c) tests at boundary sizes (1/10/24/26 MB) pass; (d) `docs/standards/CHAT-ATTACHMENT-POLICY.md` published
+    covering size cap, MIME allow-list, total-text cap, PDF page cap, upgrade path; (e) CLAUDE.md §10
+    Placement Justification entry in PR description; (f) `dotnet publish` ≤60 MB compressed verified.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-04 (A-4): operator decision OC-R4-01 (2026-05-25) shifted A-4 from doc-only to code +
+      policy doc + boundary tests. Original spec assumed client cap was 5 MB; verified at task start: the
+      current client cap is `MAX_FILE_BYTES = 10 * 1024 * 1024` (10 MB) per `useChatFileAttachment.ts:139`.
+      Other surfaces already operate at 25 MB (DocumentUploadWizard:73, OfficeService.cs:1451) — 25 MB is
+      an established Spaarke standard, not a stretch. The R3 attachment feature path remains BFF in-process
+      per refined ADR-013 (2026-05-20) and the F-1 retroactive memo (task 002). NFR-08 bundle-size budget:
+      this is a constant change + a policy doc; bundle impact should be near-zero (text cap, not file
+      binary impact). NFR-01 publish-size: must verify ≤60 MB compressed after server change. CLAUDE.md
+      §10 Placement Justification: REQUIRED since this modifies a BFF endpoint.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatFileAttachment.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/useChatFileAttachment.test.ts</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ChatEndpointsAttachmentsTests.cs</file>
+      <file>docs/standards/CHAT-ATTACHMENT-POLICY.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API only — no controllers. Modify the existing endpoint handler in `ChatEndpoints.cs`; do not introduce new routing patterns.</constraint>
+    <constraint source="ADR-010">DI minimalism — do NOT create a new feature module or service. The attachment validation lives in the existing chat endpoint pipeline; constants update only.</constraint>
+    <constraint source="ADR-013">AI features extend the BFF in-process (refined 2026-05-20). Attachment text extraction stays client-side; payload validation stays BFF in-process. No new AI service. CRUD code MUST NOT directly inject `IOpenAiClient` / `IPlaybookService` — N/A here since this task does not add new injections.</constraint>
+    <constraint source="ADR-028">Function-based auth — chat endpoint already uses `RequireAuthorization()` + `AddAiAuthorizationFilter()`. Do NOT modify auth posture. Do NOT introduce token snapshots in any code touched.</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — verify `dotnet publish` ≤60 MB compressed after change. No new NuGet packages.</constraint>
+    <constraint source="project">CLAUDE.md §10 Placement Justification REQUIRED in PR description citing `.claude/constraints/bff-extensions.md` decision criteria. Memo template: forward example for §10 (B-4 and B-5 will produce companions).</constraint>
+    <constraint source="project">Bundle-size impact: NFR-08 SpaarkeAi gzip ≤ +50 KB vs R3 918 KB baseline. This change is a constant + policy doc; expected impact ≈ 0. Measure before/after.</constraint>
+    <constraint source="project">CVE check (NFR-09): no new NuGet packages introduced; `dotnet list package --vulnerable --include-transitive` must return 0 new HIGH-severity findings.</constraint>
+    <constraint source="project">Server-side total-text cap (`MaxAttachmentTextCharsTotal = 5_000_000`) MUST be reviewed; if not raised, document the rationale in the policy doc (text density independent of binary file size).</constraint>
+    <constraint source="project">Single-LLM-call invariant (R2 D-01 lesson): 25 MB attachments still flow through ONE chat message + ONE LLM call. Do NOT introduce a separate pre-extraction call.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/bff-placement-justification-retroactive.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Rigor declaration">Output the mandatory rigor declaration: 🔒 RIGOR LEVEL: FULL — bff-api + frontend tags, modifies .cs/.ts code, 6+ steps, §10 BFF hygiene applies.</step>
+    <step order="1" name="Confirm current state">Re-read `useChatFileAttachment.ts:136-140` and `ChatEndpoints.cs:1968-2055` to lock in the current cap values (MAX_FILE_BYTES, MaxAttachmentSizeBytes, MaxAttachmentTextCharsPerFile, MaxAttachmentTextCharsTotal). Locate the exact server-side `MaxAttachmentSizeBytes` constant (search `ChatEndpoints.cs` if not at the cited lines).</step>
+    <step order="2" name="§10 Placement Justification">Draft the Placement Justification entry per `.claude/constraints/bff-extensions.md` decision criteria: (a) Is this AI-coupled? (yes — chat is the AI surface); (b) Is the in-process answer correct? (yes — text extraction stays client-side, validation stays BFF in-process per ADR-013); (c) Publish-size impact? (constants only); (d) CVE impact? (no new packages). Stash in PR notes or `projects/spaarke-ai-platform-unification-r4/notes/`.</step>
+    <step order="3" name="Update client-side cap">Edit `useChatFileAttachment.ts` line 139: `MAX_FILE_BYTES = 25 * 1024 * 1024`. Update the user-facing error message string (line ~375) to reflect 25 MB. Search for any other 10 MB / 5 MB references in the same file and adjust if found.</step>
+    <step order="4" name="Update client tests">Edit `useChatFileAttachment.test.ts`: replace 10 MB / 5 MB assertions with 25 MB. Add boundary cases at 1 MB / 10 MB / 24 MB / 26 MB if not already present.</step>
+    <step order="5" name="Update server-side cap">Locate and update the server-side equivalent in `ChatEndpoints.cs`. Decide whether to scale `MaxAttachmentTextCharsPerFile` / `MaxAttachmentTextCharsTotal`: a 25 MB binary cap does NOT imply a higher text cap (a 25 MB PDF may still extract to &lt;1M chars). Document the decision in the policy doc. If scaled, also update related test fixtures.</step>
+    <step order="6" name="Update server tests">Edit `ChatEndpointsAttachmentsTests.cs`: add 1/10/24/26 MB boundary cases; verify clear user-facing error at 26 MB rejection (matches FR-04 acceptance criterion).</step>
+    <step order="7" name="Write CHAT-ATTACHMENT-POLICY.md">Create `docs/standards/CHAT-ATTACHMENT-POLICY.md` covering: size cap rationale (25 MB matches DocumentUploadWizard + OfficeService standards); MIME allow-list (4 types: PDF, DOCX, plain text, Markdown); total-text cap policy + rationale; PDF max-page cap (200); upgrade path (how to raise in the future); cross-link to ADR-013 + the §10 Placement Justification model.</step>
+    <step order="8" name="Build verification (client)">Run `npm run build` in `src/client/shared/Spaarke.UI.Components`. Verify 0 errors. Run `npm test` for `useChatFileAttachment.test.ts`. Capture before/after bundle size if directly measurable.</step>
+    <step order="9" name="Build verification (server)">Run `dotnet build src/server/api/Sprk.Bff.Api/` — verify 0 errors / 0 new warnings. Run `dotnet test --filter "FullyQualifiedName~ChatEndpoints"` — verify all pass.</step>
+    <step order="9.5" name="Quality gates">Invoke `code-review` skill and `adr-check` skill against changes. Quality gates MANDATORY (FULL rigor). Capture findings; fix any HIGH-severity before proceeding. Verify §10 BFF hygiene enforcement passes (skills updated 2026-05-21 per recent commit).</step>
+    <step order="10" name="Publish-size check (NFR-01)">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/` and verify compressed publish size ≤60 MB. Record actual size + delta vs baseline in PR notes. Per CLAUDE.md §10 — binding workflow rule.</step>
+    <step order="11" name="CVE check (NFR-09)">Run `dotnet list package --vulnerable --include-transitive` — verify 0 new HIGH-severity findings. (No new packages expected.)</step>
+    <step order="12" name="UI test execution">Invoke `ui-test` skill against SpaarkeAi chat surface for the three UI tests defined in &lt;ui-tests&gt; below.</step>
+    <step order="13" name="Deploy">Deploy BFF via `bff-deploy` skill (Azure App Service); deploy SpaarkeAi via `code-page-deploy` skill if SprkChat is in the SpaarkeAi bundle. Verify deployment ping/health checks pass.</step>
+    <step order="14" name="Update TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 050 status 🔲 → ✅. Update current-task.md per CLAUDE.md §7.</step>
+    <step order="15" name="Document deviations">If any deviation (e.g., text-char caps NOT scaled proportionally with a documented rationale, or boundary edge case discovered), record in `projects/spaarke-ai-platform-unification-r4/notes/` for R4 lessons-learned.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish .NET — verify 0 errors and publish ≤60 MB compressed</tool>
+    <tool name="npm">Build + test the @spaarke/ui-components package</tool>
+    <tool name="Read">Read current cap constants and test fixtures</tool>
+    <tool name="Edit">Update constants in `.ts` + `.cs` + test files; create policy doc</tool>
+    <tool name="Write">Create `docs/standards/CHAT-ATTACHMENT-POLICY.md`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatFileAttachment.ts (MAX_FILE_BYTES raised + error string updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (MaxAttachmentSizeBytes + char caps reviewed)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/useChatFileAttachment.test.ts (boundary cases)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ChatEndpointsAttachmentsTests.cs (boundary cases)</output>
+    <output type="docs">docs/standards/CHAT-ATTACHMENT-POLICY.md (new)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/ — Placement Justification entry + publish-size delta record</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Upload 25 MB attachment succeeds">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Open SpaarkeAi page → Assistant pane → start a chat</step>
+        <step>Click the `+` attach button</step>
+        <step>Select a ~25 MB PDF file (just under the cap)</step>
+        <step>Wait for client-side text extraction to complete</step>
+        <step>Verify the attachment chip appears with status "ready"</step>
+        <step>Send the chat message</step>
+        <step>Verify the BFF accepts the request (no 4xx rejection)</step>
+        <step>Verify the LLM response references the attachment content</step>
+      </steps>
+      <expected>Attachment uploads, extracts, and is included in the chat send; LLM responds referencing attachment content.</expected>
+    </test>
+
+    <test name="Upload 26 MB attachment rejected with clear error">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Open SpaarkeAi page → Assistant pane → start a chat</step>
+        <step>Click the `+` attach button</step>
+        <step>Select a ~26 MB file (just over the cap)</step>
+        <step>Verify the rejection error appears in the chat surface</step>
+        <step>Verify the error message says "exceeds 25 MB" (or near-identical wording)</step>
+        <step>Verify the chip does NOT enter "ready" state — only an error chip is shown</step>
+        <step>Verify console has no uncaught JS errors</step>
+      </steps>
+      <expected>Client rejects with clear user-facing "exceeds 25 MB" error; no network call to BFF; no console errors.</expected>
+    </test>
+
+    <test name="Multi-file at total 25 MB succeeds">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Open SpaarkeAi page → Assistant pane → start a chat</step>
+        <step>Attach 3 files totaling ~25 MB (e.g., 10 MB + 10 MB + 5 MB)</step>
+        <step>Verify all 3 chips reach "ready" status</step>
+        <step>Send the chat message</step>
+        <step>Verify BFF accepts; the single LLM call includes all 3 attachments (R2 D-01 single-LLM-call invariant)</step>
+      </steps>
+      <expected>Multiple files within per-file caps work; payload sent as a single chat message + single LLM call.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a 24 MB attachment, When the user attaches it in chat, Then the chip reaches "ready" status and the message sends successfully.</criterion>
+    <criterion testable="true">Given a 25 MB attachment, When the user attaches it in chat, Then it is accepted at the boundary (FR-04 acceptance).</criterion>
+    <criterion testable="true">Given a 26 MB attachment, When the user attaches it, Then it is rejected with a clear user-facing error referencing the 25 MB limit (FR-04 acceptance).</criterion>
+    <criterion testable="true">Given the BFF endpoint, When a request exceeds the server-side `MaxAttachmentSizeBytes`, Then the BFF returns a 4xx with a clear error body.</criterion>
+    <criterion testable="true">Given `docs/standards/CHAT-ATTACHMENT-POLICY.md` exists, When read, Then it covers size cap rationale, MIME allow-list, total-text cap, PDF max-page cap, and upgrade path.</criterion>
+    <criterion testable="true">Given the §10 Placement Justification rule, When the PR is opened, Then PR notes contain a Placement Justification entry citing `.claude/constraints/bff-extensions.md` decision criteria.</criterion>
+    <criterion testable="true">Given the NFR-01 publish-size rule, When `dotnet publish -c Release` is run, Then the compressed publish size is ≤60 MB and the delta vs baseline is recorded in PR notes.</criterion>
+    <criterion testable="true">Given NFR-09 CVE policy, When `dotnet list package --vulnerable --include-transitive` is run, Then 0 new HIGH-severity findings are reported.</criterion>
+    <criterion testable="true">Given the single-LLM-call invariant (R2 D-01), When 25 MB of attachments are sent, Then exactly ONE chat message + ONE LLM call is made (no separate pre-extraction round-trip).</criterion>
+    <criterion testable="true">All unit + integration tests pass (`dotnet test` for ChatEndpoints tests; `npm test` for useChatFileAttachment tests).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec said "raise from 5 MB → 25 MB" — verified at task start that current client cap is 10 MB (not 5 MB).
+    The end-state target (25 MB) is unchanged; just the delta size differs. The 5 MB figure in spec is
+    historical. Update the §10 Placement Justification entry to cite the actual delta (10 → 25 MB).
+    Server-side `MaxAttachmentTextCharsPerFile` (2.5M) and `MaxAttachmentTextCharsTotal` (5M) are independent
+    of the binary cap — a 25 MB PDF often extracts to ≤1M chars. Reviewing them is required per spec; raising
+    them is OPTIONAL with a documented rationale (the policy doc is the right place for that rationale).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply FULL rigor protocol: declare rigor at Step 0; Step 9.5 quality gates (code-review + adr-check) MANDATORY; §10 Placement Justification REQUIRED; publish-size verification REQUIRED (NFR-01). `.claude/constraints/bff-extensions.md` is LOAD-BEARING for §10 — read in full before drafting the Placement Justification.</protocol>
+  </execution>
+</task>

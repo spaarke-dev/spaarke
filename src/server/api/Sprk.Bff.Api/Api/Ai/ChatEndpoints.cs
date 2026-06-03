@@ -3,15 +3,15 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
-using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Services.Ai.Safety.CrossMatter;
+using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Telemetry;
-
 // Explicit alias to avoid ChatMessage ambiguity between domain model and AI framework.
 // Sprk.Bff.Api.Models.Ai.Chat.ChatMessage is the Dataverse persistence record.
 // Microsoft.Extensions.AI.ChatMessage is the AI framework conversation message.
@@ -727,6 +727,25 @@ public static class ChatEndpoints
             logger.LogInformation(
                 "Client disconnected during SendMessage: session={SessionId}", sessionId);
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B2/B3): NullSprkChatAgentFactory or
+            // NullPendingPlanManager surfaced. Response is already committed as text/event-stream
+            // — emit the error as an SSE 'error' chunk with the stable errorCode so the client
+            // can render kill-switch-specific UX. Mirrors the WorkspaceMatterEndpoints HandleAiSummary
+            // pattern established in Tier 2.
+            logger.LogDebug(
+                "SendMessage called while AI chat feature disabled. ErrorCode={ErrorCode}, Session={SessionId}",
+                ex.ErrorCode, sessionId);
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), CancellationToken.None);
+                await WriteChatSSEAsync(
+                    response,
+                    new ChatSseEvent("error", $"[{ex.ErrorCode}] {ex.Message}"),
+                    CancellationToken.None);
+            }
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error during SendMessage: session={SessionId}", sessionId);
@@ -1088,7 +1107,30 @@ public static class ChatEndpoints
         // Atomic get-and-delete: prevents double-execution (task 070 design doc, Risk 2)
         // First approval: finds the key, deletes it, returns the plan → proceed
         // Second approval: key already gone → returns null → 409 Conflict
-        var pendingPlan = await pendingPlanManager.GetAndDeleteAsync(tenantId, sessionId, cancellationToken);
+        PendingPlan? pendingPlan;
+        try
+        {
+            pendingPlan = await pendingPlanManager.GetAndDeleteAsync(tenantId, sessionId, cancellationToken);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B3): NullPendingPlanManager surfaced. Response
+            // has NOT yet been committed as SSE, so return a 503 ProblemDetails JSON body.
+            logger.LogDebug(
+                "ApprovePlan called while AI compound-intent feature disabled. ErrorCode={ErrorCode}, Session={SessionId}",
+                ex.ErrorCode, sessionId);
+            response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            response.ContentType = "application/problem+json";
+            await response.WriteAsJsonAsync(new
+            {
+                type = FeatureDisabledResults.TypeUri,
+                title = "Feature Disabled",
+                status = 503,
+                detail = ex.Message,
+                errorCode = ex.ErrorCode
+            }, cancellationToken);
+            return;
+        }
 
         if (pendingPlan is null)
         {
@@ -1355,6 +1397,22 @@ public static class ChatEndpoints
                 "Client disconnected during ApprovePlan: session={SessionId}, planId={PlanId}",
                 sessionId, pendingPlan.PlanId);
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B2): NullSprkChatAgentFactory surfaced during
+            // agent construction after SSE headers were already committed. Emit SSE error chunk.
+            logger.LogDebug(
+                "ApprovePlan called while AI chat feature disabled. ErrorCode={ErrorCode}, Session={SessionId}, PlanId={PlanId}",
+                ex.ErrorCode, sessionId, pendingPlan.PlanId);
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), CancellationToken.None);
+                await WriteChatSSEAsync(
+                    response,
+                    new ChatSseEvent("error", $"[{ex.ErrorCode}] {ex.Message}"),
+                    CancellationToken.None);
+            }
+        }
         catch (Exception ex)
         {
             logger.LogError(ex,
@@ -1433,6 +1491,16 @@ public static class ChatEndpoints
                     }
                 }
             }
+            catch (FeatureDisabledException ex)
+            {
+                // Task 011 Phase 1b Tier 2 (D-09 §2 B6): NullPlaybookService surfaced. Fail-fast 503
+                // — returning empty playbook list would silently render "no playbooks available"
+                // and mask the kill-switch state.
+                logger.LogDebug(
+                    "Playbook list called while AI feature disabled. ErrorCode={ErrorCode}, UserId={UserId}",
+                    ex.ErrorCode, userId);
+                return ex.AsFeatureDisabled503();
+            }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Failed to load user playbooks for userId={UserId}; continuing with public only", userId);
@@ -1450,6 +1518,14 @@ public static class ChatEndpoints
                     playbooks.Add(new ChatPlaybookInfo(pb.Id.ToString(), pb.Name, pb.Description, pb.IsPublic));
                 }
             }
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B6): NullPlaybookService surfaced. Fail-fast 503.
+            logger.LogDebug(
+                "Public playbook list called while AI feature disabled. ErrorCode={ErrorCode}",
+                ex.ErrorCode);
+            return ex.AsFeatureDisabled503();
         }
         catch (Exception ex)
         {
@@ -1589,8 +1665,20 @@ public static class ChatEndpoints
             "Resolving commands for session={SessionId}, tenant={TenantId}, entityType={EntityType}",
             sessionId, tenantId, session.HostContext?.EntityType ?? "(none)");
 
-        var resolver = agentFactory.CreateCommandResolver();
-        var commands = await resolver.ResolveCommandsAsync(tenantId, session.HostContext, cancellationToken);
+        IEnumerable<CommandEntry> commands;
+        try
+        {
+            var resolver = agentFactory.CreateCommandResolver();
+            commands = await resolver.ResolveCommandsAsync(tenantId, session.HostContext, cancellationToken);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B2): NullSprkChatAgentFactory surfaced.
+            logger.LogDebug(
+                "GetCommands called while AI chat feature disabled. ErrorCode={ErrorCode}, Session={SessionId}",
+                ex.ErrorCode, sessionId);
+            return ex.AsFeatureDisabled503();
+        }
 
         // Partition into system vs. dynamic and project to CommandResponseItem with
         // explicit source discriminator for frontend SlashCommandMenu grouping (R2-053).
@@ -1945,7 +2033,9 @@ public static class ChatEndpoints
     }
 
     // =========================================================================
-    // FR-07 Multi-file attachment validation + composition (task 050)
+    // FR-07 Multi-file attachment validation + composition (R3 task 050)
+    // R4 task 050 (A-4): client-side binary cap raised 10 → 25 MB; server text
+    // caps unchanged (operate on extracted text, not binary — see policy doc).
     // =========================================================================
     //
     // PLACEMENT JUSTIFICATION (per CLAUDE.md §10 BFF Hygiene + ADR-013):
@@ -1956,6 +2046,9 @@ public static class ChatEndpoints
     // - All four BFF decision criteria (ADR-013 §"Decision Criteria") answer "BFF" → stays here.
     // - All four CRUD→AI facade boundary rules satisfied: this is AI-internal code in
     //   Api/Ai/, not CRUD code consuming AI — no IBffAiPublicContracts facade needed.
+    //
+    // See docs/standards/CHAT-ATTACHMENT-POLICY.md for the policy, MIME allow-list,
+    // total-text cap rationale, PDF page cap, and upgrade path.
 
     /// <summary>Maximum attachments per chat message (NFR-04, FR-07).</summary>
     internal const int MaxAttachmentsPerMessage = 5;
@@ -1963,13 +2056,24 @@ public static class ChatEndpoints
     /// <summary>
     /// Maximum extracted text length per attachment, in characters.
     /// ~2.5M chars ≈ 10 MB UTF-16 in memory; bounds LLM prompt growth per attachment.
-    /// Aligned with NFR-04 (10 MB per file at the binary/extraction layer).
+    ///
+    /// R4 task 050 (A-4) raised the CLIENT-side binary cap from 10 MB → 25 MB to
+    /// align with DocumentUploadWizard + OfficeService. This char-cap is NOT scaled
+    /// proportionally because it operates on EXTRACTED TEXT, not raw binary. A 25 MB
+    /// PDF typically extracts to &lt;1M chars (image-heavy PDFs even less); a 25 MB
+    /// DOCX often extracts to &lt;500K chars. Keeping this cap at 2.5M chars preserves
+    /// the LLM-prompt envelope without artificially limiting binary file size.
+    ///
+    /// See <c>docs/standards/CHAT-ATTACHMENT-POLICY.md</c> for the full policy + rationale.
     /// </summary>
     internal const int MaxAttachmentTextCharsPerFile = 2_500_000;
 
     /// <summary>
     /// Maximum sum of all attachment <c>TextContent</c> lengths in a single message.
     /// Bounds the LLM prompt size so 5 × 2.5M = 12.5M does not balloon context.
+    ///
+    /// R4 task 050 (A-4): NOT scaled with the 25 MB binary cap — char-cap is the
+    /// LLM-prompt envelope, independent of binary file size. See policy doc.
     /// </summary>
     internal const int MaxAttachmentTextCharsTotal = 5_000_000;
 
@@ -2032,7 +2136,8 @@ public static class ChatEndpoints
                     status: 400));
             }
 
-            // Rule 3: per-file size cap (NFR-04: ≤ 10 MB extracted text)
+            // Rule 3: per-file textContent cap (LLM prompt envelope; independent of
+            // the 25 MB client-side binary cap raised in R4 A-4 — see policy doc).
             if (att.TextContent.Length > MaxAttachmentTextCharsPerFile)
             {
                 return (400, BuildProblemDetails(

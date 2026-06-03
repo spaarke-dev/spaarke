@@ -329,7 +329,7 @@ const useStyles = makeStyles({
 // Citation marker regex (matches [1], [2], [12], etc.)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CITATION_MARKER_REGEX = /\[(\d+)\]/g;
+const _CITATION_MARKER_REGEX = /\[(\d+)\]/g;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sub-renderers
@@ -343,10 +343,7 @@ function renderMarkdownCard(data: IMarkdownResponse, styles: ReturnType<typeof u
   const html = renderMarkdownHtml(data.text);
   return (
     <div className={styles.markdownRoot}>
-      <div
-        className={styles.markdownText}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      <div className={styles.markdownText} dangerouslySetInnerHTML={{ __html: html }} />
     </div>
   );
 }
@@ -378,14 +375,11 @@ function renderCitations(data: ICitationsResponse, styles: ReturnType<typeof use
 
   return (
     <div className={styles.citationsRoot}>
-      <div
-        className={styles.citationsText}
-        dangerouslySetInnerHTML={{ __html: renderCitationsHtml(data.text) }}
-      />
+      <div className={styles.citationsText} dangerouslySetInnerHTML={{ __html: renderCitationsHtml(data.text) }} />
       {data.citations.length > 0 && (
         <div className={styles.sourcesList}>
           <div className={styles.sourcesHeading}>Sources</div>
-          {data.citations.map((c) => {
+          {data.citations.map(c => {
             const isWeb = c.sourceType === 'web';
             const key = isWeb ? `web-${c.index}` : (c.documentId ?? `doc-${c.index}`);
 
@@ -399,12 +393,7 @@ function renderCitations(data: ICitationsResponse, styles: ReturnType<typeof use
                 <span>
                   [{c.index}]&nbsp;
                   {isWeb && c.url ? (
-                    <Link
-                      href={c.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={c.title}
-                    >
+                    <Link href={c.url} target="_blank" rel="noopener noreferrer" title={c.title}>
                       {c.title}
                     </Link>
                   ) : (
@@ -432,10 +421,7 @@ function renderDiff(
   return (
     <div className={styles.diffRoot}>
       {diffHtml ? (
-        <div
-          className={styles.diffSummaryText}
-          dangerouslySetInnerHTML={{ __html: diffHtml }}
-        />
+        <div className={styles.diffSummaryText} dangerouslySetInnerHTML={{ __html: diffHtml }} />
       ) : (
         <Text className={styles.diffSummaryText}>{data.summary}</Text>
       )}
@@ -469,12 +455,7 @@ function renderEntityCard(
           </Text>
         }
         description={
-          <Badge
-            className={styles.entityTypeBadge}
-            appearance="tint"
-            color="brand"
-            size="small"
-          >
+          <Badge className={styles.entityTypeBadge} appearance="tint" color="brand" size="small">
             {data.entityType}
           </Badge>
         }
@@ -482,7 +463,7 @@ function renderEntityCard(
       {data.fields && data.fields.length > 0 && (
         <CardPreview>
           <div className={styles.entityFieldsGrid}>
-            {data.fields.map((field) => (
+            {data.fields.map(field => (
               <div key={field.label} className={styles.entityField}>
                 <span className={styles.entityFieldLabel}>{field.label}</span>
                 <span className={styles.entityFieldValue}>{field.value}</span>
@@ -524,11 +505,7 @@ function renderActionConfirmation(
               style: { fontSize: 20 },
             })}
         <Text className={styles.confirmationActionName}>{data.actionName}</Text>
-        <Badge
-          appearance="tint"
-          color={isSuccess ? 'success' : 'danger'}
-          size="small"
-        >
+        <Badge appearance="tint" color={isSuccess ? 'success' : 'danger'} size="small">
           {isSuccess ? 'Completed' : 'Failed'}
         </Badge>
       </div>

@@ -59,7 +59,7 @@ describe('BrowserMsalStrategy', () => {
 
   beforeEach(() => {
     // Reset all mocks between tests
-    Object.values(mockInstance).forEach((fn) => {
+    Object.values(mockInstance).forEach(fn => {
       if (typeof fn === 'function' && 'mockClear' in fn) fn.mockClear();
     });
     mockInstance.getAllAccounts.mockReturnValue([mockAccount]);

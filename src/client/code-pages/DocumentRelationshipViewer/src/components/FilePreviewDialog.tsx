@@ -6,9 +6,7 @@
  *
  * App.tsx must pass `documentId` (required by the rich version).
  */
-export {
-  RichFilePreviewDialog as FilePreviewDialog,
-} from '@spaarke/ui-components/components/FilePreview/RichFilePreviewDialog';
+export { RichFilePreviewDialog as FilePreviewDialog } from '@spaarke/ui-components/components/FilePreview/RichFilePreviewDialog';
 export type {
   IFilePreviewDialogProps,
   IFilePreviewDialogSummary,

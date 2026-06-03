@@ -37,8 +37,7 @@ export async function initializeRuntimeConfig(): Promise<void> {
 export function getBffBaseUrl(): string {
   if (!_bffBaseUrl) {
     throw new Error(
-      '[SemanticSearch] BFF base URL not initialized. ' +
-      'Ensure initializeAuth() is awaited before making API calls.'
+      '[SemanticSearch] BFF base URL not initialized. ' + 'Ensure initializeAuth() is awaited before making API calls.'
     );
   }
   return _bffBaseUrl;

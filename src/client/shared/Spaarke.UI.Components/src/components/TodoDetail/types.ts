@@ -23,36 +23,36 @@ export interface ITodoRecord {
   sprk_todocolumn?: number;
   sprk_todopinned?: boolean;
   /** Formatted value from OData for assigned-to lookup. */
-  "_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue"?: string;
+  '_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue'?: string;
   _sprk_assignedto_value?: string;
   /** Formatted value from OData for event type lookup. */
-  "_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue"?: string;
+  '_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue'?: string;
   _sprk_eventtype_ref_value?: string;
   /** Regarding record (associated matter/project). */
   sprk_regardingrecordid?: string;
   sprk_regardingrecordname?: string;
   /** Formatted value from OData for regarding record type lookup. */
-  "_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue"?: string;
+  '_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue'?: string;
   _sprk_regardingrecordtype_value?: string;
 }
 
 /** OData $select fields for the sprk_event query. */
 export const TODO_DETAIL_SELECT = [
-  "sprk_eventid",
-  "sprk_eventname",
-  "sprk_description",
-  "sprk_duedate",
-  "sprk_priorityscore",
-  "sprk_effortscore",
-  "sprk_todostatus",
-  "sprk_todocolumn",
-  "sprk_todopinned",
-  "_sprk_assignedto_value",
-  "_sprk_eventtype_ref_value",
-  "sprk_regardingrecordid",
-  "sprk_regardingrecordname",
-  "_sprk_regardingrecordtype_value",
-].join(",");
+  'sprk_eventid',
+  'sprk_eventname',
+  'sprk_description',
+  'sprk_duedate',
+  'sprk_priorityscore',
+  'sprk_effortscore',
+  'sprk_todostatus',
+  'sprk_todocolumn',
+  'sprk_todopinned',
+  '_sprk_assignedto_value',
+  '_sprk_eventtype_ref_value',
+  'sprk_regardingrecordid',
+  'sprk_regardingrecordname',
+  '_sprk_regardingrecordtype_value',
+].join(',');
 
 // ---------------------------------------------------------------------------
 // sprk_eventtodo fields (related entity — to-do extension)
@@ -74,13 +74,13 @@ export interface ITodoExtension {
 
 /** OData $select fields for the sprk_eventtodo query. */
 export const TODO_EXTENSION_SELECT = [
-  "sprk_eventtodoid",
-  "sprk_todonotes",
-  "sprk_completed",
-  "sprk_completeddate",
-  "statecode",
-  "statuscode",
-].join(",");
+  'sprk_eventtodoid',
+  'sprk_todonotes',
+  'sprk_completed',
+  'sprk_completeddate',
+  'statecode',
+  'statuscode',
+].join(',');
 
 // ---------------------------------------------------------------------------
 // Field update types (for save callbacks)
@@ -94,7 +94,7 @@ export interface IEventFieldUpdates {
   /** Boolean flag — set to false to remove event from To Do board. */
   sprk_todoflag?: boolean;
   /** OData bind for the Assigned To lookup (contact table). */
-  "sprk_AssignedTo@odata.bind"?: string | null;
+  'sprk_AssignedTo@odata.bind'?: string | null;
 }
 
 export interface ITodoExtensionUpdates {

@@ -85,6 +85,7 @@ import {
   GridSection,
   ViewSelectorDropdown,
   useViewSelection,
+  useEventsBulkActions,
 } from "@spaarke/events-components";
 import type { SavedView } from "@spaarke/events-components";
 import {
@@ -197,32 +198,9 @@ const IS_EMBEDDED_MODE = DRILL_THROUGH_PARAMS.mode === "embedded";
 // Session storage key for calendar filter (must match CalendarSidePane)
 const CALENDAR_FILTER_STATE_KEY = "sprk_calendar_filter_state";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Event Status Values (matches sprk_event_ribbon_commands.js)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Event Status values (sprk_eventstatus custom field)
- * Matches Spaarke.Event.EventStatus in sprk_event_ribbon_commands.js
- */
-const EventStatus = {
-  DRAFT: 0,
-  OPEN: 1,
-  COMPLETED: 2,
-  CLOSED: 3,
-  ON_HOLD: 4,
-  CANCELLED: 5,
-  REASSIGNED: 6,
-  ARCHIVED: 7,
-} as const;
-
-/**
- * OOB State codes (only used when archiving)
- */
-const StateCode = {
-  ACTIVE: 0,
-  INACTIVE: 1,
-} as const;
+// EventStatus + StateCode constants now come from @spaarke/events-components
+// (R4 task 063, B-7) — imported above. Inline declarations removed in favor
+// of the shared `useEventsBulkActions` hook's re-exports.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -715,273 +693,12 @@ async function deleteSelectedEvents(selectedIds: string[]): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Bulk Status Update Functions (matches sprk_event_ribbon_commands.js logic)
+// Bulk-action logic moved to @spaarke/events-components (R4 task 063, B-7).
+// See `useEventsBulkActions` — invoked inside the App component below.
+// The five wrappers (complete / close / cancel / hold / archive) now come from
+// the hook's return shape; behavior + confirm-dialog text unchanged. EventStatus
+// + StateCode constants re-exported from the hook module.
 // ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Execute bulk status update for selected events.
- * Based on Spaarke.Event.Homepage._executeBulkStatusUpdate in ribbon commands.
- *
- * @param eventIds - Array of event GUIDs
- * @param newStatus - New sprk_eventstatus value
- * @param statusLabel - Status label for notification message
- * @param additionalFields - Optional additional fields to update
- * @returns Promise<boolean> - True if successful
- */
-async function executeBulkStatusUpdate(
-  eventIds: string[],
-  newStatus: number,
-  statusLabel: string,
-  additionalFields?: Record<string, unknown>
-): Promise<boolean> {
-  const xrm = getXrm();
-  if (!xrm?.WebApi) {
-    console.warn("[EventsPage] Xrm.WebApi not available. Cannot update status.");
-    return false;
-  }
-
-  const updateData: Record<string, unknown> = {
-    sprk_eventstatus: newStatus,
-  };
-
-  // Merge additional fields if provided
-  if (additionalFields) {
-    Object.assign(updateData, additionalFields);
-  }
-
-  // Clean the IDs (remove braces if present)
-  const cleanIds = eventIds.map((id) => id.replace(/[{}]/g, ""));
-
-  try {
-    const promises = cleanIds.map((eventId) =>
-      xrm.WebApi.updateRecord(EVENT_ENTITY_NAME, eventId, updateData)
-    );
-
-    await Promise.all(promises);
-
-    // Show success notification
-    if (xrm.App?.addGlobalNotification) {
-      xrm.App.addGlobalNotification({
-        type: 2, // Success
-        level: 1,
-        message: `${eventIds.length} event(s) set to ${statusLabel}`,
-        showCloseButton: true,
-      });
-    }
-
-    console.log(`[EventsPage] Successfully updated ${eventIds.length} events to ${statusLabel}`);
-    return true;
-  } catch (error) {
-    console.error("[EventsPage] Bulk status update failed:", error);
-    if (xrm.Navigation?.openAlertDialog) {
-      xrm.Navigation.openAlertDialog({
-        title: "Error",
-        text: `Some events failed to update: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    }
-    return false;
-  }
-}
-
-/**
- * Execute bulk archive for selected events.
- * Sets both sprk_eventstatus=Archived AND statecode=Inactive.
- * Based on Spaarke.Event.Homepage._executeBulkArchive in ribbon commands.
- *
- * @param eventIds - Array of event GUIDs
- * @returns Promise<boolean> - True if successful
- */
-async function executeBulkArchive(eventIds: string[]): Promise<boolean> {
-  const xrm = getXrm();
-  if (!xrm?.WebApi) {
-    console.warn("[EventsPage] Xrm.WebApi not available. Cannot archive.");
-    return false;
-  }
-
-  // Clean the IDs (remove braces if present)
-  const cleanIds = eventIds.map((id) => id.replace(/[{}]/g, ""));
-
-  try {
-    // For archive, we need to:
-    // 1. Set sprk_eventstatus to Archived
-    // 2. Set statecode to Inactive (deactivate)
-    const promises = cleanIds.map(async (eventId) => {
-      // First update the custom status
-      await xrm.WebApi.updateRecord(EVENT_ENTITY_NAME, eventId, {
-        sprk_eventstatus: EventStatus.ARCHIVED,
-      });
-      // Then deactivate the record
-      await xrm.WebApi.updateRecord(EVENT_ENTITY_NAME, eventId, {
-        statecode: StateCode.INACTIVE,
-        statuscode: 2, // Inactive status code
-      });
-    });
-
-    await Promise.all(promises);
-
-    // Show success notification
-    if (xrm.App?.addGlobalNotification) {
-      xrm.App.addGlobalNotification({
-        type: 2, // Success
-        level: 1,
-        message: `${eventIds.length} event(s) archived`,
-        showCloseButton: true,
-      });
-    }
-
-    console.log(`[EventsPage] Successfully archived ${eventIds.length} events`);
-    return true;
-  } catch (error) {
-    console.error("[EventsPage] Bulk archive failed:", error);
-    if (xrm.Navigation?.openAlertDialog) {
-      xrm.Navigation.openAlertDialog({
-        title: "Error",
-        text: `Some events failed to archive: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    }
-    return false;
-  }
-}
-
-/**
- * Complete selected events - sets status to Completed with completion date.
- * @param selectedIds - Array of selected event GUIDs
- * @returns Promise<boolean> - True if successful
- */
-async function completeSelectedEvents(selectedIds: string[]): Promise<boolean> {
-  if (selectedIds.length === 0) return false;
-
-  const xrm = getXrm();
-  const confirmed = await new Promise<boolean>((resolve) => {
-    if (xrm?.Navigation?.openConfirmDialog) {
-      xrm.Navigation.openConfirmDialog({
-        title: "Complete Events",
-        text: `Mark ${selectedIds.length} event(s) as complete?`,
-        confirmButtonLabel: "Complete",
-        cancelButtonLabel: "Cancel",
-      }).then((result: { confirmed: boolean }) => resolve(result.confirmed));
-    } else {
-      resolve(window.confirm(`Mark ${selectedIds.length} event(s) as complete?`));
-    }
-  });
-
-  if (!confirmed) return false;
-
-  return executeBulkStatusUpdate(
-    selectedIds,
-    EventStatus.COMPLETED,
-    "Completed",
-    { sprk_completeddate: new Date().toISOString() }
-  );
-}
-
-/**
- * Close selected events - sets status to Closed (no action taken).
- * @param selectedIds - Array of selected event GUIDs
- * @returns Promise<boolean> - True if successful
- */
-async function closeSelectedEvents(selectedIds: string[]): Promise<boolean> {
-  if (selectedIds.length === 0) return false;
-
-  const xrm = getXrm();
-  const confirmed = await new Promise<boolean>((resolve) => {
-    if (xrm?.Navigation?.openConfirmDialog) {
-      xrm.Navigation.openConfirmDialog({
-        title: "Close Events",
-        text: `Close ${selectedIds.length} event(s) without action?`,
-        confirmButtonLabel: "Close",
-        cancelButtonLabel: "Cancel",
-      }).then((result: { confirmed: boolean }) => resolve(result.confirmed));
-    } else {
-      resolve(window.confirm(`Close ${selectedIds.length} event(s) without action?`));
-    }
-  });
-
-  if (!confirmed) return false;
-
-  return executeBulkStatusUpdate(selectedIds, EventStatus.CLOSED, "Closed");
-}
-
-/**
- * Cancel selected events - sets status to Cancelled.
- * @param selectedIds - Array of selected event GUIDs
- * @returns Promise<boolean> - True if successful
- */
-async function cancelSelectedEvents(selectedIds: string[]): Promise<boolean> {
-  if (selectedIds.length === 0) return false;
-
-  const xrm = getXrm();
-  const confirmed = await new Promise<boolean>((resolve) => {
-    if (xrm?.Navigation?.openConfirmDialog) {
-      xrm.Navigation.openConfirmDialog({
-        title: "Cancel Events",
-        text: `Cancel ${selectedIds.length} event(s)?`,
-        confirmButtonLabel: "Cancel Events",
-        cancelButtonLabel: "Keep Active",
-      }).then((result: { confirmed: boolean }) => resolve(result.confirmed));
-    } else {
-      resolve(window.confirm(`Cancel ${selectedIds.length} event(s)?`));
-    }
-  });
-
-  if (!confirmed) return false;
-
-  return executeBulkStatusUpdate(selectedIds, EventStatus.CANCELLED, "Cancelled");
-}
-
-/**
- * Put selected events on hold - sets status to On Hold.
- * @param selectedIds - Array of selected event GUIDs
- * @returns Promise<boolean> - True if successful
- */
-async function putOnHoldSelectedEvents(selectedIds: string[]): Promise<boolean> {
-  if (selectedIds.length === 0) return false;
-
-  const xrm = getXrm();
-  const confirmed = await new Promise<boolean>((resolve) => {
-    if (xrm?.Navigation?.openConfirmDialog) {
-      xrm.Navigation.openConfirmDialog({
-        title: "Put Events On Hold",
-        text: `Put ${selectedIds.length} event(s) on hold?`,
-        confirmButtonLabel: "Put On Hold",
-        cancelButtonLabel: "Cancel",
-      }).then((result: { confirmed: boolean }) => resolve(result.confirmed));
-    } else {
-      resolve(window.confirm(`Put ${selectedIds.length} event(s) on hold?`));
-    }
-  });
-
-  if (!confirmed) return false;
-
-  return executeBulkStatusUpdate(selectedIds, EventStatus.ON_HOLD, "On Hold");
-}
-
-/**
- * Archive selected events - sets status to Archived and deactivates.
- * @param selectedIds - Array of selected event GUIDs
- * @returns Promise<boolean> - True if successful
- */
-async function archiveSelectedEvents(selectedIds: string[]): Promise<boolean> {
-  if (selectedIds.length === 0) return false;
-
-  const xrm = getXrm();
-  const confirmed = await new Promise<boolean>((resolve) => {
-    if (xrm?.Navigation?.openConfirmDialog) {
-      xrm.Navigation.openConfirmDialog({
-        title: "Archive Events",
-        text: `Archive ${selectedIds.length} event(s)?\n\nThis will hide them from active views.`,
-        confirmButtonLabel: "Archive",
-        cancelButtonLabel: "Cancel",
-      }).then((result: { confirmed: boolean }) => resolve(result.confirmed));
-    } else {
-      resolve(window.confirm(`Archive ${selectedIds.length} event(s)? This will hide them from active views.`));
-    }
-  });
-
-  if (!confirmed) return false;
-
-  return executeBulkArchive(selectedIds);
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CommandBar Component (OOB-style)
@@ -1211,6 +928,18 @@ const EventsPageContent: React.FC = () => {
 
   // View selection state with session storage persistence (Task 093)
   const [selectedViewId, setSelectedViewId, selectedViewName] = useViewSelection();
+
+  // R4 task 063 (B-7): bulk-action API from the shared hook.
+  // `getXrm` is the existing module-scoped helper at the top of this file
+  // (cross-frame Xrm lookup). The hook returns confirm-dialog + status-update
+  // handlers shared with CalendarWorkspaceWidget.
+  const {
+    completeEvents,
+    closeEvents,
+    cancelEvents,
+    holdEvents,
+    archiveSelectedEvents,
+  } = useEventsBulkActions({ getXrm });
 
   // ─────────────────────────────────────────────────────────────────────────
   // Embedded Mode: Dynamic views + parent context (v3.0.0)
@@ -1472,10 +1201,13 @@ const EventsPageContent: React.FC = () => {
   // Send event dates to Calendar side pane when they change
   React.useEffect(() => {
     if (eventDates && eventDates.length > 0) {
-      // Transform eventDates to the format expected by CalendarSidePane
-      const dateInfo = eventDates.map((date) => ({
+      // eventDates is IEventDateInfo[] ({ date: string; count: number; overdue? })
+      // from EventsPageContext. The CalendarSidePane wire format is the same
+      // shape (string date + count). B-11 (task 067): tightened transform —
+      // forward existing date/count instead of double-wrapping.
+      const dateInfo = eventDates.map(({ date, count }) => ({
         date,
-        count: 1, // Each date has at least one event
+        count,
       }));
       sendEventDatesToCalendar(dateInfo);
     }
@@ -1499,9 +1231,10 @@ const EventsPageContent: React.FC = () => {
         case CALENDAR_MESSAGE_TYPES.CALENDAR_READY: {
           console.log("[EventsPage] Calendar side pane ready, sending event dates");
           if (eventDates && eventDates.length > 0) {
-            const dateInfo = eventDates.map((date) => ({
+            // B-11: forward { date, count } from IEventDateInfo rather than wrapping date again.
+            const dateInfo = eventDates.map(({ date, count }) => ({
               date,
-              count: 1,
+              count,
             }));
             sendEventDatesToCalendar(dateInfo);
           }
@@ -1610,63 +1343,69 @@ const EventsPageContent: React.FC = () => {
   }, [selectedIds, refreshGrid]);
 
   /**
-   * Handle "Complete" button click - marks selected events as complete
+   * Handle "Complete" button click - marks selected events as complete.
+   * R4 task 063 (B-7): delegates to `useEventsBulkActions().completeEvents`.
    */
   const handleComplete = React.useCallback(async () => {
     console.log("[EventsPage] Complete button clicked, selected:", selectedIds);
     if (selectedIds.length > 0) {
-      const success = await completeSelectedEvents(selectedIds);
+      const success = await completeEvents(selectedIds);
       if (success) {
         setSelectedIds([]); // Clear selection after action
         refreshGrid(); // Refresh the grid
       }
     }
-  }, [selectedIds, refreshGrid]);
+  }, [selectedIds, refreshGrid, completeEvents]);
 
   /**
-   * Handle "Close" button click - closes selected events (no action taken)
+   * Handle "Close" button click - closes selected events (no action taken).
+   * R4 task 063 (B-7): delegates to `useEventsBulkActions().closeEvents`.
    */
   const handleClose = React.useCallback(async () => {
     console.log("[EventsPage] Close button clicked, selected:", selectedIds);
     if (selectedIds.length > 0) {
-      const success = await closeSelectedEvents(selectedIds);
+      const success = await closeEvents(selectedIds);
       if (success) {
         setSelectedIds([]); // Clear selection after action
         refreshGrid(); // Refresh the grid
       }
     }
-  }, [selectedIds, refreshGrid]);
+  }, [selectedIds, refreshGrid, closeEvents]);
 
   /**
-   * Handle "Cancel" button click - cancels selected events
+   * Handle "Cancel" button click - cancels selected events.
+   * R4 task 063 (B-7): delegates to `useEventsBulkActions().cancelEvents`.
    */
   const handleCancel = React.useCallback(async () => {
     console.log("[EventsPage] Cancel button clicked, selected:", selectedIds);
     if (selectedIds.length > 0) {
-      const success = await cancelSelectedEvents(selectedIds);
+      const success = await cancelEvents(selectedIds);
       if (success) {
         setSelectedIds([]); // Clear selection after action
         refreshGrid(); // Refresh the grid
       }
     }
-  }, [selectedIds, refreshGrid]);
+  }, [selectedIds, refreshGrid, cancelEvents]);
 
   /**
-   * Handle "On Hold" button click - puts selected events on hold
+   * Handle "On Hold" button click - puts selected events on hold.
+   * R4 task 063 (B-7): delegates to `useEventsBulkActions().holdEvents`.
    */
   const handleOnHold = React.useCallback(async () => {
     console.log("[EventsPage] On Hold button clicked, selected:", selectedIds);
     if (selectedIds.length > 0) {
-      const success = await putOnHoldSelectedEvents(selectedIds);
+      const success = await holdEvents(selectedIds);
       if (success) {
         setSelectedIds([]); // Clear selection after action
         refreshGrid(); // Refresh the grid
       }
     }
-  }, [selectedIds, refreshGrid]);
+  }, [selectedIds, refreshGrid, holdEvents]);
 
   /**
-   * Handle "Archive" button click - archives selected events
+   * Handle "Archive" button click - archives selected events.
+   * R4 task 063 (B-7): delegates to
+   * `useEventsBulkActions().archiveSelectedEvents`.
    */
   const handleArchive = React.useCallback(async () => {
     console.log("[EventsPage] Archive button clicked, selected:", selectedIds);
@@ -1677,7 +1416,7 @@ const EventsPageContent: React.FC = () => {
         refreshGrid(); // Refresh the grid
       }
     }
-  }, [selectedIds, refreshGrid]);
+  }, [selectedIds, refreshGrid, archiveSelectedEvents]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Event Handlers (now delegate to context)

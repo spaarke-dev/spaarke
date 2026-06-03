@@ -66,9 +66,9 @@ public sealed class CitationVerificationService : ICitationVerificationService
         var tasks = citations.Select(c => VerifySingleAsync(c, ct));
         var allResults = await Task.WhenAll(tasks).ConfigureAwait(false);
 
-        var verified   = new List<CitationVerificationResult>();
+        var verified = new List<CitationVerificationResult>();
         var unverified = new List<CitationVerificationResult>();
-        var errors     = new List<CitationVerificationResult>();
+        var errors = new List<CitationVerificationResult>();
 
         foreach (var result in allResults)
         {

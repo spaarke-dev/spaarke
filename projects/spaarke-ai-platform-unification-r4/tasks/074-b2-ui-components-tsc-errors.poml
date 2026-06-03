@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B.2: Fix 24 pre-existing tsc errors in @spaarke/ui-components (React 19 RefObject + JSX namespace + Combobox onInput drift)</title>
+    <phase>6.5: R4 add-on cleanup</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, typescript, refactoring, react</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Touches SprkChat hot path + multiple shared components. Type fixes across ~7 files. ADR-022 (React 19) constraint. FULL per Step 3.5.5.</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>EXPLICITLY EXCLUDES DatasetGrid/GridView.tsx + DatasetGrid/ListView.tsx (those are 073's scope). All other UI.Components files are this task's domain.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Filed 2026-05-27. Task 067 carry-over (CO-1) cataloged 24 pre-existing tsc errors in
+    @spaarke/ui-components. These were verified pre-existing (not caused by R4) via stash/pop.
+    Categories: React 19 RefObject initializer drift, TS 5 JSX namespace migration, Combobox
+    onInput event-shape drift, misc nullability + implicit-any. Fix per the categories.
+  </prompt>
+
+  <role>
+    React 19 + TypeScript engineer. Bias toward correct React 19 idioms over backwards-compat
+    patches. Per-error commit discipline (or per-category) — but as a sub-agent making changes
+    in working tree only, just batch the changes; main session commits.
+  </role>
+
+  <goal>
+    (1) `npx tsc --noEmit` on `@spaarke/ui-components` → 0 errors (down from 24). (2) No
+    production-behavior change. (3) Existing tests pass. (4) NO modifications to DatasetGrid/
+    GridView.tsx or DatasetGrid/ListView.tsx — those belong to task 073.
+  </goal>
+
+  <context>
+    <background>
+      Per `notes/b11-cast-inventory.md` CO-1, the 24 errors cluster into:
+
+      A. React 19 RefObject initializer drift (~6 errors)
+         - SprkChat.tsx:2190 — `RefObject&lt;HTMLDivElement | null&gt;` not assignable to `RefObject&lt;HTMLElement&gt;`
+         - SprkChatInput.tsx:119, 233 — same `RefObject` nullability drift
+         - Root cause: React 19's `useRef&lt;T&gt;(null)` returns `RefObject&lt;T | null&gt;` not `RefObject&lt;T&gt;`. Pre-React 19 code didn't anticipate the `| null`.
+         - Fix: use `useRef&lt;T | null&gt;(null)` explicitly, OR narrow at use site, OR update consumer types to accept the nullable variant.
+
+      B. TS 5 JSX namespace migration (~3 errors)
+         - ThreePaneLayout.tsx:315 — `Cannot find namespace 'JSX'`
+         - AiProgressStepper.tsx:272 — same
+         - PanelSplitter.tsx:98 — same
+         - Root cause: TypeScript 5+ moved JSX namespace into `'react'` module; global `JSX` namespace removed.
+         - Fix: `import type { JSX } from 'react'` and use `JSX.Element` etc., OR use `React.JSX.Element`, OR use `React.ReactElement`.
+
+      C. Combobox onInput event-shape drift (~6 errors)
+         - TodoDetail.tsx:507, 508, 528 — Combobox `onInput` event-shape drift
+         - DatasetGrid/ViewSelector.tsx:160 — implicit `any` parameter on Combobox handler
+         - Root cause: Fluent v9's Combobox `onInput` expects `React.FormEvent&lt;HTMLInputElement&gt;`, not `React.ChangeEvent&lt;HTMLInputElement&gt;`.
+         - Fix: align handler signatures with Fluent v9's `React.FormEventHandler&lt;HTMLInputElement&gt;`.
+
+      D. Misc (~9 errors)
+         - Various nullability + implicit-any drift. Investigate each individually.
+
+      Files in scope:
+      - src/components/SprkChat/SprkChat.tsx (RefObject drift)
+      - src/components/SprkChat/SprkChatInput.tsx (RefObject drift)
+      - src/components/ThreePaneLayout/ThreePaneLayout.tsx (JSX namespace)
+      - src/components/AiProgressStepper/AiProgressStepper.tsx (JSX namespace)
+      - src/components/PanelSplitter/PanelSplitter.tsx (JSX namespace)
+      - src/components/TodoDetail/TodoDetail.tsx (Combobox onInput)
+      - src/components/DatasetGrid/ViewSelector.tsx (Combobox onInput)
+      - any other file that surfaces in the tsc output
+
+      EXPLICITLY OUT OF SCOPE:
+      - src/components/DatasetGrid/GridView.tsx — task 073's domain (hooks refactor)
+      - src/components/DatasetGrid/ListView.tsx — task 073's domain (hooks refactor)
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ThreePaneLayout/ThreePaneLayout.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/AiProgressStepper/AiProgressStepper.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/PanelSplitter.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/TodoDetail.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/ViewSelector.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">React 19 patterns only. Use `useRef&lt;T | null&gt;(null)` correctly. No `useRef` shims for backward compat.</constraint>
+    <constraint source="ADR-021">Fluent v9 only. Handler types must use Fluent v9's actual event signatures.</constraint>
+    <constraint source="project">EXCLUDE DatasetGrid/GridView.tsx and DatasetGrid/ListView.tsx — they belong to task 073.</constraint>
+    <constraint source="project">No behavior change. Type fixes only.</constraint>
+    <constraint source="project">If a fix reveals MORE errors (cascade), absorb them within budget; document any deferred ones for follow-up.</constraint>
+    <constraint source="project">Do NOT add `// @ts-ignore` or `// @ts-nocheck`. Use correct types.</constraint>
+    <constraint source="project">Do NOT cast with `as any`. If genuinely needed, use the SDK-boundary comment pattern from task 067 (rare case).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/b11-cast-inventory.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Baseline">Run `npx tsc --noEmit` in `Spaarke.UI.Components`. Capture full 24-error output. Categorize each into A (RefObject), B (JSX namespace), C (Combobox onInput), D (misc).</step>
+    <step order="2" name="Fix Category B (JSX namespace)">Easiest first — add `import type { JSX } from 'react'` (or use `React.JSX.Element` inline). 3 files. Verify each compiles before moving on.</step>
+    <step order="3" name="Fix Category A (RefObject)">SprkChat.tsx + SprkChatInput.tsx. Update `useRef` calls to `useRef&lt;T | null&gt;(null)`. Update consumer prop types to accept `RefObject&lt;T | null&gt;` if needed. Verify.</step>
+    <step order="4" name="Fix Category C (Combobox onInput)">TodoDetail.tsx + DatasetGrid/ViewSelector.tsx. Align handlers with `React.FormEventHandler&lt;HTMLInputElement&gt;`. Read from `event.currentTarget.value`.</step>
+    <step order="5" name="Fix Category D (misc)">Address remaining errors individually.</step>
+    <step order="6" name="Typecheck verification">`npx tsc --noEmit` on `@spaarke/ui-components` → 0 errors.</step>
+    <step order="7" name="Test verification">`npm test` in `@spaarke/ui-components`. All tests pass. If a test relied on the old (broken) type signature, fix the test.</step>
+    <step order="8" name="Document">Write `projects/spaarke-ai-platform-unification-r4/notes/074-ui-components-tsc-fix.md` with per-category fix summary, file-by-file changes, any new errors that surfaced + how addressed.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Inspect each affected file</tool>
+    <tool name="Edit">Apply type fixes</tool>
+    <tool name="Bash">npx tsc --noEmit, npm test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">~7 files in src/client/shared/Spaarke.UI.Components/src/components/ (excluding DatasetGrid/GridView.tsx + ListView.tsx)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/074-ui-components-tsc-fix.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the fixes, When `npx tsc --noEmit` runs in `Spaarke.UI.Components`, Then 0 errors (down from 24).</criterion>
+    <criterion testable="true">Given the change, When `npm test` runs in `Spaarke.UI.Components`, Then existing tests pass.</criterion>
+    <criterion testable="true">Given the change, When `git diff --stat src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/GridView.tsx src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/ListView.tsx` runs, Then NO changes appear (those files belong to task 073).</criterion>
+    <criterion testable="true">Given the change, When the diff is grep'd for `as any|@ts-ignore|@ts-nocheck`, Then 0 new occurrences.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Pre-existing errors — operator decided to address in R4 to close the build-hygiene cluster
+    cleanly. After this task, `@spaarke/ui-components` has a green typecheck for the first time
+    in months.
+
+    File overlap caution: SprkChat tests in 077 are in the same `__tests__/` directory tree.
+    077 touches test files only; this task touches production code only. No file overlap.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor — Step 9.5 quality gates after implementation.</protocol>
+  </execution>
+</task>

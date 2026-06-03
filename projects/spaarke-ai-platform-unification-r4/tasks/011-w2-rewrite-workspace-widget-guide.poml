@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>W-2: Rewrite BUILD-A-NEW-WORKSPACE-WIDGET.md with two-wrapper decision tree</title>
+    <phase>Phase 1 — Documentation round</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, guide</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Rewrite of an existing operational guide with project constraints (DR-02); not code-modifying but consumed by all future widget authors. STANDARD per Step 3.5.5 — modifies an existing file with constraints; the doc is downstream-load-bearing.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>depends on 010 (W-1 model) — must wait for the canonical terminology in `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` before the decision tree is written</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Rewrite `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` around a two-wrapper decision tree:
+    (1) composable section in a dashboard (Pattern D), (2) sophisticated single-purpose direct widget,
+    (3) dual-use widget (both shared lib + thin LW shim, e.g., Calendar), (4) Context-pane widget,
+    (5) modal-launcher. Corrects terminology to match the W-1 doc. Retains and updates the existing
+    Pattern D Calendar worked example. Future widget authors should be able to pick the right wrapper
+    from the decision tree without back-channel.
+  </prompt>
+
+  <role>
+    Technical writer with hands-on widget-author perspective. Optimize the guide for a developer who has
+    never built a SpaarkeAi widget — they must reach the right wrapper choice in ≤5 minutes of reading.
+  </role>
+
+  <goal>
+    `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` rewritten with: (1) opening two-wrapper decision tree
+    that branches to the five widget archetypes; (2) updated terminology matching `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`
+    (010); (3) retained + updated Pattern D Calendar worked example (shipped R3 tasks 114 + 115);
+    (4) cross-link from this guide to W-1 model doc and back; (5) explicit anti-patterns (e.g., "do not invent a
+    third wrapper", "do not duplicate section code in both LW and SpaarkeAi").
+  </goal>
+
+  <context>
+    <background>
+      Per spec DR-02 + plan §4 Phase 1 W-2: the existing widget-build guide predates the two-wrapper framing
+      and uses inconsistent terminology. The R3 Calendar widget shipped a clean dual-use pattern (task 115
+      + 114) that should be the canonical worked example. W-1 (task 010) establishes the model; this task
+      translates it into actionable author-side guidance.
+    </background>
+    <relevant-files>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md</file>
+      <file>src/client/shared/Spaarke.events-components/</file>
+      <file>src/solutions/LegalWorkspace/src/registrations/calendar.registration.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Guide MUST present a decision tree FIRST (before deep-dives) — the reader's first interaction with the doc is "which wrapper / archetype do I need?".</constraint>
+    <constraint source="project">All five archetypes from DR-02 MUST be covered: composable section, sophisticated single-purpose direct, dual-use, Context-pane, modal-launcher.</constraint>
+    <constraint source="project">Terminology MUST match the W-1 model doc (010). If any existing terminology drift is found, fix it during the rewrite — do not preserve stale terms.</constraint>
+    <constraint source="project">Pattern D Calendar worked example MUST be retained — but updated to reference the new model doc and current code state. Do not break the existing learning value.</constraint>
+    <constraint source="project">Doc MUST cross-link to W-1 (010) `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`. W-1 cross-links to this guide; add the reciprocal link.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read W-1 + existing guide">Read the new W-1 doc (010 output) and the existing guide. Catalog terminology mismatches between the two.</step>
+    <step order="2" name="Draft decision tree">Write the opening decision tree as a flowchart (mermaid or numbered Q&amp;A): "Is this a composable section in a multi-section dashboard?" → Pattern D / dual-use; "Is this a sophisticated single-purpose tool?" → direct widget; "Does this need to render in Context pane?" → Context-pane widget; "Is this a modal launcher?" → modal pattern.</step>
+    <step order="3" name="Rewrite archetype sections">For each of the five archetypes, write a short section: when to use, where the code lives, how to register. Reuse Calendar (Pattern D / dual-use) as the worked example.</step>
+    <step order="4" name="Update Calendar worked example">Refresh the existing Pattern D Calendar walkthrough to reference current code (`src/client/shared/Spaarke.events-components/` + `calendar.registration.ts`) and the new model doc.</step>
+    <step order="5" name="Add anti-patterns + cross-links">Add a short "Anti-patterns" section (do not invent a third wrapper, do not duplicate section code) and reciprocal cross-link to W-1.</step>
+    <step order="6" name="Verify">Walk through the decision tree with 3 hypothetical widgets (one composable, one direct, one Context-pane) and confirm the tree reaches the right answer each time.</step>
+    <step order="7" name="Update TASK-INDEX">Change task 011 status to ✅ completed in `tasks/TASK-INDEX.md`.</step>
+    <step order="8" name="Document deviations">If any deviation from spec DR-02 or plan §4, write to `projects/spaarke-ai-platform-unification-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read W-1 doc + existing guide</tool>
+    <tool name="Write">Full rewrite of the guide</tool>
+    <tool name="Edit">Cross-link addition</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md (rewritten)</output>
+    <output type="docs">docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md (reciprocal cross-link added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Guide opens with a decision tree branching to all five archetypes from DR-02.</criterion>
+    <criterion testable="true">Terminology in the guide matches `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` — no contradictions on Surface, Wrapper, Mount Source, Channel.</criterion>
+    <criterion testable="true">Pattern D Calendar worked example is retained and updated to current code references.</criterion>
+    <criterion testable="true">Decision tree walked through 3 hypothetical widgets in verify step reaches the correct archetype each time.</criterion>
+    <criterion testable="true">Cross-link to W-1 model doc present; reciprocal link added to W-1.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    STANDARD rigor — file modification with constraints, no code change. Quality gates SKIPPED per Step 0.5.
+  </execution>
+</task>

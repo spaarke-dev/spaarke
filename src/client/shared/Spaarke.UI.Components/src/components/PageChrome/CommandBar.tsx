@@ -34,7 +34,7 @@ import {
   Delete20Regular,
   ArrowClockwise20Regular,
   Search20Regular,
-  MoreHorizontal20Regular,
+  MoreHorizontal20Regular as _MoreHorizontal20Regular,
 } from '@fluentui/react-icons';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 

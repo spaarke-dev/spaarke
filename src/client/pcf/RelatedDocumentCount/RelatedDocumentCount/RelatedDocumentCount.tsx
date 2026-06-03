@@ -77,11 +77,7 @@ function getClientUrl(): string {
  *
  * Auth config and API URL are resolved from Dataverse environment variables at runtime.
  */
-export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
-  context,
-  documentId,
-  isDarkMode,
-}) => {
+export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({ context, documentId, isDarkMode }) => {
   // Auth initialization state — must complete before API calls
   const [isAuthReady, setIsAuthReady] = React.useState(false);
   const [authError, setAuthError] = React.useState<string | null>(null);
@@ -94,7 +90,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
     // initializeAuth resolves all config (Client ID, Tenant ID, BFF URL, etc.)
     // from Dataverse environment variables via webApi — no hardcoded fallbacks.
     initializeAuth(context.webAPI)
-      .then((config) => {
+      .then(config => {
         if (!cancelled) {
           setResolvedConfig(config);
           setIsAuthReady(true);

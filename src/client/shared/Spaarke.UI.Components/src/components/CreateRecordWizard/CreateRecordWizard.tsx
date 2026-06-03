@@ -415,7 +415,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
                 <CreateEventFollowOnStep
                   dataService={config.eventDataService}
                   formValues={currentFormValues}
-                  onFormValues={(vals) => {
+                  onFormValues={vals => {
                     setCreateEventName(vals.eventName);
                     setCreateEventTypeId(vals.eventTypeId);
                     setCreateEventTypeName(vals.eventTypeName);
@@ -423,7 +423,9 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
                     setCreateEventPriority(vals.priority);
                     setCreateEventDescription(vals.description);
                   }}
-                  onValidChange={() => {/* canAdvance is always true for follow-on */}}
+                  onValidChange={() => {
+                    /* canAdvance is always true for follow-on */
+                  }}
                 />
               );
             }
@@ -541,104 +543,101 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   // -- Step configurations --
   const filesStepSubtitle = config.filesStepSubtitle ?? 'Upload documents for AI analysis, or click Next to skip.';
 
-  const stepConfigs: IWizardStepConfig[] = React.useMemo(
-    () => {
-      const addFilesStep: IWizardStepConfig = {
-        id: 'add-files',
-        label: 'Add file(s)',
-        canAdvance: () => (fileStateRef.current?.uploadedFiles?.length ?? 0) > 0,
+  const stepConfigs: IWizardStepConfig[] = React.useMemo(() => {
+    const addFilesStep: IWizardStepConfig = {
+      id: 'add-files',
+      label: 'Add file(s)',
+      canAdvance: () => (fileStateRef.current?.uploadedFiles?.length ?? 0) > 0,
+      isSkippable: true,
+      renderContent: () => (
+        <>
+          <div>
+            <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
+              Add file(s)
+            </Text>
+            <Text size={200} className={styles.stepSubtitle}>
+              {filesStepSubtitle}
+            </Text>
+          </div>
+
+          {fileState.validationErrors.length > 0 && (
+            <MessageBar intent="error" className={styles.errorBar} onMouseEnter={handleClearErrors}>
+              <MessageBarBody>
+                {fileState.validationErrors.map((err, i) => (
+                  <div key={i}>
+                    <strong>{err.fileName}</strong>: {err.reason}
+                  </div>
+                ))}
+              </MessageBarBody>
+            </MessageBar>
+          )}
+
+          <FileUploadZone onFilesAccepted={handleFilesAccepted} onValidationErrors={handleValidationErrors} />
+
+          {fileState.uploadedFiles.length > 0 && (
+            <UploadedFileList files={fileState.uploadedFiles} onRemove={handleRemoveFile} />
+          )}
+        </>
+      ),
+    };
+
+    const infoStepConfig: IWizardStepConfig = {
+      id: config.infoStep.id,
+      label: config.infoStep.label,
+      canAdvance: config.infoStep.canAdvance,
+      renderContent: () => config.infoStep.renderContent(fileStateRef.current.uploadedFiles),
+    };
+
+    const nextStepsConfig: IWizardStepConfig = {
+      id: 'next-steps',
+      label: 'Next Steps',
+      canAdvance: () => true,
+      isEarlyFinish: () => selectedActions.length === 0,
+      renderContent: () => (
+        <NextStepsStep
+          selectedActions={selectedActions}
+          onSelectionChange={setSelectedActions}
+          entityLabel={config.entityLabel}
+        />
+      ),
+    };
+
+    if (config.associateToStep) {
+      const { entityTypes, navigationService } = config.associateToStep;
+      const associateStepConfig: IWizardStepConfig = {
+        id: 'associate-to',
+        label: 'Associate To',
+        canAdvance: () => Boolean(associationRef.current), // requires a record selection; Skip button bypasses this
         isSkippable: true,
-        renderContent: () => (
-          <>
-            <div>
-              <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
-                Add file(s)
-              </Text>
-              <Text size={200} className={styles.stepSubtitle}>
-                {filesStepSubtitle}
-              </Text>
-            </div>
-
-            {fileState.validationErrors.length > 0 && (
-              <MessageBar intent="error" className={styles.errorBar} onMouseEnter={handleClearErrors}>
-                <MessageBarBody>
-                  {fileState.validationErrors.map((err, i) => (
-                    <div key={i}>
-                      <strong>{err.fileName}</strong>: {err.reason}
-                    </div>
-                  ))}
-                </MessageBarBody>
-              </MessageBar>
-            )}
-
-            <FileUploadZone onFilesAccepted={handleFilesAccepted} onValidationErrors={handleValidationErrors} />
-
-            {fileState.uploadedFiles.length > 0 && (
-              <UploadedFileList files={fileState.uploadedFiles} onRemove={handleRemoveFile} />
-            )}
-          </>
-        ),
-      };
-
-      const infoStepConfig: IWizardStepConfig = {
-        id: config.infoStep.id,
-        label: config.infoStep.label,
-        canAdvance: config.infoStep.canAdvance,
-        renderContent: () => config.infoStep.renderContent(fileStateRef.current.uploadedFiles),
-      };
-
-      const nextStepsConfig: IWizardStepConfig = {
-        id: 'next-steps',
-        label: 'Next Steps',
-        canAdvance: () => true,
-        isEarlyFinish: () => selectedActions.length === 0,
-        renderContent: () => (
-          <NextStepsStep
-            selectedActions={selectedActions}
-            onSelectionChange={setSelectedActions}
-            entityLabel={config.entityLabel}
+        renderContent: handle => (
+          <AssociateToStep
+            entityTypes={entityTypes}
+            navigationService={navigationService}
+            value={associationRef.current}
+            onChange={setAssociation}
+            onSkip={() => {
+              setAssociation(null);
+              handle.nextStep();
+            }}
           />
         ),
       };
+      return [associateStepConfig, addFilesStep, infoStepConfig, nextStepsConfig];
+    }
 
-      if (config.associateToStep) {
-        const { entityTypes, navigationService } = config.associateToStep;
-        const associateStepConfig: IWizardStepConfig = {
-          id: 'associate-to',
-          label: 'Associate To',
-          canAdvance: () => Boolean(associationRef.current), // requires a record selection; Skip button bypasses this
-          isSkippable: true,
-          renderContent: (handle) => (
-            <AssociateToStep
-              entityTypes={entityTypes}
-              navigationService={navigationService}
-              value={associationRef.current}
-              onChange={setAssociation}
-              onSkip={() => {
-                setAssociation(null);
-                handle.nextStep();
-              }}
-            />
-          ),
-        };
-        return [associateStepConfig, addFilesStep, infoStepConfig, nextStepsConfig];
-      }
-
-      return [addFilesStep, infoStepConfig, nextStepsConfig];
-    },
-    [
-      fileState.uploadedFiles,
-      fileState.validationErrors,
-      selectedActions,
-      config,
-      styles,
-      filesStepSubtitle,
-      handleFilesAccepted,
-      handleValidationErrors,
-      handleRemoveFile,
-      handleClearErrors,
-    ]
-  );
+    return [addFilesStep, infoStepConfig, nextStepsConfig];
+  }, [
+    fileState.uploadedFiles,
+    fileState.validationErrors,
+    selectedActions,
+    config,
+    styles,
+    filesStepSubtitle,
+    handleFilesAccepted,
+    handleValidationErrors,
+    handleRemoveFile,
+    handleClearErrors,
+  ]);
 
   // -- Render --
   return (

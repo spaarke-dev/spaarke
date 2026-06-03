@@ -34,14 +34,7 @@ describe('registerContextWidgets', () => {
   it('registers all 6 source widget types', () => {
     registerContextWidgets();
 
-    const expected = [
-      'DocumentViewer',
-      'WebSource',
-      'LegalLibrary',
-      'Citation',
-      'ImageViewer',
-      'CodeViewer',
-    ];
+    const expected = ['DocumentViewer', 'WebSource', 'LegalLibrary', 'Citation', 'ImageViewer', 'CodeViewer'];
 
     for (const type of expected) {
       expect(hasContextWidget(type)).toBe(true);

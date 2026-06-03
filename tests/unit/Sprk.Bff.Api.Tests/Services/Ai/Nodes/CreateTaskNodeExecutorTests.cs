@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -12,6 +14,19 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Nodes;
 /// Unit tests for CreateTaskNodeExecutor.
 /// Tests validation, template substitution, and task creation.
 /// </summary>
+/// <remarks>
+/// 2026-05-31 (task 054 / P23.M Ai/Nodes): trait-tagged per §6.2 taxonomy (`repaired`).
+/// Production drift absorbed: `CreateTaskNodeExecutor.ExecuteAsync` now performs a Dataverse
+/// Web API `POST tasks` via `IHttpClientFactory.CreateClient("DataverseApi")` (commit chain
+/// added the HTTP call after the original tests were written). The original tests didn't
+/// configure the `IHttpClientFactory` mock, so `CreateClient` returned `null` and the outer
+/// try/catch turned the NRE into `Success=false` with `NodeErrorCodes.InternalError`.
+/// Repair (additive, well under NFR-02's 50% line-replacement ceiling): configure the
+/// factory mock to return an `HttpClient` backed by a fake handler that returns `204
+/// NoContent` with an `OData-EntityId` header so `taskId` parses cleanly. Pure test-stale
+/// classification; no production code touched (NFR-01).
+/// </remarks>
+[Trait("status", "repaired")]
 public class CreateTaskNodeExecutorTests
 {
     private readonly Mock<ITemplateEngine> _templateEngineMock;
@@ -24,10 +39,52 @@ public class CreateTaskNodeExecutorTests
         _templateEngineMock = new Mock<ITemplateEngine>();
         _httpClientFactoryMock = new Mock<IHttpClientFactory>();
         _loggerMock = new Mock<ILogger<CreateTaskNodeExecutor>>();
+
+        // 2026-05-31 repair: production now POSTs to Dataverse via the "DataverseApi" named
+        // client. Return a fake HttpClient by default so executor calls succeed; specific
+        // tests can override via _httpClientFactoryMock.Reset() + custom setup if needed.
+        _httpClientFactoryMock
+            .Setup(f => f.CreateClient(It.IsAny<string>()))
+            .Returns(() => CreateFakeDataverseClient());
+
         _executor = new CreateTaskNodeExecutor(
             _templateEngineMock.Object,
             _httpClientFactoryMock.Object,
             _loggerMock.Object);
+    }
+
+    private static HttpClient CreateFakeDataverseClient(
+        HttpStatusCode statusCode = HttpStatusCode.NoContent)
+    {
+        var handler = new MockHttpMessageHandler(statusCode);
+        return new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://fake-dataverse.local/api/data/v9.2/")
+        };
+    }
+
+    private sealed class MockHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly HttpStatusCode _statusCode;
+
+        public MockHttpMessageHandler(HttpStatusCode statusCode)
+        {
+            _statusCode = statusCode;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var response = new HttpResponseMessage(_statusCode);
+            // Provide an OData-EntityId header so the executor can parse a taskId cleanly.
+            // Production parses Headers.Location?.AbsoluteUri or OData-EntityId.
+            var fakeId = Guid.NewGuid();
+            response.Headers.TryAddWithoutValidation(
+                "OData-EntityId",
+                $"https://fake-dataverse.local/api/data/v9.2/tasks({fakeId})");
+            return Task.FromResult(response);
+        }
     }
 
     #region SupportedActionTypes Tests

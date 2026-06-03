@@ -265,8 +265,7 @@ export const AssignCounselStep: React.FC<IAssignCounselStepProps> = ({
   }, [onContactChange]);
 
   // -- Render --
-  const showResults =
-    !loading && !selectedContact && results.length > 0 && searchTerm.trim().length >= 2;
+  const showResults = !loading && !selectedContact && results.length > 0 && searchTerm.trim().length >= 2;
   const showEmpty =
     !loading && !selectedContact && results.length === 0 && searchTerm.trim().length >= 2 && !searchError;
 
@@ -278,8 +277,7 @@ export const AssignCounselStep: React.FC<IAssignCounselStepProps> = ({
           Assign Counsel
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Search for a contact to assign as lead counsel for this matter.
-          Type at least 2 characters to search.
+          Search for a contact to assign as lead counsel for this matter. Type at least 2 characters to search.
         </Text>
       </div>
 
@@ -311,7 +309,7 @@ export const AssignCounselStep: React.FC<IAssignCounselStepProps> = ({
         {/* Results list */}
         {showResults && (
           <div className={styles.resultsList} role="listbox" aria-label="Contact search results">
-            {results.map((contact) => (
+            {results.map(contact => (
               <div
                 key={contact.sprk_contactid}
                 className={mergeClasses(
@@ -321,12 +319,10 @@ export const AssignCounselStep: React.FC<IAssignCounselStepProps> = ({
                     : undefined
                 )}
                 role="option"
-                aria-selected={
-                  (selectedContact as IContact | null)?.sprk_contactid === contact.sprk_contactid
-                }
+                aria-selected={(selectedContact as IContact | null)?.sprk_contactid === contact.sprk_contactid}
                 tabIndex={0}
                 onClick={() => handleSelectContact(contact)}
-                onKeyDown={(e) => {
+                onKeyDown={e => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     handleSelectContact(contact);
@@ -349,7 +345,7 @@ export const AssignCounselStep: React.FC<IAssignCounselStepProps> = ({
                 <Button
                   appearance="subtle"
                   size="small"
-                  onClick={(e) => {
+                  onClick={e => {
                     e.stopPropagation();
                     handleSelectContact(contact);
                   }}

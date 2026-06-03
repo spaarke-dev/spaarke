@@ -22,20 +22,14 @@ import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth } from './authInit';
 import { EmailProcessingDashboard } from './EmailProcessingDashboard';
 import { getApiBaseUrl } from '../../shared/utils/environmentVariables';
-import {
-  getEffectiveDarkMode,
-  setupThemeListener,
-} from '@spaarke/ui-components/dist/utils/themeStorage';
+import { getEffectiveDarkMode, setupThemeListener } from '@spaarke/ui-components/dist/utils/themeStorage';
 
 export interface IEmailProcessingMonitorHostProps {
   context: ComponentFramework.Context<IInputs>;
   version: string;
 }
 
-export const EmailProcessingMonitorHost: React.FC<IEmailProcessingMonitorHostProps> = ({
-  context,
-  version,
-}) => {
+export const EmailProcessingMonitorHost: React.FC<IEmailProcessingMonitorHostProps> = ({ context, version }) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ctxAny = context as any;
   const clientAppId: string = ctxAny.parameters?.clientAppId?.raw || '';
@@ -58,9 +52,7 @@ export const EmailProcessingMonitorHost: React.FC<IEmailProcessingMonitorHostPro
     (async () => {
       try {
         if (!clientAppId || !bffAppId) {
-          throw new Error(
-            'Missing required configuration: clientAppId and bffAppId must be provided'
-          );
+          throw new Error('Missing required configuration: clientAppId and bffAppId must be provided');
         }
         // Resolve BFF base URL from Dataverse env var (single source of truth across all clients)
         const resolvedBffUrl = await getApiBaseUrl(ctxAny.webAPI);

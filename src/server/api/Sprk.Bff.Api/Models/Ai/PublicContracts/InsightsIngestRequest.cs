@@ -18,13 +18,48 @@ namespace Sprk.Bff.Api.Models.Ai.PublicContracts;
 /// (Layer 1 classification, conditional Layer 2 extraction, mechanical gates,
 /// per-field Observation emission) stay in Zone A.
 /// </para>
+/// <para>
+/// <b>Phase 1.5 r2 Wave C5 (task 024) — Universal-ingest parameterization</b>:
+/// the optional overrides (<see cref="PracticeAreaHint"/>, <see cref="CostCapOverride"/>,
+/// <see cref="Layer2Threshold"/>) wire the design-a5 §6 parameter-schema overrides
+/// onto the Zone-B-importable surface. Per design D-P15-02 (ONE canonical
+/// universal-ingest playbook, parameterized — not multiplied), these flow through
+/// the facade to Wave C4's playbook-engine invocation as runtime parameters.
+/// All overrides are NULLABLE — callers may omit them and the playbook's
+/// <c>sprk_configjson.parameterSchema</c> defaults apply (per design-a5 §6:
+/// <c>layer2Threshold = 0.7</c>, <c>practiceAreaHint = null</c>, <c>costCapOverride = null</c>).
+/// Post Wave C-G4 (task 022) the legacy code path
+/// (<c>Services.Ai.Insights.Ingest.IIngestOrchestrator</c>) has been retired; all four
+/// parameters take effect end-to-end through the playbook engine. Parameters are
+/// validated at the facade layer (see
+/// <c>Services.Ai.Insights.InsightsOrchestrator.ValidateIngestParameters</c>) and
+/// threaded into the playbook run as <c>parameters.practiceAreaHint /
+/// costCapOverride / layer2Threshold</c> per design-a5 §6.
+/// </para>
 /// </remarks>
 /// <param name="DocumentId">Document identifier the ingest playbook will process.
 /// Corresponds to the document's id in <c>spaarke-files-index</c>. Required.</param>
 /// <param name="MatterId">Matter the document belongs to (scheme-prefixed not required —
 /// callers pass the matter local part since SPE events deliver it that way). Required.</param>
 /// <param name="TenantId">Tenant identifier (D-52 single-tenant). Required.</param>
+/// <param name="PracticeAreaHint">OPTIONAL — practice-area code (e.g., <c>"CTRNS"</c>,
+/// <c>"IPPAT"</c>) for Wave D2/D3 per-area Layer 1 / Layer 2 prompt routing. Must be a
+/// non-whitespace string when supplied. Defaults to <c>null</c> (litigation-default
+/// prompts per Phase 1 D-59). Validation against <c>sprk_practicearea_ref</c> codes
+/// happens downstream in the playbook node executor; the facade only enforces
+/// well-formedness (non-empty when present).</param>
+/// <param name="CostCapOverride">OPTIONAL — per-invocation cost cap in USD; overrides
+/// <c>sprk_configjson.costCap</c>. Must be strictly positive when supplied. Defaults
+/// to <c>null</c> (uses tenant's monthly cap from D-P9). Phase 1.5 enforcement is
+/// observability-only per design D-52.</param>
+/// <param name="Layer2Threshold">OPTIONAL — confidence threshold for the Layer 2 gate.
+/// Must be in <c>[0.0, 1.0]</c> when supplied. Defaults to <c>null</c> (playbook applies
+/// the schema default of <c>0.7</c> per Phase 1 D-59). Per-invocation override for SME
+/// calibration or fixture testing.</param>
 public sealed record InsightsIngestRequest(
     string DocumentId,
     string MatterId,
-    string TenantId);
+    string TenantId,
+    string? PracticeAreaHint = null,
+    decimal? CostCapOverride = null,
+    double? Layer2Threshold = null);

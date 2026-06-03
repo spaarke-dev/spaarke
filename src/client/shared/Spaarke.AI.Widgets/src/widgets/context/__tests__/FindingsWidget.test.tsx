@@ -30,13 +30,7 @@ import type { ContextPaneEvent } from '../../../events/PaneEventTypes';
 // Test helpers
 // ---------------------------------------------------------------------------
 
-function Wrapper({
-  bus,
-  children,
-}: {
-  bus: PaneEventBus;
-  children: React.ReactNode;
-}): React.JSX.Element {
+function Wrapper({ bus, children }: { bus: PaneEventBus; children: React.ReactNode }): React.JSX.Element {
   return (
     <PaneEventBusProvider bus={bus}>
       <FluentProvider theme={webLightTheme}>{children}</FluentProvider>
@@ -228,7 +222,7 @@ describe('FindingsWidget — citation dispatch', () => {
   it('dispatches context_highlight to the context channel when a citation is clicked', () => {
     const bus = new PaneEventBus();
     const captured: ContextPaneEvent[] = [];
-    bus.subscribe('context', (event) => captured.push(event));
+    bus.subscribe('context', event => captured.push(event));
 
     renderWidget(
       {
@@ -253,7 +247,7 @@ describe('FindingsWidget — citation dispatch', () => {
   it('dispatches the correct citationId when multiple citations exist and the second is clicked', () => {
     const bus = new PaneEventBus();
     const captured: ContextPaneEvent[] = [];
-    bus.subscribe('context', (event) => captured.push(event));
+    bus.subscribe('context', event => captured.push(event));
 
     renderWidget(
       {
@@ -280,7 +274,7 @@ describe('FindingsWidget — citation dispatch', () => {
   it('dispatches separate context_highlight events for each citation in separate findings', () => {
     const bus = new PaneEventBus();
     const captured: ContextPaneEvent[] = [];
-    bus.subscribe('context', (event) => captured.push(event));
+    bus.subscribe('context', event => captured.push(event));
 
     renderWidget(
       {
@@ -314,9 +308,9 @@ describe('FindingsWidget — citation dispatch', () => {
     const conversationEvents: unknown[] = [];
     const contextEvents: ContextPaneEvent[] = [];
 
-    bus.subscribe('workspace', (e) => workspaceEvents.push(e));
-    bus.subscribe('conversation', (e) => conversationEvents.push(e));
-    bus.subscribe('context', (e) => contextEvents.push(e));
+    bus.subscribe('workspace', e => workspaceEvents.push(e));
+    bus.subscribe('conversation', e => conversationEvents.push(e));
+    bus.subscribe('context', e => contextEvents.push(e));
 
     renderWidget(
       {

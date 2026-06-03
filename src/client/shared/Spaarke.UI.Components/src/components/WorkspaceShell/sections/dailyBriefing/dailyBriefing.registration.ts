@@ -47,15 +47,11 @@
  * "Latest Updates" content sections (visually consistent medium pane).
  */
 
-import * as React from "react";
-import { SparkleRegular } from "@fluentui/react-icons";
-import type {
-  SectionRegistration,
-  SectionFactoryContext,
-  ContentSectionConfig,
-} from "../../types";
-import { DailyBriefingSection } from "./DailyBriefingSection";
-import type { NarrateRequest } from "./useDailyBriefing";
+import * as React from 'react';
+import { SparkleRegular } from '@fluentui/react-icons';
+import type { SectionRegistration, SectionFactoryContext, ContentSectionConfig } from '../../types';
+import { DailyBriefingSection } from './DailyBriefingSection';
+import type { NarrateRequest } from './useDailyBriefing';
 
 // ---------------------------------------------------------------------------
 // Factory options
@@ -113,25 +109,23 @@ export interface CreateDailyBriefingRegistrationOptions {
  * The returned registration's factory closure captures the supplied options
  * and forwards them as props to `DailyBriefingSection`.
  */
-export function createDailyBriefingRegistration(
-  options: CreateDailyBriefingRegistrationOptions,
-): SectionRegistration {
+export function createDailyBriefingRegistration(options: CreateDailyBriefingRegistrationOptions): SectionRegistration {
   const { authenticatedFetch, tenantId, onRateLimitError, loadNotificationContext } = options;
 
   return {
-    id: "daily-briefing",
-    label: "Daily Briefing",
-    description: "AI-curated highlights from your day",
+    id: 'daily-briefing',
+    label: 'Daily Briefing',
+    description: 'AI-curated highlights from your day',
     icon: SparkleRegular,
-    category: "ai",
+    category: 'ai',
     // "medium" per FR-15 — mapped to 325px (matches Latest Updates sibling)
-    defaultHeight: "325px",
+    defaultHeight: '325px',
 
     factory(_context: SectionFactoryContext): ContentSectionConfig {
       return {
-        id: "daily-briefing",
-        type: "content",
-        title: "Daily Briefing",
+        id: 'daily-briefing',
+        type: 'content',
+        title: 'Daily Briefing',
         style: {},
         renderContent: () =>
           React.createElement(DailyBriefingSection, {

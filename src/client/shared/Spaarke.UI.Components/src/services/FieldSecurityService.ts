@@ -115,10 +115,11 @@ export class FieldSecurityService {
         `?$select=logicalname,issecured&$filter=EntityLogicalName eq '${entityLogicalName}' and (${filter})`
       );
 
-      attributes.entities.forEach((attr: any) => {
+      attributes.entities.forEach((attr: Record<string, unknown>) => {
         const isSecured = attr.issecured === true;
-        fieldSecurityMap.set(attr.logicalname, {
-          fieldName: attr.logicalname,
+        const logicalName = String(attr.logicalname);
+        fieldSecurityMap.set(logicalName, {
+          fieldName: logicalName,
           isSecured: isSecured,
           permissions: {
             canRead: !isSecured, // If secured and no profile, cannot read
@@ -226,7 +227,7 @@ export class FieldSecurityService {
       let canCreate = false;
       let canReadUnmasked = false;
 
-      permissions.entities.forEach((perm: any) => {
+      permissions.entities.forEach((perm: Record<string, unknown>) => {
         // Check for value 4 (Allowed) per Microsoft field_security_permission_type choice
         if (perm.canread === 4 || perm.canread === true) canRead = true;
         if (perm.canupdate === 4 || perm.canupdate === true) canUpdate = true;
@@ -271,7 +272,8 @@ export class FieldSecurityService {
 
     // PCF dataset columns have security information
     dataset.columns.forEach(column => {
-      const security = (column as any).security;
+      const security = (column as { security?: { secured?: boolean; readable?: boolean; editable?: boolean } })
+        .security;
 
       if (security) {
         fieldSecurityMap.set(column.name, {

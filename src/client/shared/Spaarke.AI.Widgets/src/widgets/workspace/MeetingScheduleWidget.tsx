@@ -55,18 +55,8 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Button,
-  Spinner,
-  Text,
-  makeStyles,
-  mergeClasses,
-  tokens,
-} from '@fluentui/react-components';
-import {
-  CalendarAddRegular,
-  OpenRegular,
-} from '@fluentui/react-icons';
+import { Button, Spinner, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { CalendarAddRegular, OpenRegular } from '@fluentui/react-icons';
 
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import type { WidgetState } from '../../types/shared';
@@ -193,15 +183,10 @@ function resolveXrmNavigation(): any | null {
  * Mirrors the navigateTo pattern in
  * `src/solutions/LegalWorkspace/src/components/GetStarted/ActionCardHandlers.ts`.
  */
-async function openAnalysisBuilder(
-  bffBaseUrl: string | undefined,
-  initialPrompt: string | undefined
-): Promise<void> {
+async function openAnalysisBuilder(bffBaseUrl: string | undefined, initialPrompt: string | undefined): Promise<void> {
   const nav = resolveXrmNavigation();
   if (!nav) {
-    throw new Error(
-      'Xrm.Navigation is unavailable. Analysis Builder can only be opened from a Dataverse host.'
-    );
+    throw new Error('Xrm.Navigation is unavailable. Analysis Builder can only be opened from a Dataverse host.');
   }
 
   const params: string[] = [`intent=${INTENT}`];
@@ -249,9 +234,7 @@ const MeetingScheduleWidget: React.FC<WorkspaceWidgetProps<MeetingScheduleData>>
   const styles = useStyles();
 
   /** UI state. */
-  const [launchState, setLaunchState] = useState<'launching' | 'opened' | 'error' | 'unavailable'>(
-    'launching'
-  );
+  const [launchState, setLaunchState] = useState<'launching' | 'opened' | 'error' | 'unavailable'>('launching');
   const [launchError, setLaunchError] = useState<string | null>(null);
 
   /** Guard against double-launch in React 19 StrictMode (effects run twice in dev). */
@@ -312,8 +295,8 @@ const MeetingScheduleWidget: React.FC<WorkspaceWidgetProps<MeetingScheduleData>>
           {DISPLAY_NAME}
         </Text>
         <Text size={300} className={styles.subtitle}>
-          Analysis Builder is only available inside a Dataverse host. Open this
-          page from within Power Apps to schedule a meeting.
+          Analysis Builder is only available inside a Dataverse host. Open this page from within Power Apps to schedule
+          a meeting.
         </Text>
       </div>
     );
@@ -327,9 +310,7 @@ const MeetingScheduleWidget: React.FC<WorkspaceWidgetProps<MeetingScheduleData>>
         <Text as="h2" size={500} weight="semibold" className={styles.title}>
           {DISPLAY_NAME}
         </Text>
-        <Text className={styles.errorText}>
-          {launchError ?? 'Failed to open Analysis Builder.'}
-        </Text>
+        <Text className={styles.errorText}>{launchError ?? 'Failed to open Analysis Builder.'}</Text>
         <Button
           appearance="primary"
           icon={<OpenRegular />}

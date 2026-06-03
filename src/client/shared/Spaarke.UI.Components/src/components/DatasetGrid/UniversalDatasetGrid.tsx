@@ -42,7 +42,8 @@ export interface IUniversalDatasetGridProps {
   onRecordClick: (recordId: string) => void;
 
   // Context (for theme detection)
-  context: any; // ComponentFramework.Context<IInputs>
+  // SDK boundary: PCF ComponentFramework.Context<IInputs> — not imported in this lib.
+  context: unknown;
 }
 
 const useStyles = makeStyles({
@@ -85,11 +86,11 @@ export const UniversalDatasetGrid: React.FC<IUniversalDatasetGridProps> = props 
 
   // Use appropriate hook based on mode
   const datasetResult = useDatasetMode({
-    dataset: props.dataset || ({} as any),
+    dataset: props.dataset || ({} as ComponentFramework.PropertyTypes.DataSet),
   });
 
   const headlessResult = useHeadlessMode({
-    webAPI: props.headlessConfig?.webAPI || ({} as any),
+    webAPI: props.headlessConfig?.webAPI || ({} as ComponentFramework.WebApi),
     entityName: props.headlessConfig?.entityName || '',
     fetchXml: props.headlessConfig?.fetchXml,
     pageSize: props.headlessConfig?.pageSize || 25,
@@ -170,7 +171,7 @@ export const UniversalDatasetGrid: React.FC<IUniversalDatasetGridProps> = props 
 
   // Handle record click
   const handleRecordClick = React.useCallback(
-    (record: any) => {
+    (record: { id: string }) => {
       props.onRecordClick(record.id);
     },
     [props]
@@ -189,8 +190,13 @@ export const UniversalDatasetGrid: React.FC<IUniversalDatasetGridProps> = props 
     return {
       selectedRecords: records.filter(r => props.selectedRecordIds.includes(r.id)),
       entityName: records[0]?.entityName || props.headlessConfig?.entityName || '',
-      webAPI: props.headlessConfig?.webAPI || (props.context as any)?.webAPI || ({} as any),
-      navigation: (props.context as any)?.navigation || ({} as any),
+      webAPI:
+        props.headlessConfig?.webAPI ||
+        (props.context as { webAPI?: ComponentFramework.WebApi })?.webAPI ||
+        ({} as ComponentFramework.WebApi),
+      navigation:
+        (props.context as { navigation?: ComponentFramework.Navigation })?.navigation ||
+        ({} as ComponentFramework.Navigation),
       refresh: refresh,
       emitLastAction: action => {
         console.log(`Last action: ${action}`);

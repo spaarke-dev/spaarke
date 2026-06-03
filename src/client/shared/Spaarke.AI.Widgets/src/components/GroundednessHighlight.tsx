@@ -87,8 +87,7 @@ const useStyles = makeStyles({
  * Tooltip label shown for every ungrounded span.
  * Kept in a constant to avoid recreating the string per-render.
  */
-const UNGROUNDED_TOOLTIP =
-  'This claim may not be fully supported by the provided sources';
+const UNGROUNDED_TOOLTIP = 'This claim may not be fully supported by the provided sources';
 
 /**
  * Parses `text` against a set of `segments` and returns an array of React
@@ -101,11 +100,7 @@ const UNGROUNDED_TOOLTIP =
  * Gaps between segments (unlabelled ranges) are treated as grounded text
  * (rendered as plain strings).
  */
-function buildNodes(
-  text: string,
-  segments: GroundednessSegment[],
-  ungroundedClass: string
-): React.ReactNode[] {
+function buildNodes(text: string, segments: GroundednessSegment[], ungroundedClass: string): React.ReactNode[] {
   if (!segments || segments.length === 0) {
     return [text];
   }
@@ -139,12 +134,7 @@ function buildNodes(
     } else {
       // Ungrounded segment — annotated span wrapped in a Tooltip.
       nodes.push(
-        <Tooltip
-          key={`ungrounded-${segStart}-${segEnd}`}
-          content={UNGROUNDED_TOOLTIP}
-          relationship="label"
-          withArrow
-        >
+        <Tooltip key={`ungrounded-${segStart}-${segEnd}`} content={UNGROUNDED_TOOLTIP} relationship="label" withArrow>
           <span
             className={ungroundedClass}
             aria-label={`Ungrounded claim: ${segText}`}
@@ -226,11 +216,7 @@ export interface GroundednessHighlightProps {
  * // No segments — renders plain text (safe default):
  * <GroundednessHighlight text="Hello world" />
  */
-export const GroundednessHighlight: React.FC<GroundednessHighlightProps> = ({
-  text,
-  segments,
-  className,
-}) => {
+export const GroundednessHighlight: React.FC<GroundednessHighlightProps> = ({ text, segments, className }) => {
   const styles = useStyles();
 
   const nodes = React.useMemo(

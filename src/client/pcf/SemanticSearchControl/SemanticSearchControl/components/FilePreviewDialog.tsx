@@ -11,9 +11,7 @@
  *   `@spaarke/ui-components/dist/components/FilePreview/RichFilePreviewDialog`
  * and stop relying on this shim.
  */
-export {
-  RichFilePreviewDialog as FilePreviewDialog,
-} from '@spaarke/ui-components/dist/components/FilePreview/RichFilePreviewDialog';
+export { RichFilePreviewDialog as FilePreviewDialog } from '@spaarke/ui-components/dist/components/FilePreview/RichFilePreviewDialog';
 export type {
   IFilePreviewDialogProps,
   IFilePreviewDialogSummary,

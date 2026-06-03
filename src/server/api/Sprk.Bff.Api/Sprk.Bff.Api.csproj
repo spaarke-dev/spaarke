@@ -92,6 +92,18 @@
          GHSA-37gx-xxp4-5rgx + GHSA-w3x6-4m5h-cxqf (both HIGH). Pulled in transitively via
          Microsoft.IdentityModel.Tokens (JWT validation stack); same-major bump per Phase 2 MEDIUM-1. -->
     <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.3" />
+    <!-- R4 task 080 (2026-05-27): patch OpenMcdf transitive 3.1.0 -> 3.1.4 to fix two CVEs:
+         (1) CVE-2026-41511 / GHSA-jxpf-xq2m-q525 (Moderate, DoS via crafted CFB infinite-loop
+             in directory traversal); fixed in 3.1.3.
+         (2) CVE-2026-45785 / GHSA-5qwm-7pvp-w988 (Moderate, DoS via cyclic directory-tree
+             links in TryGetDirectoryEntry); fixed in 3.1.4.
+         Real Spaarke exposure: chat now accepts 25 MB attachments per A-4; uploaded legacy
+         Office docs (.doc/.xls/.ppt) can lock a BFF thread. Same-minor-version bump. -->
+    <PackageReference Include="OpenMcdf" Version="3.1.4" />
+    <!-- R4 task 080 (2026-05-27): patch OpenTelemetry.Api transitive 1.15.0 -> 1.15.3 to fix
+         CVE-2026-40894 / GHSA-g94r-2vxg-569j (Moderate, memory DoS via malformed propagation
+         headers — baggage/B3/Jaeger). Same-minor-version bump. -->
+    <PackageReference Include="OpenTelemetry.Api" Version="1.15.3" />
 
     <!-- Document Generation -->
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.4.1" />
@@ -110,14 +122,12 @@
     <Content Update="builder-scopes\**\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <!-- Insights Engine prompt templates (.txt) + schemas (.json) + playbook node configs (.json) —
-       loaded at runtime by AiAnalysisNodeExecutor when the D-P7 ingest playbook composes the
-       layered pipeline. The Web SDK auto-includes .json as Content by default but NOT .txt,
-       so we Include the .txt files explicitly and Update the .json files to set the copy attr.
-       Task 030 (Layer 1) + task 031 (Layer 2). -->
+  <!-- Insights Engine playbook node configs (.json) — loaded at runtime by the
+       PlaybookExecutionEngine. The Web SDK auto-includes .json as Content by default; we
+       Update to set CopyToOutputDirectory.
+       Wave C-G4 (task 022) retired the on-disk Prompts/ directory (.txt + .schema.json).
+       Prompts now live in sprk_analysisaction.sprk_systemprompt rows (per Wave C2 / 021).  -->
   <ItemGroup>
-    <Content Include="Services\Ai\Insights\Prompts\*.txt" CopyToOutputDirectory="PreserveNewest" />
-    <Content Update="Services\Ai\Insights\Prompts\*.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Update="Services\Ai\Insights\Playbooks\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

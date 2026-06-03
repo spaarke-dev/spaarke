@@ -17,21 +17,16 @@
  * @see ADR-012 (Shared Component Library), ADR-013 (AI Architecture)
  */
 
-import * as React from "react";
-import { useParams, useSearchParams, useNavigate } from "react-router-dom";
-import {
-  makeStyles,
-  tokens,
-  MessageBar,
-  MessageBarBody,
-} from "@fluentui/react-components";
-import { PlaybookLibraryShell } from "@spaarke/ui-components/components/PlaybookLibraryShell";
-import { createBffDataService } from "@spaarke/ui-components/utils/adapters/bffDataServiceAdapter";
-import type { AuthenticatedFetch } from "@spaarke/ui-components/utils/adapters/bffDataServiceAdapter";
-import { acquireBffToken } from "../auth/msal-auth";
-import { BFF_API_URL } from "../config";
-import { PageContainer, NavigationBar } from "../components";
-import type { BreadcrumbNavItem } from "../components";
+import * as React from 'react';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
+import { makeStyles, tokens, MessageBar, MessageBarBody } from '@fluentui/react-components';
+import { PlaybookLibraryShell } from '@spaarke/ui-components/components/PlaybookLibraryShell';
+import { createBffDataService } from '@spaarke/ui-components/utils/adapters/bffDataServiceAdapter';
+import type { AuthenticatedFetch } from '@spaarke/ui-components/utils/adapters/bffDataServiceAdapter';
+import { acquireBffToken } from '../auth/msal-auth';
+import { BFF_API_URL } from '../config';
+import { PageContainer, NavigationBar } from '../components';
+import type { BreadcrumbNavItem } from '../components';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -39,16 +34,16 @@ import type { BreadcrumbNavItem } from "../components";
 
 const useStyles = makeStyles({
   shellContainer: {
-    flex: "1 1 auto",
-    display: "flex",
-    flexDirection: "column",
-    minHeight: "500px",
-    overflow: "hidden",
+    flex: '1 1 auto',
+    display: 'flex',
+    flexDirection: 'column',
+    minHeight: '500px',
+    overflow: 'hidden',
   },
   centered: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     flex: 1,
     padding: tokens.spacingVerticalXXL,
   },
@@ -69,7 +64,7 @@ function createAuthenticatedFetch(): AuthenticatedFetch {
   return async (url: string, init?: RequestInit): Promise<Response> => {
     const token = await acquireBffToken();
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
       ...(init?.headers as Record<string, string> | undefined),
     };
@@ -109,7 +104,7 @@ export const PlaybookLibraryPage: React.FC = () => {
   const { entityType, entityId } = useParams<keyof PlaybookRouteParams>() as PlaybookRouteParams;
   const [searchParams] = useSearchParams();
 
-  const intent = searchParams.get("intent") ?? undefined;
+  const intent = searchParams.get('intent') ?? undefined;
 
   // Validate required route params
   if (!entityType || !entityId) {
@@ -130,20 +125,14 @@ export const PlaybookLibraryPage: React.FC = () => {
   // across re-renders (no dependency on changing values).
   const authenticatedFetch = React.useMemo(() => createAuthenticatedFetch(), []);
 
-  const dataService = React.useMemo(
-    () => createBffDataService(authenticatedFetch, BFF_API_URL),
-    [authenticatedFetch]
-  );
+  const dataService = React.useMemo(() => createBffDataService(authenticatedFetch, BFF_API_URL), [authenticatedFetch]);
 
   // Determine display mode based on intent query param
-  const mode: "browse" | "intent" = intent ? "intent" : "browse";
+  const mode: 'browse' | 'intent' = intent ? 'intent' : 'browse';
 
   // Breadcrumb navigation (href-based for HashRouter — NavigationBar uses <a href>)
   const breadcrumbs: BreadcrumbNavItem[] = React.useMemo(
-    () => [
-      { label: "Home", href: "#/" },
-      { label: "Playbook Library" },
-    ],
+    () => [{ label: 'Home', href: '#/' }, { label: 'Playbook Library' }],
     []
   );
 
@@ -154,18 +143,18 @@ export const PlaybookLibraryPage: React.FC = () => {
     if (window.history.length > 1) {
       navigate(-1);
     } else {
-      navigate("/");
+      navigate('/');
     }
   }, [navigate]);
 
   const handleComplete = React.useCallback(
     (result: { analysisId: string }) => {
-      console.log("[PlaybookLibraryPage] Analysis created:", result.analysisId);
+      console.log('[PlaybookLibraryPage] Analysis created:', result.analysisId);
       // Navigate back after successful creation
       if (window.history.length > 1) {
         navigate(-1);
       } else {
-        navigate("/");
+        navigate('/');
       }
     },
     [navigate]
@@ -186,7 +175,7 @@ export const PlaybookLibraryPage: React.FC = () => {
           bffBaseUrl={BFF_API_URL}
           onClose={handleClose}
           onComplete={handleComplete}
-          title={intent ? `Run: ${intent}` : "Playbook Library"}
+          title={intent ? `Run: ${intent}` : 'Playbook Library'}
         />
       </div>
     </PageContainer>

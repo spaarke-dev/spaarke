@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>Test infra: triage + fix 142 test-content failures in @spaarke/ui-components surfaced by task 068</title>
+    <phase>6: Build hygiene cluster</phase>
+    <status>not-started</status>
+    <estimated-hours>12</estimated-hours>
+    <dependencies>068</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, react, testing, refactoring, typescript</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Fixes test content (not production code). Triage + bulk fix patterns + selective deletions. STANDARD per Step 3.5.5.</rigor-reason>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Modifies test files in @spaarke/ui-components only. Production code untouched. Independent of other R4 work.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Filed 2026-05-26 per operator mandate "must ensure these issues are resolved as part of this
+    project (Phase 6)". Task 068 fixed the Jest+React 19 environment, unblocking 544 additional
+    tests that had been silently skipped. 142 of those tests fail on test-content issues
+    (userEvent quirks with RTL v16, themeStorage spy patterns broken by React 19 effect timing,
+    etc.). These aren't bugs in production code — they're test-content quality issues that the
+    React-16 + RTL-v14 pinning was hiding.
+  </prompt>
+
+  <role>
+    Test engineer fluent in RTL v16 + React 19 testing patterns. Bulk-pattern fixer.
+  </role>
+
+  <goal>
+    `@spaarke/ui-components` test suite runs clean — 0 module-resolution errors, ≤10 test-content
+    failures (down from 142). All R4-added tests (042 SprkChat.onAttachmentReady, 050 attachment
+    boundaries) pass. Memo catalogs any deferred failures with rationale.
+  </goal>
+
+  <context>
+    <background>
+      Baseline before R4: `Test Suites: 12 passed, 43 failed (392 tests passing)` — most failures
+      were `Cannot find module 'react-dom/client'` (env-broken silently).
+      After task 068: `Test Suites: 34 passed, 21 failed (936 tests passing)` — env fixed; 142
+      test-content failures surfaced.
+
+      Likely failure patterns (per task 068 memo + sub-agent observations):
+      - userEvent API migrations (RTL v14 → v16; sync → async; `.click()` → `userEvent.click()`)
+      - themeStorage spy patterns broken by React 19 effect timing (effects now batch differently)
+      - act() warnings becoming hard failures
+      - Snapshot drift from React 19 renderer output changes
+      - Pre-existing skipped tests now executing + failing
+
+      Per operator decision 2026-05-26: file as task 071 in R4 Phase 6, full triage + fix.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/</file>
+      <file>src/client/shared/Spaarke.UI.Components/jest.config.js</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/test-infra-jest-react19-fix-2026-05-26.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">No production code modification. Fix in test files only.</constraint>
+    <constraint source="project">If a failing test reveals a real production bug, ESCALATE per CLAUDE.md §6 — do NOT modify production code to make tests pass.</constraint>
+    <constraint source="project">If a test is genuinely obsolete (tests a removed surface or pre-React-16 behavior), DELETE it cleanly with a comment.</constraint>
+    <constraint source="project">Acceptance is ≤10 remaining test failures; this is a triage + bulk fix, not a 100% pass mandate.</constraint>
+    <constraint source="ADR-022">React 19 patterns only — do NOT regress to React 16 mocks.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/test-infra-jest-react19-fix-2026-05-26.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Run + capture">`npm test` in `@spaarke/ui-components`. Capture full failure list (142). Group by pattern.</step>
+    <step order="2" name="Triage">Classify each into: BULK-FIX (userEvent migration, etc.) / ONE-OFF (specific test logic) / DELETE-OBSOLETE / ESCALATE (real production bug).</step>
+    <step order="3" name="Bulk fix pass">Apply bulk patterns: userEvent async migrations, themeStorage spy pattern updates, act() wrapper additions.</step>
+    <step order="4" name="One-off fixes">Address remaining one-off failures.</step>
+    <step order="5" name="Delete obsolete">Delete tests for removed surfaces with comments citing removal commit.</step>
+    <step order="6" name="Verify">Re-run `npm test`. Target ≤10 remaining failures. If more, document why each remains.</step>
+    <step order="7" name="Memo">Write `projects/spaarke-ai-platform-unification-r4/notes/test-content-failures-triage-2026-05-26.md` with: 142-failure catalog by pattern; fixes applied; deletions; deferrals.</step>
+    <step order="8" name="Update TASK-INDEX">Mark 071 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Inspect test files</tool>
+    <tool name="Edit">Update test files</tool>
+    <tool name="Bash">Run npm test</tool>
+    <tool name="Grep">Pattern-find similar failures</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">~50-100 test files in `@spaarke/ui-components/src/**/__tests__/` (fixed or deleted)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/test-content-failures-triage-2026-05-26.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`npm test` in `@spaarke/ui-components` exits with ≤10 failures (down from 142).</criterion>
+    <criterion testable="true">R4-added tests pass: SprkChat.onAttachmentReady.test.tsx (042), SprkChat.attachments boundary tests (050).</criterion>
+    <criterion testable="true">No production code modified in `src/client/shared/Spaarke.UI.Components/src/components/**/*.tsx` (verified via `git diff --stat`).</criterion>
+    <criterion testable="true">Memo catalogs all 142 failures + classification + outcome.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor — test fixes only, no production code. Quality gates SKIPPED per Step 0.5.</protocol>
+  </execution>
+</task>

@@ -23,6 +23,10 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Added (2026-05-26 R4 Phase 1 F-3 — publish-size per-task verification rule)
+- `.claude/constraints/azure-deployment.md` — new "BFF Publish-Size Per-Task Verification Rule (NFR-01)" section. Binding rule: every BFF-touching task MUST run `dotnet publish` + report compressed size + diff vs prior baseline. Ceiling: ≤60 MB (spec NFR-01). Current baseline ~45.65 MB. Escalation thresholds: ≥+5 MB single-task → justification; ≥55 MB cumulative → architecture review; ≥60 MB → HARD STOP. Driver: R4 NFR-01 / F-3 (operationalizes ADR-029).
+- `CLAUDE.md` (root) §10 item 4 — strengthened from "verify if adding NuGet packages" → "verify on EVERY BFF-touching task" with explicit `dotnet publish` command, absolute-size + diff reporting requirement, and escalation thresholds. Cross-links to azure-deployment.md.
+
 ### Changed (2026-05-26 sdap-bff-api-remediation-fix Phase 5 wrap-up)
 - `docs/guides/auth-deployment-setup.md` §3 expanded with new §3.5 covering 25+ App Settings discovered during Phase 5 demo prep beyond the original "8 settings" inventory (MI identity disambiguation 5 keys + Cosmos persistence + AgentService placeholders + feature-flag=false patterns + email subsystem).
 - `docs/guides/auth-deployment-setup.md` §7c — drop `-UserPrincipalName` from `Connect-ExchangeOnline` example to avoid the mismatch failure mode discovered in Phase 5 (operator's browser-selected account vs param).

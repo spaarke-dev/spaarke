@@ -64,14 +64,26 @@ export function resolveTenantIdSync(): string {
   // 3. Xrm.organizationSettings.tenantId via frame hierarchy walk.
   if (typeof window !== 'undefined') {
     const frames: Window[] = [window];
-    try { if (window.parent && window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-    try { if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!); } catch { /* cross-origin */ }
+    try {
+      if (window.parent && window.parent !== window) frames.push(window.parent);
+    } catch {
+      /* cross-origin */
+    }
+    try {
+      if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
+    } catch {
+      /* cross-origin */
+    }
 
     for (const frame of frames) {
       try {
-        const tenantId = (frame as any).Xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId as string | undefined;
+        const tenantId = (frame as any).Xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId as
+          | string
+          | undefined;
         if (tenantId) return tenantId;
-      } catch { /* cross-origin */ }
+      } catch {
+        /* cross-origin */
+      }
     }
   }
 

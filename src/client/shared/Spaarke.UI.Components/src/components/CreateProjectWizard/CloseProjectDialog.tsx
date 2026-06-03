@@ -311,7 +311,7 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
         containerId,
       },
       authFetch,
-      bffBaseUrl,
+      bffBaseUrl
     );
 
     if (result.success && result.data) {
@@ -357,10 +357,7 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
             }
           >
             <div className={styles.titleRow}>
-              <WarningFilled
-                className={styles.titleIcon}
-                aria-hidden="true"
-              />
+              <WarningFilled className={styles.titleIcon} aria-hidden="true" />
               <div>
                 <Text size={400} className={styles.titleText} as="span" block>
                   Close Secure Project
@@ -375,17 +372,16 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
           {/* ── Content ─────────────────────────────────────────────────── */}
           <DialogContent>
             <div className={styles.contentArea}>
-
               {/* ── Confirm phase ── */}
               {phase === 'confirm' && (
                 <>
                   <Text size={300} className={styles.warningIntro}>
-                    Closing this project will permanently revoke all external access. Please review the
-                    consequences before proceeding.
+                    Closing this project will permanently revoke all external access. Please review the consequences
+                    before proceeding.
                   </Text>
 
                   <div className={styles.consequenceList} role="list" aria-label="Closure consequences">
-                    {CLOSURE_CONSEQUENCES.map((item) => (
+                    {CLOSURE_CONSEQUENCES.map(item => (
                       <div key={item.title} className={styles.consequenceItem} role="listitem">
                         <span className={styles.consequenceIcon} aria-hidden="true">
                           {item.icon}
@@ -432,10 +428,7 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
               {/* ── Success phase ── */}
               {phase === 'success' && closureResult && (
                 <div className={styles.resultContainer}>
-                  <CheckmarkCircleFilled
-                    className={styles.resultIconSuccess}
-                    aria-hidden="true"
-                  />
+                  <CheckmarkCircleFilled className={styles.resultIconSuccess} aria-hidden="true" />
                   <Text size={500} weight="semibold" className={styles.resultTitle}>
                     Project closed
                   </Text>
@@ -476,10 +469,7 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
               {/* ── Error phase ── */}
               {phase === 'error' && (
                 <div className={styles.resultContainer}>
-                  <DismissCircleFilled
-                    className={styles.resultIconError}
-                    aria-hidden="true"
-                  />
+                  <DismissCircleFilled className={styles.resultIconError} aria-hidden="true" />
                   <Text size={500} weight="semibold" className={styles.resultTitle}>
                     Closure failed
                   </Text>
@@ -491,8 +481,7 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
                     </MessageBar>
                   )}
                   <Text size={300} className={styles.resultSubtitle}>
-                    The project was not closed. You can retry or contact your administrator if the
-                    issue persists.
+                    The project was not closed. You can retry or contact your administrator if the issue persists.
                   </Text>
                 </div>
               )}
@@ -516,11 +505,7 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
                 >
                   Close Project
                 </Button>
-                <Button
-                  appearance="secondary"
-                  onClick={handleClose}
-                  aria-label="Cancel and keep the project open"
-                >
+                <Button appearance="secondary" onClick={handleClose} aria-label="Cancel and keep the project open">
                   Cancel
                 </Button>
               </>
@@ -533,29 +518,17 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
             )}
 
             {phase === 'success' && (
-              <Button
-                appearance="primary"
-                onClick={handleClose}
-                aria-label="Close this dialog"
-              >
+              <Button appearance="primary" onClick={handleClose} aria-label="Close this dialog">
                 Done
               </Button>
             )}
 
             {phase === 'error' && (
               <>
-                <Button
-                  appearance="primary"
-                  onClick={handleRetry}
-                  aria-label="Try closing the project again"
-                >
+                <Button appearance="primary" onClick={handleRetry} aria-label="Try closing the project again">
                   Try Again
                 </Button>
-                <Button
-                  appearance="secondary"
-                  onClick={handleClose}
-                  aria-label="Cancel and dismiss this dialog"
-                >
+                <Button appearance="secondary" onClick={handleClose} aria-label="Cancel and dismiss this dialog">
                   Cancel
                 </Button>
               </>

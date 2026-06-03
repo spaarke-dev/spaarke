@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B-3: Rename TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE → TELEMETRY_HISTORY_LOAD_FAILURE; audit App Insights queries</title>
+    <phase>Phase 6 — Build hygiene cluster</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, refactoring, typescript</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Constant rename touches .ts/.tsx code + tests; small scope but downstream telemetry-query impact requires explicit coordination. STANDARD per Step 3.5.5 (modifies code with constraints + downstream cutover impact).</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec FR-06 / plan B-3: rename the telemetry constant
+    `TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE → TELEMETRY_HISTORY_LOAD_FAILURE` throughout the
+    codebase. Audit App Insights queries that reference the old name (Operator may need to
+    surface query repository — document the request in the task notes). Coordinate the
+    cutover so there is no telemetry-loss window. Tests updated.
+  </prompt>
+
+  <role>
+    SPAARKE telemetry / observability engineer. Bias toward complete grep coverage, test
+    updates, and explicit coordination of any downstream App Insights query rename. Do NOT
+    delete the old constant without ensuring no consumer still references the old name.
+  </role>
+
+  <goal>
+    `grep -r "TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE"` shows zero matches in code + tests
+    (planning docs / changelog references are acceptable). All call sites use the new
+    name. App Insights query repository audit documented in task notes — including any
+    operator-provided query file path or "operator confirms no external query references
+    the old name". No telemetry-loss window (either: do not drop the old event-name until
+    the renamed event has shipped + been observed, or: deploy the rename in one push
+    when the next telemetry event will be the new name). Spec FR-06 acceptance satisfied.
+  </goal>
+
+  <context>
+    <background>
+      Per backlog B-3: the constant `TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE` lives in
+      `src/solutions/SpaarkeAi/src/telemetry/errorTelemetry.ts` (confirmed via grep). The
+      "Overlay" segment of the name is historically inaccurate (the failure scope is the
+      entire history load, not just the overlay UI). Rename is cosmetic for the developer
+      experience, but the *emitted event name* in App Insights MAY be the same string — in
+      which case existing dashboards / queries / alerts reference the old string. The
+      audit step is load-bearing: do NOT silently change the event name without verifying
+      downstream consumers.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/telemetry/errorTelemetry.ts</file>
+      <file>src/solutions/SpaarkeAi/src/telemetry/__tests__/errorTelemetry.test.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/HistoryOverlay.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Rename MUST cover the constant identifier AND the emitted event-name string (verify by reading the constant declaration — they are typically the same value).</constraint>
+    <constraint source="project">Tests in `errorTelemetry.test.ts` MUST be updated; do NOT leave the old name as a fallback assertion.</constraint>
+    <constraint source="project">Before merging, the App Insights query audit MUST be documented in `projects/spaarke-ai-platform-unification-r4/notes/b3-app-insights-query-audit.md`. If operator-provided query repository is available, search it; if not, note "operator to confirm no external query references". Do NOT delete the old constant value without this confirmation.</constraint>
+    <constraint source="project">No telemetry-loss window: prefer atomic single-PR rename rather than a two-PR migration. The failure event is low-frequency, so a brief gap is acceptable but should be flagged to operator.</constraint>
+    <constraint source="ADR-022">React 19 only; rename MUST NOT introduce any React-version-conditional code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/SpaarkeAi/src/telemetry/errorTelemetry.ts</file>
+      <file>src/solutions/SpaarkeAi/src/telemetry/__tests__/errorTelemetry.test.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/HistoryOverlay.tsx</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Grep audit">Run `grep -rn "TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE" --include="*.ts" --include="*.tsx" --include="*.js"` (and the new name). Enumerate every match. Catalog code vs test vs doc references.</step>
+    <step order="2" name="Inspect constant + emitted-event mapping">Read `errorTelemetry.ts` to confirm the constant value (the literal string sent to App Insights). If the value matches the old identifier, the event-name itself changes — operator notification needed. If the value differs (e.g., constant is `TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE = "historyLoadFailed"`), the rename is identifier-only — much lower coordination cost. Document the case in `notes/b3-app-insights-query-audit.md`.</step>
+    <step order="3" name="App Insights query audit">Search known operator-provided query repos (if any). If none provided, write a section in `notes/b3-app-insights-query-audit.md` titled "Operator confirmation required" with a one-line ask. Proceed with the rename in code; the audit note triggers the operator coordination.</step>
+    <step order="4" name="Rename in code">Update `errorTelemetry.ts`: rename constant + (if applicable) update the emitted event-name string value. Update all consumers (`HistoryOverlay.tsx`, etc.). Use Edit tool's replace_all for fully-qualified imports only — manual review for partial matches.</step>
+    <step order="5" name="Update tests">Update `errorTelemetry.test.ts` to assert against the new name. Do NOT keep the old name as a legacy alias.</step>
+    <step order="6" name="Verify build + lint">Run `npm run build` on `src/solutions/SpaarkeAi/`. Run `npm run lint` (if configured for the package). 0 errors.</step>
+    <step order="7" name="Verify tests">Run `npm test` (or `npx jest`) on the SpaarkeAi telemetry tests. All passing.</step>
+    <step order="8" name="Update TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 062 from 🔲 → ✅ completed.</step>
+    <step order="9" name="Document deviations">If the App Insights audit could not be completed (no operator response), document the open coordination item in `projects/spaarke-ai-platform-unification-r4/notes/` so it surfaces in R4 lessons-learned + handoff.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">grep, npm run build, npm test, npm run lint</tool>
+    <tool name="Read">Read errorTelemetry.ts + consumers + tests</tool>
+    <tool name="Edit">Rename constant + update consumers + update tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/telemetry/errorTelemetry.ts (modified — rename)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/telemetry/__tests__/errorTelemetry.test.ts (modified)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/HistoryOverlay.tsx (modified if it referenced the constant)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/b3-app-insights-query-audit.md (audit + operator-confirmation request)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md (status flip)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the rename, When `grep -rn "TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE" --include="*.ts" --include="*.tsx"` is run across `src/`, Then 0 matches are returned.</criterion>
+    <criterion testable="true">Given the new constant name, When `grep -rn "TELEMETRY_HISTORY_LOAD_FAILURE"` is run, Then it appears in `errorTelemetry.ts` + consumers + tests.</criterion>
+    <criterion testable="true">Given the App Insights audit, When `notes/b3-app-insights-query-audit.md` is read, Then it documents either (a) the audit was completed with no external references found, OR (b) the operator-confirmation request is pending.</criterion>
+    <criterion testable="true">Given the test update, When `npm test` runs the SpaarkeAi telemetry tests, Then all pass and no assertion still references the old name.</criterion>
+    <criterion testable="true">Given task 062 is being executed, When this task completes, Then TASK-INDEX.md shows task 062 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The constant lives in `src/solutions/SpaarkeAi/src/telemetry/errorTelemetry.ts`. The R3 task that introduced it was task 013 (`013-error-telemetry-helpers.poml`). The historic "Overlay" segment of the name is the cosmetic drift this task fixes. If the constant value (the App Insights event-name string) is the same string as the identifier, you are renaming the *emitted event name*; coordinate with operator. If the value is a different short string, the rename is identifier-only and low-risk.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply STANDARD rigor protocol (no Step 9.5 quality gates; checkpointing every 3 steps; current-task.md tracking).</protocol>
+  </execution>
+</task>

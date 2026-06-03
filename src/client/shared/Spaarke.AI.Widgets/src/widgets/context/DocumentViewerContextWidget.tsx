@@ -32,7 +32,7 @@ export type { DocumentViewerData };
  */
 const DocumentViewerContextWidget = createContextWidgetAdapter<DocumentViewerData>(
   DocumentViewerWidget,
-  createDocumentViewerHighlighter<DocumentViewerData>(),
+  createDocumentViewerHighlighter<DocumentViewerData>()
 );
 
 DocumentViewerContextWidget.displayName = 'DocumentViewerContextWidget';

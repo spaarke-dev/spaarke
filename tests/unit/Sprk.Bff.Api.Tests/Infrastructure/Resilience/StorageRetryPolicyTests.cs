@@ -12,6 +12,7 @@ namespace Sprk.Bff.Api.Tests.Infrastructure.Resilience;
 /// Integration tests for StorageRetryPolicy.
 /// Tests retry behavior with simulated storage errors.
 /// </summary>
+[Trait("status", "repaired")]
 public class StorageRetryPolicyTests
 {
     private readonly Mock<ILogger<StorageRetryPolicy>> _loggerMock;

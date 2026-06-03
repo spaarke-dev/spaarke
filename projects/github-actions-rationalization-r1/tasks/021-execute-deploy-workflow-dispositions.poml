@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Execute deploy-* workflow dispositions (delete/consolidate)</title>
+    <phase>2: Rationalization</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>none</blocks>
+    <tags>ci-cd, github-actions, devops, workflow-fix, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Execute decisions from 020; file deletions or consolidations per ledger; FR-06 acceptance</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Execute the dispositions from task 020's ledger for the four deploy-* untested workflows: `deploy-bff-api.yml`, `deploy-platform.yml`, `deploy-slot-swap.yml`, `deploy-office-addins.yml`. Delete those marked DELETE via `git rm`; consolidate those marked CONSOLIDATE per the ledger; for KEEPs, do nothing in this task. Each delete must reference its decision record in the commit message (NFR-04 + NFR-06).
+  </prompt>
+
+  <role>
+    SPAARKE platform DevOps engineer. Executes pre-approved deletions and consolidations. Comfortable preserving ADR-029 hash-verify + slot-swap rollback patterns if `deploy-bff-api.yml` survives consolidation.
+  </role>
+
+  <goal>
+    The 4 deploy-* untested workflows are reduced or consolidated per `ledgers/workflow-disposition-ledger.md`. Each removal is a `git rm` commit referencing the decision record. ADR-029 patterns preserved in any retained deploy workflow.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-06: target ≤8 total workflows. Per D-04: consolidate liberally — `deploy-bff-api.yml` + `deploy-slot-swap.yml` are likely consolidation candidates (both deploy BFF; slot-swap is the strategy). Per ADR-029: any retained BFF deploy workflow must preserve hash-verify + slot-swap rollback.
+    </background>
+    <relevant-files>
+      <file>.github/workflows/deploy-bff-api.yml</file>
+      <file>.github/workflows/deploy-platform.yml</file>
+      <file>.github/workflows/deploy-slot-swap.yml</file>
+      <file>.github/workflows/deploy-office-addins.yml</file>
+      <file>projects/github-actions-rationalization-r1/ledgers/workflow-disposition-ledger.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-06: Workflow count ≤8 after this task + 022</constraint>
+    <constraint source="spec">NFR-04: Deletions via `git rm` + commit; NOT comment-out</constraint>
+    <constraint source="spec">NFR-06: Each delete references its decision record</constraint>
+    <constraint source="ADR-029">Any retained BFF deploy workflow MUST preserve hash-verify + slot-swap rollback patterns</constraint>
+    <constraint source="design">D-04: Consolidate overlapping deploys liberally</constraint>
+    <constraint source="project">MUST run `actionlint` on any retained/modified deploy workflow before push</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+      <file>projects/github-actions-rationalization-r1/ledgers/workflow-disposition-ledger.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load `ledgers/workflow-disposition-ledger.md` — that's the execution plan. Identify which of the 4 deploy-* workflows are DELETE, CONSOLIDATE, or KEEP.</step>
+    <step order="2">For each DELETE: `git rm .github/workflows/{name}.yml` and commit with message referencing the decision record: `chore(ci): remove {name}.yml (D-NN — never observed running successfully in 30d)`.</step>
+    <step order="3">For each CONSOLIDATE pair: read both source files. Author a merged workflow (or extend the target) preserving each unique trigger/job. Verify ADR-029 patterns survived if BFF deploy was involved. Run `actionlint` on the merged file.</step>
+    <step order="4">For each KEEP: no action required (workflow stays as-is or was already fixed in Phase 1).</step>
+    <step order="5">Verify post-condition: `ls .github/workflows/*.yml | wc -l` ≤ (current count - DELETE count - CONSOLIDATE merged count). Document the new count in the ledger.</step>
+    <step order="6">Update TASK-INDEX.md: change task 021 status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">rm for deletions</tool>
+    <tool name="actionlint">Validate any retained/merged workflow</tool>
+    <tool name="Read">Source workflows for consolidation</tool>
+    <tool name="Write">Merged workflow file (if consolidating)</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.github/workflows/ (file count reduced per ledger)</output>
+    <output type="docs">projects/github-actions-rationalization-r1/ledgers/workflow-disposition-ledger.md (updated with execution results)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each deploy-* DELETE in the ledger has a corresponding `git rm` commit on `work/github-actions-rationalization-r1`.</criterion>
+    <criterion testable="true">Each CONSOLIDATE has a merged file that passes `actionlint`.</criterion>
+    <criterion testable="true">Each commit message references its decision record (D-NN).</criterion>
+    <criterion testable="true">ADR-029 patterns (hash-verify, slot-swap rollback) preserved in any retained BFF deploy workflow.</criterion>
+    <criterion testable="true">TASK-INDEX.md task 021 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with 022 because they touch disjoint workflow files. If a CONSOLIDATE requires merging into an unrelated retained workflow, coordinate with task 022 owner via the ledger.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: STANDARD. Parallel-safe with 022.</protocol>
+  </execution>
+</task>

@@ -117,17 +117,17 @@ public sealed class SafetyPipelineMiddleware : ISprkChatAgent
         string userId,
         ILogger<SafetyPipelineMiddleware> logger)
     {
-        _inner            = inner            ?? throw new ArgumentNullException(nameof(inner));
-        _promptShield     = promptShield     ?? throw new ArgumentNullException(nameof(promptShield));
+        _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+        _promptShield = promptShield ?? throw new ArgumentNullException(nameof(promptShield));
         _groundednessCheck = groundednessCheck ?? throw new ArgumentNullException(nameof(groundednessCheck));
-        _citationCheck    = citationCheck    ?? throw new ArgumentNullException(nameof(citationCheck));
+        _citationCheck = citationCheck ?? throw new ArgumentNullException(nameof(citationCheck));
         _confidenceScoring = confidenceScoring ?? throw new ArgumentNullException(nameof(confidenceScoring));
-        _auditLog         = auditLog         ?? throw new ArgumentNullException(nameof(auditLog));
-        _sseWriter        = sseWriter;
-        _sessionId        = sessionId        ?? throw new ArgumentNullException(nameof(sessionId));
-        _tenantId         = tenantId         ?? throw new ArgumentNullException(nameof(tenantId));
-        _userId           = userId           ?? throw new ArgumentNullException(nameof(userId));
-        _logger           = logger           ?? throw new ArgumentNullException(nameof(logger));
+        _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
+        _sseWriter = sseWriter;
+        _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
+        _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
+        _userId = userId ?? throw new ArgumentNullException(nameof(userId));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     // =========================================================================
@@ -233,8 +233,8 @@ public sealed class SafetyPipelineMiddleware : ISprkChatAgent
 
         // ── PHASE 3: Post-LLM safety checks ───────────────────────────────────
 
-        var fullResponse   = responseBuilder.ToString();
-        var sourceDocs     = ExtractSourceDocuments();
+        var fullResponse = responseBuilder.ToString();
+        var sourceDocs = ExtractSourceDocuments();
         var sourceDocCount = sourceDocs.Count;
 
         // Run groundedness + citation checks concurrently — they are independent services
@@ -246,9 +246,9 @@ public sealed class SafetyPipelineMiddleware : ISprkChatAgent
         {
             var groundednessTask = _groundednessCheck.CheckAsync(
                 new GroundednessRequest(
-                    LlmResponse:     fullResponse,
+                    LlmResponse: fullResponse,
                     SourceDocuments: sourceDocs,
-                    Query:           message),
+                    Query: message),
                 cancellationToken);
 
             var citationTask = _citationCheck.CheckResponseAsync(fullResponse, cancellationToken);
@@ -278,8 +278,8 @@ public sealed class SafetyPipelineMiddleware : ISprkChatAgent
             confidenceResult = _confidenceScoring.Score(new ConfidenceScoringRequest(
                 SourcePassageCount: sourceDocCount,
                 GroundednessResult: groundednessResult,
-                ResponseLength:     fullResponse.Length,
-                CitationCount:      citationAnnotation.Citations.Count));
+                ResponseLength: fullResponse.Length,
+                CitationCount: citationAnnotation.Citations.Count));
         }
         catch (Exception ex)
         {
@@ -288,8 +288,8 @@ public sealed class SafetyPipelineMiddleware : ISprkChatAgent
                 "Using Low confidence default.",
                 _sessionId);
             confidenceResult = new ConfidenceScoringResult(
-                Level:     ConfidenceLevel.Low,
-                Score:     0f,
+                Level: ConfidenceLevel.Low,
+                Score: 0f,
                 Rationale: "Confidence scoring failed; defaulting to Low.");
         }
 
@@ -327,8 +327,8 @@ public sealed class SafetyPipelineMiddleware : ISprkChatAgent
         var verifiedCitationCount = citationAnnotation.Citations.Count(c => c.IsVerified);
 
         await WriteAuditEntryAsync(
-            responseHash:      AuditHashHelper.HashResponse(fullResponse),
-            shieldPassed:      true,
+            responseHash: AuditHashHelper.HashResponse(fullResponse),
+            shieldPassed: true,
             groundednessScore: groundednessScore,
             citationsVerified: verifiedCitationCount,
             cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -438,19 +438,19 @@ public sealed class SafetyPipelineMiddleware : ISprkChatAgent
             var emitter = new R2SseEventEmitter(_sseWriter!, _logger);
 
             var severity = groundednessResult.IsGrounded ? "info" : "warning";
-            var action   = groundednessResult.IsGrounded ? "logged" : "logged";
+            var action = groundednessResult.IsGrounded ? "logged" : "logged";
 
             // Groundedness payload: use confidence score as the 0-1 groundedness score
             // (high confidence = well-grounded, low = poorly grounded).
             var groundedness = new SafetyGroundedness(
-                Score:     confidenceResult.Score,
+                Score: confidenceResult.Score,
                 Rationale: confidenceResult.Rationale);
 
             // Citation payload: split verified vs unverified by normalised key.
             SafetyCitations? citations = null;
             if (citationAnnotation.HasCitations)
             {
-                var verified   = citationAnnotation.Citations
+                var verified = citationAnnotation.Citations
                     .Where(c => c.IsVerified)
                     .Select(c => c.Normalized)
                     .ToList()
@@ -463,7 +463,7 @@ public sealed class SafetyPipelineMiddleware : ISprkChatAgent
                     .AsReadOnly();
 
                 citations = new SafetyCitations(
-                    Verified:   verified.Count   > 0 ? verified   : null,
+                    Verified: verified.Count > 0 ? verified : null,
                     Unverified: unverified.Count > 0 ? unverified : null);
             }
 
@@ -474,12 +474,12 @@ public sealed class SafetyPipelineMiddleware : ISprkChatAgent
                   $"Confidence: {confidenceResult.Level}.";
 
             await emitter.EmitSafetyAnnotationAsync(
-                severity:    severity,
-                category:    "groundedness",
-                action:      action,
+                severity: severity,
+                category: "groundedness",
+                action: action,
                 userMessage: userMessage,
                 groundedness: groundedness,
-                citations:   citations,
+                citations: citations,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -513,16 +513,16 @@ public sealed class SafetyPipelineMiddleware : ISprkChatAgent
         {
             var entry = new AuditEntry
             {
-                TenantId     = _tenantId,
-                UserId       = _userId,
-                SessionId    = _sessionId,
-                Action       = "chat_response",
+                TenantId = _tenantId,
+                UserId = _userId,
+                SessionId = _sessionId,
+                Action = "chat_response",
                 ResponseHash = responseHash,
                 SafetyResults = new SafetyCheckResult
                 {
-                    PromptShieldPassed  = shieldPassed,
-                    GroundednessScore   = groundednessScore,
-                    CitationsVerified   = citationsVerified,
+                    PromptShieldPassed = shieldPassed,
+                    GroundednessScore = groundednessScore,
+                    CitationsVerified = citationsVerified,
                 },
             };
 

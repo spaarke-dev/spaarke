@@ -44,16 +44,22 @@ describe('SprkChatBridge — ADR-015 no-auth-token constraint (R2-066 security a
       /^credential/i,
     ];
 
+    // Task 071: `DocumentStreamTokenPayload.token` is a content token (a word in
+    // the streaming AI response), NOT an auth token. The regex `^token/i` is
+    // overly broad for that one legitimate field. Allow-list it explicitly.
+    const ALLOWED_FIELD_NAMES = new Set(['token']);
+
     function assertNoAuthFields(payload: Record<string, unknown>, payloadName: string): void {
       const keys = Object.keys(payload);
       for (const key of keys) {
+        if (ALLOWED_FIELD_NAMES.has(key)) continue;
         for (const pattern of AUTH_FIELD_PATTERNS) {
           expect(pattern.test(key)).toBe(false);
           // If the test fails, the message shows which field matched which pattern
           if (pattern.test(key)) {
             throw new Error(
               `SECURITY: ${payloadName} contains auth-related field "${key}" matching ${pattern}. ` +
-              `This violates ADR-015: auth tokens MUST NOT flow through BroadcastChannel.`
+                `This violates ADR-015: auth tokens MUST NOT flow through BroadcastChannel.`
             );
           }
         }

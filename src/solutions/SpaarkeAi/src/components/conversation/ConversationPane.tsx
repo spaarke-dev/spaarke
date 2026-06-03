@@ -84,6 +84,14 @@ import {
 import { PaneHeader, SprkChat } from "@spaarke/ui-components";
 import { useAiSession, usePaneEvent, useDispatchPaneEvent } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
+// R4 task 042 (W-4): symbolic widget type ID + payload shape for the
+// Assistant-pane PDF-upload → DocumentViewer demo. We import the constant
+// (NOT the literal "document-viewer") so a rename in the registration file
+// surfaces at compile time.
+import {
+  DOCUMENT_VIEWER_WIDGET_TYPE,
+  type DocumentViewerWidgetData,
+} from "@spaarke/ai-widgets";
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
 import {
@@ -576,6 +584,50 @@ export function ConversationPane(): React.JSX.Element {
     [setPlaybookId]
   );
 
+  /**
+   * onAttachmentReady — R4 task 042 (W-4) Assistant → Workspace mount source.
+   *
+   * Demo scenario per OC-R4-07 (2026-05-26 operator confirmation): when the
+   * user attaches a file in the chat input and SprkChat's
+   * `useChatFileAttachment` hook finishes client-side text extraction, this
+   * callback fires once per ready file. We dispatch a typed `widget_load`
+   * event on the `workspace` PaneEventBus channel, which the WorkspacePane
+   * (subscribed via usePaneEvent) resolves through WorkspaceWidgetRegistry
+   * and mounts as a new tab.
+   *
+   * Per Risk R-7 in plan.original.md §8: dispatch + ONE viewer widget only;
+   * broader coverage (image preview, RecordViewer, etc.) is deferred to a
+   * follow-up. The PDF case is the primary path; non-PDF MIME types still
+   * open as workspace tabs but the DocumentViewerWidget falls back to the
+   * extracted text preview (no PDF binary render — see widget docstring).
+   *
+   * Per ADR-030: the payload is typed end-to-end. `widgetData` is cast to
+   * `DocumentViewerWidgetData` at the dispatch boundary (NOT `any`). The
+   * payload shape is reusable for W-5 (task 043 Context-pane dispatch).
+   *
+   * Per ADR-028: no auth context flows through this callback — text was
+   * extracted client-side before this point. NO BFF call is made here.
+   */
+  const handleAttachmentReady = React.useCallback(
+    (attachment: { filename: string; contentType: string; textContent: string }) => {
+      const widgetData: DocumentViewerWidgetData = {
+        filename: attachment.filename,
+        contentType: attachment.contentType,
+        textContent: attachment.textContent,
+      };
+      dispatch("workspace", {
+        type: "widget_load",
+        widgetType: DOCUMENT_VIEWER_WIDGET_TYPE,
+        widgetData,
+        // Use the filename as the tab label — operator-visible behaviour per
+        // OC-R4-07. WorkspacePane.tsx prefers event.displayName over the
+        // registry metadata's generic "Document Viewer" label.
+        displayName: attachment.filename,
+      });
+    },
+    [dispatch]
+  );
+
   // ── WelcomePanel callbacks ──────────────────────────────────────────────
 
   // ── Removed handlers (task 068, Bug 1 + UX-A) ───────────────────────────
@@ -894,6 +946,7 @@ export function ConversationPane(): React.JSX.Element {
               predefinedPrompts={predefinedPrompts}
               hostContext={hostContext}
               onPaneEvent={streaming.onPaneEvent ?? null}
+              onAttachmentReady={handleAttachmentReady}
             />
           </div>
         </div>

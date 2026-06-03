@@ -11,7 +11,7 @@
  * navService.openLookup.mockResolvedValue([{ id: "guid-1", name: "Matter A", entityType: "sprk_matter" }]);
  * ```
  */
-import type { INavigationService } from "../types/serviceInterfaces";
+import type { INavigationService } from '../types/serviceInterfaces';
 
 /**
  * Creates a mock INavigationService with jest.fn() stubs and sensible defaults.

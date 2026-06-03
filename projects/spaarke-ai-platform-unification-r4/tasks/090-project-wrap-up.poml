@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>R4 Project Wrap-up — final quality gates, lessons-learned, repo-cleanup, README → Complete</title>
+    <phase>7: R4 wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001,002,010,011,012,013,014,015,016,017,020,030,031,040,041,042,043,050,051,052,053,054,055,060,061,062,063,064,065,066,067</dependencies>
+    <blocks>none</blocks>
+    <tags>project-wrap-up, repo-cleanup, documentation, code-review, adr-check</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final project-level quality gates (code-review + adr-check across all R4 code), repo-cleanup with operator approval, README + plan status flips, lessons-learned authoring — mandatory per task-create Step 3.7.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task — depends on every other R4 task. Must run sequentially as the closing step.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Close R4 cleanly. Run final quality gates (`/code-review` + `/adr-check` across project code), execute `/repo-cleanup`, document lessons learned, flip README + plan status to Complete, mark all 25 graduation criteria checkboxes verified, reset `current-task.md` to none. This is the project's "ship gate" — operator sign-off required.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer + project shepherd. Final-task discipline: nothing slips into "lessons-learned later"; close everything here. Apply CLAUDE.md §10 governance to the wrap-up itself (no last-minute BFF additions).
+  </role>
+
+  <goal>
+    R4 marked Status: Complete in README.md + plan.md; `/repo-cleanup` audit clean; `notes/lessons-learned.md` published; all 25 graduation criteria boxes (Code+deploy / Documentation / Behavior / Process) checked off with verification evidence; `current-task.md` reset to none; project handed off for `/merge-to-master`.
+  </goal>
+
+  <context>
+    <background>
+      R4 was scoped on 2026-05-25 as 34 IN items across 8 phases (~116h). Pipeline generated 31 POML task files plus this wrap-up. Per CLAUDE.md §7 (Task Completion &amp; Transition) and task-create Step 3.7, every project MUST have a wrap-up task as its final step. This task is the operator-visible "R4 done" gate.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-unification-r4/README.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/current-task.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/lessons-learned.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All 30 preceding R4 tasks MUST be completed (status ✅ in TASK-INDEX) before this wrap-up runs.</constraint>
+    <constraint source="project">All 25 graduation criteria from spec.md §Success Criteria MUST be verifiable, with evidence cited in lessons-learned.md.</constraint>
+    <constraint source="project">No new code changes in this task — only documentation, status updates, and cleanup.</constraint>
+    <constraint source="CLAUDE.md §10">No new BFF additions in wrap-up. If the wrap-up uncovers a needed BFF change, file it as a follow-up R5 item, not as a last-minute R4 commit.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/doc-drift-audit/SKILL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/lessons-learned.md</file>
+      <file>docs/procedures/context-recovery.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all 30 preceding tasks (001-067) are marked ✅ in `tasks/TASK-INDEX.md`. If any are still 🔲 or 🔄, STOP — finish those first.</step>
+    <step order="2">Run `/code-review` on the project's R4-touched code paths (per spec.md §Scope/Affected Areas). Fix any critical findings before proceeding. Non-critical findings → record in lessons-learned for R5 backlog.</step>
+    <step order="3">Run `/adr-check` on the same scope. Verify all R4 code complies with load-bearing ADRs (012, 021, 022, 028) and CLAUDE.md §10 BFF Hygiene. Fix any blockers; record non-blockers.</step>
+    <step order="4">Run `/doc-drift-audit` to catch any stale doc references in `.claude/` or `docs/` introduced by R4 work. Fix immediately if any drift is real.</step>
+    <step order="5">Verify each graduation criterion (25 boxes) in spec.md §Success Criteria. For each, cite evidence (task ID + git commit + verification artifact). Document in `notes/lessons-learned.md`.</step>
+    <step order="6">Write `projects/spaarke-ai-platform-unification-r4/notes/lessons-learned.md` covering: what shipped (mapped to FR/NFR/DR/PR IDs), what worked (parallelization, verify-then-fix in Phase 3, two-wrapper framing), what surprised (use B-2 tsc fix outcome, A-5 verification result), what to defer to R5 (any non-critical code-review/adr-check findings, deferred items per spec §Out of Scope).</step>
+    <step order="7">Flip status in `README.md`: Status → Complete; Last Updated → today; Phase → Complete; Progress → 100%; Completed Date → today; check all Graduation Criteria boxes; add Changelog entry "R4 shipped".</step>
+    <step order="8">Flip status in `plan.md`: Status → Complete. Update all phase deliverable checkboxes (already done per individual task wrap-ups, but verify). Add a "Lessons applied" note linking to `notes/lessons-learned.md`.</step>
+    <step order="9">Reset `current-task.md` to none state (status: none; next action: "R4 complete — run `/merge-to-master` when ready"). Add final session note + project-level handoff summary.</step>
+    <step order="10">Run `/repo-cleanup projects/spaarke-ai-platform-unification-r4`. Review cleanup report. Approve removals (`notes/debug/`, `notes/spikes/`, `notes/drafts/`). Archive `notes/handoffs/` to `.archive/` if any handoff notes were created during R4. Approve final cleanup.</step>
+    <step order="11">Final verification: TASK-INDEX.md shows all ✅; README + plan are Complete; lessons-learned.md exists; current-task.md reset; repo-cleanup audit clean; `git status` clean. Update tasks/TASK-INDEX.md: this task (090) → ✅ completed.</step>
+    <step order="12">Report completion to operator. Recommend `/merge-to-master` as next action.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Shell commands for repo-cleanup, git status</tool>
+    <tool name="dotnet">Build verification if any BFF code touched (none expected here)</tool>
+    <tool name="npm">Build verification if any client code touched (none expected here)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/lessons-learned.md (new)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/README.md (Status → Complete)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/plan.md (Status → Complete)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/current-task.md (reset)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md (090 → ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given all 30 preceding tasks are ✅, when `/code-review` runs on R4 scope, then there are 0 critical findings (non-critical findings logged in lessons-learned).</criterion>
+    <criterion testable="true">Given the same scope, when `/adr-check` runs, then there are 0 ADR violations (CLAUDE.md §10 included).</criterion>
+    <criterion testable="true">Given the 25 graduation criteria from spec.md §Success Criteria, each box is checked with cited evidence (task ID + commit + verification artifact).</criterion>
+    <criterion testable="true">Given `notes/lessons-learned.md` exists, it covers what shipped, what worked, what surprised, what defers to R5 — with explicit task-ID + ADR cross-references.</criterion>
+    <criterion testable="true">Given `README.md` is opened, Status = Complete, Progress = 100%, all Graduation Criteria boxes are checked, Changelog has a "R4 shipped" entry.</criterion>
+    <criterion testable="true">Given `/repo-cleanup` runs, the audit reports clean (no orphaned ephemeral files; `notes/handoffs/` archived if any).</criterion>
+    <criterion testable="true">Given `current-task.md` is opened, Status = none, Next Action = "Run `/merge-to-master`".</criterion>
+    <criterion testable="true">Given `git status` runs, there are no uncommitted ephemeral files after `/repo-cleanup`.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Per CLAUDE.md §7, current-task.md tracks only the active task — history lives in TASK-INDEX and per-task POMLs. The final reset is non-optional.
+
+    If `/code-review` or `/adr-check` surfaces a critical finding that requires a code change, that change MUST be filed as a new task (091+) and executed BEFORE this wrap-up flips to Complete. Do NOT inline-fix in this wrap-up task — it would bypass the per-task quality gate protocol.
+
+    If any deferred item from spec.md §Out of Scope has crept into R4 by accident, document it in lessons-learned (with a note: "actually shipped" or "explicitly NOT shipped"). Don't paper over.
+
+    The R3 wrap-up (task 001 / E-1) is the closest analog and provides a structural template for what good lessons-learned look like in this codebase.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all knowledge files. Apply FULL rigor protocol (Step 9.5 code-review + adr-check gates). This task IS the wrap-up — do NOT skip Step 9.5 even though no code changes happen here; the gates verify the project's accumulated R4 code state.
+    </protocol>
+  </execution>
+</task>

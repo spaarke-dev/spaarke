@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests;
 
+[Trait("status", "repaired")]
 public class CorsAndAuthTests : IClassFixture<CustomWebAppFactory>
 {
     private readonly HttpClient _client;

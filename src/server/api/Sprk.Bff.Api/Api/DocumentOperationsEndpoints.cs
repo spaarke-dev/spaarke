@@ -6,8 +6,8 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services;
-using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Ai.Jobs;
+using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Api;

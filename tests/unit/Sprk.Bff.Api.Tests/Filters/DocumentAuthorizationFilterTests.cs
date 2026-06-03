@@ -14,6 +14,7 @@ namespace Sprk.Bff.Api.Tests.Filters;
 /// so we test input validation and route extraction logic.
 /// Integration tests with the full DI container test the authorization flow.
 /// </summary>
+[Trait("status", "repaired")]
 public class DocumentAuthorizationFilterTests
 {
     private static ClaimsPrincipal CreateUser(string userId = "user-123")

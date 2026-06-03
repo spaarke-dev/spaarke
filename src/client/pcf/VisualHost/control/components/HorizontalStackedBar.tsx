@@ -300,9 +300,7 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
     const headlineField = cardConfig?.headlineFromField;
     let headlinePoint: IAggregatedDataPoint | undefined = currentPoint;
     if (headlineField) {
-      const matched = dataPoints.find(
-        dp => dp.fieldValue === headlineField || dp.label === headlineField
-      );
+      const matched = dataPoints.find(dp => dp.fieldValue === headlineField || dp.label === headlineField);
       if (matched) {
         headlinePoint = matched;
       }

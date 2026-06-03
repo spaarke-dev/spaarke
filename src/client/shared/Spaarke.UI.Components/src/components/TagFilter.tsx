@@ -183,10 +183,7 @@ export const TagFilter: React.FC<TagFilterProps> = ({
   // ── Fluent v9 Menu checked-state binding ─────────────────────────────────
   // Menu expects `checkedValues` keyed by the `name` of each checkbox group.
   // We always wire `tagFilter` → current selection.
-  const checkedValues = React.useMemo(
-    () => ({ [CHECKBOX_GROUP_NAME]: selected }),
-    [selected]
-  );
+  const checkedValues = React.useMemo(() => ({ [CHECKBOX_GROUP_NAME]: selected }), [selected]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
   const handleCheckedValueChange = React.useCallback(
@@ -233,10 +230,7 @@ export const TagFilter: React.FC<TagFilterProps> = ({
           DO NOT re-wrap the MenuPopover in a nested FluentProvider —
           that would shadow the customer theme. See
           `.claude/patterns/ui/fluent-v9-portal-gotcha.md`. */}
-      <Menu
-        checkedValues={checkedValues}
-        onCheckedValueChange={handleCheckedValueChange}
-      >
+      <Menu checkedValues={checkedValues} onCheckedValueChange={handleCheckedValueChange}>
         <MenuTrigger disableButtonEnhancement>
           <Button
             className={styles.trigger}
@@ -244,11 +238,7 @@ export const TagFilter: React.FC<TagFilterProps> = ({
             iconPosition="after"
             icon={<ChevronDownRegular aria-hidden="true" />}
             onClick={handleTriggerClick}
-            aria-label={
-              selectedCount > 0
-                ? `${resolvedLabel} (${selectedCount} selected)`
-                : resolvedLabel
-            }
+            aria-label={selectedCount > 0 ? `${resolvedLabel} (${selectedCount} selected)` : resolvedLabel}
             data-testid="tag-filter-trigger"
           >
             {resolvedLabel}
@@ -295,9 +285,7 @@ export const TagFilter: React.FC<TagFilterProps> = ({
                 size="small"
                 appearance="brand"
                 dismissible
-                dismissIcon={
-                  <DismissRegular aria-label={`Remove ${chipLabel}`} />
-                }
+                dismissIcon={<DismissRegular aria-label={`Remove ${chipLabel}`} />}
                 value={value}
                 onClick={() => handleRemoveTag(value)}
                 data-testid={`tag-filter-active-tag-${value}`}

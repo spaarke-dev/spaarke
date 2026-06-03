@@ -1,21 +1,31 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Sprk.Bff.Api.Services.Ai.Insights.Ingest;
 using Sprk.Bff.Api.Services.Ai.Insights.Mirror;
-using Sprk.Bff.Api.Services.Ai.Insights.Prompts;
+using Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 using Sprk.Bff.Api.Services.Ai.Insights.Sanitization;
+using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
 /// <summary>
-/// DI module for the Spaarke Insights Engine universal ingest pipeline (D-P7, task 040).
+/// DI module for the Spaarke Insights Engine universal ingest pipeline (D-P7).
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>Zone</b>: A per <c>SPEC §3.5</c> — lives under <c>Services/Ai/Insights/Ingest/</c>
-/// + sibling Zone A subnamespaces (<c>Sanitization/</c>, <c>Mirror/</c>, <c>Prompts/</c>).
-/// Zone B never imports these registrations; the orchestrator surfaces through
+/// + sibling Zone A subnamespaces (<c>Sanitization/</c>, <c>Mirror/</c>). Zone B never
+/// imports these registrations; the orchestrator surfaces through
 /// <see cref="PublicContracts.IInsightsAi.RunIngestAsync"/>.
+/// </para>
+/// <para>
+/// <b>Wave C-G4 (task 022) retirement</b>: the legacy <c>IIngestOrchestrator</c> +
+/// <c>IInsightsPromptLoader</c> registrations have been removed along with their
+/// concrete implementations. The universal-ingest pipeline now runs entirely through the
+/// <c>universal-ingest@v1</c> JPS playbook — orchestrated by
+/// <see cref="IPlaybookOrchestrationService.ExecuteAppOnlyAsync"/> via
+/// <see cref="Insights.InsightsOrchestrator"/>. Prompt content lives in
+/// <c>sprk_analysisaction.sprk_systemprompt</c> rows, not on-disk <c>.txt</c> files.
 /// </para>
 /// <para>
 /// <b>ADR-010 compliance</b>:
@@ -24,17 +34,14 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///   <see cref="InsightsExtractionModule"/> (different concern — extraction primitives vs
 ///   pipeline orchestration) or <see cref="InsightsFacadeModule"/> (Zone A public surface).
 ///   Keeps the §3.5 boundary visible in DI composition.</item>
-///   <item>Six interface seams (<see cref="IInsightsContentSanitizer"/>,
+///   <item>Four interface seams (<see cref="IInsightsContentSanitizer"/>,
 ///   <see cref="IObservationMirror"/>, <see cref="IIngestDocumentSource"/>,
-///   <see cref="IObservationIndexUpserter"/>, <see cref="IInsightsPromptLoader"/>,
-///   <see cref="IIngestOrchestrator"/>). Each is justified per ADR-010 §Exceptions:
+///   <see cref="IObservationIndexUpserter"/>). Each is justified per ADR-010 §Exceptions:
 ///   <list type="bullet">
 ///     <item><see cref="IInsightsContentSanitizer"/> — Phase 1.5+ LAVERN Sanitizer swap path.</item>
 ///     <item><see cref="IObservationMirror"/> — Phase 1 NoOp + Phase 1.5+ Dataverse impl (task 051) swap path.</item>
 ///     <item><see cref="IIngestDocumentSource"/> — testability seam (orchestrator unit-tested without real Azure Search).</item>
 ///     <item><see cref="IObservationIndexUpserter"/> — testability seam (orchestrator unit-tested without real Azure Search + embeddings).</item>
-///     <item><see cref="IInsightsPromptLoader"/> — testability seam (orchestrator unit-tested without prompt files on disk).</item>
-///     <item><see cref="IIngestOrchestrator"/> — facade-level testability seam (<see cref="Insights.InsightsOrchestrator"/> unit-tested without exercising full pipeline).</item>
 ///   </list>
 ///   </item>
 ///   <item>All singletons — concrete impls are stateless wrappers over thread-safe dependencies.</item>
@@ -70,14 +77,39 @@ public static class InsightsIngestModule
         // D-P11 — mirror seam (Phase 1 no-op; task 051 swaps in DataverseObservationMirror).
         services.AddSingleton<IObservationMirror, NoOpObservationMirror>();
 
-        // D-P7 supporting services.
-        services.AddSingleton<IInsightsPromptLoader, InsightsPromptLoader>();
+        // D-P7 supporting services. Document fetch is owned by IInsightsAi.RunIngestAsync
+        // (the facade pre-fetches and injects documentText + chunksJson into playbook
+        // parameters per design-a5 §4 Node 1).
         services.AddSingleton<IIngestDocumentSource, FilesIndexIngestDocumentSource>();
         services.AddSingleton<IObservationIndexUpserter, ObservationIndexUpserter>();
 
-        // D-P7 orchestrator itself — bridges into the InsightsOrchestrator facade
-        // (task 042's InsightsOrchestrator.RunIngestAsync delegates here).
-        services.AddSingleton<IIngestOrchestrator, IngestOrchestrator>();
+        // Wave C-G4 (task 022): legacy IIngestOrchestrator + IInsightsPromptLoader
+        // registrations RETIRED. Universal-ingest is now a JPS playbook (universal-ingest@v1)
+        // executed via IPlaybookOrchestrationService; prompts live in
+        // sprk_analysisaction.sprk_systemprompt rows, not on-disk .txt files.
+
+        // ====================================================================
+        // Wave C1 task 020 — universal-ingest@v1 JPS playbook node executors.
+        // ====================================================================
+        // Two new INodeExecutor registrations for the universal-ingest@v1 playbook (D-P15-02
+        // ONE canonical playbook, parameterized — replaces code-defined IngestOrchestrator.cs
+        // on Wave C3). Auto-discovered by NodeExecutorRegistry via SupportedActionTypes:
+        //   - SanitizerNodeExecutor → ActionType.Sanitization (130) — wraps IInsightsContentSanitizer
+        //   - ObservationEmitterNodeExecutor → ActionType.ObservationEmit (140) — wraps
+        //     IObservationEmitter + IObservationIndexUpserter + IObservationMirror
+        //
+        // ADR-030 §F.1 inspection (Asymmetric-Registration Tier 1.5):
+        //   - These are UNCONDITIONAL registrations (no `if (flag)` block).
+        //   - Endpoint consumers: none direct — invoked via PlaybookExecutionEngine which is
+        //     itself unconditionally registered. No metadata-gen risk.
+        //   - Pattern P1 (Promote-to-unconditional) per ADR-030 — appropriate for executors
+        //     auto-discovered by NodeExecutorRegistry. Choice rationale: zero feature-gated
+        //     transitive deps (IInsightsContentSanitizer, IObservationEmitter, etc. are all
+        //     registered above unconditionally in this same module).
+        //
+        // Singleton: stateless executors per the GroundingVerifyNode pattern (Phase 1).
+        services.AddSingleton<INodeExecutor, SanitizerNodeExecutor>();
+        services.AddSingleton<INodeExecutor, ObservationEmitterNodeExecutor>();
 
         return services;
     }

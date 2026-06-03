@@ -186,7 +186,7 @@ const CONTEXT_TOOLS: readonly ToolDescriptor[] = [
  * ContextPaneController. See file header for full design rationale.
  */
 export const ContextPaneMenu: React.FC<ContextPaneMenuProps> = ({
-  selectedTool,
+  selectedTool: _selectedTool,
   onSelectTool,
 }) => {
   const styles = useStyles();

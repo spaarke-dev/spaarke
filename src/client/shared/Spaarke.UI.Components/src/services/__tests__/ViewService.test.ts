@@ -210,12 +210,17 @@ describe('ViewService', () => {
         },
       ];
 
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      // Task 071: `getViewById` calls `getViews(..., { includeCustom: true })`,
+      // which uses a DIFFERENT cache key from a default `getViews(...)` call.
+      // Pre-populate the `{ includeCustom: true }` cache so the cache-hit path
+      // is actually exercised. Also stub retrieveMultipleRecords for the
+      // possible second call (custom configurations) so it returns no entities.
+      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValue({
         entities: mockViews,
       });
 
-      // Populate cache
-      await service.getViews('account');
+      // Populate cache with the same options getViewById uses
+      await service.getViews('account', { includeCustom: true });
 
       // Get by ID should use cache
       const view = await service.getViewById('view-1', 'account');

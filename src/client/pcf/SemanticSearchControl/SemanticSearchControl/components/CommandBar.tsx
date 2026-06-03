@@ -304,10 +304,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
   );
 
   // ── File Type (multi-select) ───────────────────────────────────────────
-  const fileTypeCheckedValues = React.useMemo(
-    () => ({ [FILE_TYPE_GROUP]: filters.fileTypes }),
-    [filters.fileTypes]
-  );
+  const fileTypeCheckedValues = React.useMemo(() => ({ [FILE_TYPE_GROUP]: filters.fileTypes }), [filters.fileTypes]);
 
   const handleFileTypeCheckedChange = React.useCallback(
     (_ev: unknown, data: { name: string; checkedItems: string[] }) => {
@@ -335,10 +332,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
   );
 
   // ── Mode (single-select) ───────────────────────────────────────────────
-  const modeCheckedValues = React.useMemo(
-    () => ({ [MODE_GROUP]: [filters.searchMode] }),
-    [filters.searchMode]
-  );
+  const modeCheckedValues = React.useMemo(() => ({ [MODE_GROUP]: [filters.searchMode] }), [filters.searchMode]);
 
   const handleModeChange = React.useCallback(
     (_ev: unknown, data: { name: string; checkedItems: string[] }) => {
@@ -379,11 +373,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
           appropriate value. Active button gets a token-driven color cue (green
           for All Documents, brand-blue for Associated Only). */}
       {showAssociatedOnly && (
-        <div
-          className={styles.scopeToggleGroup}
-          role="group"
-          aria-label="Document scope toggle"
-        >
+        <div className={styles.scopeToggleGroup} role="group" aria-label="Document scope toggle">
           <Button
             className={mergeClasses(
               styles.scopeToggleButton,
@@ -412,10 +402,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
       )}
 
       {/* File Type — multi-select via MenuItemCheckbox */}
-      <Menu
-        checkedValues={fileTypeCheckedValues}
-        onCheckedValueChange={handleFileTypeCheckedChange}
-      >
+      <Menu checkedValues={fileTypeCheckedValues} onCheckedValueChange={handleFileTypeCheckedChange}>
         <MenuTrigger disableButtonEnhancement>
           <Button
             className={styles.filterButton}
@@ -466,10 +453,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
       </Popover>
 
       {/* Threshold — single-select via MenuItemRadio (5 preset values) */}
-      <Menu
-        checkedValues={thresholdCheckedValues}
-        onCheckedValueChange={handleThresholdChange}
-      >
+      <Menu checkedValues={thresholdCheckedValues} onCheckedValueChange={handleThresholdChange}>
         <MenuTrigger disableButtonEnhancement>
           <Button
             className={styles.filterButton}
@@ -494,10 +478,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
       </Menu>
 
       {/* Mode — single-select (hybrid | vectorOnly | keywordOnly) */}
-      <Menu
-        checkedValues={modeCheckedValues}
-        onCheckedValueChange={handleModeChange}
-      >
+      <Menu checkedValues={modeCheckedValues} onCheckedValueChange={handleModeChange}>
         <MenuTrigger disableButtonEnhancement>
           <Button
             className={styles.filterButton}
@@ -539,27 +520,27 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
           threshold / searchMode / selectedTags. NOT included:
           `associatedOnly` (FR-DOC-06 binding — that's a scope, not a
           filter, and resetting it would fire the auto-search effect). */}
-      {onClearFilters && (() => {
-        const hasActiveFilters =
-          (filters.fileTypes && filters.fileTypes.length > 0) ||
-          (filters.dateRange !== null &&
-            (!!filters.dateRange.from || !!filters.dateRange.to)) ||
-          (filters.threshold ?? 0) !== 0 ||
-          (filters.searchMode ?? 'hybrid') !== 'hybrid' ||
-          (selectedTags && selectedTags.length > 0);
-        if (!hasActiveFilters) return null;
-        return (
-          <Button
-            appearance="subtle"
-            size="small"
-            onClick={onClearFilters}
-            disabled={disabled}
-            aria-label="Clear filters"
-          >
-            Clear
-          </Button>
-        );
-      })()}
+      {onClearFilters &&
+        (() => {
+          const hasActiveFilters =
+            (filters.fileTypes && filters.fileTypes.length > 0) ||
+            (filters.dateRange !== null && (!!filters.dateRange.from || !!filters.dateRange.to)) ||
+            (filters.threshold ?? 0) !== 0 ||
+            (filters.searchMode ?? 'hybrid') !== 'hybrid' ||
+            (selectedTags && selectedTags.length > 0);
+          if (!hasActiveFilters) return null;
+          return (
+            <Button
+              appearance="subtle"
+              size="small"
+              onClick={onClearFilters}
+              disabled={disabled}
+              aria-label="Clear filters"
+            >
+              Clear
+            </Button>
+          );
+        })()}
 
       <div className={styles.spacer} aria-hidden="true" />
 

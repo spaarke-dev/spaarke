@@ -11,9 +11,7 @@ import { IInputs, IOutputs } from './generated/ManifestTypes';
 import { VisualHostHost } from './VisualHostHost';
 import { logger } from './utils/logger';
 
-export class VisualHost
-  implements ComponentFramework.ReactControl<IInputs, IOutputs>
-{
+export class VisualHost implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   private notifyOutputChanged: () => void = () => undefined;
 
   constructor() {

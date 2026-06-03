@@ -60,7 +60,12 @@ describe('SprkChatPredefinedPrompts', () => {
     it('should render nothing when prompts array is empty', () => {
       const { container } = renderWithProviders(<SprkChatPredefinedPrompts prompts={[]} onSelect={mockOnSelect} />);
 
-      expect(container.firstChild).toBeNull();
+      // Task 071: `renderWithProviders` wraps in FluentProvider, so `container.firstChild`
+      // is the FluentProvider <div>, not the component output. Verify the inner content
+      // (the FluentProvider's first child) is empty when prompts is [].
+      const fluentRoot = container.firstChild as HTMLElement | null;
+      // FluentProvider renders a div with className but no children when its `children` is null
+      expect(fluentRoot?.firstChild).toBeNull();
     });
 
     it('should render with region role', () => {

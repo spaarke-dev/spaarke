@@ -22,6 +22,7 @@ namespace Sprk.Bff.Api.Tests.Services.Workspace;
 ///   <item>Created to-dos have sprk_todoflag=true, sprk_todosource='System', sprk_todostatus='Open'</item>
 /// </list>
 /// </remarks>
+[Trait("status", "repaired")]
 public class TodoGenerationServiceTests
 {
     // ──────────────────────────────────────────────────────────────────────────

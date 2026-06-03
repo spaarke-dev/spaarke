@@ -212,7 +212,9 @@ async function acquireTokenViaMsal(): Promise<TokenCache | null> {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
       loginHint = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userName;
-    } catch { /* cross-origin */ }
+    } catch {
+      /* cross-origin */
+    }
     const ssoResult = await msal.ssoSilent({ scopes, loginHint });
     if (ssoResult?.accessToken) {
       return {

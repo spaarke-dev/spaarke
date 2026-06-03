@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="075" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B.4: Fix 5 pre-existing tsc errors in src/solutions/SpaarkeAi/</title>
+    <phase>6.5: R4 add-on cleanup</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, typescript, code-page</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Small set of own-src errors (5) — unused vars, nullability mismatch, missing tsconfig path. STANDARD per Step 3.5.5.</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches src/solutions/SpaarkeAi/ only — different file tree from 072, 073, 074, 076, 077</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Filed 2026-05-27. Task 067 carry-over (CO-3) cataloged 5 pre-existing tsc errors in the
+    SpaarkeAi code page. Operator mandate: fix as part of R4 build-hygiene close.
+  </prompt>
+
+  <role>
+    SPAARKE Code Page engineer. Bias toward minimal, surgical fixes.
+  </role>
+
+  <goal>
+    `npx tsc --noEmit` in `src/solutions/SpaarkeAi/` → 0 own-src errors (down from 5).
+  </goal>
+
+  <context>
+    <background>
+      Per notes/b11-cast-inventory.md CO-3:
+      - src/components/context/ContextPaneMenu.tsx:189 — unused `selectedTool`
+      - src/components/shell/ThreePaneShell.tsx:59 — unused `tokens`
+      - src/components/shell/ThreePaneShell.tsx:447 — unused `isRestoring`
+      - src/components/shell/ThreePaneShell.tsx:612 — `EntityContext | null | undefined` shape mismatch
+      - src/main.tsx:63 — `Cannot find module '@spaarke/legal-workspace'` (likely tsconfig paths missing the `@spaarke/legal-workspace` entry — mirror the B-2 pattern at `Spaarke.AI.Widgets/tsconfig.json`)
+
+      Fix approach per category:
+      - Unused vars: prefix with `_` (per the project's eslint convention) OR remove if dead code
+      - Nullability mismatch on line 612: narrow the type at use site (`if (entityContext) {...}`) or update the consumer to accept the wider shape
+      - `@spaarke/legal-workspace` resolution: add a `paths` entry in `src/solutions/SpaarkeAi/tsconfig.json` pointing to the legal-workspace package's `dist/index.d.ts` (mirror the pattern task 061 / 067 used for `@spaarke/auth` and `@spaarke/ai-context`)
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/context/ContextPaneMenu.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/main.tsx</file>
+      <file>src/solutions/SpaarkeAi/tsconfig.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">React 19 patterns only.</constraint>
+    <constraint source="project">Minimum-viable fix per error. Don't refactor surrounding code.</constraint>
+    <constraint source="project">For unused vars: prefer `_`-prefix over deletion if the variable was deliberately destructured for clarity. Delete if truly dead.</constraint>
+    <constraint source="project">For tsconfig paths: mirror the existing pattern at `Spaarke.AI.Widgets/tsconfig.json` for `@spaarke/auth` / `@spaarke/ai-context`. Point to `dist/index.d.ts`.</constraint>
+    <constraint source="project">If a fix reveals more errors (cascade), absorb if within budget; document otherwise.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/b11-cast-inventory.md</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/tsconfig.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Baseline">Run `npx tsc --noEmit` in `src/solutions/SpaarkeAi/`. Capture exact errors. Confirm 5 own-src.</step>
+    <step order="2" name="Fix unused vars">3 unused-var errors → prefix with `_` or delete dead code.</step>
+    <step order="3" name="Fix EntityContext nullability">ThreePaneShell.tsx:612 — narrow at use site or update consumer.</step>
+    <step order="4" name="Fix @spaarke/legal-workspace resolution">Add `paths` entry to `src/solutions/SpaarkeAi/tsconfig.json`. Pattern: `"@spaarke/legal-workspace": ["../../client/shared/Spaarke.LegalWorkspace/dist/index.d.ts"]` (verify exact path). Also ensure the legal-workspace package has been built (its `dist/` exists).</step>
+    <step order="5" name="Typecheck verification">`npx tsc --noEmit` → 0 own-src errors.</step>
+    <step order="6" name="Build verification">`npm run build` in `src/solutions/SpaarkeAi/` → 0 errors.</step>
+    <step order="7" name="Document">Write `projects/spaarke-ai-platform-unification-r4/notes/075-spaarkeai-tsc-fix.md` with per-error fix summary.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Inspect affected files</tool>
+    <tool name="Edit">Apply fixes</tool>
+    <tool name="Bash">npx tsc --noEmit, npm run build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/context/ContextPaneMenu.tsx</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx</output>
+    <output type="code">src/solutions/SpaarkeAi/src/main.tsx (if affected by tsconfig fix)</output>
+    <output type="config">src/solutions/SpaarkeAi/tsconfig.json (paths entry added)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/075-spaarkeai-tsc-fix.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the fixes, When `npx tsc --noEmit` runs in `src/solutions/SpaarkeAi/`, Then 0 own-src errors.</criterion>
+    <criterion testable="true">Given the change, When `npm run build` runs in `src/solutions/SpaarkeAi/`, Then 0 errors.</criterion>
+    <criterion testable="true">Given the tsconfig fix, When `tsconfig.json` is inspected, Then a `paths` entry for `@spaarke/legal-workspace` exists.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>

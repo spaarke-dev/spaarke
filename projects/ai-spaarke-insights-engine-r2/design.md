@@ -23,9 +23,9 @@ Live verification surfaced two categories of follow-on work:
 | Correction / Addition | Phase 1 state | Phase 1.5 target |
 |---|---|---|
 | Insights IS a JPS application (not "extends JPS") | Mostly true except `IngestOrchestrator` | Universal-ingest refactored to JPS playbook; ALL Insights workflows are JPS |
-| Prompts in source files | `classification.v1.txt`, `outcome-extraction.v1.txt`, `predict-matter-cost-synthesis.v1.txt` in source | Prompts in JPS-managed Dataverse scope storage; SME-iterable, per-tenant overridable |
+| Prompts in source files | `classification.v1.txt`, `outcome-extraction.v1.txt`, `predict-matter-cost-synthesis.v1.txt` in source | Prompts in `sprk_analysisaction.sprk_systemprompt` (**existing** JPS primitive — already used by r1 for non-Insights actions like "Classify Document"); SME-iterable, per-tenant overridable. **No new `sprk_prompt` entity.** |
 | Single ingest playbook = canonical (don't multiply) | N/A | One `universal-ingest@v1` JPS playbook with parameterized config — flexibility via config, not via spawning new playbooks |
-| Classification taxonomy 1D (litigation-biased) | 8 categories hard-coded | 2D: practice-area × document-type; per-practice-area Layer 1 + Layer 2 prompts |
+| Classification taxonomy 1D (litigation-biased) | 8 categories hard-coded | 2D: practice-area × document-type; per-practice-area Layer 1 + Layer 2 prompts. Practice-area dimension sourced from the **existing `sprk_practicearea_ref` Dataverse table** (APPL, BNKF, CTRNS, IPPAT, IPTM, MA, …) — the table IS the source of truth; no hardcoded list in code or docs |
 | Subject scheme = `matter:` only | `DataverseLiveFactResolver` queries `sprk_matter` only | Subject schemes: `matter:`, `project:`, `invoice:`, future entities; per-entity live-fact resolvers; scope shape generalized |
 | Consumption surface = single endpoint | `POST /api/insights/ask` only | Hybrid: playbook + generic RAG; intent classifier; Assistant integration |
 | Ingest opt-in | Job handler wired but no producer-side surface to set the flag | Producer-side surface decided + implemented |
@@ -118,7 +118,12 @@ This project executes the Phase 1.5 work above. The Phase 1.5 acceptance bar is:
 
 ### D-P15-01: Insights IS a JPS application (canonical framing)
 
-All Insights workflows are realized as JPS playbooks executed by the existing `PlaybookExecutionEngine`. Insights extends JPS by registering new `INodeExecutor` types (LiveFactNode, IndexRetrieveNode, EvidenceSufficiencyNode, DeclineToFindNode, ReturnInsightArtifactNode, GroundingVerifyNode) and adds a new substrate (`spaarke-insights-index`) and a stable facade (`IInsightsAi`). NO parallel orchestrators. NO code-defined playbooks except via interim migration during Wave C.
+**Terminology** (load-bearing — these terms got conflated in earlier drafts):
+- **JPS** = the JSON Prompt Schema, i.e. the **data format**. JPS itself is data, not code. JPS data lives in Dataverse on `sprk_analysisaction.sprk_systemprompt` (with `$schema`, `$version`, `instruction { role, task, constraints, context }`, `input`, `parameters`) and on `sprk_playbook` rows.
+- **`PlaybookExecutionEngine`** = the **code component in `Sprk.Bff.Api`** that executes JPS-defined work. Earlier drafts loosely called this "the JPS engine."
+- **`INodeExecutor`** = code-side handler for a specific analysis-action TYPE.
+
+All Insights workflows are realized as JPS playbooks (data) executed by the existing `PlaybookExecutionEngine` (code). Insights contributes new `INodeExecutor` implementations (LiveFactNode, IndexRetrieveNode, EvidenceSufficiencyNode, DeclineToFindNode, ReturnInsightArtifactNode, GroundingVerifyNode), adds a new scope substrate (`spaarke-insights-index`), and adds a stable facade (`IInsightsAi`). **The JPS schema and `PlaybookExecutionEngine` itself are not modified by Insights.** NO parallel orchestrators. NO code-defined playbooks except via interim migration during Wave C.
 
 ### D-P15-02: One canonical universal-ingest playbook, parameterized
 
@@ -142,29 +147,41 @@ Per-entity playbooks (e.g., `predict-project-completion@v1`, `flag-invoice-anoma
 ### D-P15-04: 2D classification taxonomy with per-practice-area routing
 
 Document classification is parameterized over practice area:
-- `sprk_practicearea_ref` (existing) is the first dimension
+- `sprk_practicearea_ref` (existing) is the first dimension; the **table IS the source of truth** (APPL, BNKF, CTRNS, IPPAT, IPTM, MA, …) — no hardcoded list anywhere in code or docs
 - `sprk_documenttype_ref` (NEW Phase 1.5) is the second dimension; per-practice-area lookup
 - N:N matrix entity `sprk_practicearea_documenttype` (NEW Phase 1.5) carries which document types are valid for which practice area
-- Per-practice-area Layer 1 classification prompts: `classification.{practice-area}.{version}`
-- Per-(practice-area, document-type) Layer 2 extraction schemas: `extraction.{practice-area}.{document-type}.{version}`
+- Per-practice-area Layer 1 classification: handled either by **parametric injection** into a single `sprk_analysisaction` row (`parameters.categories` array, `parameters.practiceAreaContext` string) OR by **per-practice-area variant action rows** (e.g., action codes `INSIGHTS.LAYER1_CLASSIFY.CTRNS`, `INSIGHTS.LAYER1_CLASSIFY.IPPAT`) — Wave A4 decides
+- Per-(practice-area, document-type) Layer 2 extraction: similarly via variant `sprk_analysisaction` rows or parametric injection per Wave A4
 
-Universal-ingest playbook reads `sprk_matter.sprk_practicearea` (or per-entity equivalent) to select the appropriate Layer 1 prompt; Layer 1 output (document type) drives selection of the appropriate Layer 2 schema.
+Universal-ingest playbook reads `sprk_matter.sprk_practicearea` (or per-entity equivalent) to select the appropriate Layer 1 action; Layer 1 output (document type) drives selection of the appropriate Layer 2 action.
 
-`outcomeBearing` as a gate is **retired in its current form** — replaced by per-(practice-area, document-type) gate logic. For litigation, the gate is still "is this a settlement/judgment/closure doc?" For real estate, the gate becomes "is this a lease/deed/closing-statement doc?" Each practice area defines its own gate semantics in its Layer 2 schema.
+`outcomeBearing` as a gate is **retired in its current form** — replaced by per-(practice-area, document-type) gate logic. For Commercial Transactions (CTRNS), the gate becomes "is this a closing-statement / asset-purchase / financing doc?" For IP Patents (IPPAT), "is this a patent application / office action / issued patent?" For Banking & Finance (BNKF), "is this a loan agreement / security agreement / payoff?" Each practice area defines its own gate semantics in its Layer 2 schema. The example set is illustrative — the initial Wave D2 scope picks the top N practice areas from `sprk_practicearea_ref` based on SME readiness (see Q-D2-1).
 
-### D-P15-05: Prompts in JPS scope storage
+### D-P15-05: Prompts move from `.txt` files into the existing `sprk_analysisaction.sprk_systemprompt` primitive
 
-Prompts move from source `.txt` files to Dataverse-managed scope storage. Wave A4 design chooses between:
+**Correction from earlier draft**: prior versions of this design proposed introducing a new `sprk_prompt` entity. That is **superseded**. `sprk_analysisaction.sprk_systemprompt` already serves this role and is in active use in r1 — the existing "Classify Document" action row carries its full JPS prompt (`$schema`, `$version`, `instruction { role, task, constraints, context }`, `input`, `parameters`) in this field. Adding a parallel `sprk_prompt` entity would duplicate an existing primitive.
 
-- **Option (a) New `sprk_prompt` entity** — dedicated table for prompts with version, scope, content, parameter schema
-- **Option (b) Per-playbook `sprk_configjson`** — prompts embedded in playbook config as JSON-quoted strings
-- **Option (c) Hybrid: `sprk_prompt` for shared prompts (Layer 1, Layer 2 per-practice-area), `sprk_configjson` for playbook-specific prompts (synthesis templates)**
+**How `sprk_analysisaction` relates to other JPS primitives**:
 
-Wave A4 design doc picks one with explicit reasoning. Initial leaning: option (c) — shared prompts in their own entity (reusable across playbooks); playbook-specific prompts inline.
+| Primitive | Role | Edited by |
+|---|---|---|
+| `sprk_analysisaction` (existing) | **Prompt-bearing dispatch row.** Carries action code, action type, JPS-formatted system prompt in `sprk_systemprompt`, parameter schema, output schema, tags. ONE row per action variant. | SMEs (prompt content) + devs (when adding new action types) |
+| `sprk_playbook` + `sprk_configjson` (existing) | Playbook definition with per-playbook config blob: cost cap, thresholds, and inline prompt templates that exist only for that playbook | Playbook author |
+| `sprk_prompt` | **Not introduced.** Would duplicate `sprk_analysisaction.sprk_systemprompt`. | n/a |
 
-Versioning: every prompt change creates a new row (NEVER edit in place). Old versions remain available for A/B testing and rollback. Playbooks reference specific prompt versions; cutover is a playbook config change.
+**Phase 1.5 prompt storage approach**:
 
-Per-tenant overrides: scope queries fall through tenant-specific → global. Customers can override a global prompt with a tenant-specific version without affecting other tenants.
+- **All Insights prompt content** lives in `sprk_analysisaction.sprk_systemprompt` (JPS-formatted JSON). The 6+ new Insights action rows created in Wave B and additional rows added in Waves C/D/E each carry their canonical prompt.
+- **Playbook-specific inline templates** (e.g., the synthesis template owned exclusively by `predict-matter-cost@v1`) may still live in `sprk_playbook.sprk_configjson` since they have no reuse value across playbooks.
+- **No new `sprk_prompt` entity.**
+
+**Wave A4 design doc decides the mechanism for variants, versioning, and per-tenant override WITHIN `sprk_analysisaction`**:
+
+- **Variants** (per-practice-area): (a) variant action rows per practice area (e.g., action codes suffixed `_CTRNS`, `_IPPAT`); playbook nodes resolve the action code at invocation based on the matter's practice area. OR (b) parametric JPS injection — a single action row with runtime parameters per practice area (`parameters.categories`, `parameters.practiceAreaContext`).
+- **Versioning**: new action row per version vs. version field on existing row. Initial leaning: new row per version (matches the "Classify Document" pattern of immutable rows; old versions remain queryable for rollback + A/B testing).
+- **Per-tenant overrides**: tenant-scoped variant rows with fallthrough query (tenant-specific → global), vs. override mapping table, vs. tenant blocks within the JPS schema.
+
+Wave A4 picks with explicit reasoning.
 
 ### D-P15-06: Hybrid playbook + ad-hoc RAG
 
@@ -193,9 +210,9 @@ Rationale: most production scenarios want consistent behavior per tenant. Per-up
 
 ### D-P15-09: `outcomeBearing` retired; replaced with practice-area-specific gates
 
-Phase 1's binary `outcomeBearing` flag was a `predict-matter-cost`-specific gate baked into Layer 1. Phase 1.5 retires it. Each practice area's Layer 1 prompt emits practice-area-appropriate signals (e.g., `is_settlement` + `is_judgment` + `is_closure` for litigation; `is_lease` + `is_purchase_agreement` + `is_closing_statement` for real estate). The universal-ingest playbook's conditional gate consults the practice-area-specific Layer 2 schema to determine whether the document warrants Layer 2 extraction.
+Phase 1's binary `outcomeBearing` flag was a `predict-matter-cost`-specific gate baked into Layer 1. Phase 1.5 retires it. Each practice area's Layer 1 prompt emits practice-area-appropriate signals — e.g., for Commercial Transactions (CTRNS): `is_closing_statement`, `is_asset_purchase`, `is_financing_agreement`; for IP Patents (IPPAT): `is_patent_application`, `is_office_action`, `is_issued_patent`; for Banking & Finance (BNKF): `is_loan_agreement`, `is_security_agreement`, `is_payoff_letter`. The specific signals per practice area are authored during Wave D2; the example set is illustrative only. The universal-ingest playbook's conditional gate consults the practice-area-specific Layer 2 schema to determine whether the document warrants Layer 2 extraction.
 
-This is a larger redesign than just renaming a field — it requires per-practice-area prompt authoring (Wave D2) and per-practice-area gate logic in the universal-ingest playbook (Wave D4). Phase 1 fixtures remain compatible because their practice area defaults to litigation.
+This is a larger redesign than just renaming a field — it requires per-practice-area prompt authoring (Wave D2) and per-practice-area gate logic in the universal-ingest playbook (Wave D4). Phase 1 fixtures remain compatible because their practice area defaults to the litigation/CTRNS-equivalent in Spaarke Dev seed data; new fixtures generated in Wave D7 are synthetic per practice area (per Owner Clarification TF-1 in `spec.md`).
 
 ---
 
@@ -232,9 +249,15 @@ Estimated effort:
 
 ## 5. Open design questions (resolve during Wave A)
 
-### Q-A4-1: Where do prompts live in Dataverse?
+### Q-A4-1: Phase 1.5 prompt-variant + versioning + per-tenant-override pattern within `sprk_analysisaction`
 
-Options per D-P15-05. Wave A4 design doc must pick and defend. Suggested initial leaning: option (c) hybrid.
+(See D-P15-05 — no new entity introduced; refinement of the original "where do prompts live" question.) Wave A4 picks:
+
+- **Variant pattern** — variant action rows per practice area (e.g., `_CTRNS`, `_IPPAT` suffixes) vs. parametric JPS injection within a single action row (`parameters.categories` array, `parameters.practiceAreaContext` string)
+- **Versioning model** — new action row per version vs. version field on existing row (initial leaning: new row per version, matching the "Classify Document" immutable-row pattern)
+- **Per-tenant override** — tenant-scoped variant rows with fallthrough query (tenant-specific → global) vs. override mapping table vs. tenant blocks within the JPS schema
+
+Each option with explicit reasoning and a rollback / A-B test story.
 
 ### Q-A5-1: How many nodes in the JPS universal-ingest playbook?
 
@@ -264,13 +287,14 @@ Wave D6 design decides + plans migration.
 
 ### Q-D2-1: Initial practice-area scope
 
-Phase 1.5 can't realistically implement all of Spaarke's practice areas in one project. Initial Wave D2 scope:
-- Litigation (Phase 1 default — already implicit)
-- Real estate (substantial document variety; high SME readiness)
-- Patent (specialized; valuable for IP firms)
-- Transactional (broad; foundational for many practice areas)
+Phase 1.5 can't realistically implement all of Spaarke's practice areas in one project. The full set lives in the **existing `sprk_practicearea_ref` table** in Spaarke Dev (visible rows include APPL Appellate, BNKF Banking & Finance, CTRNS Commercial Transactions, IPPAT Intellectual Property Patents, IPTM Intellectual Property Trademarks, MA Mergers & Acquisitions — and any others added since this design was authored). **The table IS the source of truth**; no hardcoded list in code or docs.
 
-5 practice areas in Wave D2, 3 in Wave D3 (Layer 2 schemas). Additional practice areas land per customer onboarding cadence.
+Wave A3 selects the **top 3 practice areas** for the initial Wave D2 implementation based on:
+- **SME readiness** — which areas have prompt authors available
+- **Document variety** — which areas exercise more of the 2D taxonomy
+- **Strategic priority** — which areas the project owner identifies as highest-value for Phase 1.5 rollout
+
+Wave D3 picks 3 (practice-area, document-type) pairs for Layer 2 extraction schemas. Additional practice areas land per customer onboarding cadence post-Phase 1.5.
 
 ### Q-E2-1: Intent classifier approach
 

@@ -17,7 +17,7 @@
  * All colours from Fluent UI v9 semantic tokens (ADR-021).
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -36,25 +36,15 @@ import {
   Spinner,
   MessageBar,
   MessageBarBody,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import type {
   SliderOnChangeData,
   ComboboxProps,
-} from "@fluentui/react-components";
-import {
-  SaveRegular,
-  InfoRegular,
-  DeleteRegular,
-  CheckmarkRegular,
-  OpenRegular,
-} from "@fluentui/react-icons";
-import type {
-  ITodoRecord,
-  ITodoExtension,
-  IEventFieldUpdates,
-  ITodoExtensionUpdates,
-  IContactOption,
-} from "./types";
+  OptionOnSelectData,
+  SelectionEvents,
+} from '@fluentui/react-components';
+import { SaveRegular, InfoRegular, DeleteRegular, CheckmarkRegular, OpenRegular } from '@fluentui/react-icons';
+import type { ITodoRecord, ITodoExtension, IEventFieldUpdates, ITodoExtensionUpdates, IContactOption } from './types';
 
 // ---------------------------------------------------------------------------
 // To Do Score computation (self-contained — no cross-solution imports)
@@ -105,10 +95,10 @@ function computeScore(
 
 /** Convert ISO date string to YYYY-MM-DD for input[type="date"]. */
 function toDateInputValue(dateStr?: string | null): string {
-  if (!dateStr) return "";
+  if (!dateStr) return '';
   const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return "";
-  return d.toISOString().split("T")[0];
+  if (isNaN(d.getTime())) return '';
+  return d.toISOString().split('T')[0];
 }
 
 // ---------------------------------------------------------------------------
@@ -117,38 +107,38 @@ function toDateInputValue(dateStr?: string | null): string {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    overflow: 'hidden',
   },
   content: {
-    flex: "1 1 0",
-    overflowY: "auto",
+    flex: '1 1 0',
+    overflowY: 'auto',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
-    display: "flex",
-    flexDirection: "column",
-    gap: "0px",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0px',
   },
   divider: {
-    height: "1px",
+    height: '1px',
     backgroundColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
-    marginTop: "25px",
-    marginBottom: "25px",
+    marginTop: '25px',
+    marginBottom: '25px',
   },
   section: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   sectionTitleRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   sectionTitle: {
@@ -156,9 +146,9 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
   fieldRow: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "2px",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
   },
   fieldLabel: {
     color: tokens.colorNeutralForeground3,
@@ -166,45 +156,45 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   sliderRow: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "2px",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
   },
   sliderLabelRow: {
-    display: "flex",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   sliderValue: {
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    minWidth: "24px",
-    textAlign: "right" as const,
+    minWidth: '24px',
+    textAlign: 'right' as const,
   },
   scoreCircle: {
-    width: "36px",
-    height: "36px",
-    borderRadius: "50%",
+    width: '36px',
+    height: '36px',
+    borderRadius: '50%',
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     fontWeight: tokens.fontWeightBold,
     fontSize: tokens.fontSizeBase300,
     flexShrink: 0,
   },
   infoPopover: {
-    maxWidth: "320px",
-    display: "flex",
-    flexDirection: "column",
+    maxWidth: '320px',
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   infoSection: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
   infoSectionTitle: {
@@ -216,65 +206,65 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
   },
   footer: {
-    display: "flex",
-    justifyContent: "flex-end",
+    display: 'flex',
+    justifyContent: 'flex-end',
     gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
-    borderTopWidth: "1px",
-    borderTopStyle: "solid",
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
   },
   emptyState: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flex: "1 1 0",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: '1 1 0',
     color: tokens.colorNeutralForeground4,
     paddingTop: tokens.spacingVerticalXXXL,
   },
   loadingState: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flex: "1 1 0",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: '1 1 0',
     paddingTop: tokens.spacingVerticalXXXL,
   },
   errorBanner: {
     flexShrink: 0,
   },
   assignedToDisplay: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   assignedToName: {
-    flex: "1 1 0",
+    flex: '1 1 0',
     color: tokens.colorNeutralForeground1,
     fontSize: tokens.fontSizeBase300,
   },
   recordLink: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
-    cursor: "pointer",
+    cursor: 'pointer',
   },
   completeBtn: {
     backgroundColor: tokens.colorPaletteYellowBackground3,
     color: tokens.colorNeutralForeground1,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorPaletteYellowForeground2,
     },
   },
   completedBtn: {
     backgroundColor: tokens.colorPaletteGreenBackground3,
     color: tokens.colorNeutralForegroundOnBrand,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorPaletteGreenForeground2,
     },
   },
@@ -291,19 +281,11 @@ export interface ITodoDetailProps {
   isLoading: boolean;
   error: string | null;
   /** Save event fields (sprk_event). */
-  onSaveEventFields: (
-    eventId: string,
-    fields: IEventFieldUpdates
-  ) => Promise<{ success: boolean; error?: string }>;
+  onSaveEventFields: (eventId: string, fields: IEventFieldUpdates) => Promise<{ success: boolean; error?: string }>;
   /** Save todo extension fields (sprk_eventtodo). */
-  onSaveTodoExtFields: (
-    todoId: string,
-    fields: ITodoExtensionUpdates
-  ) => Promise<{ success: boolean; error?: string }>;
+  onSaveTodoExtFields: (todoId: string, fields: ITodoExtensionUpdates) => Promise<{ success: boolean; error?: string }>;
   /** Deactivate sprk_eventtodo (statecode=1, statuscode=2) via direct REST API. */
-  onDeactivateTodoExt: (
-    todoId: string
-  ) => Promise<{ success: boolean; error?: string }>;
+  onDeactivateTodoExt: (todoId: string) => Promise<{ success: boolean; error?: string }>;
   /** Remove from To Do (sets sprk_todoflag=false, then closes pane). */
   onRemoveTodo?: (eventId: string) => Promise<void>;
   /** Close the side pane. */
@@ -323,8 +305,8 @@ export interface ITodoDetailProps {
 
 /** Map record type display name to Dataverse entity logical name for navigation. */
 const RECORD_TYPE_ENTITY_MAP: Record<string, string> = {
-  Matter: "sprk_matter",
-  Project: "sprk_project",
+  Matter: 'sprk_matter',
+  Project: 'sprk_project',
 };
 
 // ---------------------------------------------------------------------------
@@ -341,7 +323,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     onSaveTodoExtFields,
     onDeactivateTodoExt,
     onRemoveTodo,
-    onClose,
+    onClose: _onClose,
     onSearchContacts,
     onOpenRegardingRecord,
   }) => {
@@ -352,18 +334,18 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     const notesTextareaRef = React.useRef<HTMLTextAreaElement | null>(null);
 
     // Editable field values (sprk_event fields)
-    const [description, setDescription] = React.useState("");
-    const [dueDate, setDueDate] = React.useState("");
+    const [description, setDescription] = React.useState('');
+    const [dueDate, setDueDate] = React.useState('');
     const [priority, setPriority] = React.useState<number>(50);
     const [effort, setEffort] = React.useState<number>(50);
 
     // Editable field value (sprk_eventtodo field)
-    const [toDoNotes, setToDoNotes] = React.useState("");
+    const [toDoNotes, setToDoNotes] = React.useState('');
 
     // Assigned To state
     const [assignedToId, setAssignedToId] = React.useState<string | null>(null);
-    const [assignedToName, setAssignedToName] = React.useState("");
-    const [contactQuery, setContactQuery] = React.useState("");
+    const [assignedToName, setAssignedToName] = React.useState('');
+    const [contactQuery, setContactQuery] = React.useState('');
     const [contactOptions, setContactOptions] = React.useState<IContactOption[]>([]);
     const [isSearching, setIsSearching] = React.useState(false);
     const [isEditingAssignedTo, setIsEditingAssignedTo] = React.useState(false);
@@ -376,33 +358,30 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
     // Snapshot of original values (for dirty detection)
     const origRef = React.useRef({
-      description: "",
-      dueDate: "",
+      description: '',
+      dueDate: '',
       priority: 50,
       effort: 50,
       assignedToId: null as string | null,
-      toDoNotes: "",
+      toDoNotes: '',
     });
 
     // Reset when record changes
     React.useEffect(() => {
       if (record) {
-        const desc = record.sprk_description ?? "";
+        const desc = record.sprk_description ?? '';
         const dd = toDateInputValue(record.sprk_duedate);
         const pri = record.sprk_priorityscore ?? 50;
         const eff = record.sprk_effortscore ?? 50;
         const aId = record._sprk_assignedto_value ?? null;
-        const aName =
-          record[
-            "_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue"
-          ] ?? "";
+        const aName = record['_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue'] ?? '';
         setDescription(desc);
         setDueDate(dd);
         setPriority(pri);
         setEffort(eff);
         setAssignedToId(aId);
         setAssignedToName(aName);
-        setContactQuery("");
+        setContactQuery('');
         setContactOptions([]);
         setIsEditingAssignedTo(false);
         setSaveError(null);
@@ -419,7 +398,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
     // Reset notes when todoExtension changes
     React.useEffect(() => {
-      const notes = todoExtension?.sprk_todonotes ?? "";
+      const notes = todoExtension?.sprk_todonotes ?? '';
       setToDoNotes(notes);
       origRef.current = { ...origRef.current, toDoNotes: notes };
     }, [todoExtension?.sprk_eventtodoid]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -438,50 +417,44 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
     // --- Handlers ---
 
-    const handleDescriptionChange = React.useCallback(
-      (_ev: unknown, data: { value: string }) => {
-        setDescription(data.value);
-        requestAnimationFrame(() => {
-          const el = textareaRef.current;
-          if (!el) return;
-          el.style.height = "auto";
-          el.style.height = `${el.scrollHeight}px`;
-          el.style.overflowY = "hidden";
-        });
-      },
-      []
-    );
+    const handleDescriptionChange = React.useCallback((_ev: unknown, data: { value: string }) => {
+      setDescription(data.value);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = `${el.scrollHeight}px`;
+        el.style.overflowY = 'hidden';
+      });
+    }, []);
 
     // Auto-resize description textarea on initial load
     React.useEffect(() => {
       const el = textareaRef.current;
       if (!el) return;
-      el.style.height = "auto";
+      el.style.height = 'auto';
       el.style.height = `${el.scrollHeight}px`;
-      el.style.overflowY = "hidden";
+      el.style.overflowY = 'hidden';
     }, [description]);
 
-    const handleNotesChange = React.useCallback(
-      (_ev: unknown, data: { value: string }) => {
-        setToDoNotes(data.value);
-        requestAnimationFrame(() => {
-          const el = notesTextareaRef.current;
-          if (!el) return;
-          el.style.height = "auto";
-          el.style.height = `${el.scrollHeight}px`;
-          el.style.overflowY = "hidden";
-        });
-      },
-      []
-    );
+    const handleNotesChange = React.useCallback((_ev: unknown, data: { value: string }) => {
+      setToDoNotes(data.value);
+      requestAnimationFrame(() => {
+        const el = notesTextareaRef.current;
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = `${el.scrollHeight}px`;
+        el.style.overflowY = 'hidden';
+      });
+    }, []);
 
     // Auto-resize notes textarea on initial load
     React.useEffect(() => {
       const el = notesTextareaRef.current;
       if (!el) return;
-      el.style.height = "auto";
+      el.style.height = 'auto';
       el.style.height = `${el.scrollHeight}px`;
-      el.style.overflowY = "hidden";
+      el.style.overflowY = 'hidden';
     }, [toDoNotes]);
 
     const handleDueDateChange = React.useCallback(
@@ -504,10 +477,10 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     );
 
     // Debounced contact search (uses onSearchContacts callback prop)
-    const searchTimerRef = React.useRef<ReturnType<typeof setTimeout>>();
-    const handleContactInput: ComboboxProps["onInput"] = React.useCallback(
-      (ev: React.ChangeEvent<HTMLInputElement>) => {
-        const q = ev.target.value;
+    const searchTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const handleContactInput: ComboboxProps['onInput'] = React.useCallback(
+      (ev: React.FormEvent<HTMLInputElement>) => {
+        const q = ev.currentTarget.value;
         setContactQuery(q);
         clearTimeout(searchTimerRef.current);
         if (q.length < 2) {
@@ -524,12 +497,12 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       [onSearchContacts]
     );
 
-    const handleContactSelect: ComboboxProps["onOptionSelect"] = React.useCallback(
-      (_ev, data) => {
+    const handleContactSelect: ComboboxProps['onOptionSelect'] = React.useCallback(
+      (_ev: SelectionEvents, data: OptionOnSelectData) => {
         if (data.optionValue && data.optionText) {
           setAssignedToId(data.optionValue);
           setAssignedToName(data.optionText);
-          setContactQuery("");
+          setContactQuery('');
           setContactOptions([]);
           setIsEditingAssignedTo(false);
         }
@@ -560,13 +533,11 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             eventUpdates.sprk_effortscore = effort;
           }
           if (assignedToId !== origRef.current.assignedToId) {
-            eventUpdates["sprk_AssignedTo@odata.bind"] = assignedToId
-              ? `/contacts(${assignedToId})`
-              : null;
+            eventUpdates['sprk_AssignedTo@odata.bind'] = assignedToId ? `/contacts(${assignedToId})` : null;
           }
           const eventResult = await onSaveEventFields(record.sprk_eventid, eventUpdates);
           if (!eventResult.success) {
-            setSaveError(eventResult.error ?? "Failed to save event fields");
+            setSaveError(eventResult.error ?? 'Failed to save event fields');
             setIsSaving(false);
             return;
           }
@@ -577,12 +548,9 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
           const extUpdates: ITodoExtensionUpdates = {
             sprk_todonotes: toDoNotes,
           };
-          const extResult = await onSaveTodoExtFields(
-            todoExtension.sprk_eventtodoid,
-            extUpdates
-          );
+          const extResult = await onSaveTodoExtFields(todoExtension.sprk_eventtodoid, extUpdates);
           if (!extResult.success) {
-            setSaveError(extResult.error ?? "Failed to save notes");
+            setSaveError(extResult.error ?? 'Failed to save notes');
             setIsSaving(false);
             return;
           }
@@ -598,7 +566,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
           toDoNotes,
         };
       } catch {
-        setSaveError("Save failed — unexpected error");
+        setSaveError('Save failed — unexpected error');
       } finally {
         setIsSaving(false);
       }
@@ -626,7 +594,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       try {
         await onRemoveTodo(record.sprk_eventid);
       } catch {
-        setSaveError("Failed to remove from To Do");
+        setSaveError('Failed to remove from To Do');
         setIsRemoving(false);
       }
     }, [record, onRemoveTodo]);
@@ -654,13 +622,11 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             eventUpdates.sprk_effortscore = effort;
           }
           if (assignedToId !== origRef.current.assignedToId) {
-            eventUpdates["sprk_AssignedTo@odata.bind"] = assignedToId
-              ? `/contacts(${assignedToId})`
-              : null;
+            eventUpdates['sprk_AssignedTo@odata.bind'] = assignedToId ? `/contacts(${assignedToId})` : null;
           }
           const eventResult = await onSaveEventFields(record.sprk_eventid, eventUpdates);
           if (!eventResult.success) {
-            setSaveError(eventResult.error ?? "Failed to save event fields");
+            setSaveError(eventResult.error ?? 'Failed to save event fields');
             setIsCompleting(false);
             return;
           }
@@ -677,28 +643,23 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
           if (isNotesDirty) {
             dataUpdates.sprk_todonotes = toDoNotes;
           }
-          const dataResult = await onSaveTodoExtFields(
-            todoExtension.sprk_eventtodoid,
-            dataUpdates
-          );
+          const dataResult = await onSaveTodoExtFields(todoExtension.sprk_eventtodoid, dataUpdates);
           if (!dataResult.success) {
-            setSaveError(dataResult.error ?? "Failed to save completion data");
+            setSaveError(dataResult.error ?? 'Failed to save completion data');
             setIsCompleting(false);
             return;
           }
 
           // 2) Deactivate via callback
-          const stateResult = await onDeactivateTodoExt(
-            todoExtension.sprk_eventtodoid
-          );
+          const stateResult = await onDeactivateTodoExt(todoExtension.sprk_eventtodoid);
           if (!stateResult.success) {
-            setSaveError(stateResult.error ?? "Failed to deactivate record");
+            setSaveError(stateResult.error ?? 'Failed to deactivate record');
             setIsCompleting(false);
             return;
           }
         }
       } catch {
-        setSaveError("Failed to mark as completed — unexpected error");
+        setSaveError('Failed to mark as completed — unexpected error');
       } finally {
         setIsCompleting(false);
       }
@@ -721,10 +682,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     // Open regarding record — delegates to host via callback prop
     const handleOpenRegardingRecord = React.useCallback(() => {
       if (!record?.sprk_regardingrecordid || !onOpenRegardingRecord) return;
-      const typeName =
-        record[
-          "_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue"
-        ] ?? "";
+      const typeName = record['_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue'] ?? '';
       const entityName = RECORD_TYPE_ENTITY_MAP[typeName];
       if (!entityName) return;
       onOpenRegardingRecord(entityName, record.sprk_regardingrecordid);
@@ -781,7 +739,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               resize="none"
               textarea={{
                 ref: textareaRef,
-                style: { minHeight: "160px" },
+                style: { minHeight: '160px' },
               }}
             />
           </div>
@@ -795,16 +753,12 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             </Text>
 
             {/* Record Type tag */}
-            {record["_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue"] && (
+            {record['_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue'] && (
               <div className={styles.fieldRow}>
                 <label className={styles.fieldLabel}>Record Type</label>
                 <div>
-                  <Badge
-                    appearance="filled"
-                    color="informative"
-                    size="medium"
-                  >
-                    {record["_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue"]}
+                  <Badge appearance="filled" color="informative" size="medium">
+                    {record['_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue']}
                   </Badge>
                 </div>
               </div>
@@ -814,24 +768,16 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             {record.sprk_regardingrecordname && record.sprk_regardingrecordid && (
               <div className={styles.fieldRow}>
                 <label className={styles.fieldLabel}>Record</label>
-                <Link
-                  className={styles.recordLink}
-                  onClick={handleOpenRegardingRecord}
-                  as="button"
-                >
+                <Link className={styles.recordLink} onClick={handleOpenRegardingRecord} as="button">
                   {record.sprk_regardingrecordname}
-                  <OpenRegular style={{ fontSize: "12px" }} />
+                  <OpenRegular style={{ fontSize: '12px' }} />
                 </Link>
               </div>
             )}
 
             <div className={styles.fieldRow}>
               <label className={styles.fieldLabel}>Due Date</label>
-              <Input
-                type="date"
-                value={dueDate}
-                onChange={handleDueDateChange}
-              />
+              <Input type="date" value={dueDate} onChange={handleDueDateChange} />
             </div>
 
             <div className={styles.fieldRow}>
@@ -839,11 +785,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               {assignedToName && !isEditingAssignedTo ? (
                 <div className={styles.assignedToDisplay}>
                   <Text className={styles.assignedToName}>{assignedToName}</Text>
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    onClick={() => setIsEditingAssignedTo(true)}
-                  >
+                  <Button appearance="subtle" size="small" onClick={() => setIsEditingAssignedTo(true)}>
                     Change
                   </Button>
                 </div>
@@ -866,7 +808,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                       No contacts found
                     </Option>
                   )}
-                  {contactOptions.map((c) => (
+                  {contactOptions.map(c => (
                     <Option key={c.id} value={c.id} text={c.name}>
                       {c.name}
                     </Option>
@@ -890,7 +832,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               resize="none"
               textarea={{
                 ref: notesTextareaRef,
-                style: { minHeight: "160px" },
+                style: { minHeight: '160px' },
               }}
             />
           </div>
@@ -898,19 +840,14 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
           <div className={styles.divider} role="separator" />
 
           {/* -- To Do Score: title row with circle + info, then sliders -- */}
-          <div className={styles.section} style={{ marginBottom: "20px" }}>
+          <div className={styles.section} style={{ marginBottom: '20px' }}>
             <div className={styles.sectionTitleRow}>
               <Text className={styles.sectionTitle} size={300}>
                 To Do Score
               </Text>
               <Popover withArrow>
                 <PopoverTrigger disableButtonEnhancement>
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    icon={<InfoRegular />}
-                    aria-label="Score information"
-                  />
+                  <Button appearance="subtle" size="small" icon={<InfoRegular />} aria-label="Score information" />
                 </PopoverTrigger>
                 <PopoverSurface>
                   <div className={styles.infoPopover}>
@@ -919,9 +856,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                         How Scoring Works
                       </Text>
                       <Text className={styles.infoSectionBody}>
-                        The To Do Score combines three factors into a single 0-100
-                        number. Higher scores surface more important items first in
-                        the Kanban board.
+                        The To Do Score combines three factors into a single 0-100 number. Higher scores surface more
+                        important items first in the Kanban board.
                       </Text>
                     </div>
 
@@ -930,8 +866,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                         Score Formula
                       </Text>
                       <Text className={styles.infoSectionBody}>
-                        Score = Priority (50%) + Inverted Effort (20%) + Urgency (30%).
-                        Lower effort items score higher (quick wins bubble up).
+                        Score = Priority (50%) + Inverted Effort (20%) + Urgency (30%). Lower effort items score higher
+                        (quick wins bubble up).
                       </Text>
                     </div>
 
@@ -940,14 +876,14 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                         Urgency Score
                       </Text>
                       <Text className={styles.infoSectionBody}>
-                        Auto-calculated from due date: Overdue = 100, within 3 days = 80,
-                        within 7 days = 50, within 10 days = 25, more than 10 days = 0.
+                        Auto-calculated from due date: Overdue = 100, within 3 days = 80, within 7 days = 50, within 10
+                        days = 25, more than 10 days = 0.
                       </Text>
                     </div>
                   </div>
                 </PopoverSurface>
               </Popover>
-              <div className={styles.scoreCircle} style={{ marginLeft: "auto" }}>
+              <div className={styles.scoreCircle} style={{ marginLeft: 'auto' }}>
                 {Math.round(score.todoScore)}
               </div>
             </div>
@@ -957,13 +893,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                 <label className={styles.fieldLabel}>Priority (50%)</label>
                 <span className={styles.sliderValue}>{priority}</span>
               </div>
-              <Slider
-                value={priority}
-                onChange={handlePriorityChange}
-                min={0}
-                max={100}
-                step={5}
-              />
+              <Slider value={priority} onChange={handlePriorityChange} min={0} max={100} step={5} />
             </div>
 
             <div className={styles.sliderRow}>
@@ -971,15 +901,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                 <label className={styles.fieldLabel}>Effort (20%)</label>
                 <span className={styles.sliderValue}>{effort}</span>
               </div>
-              <Slider
-                value={effort}
-                onChange={handleEffortChange}
-                min={0}
-                max={100}
-                step={5}
-              />
+              <Slider value={effort} onChange={handleEffortChange} min={0} max={100} step={5} />
             </div>
-
           </div>
         </div>
 
@@ -991,9 +914,9 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               icon={<DeleteRegular />}
               onClick={handleRemoveTodo}
               disabled={isRemoving || isSaving || isCompleting}
-              style={{ color: tokens.colorPaletteRedForeground1, marginRight: "auto" }}
+              style={{ color: tokens.colorPaletteRedForeground1, marginRight: 'auto' }}
             >
-              {isRemoving ? "Removing..." : "Remove"}
+              {isRemoving ? 'Removing...' : 'Remove'}
             </Button>
           )}
           <Button
@@ -1002,14 +925,10 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             onClick={handleSave}
             disabled={!isDirty || isSaving || isCompleting}
           >
-            {isSaving ? "Saving..." : "Save"}
+            {isSaving ? 'Saving...' : 'Save'}
           </Button>
           {todoExtension?.statecode === 1 || todoExtension?.statuscode === 2 ? (
-            <Button
-              icon={<CheckmarkRegular />}
-              disabled
-              className={styles.completedBtn}
-            >
+            <Button icon={<CheckmarkRegular />} disabled className={styles.completedBtn}>
               Completed
             </Button>
           ) : (
@@ -1019,7 +938,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               disabled={isSaving || isCompleting}
               className={styles.completeBtn}
             >
-              {isCompleting ? "Completing..." : "Complete"}
+              {isCompleting ? 'Completing...' : 'Complete'}
             </Button>
           )}
         </div>
@@ -1028,4 +947,4 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
   }
 );
 
-TodoDetail.displayName = "TodoDetail";
+TodoDetail.displayName = 'TodoDetail';

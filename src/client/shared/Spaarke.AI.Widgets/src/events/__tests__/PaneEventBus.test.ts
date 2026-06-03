@@ -41,8 +41,8 @@ describe('PaneEventBus — multi-subscriber', () => {
     const bus = makeBus();
     const received: WorkspacePaneEvent[] = [];
 
-    bus.subscribe('workspace', (e) => received.push(e));
-    bus.subscribe('workspace', (e) => received.push(e));
+    bus.subscribe('workspace', e => received.push(e));
+    bus.subscribe('workspace', e => received.push(e));
 
     const event: WorkspacePaneEvent = {
       type: 'widget_action',
@@ -57,13 +57,13 @@ describe('PaneEventBus — multi-subscriber', () => {
     expect(received[1]).toBe(event);
   });
 
-  it('subscribers on different channels do not receive each other\'s events', () => {
+  it("subscribers on different channels do not receive each other's events", () => {
     const bus = makeBus();
     const workspaceCalls: WorkspacePaneEvent[] = [];
     const contextCalls: ContextPaneEvent[] = [];
 
-    bus.subscribe('workspace', (e) => workspaceCalls.push(e));
-    bus.subscribe('context', (e) => contextCalls.push(e));
+    bus.subscribe('workspace', e => workspaceCalls.push(e));
+    bus.subscribe('context', e => contextCalls.push(e));
 
     bus.dispatch('workspace', { type: 'widget_load', widgetType: 'clause-list' });
 
@@ -75,18 +75,13 @@ describe('PaneEventBus — multi-subscriber', () => {
     const bus = makeBus();
     const log: string[] = [];
 
-    bus.subscribe('workspace', (e) => log.push(`A:${e.type}`));
-    bus.subscribe('workspace', (e) => log.push(`B:${e.type}`));
+    bus.subscribe('workspace', e => log.push(`A:${e.type}`));
+    bus.subscribe('workspace', e => log.push(`B:${e.type}`));
 
     bus.dispatch('workspace', { type: 'widget_load' });
     bus.dispatch('workspace', { type: 'tab_change', tabId: 't1' });
 
-    expect(log).toEqual([
-      'A:widget_load',
-      'B:widget_load',
-      'A:tab_change',
-      'B:tab_change',
-    ]);
+    expect(log).toEqual(['A:widget_load', 'B:widget_load', 'A:tab_change', 'B:tab_change']);
   });
 });
 
@@ -206,7 +201,7 @@ describe('PaneEventBus — edge cases', () => {
     const bus = makeBus();
     const received: SafetyPaneEvent[] = [];
 
-    bus.subscribe('safety', (e) => received.push(e));
+    bus.subscribe('safety', e => received.push(e));
 
     const event: SafetyPaneEvent = {
       type: 'safety_annotation',

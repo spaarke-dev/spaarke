@@ -18,6 +18,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Feedback;
 /// (d) GetAggregateByCapabilityAsync returns correct thumbs-up/down counts and satisfaction rate.
 /// (e) GetAggregateByPlaybookAsync returns null when no feedback exists (empty counts).
 /// </summary>
+[Trait("status", "repaired")]
 public class FeedbackServiceTests
 {
     private const string TenantId = "tenant-test-001";
@@ -342,10 +343,14 @@ public class FeedbackServiceTests
 
     private static FeedResponse<T> MockFeedResponse<T>(T[] items)
     {
+        // NOTE: Moq cannot stub extension methods (e.g. Enumerable.FirstOrDefault).
+        // FeedbackService consumes FeedResponse<T> via foreach (GetEnumerator) and
+        // via the FirstOrDefault() extension which itself enumerates GetEnumerator —
+        // so a correctly-mocked GetEnumerator is sufficient. Resource is also set
+        // for any direct accessor reads.
         var mock = new Mock<FeedResponse<T>>();
         mock.Setup(r => r.Resource).Returns(items);
         mock.Setup(r => r.GetEnumerator()).Returns(((IEnumerable<T>)items).GetEnumerator());
-        mock.Setup(r => r.FirstOrDefault()).Returns(items.Length > 0 ? items[0] : default!);
         return mock.Object;
     }
 

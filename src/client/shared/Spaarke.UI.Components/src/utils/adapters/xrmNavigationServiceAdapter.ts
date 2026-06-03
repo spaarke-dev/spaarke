@@ -108,12 +108,8 @@ export function createXrmNavigationService(): INavigationService {
       await navigation.openForm({ entityName, entityId });
     },
 
-    async openDialog(
-      webresourceName: string,
-      data?: string,
-      options?: DialogOptions
-    ): Promise<DialogResult> {
-      const navigation = getNavigation();
+    async openDialog(webresourceName: string, data?: string, options?: DialogOptions): Promise<DialogResult> {
+      const _navigation = getNavigation();
 
       // Build the navigateTo page input
       const pageInput: Record<string, unknown> = {
@@ -177,22 +173,27 @@ export function createXrmNavigationService(): INavigationService {
         (window as any).__dialogResult = result;
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const frames = [window, window.parent, window.top].filter(Boolean) as Window[];
       for (const frame of frames) {
         try {
           const closeBtn =
-            frame?.document?.querySelector('[data-id="dialogCloseIconButton"]') as HTMLElement
-            ?? frame?.document?.querySelector('.ms-Dialog-button--close') as HTMLElement;
+            (frame?.document?.querySelector('[data-id="dialogCloseIconButton"]') as HTMLElement) ??
+            (frame?.document?.querySelector('.ms-Dialog-button--close') as HTMLElement);
           if (closeBtn) {
             closeBtn.click();
             return;
           }
-        } catch { /* cross-origin frame */ }
+        } catch {
+          /* cross-origin frame */
+        }
       }
 
       // Fallback: window.close() — works for standalone popups
-      try { window.close(); } catch { /* blocked by browser */ }
+      try {
+        window.close();
+      } catch {
+        /* blocked by browser */
+      }
     },
 
     async openLookup(options: LookupOptions): Promise<LookupResult[]> {
@@ -229,7 +230,7 @@ export function createXrmNavigationService(): INavigationService {
           return [];
         }
 
-        return results.map((r) => ({
+        return results.map(r => ({
           id: r.id,
           name: r.name,
           entityType: r.entityType,

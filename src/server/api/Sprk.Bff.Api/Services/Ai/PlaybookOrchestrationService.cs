@@ -790,6 +790,45 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     }
 
     /// <summary>
+    /// Wave C1 task 020 — Gap #2 helper per design-a5 §7.2. Extracts the <c>selectedBranch</c>
+    /// from a branching gate's <see cref="NodeOutput"/> structured data. Returns the downstream
+    /// node name on the selected branch, or null when the upstream is not a branching gate
+    /// (no <c>selectedBranch</c> property in its structured data).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Branching gates today:
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Nodes.EvidenceSufficiencyResult.SelectedBranch"/> and
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Nodes.ConditionResult.SelectedBranch"/>. Both expose
+    /// the property under the JSON name <c>"selectedBranch"</c> via default record serialization.
+    /// </para>
+    /// <para>
+    /// Reads from <see cref="NodeOutput.StructuredData"/> via case-insensitive property lookup
+    /// (the JSON serializer uses PascalCase or camelCase depending on options; we accept both).
+    /// </para>
+    /// </remarks>
+    private static string? TryExtractSelectedBranch(NodeOutput depOutput)
+    {
+        if (depOutput.StructuredData is null) return null;
+        var data = depOutput.StructuredData.Value;
+        if (data.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+
+        // Try common casings: "selectedBranch" (camelCase JSON output) and "SelectedBranch" (record name).
+        if (data.TryGetProperty("selectedBranch", out var camelCase) &&
+            camelCase.ValueKind == System.Text.Json.JsonValueKind.String)
+        {
+            return camelCase.GetString();
+        }
+        if (data.TryGetProperty("SelectedBranch", out var pascalCase) &&
+            pascalCase.ValueKind == System.Text.Json.JsonValueKind.String)
+        {
+            return pascalCase.GetString();
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Extracts the __actionType value from a node's ConfigJson.
     /// Returns null if ConfigJson is missing or doesn't contain the field.
     /// </summary>
@@ -834,6 +873,63 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
         try
         {
+            // Wave C1 task 020 — Gap #2 patch: branch-aware dependency resolution per design-a5 §7.2.
+            // When an upstream EvidenceSufficiencyNode (or ConditionNode) emits a selectedBranch,
+            // downstream nodes NOT on the selected branch are skipped — even if all their upstream
+            // dependencies succeeded. Without this patch, a "gated-off" node (e.g., layer2Extract
+            // in universal-ingest@v1 when checkLayer2Gate=insufficient) would execute because
+            // the existing AND-only dependency check treats EvidenceSufficiencyNode's "success-with-
+            // insufficient-verdict" as a successful upstream.
+            //
+            // Semantics: an upstream's selectedBranch is the NAME of the downstream node on the
+            // selected branch (see EvidenceSufficiencyNode line 158-160:
+            //   selectedBranch = sufficient ? config.SufficientBranch : config.InsufficientBranch
+            //   where SufficientBranch / InsufficientBranch hold downstream node names).
+            // We skip the current node when ALL of:
+            //   1) The upstream returned a selectedBranch (i.e., upstream is a branching gate);
+            //   2) The current node's name != selectedBranch.
+            // If a node has MULTIPLE upstreams and at least ONE branching gate selected it, run it
+            // (handles emitObservations which has groundingVerify [sufficient path] + checkLayer2Gate
+            // [insufficient path] as upstreams). Implementation: track whether at least one branching
+            // upstream selected this node; only skip if every branching upstream rejected it.
+            //
+            // Backward compatibility: nodes whose upstreams have no selectedBranch (most existing
+            // playbooks) behave unchanged — branchingDepCount stays 0 and the skip branch is bypassed.
+            int branchingDepCount = 0;
+            int branchingDepsSelectingThisNode = 0;
+            foreach (var depId in node.DependsOn)
+            {
+                var depNode = graph.GetNode(depId);
+                if (depNode == null) continue;
+
+                var depOutput = runContext.GetOutput(depNode.OutputVariable);
+                if (depOutput == null || !depOutput.Success) continue;  // existing failure path handles below
+
+                var selectedBranch = TryExtractSelectedBranch(depOutput);
+                if (selectedBranch is null) continue;
+
+                branchingDepCount++;
+                if (string.Equals(selectedBranch, node.Name, StringComparison.OrdinalIgnoreCase))
+                    branchingDepsSelectingThisNode++;
+            }
+
+            if (branchingDepCount > 0 && branchingDepsSelectingThisNode == 0)
+            {
+                var skipReason = $"Branch not selected: {branchingDepCount} upstream branching gate(s) routed to a different branch";
+                runContext.RecordNodeSkipped();
+
+                _logger.LogDebug(
+                    "Skipping node {NodeName}: {Reason}",
+                    node.Name, skipReason);
+
+                await writer.WriteAsync(PlaybookStreamEvent.NodeSkipped(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipReason), cancellationToken);
+
+                // Return a skip output (treated as success for flow control — matches existing
+                // dependency-failure-skip semantics; downstream nodes see this as "Ok(null)").
+                return NodeOutput.Ok(node.Id, node.OutputVariable, null, skipReason);
+            }
+
             // Check if dependencies failed
             foreach (var depId in node.DependsOn)
             {
@@ -892,23 +988,23 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             ActionType actionType;
             ResolvedScopes scopes;
 
-            if (node.NodeType == NodeType.AIAnalysis)
+            // Per Insights Engine r2 Wave B (2026-06-02): when sprk_actionid is set,
+            // the action's ActionType is the canonical dispatch source REGARDLESS of
+            // nodeType. Insights nodes like checkSufficiency (Control), groundCitations
+            // (Control), ReturnInsightArtifactNode (Output), and declineInsufficient
+            // (Output) all need their specific executor (EvidenceSufficiency, GroundingVerify,
+            // ReturnInsightArtifact, DeclineToFind) — not the nodeType-based default
+            // (Condition / DeliverOutput) that the original logic fell back to.
+            //
+            // The legacy structural-node path is preserved for backward compat: when no
+            // action FK is set, fall back to ConfigJson __actionType (canvas-Designer
+            // convention) or nodeType-based default.
+            if (node.ActionId != Guid.Empty)
             {
-                // AI nodes: resolve scopes and load action from Dataverse
-                scopes = await _scopeResolver.ResolveNodeScopesAsync(
-                    node.Id, runContext.CancellationToken);
-
-                if (node.ActionId == Guid.Empty)
-                {
-                    var errorMsg = $"AI node '{node.Name}' requires an Action but has no ActionId";
-                    var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
-                    runContext.StoreNodeOutput(errorOutput);
-
-                    await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
-                        runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
-
-                    return errorOutput;
-                }
+                // Resolve scopes only for AI nodes (Control/Output/Workflow have none)
+                scopes = node.NodeType == NodeType.AIAnalysis
+                    ? await _scopeResolver.ResolveNodeScopesAsync(node.Id, runContext.CancellationToken)
+                    : new ResolvedScopes([], [], []);
 
                 var resolved = await _scopeResolver.GetActionAsync(
                     node.ActionId, runContext.CancellationToken);
@@ -928,13 +1024,23 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 action = resolved;
                 actionType = action.ActionType;
             }
+            else if (node.NodeType == NodeType.AIAnalysis)
+            {
+                var errorMsg = $"AI node '{node.Name}' requires an Action but has no ActionId";
+                var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
+                runContext.StoreNodeOutput(errorOutput);
+
+                await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
+
+                return errorOutput;
+            }
             else
             {
-                // Structural nodes (Output, Control, Workflow): no Action record, no scopes
+                // Structural nodes (Output, Control, Workflow) WITHOUT an action FK:
+                // legacy path — uses ConfigJson __actionType or nodeType-based default.
                 scopes = new ResolvedScopes([], [], []);
 
-                // Read specific ActionType from ConfigJson (written during canvas sync)
-                // Falls back to NodeType-based default if not present
                 actionType = ExtractActionTypeFromConfig(node.ConfigJson) ?? node.NodeType switch
                 {
                     NodeType.Output => ActionType.DeliverOutput,
@@ -973,8 +1079,18 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             // and collect UpdateRecord-type nodes with their ConfigJson (which contains fieldMappings).
             var downstreamNodes = CollectDownstreamNodeInfo(node, graph);
 
+            // Apply {{paramName}} template substitution to ConfigJson before the executor
+            // runs. Variables come from runContext.Parameters (populated by the caller +
+            // enriched by InsightsOrchestrator with matterId/projectId/invoiceId derived from
+            // Subject). Per Insights Engine r2 Wave B (2026-06-02 smoke trace): without this
+            // substitution, playbook nodes like resolveLiveFacts received the literal
+            // "matter:{{matterId}}" and failed at LiveFactResolver. Centralizing the fix here
+            // applies it to every node executor uniformly (LiveFact / IndexRetrieve /
+            // ReturnInsightArtifact all use {{matterId}} in synthesis playbooks).
+            var substitutedNode = ApplyConfigJsonTemplates(node, runContext.Parameters);
+
             // Create node execution context with streaming callback for per-token SSE events
-            var nodeContext = runContext.CreateNodeContext(node, action, scopes, actionType) with
+            var nodeContext = runContext.CreateNodeContext(substitutedNode, action, scopes, actionType) with
             {
                 DownstreamNodes = downstreamNodes,
                 OnTokenReceived = async text =>
@@ -1236,6 +1352,44 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Substitute <c>{{paramName}}</c> placeholders in the node's ConfigJson with values
+    /// from the run parameters. Returns a NEW PlaybookNodeDto record with the substituted
+    /// ConfigJson; never mutates the input. Idempotent — placeholders without matching
+    /// parameters are left intact (the executor surfaces the original string for clear
+    /// authoring feedback).
+    /// </summary>
+    /// <remarks>
+    /// Per Insights Engine r2 Wave B (2026-06-02): adds centralized template substitution
+    /// previously missing from the orchestration pipeline. Without it, playbook nodes like
+    /// <c>resolveLiveFacts</c> received literal <c>"matter:{{matterId}}"</c> from ConfigJson
+    /// and failed at <c>LiveFactResolver.ParseMatterSubject</c> with
+    /// <c>LiveFactNotSupportedException</c>, returning a scaffold "no-artifact-produced"
+    /// decline to the caller. Centralized fix applies uniformly to all executor types.
+    /// </remarks>
+    private static PlaybookNodeDto ApplyConfigJsonTemplates(
+        PlaybookNodeDto node,
+        IReadOnlyDictionary<string, string>? parameters)
+    {
+        if (parameters is null || parameters.Count == 0)
+            return node;
+        if (string.IsNullOrEmpty(node.ConfigJson) || !node.ConfigJson.Contains("{{", StringComparison.Ordinal))
+            return node;
+
+        var rendered = node.ConfigJson;
+        foreach (var kvp in parameters)
+        {
+            if (string.IsNullOrEmpty(kvp.Key)) continue;
+            var placeholder = "{{" + kvp.Key + "}}";
+            if (rendered.Contains(placeholder, StringComparison.Ordinal))
+            {
+                rendered = rendered.Replace(placeholder, kvp.Value ?? string.Empty, StringComparison.Ordinal);
+            }
+        }
+
+        return node with { ConfigJson = rendered };
     }
 
     #endregion

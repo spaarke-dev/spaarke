@@ -35,8 +35,8 @@ import {
   Dialog,
   DialogSurface,
   DialogBody,
-  DialogContent,
-  DialogActions,
+  DialogContent as _DialogContent,
+  DialogActions as _DialogActions,
   Button,
   MessageBar,
   MessageBarBody,
@@ -424,9 +424,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
       {successConfig ? (
         <div className={styles.footer}>
           <div className={styles.footerLeft} />
-          <div className={styles.footerRight}>
-            {successConfig.actions}
-          </div>
+          <div className={styles.footerRight}>{successConfig.actions}</div>
         </div>
       ) : (
         <div className={styles.footer}>

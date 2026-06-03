@@ -82,7 +82,7 @@ export type ProvisioningStepKey = (typeof PROVISIONING_STEPS)[number]['key'];
 export async function provisionSecureProject(
   request: IProvisionProjectRequest,
   authenticatedFetch: typeof fetch,
-  bffBaseUrl: string,
+  bffBaseUrl: string
 ): Promise<IProvisionProjectResult> {
   const url = `${bffBaseUrl}/api/v1/external-access/provision-project`;
 

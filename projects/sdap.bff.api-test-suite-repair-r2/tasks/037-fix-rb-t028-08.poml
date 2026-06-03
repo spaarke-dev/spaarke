@@ -1,0 +1,142 @@
+<task id="037" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P3 — Fix RB-T028-08: PrecedentAdminEndpoints CreateTentativeAsync verification gap (1 test)</title>
+    <phase>Phase 3: LOW Severity + Integration Stability</phase>
+    <status>completed-2026-06-01</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>029, 011</dependencies>
+    <blocks>038</blocks>
+    <tags>phase-3, bff-api, real-bug-ledger, low-severity, production-fix, endpoint-binding, insights</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production code modification potentially in src/server/api/Sprk.Bff.Api/Api/Insights/; FULL rigor required for .cs changes (code-review + adr-check at Step 9.5). May share root cause with Phase 1 RB-T028 cluster.</rigor-reason>
+    <parallel-group>P3-W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <production-fix-per-ledger>true</production-fix-per-ledger>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Close ledger entry RB-T028-08 (`PrecedentAdminEndpoints.CreateTentativeAsync` verification gap; 1 test) in
+    `tests/integration/Spe.Integration.Tests/Api/Insights/PrecedentAdminEndpointsTests.cs`. The TRX failure shows a Moq verification
+    expecting `CreateTentativeAsync` to be called once but invoked zero times — even though the endpoint returns 201 Created.
+
+    Two possible explanations per ledger:
+    1. Production signature drift: the handler was refactored to call `CreatePendingAsync` or `CreatePrecedentAsync` — test Moq expectation is stale.
+    2. Production short-circuit: the handler returns 201 without actually invoking the service (feature flag, cached response, or a refactor moved the side effect).
+
+    **FIRST verify whether the Phase 1 RB-T028-03/04/05/06 cluster fix (task 011) has ALREADY resolved this.** If yes (the 1 test now passes
+    without any further change), close RB-T028-08 as `repaired` with cross-reference to task 011's commit SHA. If not, read
+    `src/server/api/Sprk.Bff.Api/Api/Insights/PrecedentAdminEndpoints.cs` `PostPrecedent` handler + the `IPrecedentService` interface to
+    determine which case applies; apply the minimal repair (update Moq expectation if drift, OR file production fix if genuine gap).
+
+    Per NFR-04: commit message MUST cite "RB-T028-08" + resolution mode (`repaired` or `transferred-to-sibling`).
+  </prompt>
+
+  <role>BFF production-fix engineer closing a LOW-severity real-bug ledger entry under repair-not-rewrite discipline.</role>
+
+  <goal>
+    Determine and apply the correct closure path for RB-T028-08:
+    - If task 011 (Phase 1 cluster fix) already resolved it → close with `repaired` + cross-reference 011's commit
+    - If signature drift → update Moq expectation in the integration test
+    - If genuine production gap → fix `PrecedentAdminEndpoints.PostPrecedent` to call the correct service method
+    The 1 Skip'd integration test passes. Ledger row RB-T028-08 → `repaired` (or appropriate resolution mode).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="r1-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file purpose="production-target">src/server/api/Sprk.Bff.Api/Api/Insights/PrecedentAdminEndpoints.cs</file>
+    <file purpose="integration-tests">tests/integration/Spe.Integration.Tests/Api/Insights/PrecedentAdminEndpointsTests.cs</file>
+    <file purpose="phase-1-cluster">projects/sdap.bff.api-test-suite-repair-r2/tasks/011-fix-rb-t028-cluster.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — DIRECTLY binding for RB-T028 cluster; conditional-registration vs unconditional-endpoint-mapping is the root-cause question</constraint>
+    <constraint source="ADR-018">Kill switches — DIRECTLY binding for the conditional-registration pattern</constraint>
+    <constraint source="ADR-001">Minimal API + Workers — endpoint surface unchanged at the contract level</constraint>
+    <constraint source="ADR-008">Endpoint filters — auth-filter pattern for admin endpoints</constraint>
+    <constraint source="NFR-01">Production code IS in scope (r2); tests modified ONLY for Skip→Pass transitions OR Moq drift correction</constraint>
+    <constraint source="NFR-02">&lt;50% line replacement per file; targeted fix</constraint>
+    <constraint source="NFR-04">Commit cites ledger entry ID + resolution mode</constraint>
+    <constraint source="D-02">One fix = one ledger entry closed (or cross-reference Phase 1 cluster if absorbed)</constraint>
+    <constraint source="D-05">Real-bug ledger source of truth; transition RB-T028-08 → `repaired`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per r1 ledger entry RB-T028-08 (filed 2026-05-31, fix-by 2026-09-30): 5 of 6 `PrecedentAdminEndpointsTests` pass; only `PostPrecedent_AsAdmin_Returns_201_WithTentativeStatus` fails. The endpoint returns 201 (matching the outer assertion) but the Moq verification on `CreateTentativeAsync` records zero invocations. The dispatching is "working" — just not the way the test expects.
+
+      Hypothesis 1: Phase 1 task 011 (RB-T028-03/04/05/06 cluster fix) may have already resolved this if the root cause was conditional-registration + unconditional-endpoint-mapping. Verify by re-enabling this test post-011 and running before any new work.
+
+      Hypothesis 2: Signature drift (`CreateTentativeAsync` renamed to `CreatePendingAsync` or `CreatePrecedentAsync`). If so, the test's Moq expectation is stale — update test to match production reality. NOT a production bug; mark `repaired` via test-only edit.
+
+      Hypothesis 3: Genuine production gap — the handler returns 201 without invoking the service. Investigate and fix.
+
+      Sibling project coordination: `ai-spaarke-insights-engine-r1` is the named owner per ledger; coordinate if production-side change required.
+    </background>
+    <dependencies>
+      <dependency task="029" status="must-be-complete">Phase 2 exit triple-run validation before Phase 3 starts</dependency>
+      <dependency task="011" status="must-be-complete">Phase 1 RB-T028 cluster fix — may have absorbed this entry's root cause</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Api/Insights/PrecedentAdminEndpoints.cs</file>
+    <file>tests/integration/Spe.Integration.Tests/Api/Insights/PrecedentAdminEndpointsTests.cs</file>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Load r1 ledger entry RB-T028-08 (lines ~856-897) for documented symptom + two hypotheses.</step>
+    <step order="2">Verify task 011 (Phase 1 cluster fix) is complete and merged. Read its commit message for the registration-path change.</step>
+    <step order="3">First check: temporarily remove the `Skip = "..."` attribute on `PostPrecedent_AsAdmin_Returns_201_WithTentativeStatus` and run the integration test: `dotnet test tests/integration/Spe.Integration.Tests/ --filter "FullyQualifiedName~PrecedentAdminEndpointsTests.PostPrecedent_AsAdmin_Returns_201_WithTentativeStatus"`. If it passes after task 011, this is Hypothesis 1: close as `repaired` with cross-reference (skip to step 8).</step>
+    <step order="4">If still failing, read `src/server/api/Sprk.Bff.Api/Api/Insights/PrecedentAdminEndpoints.cs` `PostPrecedent` handler and the `IPrecedentService` interface (likely under `Services/Insights/`). Compare the method name being called against the test's Moq expectation (`CreateTentativeAsync`).</step>
+    <step order="5">If signature drift (Hypothesis 2): update the Moq expectation in the test to match the actual service method name. Test-only edit; commit cites RB-T028-08 + `repaired` resolution mode.</step>
+    <step order="6">If genuine production gap (Hypothesis 3): determine the correct method to call OR contact the `ai-spaarke-insights-engine-r1` owner. If production fix required, implement the minimal change to `PostPrecedent` to invoke the expected service method. If sibling-owned, mark `transferred-to-sibling` and file in their backlog.</step>
+    <step order="7">Build + test as appropriate: `dotnet build` for any production change; `dotnet test --filter ...PrecedentAdminEndpointsTests` for verification. Re-enabled test must pass.</step>
+    <step order="8">Update ledger row RB-T028-08: status → `repaired` (or `transferred-to-sibling` if applicable), add fix-commit SHA + today's date + cross-reference to task 011 if Hypothesis 1.</step>
+    <step order="9">Commit: `fix(bff-api): close PrecedentAdmin endpoint verification gap (RB-T028-08; repaired)` (adjust message to fit resolution mode) per NFR-04.</step>
+    <step order="10">Update `projects/sdap.bff.api-test-suite-repair-r2/current-task.md` with completion + chosen hypothesis + commit SHA.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PrecedentAdminEndpoints.cs + test file + IPrecedentService + ledger + task 011 POML/commit</tool>
+    <tool name="Edit">Test file (Skip removal; Moq expectation update if drift) OR production file (handler fix) + ledger row</tool>
+    <tool name="Bash">`dotnet build`, `dotnet test --filter`, `git status`, `git log`, `git commit`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code-or-tests">Either: production fix to PrecedentAdminEndpoints.PostPrecedent, OR test-only Moq expectation correction</output>
+    <output type="tests">tests/integration/Spe.Integration.Tests/Api/Insights/PrecedentAdminEndpointsTests.cs (1 test un-Skip'd)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (RB-T028-08 row → `repaired` with hypothesis documented)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Hypothesis investigated and documented (1 of 3); resolution path chosen</criterion>
+    <criterion testable="true">Build passes if production change applied; no new warnings</criterion>
+    <criterion testable="true">`PostPrecedent_AsAdmin_Returns_201_WithTentativeStatus` passes when Skip removed</criterion>
+    <criterion testable="true">Other 5 PrecedentAdminEndpointsTests still pass — no regression</criterion>
+    <criterion testable="true">Commit message contains "RB-T028-08" + resolution mode (`repaired` or `transferred-to-sibling`) per NFR-04</criterion>
+    <criterion testable="true">Ledger entry RB-T028-08 row status updated; cross-reference to task 011 if applicable</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Invoke `task-execute` skill with this POML. Loads project CLAUDE.md + r1 ledger + ADR-010 + ADR-018 + ADR-001 + ADR-008 + service-registration pattern per knowledge files. Step 9.5 quality gate runs code-review + adr-check (FULL rigor).
+  </execution>
+</task>

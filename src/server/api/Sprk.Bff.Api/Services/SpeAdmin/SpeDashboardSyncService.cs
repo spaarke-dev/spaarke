@@ -3,9 +3,9 @@ using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
-using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Services.SpeAdmin;
 

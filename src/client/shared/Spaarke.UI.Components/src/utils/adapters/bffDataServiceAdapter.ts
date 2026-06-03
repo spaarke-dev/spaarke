@@ -86,10 +86,7 @@ export type AuthenticatedFetch = (url: string, init?: RequestInit) => Promise<Re
  * }
  * ```
  */
-export function createBffDataService(
-  authenticatedFetch: AuthenticatedFetch,
-  bffBaseUrl: string
-): IDataService {
+export function createBffDataService(authenticatedFetch: AuthenticatedFetch, bffBaseUrl: string): IDataService {
   const baseUrl = bffBaseUrl.replace(/\/+$/, '');
 
   /**
@@ -125,17 +122,12 @@ export function createBffDataService(
       } catch {
         // Ignore parse errors — use statusText
       }
-      throw new Error(
-        `BFF ${operation} failed with status ${response.status}: ${detail}`
-      );
+      throw new Error(`BFF ${operation} failed with status ${response.status}: ${detail}`);
     }
   }
 
   return {
-    async createRecord(
-      entityName: string,
-      data: Record<string, unknown>
-    ): Promise<string> {
+    async createRecord(entityName: string, data: Record<string, unknown>): Promise<string> {
       const url = buildUrl(entityName);
       const response = await authenticatedFetch(url, {
         method: 'POST',
@@ -148,18 +140,12 @@ export function createBffDataService(
       // BFF returns the created record ID — support common response shapes
       const id = result['id'] ?? result['Id'] ?? result['entityId'];
       if (typeof id !== 'string') {
-        throw new Error(
-          'BFF createRecord response did not contain a recognisable record ID'
-        );
+        throw new Error('BFF createRecord response did not contain a recognisable record ID');
       }
       return id;
     },
 
-    async retrieveRecord(
-      entityName: string,
-      id: string,
-      options?: string
-    ): Promise<Record<string, unknown>> {
+    async retrieveRecord(entityName: string, id: string, options?: string): Promise<Record<string, unknown>> {
       const url = buildUrl(entityName, id, options);
       const response = await authenticatedFetch(url, {
         method: 'GET',
@@ -183,18 +169,11 @@ export function createBffDataService(
 
       const result = (await response.json()) as Record<string, unknown>;
       // Support both { entities: [...] } and { value: [...] } response shapes
-      const entities = (result['entities'] ?? result['value'] ?? []) as Record<
-        string,
-        unknown
-      >[];
+      const entities = (result['entities'] ?? result['value'] ?? []) as Record<string, unknown>[];
       return { entities };
     },
 
-    async updateRecord(
-      entityName: string,
-      id: string,
-      data: Record<string, unknown>
-    ): Promise<void> {
+    async updateRecord(entityName: string, id: string, data: Record<string, unknown>): Promise<void> {
       const url = buildUrl(entityName, id);
       const response = await authenticatedFetch(url, {
         method: 'PATCH',

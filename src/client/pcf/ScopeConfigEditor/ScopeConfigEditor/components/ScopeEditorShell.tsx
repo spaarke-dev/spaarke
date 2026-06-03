@@ -10,10 +10,7 @@
 
 import * as React from 'react';
 import { FluentProvider, webLightTheme, webDarkTheme, Theme, makeStyles, tokens } from '@fluentui/react-components';
-import {
-  getEffectiveDarkMode,
-  setupThemeListener,
-} from '@spaarke/ui-components/dist/utils/themeStorage';
+import { getEffectiveDarkMode, setupThemeListener } from '@spaarke/ui-components/dist/utils/themeStorage';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

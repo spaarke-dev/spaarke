@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>E-1: R3 project wrap-up — lessons-learned, README→Complete, /repo-cleanup</title>
+    <phase>0: R3 wrap-up + retroactive memo</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>project-wrap-up, documentation, repo-cleanup</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Housekeeping + documentation only — no src/ code. STANDARD rigor (task-execute discipline + knowledge-loading + checkpointing) without FULL Step 9.5 gates.</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Close R3 cleanly: write/finalize R3 lessons-learned.md (patterns shipped, gotchas, what
+    worked, surprises); flip R3 README to Status: Complete and R3 plan.md milestones to ✅;
+    run `/repo-cleanup projects/spaarke-ai-platform-unification-r3`. Independent of task
+    002 — both Phase 0 tasks may run in parallel.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer experienced in project-closure rituals. Bias toward dense
+    lessons-learned (one bullet per pattern, evidence-cited) and faithful README/plan flip
+    (don't invent status). Do NOT touch `.claude/` or any path outside
+    `projects/spaarke-ai-platform-unification-r3/`.
+  </role>
+
+  <goal>
+    R3 marked Complete and audit-clean: (a) lessons-learned.md exists covering R3-shipped
+    patterns + gotchas + surprises; (b) R3 README.md Status: Complete with completed date;
+    (c) R3 plan.md milestones flipped to ✅ to match shipped state at master `3813af32`
+    (task 140); (d) /repo-cleanup audit clean. PR-01 acceptance satisfied.
+  </goal>
+
+  <context>
+    <background>
+      R3 shipped at master `3813af32` (task 140), predecessor to R4. Introduced load-bearing
+      patterns R4 builds on: PaneEventBus, Widget framework, dashboard pipeline, dual-use
+      shared-lib widget pattern (Calendar task 115, Daily Briefing task 069), ThreePaneLayout,
+      Auth v2. Some closure artifacts may already exist (recent commit `4a877b1e` references
+      "Phase 0 wrap-up — R3 marked Complete"). This task finalizes/verifies closure before R4
+      implementation tasks begin. PR-01 in R4 spec.md is the binding criterion.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-unification-r3/README.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/lessons-learned.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Edits limited to `projects/spaarke-ai-platform-unification-r3/` (+ R4 TASK-INDEX flip). Do NOT modify `.claude/` or root files.</constraint>
+    <constraint source="project">PR-01 acceptance: R3 README Status: Complete; lessons-learned.md present; repo-cleanup audit clean. All three must hold at task end.</constraint>
+    <constraint source="project">VERIFY-then-amend if artifacts already exist with substantive content. Preserve prior author intent — no destructive overwrites.</constraint>
+    <constraint source="project">Run `/repo-cleanup` via the skill — do not hand-delete files. Skill chooses archive vs delete per its audit logic.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>docs/procedures/context-recovery.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Load R3 final state">Read R3 README, plan, TASK-INDEX, lessons-learned (if present). Confirm task 140 shipped at master `3813af32`.</step>
+    <step order="2" name="Audit lessons-learned">If present, verify coverage of: (a) R3-shipped patterns (PaneEventBus, widget framework, dual-use, dashboard pipeline); (b) gotchas (catalog drift, hook duplication, build hygiene); (c) surprises. If missing/thin, amend — dense, evidence-cited, one bullet per insight.</step>
+    <step order="3" name="Flip README status">Update R3 README: Status → Complete; add Completed Date (today 2026-05-26 if not previously recorded); Last Updated → today. Do NOT alter other narrative.</step>
+    <step order="4" name="Flip plan milestones">Update R3 plan.md: flip shipped-task milestone checkboxes (per TASK-INDEX) from 🔲 → ✅. Annotate deferred/superseded milestones rather than ticking blindly.</step>
+    <step order="5" name="Cross-link to R4">Confirm R3 lessons-learned is referenced from R4 CLAUDE.md "Related Projects" (verify the path). Add brief R4 cross-links if missing (do NOT touch R4 README/plan beyond cross-linking).</step>
+    <step order="6" name="Run /repo-cleanup">Invoke `repo-cleanup` skill on `projects/spaarke-ai-platform-unification-r3`. Approve archive/deletion actions. Save audit summary to R3 `notes/handoffs/`.</step>
+    <step order="7" name="Verify">Confirm: (1) R3 README Status: Complete; (2) lessons-learned.md non-trivial; (3) plan milestones flipped; (4) /repo-cleanup audit clean. Fix any failures in place.</step>
+    <step order="8" name="Update R4 TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 001 from 🔲 → ✅ completed.</step>
+    <step order="9" name="Document deviations">If anything deviated, record in `projects/spaarke-ai-platform-unification-r4/notes/` for R4 lessons-learned harvest.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Shell commands (git status / git log)</tool>
+    <tool name="Skill">Invoke repo-cleanup skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/README.md</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/plan.md</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given R3 is the predecessor project, When this task completes, Then R3 README.md Status reads "Complete" with a Completed Date populated.</criterion>
+    <criterion testable="true">Given R3 patterns + gotchas + surprises must be preserved, When this task completes, Then R3 `notes/lessons-learned.md` exists with R3-specific content covering shipped patterns, gotchas, and surprises (not a placeholder).</criterion>
+    <criterion testable="true">Given R3 plan.md tracks milestones, When this task completes, Then milestones for shipped tasks show ✅; deferred/superseded milestones are annotated.</criterion>
+    <criterion testable="true">Given /repo-cleanup audits ephemeral files, When the skill runs against R3, Then the audit reports clean.</criterion>
+    <criterion testable="true">Given task 001 is being executed, When this task completes, Then R4 TASK-INDEX.md shows task 001 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Recent commit `4a877b1e` ("docs(r3): Phase 0 wrap-up — R3 marked Complete + lessons-learned + F-1 retroactive memo") suggests closure artifacts may already exist. Treat as VERIFY-AND-FINALIZE, not create-from-scratch. If lessons-learned.md is already substantive, confirm completeness; do not rewrite. Avoid destructive overwrites.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply STANDARD rigor protocol (no Step 9.5 quality gates; checkpointing every 3 steps; current-task.md tracking).</protocol>
+  </execution>
+</task>

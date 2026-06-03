@@ -76,7 +76,7 @@ export interface UseSlashCommandsOptions {
    * The hook writes the selected command trigger back into this element when
    * handleCommandSelect is called.
    */
-  inputRef: React.RefObject<HTMLTextAreaElement | HTMLInputElement>;
+  inputRef: React.RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
 
   /**
    * Static system commands to always include.
@@ -155,12 +155,7 @@ const SLASH_TRIGGER = '/';
  * @returns Slash command menu state and action handlers
  */
 export function useSlashCommands(options: UseSlashCommandsOptions): UseSlashCommandsResult {
-  const {
-    inputRef,
-    staticCommands = DEFAULT_SLASH_COMMANDS,
-    dynamicCommands = [],
-    onCommandSelected,
-  } = options;
+  const { inputRef, staticCommands = DEFAULT_SLASH_COMMANDS, dynamicCommands = [], onCommandSelected } = options;
 
   const [menuVisible, setMenuVisible] = useState(false);
   const [filterText, setFilterText] = useState('');
@@ -168,7 +163,7 @@ export function useSlashCommands(options: UseSlashCommandsOptions): UseSlashComm
   // Merge static and dynamic commands; stable unless deps change
   const allCommands = useMemo<SlashCommand[]>(
     () => [...staticCommands, ...dynamicCommands],
-    [staticCommands, dynamicCommands],
+    [staticCommands, dynamicCommands]
   );
 
   // Filter commands by filterText: match against label or trigger (case-insensitive)
@@ -213,38 +208,41 @@ export function useSlashCommands(options: UseSlashCommandsOptions): UseSlashComm
    * Selects a command: writes trigger + space into the input element,
    * fires the optional callback, and dismisses the menu.
    */
-  const handleCommandSelect = useCallback((command: SlashCommand) => {
-    const input = inputRef.current;
-    if (input) {
-      const newValue = `${command.trigger} `;
+  const handleCommandSelect = useCallback(
+    (command: SlashCommand) => {
+      const input = inputRef.current;
+      if (input) {
+        const newValue = `${command.trigger} `;
 
-      // Write the value using the native input value setter so that React's
-      // synthetic event system tracks the change correctly
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        input instanceof HTMLTextAreaElement
-          ? window.HTMLTextAreaElement.prototype
-          : window.HTMLInputElement.prototype,
-        'value',
-      )?.set;
+        // Write the value using the native input value setter so that React's
+        // synthetic event system tracks the change correctly
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+          input instanceof HTMLTextAreaElement
+            ? window.HTMLTextAreaElement.prototype
+            : window.HTMLInputElement.prototype,
+          'value'
+        )?.set;
 
-      if (nativeInputValueSetter) {
-        nativeInputValueSetter.call(input, newValue);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-      } else {
-        // Fallback: direct assignment (may not trigger React onChange in all cases)
-        (input as HTMLTextAreaElement | HTMLInputElement).value = newValue;
+        if (nativeInputValueSetter) {
+          nativeInputValueSetter.call(input, newValue);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+          // Fallback: direct assignment (may not trigger React onChange in all cases)
+          (input as HTMLTextAreaElement | HTMLInputElement).value = newValue;
+        }
+
+        // Place cursor at end
+        const len = newValue.length;
+        input.setSelectionRange(len, len);
+        input.focus();
       }
 
-      // Place cursor at end
-      const len = newValue.length;
-      input.setSelectionRange(len, len);
-      input.focus();
-    }
-
-    onCommandSelected?.(command);
-    setMenuVisible(false);
-    setFilterText('');
-  }, [inputRef, onCommandSelected]);
+      onCommandSelected?.(command);
+      setMenuVisible(false);
+      setFilterText('');
+    },
+    [inputRef, onCommandSelected]
+  );
 
   /** Hides the menu without selecting a command. */
   const dismissMenu = useCallback(() => {
