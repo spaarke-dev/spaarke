@@ -17,7 +17,7 @@
     "@azure/msal-browser": "^4.26.2",
     "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
     "eslint": "^8.57.1",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.25.1",
