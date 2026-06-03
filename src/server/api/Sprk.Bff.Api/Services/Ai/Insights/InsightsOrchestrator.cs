@@ -100,6 +100,8 @@ public sealed class InsightsOrchestrator : IInsightsAi
     private readonly IPlaybookOrchestrationService _playbookOrchestration;
     private readonly IIngestDocumentSource _ingestDocumentSource;
     private readonly IOptionsMonitor<InsightsPlaybookNameMapOptions> _playbookNameMap;
+    private readonly IRagService _ragService;
+    private readonly AssistantToolCallHandler _assistantHandler;
     private readonly ILogger<InsightsOrchestrator> _logger;
 
     public InsightsOrchestrator(
@@ -109,6 +111,8 @@ public sealed class InsightsOrchestrator : IInsightsAi
         IPlaybookOrchestrationService playbookOrchestration,
         IIngestDocumentSource ingestDocumentSource,
         IOptionsMonitor<InsightsPlaybookNameMapOptions> playbookNameMap,
+        IRagService ragService,
+        AssistantToolCallHandler assistantHandler,
         ILogger<InsightsOrchestrator> logger)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
@@ -117,7 +121,28 @@ public sealed class InsightsOrchestrator : IInsightsAi
         _playbookOrchestration = playbookOrchestration ?? throw new ArgumentNullException(nameof(playbookOrchestration));
         _ingestDocumentSource = ingestDocumentSource ?? throw new ArgumentNullException(nameof(ingestDocumentSource));
         _playbookNameMap = playbookNameMap ?? throw new ArgumentNullException(nameof(playbookNameMap));
+        _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
+        _assistantHandler = assistantHandler ?? throw new ArgumentNullException(nameof(assistantHandler));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <inheritdoc />
+    public Task<AssistantQueryFacadeResult> AssistantQueryAsync(
+        AssistantQueryFacadeRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Delegate to the Wave E3 handler. Pass the orchestrator's OWN playbook + RAG methods
+        // as delegates so the handler does NOT take a direct dependency on IInsightsAi
+        // (avoids constructor-cycle: AssistantToolCallHandler ← IInsightsAi ← InsightsOrchestrator
+        // ← AssistantToolCallHandler). The delegates capture `this` which is safe because the
+        // orchestrator is Scoped and the request lifetime never outlives its hosting scope.
+        return _assistantHandler.ExecuteAsync(
+            request,
+            playbookInvoker: AnswerQuestionAsync,
+            ragInvoker: SearchAsync,
+            cancellationToken);
     }
 
     /// <inheritdoc />
@@ -602,6 +627,190 @@ public sealed class InsightsOrchestrator : IInsightsAi
             text,
             model: null,
             dimensions: null,
+            cancellationToken: cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<InsightsSearchFacadeResult> SearchAsync(
+        InsightsSearchFacadeRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Query, nameof(request));
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ParentEntityType, nameof(request));
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ParentEntityId, nameof(request));
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId, nameof(request));
+
+        var sw = Stopwatch.StartNew();
+
+        // Build RagSearchOptions — the IRagService facade already supports the filters
+        // Insights search needs (ParentEntityType/Id from Wave D5, DocumentType, Tags).
+        // No new RAG-facade interface methods required per task 040 Step 2 decision.
+        // Note: tags carry the OR-semantics meaning "matches ANY of the supplied tags";
+        // since we set a single Predicate as a RequiredTag (AND semantics), the chunk
+        // MUST have that exact tag. That's the desired semantics for predicate filtering.
+        var ragOptions = new RagSearchOptions
+        {
+            TenantId = request.TenantId,
+            TopK = request.TopK,
+            ParentEntityType = request.ParentEntityType,
+            ParentEntityId = request.ParentEntityId,
+            DocumentType = request.ArtifactType,
+            RequiredTags = !string.IsNullOrWhiteSpace(request.Predicate)
+                ? new[] { request.Predicate }
+                : null,
+            CallerPrincipal = request.CallerPrincipal,
+            UseSemanticRanking = true,
+            UseVectorSearch = true,
+            UseKeywordSearch = true,
+            // Slightly lower MinScore than the default (0.7) — Insights queries are
+            // open-ended NL and we want recall to dominate precision at the top-K cap.
+            // Subject + privilege filtering already trim the space substantially.
+            MinScore = 0.5f
+        };
+
+        // RAG search. If the kill-switch is OFF, NullRagService throws
+        // FeatureDisabledException with ErrorCode = "ai.rag.disabled" (ADR-032 P3).
+        // We propagate it unchanged so the endpoint can catch and convert to 503
+        // ProblemDetails via AsFeatureDisabled503(). DO NOT swallow.
+        var ragResponse = await _ragService.SearchAsync(request.Query, ragOptions, cancellationToken);
+
+        // Project RagSearchResult → InsightsSearchHit (the Zone B-importable shape).
+        // Predicate is derived from the first matching Insights-shaped tag when present;
+        // we don't have schema confirmation of which tag prefixes indicate Insights
+        // predicates yet, so we surface the first tag verbatim and let the caller display.
+        // When predicate filtering was applied (RequiredTags), we already know the
+        // predicate — prefer it to avoid surfacing a stale "first tag" mismatch.
+        var hits = ragResponse.Results
+            .Select(r => new InsightsSearchHit(
+                ChunkId: r.Id,
+                ObservationId: r.DocumentId,
+                DocumentName: r.DocumentName,
+                Snippet: PickSnippet(r),
+                Predicate: !string.IsNullOrWhiteSpace(request.Predicate)
+                    ? request.Predicate
+                    : r.Tags is { Count: > 0 } ? r.Tags[0] : null,
+                Confidence: r.Score))
+            .ToList();
+
+        // Synthesis: only fabricate a summary when we have hits to ground against.
+        // Empty result + empty summary is honest signal to the client ("no matches found")
+        // and avoids hallucinated answers — matches the design.md FR-04 "synthesis with
+        // grounded citations" contract (no grounding → no synthesis).
+        string summary = string.Empty;
+        if (hits.Count > 0)
+        {
+            summary = await SynthesizeGroundedSummaryAsync(
+                request.Query,
+                request.ParentEntityType,
+                request.ParentEntityId,
+                hits,
+                cancellationToken);
+        }
+        else
+        {
+            _logger.LogInformation(
+                "InsightsOrchestrator.SearchAsync: zero RAG hits for tenant {TenantId} subject {Scheme}:{Id} query length {QueryLength}; returning empty summary (no grounding available).",
+                request.TenantId, request.ParentEntityType, request.ParentEntityId, request.Query.Length);
+        }
+
+        sw.Stop();
+
+        _logger.LogInformation(
+            "InsightsOrchestrator.SearchAsync completed for tenant {TenantId} subject {Scheme}:{Id}: hits={HitCount} synthesizedSummary={HasSummary} elapsedMs={ElapsedMs}",
+            request.TenantId, request.ParentEntityType, request.ParentEntityId,
+            hits.Count, !string.IsNullOrEmpty(summary), sw.ElapsedMilliseconds);
+
+        return new InsightsSearchFacadeResult
+        {
+            Query = request.Query,
+            Results = hits,
+            Summary = summary,
+            DurationMs = sw.ElapsedMilliseconds
+        };
+    }
+
+    /// <summary>
+    /// Pick a display snippet for a <see cref="RagSearchResult"/>: prefer the first
+    /// highlight (semantic caption or content highlight) when available, otherwise fall
+    /// back to the chunk Content truncated to <c>~280 chars</c>. We deliberately do NOT
+    /// return the full chunk because (a) the UI doesn't need it and (b) it bloats the
+    /// response payload for top-K hits where K can be up to 20.
+    /// </summary>
+    private static string PickSnippet(RagSearchResult result)
+    {
+        if (result.Highlights is { Count: > 0 })
+        {
+            return result.Highlights[0];
+        }
+
+        var content = result.Content ?? string.Empty;
+        const int maxLen = 280;
+        return content.Length <= maxLen ? content : content[..maxLen] + "…";
+    }
+
+    /// <summary>
+    /// Synthesize a grounded summary from the ranked RAG hits, instructing the model to
+    /// cite each claim using <c>[n]</c> tokens that index into <paramref name="hits"/>
+    /// (1-based). Per ADR-019 we do not leak the raw prompt or model output details on
+    /// failure — exceptions propagate to the orchestrator and surface as 500 to the
+    /// caller.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The prompt is intentionally terse and instruction-heavy: open-ended NL queries +
+    /// Insights chunks tend to be short factual snippets, so a wordy system prompt
+    /// would dilute the grounding signal. The "cite every claim" instruction is the
+    /// only safeguard against ungrounded synthesis at this layer; the
+    /// <see cref="PickSnippet(RagSearchResult)"/> truncation ensures we don't blow past
+    /// model context limits for high-K queries.
+    /// </para>
+    /// <para>
+    /// <b>Token budget</b>: we cap the LLM at 400 output tokens — enough for a 2–3
+    /// paragraph answer with citations, short enough to keep P95 well under the 800ms
+    /// budget design.md targets for the synthesis path.
+    /// </para>
+    /// </remarks>
+    private async Task<string> SynthesizeGroundedSummaryAsync(
+        string query,
+        string parentEntityType,
+        string parentEntityId,
+        IReadOnlyList<InsightsSearchHit> hits,
+        CancellationToken cancellationToken)
+    {
+        // Build the grounded-context block. Each hit is numbered [n] so the model can
+        // cite them; 1-based indexing matches reader convention. Snippets are already
+        // truncated by PickSnippet.
+        var contextBuilder = new System.Text.StringBuilder();
+        for (int i = 0; i < hits.Count; i++)
+        {
+            var hit = hits[i];
+            contextBuilder
+                .Append('[').Append(i + 1).Append("] ")
+                .Append(hit.DocumentName)
+                .Append(" — ")
+                .Append(hit.Snippet)
+                .AppendLine();
+        }
+
+        var prompt =
+            "You are a legal research assistant answering questions about a specific " +
+            $"{parentEntityType} (id: {parentEntityId}). " +
+            "Answer the user's question using ONLY the numbered context snippets below. " +
+            "Cite every factual claim with [n] referring to the snippet it came from. " +
+            "If the snippets do not contain enough information to answer, say so plainly. " +
+            "Do NOT fabricate facts not present in the snippets.\n\n" +
+            $"Question: {query}\n\n" +
+            "Context:\n" +
+            contextBuilder.ToString() + "\n" +
+            "Answer (with [n] citations):";
+
+        // Single non-streaming LLM call — endpoint returns the whole response, so
+        // streaming would just add complexity without latency benefit at this size.
+        return await _openAi.GetCompletionAsync(
+            prompt,
+            model: null,            // use configured SummarizeModel
+            maxOutputTokens: 400,
             cancellationToken: cancellationToken);
     }
 

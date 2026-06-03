@@ -198,6 +198,22 @@ public static class EndpointMappingExtensions
         // policy (60/min sliding window per caller). Errors: ADR-019 ProblemDetails.
         app.MapInsightsAskEndpoint();
 
+        // Insights Engine hybrid retrieval endpoint (/api/insights/search) — Wave E task 040
+        // (D-P15-06 / FR-04 / SC-04) — open-ended NL query + RAG retrieval over
+        // spaarke-insights-index + LLM-synthesized grounded summary. Same Zone B placement,
+        // auth model, and rate-limit policy as /api/insights/ask. Kill-switch (ADR-032 P3):
+        // when AI is disabled, NullRagService throws FeatureDisabledException → 503.
+        app.MapInsightsSearchEndpoint();
+
+        // Insights Engine unified Assistant tool-call endpoint (/api/insights/assistant/query)
+        // — Wave E3 task 042 / FR-05. Single tool surface for the Spaarke Assistant; routes
+        // internally to playbook OR RAG via the Wave E2 classifier (or caller forceMode
+        // override). Zone B placement, same auth + rate-limit as /ask + /search. Kill-switch
+        // (ADR-032 P3): FeatureDisabledException → 503 with stable errorCode
+        // (ai.insights.disabled | ai.rag.disabled | ai.intent-classification.disabled).
+        // Contract anchor: projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md.
+        app.MapInsightsAssistantEndpoint();
+
         // SPE Admin endpoints (/api/spe/*) — environments, configs, business units, containers, audit log, dashboard
         app.MapSpeAdminEndpoints();
 

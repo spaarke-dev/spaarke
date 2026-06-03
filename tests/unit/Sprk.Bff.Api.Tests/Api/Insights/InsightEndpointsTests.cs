@@ -476,6 +476,81 @@ public class InsightEndpointsTests : IClassFixture<InsightEndpointsTestFixture>
     }
 
     // -------------------------------------------------------------------------
+    // FORCE-MODE (Wave E2 / FR-05 forward-compat plumbing)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task PostAsk_ForceModePlaybook_ProceedsAsPlaybookDispatch()
+    {
+        // Arrange — forceMode=playbook on /ask is internally consistent (it IS the
+        // canonical playbook dispatcher).
+        _fixture.InsightsAiMock.Reset();
+        _fixture.InsightsAiMock
+            .Setup(s => s.AnswerQuestionAsync(It.IsAny<InsightsAgentRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(InsightsAgentResult.Success(BuildInferenceArtifact(), cacheHit: false, processingTimeMs: 1));
+
+        var client = _fixture.CreateAuthenticatedTenantClient();
+        var request = new
+        {
+            question = SampleQuestion.ToString(),
+            subject = SampleSubject,
+            forceMode = "playbook"
+        };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/insights/ask", request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "forceMode=playbook on the playbook endpoint is consistent — endpoint proceeds normally");
+    }
+
+    [Fact]
+    public async Task PostAsk_ForceModeRag_Returns400()
+    {
+        // Arrange — forceMode=rag on /ask is a wrong-endpoint mismatch
+        _fixture.InsightsAiMock.Reset();
+        var client = _fixture.CreateAuthenticatedTenantClient();
+        var request = new
+        {
+            question = SampleQuestion.ToString(),
+            subject = SampleSubject,
+            forceMode = "rag"
+        };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/insights/ask", request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "forceMode=rag on the playbook endpoint must be rejected — caller should switch endpoints");
+        var raw = await response.Content.ReadAsStringAsync();
+        raw.Should().Contain("/api/insights/search",
+            "error message must direct caller to the correct endpoint");
+    }
+
+    [Fact]
+    public async Task PostAsk_ForceModeUnknown_Returns400()
+    {
+        // Arrange — invalid forceMode
+        _fixture.InsightsAiMock.Reset();
+        var client = _fixture.CreateAuthenticatedTenantClient();
+        var request = new
+        {
+            question = SampleQuestion.ToString(),
+            subject = SampleSubject,
+            forceMode = "xyz"
+        };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/insights/ask", request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "forceMode must be one of 'playbook' | 'rag' | null");
+    }
+
+    // -------------------------------------------------------------------------
     // REGISTRATION — acceptance criterion 6
     // -------------------------------------------------------------------------
 

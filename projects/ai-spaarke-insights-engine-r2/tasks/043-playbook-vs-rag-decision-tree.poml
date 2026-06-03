@@ -1,7 +1,7 @@
 <task id="043" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>E4 — Decision-tree doc: when to author a playbook vs rely on RAG</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>E</wave>
     <estimated-effort>4h</estimated-effort>
     <tags>docs, decision-tree, developer-guide, hybrid-consumption</tags>

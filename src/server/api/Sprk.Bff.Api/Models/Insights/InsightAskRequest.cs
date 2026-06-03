@@ -43,10 +43,19 @@ namespace Sprk.Bff.Api.Models.Insights;
 /// the <c>matter:</c> scheme.</param>
 /// <param name="Parameters">Optional template parameters passed through to the playbook
 /// for prompt substitution. Each value is rendered as a string at the prompt layer.</param>
+/// <param name="ForceMode">Wave E2 (FR-05) caller-side intent override. Accepted values:
+/// <c>"playbook"</c> | <c>"rag"</c> | null. When set to <c>"playbook"</c> on this endpoint,
+/// the endpoint proceeds as today (this IS the canonical playbook dispatch endpoint).
+/// When set to <c>"rag"</c> on this endpoint, the endpoint returns 400 ProblemDetails —
+/// callers MUST switch endpoints to invoke RAG (E3 Spaarke Assistant handles the
+/// cross-endpoint dispatch on the caller's behalf). The field exists in the Wave E2 wire
+/// surface for forward-compat; the classifier itself is not yet invoked from this endpoint
+/// in E2 (reserved for E3 Assistant integration).</param>
 public sealed record InsightAskRequest(
     [Required, StringLength(64, MinimumLength = 1)] string? Question,
     [Required, StringLength(256, MinimumLength = 1)] string? Subject,
-    IReadOnlyDictionary<string, string>? Parameters
+    IReadOnlyDictionary<string, string>? Parameters,
+    [property: StringLength(16)] string? ForceMode = null
 );
 
 /// <summary>
