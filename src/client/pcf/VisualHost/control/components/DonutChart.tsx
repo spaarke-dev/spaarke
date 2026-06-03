@@ -283,9 +283,7 @@ function resolveLegendConfig(
     const placement = legend.placement ?? 'right';
     return {
       placement,
-      orientation:
-        legend.orientation ??
-        (placement === 'top' || placement === 'bottom' ? 'inline' : 'rows'),
+      orientation: legend.orientation ?? (placement === 'top' || placement === 'bottom' ? 'inline' : 'rows'),
       itemFormat: legend.itemFormat ?? 'swatchLabelValue',
       valueAlignment: legend.valueAlignment ?? 'near',
       swatchSize: legend.swatchSize ?? 10,
@@ -451,7 +449,7 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
   // Standard layout keeps using Fluent's `valueInsideDonut` for byte-identical
   // back-compat with every pre-FR-VH-01 chart def (NFR-05).
   const effectiveCenterLabel = cardConfig?.donutCenterLabel ?? centerLabel;
-  const centerOverlayValue = showCenterValue ? (effectiveCenterLabel || centerValueText) : undefined;
+  const centerOverlayValue = showCenterValue ? effectiveCenterLabel || centerValueText : undefined;
   const valueInside = centerOverlayValue;
 
   const chartProps: IChartProps = {
@@ -463,11 +461,7 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
   // `donutLayout: "matrixRight"` + `showBreakdownRows: true` derive
   // `placement: "right"` defaults so every pre-v1.4.4 chart def renders
   // identically. When undefined, falls through to standard layout below.
-  const effectiveLegend = resolveLegendConfig(
-    cardConfig?.legend,
-    donutLayout,
-    cardConfig?.showBreakdownRows
-  );
+  const effectiveLegend = resolveLegendConfig(cardConfig?.legend, donutLayout, cardConfig?.showBreakdownRows);
 
   if (effectiveLegend) {
     const placement = effectiveLegend.placement;
@@ -475,24 +469,25 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
     // Donut size: for side-by-side placements (right/left/hidden) cap at 45%
     // container width so the legend has room. For top/bottom, take more width
     // (75%) since the legend stacks vertically. Always honor `height` cap.
-    const widthFraction = (placement === 'top' || placement === 'bottom') ? 0.75 : 0.45;
+    const widthFraction = placement === 'top' || placement === 'bottom' ? 0.75 : 0.45;
     const donutSize = Math.max(120, Math.min(containerWidth * widthFraction, height));
     // v1.4.6 — center font 28% of donut diameter (was 36% in v1.4.2),
     // capped at 72px. UAT feedback: smaller letter reads better at glance.
     const centerFontSize = `${Math.min(Math.round(donutSize * 0.28), 72)}px`;
     const showSwatch =
-      effectiveLegend.itemFormat === 'swatchLabelValue' ||
-      effectiveLegend.itemFormat === 'swatchLabel';
-    const showValue =
-      effectiveLegend.itemFormat === 'swatchLabelValue' ||
-      effectiveLegend.itemFormat === 'labelValue';
+      effectiveLegend.itemFormat === 'swatchLabelValue' || effectiveLegend.itemFormat === 'swatchLabel';
+    const showValue = effectiveLegend.itemFormat === 'swatchLabelValue' || effectiveLegend.itemFormat === 'labelValue';
 
     const layoutClass =
-      placement === 'right' ? styles.layoutRight :
-      placement === 'left' ? styles.layoutLeft :
-      placement === 'top' ? styles.layoutTop :
-      placement === 'bottom' ? styles.layoutBottom :
-      styles.layoutHidden;
+      placement === 'right'
+        ? styles.layoutRight
+        : placement === 'left'
+          ? styles.layoutLeft
+          : placement === 'top'
+            ? styles.layoutTop
+            : placement === 'bottom'
+              ? styles.layoutBottom
+              : styles.layoutHidden;
 
     const donutNode = (
       <div className={styles.donutCell}>
@@ -506,36 +501,22 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
           {...chartProps}
         />
         {centerOverlayValue !== undefined && (
-          <span
-            className={styles.centerOverlay}
-            style={{ fontSize: centerFontSize }}
-            aria-live="polite"
-          >
+          <span className={styles.centerOverlay} style={{ fontSize: centerFontSize }} aria-live="polite">
             {centerOverlayValue}
           </span>
         )}
       </div>
     );
 
-    const legendNode = placement === 'hidden' ? null : (
-      effectiveLegend.orientation === 'inline' ? (
-        <div
-          className={styles.legendInline}
-          role="list"
-          aria-label="Legend"
-        >
+    const legendNode =
+      placement === 'hidden' ? null : effectiveLegend.orientation === 'inline' ? (
+        <div className={styles.legendInline} role="list" aria-label="Legend">
           {data.map((dp, idx) => {
             const swatchColor = chartData[idx]?.color;
             const rowValue =
-              dp.value == null
-                ? cardConfig?.nullDisplay ?? '—'
-                : formatBreakdownValue(dp.value, breakdownFormat);
+              dp.value == null ? (cardConfig?.nullDisplay ?? '—') : formatBreakdownValue(dp.value, breakdownFormat);
             return (
-              <span
-                key={`${dp.label}-${idx}`}
-                className={styles.legendInlineItem}
-                role="listitem"
-              >
+              <span key={`${dp.label}-${idx}`} className={styles.legendInlineItem} role="listitem">
                 {showSwatch && swatchColor && (
                   <span
                     className={styles.breakdownSwatch}
@@ -561,10 +542,7 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
         <div
           className={styles.legendRows}
           style={{
-            gridTemplateColumns: computeLegendGridColumns(
-              effectiveLegend.itemFormat,
-              effectiveLegend.valueAlignment
-            ),
+            gridTemplateColumns: computeLegendGridColumns(effectiveLegend.itemFormat, effectiveLegend.valueAlignment),
           }}
           role="list"
           aria-label="Legend"
@@ -572,13 +550,11 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
           {data.map((dp, idx) => {
             const swatchColor = chartData[idx]?.color;
             const rowValue =
-              dp.value == null
-                ? cardConfig?.nullDisplay ?? '—'
-                : formatBreakdownValue(dp.value, breakdownFormat);
+              dp.value == null ? (cardConfig?.nullDisplay ?? '—') : formatBreakdownValue(dp.value, breakdownFormat);
             return (
               <React.Fragment key={`${dp.label}-${idx}`}>
-                {showSwatch && (
-                  swatchColor ? (
+                {showSwatch &&
+                  (swatchColor ? (
                     <span
                       className={styles.breakdownSwatch}
                       style={{
@@ -590,8 +566,7 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
                     />
                   ) : (
                     <span aria-hidden={true} />
-                  )
-                )}
+                  ))}
                 <Text className={styles.breakdownLabel} role="listitem">
                   {dp.label}
                 </Text>
@@ -604,8 +579,7 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
             );
           })}
         </div>
-      )
-    );
+      );
 
     return (
       <div className={styles.container} ref={containerRef}>

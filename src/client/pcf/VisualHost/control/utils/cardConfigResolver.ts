@@ -277,16 +277,13 @@ export function resolveCardConfig(
   // from the parent record. Takes precedence over the PCF `aiSummaryField`
   // property (placement-level override stays available for ad-hoc forms).
   const aiSummaryField =
-    typeof json.aiSummaryField === 'string' && json.aiSummaryField.length > 0
-      ? json.aiSummaryField
-      : undefined;
+    typeof json.aiSummaryField === 'string' && json.aiSummaryField.length > 0 ? json.aiSummaryField : undefined;
 
   // --- Show card title in toolbar (v1.4.6) ---
   // When false, suppresses the chart name from the toolbar (icons only).
   // Used when the form section already provides the title and we want to
   // avoid double-rendering. Undefined defaults to true (legacy behavior).
-  const showCardTitle =
-    typeof json.showCardTitle === 'boolean' ? json.showCardTitle : undefined;
+  const showCardTitle = typeof json.showCardTitle === 'boolean' ? json.showCardTitle : undefined;
 
   return {
     valueFormat,
@@ -381,10 +378,7 @@ function parseLegend(raw: unknown): IChartLegendConfig | undefined {
       ? obj.placement
       : undefined;
 
-  const orientation =
-    obj.orientation === 'rows' || obj.orientation === 'inline'
-      ? obj.orientation
-      : undefined;
+  const orientation = obj.orientation === 'rows' || obj.orientation === 'inline' ? obj.orientation : undefined;
 
   const itemFormat =
     obj.itemFormat === 'swatchLabelValue' ||
@@ -394,15 +388,10 @@ function parseLegend(raw: unknown): IChartLegendConfig | undefined {
       ? obj.itemFormat
       : undefined;
 
-  const valueAlignment =
-    obj.valueAlignment === 'near' || obj.valueAlignment === 'far'
-      ? obj.valueAlignment
-      : undefined;
+  const valueAlignment = obj.valueAlignment === 'near' || obj.valueAlignment === 'far' ? obj.valueAlignment : undefined;
 
   const swatchSize =
-    typeof obj.swatchSize === 'number' && obj.swatchSize > 0 && obj.swatchSize < 100
-      ? obj.swatchSize
-      : undefined;
+    typeof obj.swatchSize === 'number' && obj.swatchSize > 0 && obj.swatchSize < 100 ? obj.swatchSize : undefined;
 
   // Skip the object entirely if every field is invalid/absent — caller
   // falls back to the legacy `matrixRight`/`showBreakdownRows` derivation.

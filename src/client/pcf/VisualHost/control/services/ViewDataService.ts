@@ -212,10 +212,7 @@ export function injectContextFilter(fetchXml: string, fieldName: string, recordI
       ? fetchXml.substring(entityTagEnd, beforeEntityClose)
       : fetchXml.substring(entityTagEnd);
   const lastLinkEntityCloseIdx = entityContents.lastIndexOf('</link-entity>');
-  const searchStartInContents =
-    lastLinkEntityCloseIdx >= 0
-      ? lastLinkEntityCloseIdx + '</link-entity>'.length
-      : 0;
+  const searchStartInContents = lastLinkEntityCloseIdx >= 0 ? lastLinkEntityCloseIdx + '</link-entity>'.length : 0;
   const afterEntity = entityContents.substring(searchStartInContents);
   const existingFilterMatch = afterEntity.match(/(<filter[^>]*>)/i);
   // Absolute base offset for translating positions back to `fetchXml`.

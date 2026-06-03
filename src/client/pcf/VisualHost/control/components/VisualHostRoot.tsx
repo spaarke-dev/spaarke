@@ -435,8 +435,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
         //       but drill into related child records of a different entity
         //       (sprk_invoice etc.) without authoring a web resource per case.
         const isWebResource =
-          drillThroughTarget.toLowerCase().endsWith('.html') ||
-          drillThroughTarget.toLowerCase().endsWith('.htm');
+          drillThroughTarget.toLowerCase().endsWith('.html') || drillThroughTarget.toLowerCase().endsWith('.htm');
 
         if (isWebResource) {
           logger.info('VisualHostRoot', 'Opening web resource drill-through dialog', {
@@ -618,9 +617,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
     // title — v1.4.9 misapplied it and the result was that Matter Next Date
     // lost its only header). CardChrome is the canonical title surface for
     // all 5 Matter chart cards, matching FR-VH-05.
-    const chromeTitle: string | undefined = chromeOptIn
-      ? (chartDefinition.sprk_name || undefined)
-      : undefined;
+    const chromeTitle: string | undefined = chromeOptIn ? chartDefinition.sprk_name || undefined : undefined;
 
     // Wire expand to existing handleExpandClick so chart-def Drill Through
     // Settings continue to apply (no new ClickActionHandler).
@@ -640,10 +637,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
     //   - chartDefinition has a sprk_name
     //   - the toolbar itself is visible (aiSummaryField OR enableDrillThrough)
     const legacyToolbarTitle =
-      !chromeOptIn &&
-      showToolbar === true &&
-      !!chartDefinition.sprk_name &&
-      (!!aiSummaryField || enableDrillThrough);
+      !chromeOptIn && showToolbar === true && !!chartDefinition.sprk_name && (!!aiSummaryField || enableDrillThrough);
     const hostRenderedTitle = chromeOptIn || legacyToolbarTitle;
 
     return (
@@ -700,14 +694,17 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
           so any legacy toolbar render here produces stacked duplicate icons.
           For chart defs without CardChrome opt-in, the toolbar renders in one
           of two modes (see comment below). */}
-      {showToolbar && chartDefinition && (aiSummaryField || enableDrillThrough) && showTitlePcf !== true && (
+      {showToolbar &&
+        chartDefinition &&
+        (aiSummaryField || enableDrillThrough) &&
+        showTitlePcf !== true &&
         // Two render modes when CardChrome is NOT active:
         //   showCardTitle:false → float variant. Icons absolutely positioned in
         //     top-right corner; toolbar reserves zero vertical space. Used when
         //     a form section heading already provides the chart name.
         //   else                → inline variant. Title (left) + icons (right)
         //     occupy a 32px row above the chart content (v1.4.3 layout).
-        showCardTitleInToolbar && chartDefinition.sprk_name ? (
+        (showCardTitleInToolbar && chartDefinition.sprk_name ? (
           <div className={styles.toolbar}>
             <Text
               size={300}
@@ -765,8 +762,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
               </Tooltip>
             )}
           </div>
-        )
-      )}
+        ))}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
       {showVersion && <span className={styles.versionBadge}>v1.4.16 • 2026-06-01</span>}

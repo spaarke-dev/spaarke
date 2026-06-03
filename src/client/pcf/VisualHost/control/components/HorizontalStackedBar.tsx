@@ -263,8 +263,7 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
   // When over the total, render a vertical marker at the position where the
   // budget WOULD fall (100% line within the actual-amount bar). For $250K of
   // $150K: marker at (150/250)*100 = 60% from the left.
-  const budgetMarkerLeftPercent =
-    isOverTotal && currentValue > 0 ? (totalValue / currentValue) * 100 : null;
+  const budgetMarkerLeftPercent = isOverTotal && currentValue > 0 ? (totalValue / currentValue) * 100 : null;
 
   // --- Resolve colors ---
   const barColor = resolveBarColor(fillRatio, cardConfig);
@@ -403,11 +402,7 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
         {/* Diamond marker — only rendered when over budget, positioned at
             the in-budget/over-budget segment boundary. */}
         {budgetMarkerLeftPercent !== null && (
-          <div
-            className={styles.budgetMarker}
-            style={{ left: `${budgetMarkerLeftPercent}%` }}
-            aria-hidden={true}
-          />
+          <div className={styles.budgetMarker} style={{ left: `${budgetMarkerLeftPercent}%` }} aria-hidden={true} />
         )}
       </div>
 

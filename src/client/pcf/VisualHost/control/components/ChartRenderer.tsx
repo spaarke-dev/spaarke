@@ -303,7 +303,7 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
       return (
         <DonutChart
           data={dataPoints}
-          title={hostRenderedTitle ? undefined : (config.showTitle !== false ? sprk_name : undefined)}
+          title={hostRenderedTitle ? undefined : config.showTitle !== false ? sprk_name : undefined}
           innerRadius={config.innerRadius as number | undefined}
           showCenterValue={config.showCenterValue as boolean | undefined}
           centerLabel={config.centerLabel as string | undefined}
