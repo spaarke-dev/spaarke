@@ -131,9 +131,8 @@
       "dependsOn": ["checkSufficiency"],
       "configJson": {
         "tenantId": "{{tenantId}}",
-        "prompt": "$ref:Services/Ai/Insights/Prompts/predict-matter-cost-synthesis.v1.txt",
-        "$comment-prompt": "$ref: form is a convention for the seed script to inline the prompt text at deploy time. The substitution placeholders {{liveFacts}}, {{cohortObservations}}, {{precedents}} are resolved by the orchestrator's template engine from prior-node OutputVariables (per existing PlaybookOrchestrationService template-substitution semantics).",
-        "$comment-branching": "This node executes ONLY when checkSufficiency.verdict == 'sufficient'. The orchestrator's branch routing is handled by checkSufficiency's selectedBranch output + the engine's downstream node skip logic (a node whose upstream EvidenceSufficiency emitted 'insufficient' is skipped per EvidenceSufficiencyNode docs)."
+        "$comment-prompt-source": "Synthesis prompt content lives in sprk_analysisaction[INS-AGNT@v1].sprk_systemprompt (Wave C2 task 021 migrated predict-matter-cost-synthesis.v1.txt → row; the .txt file was deleted in Wave C-G4 task 022). AgentServiceNodeExecutor reads the prompt at runtime via the actionCode FK; template placeholders {{liveFacts}}, {{cohortObservations}}, {{precedents}} are resolved by PlaybookOrchestrationService.ApplyConfigJsonTemplates from prior-node OutputVariables.",
+        "$comment-branching": "This node executes ONLY when checkSufficiency.verdict == 'sufficient'. The orchestrator's branch routing is handled by checkSufficiency's selectedBranch output + the engine's downstream node skip logic (Wave C1 Gap #2 patch: a node whose upstream EvidenceSufficiency emitted 'insufficient' is skipped per EvidenceSufficiencyNode docs)."
       }
     },
     {

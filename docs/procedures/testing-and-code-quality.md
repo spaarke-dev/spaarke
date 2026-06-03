@@ -1312,19 +1312,19 @@ When a new ADR is created that has enforceable structural constraints:
 > **Evidence base**:
 > - [Phase 4 Track E — Anti-drift effectiveness report](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md)
 > - [Phase 4 Track C — TestClock + seeded-Guid PoC findings](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-c-testclock-poc-2026-06-01.md)
-> - [ADR-030 — BFF Null-Object Kill-Switch Pattern](../../.claude/adr/ADR-030-bff-nullobject-kill-switch.md)
+> - [ADR-032 — BFF Null-Object Kill-Switch Pattern](../../.claude/adr/ADR-032-bff-nullobject-kill-switch.md)
 >
 > r2 closed 20 r1 ledger entries (5 HIGH + 8 MED + 7 LOW) across 19 commits and exposed three repeatable pre-execution governance gaps. These four subsections codify the patterns so future BFF-touching projects inherit them without re-discovery. Phase 5 task 080 is the canonical merge of these lessons into this procedure doc.
 
 ### Asymmetric-Registration Pre-Commit Check (Lesson #1)
 
-**Source**: r2 task 011 RB-T028 cluster + [`asymmetric-registration-inventory-2026-06-01.md`](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/asymmetric-registration-inventory-2026-06-01.md) + [ADR-030 §10](../../.claude/adr/ADR-030-bff-nullobject-kill-switch.md#pr-review-checklist-governance-enforcement--phase-5-of-source-project-codifies-in-docsproceduretesting-and-code-qualitymd).
+**Source**: r2 task 011 RB-T028 cluster + [`asymmetric-registration-inventory-2026-06-01.md`](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/asymmetric-registration-inventory-2026-06-01.md) + [ADR-032 §10](../../.claude/adr/ADR-032-bff-nullobject-kill-switch.md#pr-review-checklist-governance-enforcement--phase-5-of-source-project-codifies-in-docsproceduretesting-and-code-qualitymd).
 
 **Why this lives here**: `CLAUDE.md` §10 bullet 6 says "endpoints that map unconditionally must have unconditional service registration." That catches the **Tier 1 BLOCKING** category (8 of 13 services in r2's inventory) but **misses the Tier 1.5 LATENT** category (5 of 13 — endpoint unconditional + conditional service injected as `[FromServices]` parameter, with or without `IServiceX? = null` nullable default). The Tier 1.5 anti-pattern compiles, local tests pass when the feature flag is on, and fails only at startup metadata-generation when the flag is off. The rule wording was insufficient prevention; r2 task 011 discovered the latent surface AFTER execution began, through 4 follow-up commits (`d932f355`, `43ca4f9b`, `dbd3888e`, `56e74b84`). The static-scan recipe below makes it author-side preventable.
 
 **When to run**: Before opening any PR that adds a new service registration to a `*Module.cs` DI helper under `src/server/api/Sprk.Bff.Api/Infrastructure/DI/`. Also run if the PR adds a new endpoint that depends on an existing conditional service.
 
-**The 4-step static-scan recipe** (lifted from ADR-030 §10):
+**The 4-step static-scan recipe** (lifted from ADR-032 §10):
 
 1. **Enumerate conditional registrations**:
 
@@ -1352,10 +1352,10 @@ When a new ADR is created that has enforceable structural constraints:
    | Unconditional | Conditional | **Tier 1.5 anti-pattern** | Apply one of three remediations below |
    | Conditional | Unconditional | Asymmetric (wasteful, not broken) | Optional cleanup |
 
-**Three remediations for Tier 1.5** (decision per ADR-030):
+**Three remediations for Tier 1.5** (decision per ADR-032):
 
-- **(a) Promote service to unconditional** — preferred when the service has zero AI/external deps. See ADR-010 DI minimalism + ADR-030 §4.4.
-- **(b) Apply Null-Object kill-switch** — when the service has conditional deps preventing unconditional registration. See ADR-030 §4.1–4.3 + `FeatureDisabledException` + endpoint catch + 503 ProblemDetails.
+- **(a) Promote service to unconditional** — preferred when the service has zero AI/external deps. See ADR-010 DI minimalism + ADR-032 §4.4.
+- **(b) Apply Null-Object kill-switch** — when the service has conditional deps preventing unconditional registration. See ADR-032 §4.1–4.3 + `FeatureDisabledException` + endpoint catch + 503 ProblemDetails.
 - **(c) Refactor endpoint signature** — consume a different service that doesn't have the conditional surface. See r2's `KnowledgeBaseEndpoints` B8 refactor (commit `5613b8ad`) where the endpoint stopped injecting `SearchIndexClient` directly and consumed only `IRagService`.
 
 **Anti-pattern to avoid (do not do this)**:
@@ -1378,7 +1378,7 @@ if (documentIntelligenceEnabled)
 `IInvoiceSearchService? = null` does **not** suppress the failure. The .NET 8 minimal-API metadata generator resolves the dependency at startup independent of the runtime null-check.
 
 **Cross-references**:
-- [`.claude/adr/ADR-030-bff-nullobject-kill-switch.md`](../../.claude/adr/ADR-030-bff-nullobject-kill-switch.md) — full pattern definition + the 3 remediation choices.
+- [`.claude/adr/ADR-032-bff-nullobject-kill-switch.md`](../../.claude/adr/ADR-032-bff-nullobject-kill-switch.md) — full pattern definition + the 3 remediation choices.
 - [`.claude/constraints/bff-extensions.md` § F](../../.claude/constraints/bff-extensions.md) — binding rule (extended by Phase 5 task 081 with the Tier 1.5 language).
 - [`CLAUDE.md` §10 bullet 6](../../CLAUDE.md) — root governance pointer.
 - r2 worked example: [asymmetric-registration-inventory-2026-06-01.md](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/asymmetric-registration-inventory-2026-06-01.md) §5.B (LATENT pairs L1–L5).
@@ -1426,7 +1426,7 @@ Before declaring any ledger entry "subsumed by" a cluster fix or upstream root-c
 **Source**: r2 task 010 (RB-T044-01) + r2 task 011 (RB-T028 cluster) + r2 task 012 (RB-T028-02). In **all 3** cases r1's ledger described the symptom accurately, but r1's HYPOTHESIZED FIX was incomplete or wrong:
 
 - **Task 010 (RB-T044-01)**: r1 ledger recommended a 1-line `if (i > fromTurnIndex)` → `if (i < fromTurnIndex)` inversion in `ConversationHistorySanitizer`. r2 hand-trace + reproduction showed that inversion would BREAK the existing `Sanitizer_StripsRetrievalBlocks_PreservesConclusions` test. True fix: matter-pivot-aware semantic, 37% line replacement.
-- **Task 011 (RB-T028-03/04/05/06 cluster)**: r1 ledger recommended "conditional endpoint mapping" (Approach 1) OR "register a no-op `INotificationService`" (Approach 2). r2 attempt at Approach 1 surfaced E-01's 5-layer failure cascade. True fix: Null-Object kill-switch pattern across **18** services (not the 4 r1 captured), codified as ADR-030. Both r1 approaches were incomplete.
+- **Task 011 (RB-T028-03/04/05/06 cluster)**: r1 ledger recommended "conditional endpoint mapping" (Approach 1) OR "register a no-op `INotificationService`" (Approach 2). r2 attempt at Approach 1 surfaced E-01's 5-layer failure cascade. True fix: Null-Object kill-switch pattern across **18** services (not the 4 r1 captured), codified as ADR-032. Both r1 approaches were incomplete.
 - **Task 012 (RB-T028-02)**: r1 ledger hypothesized "fixture-text-drift after sibling-project edits." r2 byte-level inspection + temporary Skip removal showed the actual cause was CRLF↔LF whitespace mismatch in `GroundingVerifier.Normalize` semantics — the test was asserting a stricter invariant than production enforced. True fix: 1-line visibility promotion + 16 lines of XML doc + 7 test assertions migrated.
 
 **Why this lives here**: Ledger hypotheses are written without hand-trace + reproduction during the FILE phase (when discovery is hot but root cause may be obscured). When a downstream agent applies the recommended fix without verifying the root cause first, they discover late that the fix is incomplete, wrong, or regresses neighboring tests. This protocol makes empirical reproduction the GATE before fix application.
@@ -1790,7 +1790,7 @@ claude --chrome
 - [ui-test Skill](../../.claude/skills/ui-test/SKILL.md) - Browser testing details
 - [repo-cleanup Skill](../../.claude/skills/repo-cleanup/SKILL.md) - Cleanup procedures
 - [ci-cd Skill](../../.claude/skills/ci-cd/SKILL.md) - CI/CD pipeline management
-- [ADR-030 — BFF Null-Object Kill-Switch Pattern](../../.claude/adr/ADR-030-bff-nullobject-kill-switch.md) — referenced by the Asymmetric-Registration Pre-Commit Check section
+- [ADR-032 — BFF Null-Object Kill-Switch Pattern](../../.claude/adr/ADR-032-bff-nullobject-kill-switch.md) — referenced by the Asymmetric-Registration Pre-Commit Check section
 - [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) — binding test-update + placement governance for `Sprk.Bff.Api/`
 - [Phase 4 Track E — Anti-drift effectiveness report](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md) — evidence base for Lessons #1 / #2 / #3
 - [Phase 4 Track C — TestClock + seeded-Guid PoC findings](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-c-testclock-poc-2026-06-01.md) — evidence base for FR-13 pattern section

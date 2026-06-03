@@ -353,7 +353,7 @@ Top-N ranked Observations/Precedents with full envelopes + an LLM-synthesized su
 ### 7.3 Auth + governance
 
 - **Auth filter**: same per-route endpoint filter as `/api/insights/ask` (per ADR-008 + ADR-028) — registered via the function-based contract; named API key scheme + audit middleware applied.
-- **Kill-switch**: if `IRagService` is feature-disabled per ADR-030, the endpoint returns 503 ProblemDetails via `FeatureDisabledException` → `FeatureDisabledResults.AsFeatureDisabled503()`.
+- **Kill-switch**: if `IRagService` is feature-disabled per ADR-032, the endpoint returns 503 ProblemDetails via `FeatureDisabledException` → `FeatureDisabledResults.AsFeatureDisabled503()`.
 - **BFF placement**: endpoint lives in `Sprk.Bff.Api/Endpoints/` following the existing `/ask` pattern (per spec.md BFF Placement Review).
 
 ### 7.4 Until E1 ships
@@ -479,7 +479,7 @@ Phase 1 per-document hard cap: $0.10 (observability-only Phase 1; per-tenant mon
 | Ingest job never runs after upload | `AiProcessingOptions.InsightsIngest = true` not set on upload | Phase 1.5 needs producer-side surface; today no upload triggers Insights ingest |
 | `DataverseObservationMirror skipped: InsightsObservationActionId is unset` | Per-environment config GUID not configured | Follow §8.2 prerequisite checklist |
 | Insights tests pass locally but live smoke shows different behavior | Tests mock `IInsightsAi`; real DI graph never exercised | Phase 1.5: add a DI-resolution test that resolves `IInsightsAi` from real container without mocks |
-| `/api/insights/search` returns 503 ProblemDetails with `featureDisabled: true` | `IRagService` is `NullRagService` (kill-switch active per ADR-030) | Enable the RAG feature flag in App Service config; restart |
+| `/api/insights/search` returns 503 ProblemDetails with `featureDisabled: true` | `IRagService` is `NullRagService` (kill-switch active per ADR-032) | Enable the RAG feature flag in App Service config; restart |
 | Intent classifier confidence is consistently low for in-domain questions | Threshold too high OR classifier prompt drift | Tune `Insights:IntentClassifier:ConfidenceThreshold`; consider caller `forceMode` override; re-calibrate against eval harness |
 
 ---
@@ -494,7 +494,7 @@ Phase 1 per-document hard cap: $0.10 (observability-only Phase 1; per-tenant mon
 | Insights node executors (6) | `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/{LiveFact,IndexRetrieve,EvidenceSufficiency,DeclineToFind,ReturnInsightArtifact,GroundingVerify}Node.cs` |
 | Layer 1/2 prompts (Phase 1.5 → Dataverse) | `sprk_analysisaction.sprk_systemprompt` rows (action codes `INSIGHTS.LAYER1_CLASSIFY.*`, `INSIGHTS.LAYER2_EXTRACT.*.*`). Phase 1 `Services/Ai/Insights/Prompts/*.txt` files are **retired** by Wave C2 ([task 021](../../projects/ai-spaarke-insights-engine-r2/tasks/021-prompts-to-jps-storage.poml)). |
 | Universal-ingest JPS playbook (Phase 1.5) | Dataverse `sprk_playbook` row `universal-ingest@v1` (Wave C1 [task 020](../../projects/ai-spaarke-insights-engine-r2/tasks/020-universal-ingest-jps-playbook.poml)) — replaces `IngestOrchestrator.cs` |
-| RAG service (existing, wrapped by `/search`) | `src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs` + `RagService.cs` + `NullRagService.cs` (ADR-030 kill-switch) |
+| RAG service (existing, wrapped by `/search`) | `src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs` + `RagService.cs` + `NullRagService.cs` (ADR-032 kill-switch) |
 | `FeatureDisabledException` plumbing | `src/server/api/Sprk.Bff.Api/Configuration/FeatureDisabledException.cs` + `FeatureDisabledResults.AsFeatureDisabled503()` |
 | Predict-matter-cost playbook spec | `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json` |
 | Universal-ingest orchestrator (code; Phase 1.5 refactors to JPS) | `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Ingest/IngestOrchestrator.cs` |
@@ -529,5 +529,5 @@ Phase 1 per-document hard cap: $0.10 (observability-only Phase 1; per-tenant mon
 - **Hybrid pattern** — Phase 1.5 consumption model: pre-authored JPS playbooks for high-value questions + generic RAG (`/api/insights/search`) for long-tail; **intent classifier** (LLM-based, Wave E2) routes between. Caller `forceMode` override is the escape hatch.
 - **Multi-entity subjects** — Phase 1.5 extension: questions can target Matter / Project / Invoice / future entities (Phase 1 hard-coded to Matter). Per-entity `ILiveFactResolver` registered keyed by scheme.
 - **Universal-ingest@v1** — Phase 1.5 Wave C1 canonical JPS ingest playbook. Replaces Phase 1's `IngestOrchestrator.cs`. Parameterized (per-tenant, per-practice-area, cost-cap override) — flexibility via config, NOT via multiplication.
-- **`IRagService`** — existing RAG retrieval canonical entry point (per 2026-06-01 master refactor). Phase 1.5 `/api/insights/search` endpoint (Wave E1) wraps this; ADR-030 P3 kill-switch via `NullRagService` → 503 ProblemDetails.
+- **`IRagService`** — existing RAG retrieval canonical entry point (per 2026-06-01 master refactor). Phase 1.5 `/api/insights/search` endpoint (Wave E1) wraps this; ADR-032 P3 kill-switch via `NullRagService` → 503 ProblemDetails.
 - **Wave B / A / C / D / E** — Phase 1.5 execution sequence (B first per WB-1 owner direction): Unblock synthesis → Foundations (design docs) → JPS compliance refactor → 2D taxonomy + multi-entity → Hybrid consumption + Assistant.

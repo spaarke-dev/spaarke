@@ -153,7 +153,7 @@ This section is non-decorative — terms below define exactly what is and isn't 
 - **ADR-027** — Subscription Isolation + Dataverse Solution Management. Phase 1.5 schema additions (`sprk_documenttype_ref`, `sprk_practicearea_documenttype`, possibly `sprk_prompt`) MUST flow through the managed-solution promotion path to prod.
 - **ADR-028** — Spaarke Auth v2. New `/api/insights/search` endpoint MUST register via the function-based contract and use a named API key scheme + audit middleware where applicable.
 - **ADR-029** — BFF Publish Hygiene. Phase 1.5 wave merges MUST verify publish-size impact + the transitive CVE override pattern.
-- **ADR-030** — BFF Null-Object Kill-Switch Pattern (NEW 2026-06-01). Any new service in a `*Module.cs` `if (flag) { ... }` block consumed by an unconditionally-mapped endpoint MUST apply one of: P1 (Promote-to-unconditional if no AI-deps), P2 (Quiet no-op — FORBIDDEN for query services), P3 (Fail-fast Null-Object via `FeatureDisabledException` → 503 ProblemDetails). Affects Wave C (020 universal-ingest service additions, 023 facade re-wire), Wave D (034 multi-entity resolvers), Wave E (040 search endpoint, 041 intent classifier).
+- **ADR-032** — BFF Null-Object Kill-Switch Pattern (NEW 2026-06-01). Any new service in a `*Module.cs` `if (flag) { ... }` block consumed by an unconditionally-mapped endpoint MUST apply one of: P1 (Promote-to-unconditional if no AI-deps), P2 (Quiet no-op — FORBIDDEN for query services), P3 (Fail-fast Null-Object via `FeatureDisabledException` → 503 ProblemDetails). Affects Wave C (020 universal-ingest service additions, 023 facade re-wire), Wave D (034 multi-entity resolvers), Wave E (040 search endpoint, 041 intent classifier).
 
 ### MUST Rules (from ADRs + CLAUDE.md §10)
 

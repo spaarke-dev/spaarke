@@ -103,11 +103,11 @@ Before adding a new production service that consumes a config key OR a claim:
 
 **Production code**: `AnalysisServicesModule.AddAnalysisServicesModule` reads both flags. Many AI services are registered ONLY when both flags are true.
 
-**Contract**: A fixture MAY set either flag to `false` to exercise kill-switch behavior. Per ADR-030 + r2 task 011, EVERY conditionally-registered service consumed by an unconditionally-mapped endpoint MUST have a Null-Object (P3 fail-fast throwing `FeatureDisabledException`) registered in the `else` branch. See `.claude/adr/ADR-030-bff-nullobject-kill-switch.md`.
+**Contract**: A fixture MAY set either flag to `false` to exercise kill-switch behavior. Per ADR-032 + r2 task 011, EVERY conditionally-registered service consumed by an unconditionally-mapped endpoint MUST have a Null-Object (P3 fail-fast throwing `FeatureDisabledException`) registered in the `else` branch. See `.claude/adr/ADR-032-bff-nullobject-kill-switch.md`.
 
 **Failure mode**: Test fixtures that set the gate off MUST either (a) accept `503 Feature Disabled` from kill-switched endpoints OR (b) override-register the affected services with `Mock<T>` BEFORE the host starts. See §4 below.
 
-**Worked example**: r2 task 011 closed 18 services migrating to ADR-030. The 4 RB-T028 ledger entries traced to this gate combination not being symmetric.
+**Worked example**: r2 task 011 closed 18 services migrating to ADR-032. The 4 RB-T028 ledger entries traced to this gate combination not being symmetric.
 
 **Fixture location**: `IntegrationTestFixture.cs` lines 135-141 (`DocumentIntelligence:Enabled = "true"` + `Analysis:Enabled = "true"` for default IT mode).
 
@@ -125,7 +125,7 @@ Before adding a new production service that consumes a config key OR a claim:
 
 **Production code**: `AnalysisServicesModule.AddRagServices` registers `IRagService` + `SearchIndexClient` only when both keys are non-empty.
 
-**Contract**: Tests exercising RAG paths MUST set both keys. Tests that DON'T want RAG can leave one or both empty — the `else` branch registers `NullRagService` (per ADR-030) and endpoints return 503.
+**Contract**: Tests exercising RAG paths MUST set both keys. Tests that DON'T want RAG can leave one or both empty — the `else` branch registers `NullRagService` (per ADR-032) and endpoints return 503.
 
 **Failure mode if no Null-Object**: Pre-task-011, this gap would surface as 500 NoServiceFound on RAG endpoints. Post-task-011, the Null-Object returns 503.
 
@@ -224,11 +224,11 @@ Did Moq verification fail with "expected once, but was 0 times"?
   NO ↓
 
 Did the test return 500 NoServiceFound?
-  YES → §3 (compound gate symmetry per ADR-030) or §4.1 (override timing).
+  YES → §3 (compound gate symmetry per ADR-032) or §4.1 (override timing).
   NO ↓
 
 Did the test return 503 Feature Disabled with errorCode "ai.<X>.disabled"?
-  YES → Expected behavior (ADR-018 + ADR-030). The test fixture set
+  YES → Expected behavior (ADR-018 + ADR-032). The test fixture set
         a kill-switch flag to off. Either accept the 503 in the
         assertion OR set the flag on.
   NO ↓

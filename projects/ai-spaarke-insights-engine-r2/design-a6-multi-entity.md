@@ -389,9 +389,9 @@ Wave D7 (036) adds synthetic LLM-generated fixtures for project + invoice.
 
 ---
 
-## 7. ADR-030 (Null-Object Kill-Switch) applicability
+## 7. ADR-032 (Null-Object Kill-Switch) applicability
 
-ADR-030 applies if any of the per-entity resolvers are gated behind a feature flag in `InsightsModule.cs` (e.g., `if (multiEntitySubjectsEnabled) { registerProjectResolver(); }`).
+ADR-032 applies if any of the per-entity resolvers are gated behind a feature flag in `InsightsModule.cs` (e.g., `if (multiEntitySubjectsEnabled) { registerProjectResolver(); }`).
 
 **Recommendation for D5**: register all three resolvers unconditionally. The cost is minimal (3 concrete registrations + 1 dict factory + 1 parser singleton). If a feature gate is later judged necessary, apply the P3 pattern — `FeatureDisabledException` thrown by `ProjectLiveFactResolver` / `InvoiceLiveFactResolver` when the gate is off — surfacing as a uniform 503 ProblemDetails via the existing `FeatureDisabledResults.AsFeatureDisabled503()` helper.
 
@@ -430,7 +430,7 @@ These are the testable outcomes that Wave D5 (034) + D6 (035) must satisfy:
 | A6-D3 | Q-D6-1 → Option (c) Hybrid (keep `scope.matterId` + add `entityType`/`entityId`) | Preserves NFR-08 backward-compat; minimal Phase 1 Observation back-fill cost |
 | A6-D4 | Index migration via new index `spaarke-insights-index-v2` + back-fill | Azure AI Search doesn't support in-place schema mutation for filterable fields |
 | A6-D5 | r1 `DataverseLiveFactResolver` renamed to `MatterLiveFactResolver`; behavior preserved | Naming consistency with `ProjectLiveFactResolver`, `InvoiceLiveFactResolver`; zero behavior change |
-| A6-D6 | All resolvers registered unconditionally (no ADR-030 gate) in D5 default | Cost is minimal; avoids ADR-030 conditional-registration overhead; can revisit if cost grows |
+| A6-D6 | All resolvers registered unconditionally (no ADR-032 gate) in D5 default | Cost is minimal; avoids ADR-032 conditional-registration overhead; can revisit if cost grows |
 | A6-D7 | Inter-entity references (e.g., `invoice.relatedMatter`) return `EntityReference` only; do NOT recurse | Keeps resolvers simple; playbooks compose multi-entity fact-gathering at the playbook level |
 | A6-D8 | Subject parser is `ISingleton`; concrete resolvers are `IScoped` (matches r1 lifetime) | Matches `IGenericEntityService` scoped lifetime in r1 |
 
@@ -457,7 +457,7 @@ These are NOT blockers for design — they are implementation-time decisions:
 - r1 index schema: `infra/insights/schemas/spaarke-insights-index.index.json`
 - ADR-010 (DI minimalism)
 - ADR-013 (AI Architecture — facade boundary)
-- ADR-030 (BFF Null-Object Kill-Switch Pattern)
+- ADR-032 (BFF Null-Object Kill-Switch Pattern)
 - CLAUDE.md §3.5 (Zone A/B facade boundary), §10 (BFF Hygiene)
 
 ---

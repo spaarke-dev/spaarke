@@ -38,7 +38,7 @@ Phase 1.5 evolves the Insights Engine from r1's plumbing prototype into a usable
 | [ADR-027](../../.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-mgmt.md) — Solution management | Wave D1 schema additions → managed solution promotion | 030 |
 | [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — Spaarke Auth v2 | New `/api/insights/search` endpoint auth filter | 040 |
 | [ADR-029](../../.claude/adr/ADR-029-bff-publish-hygiene.md) — BFF publish hygiene | Wave C/D/E NuGet additions, publish-size baseline | 020, 040 |
-| [ADR-030](../../.claude/adr/ADR-030-bff-nullobject-kill-switch.md) — BFF Null-Object Kill-Switch Pattern (NEW 2026-06-01) | Any service registered in a `*Module.cs` `if (flag) { ... }` block consumed by an unconditionally-mapped endpoint. Three patterns: P1 Promote-to-unconditional / P2 Quiet no-op / P3 Fail-fast Null-Object (via `FeatureDisabledException`) | 020, 023, 034, 040, 041 |
+| [ADR-032](../../.claude/adr/ADR-032-bff-nullobject-kill-switch.md) — BFF Null-Object Kill-Switch Pattern (NEW 2026-06-01) | Any service registered in a `*Module.cs` `if (flag) { ... }` block consumed by an unconditionally-mapped endpoint. Three patterns: P1 Promote-to-unconditional / P2 Quiet no-op / P3 Fail-fast Null-Object (via `FeatureDisabledException`) | 020, 023, 034, 040, 041 |
 
 ### Applicable skills
 
@@ -74,7 +74,7 @@ Phase 1.5 evolves the Insights Engine from r1's plumbing prototype into a usable
 
 ### Project-specific constraints
 
-- **`.claude/constraints/bff-extensions.md`** — binding pre-merge checklist for any Wave C/D/E task that adds endpoints, services, DI registrations, or NuGet packages. Updated 2026-06-01 with binding sections **F.1 Asymmetric-Registration Tier 1.5 Anti-Pattern** (codifies ADR-030 enforcement at PR review), **F.2 Fixture-Config-FIRST Inspection Protocol** (relevant to Wave D7 fixtures), **F.3 Empirical-Reproduction-FIRST Protocol** (verify-before-fix when referencing r1 RB-T ledger entries)
+- **`.claude/constraints/bff-extensions.md`** — binding pre-merge checklist for any Wave C/D/E task that adds endpoints, services, DI registrations, or NuGet packages. Updated 2026-06-01 with binding sections **F.1 Asymmetric-Registration Tier 1.5 Anti-Pattern** (codifies ADR-032 enforcement at PR review), **F.2 Fixture-Config-FIRST Inspection Protocol** (relevant to Wave D7 fixtures), **F.3 Empirical-Reproduction-FIRST Protocol** (verify-before-fix when referencing r1 RB-T ledger entries)
 - **§3.5 Zone A / Zone B grep gate** continues from r1 — every PR runs the forbidden-imports grep before merge
 - **`IRagService` (existing per 2026-06-01 refactor)** — canonical RAG facade. Wave E1 (task 040) MUST consume this; do NOT inject `SearchIndexClient` directly into endpoint handlers
 
