@@ -1,11 +1,46 @@
 # Current Task — Spaarke Insights Engine Phase 1.5 (r2)
 
 > **Purpose**: Active task state tracker. Managed by `task-execute` skill.
-> **Status**: COMPLETE — Task 035 (Wave D6 / D-G4) — Index Scope Shape Migration ✅ 2026-06-03
+> **Status**: COMPLETE — Task 033 (Wave D4 / D-G3) — Universal-ingest per-area routing ✅ 2026-06-03
 
 ---
 
-## 🔄 Active — Task 035 (Wave D6 / D-G4)
+## ✅ Closed — Task 033 (Wave D4 / D-G3) — COMPLETE 2026-06-03
+
+| Field | Value |
+|---|---|
+| **Task** | 033 — D4 universal-ingest@v1 runtime per-(area, type) routing (Layer 1 + Layer 2 dispatch + NULL gate-fail) |
+| **POML** | `projects/ai-spaarke-insights-engine-r2/tasks/033-universal-ingest-per-area-routing.poml` |
+| **Rigor Level** | FULL (BFF code: new routing service + orchestrator integration + DI registration) |
+| **Wave-item** | D-G3 (parallel with 036 synthetic fixtures) |
+| **Completed** | 2026-06-03 |
+
+### Deliverables shipped
+
+- `Services/Ai/Insights/Routing/IInsightsActionRouter.cs` — interface + result record + decision enum
+- `Services/Ai/Insights/Routing/InsightsActionRouter.cs` — default impl with `IMemoryCache` (15-min sliding TTL) + Dataverse alternate-key + matrix QueryExpression lookups
+- `Services/Ai/PlaybookOrchestrationService.cs` — routing plug-in via `ApplyInsightsRoutingAsync` between action resolution and node-context creation; Layer 2 gate-fail emission reuses existing branch-aware-skip mechanism
+- `Infrastructure/DI/AnalysisServicesModule.cs` — single `AddScoped` registration with inline ADR-032 §F.1 inspection
+- Tests: 13 new in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Routing/InsightsActionRouterTests.cs` (all 4 routing decisions + caching + defense-in-depth fallbacks)
+- Existing test updates (additive pass-through mock): `PlaybookOrchestrationServiceTests.cs`, `Integration/PlaybookExecutionTests.cs`
+
+### Quality gates
+
+- Build: ✅ 0 errors, 0 new warnings
+- Tests: ✅ 6018 pass, 0 fail (13 new + 6005 existing + 111 pre-existing skips)
+- code-review: ✅ 0 critical, 0 warning, 3 suggestions (observability follow-ups for Wave E)
+- adr-check: ✅ 0 violations, 0 warnings; full §10 BFF Hygiene checklist passed
+
+### Open follow-ups for Wave D7 (036) or Wave E
+
+1. Cache invalidation strategy if Dataverse matrix changes mid-soak (15-min TTL acceptable for Phase 1.5)
+2. Telemetry event `InsightsActionLookupFailed` for ops visibility into matrix data-quality issues
+3. Multi-area documents (M&A spanning CTRNS + BNKF) — Phase 2 candidate
+4. Per-area smoke against 3 real Spaarke Dev matters — deferred to owner-coordinated `spaarke-bff-dev` deploy
+
+---
+
+## ✅ Closed — Task 035 (Wave D6 / D-G4) — COMPLETE 2026-06-03
 
 | Field | Value |
 |---|---|

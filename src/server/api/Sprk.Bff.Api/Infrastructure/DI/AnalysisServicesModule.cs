@@ -271,6 +271,24 @@ public static class AnalysisServicesModule
         services.AddHttpClient<IPlaybookService, PlaybookService>();
         services.AddHttpClient<INodeService, NodeService>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutorRegistry, Sprk.Bff.Api.Services.Ai.Nodes.NodeExecutorRegistry>();
+
+        // Insights Engine r2 Wave D4 (task 033) — runtime per-(area, type) routing for
+        // universal-ingest@v1. Consumed unconditionally by PlaybookOrchestrationService.
+        // Scoped lifetime: matches PlaybookOrchestrationService + IScopeResolverService
+        // (which the router depends on for action resolution). The router holds an
+        // IMemoryCache reference, but the cache itself is a Singleton; the router's
+        // ConcurrentDictionary<string, byte> for log-once miss reporting is process-wide
+        // when promoted to Singleton in a future iteration. For now Scoped is sufficient
+        // — cache lookups are cheap, and per-request instances avoid captive-dependency
+        // concerns with the Scoped IGenericEntityService.
+        //
+        // ADR-032 §F.1 inspection: unconditional registration; consumer
+        // (PlaybookOrchestrationService) is also unconditional. The asymmetric-registration
+        // anti-pattern does NOT apply. Static-scan recipe verified compliant — no new
+        // `if (flag) { ... }` block introduced.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Insights.Routing.IInsightsActionRouter,
+                           Sprk.Bff.Api.Services.Ai.Insights.Routing.InsightsActionRouter>();
+
         services.AddScoped<IPlaybookOrchestrationService, PlaybookOrchestrationService>();
         services.AddHttpClient<IPlaybookSharingService, PlaybookSharingService>();
         // NotificationService promoted to unconditional registration (task 011 Phase 1b Tier 1, D-09 §2 B1).

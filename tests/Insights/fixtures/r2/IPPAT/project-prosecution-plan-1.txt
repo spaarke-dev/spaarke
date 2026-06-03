@@ -1,0 +1,117 @@
+PATENT PROSECUTION PROJECT PLAN
+
+Project Code:        IPPAT-2026-019
+Project Name:        Helios Quantum Compute — Thermal Management Patent Family
+                     Prosecution Plan
+Project Manager:     Lior Bekele (Internal Client Lead) / Patrick Devanney
+                     (Greene Marlow Patent Group LLP, Outside Counsel Lead)
+Client of Record:    Helios Quantum Compute, Inc.
+Linked Matter:       Greene Marlow file HQC-2026-0034 ("Adaptive Thermal
+                     Management for Stacked Accelerator Arrays")
+Effective Date:      March 18, 2026
+Plan Horizon:        Through Q4 2028
+Status:              Active — Application 18/734,521 pending; continuation
+                     and PCT planning in progress
+Annual Budget:       $420,000 (combined US + PCT track, 2026 calendar year)
+
+1. PROJECT OVERVIEW
+
+This Patent Prosecution Project Plan ("PPP") sets the strategic prosecution
+roadmap for the patent family rooted in U.S. Provisional Application
+63/598,142 (filed Nov 3, 2025) and U.S. Non-Provisional Application
+18/734,521 (filed Mar 11, 2026). Subject matter: adaptive thermal management
+in high-density compute fabrics using fluid-dynamic feedback control.
+
+2. PATENT FAMILY STRUCTURE (PLANNED)
+
+   2.1 Already Filed
+       - U.S. Provisional 63/598,142          (Nov 3, 2025; expires Nov 3, 2026)
+       - U.S. Non-Provisional 18/734,521      (Mar 11, 2026; claims priority
+                                              to provisional)
+
+   2.2 Planned Within Plan Horizon
+       - PCT International Application                 by Nov 3, 2026
+         (claim priority to U.S. Provisional)
+       - National Phase entries: EP, JP, KR, CN, IL    by May 3, 2028
+         (PCT 30/31-month deadlines)
+       - First Continuation-in-Part (CIP)              Q1 2027 target
+         (subject matter: per-microvalve dispersion compensation;
+          development underway in HQC R&D team — see Section 7)
+
+3. STRATEGIC OBJECTIVES
+
+   a) Build a defensive patent thicket around the core thermal-management
+      method to deter competitive products from major accelerator OEMs.
+   b) Position the family for licensing into the data-center cooling
+      sub-segment (target licensees: Tier-1 hyperscalers and merchant cooling
+      vendors).
+   c) Secure broad jurisdictional coverage in the top 5 hyperscaler-operating
+      jurisdictions: US, EU (EP), JP, KR, CN.
+
+4. KEY PROSECUTION RISKS AND MITIGATIONS
+
+   4.1 Subject-matter eligibility (US § 101). The state-space-model
+       limitations could attract a § 101 software-eligibility rejection.
+       Mitigation: amended claims include explicit hardware actuator
+       (piezoelectric microvalve) and millisecond control-horizon limitation
+       (see independent claim 1 as filed).
+
+   4.2 Prior-art landscape (US § 103). Singh et al. (IEEE Photonics Journal,
+       June 2023) discloses comparable feedback-control approaches; the
+       distinguishing limitation is the 1 kHz sampling rate and the Kalman
+       filter tuning to chip-package thermal time constants. Mitigation:
+       maintain detailed inventor declarations supporting non-obviousness
+       through experimental data captured in HQC's internal lab notebooks
+       LN-2025-187 through LN-2025-203.
+
+   4.3 Continuation strategy. Filing the CIP must not introduce new matter
+       that would impair the parent's priority claim. Mitigation: outside
+       counsel will review the CIP specification for new-matter compliance
+       before filing.
+
+5. MILESTONES AND BUDGET ALLOCATION
+
+   M-01  Non-Provisional filed                                ✅ Mar 11, 2026
+   M-02  First Office Action expected (US)        13-18 mo:    Apr-Sep 2027
+   M-03  PCT filing                                Nov 3, 2026
+         Budget allocation: $48,000
+   M-04  CIP filing target                          Q1 2027
+         Budget allocation: $62,000
+   M-05  National phase entries (5 jurisdictions)  May 3, 2028
+         Budget allocation: $180,000
+
+6. STAFFING AND ROLES
+
+   - Lead Outside Counsel: Patrick Devanney (Reg. No. 71,883)
+   - Associate (US prosecution): Aliyah Brennan (Reg. No. 79,221)
+   - Foreign Filing Coordinator: Yusuf Ramirez (Paralegal)
+   - Inventor-of-Record / Client Liaison: Lior Bekele
+   - Co-Inventors (signature decisions): Maitreyi Saraswat, Tomasz Wronski
+
+7. INTERLOCK WITH HQC R&D ROADMAP
+
+   The CIP filing target (Q1 2027) is gated on completion of HQC R&D's
+   per-microvalve dispersion-compensation prototype, currently scheduled for
+   completion Q4 2026 (per HQC internal roadmap RM-2026-Q1). Patent project
+   manager Lior Bekele will provide updates to outside counsel at quarterly
+   intervals.
+
+8. REPORTING
+
+   Outside counsel shall provide a monthly Prosecution Status Report covering
+   per-application status, projected next-action dates, budget utilization,
+   and any new prior-art the office surfaces in any active jurisdiction.
+
+9. AMENDMENTS
+
+   This PPP shall be reviewed and updated quarterly. Material changes to the
+   prosecution strategy (e.g., addition of a new family member or jurisdiction)
+   require written approval from the client (Lior Bekele, CTO).
+
+APPROVED:
+
+For Helios Quantum Compute, Inc.:            For Greene Marlow Patent Group LLP:
+
+___________________________                  ___________________________
+Lior Bekele, CTO                             Patrick Devanney, Lead Counsel
+Date: March 18, 2026                          Date: March 18, 2026

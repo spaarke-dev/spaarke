@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Insights.Routing;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Xunit;
@@ -901,6 +902,18 @@ public class PlaybookExecutionTests
         var scopeResolverMock = new Mock<IScopeResolverService>();
         var legacyOrchestratorMock = new Mock<IAnalysisOrchestrationService>();
         var executorMock = new Mock<INodeExecutor>();
+
+        // Wave D4 / task 033: pass-through router for non-Insights playbooks. Existing
+        // integration tests do not exercise universal-ingest@v1 routing; the default
+        // PassThrough behavior preserves pre-Wave-D4 semantics.
+        var insightsRouterMock = new Mock<IInsightsActionRouter>();
+        insightsRouterMock
+            .Setup(r => r.ResolveLayer1ActionAsync(It.IsAny<string?>(), It.IsAny<AnalysisAction>(), It.IsAny<System.Threading.CancellationToken>()))
+            .ReturnsAsync((string? _, AnalysisAction action, System.Threading.CancellationToken _) => action);
+        insightsRouterMock
+            .Setup(r => r.ResolveLayer2ActionAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<AnalysisAction>(), It.IsAny<System.Threading.CancellationToken>()))
+            .ReturnsAsync((string? _, string? __, AnalysisAction action, System.Threading.CancellationToken _) => InsightsLayer2RoutingResult.PassThrough(action));
+
         var loggerMock = new Mock<ILogger<PlaybookOrchestrationService>>();
 
         var service = new PlaybookOrchestrationService(
@@ -908,6 +921,7 @@ public class PlaybookExecutionTests
             executorRegistryMock.Object,
             scopeResolverMock.Object,
             legacyOrchestratorMock.Object,
+            insightsRouterMock.Object,
             loggerMock.Object);
 
         return (service, new TestMocks(

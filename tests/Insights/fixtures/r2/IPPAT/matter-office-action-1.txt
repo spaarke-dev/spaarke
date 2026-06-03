@@ -1,0 +1,108 @@
+UNITED STATES PATENT AND TRADEMARK OFFICE
+COMMISSIONER FOR PATENTS
+P.O. Box 1450
+Alexandria, VA 22313-1450
+
+NON-FINAL OFFICE ACTION
+
+Application No.:    18/501,772
+Applicant(s):       Tessera Photonic Networks, Inc.
+Filing Date:        June 18, 2024
+Title:              METHOD FOR LOW-LOSS PHOTONIC ROUTING IN SILICON-NITRIDE
+                    WAVEGUIDE ARRAYS USING ASYMMETRIC RING RESONATORS
+Examiner:           Yuki Tanaka-Williams
+Art Unit:           2879
+Confirmation No.:   3041
+Mail Date:          March 24, 2026
+Attorney Docket:    TPN-2024-0011-US1
+
+DETAILED ACTION
+
+A. NOTIFICATION OF STATUS
+
+This Non-Final Office Action is responsive to the application filed June 18,
+2024 and to the preliminary amendment of December 4, 2025. Claims 1 through 27
+are pending. Claims 11 and 19 stand objected to. Claims 1–10, 12–18, and 20–27
+are rejected. No claim is allowed at this time.
+
+PERIOD FOR REPLY: A reply to this Office Action is required within THREE (3)
+MONTHS of the mail date set forth above. Extensions of time may be available
+under 37 CFR 1.136(a). The statutory period for reply is set to expire on
+JUNE 24, 2026. Failure to timely reply will result in ABANDONMENT of the
+application.
+
+B. INFORMATION DISCLOSURE STATEMENTS
+
+The Information Disclosure Statements filed July 15, 2024 and November 12, 2025
+have been considered.
+
+C. CLAIM REJECTIONS — 35 U.S.C. § 103
+
+Claims 1–6, 8–10, and 12–18 are REJECTED under 35 U.S.C. § 103 as being
+unpatentable over Park et al. (U.S. Patent No. 11,287,409, "Park") in view of
+Rajagopalan (U.S. Pub. No. 2023/0114502 A1, "Rajagopalan").
+
+   Regarding claim 1, Park discloses a photonic routing structure comprising a
+   silicon-nitride waveguide array and at least one ring resonator coupled to
+   the waveguide array (Park, Figs. 2 and 5; col. 6, lines 18–47). Park does
+   not explicitly disclose an asymmetric ring resonator geometry having a
+   coupling-region asymmetry ratio of between 1.4 and 2.6. However,
+   Rajagopalan teaches asymmetric ring resonator coupling regions for
+   wavelength-selective routing in photonic networks (Rajagopalan,
+   paragraphs [0058]–[0072]; Fig. 7) and identifies coupling-region asymmetry
+   ratios of approximately 1.8 as advantageous for low-insertion-loss routing
+   in the C-band.
+
+   It would have been obvious to one of ordinary skill in the art at the time
+   the application was filed to modify the photonic routing structure of Park
+   to incorporate the asymmetric coupling geometry taught by Rajagopalan in
+   order to reduce insertion loss in wavelength-selective routing applications,
+   as expressly taught by Rajagopalan, paragraph [0061].
+
+D. CLAIM REJECTIONS — 35 U.S.C. § 112(b)
+
+Claims 7, 20–24, and 26 are REJECTED under 35 U.S.C. § 112(b) as being
+indefinite. The phrase "substantially periodic coupling profile" in claim 7
+lacks an antecedent basis sufficient for one of ordinary skill to ascertain
+the metes and bounds of the claim. The Examiner suggests amendment to recite a
+specific quantitative metric (e.g., "a coupling profile having a spatial
+period of P and a period-to-period variance of less than 5%").
+
+E. CLAIM REJECTIONS — 35 U.S.C. § 101
+
+Claim 25 is REJECTED under 35 U.S.C. § 101 as being directed to non-statutory
+subject matter, namely a propagating optical signal per se, which does not
+fall within any of the four statutory categories of invention.
+
+F. OBJECTIONS TO CLAIMS
+
+Claims 11 and 19 are objected to as being dependent upon a rejected base
+claim, but would be allowable if rewritten in independent form including all
+of the limitations of the base claim and any intervening claims.
+
+G. CITED REFERENCES (DETAILED LIST)
+
+The following references are cited in this Office Action:
+
+   1. U.S. Patent No. 11,287,409 (Park et al.), issued March 7, 2024.
+   2. U.S. Patent App. Pub. No. 2023/0114502 (Rajagopalan), pub. April 13, 2023.
+   3. U.S. Patent No. 10,962,704 (Heinz-Brunner), issued March 30, 2021.
+   4. Singh, A. et al., "Asymmetric Ring Resonators for High-Q Wavelength
+      Filtering in Silicon Nitride Platforms," IEEE Photonics Journal, vol. 15,
+      no. 3, pp. 7301114-1 to 7301114-12, June 2023.
+   5. Lemire-Dubois, V. and Carlos H. Aragon, "Insertion-Loss Optimization in
+      Ring-Resonator-Coupled Waveguide Arrays," Optics Express, vol. 32, no. 8,
+      pp. 14002–14017, April 2024.
+
+H. CONCLUSION
+
+This action is non-final. A response is required within the period set forth
+in Section A. Applicant is reminded of the duty to disclose under 37 CFR 1.56.
+
+Any inquiry concerning this communication should be directed to Examiner Yuki
+Tanaka-Williams at (571) 272-4019 (office) or via Examiner Interview Request
+in EFS-Web. Interviews are scheduled Tuesdays and Thursdays.
+
+/Yuki Tanaka-Williams/
+Primary Examiner, Art Unit 2879
+Mail Date: March 24, 2026

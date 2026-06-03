@@ -5,6 +5,7 @@ using Moq;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Insights.Routing;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Xunit;
 
@@ -22,6 +23,7 @@ public class PlaybookOrchestrationServiceTests
     private readonly Mock<INodeExecutorRegistry> _executorRegistryMock;
     private readonly Mock<IScopeResolverService> _scopeResolverMock;
     private readonly Mock<IAnalysisOrchestrationService> _legacyOrchestratorMock;
+    private readonly Mock<IInsightsActionRouter> _insightsRouterMock;
     private readonly Mock<ILogger<PlaybookOrchestrationService>> _loggerMock;
     private readonly PlaybookOrchestrationService _service;
     private readonly HttpContext _mockHttpContext;
@@ -32,6 +34,15 @@ public class PlaybookOrchestrationServiceTests
         _executorRegistryMock = new Mock<INodeExecutorRegistry>();
         _scopeResolverMock = new Mock<IScopeResolverService>();
         _legacyOrchestratorMock = new Mock<IAnalysisOrchestrationService>();
+        _insightsRouterMock = new Mock<IInsightsActionRouter>();
+        // Pass-through routing: return the default action / PassThrough decision so
+        // existing tests behave identically to pre-Wave-D4 behavior.
+        _insightsRouterMock
+            .Setup(r => r.ResolveLayer1ActionAsync(It.IsAny<string?>(), It.IsAny<AnalysisAction>(), It.IsAny<System.Threading.CancellationToken>()))
+            .ReturnsAsync((string? _, AnalysisAction action, System.Threading.CancellationToken _) => action);
+        _insightsRouterMock
+            .Setup(r => r.ResolveLayer2ActionAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<AnalysisAction>(), It.IsAny<System.Threading.CancellationToken>()))
+            .ReturnsAsync((string? _, string? __, AnalysisAction action, System.Threading.CancellationToken _) => InsightsLayer2RoutingResult.PassThrough(action));
         _loggerMock = new Mock<ILogger<PlaybookOrchestrationService>>();
         _mockHttpContext = new DefaultHttpContext();
 
@@ -40,6 +51,7 @@ public class PlaybookOrchestrationServiceTests
             _executorRegistryMock.Object,
             _scopeResolverMock.Object,
             _legacyOrchestratorMock.Object,
+            _insightsRouterMock.Object,
             _loggerMock.Object);
     }
 

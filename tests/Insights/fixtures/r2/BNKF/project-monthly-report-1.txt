@@ -1,0 +1,94 @@
+FINANCING PROJECT MONTHLY REPORT — MARCH 2026
+
+Project Code:        BNKF-2026-031
+Project Name:        Mariner Logistics Senior Secured Credit Facility
+                     Refinancing — Post-Closing Perfection
+Project Manager:     Aliyah Brennan
+Reporting Period:    March 1, 2026 – March 31, 2026
+Project Status:      AMBER — Two open post-closing deliverables tracking
+                      slightly behind plan; mitigations in place
+Days to Final Project Closure:  28 (target April 28, 2026, on DACA delivery)
+
+1. EXECUTIVE SUMMARY
+
+The Closing on February 27, 2026 was achieved successfully. All Day-of-Closing
+deliverables were satisfied. The post-closing perfection phase is approximately
+85% complete. Two items remain open: (a) DACA execution for the fifth bank
+account (Norfolk Community Credit Union); and (b) one Trademark Security
+Agreement filing held pending USPTO portal queue. Mitigations are in place
+for both.
+
+2. STATUS OF POST-CLOSING DELIVERABLES (FROM CLOSING CHECKLIST)
+
+   M-06.1  Patent Security Agreement (USPTO)            ✅ Filed Mar 11, 2026
+           (3 patents covered)
+   M-06.1a Trademark Security Agreement (USPTO)         🟡 In USPTO queue —
+                                                          submitted Mar 11;
+                                                          recordation confirmation
+                                                          expected by Apr 8
+   M-06.2  DACA — Linden Trust operating account        ✅ Executed Mar 5, 2026
+   M-06.2  DACA — Linden Trust collections account      ✅ Executed Mar 12, 2026
+   M-06.2  DACA — Wells Heritage payroll account        ✅ Executed Mar 18, 2026
+   M-06.2  DACA — Wells Heritage tax escrow             ✅ Executed Mar 25, 2026
+   M-06.2  DACA — Norfolk Community CU                  🟡 In negotiation;
+                                                          credit-union form
+                                                          conflicts with
+                                                          standard DACA form;
+                                                          alternative form
+                                                          proposed Mar 28
+   M-06.3  Mortgage recordation evidence delivered      ✅ Mar 6, 2026
+   M-06.4  UCC continuation tickler set                 ✅ Mar 1, 2026
+
+3. KEY EVENTS DURING REPORTING PERIOD
+
+   - March 1: First post-closing tickler set in HSA docket system.
+   - March 5: First DACA executed (Linden Trust operating account).
+   - March 6: Mortgage recordation evidence (Hampton Roads Recorder Document
+     2026-039482) delivered to Administrative Agent.
+   - March 11: Patent + Trademark Security Agreements submitted to USPTO via
+     EPAS portal; Patent recordation confirmed same day.
+   - March 28: Norfolk Community Credit Union signaled its standard form
+     deposit-account agreement conflicts with the Administrative Agent's
+     standard DACA template; HSA proposed an alternative form pending
+     Agent review.
+
+4. ITEMS REQUIRING ATTENTION
+
+   4.1 Norfolk Community CU DACA. Status: under negotiation. Risk: medium —
+       the alternative form proposed by HSA does not entirely conform to the
+       Administrative Agent's standard but preserves all material control
+       rights. If Agent rejects the alternative form, Mariner will need to
+       either close the credit-union payroll account (transition payroll to
+       Wells Heritage) or escalate to lender for waiver. Path to resolution:
+       Agent review by April 10; client decision (if waiver needed) by
+       April 17.
+
+   4.2 Trademark Security Agreement USPTO recordation. Status: in queue —
+       USPTO Trademark Assignment Branch has reported a 3-week recordation
+       backlog. Expected recordation: April 1–8. No client action required.
+
+5. BUDGET STATUS
+
+   Project Budget Cap:                $385,000
+   Fees Billed YTD:                   $352,700  (91.6%)
+   Fees Booked, Not Yet Billed:        $ 18,400
+   Total Engaged Fees:                 $371,100  (96.4% of cap)
+   Projected at Project Closure:       $379,500  (within cap by $5,500)
+
+6. CARRY-FORWARD ITEMS
+
+Once the two remaining post-closing items are resolved, this project will
+close. No anticipated carry-forward to a successor project; routine docket
+ticklers will be maintained on the Mariner matter file.
+
+7. UPCOMING ACTIVITIES (APRIL 2026)
+
+   a) Resolve Norfolk Community CU DACA (target: April 17)
+   b) Confirm Trademark recordation (target: April 8)
+   c) Final perfection completion certificate to Administrative Agent
+      (target: April 28)
+   d) Project Closure Memorandum (target: May 6)
+
+Prepared by:   Marlena Vogel, Paralegal
+Reviewed by:   Aliyah Brennan, Project Manager
+Distribution:  Mariner CFO; HSA Lead Partner Devanney; project file
