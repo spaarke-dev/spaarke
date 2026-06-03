@@ -1,7 +1,7 @@
 <task id="022" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>C3 — Retire IngestOrchestrator.cs + orphaned interfaces</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>C</wave>
     <estimated-effort>4h</estimated-effort>
     <tags>refactor, code-removal, jps-compliance, zone-a, bff-api</tags>
@@ -63,4 +63,97 @@
     <criterion testable="true">DI non-framework registration count drops (verify per ADR-010)</criterion>
     <criterion testable="true">predict-matter-cost end-to-end smoke still works (regression-free)</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      Wave C-G4 (final Wave C task) COMPLETE 2026-06-02. The universal-ingest@v1 JPS
+      playbook (landed Wave C1 task 020 + wired Wave C-G3 task 023) is now the SOLE
+      runtime ingest path. The legacy code-defined `IngestOrchestrator` + 2 orphan
+      interfaces (`IIngestOrchestrator`, `IInsightsPromptLoader`) + the on-disk prompt
+      files retired. Net: -3519 LOC across 22 files. Closes D-P15-02 "Insights IS a JPS
+      application; no parallel orchestrators."
+    </completion-summary>
+
+    <files-deleted>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Ingest/IngestOrchestrator.cs (-501 LOC)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Ingest/IIngestOrchestrator.cs (-51 LOC)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/IInsightsPromptLoader.cs (-40 LOC)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/InsightsPromptLoader.cs (-84 LOC)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/classification.v1.txt (-44 LOC)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/classification.v1.schema.json (-37 LOC)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/outcome-extraction.v1.txt (-60 LOC)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/outcome-extraction.v1.schema.json (-85 LOC)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/predict-matter-cost-synthesis.v1.txt (-89 LOC)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsIngestOptions.cs (-105 LOC; Decision 1 — flag deleted entirely)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/universal-ingest.v1.json (-132 LOC; r1 design-doc artifact obsolete)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Ingest/IngestOrchestratorTests.cs (-763 LOC; 14 tests for retired type)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Layer1ClassificationTests.cs (-639 LOC; loaded deleted prompt files)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Layer2/Layer2OutcomeExtractionTests.cs (-684 LOC; loaded deleted prompt files)</file>
+    </files-deleted>
+
+    <files-modified>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs (ctor 8→6 deps; legacy fallback removed; RunFailed/throw propagate per ADR-004; per-env Guid resolved via IOptionsMonitor&lt;InsightsPlaybookNameMapOptions&gt;; -50 LOC net)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/InsightsFacadeModule.cs (dropped InsightsIngestOptions binding)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/InsightsIngestModule.cs (dropped IIngestOrchestrator + IInsightsPromptLoader registrations; rationale block updated 6→4 interface seams)</file>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (removed Prompts/*.txt + *.schema.json Content includes)</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs (updated DI registration comments)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/universal-ingest.playbook.json ($comment-publication updated)</file>
+      <file>Doc-only comment updates: IObservationMirror.cs, DataverseObservationMirror.cs, IInsightsContentSanitizer.cs, INodeExecutor.cs, SanitizerNodeExecutor.cs, ObservationEmitterNodeExecutor.cs, InsightsIngestJobHandler.cs, InsightsIngestRequest.cs, InsightsModule.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/InsightsOrchestratorTests.cs (rewrote; 52 tests; -369 LOC net)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Playbooks/PredictMatterCostPlaybookTests.cs (updated ctor signature)</file>
+    </files-modified>
+
+    <decisions>
+      <decision id="D1" name="Feature-flag handling">
+        Chose Option A (delete entirely) per task brief recommendation. Rationale: kill-switch
+        for universal-ingest now lives at the playbook-deployment layer (deploy a no-op
+        Dataverse playbook to disable). This survives BFF redeploys and matches the same
+        mechanism predict-matter-cost@v1 uses. Eliminates Tier-1.5-anti-pattern surface
+        area in BFF DI config.
+      </decision>
+      <decision id="D2" name="EventId disposition">
+        <event id="8060" name="InsightsRunIngestRoutedToPlaybook">DELETED — always taken now; pure noise.</event>
+        <event id="8061" name="InsightsRunIngestRoutedToLegacy">DELETED — no legacy path remains.</event>
+        <event id="8062" name="InsightsRunIngestPlaybookAdapterMismatch">KEPT — still defensive (e.g., sanitize short-circuit).</event>
+        <event id="8063" name="InsightsRunIngestPlaybookFailed">KEPT — reworded from "falling back" to "failure propagates per ADR-004".</event>
+      </decision>
+      <decision id="D3" name="Per-env playbook Guid resolution">
+        Inject IOptionsMonitor&lt;InsightsPlaybookNameMapOptions&gt; (the existing per-env
+        name→Guid map used by /api/insights/ask for predict-matter-cost@v1). Canonical
+        name = "universal_ingest_v1" (snake_case_only per POSIX env-var rules; see
+        InsightsPlaybookNameMapOptions XML doc). Empty-Guid response throws
+        InvalidOperationException with actionable error message naming the missing config key.
+      </decision>
+    </decisions>
+
+    <quality-gates>
+      <build>dotnet build src/server/api/Sprk.Bff.Api/ — 0 errors, 15 warnings (all pre-existing; none related to this change)</build>
+      <tests>
+        <suite name="InsightsOrchestratorTests">52 pass, 0 fail, 0 skip</suite>
+        <suite name="InsightsIngest* + UniversalIngestPlaybook* + PredictMatterCostPlaybook*">46 pass, 0 fail, 0 skip</suite>
+        <suite name="Full BFF unit-test suite">5903 pass, 0 fail, 111 skip (pre-existing skips)</suite>
+      </tests>
+      <code-review>0 critical, 0 warnings, 2 suggestions (Recommend keep current behavior — no action). Verdict: APPROVED.</code-review>
+      <adr-check>14 Compliant, 0 Warnings, 0 Violations. Verdict: APPROVED. ADR-010 + ADR-004 strictly improved.</adr-check>
+      <grep-verification>0 source code references to IIngestOrchestrator / IngestOrchestrator / IInsightsPromptLoader / InsightsPromptLoader / InsightsIngestOptions remain (all remaining hits are doc-comment "retired Wave C-G4 / task 022" historical references).</grep-verification>
+    </quality-gates>
+
+    <deploy-ordering-note>
+      BFF deploy of Wave C-G4 code MUST be preceded by:
+      (1) Dataverse playbook deploy of universal-ingest@v1 (Wave C1 / task 020 — DEFERRED per bff-extensions §F.4 owner coordination) — the 4 sprk_analysisaction rows (INS-SANI, INS-L1C, INS-L2X, INS-OBSE) were created by Wave C2 / task 021 (schema bump 7671aea6).
+      (2) Population of App Service config key `Insights:Playbooks:Map:universal_ingest_v1` with the per-env Dataverse Guid generated by Deploy-Playbook.ps1.
+      If both (1) and (2) are NOT in place before this BFF deploy lands in production, RunIngestAsync will throw InvalidOperationException on every invocation (no silent fallback). The dev-env hold (bff-extensions §F.4 coordination) remains in effect; merge-to-master is on hold per parallel project reconciliation per the task brief.
+    </deploy-ordering-note>
+
+    <open-followups>
+      <followup id="FU-1" priority="P3">
+        predict-matter-cost.playbook.json still references $ref:Services/Ai/Insights/Prompts/predict-matter-cost-synthesis.v1.txt (file deleted in this task). The .playbook.json is design-doc-only (not loaded at runtime; verified by grep). Cleanup deferred to a future doc-sync task — not blocking.
+      </followup>
+      <followup id="FU-2" priority="P3">
+        layer1-classification.node.json + layer2-outcome-extraction.node.json — r1 design-contract docs that referenced retired prompt files. Not loaded at runtime; retained as historical reference. Cleanup deferred.
+      </followup>
+    </open-followups>
+
+    <claude-write-boundary-hits>none</claude-write-boundary-hits>
+  </notes>
 </task>

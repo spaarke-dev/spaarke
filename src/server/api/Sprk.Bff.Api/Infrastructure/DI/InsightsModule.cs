@@ -93,12 +93,12 @@ public static class InsightsModule
         // and would fail loudly if a future refactor changed the registration order.
         //
         // Singleton lifetime: matches the upstream NoOp registration AND matches the
-        // upstream IIngestOrchestrator (Singleton, consumes IObservationMirror — a Scoped
-        // mirror would trigger a captive-dependency warning). Safe because the only DI
-        // dependency is IGenericEntityService, which is registered as Singleton in this
-        // codebase (see GraphModule.cs: AddSingleton<IGenericEntityService>(...) bridges
-        // to IDataverseService Singleton). InsightsMirrorOptions is bound via IOptions
-        // pattern (Singleton-safe).
+        // upstream universal-ingest@v1 ObservationEmitterNodeExecutor (Singleton — a
+        // Scoped mirror would trigger a captive-dependency warning). Safe because the
+        // only DI dependency is IGenericEntityService, which is registered as Singleton
+        // in this codebase (see GraphModule.cs: AddSingleton<IGenericEntityService>(...)
+        // bridges to IDataverseService Singleton). InsightsMirrorOptions is bound via
+        // IOptions pattern (Singleton-safe).
         //
         // Defense-in-depth: DataverseObservationMirror itself handles the "InsightsObservationActionId
         // unset" case by logging a Warning and skipping the write — so even though we swap to the

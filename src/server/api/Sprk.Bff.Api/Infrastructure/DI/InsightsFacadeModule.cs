@@ -63,7 +63,17 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///   AnalysisServicesModule</item>
 ///   <item><see cref="IOpenAiClient"/> — registered in Program.cs when
 ///   <c>DocumentIntelligence:Enabled = true</c></item>
+///   <item><c>InsightsPlaybookNameMapOptions</c> — registered by <c>InsightsModule</c>
+///   (the same name → Guid catalog the <c>/api/insights/ask</c> endpoint uses; post
+///   Wave C-G4 the facade resolves the universal-ingest@v1 Guid through it).</item>
 /// </list>
+/// </para>
+/// <para>
+/// <b>Wave C-G4 (task 022) retirement</b>: the legacy <c>InsightsIngestOptions</c>
+/// feature flag has been deleted along with the legacy <c>IIngestOrchestrator</c> path.
+/// Universal-ingest is now ONE canonical JPS playbook (<c>universal-ingest@v1</c>);
+/// operators disable ingest by deploying a no-op playbook at that canonical name, not
+/// by toggling a BFF-side feature flag.
 /// </para>
 /// </remarks>
 public static class InsightsFacadeModule
@@ -84,20 +94,14 @@ public static class InsightsFacadeModule
         // never called" gap (see XML doc above for the 2026-05-29 incident).
         services.AddScoped<IPlaybookExecutionEngine, PlaybookExecutionEngine>();
 
-        // Wave C4 (task 023) — InsightsIngestOptions binds Spaarke:Insights:Ingest.
-        // Carries the universal-ingest@v1 playbook Guid (per-env) + UseUniversalIngestPlaybook
-        // feature flag. Consulted at runtime inside InsightsOrchestrator.RunIngestAsync to
-        // route between the new playbook path and the legacy IIngestOrchestrator path.
-        // ADR-030 + bff-extensions §F.1 inspection: NO conditional registration. The flag
-        // is a runtime choice between two unconditionally-registered implementations —
-        // not an asymmetric-registration pattern. See InsightsIngestOptions XML doc.
-        services.AddOptions<InsightsIngestOptions>()
-            .BindConfiguration(InsightsIngestOptions.SectionName);
-
         // IInsightsAi — the only Zone-A surface Zone B code may import per SPEC §3.5.
         // Scoped: matches the lifetime of its transitive Scoped dependencies (engine →
         // IPlaybookOrchestrationService). Per ADR-010 §Exceptions the interface seam
         // is justified — this IS the §3.5 boundary, not an over-abstraction.
+        //
+        // Wave C-G4 (task 022): retired InsightsIngestOptions feature flag + binding.
+        // Universal-ingest is now resolved through InsightsPlaybookNameMapOptions (same
+        // name → Guid map used by /api/insights/ask for predict-matter-cost@v1).
         services.AddScoped<IInsightsAi, InsightsOrchestrator>();
 
         return services;

@@ -122,14 +122,12 @@
     <Content Update="builder-scopes\**\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <!-- Insights Engine prompt templates (.txt) + schemas (.json) + playbook node configs (.json) —
-       loaded at runtime by AiAnalysisNodeExecutor when the D-P7 ingest playbook composes the
-       layered pipeline. The Web SDK auto-includes .json as Content by default but NOT .txt,
-       so we Include the .txt files explicitly and Update the .json files to set the copy attr.
-       Task 030 (Layer 1) + task 031 (Layer 2). -->
+  <!-- Insights Engine playbook node configs (.json) — loaded at runtime by the
+       PlaybookExecutionEngine. The Web SDK auto-includes .json as Content by default; we
+       Update to set CopyToOutputDirectory.
+       Wave C-G4 (task 022) retired the on-disk Prompts/ directory (.txt + .schema.json).
+       Prompts now live in sprk_analysisaction.sprk_systemprompt rows (per Wave C2 / 021).  -->
   <ItemGroup>
-    <Content Include="Services\Ai\Insights\Prompts\*.txt" CopyToOutputDirectory="PreserveNewest" />
-    <Content Update="Services\Ai\Insights\Prompts\*.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Update="Services\Ai\Insights\Playbooks\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

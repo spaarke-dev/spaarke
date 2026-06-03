@@ -58,24 +58,34 @@ public class PredictMatterCostPlaybookTests
     private readonly Mock<IPlaybookExecutionEngine> _engineMock = new(MockBehavior.Strict);
     private readonly Mock<IInsightsPlaybookExecutionCache> _cacheMock = new(MockBehavior.Strict);
     private readonly Mock<IOpenAiClient> _openAiMock = new(MockBehavior.Strict);
-    private readonly Mock<Sprk.Bff.Api.Services.Ai.Insights.Ingest.IIngestOrchestrator> _ingestMock = new();
-    // Wave C4 (task 023) — IInsightsAi facade ctor extended with the playbook-path deps.
-    // These tests cover the AnswerQuestion path only (predict-matter-cost@v1 is a synthesis
-    // playbook, not ingest), so loose mocks suffice — they're never invoked.
+    // Wave C-G4 (task 022) — IIngestOrchestrator + InsightsIngestOptions retired; ctor now
+    // takes IPlaybookOrchestrationService + IIngestDocumentSource (for the JPS-only ingest
+    // path) + IOptionsMonitor<InsightsPlaybookNameMapOptions> (per-env playbook Guid
+    // resolution). These tests cover the AnswerQuestion path only (predict-matter-cost@v1
+    // is a synthesis playbook, not ingest), so loose mocks suffice — they're never invoked.
     private readonly Mock<Sprk.Bff.Api.Services.Ai.IPlaybookOrchestrationService> _playbookOrchestrationMock = new();
     private readonly Mock<Sprk.Bff.Api.Services.Ai.Insights.Ingest.IIngestDocumentSource> _ingestDocumentSourceMock = new();
-    private readonly Microsoft.Extensions.Options.IOptions<Sprk.Bff.Api.Services.Ai.Insights.InsightsIngestOptions> _ingestOptions =
-        Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Services.Ai.Insights.InsightsIngestOptions());
+    private readonly Microsoft.Extensions.Options.IOptionsMonitor<Sprk.Bff.Api.Api.Insights.InsightsPlaybookNameMapOptions> _playbookNameMap =
+        new TestOptionsMonitor<Sprk.Bff.Api.Api.Insights.InsightsPlaybookNameMapOptions>(
+            new Sprk.Bff.Api.Api.Insights.InsightsPlaybookNameMapOptions());
 
     private InsightsOrchestrator CreateSut() => new(
         _engineMock.Object,
         _cacheMock.Object,
         _openAiMock.Object,
-        _ingestMock.Object,
         _playbookOrchestrationMock.Object,
         _ingestDocumentSourceMock.Object,
-        _ingestOptions,
+        _playbookNameMap,
         NullLogger<InsightsOrchestrator>.Instance);
+
+    private sealed class TestOptionsMonitor<T> : Microsoft.Extensions.Options.IOptionsMonitor<T>
+    {
+        private readonly T _value;
+        public TestOptionsMonitor(T value) { _value = value; }
+        public T CurrentValue => _value;
+        public T Get(string? name) => _value;
+        public IDisposable? OnChange(Action<T, string?> listener) => null;
+    }
 
     private static InsightsAgentRequest MakeRequest(
         IReadOnlyDictionary<string, string>? parameters = null)

@@ -199,9 +199,9 @@ public enum ActionType
     /// Emits N observations (one per surviving L2 candidate after grounding) + the L1
     /// classification observation. Used as the final node of the universal-ingest@v1 JPS
     /// playbook (Wave C1 task 020). Wraps <c>IObservationEmitter</c> +
-    /// <c>IObservationIndexUpserter</c> + <c>IObservationMirror</c>. Replaces the
-    /// observation-emission portion of the code-defined <c>IngestOrchestrator</c>.
-    /// NEW in Wave C1 per design-a5 §4 Node 6.
+    /// <c>IObservationIndexUpserter</c> + <c>IObservationMirror</c>. Replaced the
+    /// observation-emission portion of the code-defined <c>IngestOrchestrator</c>
+    /// (retired Wave C-G4 / task 022). NEW in Wave C1 per design-a5 §4 Node 6.
     /// </summary>
     ObservationEmit = 140
 }

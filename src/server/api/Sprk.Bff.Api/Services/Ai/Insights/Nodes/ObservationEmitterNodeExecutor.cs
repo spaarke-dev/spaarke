@@ -13,8 +13,8 @@ namespace Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 /// Wave C1 task 020 — node executor for <see cref="ActionType.ObservationEmit"/> (140). Final
 /// node of the universal-ingest@v1 JPS playbook per design-a5 §4 Node 6. Wraps
 /// <see cref="IObservationEmitter"/> + <see cref="IObservationIndexUpserter"/> +
-/// <see cref="IObservationMirror"/>. Replaces the per-field Observation emission portion of
-/// the code-defined <c>IngestOrchestrator</c>.
+/// <see cref="IObservationMirror"/>. Replaced the per-field Observation emission portion of
+/// the code-defined <c>IngestOrchestrator</c> (retired Wave C-G4 / task 022).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -59,7 +59,8 @@ public sealed class ObservationEmitterNodeExecutor : INodeExecutor
     private const string UpstreamGrounded = "grounded";
     private const string UpstreamLayer1 = "layer1";
 
-    /// <summary>Producer identity per r1 <c>IngestOrchestrator.Layer2Producer</c>.</summary>
+    /// <summary>Producer identity matching the retired r1 <c>IngestOrchestrator.Layer2Producer</c>
+    /// shape (preserved across Wave C-G4 / task 022 for substrate parity).</summary>
     private static readonly ProducerIdentity Layer2Producer = new()
     {
         Kind = "playbook",

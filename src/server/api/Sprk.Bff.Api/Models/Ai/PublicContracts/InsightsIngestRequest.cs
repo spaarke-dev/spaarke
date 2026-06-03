@@ -28,14 +28,13 @@ namespace Sprk.Bff.Api.Models.Ai.PublicContracts;
 /// All overrides are NULLABLE — callers may omit them and the playbook's
 /// <c>sprk_configjson.parameterSchema</c> defaults apply (per design-a5 §6:
 /// <c>layer2Threshold = 0.7</c>, <c>practiceAreaHint = null</c>, <c>costCapOverride = null</c>).
-/// During the Wave C1→C3 transition window (universal-ingest.playbook.json shipped
-/// in C1; <c>IngestOrchestrator.cs</c> code path retired in C3), the optional
-/// parameters are validated at the facade layer (see
-/// <c>InsightsOrchestrator.ValidateIngestParameters</c>) and threaded through to
-/// <see cref="Services.Ai.Insights.Ingest.IIngestOrchestrator"/> — currently the
-/// internal orchestrator does not consume them (zero-effect during the window).
-/// C4 (task 023) rewires <see cref="Services.Ai.PublicContracts.IInsightsAi.RunIngestAsync"/>
-/// to invoke the playbook engine where parameters take effect end-to-end.
+/// Post Wave C-G4 (task 022) the legacy code path
+/// (<c>Services.Ai.Insights.Ingest.IIngestOrchestrator</c>) has been retired; all four
+/// parameters take effect end-to-end through the playbook engine. Parameters are
+/// validated at the facade layer (see
+/// <c>Services.Ai.Insights.InsightsOrchestrator.ValidateIngestParameters</c>) and
+/// threaded into the playbook run as <c>parameters.practiceAreaHint /
+/// costCapOverride / layer2Threshold</c> per design-a5 §6.
 /// </para>
 /// </remarks>
 /// <param name="DocumentId">Document identifier the ingest playbook will process.

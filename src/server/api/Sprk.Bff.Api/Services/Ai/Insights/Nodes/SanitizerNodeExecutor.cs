@@ -9,8 +9,8 @@ namespace Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 /// <summary>
 /// Wave C1 task 020 — node executor for <see cref="ActionType.Sanitization"/> (130). Wraps
 /// <see cref="IInsightsContentSanitizer"/> (D-50 / D-A25) as the first node of the
-/// universal-ingest@v1 JPS playbook per design-a5 §4 Node 1. Replaces the inline sanitization
-/// step in the code-defined <c>IngestOrchestrator.RunAsync</c>.
+/// universal-ingest@v1 JPS playbook per design-a5 §4 Node 1. Replaced the inline sanitization
+/// step in the code-defined <c>IngestOrchestrator.RunAsync</c> (retired Wave C-G4 / task 022).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,7 +26,8 @@ namespace Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 ///   <item><c>parameters.documentText</c> — concatenated raw document text. Resolved by
 ///   <c>IInsightsAi.RunIngestAsync</c> (Wave C4) from <c>IIngestDocumentSource.FetchAsync</c>.</item>
 ///   <item><c>parameters.chunksJson</c> — JSON-serialized array of raw chunks for grounding.
-///   Pass-through (unmodified per r1 <c>IngestOrchestrator</c> remarks).</item>
+///   Pass-through (unmodified — grounding verifier requires raw text to match verbatim quotes,
+///   matching the contract from the retired r1 <c>IngestOrchestrator</c>).</item>
 ///   <item><c>parameters.documentRef</c> — stable document reference (used downstream by
 ///   grounding + observation emission).</item>
 /// </list>
@@ -130,8 +131,9 @@ public sealed class SanitizerNodeExecutor : INodeExecutor
                     NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
             }
 
-            // Parse chunks JSON pass-through (raw chunks remain unmodified per r1 IngestOrchestrator
-            // remarks — GroundingVerifier needs verbatim quotes against unmodified chunks).
+            // Parse chunks JSON pass-through (raw chunks remain unmodified — GroundingVerifier
+            // needs verbatim quotes against unmodified chunks, matching the contract from the
+            // retired r1 IngestOrchestrator).
             JsonElement chunksElement = default;
             var hasChunks = false;
             if (context.Parameters.TryGetValue(ParamChunksJson, out var chunksJson) &&

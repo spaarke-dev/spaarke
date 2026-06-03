@@ -83,18 +83,24 @@ builder.Services.AddAnalysisServicesModule(builder.Configuration);
 builder.Services.AddInsightsExtractionModule(builder.Configuration);
 
 // Spaarke Insights Engine — Zone A universal ingest pipeline per SPEC §3 (D-P7, task 040).
-// IIngestOrchestrator composes: Sanitizer → Layer 1 → conditional Layer 2 → mechanical
-// gates (GroundingVerifier, ConfidenceThreshold) → emission → spaarke-insights-index
-// upsert → D-P11 mirror (NoOp until task 051 swaps in DataverseObservationMirror).
-// Must precede AddInsightsFacadeModule which ctor-injects IIngestOrchestrator.
+// Post Wave C-G4 (task 022): the legacy code-defined IIngestOrchestrator path has been
+// retired; universal-ingest now runs entirely through the universal-ingest@v1 JPS playbook
+// (sanitize → layer1Classify → checkLayer2Gate → layer2Extract → groundingVerify →
+// emitObservations). This module registers the supporting services consumed by the
+// playbook node executors (SanitizerNodeExecutor, ObservationEmitterNodeExecutor,
+// IIngestDocumentSource, IObservationIndexUpserter, IObservationMirror).
+// Must precede AddInsightsFacadeModule which ctor-injects IIngestDocumentSource.
 builder.Services.AddInsightsIngestModule();
 
 // Spaarke Insights Engine — Zone A public facade per SPEC §3.5 (task 042).
 // IInsightsAi → InsightsOrchestrator: the ONLY Zone-A surface Zone B code may import.
 // Wraps IPlaybookExecutionEngine + IInsightsPlaybookExecutionCache (D-P13) + IOpenAiClient
-// + IIngestOrchestrator behind a 3-method facade (AnswerQuestionAsync / RunIngestAsync / EmbedTextAsync).
+// + IPlaybookOrchestrationService behind a 3-method facade (AnswerQuestionAsync /
+// RunIngestAsync / EmbedTextAsync). RunIngestAsync invokes universal-ingest@v1 via the
+// orchestration service; the per-env playbook Guid is resolved through
+// InsightsPlaybookNameMapOptions (post Wave C-G4 / task 022).
 // Must follow AnalysisServicesModule which registers the engine + D-P13 cache, AND
-// AddInsightsIngestModule which registers IIngestOrchestrator.
+// AddInsightsIngestModule which registers IIngestDocumentSource.
 builder.Services.AddInsightsFacadeModule();
 
 // AI Platform R2: safety perimeter (content safety, prompt shield, groundedness)
