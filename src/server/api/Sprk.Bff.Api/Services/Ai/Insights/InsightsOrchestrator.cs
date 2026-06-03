@@ -1,16 +1,22 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text.Json;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Api.Insights;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
 using Sprk.Bff.Api.Services.Ai.Insights.Ingest;
+using Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Insights;
 
 /// <summary>
-/// Phase 1 Zone A implementation of <see cref="IInsightsAi"/> — orchestrates the
+/// Phase 1.5 Zone A implementation of <see cref="IInsightsAi"/> — orchestrates the
 /// synthesis path (<see cref="AnswerQuestionAsync"/> via D-P13 cache +
 /// <see cref="IPlaybookExecutionEngine"/>), the ingest path
-/// (<see cref="RunIngestAsync"/> via the universal ingest playbook), and embedding
+/// (<see cref="RunIngestAsync"/> via the universal-ingest@v1 JPS playbook), and embedding
 /// generation (<see cref="EmbedTextAsync"/> via <see cref="IOpenAiClient"/>) for
 /// Zone B callers.
 /// </summary>
@@ -18,28 +24,19 @@ namespace Sprk.Bff.Api.Services.Ai.Insights;
 /// <para>
 /// <b>Zone A placement</b>: lives under <c>Services/Ai/Insights/</c> and freely imports
 /// AI internals (<see cref="IPlaybookExecutionEngine"/>, <see cref="IOpenAiClient"/>,
-/// <see cref="IInsightsPlaybookExecutionCache"/>). Zone B callers receive
-/// <see cref="IInsightsAi"/> via DI and have no visibility into any of these types.
+/// <see cref="IInsightsPlaybookExecutionCache"/>, <see cref="IPlaybookOrchestrationService"/>).
+/// Zone B callers receive <see cref="IInsightsAi"/> via DI and have no visibility into any
+/// of these types.
 /// </para>
 /// <para>
-/// <b>Phase 1 implementation status</b>:
-/// <list type="bullet">
-///   <item><see cref="EmbedTextAsync"/> — <b>complete</b> (thin delegation to
-///   <see cref="IOpenAiClient.GenerateEmbeddingAsync"/>); unblocks task 041 Step 3.</item>
-///   <item><see cref="AnswerQuestionAsync"/> — <b>scaffold</b>: cache + engine wiring is
-///   in place, but the full D-P15 wiring (subject → <c>DocumentIds[]</c> mapping for
-///   <see cref="PlaybookRunRequest"/>, <c>NotImplementedException</c> on decline path,
-///   D-P14 playbook id resolution) lands with task 061 (D-P15 endpoint) and task 060
-///   (D-P14 synthesis playbook). The implementation here invokes the cache directly so
-///   that as soon as a D-P14 playbook id is supplied as <see cref="InsightsAgentRequest.Question"/>
-///   the wiring is honest.</item>
-///   <item><see cref="RunIngestAsync"/> — <b>complete</b> (task 040): delegates to
-///   <see cref="IIngestOrchestrator"/> which composes Sanitizer → Layer 1 → conditional
-///   Layer 2 → GroundingVerifier → ConfidenceThreshold → ObservationEmitter →
-///   IndexUpsert → Mirror. D-P11 mirror is wired as <see cref="Mirror.IObservationMirror"/>
-///   seam; Phase 1 ships <see cref="Mirror.NoOpObservationMirror"/>; task 051 swaps in
-///   the real Dataverse impl.</item>
-/// </list>
+/// <b>Phase 1.5 r2 Wave C-G4 (task 022) — IngestOrchestrator retirement</b>: the legacy
+/// code-defined ingest path (<c>IIngestOrchestrator</c> + <c>IngestOrchestrator.cs</c>)
+/// has been retired. Universal-ingest is now ONE canonical JPS playbook
+/// (<c>universal-ingest@v1</c>), parameterized per design-a5 §6 — per D-P15-02 "Insights
+/// IS a JPS application; no parallel orchestrators." The kill-switch for the ingest path
+/// now lives at the playbook level (deploy a no-op playbook to disable), NOT at the
+/// orchestrator. The <c>InsightsIngestOptions</c> feature flag has been deleted as part
+/// of the same task.
 /// </para>
 /// <para>
 /// <b>ADR-013 + ADR-009 + ADR-010 compliance</b>:
@@ -48,30 +45,78 @@ namespace Sprk.Bff.Api.Services.Ai.Insights;
 ///   <item>ADR-009: synthesis path goes through the D-P13 Redis cache
 ///   (<see cref="IInsightsPlaybookExecutionCache"/>); no direct
 ///   <see cref="IDistributedCache"/> usage here.</item>
-///   <item>ADR-010: single concrete impl behind the interface; registered Singleton
-///   (all dependencies are themselves Singleton or thread-safe Scoped-resolved per call).</item>
+///   <item>ADR-010: single concrete impl behind the interface; registered Scoped (engine
+///   transitively depends on Scoped services). Constructor depends on 6 services after
+///   Wave C-G4 retirement of <c>IIngestOrchestrator</c> + <c>IOptions&lt;InsightsIngestOptions&gt;</c>
+///   — well inside the ADR-010 ctor-param cap.</item>
 /// </list>
 /// </para>
 /// </remarks>
 public sealed class InsightsOrchestrator : IInsightsAi
 {
+    /// <summary>
+    /// Canonical name of the universal-ingest@v1 playbook. Per-environment Guid resolution
+    /// goes through <see cref="InsightsPlaybookNameMapOptions"/> — the same name catalog
+    /// the <c>/api/insights/ask</c> endpoint uses for predict-matter-cost@v1. Deploy-time
+    /// configuration MUST map this name to the Dataverse <c>sprk_analysisplaybook</c> Guid
+    /// generated by <c>Deploy-Playbook.ps1</c> in the target environment.
+    /// </summary>
+    /// <remarks>
+    /// Per <see cref="InsightsPlaybookNameMapOptions"/> XML doc, App Service POSIX env-var
+    /// rules forbid <c>@</c> and <c>-</c> in env-var keys (Linux App Service), so the
+    /// configuration key MUST use the snake_case_only variant
+    /// (<c>universal_ingest_v1</c>). The Dataverse <c>sprk_name</c> still uses
+    /// <c>universal-ingest@v1</c>; the map key is purely an API/config-layer string.
+    /// File-source bindings (<c>appsettings.json</c>) accept either form but the
+    /// canonical contract is snake_case_only for portability.
+    /// </remarks>
+    private const string UniversalIngestPlaybookCanonicalName = "universal_ingest_v1";
+
+    /// <summary>
+    /// Output variable name on the <c>emitObservations</c> node in
+    /// <c>universal-ingest@v1</c> (per <c>universal-ingest.playbook.json</c>). The
+    /// adapter reads the node's <see cref="NodeOutput.StructuredData"/> as
+    /// <see cref="ObservationEmissionResult"/> and projects to
+    /// <see cref="InsightsIngestResult"/>. Mismatch (e.g., playbook renamed the variable)
+    /// will cause the adapter to log a Warning and surface an empty result.
+    /// </summary>
+    private const string EmitObservationsOutputVariable = "emission";
+
+    /// <summary>
+    /// Output variable name on the <c>layer1Classify</c> node. Used by the adapter as
+    /// the fallback source of the <c>Layer1Classification</c> field when the emission
+    /// node did not run (e.g., sanitize-empty short-circuit) — preserves the r1 facade
+    /// contract where <c>InsightsIngestResult.Layer1Classification</c> is populated
+    /// whenever Layer 1 ran successfully.
+    /// </summary>
+    private const string Layer1OutputVariable = "layer1";
+
+    private static readonly EventId IngestPlaybookAdapterMismatchEvent = new(8062, "InsightsRunIngestPlaybookAdapterMismatch");
+    private static readonly EventId IngestPlaybookFailedEvent = new(8063, "InsightsRunIngestPlaybookFailed");
+
     private readonly IPlaybookExecutionEngine _engine;
     private readonly IInsightsPlaybookExecutionCache _cache;
     private readonly IOpenAiClient _openAi;
-    private readonly IIngestOrchestrator _ingestOrchestrator;
+    private readonly IPlaybookOrchestrationService _playbookOrchestration;
+    private readonly IIngestDocumentSource _ingestDocumentSource;
+    private readonly IOptionsMonitor<InsightsPlaybookNameMapOptions> _playbookNameMap;
     private readonly ILogger<InsightsOrchestrator> _logger;
 
     public InsightsOrchestrator(
         IPlaybookExecutionEngine engine,
         IInsightsPlaybookExecutionCache cache,
         IOpenAiClient openAi,
-        IIngestOrchestrator ingestOrchestrator,
+        IPlaybookOrchestrationService playbookOrchestration,
+        IIngestDocumentSource ingestDocumentSource,
+        IOptionsMonitor<InsightsPlaybookNameMapOptions> playbookNameMap,
         ILogger<InsightsOrchestrator> logger)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _openAi = openAi ?? throw new ArgumentNullException(nameof(openAi));
-        _ingestOrchestrator = ingestOrchestrator ?? throw new ArgumentNullException(nameof(ingestOrchestrator));
+        _playbookOrchestration = playbookOrchestration ?? throw new ArgumentNullException(nameof(playbookOrchestration));
+        _ingestDocumentSource = ingestDocumentSource ?? throw new ArgumentNullException(nameof(ingestDocumentSource));
+        _playbookNameMap = playbookNameMap ?? throw new ArgumentNullException(nameof(playbookNameMap));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -187,7 +232,7 @@ public sealed class InsightsOrchestrator : IInsightsAi
     }
 
     /// <inheritdoc />
-    public Task<InsightsIngestResult> RunIngestAsync(
+    public async Task<InsightsIngestResult> RunIngestAsync(
         InsightsIngestRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -196,12 +241,349 @@ public sealed class InsightsOrchestrator : IInsightsAi
         ArgumentException.ThrowIfNullOrWhiteSpace(request.MatterId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
 
-        // Task 040 (D-P7) delegates to IIngestOrchestrator, which composes the universal
-        // ingest pipeline (Sanitizer → Layer 1 → conditional Layer 2 → mechanical gates →
-        // emission → substrate write → mirror). The facade stays thin so Zone B callers
-        // (D-P8 SPE-upload consumer per task 050) see a stable IInsightsAi contract while
-        // the Zone A pipeline composition evolves freely.
-        return _ingestOrchestrator.RunAsync(request, cancellationToken);
+        // Phase 1.5 r2 Wave C5 (task 024): validate optional parameter overrides at the
+        // facade boundary so that bad inputs fail fast with a clear ArgumentException
+        // before any AI cost is incurred. The validation enforces well-formedness only;
+        // domain validation (e.g., practice-area code exists in sprk_practicearea_ref)
+        // happens downstream in the playbook node executor where Dataverse is reachable.
+        // See design-a5-universal-ingest-jps.md §6 for the parameter contract.
+        ValidateIngestParameters(request);
+
+        // Phase 1.5 r2 Wave C-G4 (task 022): the universal-ingest@v1 JPS playbook is the
+        // ONLY runtime path. The legacy code-defined IIngestOrchestrator path has been
+        // retired per D-P15-02 "Insights IS a JPS application; no parallel orchestrators".
+        // Operators can disable ingest by deploying a no-op playbook at the
+        // `universal-ingest@v1` canonical name (playbook-level kill-switch); this layer
+        // no longer carries a feature flag. See InsightsOrchestrator class-level <remarks>
+        // for the rationale and Wave C-G4 task POML for the decision record.
+        return await RunIngestViaPlaybookAsync(request, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Invoke <c>universal-ingest@v1</c> via
+    /// <see cref="IPlaybookOrchestrationService.ExecuteAppOnlyAsync"/>, drain the stream,
+    /// and adapt the final <c>emitObservations</c> node output to
+    /// <see cref="InsightsIngestResult"/>. The adapter preserves the r1 facade contract —
+    /// Zone B callers see no surface change.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Path</b>: IIngestDocumentSource.FetchAsync → assemble parameters →
+    /// IPlaybookOrchestrationService.ExecuteAppOnlyAsync(universal-ingest@v1, parameters)
+    /// → drain stream → find emission node output → project to <see cref="InsightsIngestResult"/>.
+    /// </para>
+    /// <para>
+    /// <b>Why ExecuteAppOnlyAsync, not IPlaybookExecutionEngine.ExecuteBatchAsync</b>: the
+    /// ingest path is invoked from a background <c>BackgroundService</c> (D-P8 SPE-upload
+    /// consumer / Service Bus). <see cref="IPlaybookExecutionEngine.ExecuteBatchAsync"/>
+    /// requires an <see cref="Microsoft.AspNetCore.Http.HttpContext"/> (per
+    /// <c>PlaybookExecutionEngine</c> line 91); app-only invocation explicitly avoids it.
+    /// </para>
+    /// <para>
+    /// <b>Failure handling</b> (post Wave C-G4 retirement): on playbook failure (engine
+    /// throws OR emits <c>RunFailed</c>) we log Error and propagate the failure to the
+    /// caller. The D-P8 SPE-upload consumer (<c>InsightsIngestJobHandler</c>) treats this
+    /// per ADR-004 — transient failures retry via Service Bus; persistent failures
+    /// dead-letter after delivery-count exhaustion. There is no longer a legacy fallback.
+    /// </para>
+    /// </remarks>
+    private async Task<InsightsIngestResult> RunIngestViaPlaybookAsync(
+        InsightsIngestRequest request,
+        CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+
+        // Step 1: Fetch document content (the facade owns the fetch per design-a5 §4
+        // Node 1 — the executor receives pre-fetched text + chunks via parameters).
+        // Null result = non-indexable document; the playbook will short-circuit at
+        // sanitize. Match the r1 early-return semantics: produce an empty result so
+        // Zone B callers see the same "0 observations, no Layer 1" outcome.
+        var content = await _ingestDocumentSource.FetchAsync(
+            request.DocumentId, request.TenantId, cancellationToken)
+            .ConfigureAwait(false);
+        if (content is null)
+        {
+            _logger.LogInformation(
+                "InsightsOrchestrator.RunIngestAsync (playbook path): document not indexable, returning empty result (documentId={DocumentId} tenantId={TenantId})",
+                request.DocumentId, request.TenantId);
+            return new InsightsIngestResult(
+                ObservationsEmitted: 0,
+                Layer1Classification: null,
+                Layer2Triggered: false);
+        }
+
+        // Step 2: Assemble playbook parameters per design-a5 §6 parameterSchema.
+        // Required: documentId, matterId, tenantId, documentText, chunksJson, documentRef.
+        // Optional: practiceAreaHint, costCapOverride, layer2Threshold (null → omit,
+        // playbook schema defaults apply per §6).
+        var parameters = AssemblePlaybookParameters(request, content);
+
+        // Step 3: Invoke the playbook via app-only orchestration. ExecuteAppOnlyAsync is
+        // the correct entry — it does NOT require HttpContext (D-P8 dispatch is a
+        // BackgroundService scope, not a request scope).
+        //
+        // Post Wave C-G4 (task 022): the playbook Guid is resolved at invocation time
+        // through the existing InsightsPlaybookNameMapOptions (the same per-env name →
+        // Guid map the /api/insights/ask endpoint uses for predict-matter-cost@v1). The
+        // canonical name `universal-ingest@v1` is the operational identity per D-P15-02
+        // "ONE canonical universal-ingest playbook"; the per-env Guid is set by
+        // Deploy-Playbook.ps1 and configured at the `Insights:Playbooks:Map` section.
+        var playbookId = _playbookNameMap.CurrentValue
+            .ResolveOrDefault(UniversalIngestPlaybookCanonicalName);
+        if (playbookId == Guid.Empty)
+        {
+            _logger.Log(
+                LogLevel.Error,
+                IngestPlaybookFailedEvent,
+                "InsightsOrchestrator.RunIngestAsync: universal-ingest@v1 playbook Guid is unconfigured. Set Insights:Playbooks:Map.{CanonicalName} to the Dataverse sprk_analysisplaybook row Guid in this environment (Deploy-Playbook.ps1 emits it). documentId={DocumentId} matterId={MatterId} tenantId={TenantId}",
+                UniversalIngestPlaybookCanonicalName, request.DocumentId, request.MatterId, request.TenantId);
+            throw new InvalidOperationException(
+                $"universal-ingest@v1 playbook is not registered in InsightsPlaybookNameMapOptions " +
+                $"(missing config key Insights:Playbooks:Map:{UniversalIngestPlaybookCanonicalName}). " +
+                $"Deploy the playbook via scripts/Deploy-Playbook.ps1 and add its Guid to per-environment configuration.");
+        }
+        var runRequest = new PlaybookRunRequest
+        {
+            PlaybookId = playbookId,
+            // Universal-ingest does NOT process ad-hoc DocumentIds (each playbook node
+            // reads from parameters.documentText / parameters.chunks). Pass an empty array
+            // to satisfy the required[] contract; nodes ignore it.
+            DocumentIds = Array.Empty<Guid>(),
+            Parameters = parameters
+        };
+
+        _logger.LogInformation(
+            "InsightsOrchestrator.RunIngestAsync invoking universal-ingest@v1 (playbookId={PlaybookId} documentId={DocumentId} matterId={MatterId} tenantId={TenantId})",
+            playbookId, request.DocumentId, request.MatterId, request.TenantId);
+
+        ObservationEmissionResult? emission = null;
+        string? layer1Classification = null;
+        string? runFailedError = null;
+
+        try
+        {
+            await foreach (var evt in _playbookOrchestration.ExecuteAppOnlyAsync(
+                runRequest, request.TenantId, cancellationToken).ConfigureAwait(false))
+            {
+                switch (evt.Type)
+                {
+                    case PlaybookEventType.NodeCompleted when evt.NodeOutput is { Success: true }:
+                        // Capture the emission node output (project to InsightsIngestResult below).
+                        if (string.Equals(evt.NodeOutput.OutputVariable, EmitObservationsOutputVariable, StringComparison.Ordinal))
+                        {
+                            emission = evt.NodeOutput.GetData<ObservationEmissionResult>();
+                        }
+                        // Capture the layer1 classification as a fallback (used if the emission node
+                        // did not run — e.g., sanitize short-circuit short of the L1+gate path).
+                        else if (string.Equals(evt.NodeOutput.OutputVariable, Layer1OutputVariable, StringComparison.Ordinal))
+                        {
+                            layer1Classification = ExtractLayer1Classification(evt.NodeOutput);
+                        }
+                        break;
+
+                    case PlaybookEventType.RunFailed:
+                        runFailedError = evt.Error ?? "Playbook run failed (no error message provided)";
+                        break;
+                }
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.Log(
+                LogLevel.Error,
+                IngestPlaybookFailedEvent,
+                ex,
+                "InsightsOrchestrator.RunIngestAsync universal-ingest@v1 threw: playbookId={PlaybookId} documentId={DocumentId} matterId={MatterId} tenantId={TenantId} elapsedMs={ElapsedMs}. Failure propagates per ADR-004 (D-P8 SPE-upload consumer policy: transient → retry; persistent → dead-letter).",
+                playbookId, request.DocumentId, request.MatterId, request.TenantId, sw.ElapsedMilliseconds);
+            throw;
+        }
+
+        sw.Stop();
+
+        if (runFailedError is not null)
+        {
+            _logger.Log(
+                LogLevel.Error,
+                IngestPlaybookFailedEvent,
+                "InsightsOrchestrator.RunIngestAsync universal-ingest@v1 emitted RunFailed: playbookId={PlaybookId} documentId={DocumentId} matterId={MatterId} tenantId={TenantId} error={Error} elapsedMs={ElapsedMs}. Failure propagates per ADR-004 (D-P8 SPE-upload consumer policy: transient → retry; persistent → dead-letter).",
+                playbookId, request.DocumentId, request.MatterId, request.TenantId, runFailedError, sw.ElapsedMilliseconds);
+            throw new InvalidOperationException(
+                $"universal-ingest@v1 playbook execution failed for documentId={request.DocumentId} matterId={request.MatterId}: {runFailedError}");
+        }
+
+        return AdaptPlaybookResult(emission, layer1Classification, request, sw.ElapsedMilliseconds);
+    }
+
+    /// <summary>
+    /// Build the playbook parameters dictionary per design-a5 §6 parameterSchema. All
+    /// values are stringified — the playbook engine's template substitution operates on
+    /// the string form. Optional overrides (PracticeAreaHint, CostCapOverride,
+    /// Layer2Threshold) are omitted when null so the parameterSchema defaults apply.
+    /// </summary>
+    /// <remarks>
+    /// <b>Invariant culture for numerics</b> — currency caps and thresholds must
+    /// serialize as <c>1.50</c>, <c>0.7</c> (not <c>1,50</c> / <c>0,7</c>) regardless of
+    /// the App Service host culture. ALL invariant-culture formatting throughout.
+    /// </remarks>
+    internal static IReadOnlyDictionary<string, string> AssemblePlaybookParameters(
+        InsightsIngestRequest request,
+        IngestDocumentContent content)
+    {
+        // Serialize chunks as a JSON array per the SanitizerNodeExecutor contract
+        // (parameters.chunksJson is parsed back into a JsonElement[] by the executor).
+        var chunksJson = JsonSerializer.Serialize(content.Chunks);
+
+        var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Required (per design-a5 §6 parameterSchema "required" array).
+            ["documentId"] = request.DocumentId,
+            ["matterId"] = request.MatterId,
+            ["tenantId"] = request.TenantId,
+            // Required (consumed by SanitizerNodeExecutor + emitObservations executor —
+            // these are NOT in the schema "required" array because the design assumes
+            // they're injected by the facade, not supplied by upstream callers).
+            ["documentText"] = content.FullText,
+            ["chunksJson"] = chunksJson,
+            ["documentRef"] = content.DocumentRef
+        };
+
+        // Optional overrides — omit (rather than send null/empty) so the playbook
+        // parameterSchema's default values apply per design-a5 §6:
+        //   layer2Threshold default = 0.7 (Phase 1 D-59)
+        //   practiceAreaHint default = null (litigation-default prompts)
+        //   costCapOverride default = null (tenant monthly cap from D-P9)
+        if (!string.IsNullOrWhiteSpace(request.PracticeAreaHint))
+        {
+            parameters["practiceAreaHint"] = request.PracticeAreaHint;
+        }
+        if (request.CostCapOverride is { } cap)
+        {
+            parameters["costCapOverride"] = cap.ToString(CultureInfo.InvariantCulture);
+        }
+        if (request.Layer2Threshold is { } threshold)
+        {
+            parameters["layer2Threshold"] = threshold.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return parameters;
+    }
+
+    /// <summary>
+    /// Project the playbook's <see cref="ObservationEmissionResult"/> (from the
+    /// <c>emitObservations</c> node — per Wave C1 task 020 shape-matched to
+    /// <see cref="InsightsIngestResult"/>) to the facade's <see cref="InsightsIngestResult"/>.
+    /// Handles the defensive case where the emission node did not run (e.g., the playbook
+    /// short-circuited at sanitize-empty) by surfacing the Layer 1 classification when
+    /// available + zero observations.
+    /// </summary>
+    private InsightsIngestResult AdaptPlaybookResult(
+        ObservationEmissionResult? emission,
+        string? layer1ClassificationFallback,
+        InsightsIngestRequest request,
+        long elapsedMs)
+    {
+        if (emission is not null)
+        {
+            _logger.LogInformation(
+                "InsightsOrchestrator.RunIngestAsync (playbook path) completed: documentId={DocumentId} layer1Classification={Layer1Classification} layer2Triggered={Layer2Triggered} observationsEmitted={ObservationsEmitted} elapsedMs={ElapsedMs}",
+                request.DocumentId, emission.Layer1Classification, emission.Layer2Triggered,
+                emission.ObservationsEmitted, elapsedMs);
+            return new InsightsIngestResult(
+                ObservationsEmitted: emission.ObservationsEmitted,
+                Layer1Classification: emission.Layer1Classification,
+                Layer2Triggered: emission.Layer2Triggered);
+        }
+
+        // Defensive path — playbook ran to completion (no RunFailed) but no emission
+        // output captured. Most likely cause: sanitize short-circuited (SANITIZE_EMPTY)
+        // and downstream nodes skipped — semantically equivalent to r1's
+        // "sanitized-empty" early return. Surface the Layer 1 classification if we
+        // captured it (we usually won't on this path); otherwise emit empty.
+        _logger.Log(
+            LogLevel.Warning,
+            IngestPlaybookAdapterMismatchEvent,
+            "InsightsOrchestrator.RunIngestAsync (playbook path) completed without an emitObservations output (documentId={DocumentId} layer1ClassificationFallback={Layer1Classification} elapsedMs={ElapsedMs}). Most likely cause: sanitize short-circuit (SANITIZE_EMPTY). Surfacing empty result to preserve r1 parity.",
+            request.DocumentId, layer1ClassificationFallback, elapsedMs);
+        return new InsightsIngestResult(
+            ObservationsEmitted: 0,
+            Layer1Classification: layer1ClassificationFallback,
+            Layer2Triggered: false);
+    }
+
+    /// <summary>
+    /// Extract the <c>classification</c> string from a Layer 1 node output (case-insensitive).
+    /// Mirrors <see cref="ObservationEmitterNodeExecutor"/>'s extraction logic so the
+    /// fallback path produces the same field value as the canonical emission path.
+    /// </summary>
+    private static string? ExtractLayer1Classification(NodeOutput layer1)
+    {
+        if (layer1.StructuredData is null) return null;
+        var data = layer1.StructuredData.Value;
+        if (data.ValueKind != JsonValueKind.Object) return null;
+
+        if (data.TryGetProperty("classification", out var camel) && camel.ValueKind == JsonValueKind.String)
+            return camel.GetString();
+        if (data.TryGetProperty("Classification", out var pascal) && pascal.ValueKind == JsonValueKind.String)
+            return pascal.GetString();
+        return null;
+    }
+
+    /// <summary>
+    /// Validate the Wave C5 optional parameter overrides on
+    /// <see cref="InsightsIngestRequest"/>. Throws <see cref="ArgumentException"/> on
+    /// any malformed override; returns silently when overrides are absent or valid.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Rules per task 024 POML §step 2 + design-a5 §6 parameterSchema:
+    /// <list type="bullet">
+    ///   <item><c>PracticeAreaHint</c> — when supplied, must be non-whitespace. Domain
+    ///   validation against <c>sprk_practicearea_ref</c> codes happens in the playbook
+    ///   node executor (Wave D2) where Dataverse is reachable; the facade only enforces
+    ///   well-formedness.</item>
+    ///   <item><c>CostCapOverride</c> — when supplied, must be strictly positive
+    ///   (&gt; 0). Zero or negative caps are nonsensical; the schema default
+    ///   (<c>null</c>) means "use tenant monthly cap from D-P9".</item>
+    ///   <item><c>Layer2Threshold</c> — when supplied, must lie in <c>[0.0, 1.0]</c>
+    ///   inclusive. NaN and infinity are rejected. The schema default (<c>null</c>)
+    ///   means "use playbook default 0.7 per Phase 1 D-59".</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// Validation runs <em>before</em> any work is dispatched so that bad inputs fail
+    /// without incurring LLM cost or Dataverse round-trips. Internal-visible for unit
+    /// tests; not part of the public Zone B surface.
+    /// </para>
+    /// </remarks>
+    internal static void ValidateIngestParameters(InsightsIngestRequest request)
+    {
+        if (request.PracticeAreaHint is not null
+            && string.IsNullOrWhiteSpace(request.PracticeAreaHint))
+        {
+            throw new ArgumentException(
+                "PracticeAreaHint, when supplied, must be a non-whitespace practice-area code (e.g., 'CTRNS'). Pass null to omit and use the litigation-default per Phase 1 D-59.",
+                nameof(request));
+        }
+
+        if (request.CostCapOverride is { } cap && cap <= 0m)
+        {
+            throw new ArgumentException(
+                $"CostCapOverride, when supplied, must be strictly positive (got {cap}). Pass null to omit and use the tenant's monthly cap per D-P9.",
+                nameof(request));
+        }
+
+        if (request.Layer2Threshold is { } threshold)
+        {
+            if (double.IsNaN(threshold) || double.IsInfinity(threshold)
+                || threshold < 0.0 || threshold > 1.0)
+            {
+                throw new ArgumentException(
+                    $"Layer2Threshold, when supplied, must be a finite value in [0.0, 1.0] (got {threshold}). Pass null to omit and use the playbook default 0.7 per Phase 1 D-59.",
+                    nameof(request));
+            }
+        }
     }
 
     /// <inheritdoc />

@@ -1,7 +1,7 @@
 <task id="011" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>A2 — Operator/developer guide refresh</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>A</wave>
     <estimated-effort>4h</estimated-effort>
     <tags>docs, guides, operator-guide, phase-1.5-framing</tags>
@@ -9,6 +9,7 @@
     <parallel-safe>true</parallel-safe>
     <rigor>MINIMAL</rigor>
     <wave-item>A2</wave-item>
+    <completed-date>2026-06-02</completed-date>
   </metadata>
 
   <prompt>
@@ -49,4 +50,29 @@
     <criterion testable="true">Guide includes "how to edit a prompt in sprk_analysisaction.sprk_systemprompt" section (no new entity)</criterion>
     <criterion testable="true">Cross-refs to design.md, spec.md, plan.md work</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-02 (Wave A2). Refreshed docs/guides/INSIGHTS-ENGINE-GUIDE.md end-to-end to Phase 1.5 framing:
+    - Added Phase 1.5 terminology block (JPS-as-data vs PlaybookExecutionEngine-as-code, sprk_analysisaction IS the prompt-bearing primitive, NO new sprk_prompt entity per PR-1).
+    - §4 "Adding a new practice area" rewritten: sprk_practicearea_ref is the source of truth (per PA-1); listed actual Spaarke Dev rows (APPL, BNKF, CTRNS, IPPAT, IPTM, MA); cross-refs to Wave D1/D2/D3 tasks; retired "litigation" framing.
+    - §5 "Adding a new subject entity type" rewritten for Wave D5/D6: per-entity ILiveFactResolver, DI minimalism ceiling per ADR-010, index scope-shape generalization with backward compat per NFR-08; Cosmos NoSQL re-deferred to Phase 2.
+    - §6 "Authoring + iterating prompts" rewritten as authoritative Phase 1.5 procedure: prompts live in sprk_analysisaction.sprk_systemprompt JPS JSON, SME edit via Dataverse MCP without code deploy/App Service restart, variant + versioning + per-tenant override pattern stubbed pending A4 (task 013).
+    - §7 "/api/insights/search" rewritten as Phase 1.5 NEW endpoint wrapping existing IRagService per 2026-06-02 re-scope, auth filter per ADR-008/028, kill-switch via ADR-030 P3 (NullRagService → 503).
+    - §7A NEW intent classifier section (Wave E2, LLM-based, forceMode override).
+    - §7B NEW Spaarke Assistant integration section (Wave E3, contract-first per AC-1, read-only tool-call for Phase 1.5).
+    - §2 decision framework stubbed with placeholder pointing to Wave E4 task 043 for final playbook-vs-RAG decision tree (per POML step 4).
+    - §10 Troubleshooting: added 2 Phase 1.5 rows (search 503 kill-switch, classifier confidence tuning).
+    - §11 File locations: Phase 1.5 prompt storage moved to Dataverse (sprk_analysisaction.sprk_systemprompt); added IRagService + FeatureDisabledException entries.
+    - §12 Glossary: rewritten with PlaybookExecutionEngine, INodeExecutor, 2D taxonomy, D-P15-NN, Universal-ingest@v1, IRagService, Wave B/A/C/D/E sequencing.
+    - Header companion-document refs extended to include spec.md + plan.md.
+    - Updated "Last Updated" to 2026-06-02 (Wave A2 task 011).
+
+    Acceptance criteria status:
+    - "how to add a new practice area" (sources from sprk_practicearea_ref) — ✅ §4 (explicit "Source of truth — sprk_practicearea_ref table" banner)
+    - "how to add a new subject-entity type" — ✅ §5
+    - "how to edit a prompt in sprk_analysisaction.sprk_systemprompt" (no new entity) — ✅ §6.1 + §6.2 (NO new sprk_prompt entity stated explicitly)
+    - Cross-refs to design.md, spec.md, plan.md work — ✅ header companion refs + inline task POML cross-refs throughout (all targets verified to exist)
+
+    No .claude/ writes attempted; no permission-boundary hits.
+  </notes>
 </task>

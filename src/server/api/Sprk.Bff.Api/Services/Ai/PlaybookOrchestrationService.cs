@@ -790,6 +790,45 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     }
 
     /// <summary>
+    /// Wave C1 task 020 — Gap #2 helper per design-a5 §7.2. Extracts the <c>selectedBranch</c>
+    /// from a branching gate's <see cref="NodeOutput"/> structured data. Returns the downstream
+    /// node name on the selected branch, or null when the upstream is not a branching gate
+    /// (no <c>selectedBranch</c> property in its structured data).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Branching gates today:
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Nodes.EvidenceSufficiencyResult.SelectedBranch"/> and
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Nodes.ConditionResult.SelectedBranch"/>. Both expose
+    /// the property under the JSON name <c>"selectedBranch"</c> via default record serialization.
+    /// </para>
+    /// <para>
+    /// Reads from <see cref="NodeOutput.StructuredData"/> via case-insensitive property lookup
+    /// (the JSON serializer uses PascalCase or camelCase depending on options; we accept both).
+    /// </para>
+    /// </remarks>
+    private static string? TryExtractSelectedBranch(NodeOutput depOutput)
+    {
+        if (depOutput.StructuredData is null) return null;
+        var data = depOutput.StructuredData.Value;
+        if (data.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+
+        // Try common casings: "selectedBranch" (camelCase JSON output) and "SelectedBranch" (record name).
+        if (data.TryGetProperty("selectedBranch", out var camelCase) &&
+            camelCase.ValueKind == System.Text.Json.JsonValueKind.String)
+        {
+            return camelCase.GetString();
+        }
+        if (data.TryGetProperty("SelectedBranch", out var pascalCase) &&
+            pascalCase.ValueKind == System.Text.Json.JsonValueKind.String)
+        {
+            return pascalCase.GetString();
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Extracts the __actionType value from a node's ConfigJson.
     /// Returns null if ConfigJson is missing or doesn't contain the field.
     /// </summary>
@@ -834,6 +873,63 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
         try
         {
+            // Wave C1 task 020 — Gap #2 patch: branch-aware dependency resolution per design-a5 §7.2.
+            // When an upstream EvidenceSufficiencyNode (or ConditionNode) emits a selectedBranch,
+            // downstream nodes NOT on the selected branch are skipped — even if all their upstream
+            // dependencies succeeded. Without this patch, a "gated-off" node (e.g., layer2Extract
+            // in universal-ingest@v1 when checkLayer2Gate=insufficient) would execute because
+            // the existing AND-only dependency check treats EvidenceSufficiencyNode's "success-with-
+            // insufficient-verdict" as a successful upstream.
+            //
+            // Semantics: an upstream's selectedBranch is the NAME of the downstream node on the
+            // selected branch (see EvidenceSufficiencyNode line 158-160:
+            //   selectedBranch = sufficient ? config.SufficientBranch : config.InsufficientBranch
+            //   where SufficientBranch / InsufficientBranch hold downstream node names).
+            // We skip the current node when ALL of:
+            //   1) The upstream returned a selectedBranch (i.e., upstream is a branching gate);
+            //   2) The current node's name != selectedBranch.
+            // If a node has MULTIPLE upstreams and at least ONE branching gate selected it, run it
+            // (handles emitObservations which has groundingVerify [sufficient path] + checkLayer2Gate
+            // [insufficient path] as upstreams). Implementation: track whether at least one branching
+            // upstream selected this node; only skip if every branching upstream rejected it.
+            //
+            // Backward compatibility: nodes whose upstreams have no selectedBranch (most existing
+            // playbooks) behave unchanged — branchingDepCount stays 0 and the skip branch is bypassed.
+            int branchingDepCount = 0;
+            int branchingDepsSelectingThisNode = 0;
+            foreach (var depId in node.DependsOn)
+            {
+                var depNode = graph.GetNode(depId);
+                if (depNode == null) continue;
+
+                var depOutput = runContext.GetOutput(depNode.OutputVariable);
+                if (depOutput == null || !depOutput.Success) continue;  // existing failure path handles below
+
+                var selectedBranch = TryExtractSelectedBranch(depOutput);
+                if (selectedBranch is null) continue;
+
+                branchingDepCount++;
+                if (string.Equals(selectedBranch, node.Name, StringComparison.OrdinalIgnoreCase))
+                    branchingDepsSelectingThisNode++;
+            }
+
+            if (branchingDepCount > 0 && branchingDepsSelectingThisNode == 0)
+            {
+                var skipReason = $"Branch not selected: {branchingDepCount} upstream branching gate(s) routed to a different branch";
+                runContext.RecordNodeSkipped();
+
+                _logger.LogDebug(
+                    "Skipping node {NodeName}: {Reason}",
+                    node.Name, skipReason);
+
+                await writer.WriteAsync(PlaybookStreamEvent.NodeSkipped(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipReason), cancellationToken);
+
+                // Return a skip output (treated as success for flow control — matches existing
+                // dependency-failure-skip semantics; downstream nodes see this as "Ok(null)").
+                return NodeOutput.Ok(node.Id, node.OutputVariable, null, skipReason);
+            }
+
             // Check if dependencies failed
             foreach (var depId in node.DependsOn)
             {

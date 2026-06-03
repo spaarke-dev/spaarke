@@ -71,6 +71,16 @@ public record NodeExecutionContext
         = new Dictionary<string, NodeOutput>();
 
     /// <summary>
+    /// Run-level Parameters dictionary (Wave C1 task 020 addition per design-a5 §6).
+    /// Carries the typed invocation parameters from the caller — used by node executors that
+    /// need raw values that are not safely passed via <c>{{var}}</c> ConfigJson template
+    /// substitution (e.g., large document text, chunk arrays, per-invocation overrides).
+    /// Read-only mirror of <c>PlaybookRunContext.Parameters</c>.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Parameters { get; init; }
+        = new Dictionary<string, string>();
+
+    /// <summary>
     /// Tenant identifier for multi-tenant isolation.
     /// </summary>
     public required string TenantId { get; init; }

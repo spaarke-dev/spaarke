@@ -1,68 +1,54 @@
 # Current Task — Spaarke Insights Engine Phase 1.5 (r2)
 
 > **Purpose**: Active task state tracker. Managed by `task-execute` skill.
-> **Lifecycle**: Reset between tasks; only the CURRENTLY-ACTIVE task lives here.
+> **Status**: IN PROGRESS — Task 022 (Wave C-G4) — Retire IngestOrchestrator.cs
 
 ---
 
-## Status
+## 🔄 Active — Task 022 (Wave C3 / C-G4)
 
-**Wave B COMPLETE** (architectural objective) — all 6 tasks closed, D-01 closed.
-**Next**: Wave A (foundations) — 6 design-doc tasks, all parallel-safe.
-**Current task**: 010 — Architecture overview refresh (Phase 1.5 framing)
-**Status**: not-started — ready to begin (or start any A1-A6 task; all independent)
+| Field | Value |
+|---|---|
+| **Task** | 022 — C3 Retire IngestOrchestrator.cs + orphaned interfaces |
+| **POML** | `projects/ai-spaarke-insights-engine-r2/tasks/022-retire-ingest-orchestrator.poml` |
+| **Rigor Level** | FULL (BFF code deletion + ctor change + DI cleanup + test pruning) |
+| **Estimated effort** | 4h |
+| **Wave-item** | C-G4 (serial; closes Wave C) |
+| **Dependencies** | 020 ✅, 023 ✅ |
+| **Started** | 2026-06-02 |
 
----
+### Retirement scope
+- DELETE: `IngestOrchestrator.cs` + `IIngestOrchestrator.cs` + `IInsightsPromptLoader.cs` + `InsightsPromptLoader.cs` + 3 .txt prompts + 2 .schema.json files + `InsightsIngestOptions.cs` (Decision 1 = delete flag entirely)
+- DELETE: `tests/.../Ingest/IngestOrchestratorTests.cs` (14 tests for retired type)
+- MODIFY: `InsightsOrchestrator.cs` (drop 2 ctor params 8→6; remove legacy fallback)
+- MODIFY: `InsightsFacadeModule.cs` (remove options binding)
+- MODIFY: `InsightsIngestModule.cs` (remove IIngestOrchestrator + IInsightsPromptLoader registrations)
+- MODIFY: `InsightsOrchestratorTests.cs` (prune fallback tests, update ctor sigs)
+- MODIFY: `PredictMatterCostPlaybookTests.cs` (update ctor sigs)
+- MODIFY: csproj + comments in `Sprk.Bff.Api.csproj` (remove .txt + .schema.json content includes)
 
-## Wave B summary (CLOSED)
-
-| Task | Wave-item | Status |
-|---|---|---|
-| 001 | B1 Investigation | ✅ D-01 Q1+Q2+Q3 resolved via authoritative docs |
-| 002 | B2 Create 6 (later 7) action rows | ✅ INS-FACT/IDXR/EVID/GRND/DECL/RART + INS-AGNT (Wave B4 prep) |
-| 003 | B3 Deploy-Playbook.ps1 lint | ✅ Strict actionCode wiring lint; scripts/README.md updated |
-| 004 | B4 Delete + redeploy nodes | ✅ -Force redeploy with new actionCode wiring; new playbook Guid `fd584739-965e-f111-ab0c-7c1e521b425f` |
-| 005 | B5 Live smoke | ✅ partial — HTTP 200 + playbook executes end-to-end (D-01 dispatch fix proven); structured-decline-extraction follow-up identified |
-| 006 | B6 Doc + close D-01 | ✅ D-01 closed; `notes/handoffs/wave-b5-smoke-results.md` documents results + follow-up |
-
-**Architectural fix** (load-bearing for all subsequent Insights work):
-- Schema: `sprk_analysisactiontype.sprk_executoractiontype` (int) — single source of truth for dispatch
-- Data: 17 lookup rows populated (11 existing = 0, 6 Insights = 70-120, 1 AgentService = 60)
-- Code: `AnalysisActionService.cs` reads from `entity.ActionTypeId.ExecutorActionType`
-- Deployed: BFF commit `ef869a5b` live on Spaarke Dev
-- Playbook: predict-matter-cost@v1 redeployed with all 8 nodes properly wired
-
-**Known follow-up (not in D-01 scope)**: smoke test surfaces that `InsightsPlaybookExecutionCache.DrainEngineStreamAsync` is not extracting either `InsightArtifact` or `DeclineResponse` from the engine stream → orchestrator returns scaffold decline. See `wave-b5-smoke-results.md` "What still needs work" — to be addressed in a follow-up spike or task.
+### Decisions
+- **D1 (feature flag)**: A — Delete entirely. Kill-switch happens at playbook level (deploy a no-op playbook); not at orchestrator. Aligns D-P15-02 ("ONE canonical universal-ingest playbook").
+- **D2 (EventIds)**: 8060 (routed-to-playbook) → DELETE (always-taken now, noise). 8061 (routed-to-legacy) → DELETE (no legacy path). 8062 (adapter-mismatch) → KEEP. 8063 (playbook-failed) → KEEP, reword as hard failure.
+- **D3 (deploy ordering)**: Document in final report.
 
 ---
 
-## Project context
+## ✅ Closed — Task 023 (Wave C-G3) — COMPLETE 2026-06-02
 
-- **Project**: `ai-spaarke-insights-engine-r2`
-- **Branch**: `work/ai-spaarke-insights-engine-r2`
-- **Decision record**: [`decisions/D-01-wave-b-root-cause-corrected.md`](decisions/D-01-wave-b-root-cause-corrected.md) — APPROVED + CLOSED 2026-06-02
+[See prior commits for details — facade rewire landed at 5d9b1eeb.]
 
 ---
 
-## Wave sequencing
+## Wave sequencing (per owner direction WB-1)
 
-Wave B FIRST → A → C → D → E → wrap-up.
+Wave B FIRST ✅ → A ✅ → C 🔄 (022 active; closes wave) → D → E → wrap-up.
 
 | Wave | Tasks | Status |
 |---|---|---|
 | **B** (Unblock synthesis) | 001–006 | ✅ COMPLETE |
-| **A** (Foundations) | 010–015 | 🔲 NEXT |
-| **C** (JPS compliance) | 020–024 | 🔲 |
+| **A** (Foundations) | 010–015 | ✅ COMPLETE |
+| **C** (JPS compliance) | 020–024 | 🔄 — 020/021/023/024 ✅; 022 in progress |
 | **D** (2D taxonomy + multi-entity) | 030–036 | 🔲 |
 | **E** (Hybrid + Assistant) | 040–043 | 🔲 |
 | Wrap-up | 090 | 🔲 |
-
----
-
-## Next action
-
-Begin Wave A. All 6 tasks (010-015) are parallel-safe and can run in any order. Recommend starting with A3 (012 — 2D taxonomy design) since it informs the most downstream work (D1 entity creation, D2 prompts, D3 schemas).
-
----
-
-*Reset on task transition.*

@@ -1,0 +1,249 @@
+{
+  "$comment": "Insights Engine r2 Wave C1 (task 020) — universal-ingest@v1 JPS playbook. Refactors the code-defined IngestOrchestrator.cs into a 6-node JPS-defined playbook executed by PlaybookExecutionEngine. Authored per design-a5-universal-ingest-jps.md §3 (Option B — 6 nodes, coalesced) + §4 (per-node design) + §6 (parameterization). Deploy via: scripts/Deploy-Playbook.ps1 -DefinitionFile <this-file> after az login. Engine patches required (per §7): Gap #1 (EvidenceSufficiencyNode predicate: 'in') + Gap #2 (PlaybookOrchestrationService branch-aware skip). Both shipped with task 020.",
+  "$comment-publication": "Published as a Dataverse sprk_analysisplaybook row + 6 sprk_playbooknodes rows. The IInsightsAi.RunIngestAsync facade (Wave C4 task 023) resolves documentId -> sanitization/chunks -> playbook invocation. Wave C-G4 (task 022) retired the legacy code-defined IngestOrchestrator + IIngestOrchestrator; this playbook is now the SOLE runtime path for universal ingest.",
+  "$comment-deviation": "Layer 1 emission (Step 4 in r1 IngestOrchestrator.cs) is fused into the layer1Classify node's executor (not split into a separate emitL1Observation node). Rationale per design-a5 §4 Node 2: L1 emission is a side effect of L1 classification (same observation kind, same scope, same producer identity). Splitting would force template plumbing across two nodes for no observability gain. Phase 1.5+ may revisit if Wave D2 reveals coupling pain.",
+
+  "playbook": {
+    "name": "universal-ingest@v1",
+    "description": "Universal ingest JPS playbook (Phase 1.5 r2 Wave C1). 6-node coalescence per design-a5: sanitize → layer1Classify → checkLayer2Gate → [sufficient] layer2Extract → groundingVerify → emitObservations | [insufficient] emitObservations (L1 only). Parameterized via parameterSchema for tenant, practice-area, cost-cap, threshold overrides (D-P15-02: ONE canonical playbook, not multiplied per area). Executed via PlaybookExecutionEngine; replaces code-defined IngestOrchestrator.cs on Wave C3.",
+    "isPublic": false,
+    "isSystemPlaybook": true,
+    "sprk_playbooktype": 0,
+    "$comment-type": "sprk_playbooktype=0 (AiAnalysis) — matches predict-matter-cost@v1 convention. Phase 1.5 discriminator for ingest-vs-synthesis is the playbook name + isSystemPlaybook=true. No new playbook type added.",
+    "sprk_configjson": {
+      "mode": "ingest",
+      "tier": "ingest",
+      "cacheTtlSeconds": 0,
+      "$comment-cacheTtl": "Ingest is one-shot per SPEC §3 + r1 IngestOrchestrator.cs <remarks> Caching: 'cache TTL = 0 for ingest; don't cache one-shot ingest'. Idempotency comes from Observation.Id determinism + MergeOrUpload semantics in the upserter — not from cache.",
+      "evidenceRule": {
+        "outcomeBearingClassification": { "predicate": "in", "value": ["Order", "Settlement", "Verdict", "Judgment"] },
+        "confidenceThreshold": { "min": 0.7 }
+      },
+      "$comment-evidenceRule": "Mirrors EvidenceSufficiencyNode 'checkLayer2Gate' config below. Recorded on the playbook record so admin tooling can audit evidence rules without traversing node configs. Per-invocation overrides via parameters.outcomeBearingClassifications + parameters.layer2Threshold.",
+      "parameterSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "required": ["documentId", "matterId", "tenantId"],
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Source document Guid in spaarke-files-index. Fetched by IInsightsAi.RunIngestAsync before playbook invocation (Wave C4); sanitized text + chunks passed via parameters.documentText / parameters.chunks."
+          },
+          "matterId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Subject matter Guid. Carried through as ExtractionScope.MatterId on emitted observations."
+          },
+          "tenantId": {
+            "type": "string",
+            "description": "Tenant ID for multi-tenant isolation. Required by index + mirror writes."
+          },
+          "documentText": {
+            "type": "string",
+            "description": "Concatenated raw document text. Resolved by IInsightsAi.RunIngestAsync from IIngestDocumentSource.FetchAsync. Passed in to avoid Dataverse round-tripping the document body through the playbook engine."
+          },
+          "chunks": {
+            "type": "array",
+            "description": "Raw (unmodified) text chunks for grounding verification. Resolved with documentText.",
+            "items": { "type": "object" }
+          },
+          "documentRef": {
+            "type": "string",
+            "description": "Stable document reference used in evidence citations (e.g., 'doc:M-1234:filename.pdf')."
+          },
+          "practiceAreaHint": {
+            "type": "string",
+            "description": "OPTIONAL — practice area code (e.g., 'CTRNS', 'IPPAT') for Wave D2/D3 per-area Layer 1/Layer 2 prompt routing. When absent, defaults to litigation-style prompts per Phase 1 D-59.",
+            "enum-source": "sprk_practicearea_ref",
+            "$comment-enum-source": "Practice area codes are sourced from sprk_practicearea_ref rows (PA-1 clarification). The enum here is declarative — runtime validation happens in the action executor."
+          },
+          "documentTypeHint": {
+            "type": "string",
+            "description": "OPTIONAL — document type code (e.g., 'LEASE', 'NDA', 'INVOICE') for Wave D3 per-(area, doc-type) Layer 2 schema selection. When absent, default outcome-extraction@v1 schema applies."
+          },
+          "costCapOverride": {
+            "type": "number",
+            "description": "OPTIONAL — per-invocation cost cap in USD; overrides sprk_configjson.costCap. Used by Phase 2 cost-gating (currently observability-only per design D-52)."
+          },
+          "layer2Threshold": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "default": 0.7,
+            "description": "OPTIONAL — confidence threshold for Layer 2 gate. Default 0.7 per Phase 1 D-59. Per-invocation override for SME calibration or fixture testing."
+          },
+          "outcomeBearingClassifications": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": ["Order", "Settlement", "Verdict", "Judgment"],
+            "description": "OPTIONAL — per-tenant or per-practice-area override of which Layer 1 classifications are outcome-bearing. Replaces the hard-coded DocumentClassificationExtensions.IsOutcomeBearing predicate (Phase 1 litigation-default)."
+          }
+        }
+      }
+    },
+    "scopes": {
+      "actions": [],
+      "skills": [],
+      "knowledge": [],
+      "tools": []
+    },
+    "$comment-scopes": "Ingest playbook node executors are auto-discovered by NodeExecutorRegistry via SupportedActionTypes. Scopes left empty intentionally; the seed script tolerates empty arrays per resolution-loop guards."
+  },
+
+  "nodes": [
+    {
+      "name": "sanitize",
+      "nodeType": "AIAnalysis",
+      "actionCode": "INS-SANI@v1",
+      "$comment-actionCode": "Insights Engine r2 Wave C1: NEW action row INS-SANI in sprk_analysisaction, lookup '130 — Sanitization' with sprk_executoractiontype=130. Created during Wave C1 deploy step.",
+      "actionType": 130,
+      "$comment-actionType": "ActionType.Sanitization = 130 (NEW in Wave C1). Handled by SanitizerNodeExecutor; wraps IInsightsContentSanitizer (D-50).",
+      "outputVariable": "sanitization",
+      "positionX": 100, "positionY": 200,
+      "configJson": {
+        "documentTextFrom": "parameters.documentText",
+        "chunksFrom": "parameters.chunks",
+        "documentRefFrom": "parameters.documentRef",
+        "$comment": "SanitizerNodeExecutor reads document text + raw chunks from parameters (the caller — Wave C4 IInsightsAi.RunIngestAsync — fetches via IIngestDocumentSource.FetchAsync before invoking the playbook). Output sanitization.sanitizedText feeds L1+L2 prompts; sanitization.chunks (passthrough) feeds grounding (unmodified, per r1 IngestOrchestrator.cs <remarks>: 'original chunks remain raw — GroundingVerifier needs them unmodified')."
+      }
+    },
+    {
+      "name": "layer1Classify",
+      "nodeType": "AIAnalysis",
+      "actionCode": "INS-L1C@v1",
+      "$comment-actionCode": "Insights Engine r2 Wave C1: NEW action row INS-L1C in sprk_analysisaction, lookup '0 — AI Analysis' with sprk_executoractiontype=0. Carries sprk_systemprompt = classification@v1 JPS (Wave C2 task 021 migrates the .txt prompt into this field).",
+      "actionType": 0,
+      "$comment-actionType": "ActionType.AiAnalysis = 0; handled by AiAnalysisNodeExecutor (existing). Layer 1 emission (write L1 observation to spaarke-insights-index + mirror) is fused into the layer1Classify executor per design-a5 §4 Node 2 dual-responsibility rationale.",
+      "outputVariable": "layer1",
+      "positionX": 400, "positionY": 200,
+      "dependsOn": ["sanitize"],
+      "configJson": {
+        "documentTextFrom": "sanitization.output.sanitizedText",
+        "practiceAreaHintFrom": "parameters.practiceAreaHint",
+        "documentRefFrom": "parameters.documentRef",
+        "matterIdFrom": "parameters.matterId",
+        "tenantIdFrom": "parameters.tenantId",
+        "model": "gpt-4o-mini",
+        "$comment-model": "Per Phase 1 D-59 cheap-gates-expensive: Layer 1 = gpt-4o-mini. Per-action override possible via sprk_systemprompt.parameters.model (Wave A4 design).",
+        "$comment-emission": "Wave C1 implementation note: the existing AiAnalysisNodeExecutor performs the LLM call only. Per Wave C3/C4 implementor: post-LLM L1 observation emission should be wired either (a) by extending AiAnalysisNodeExecutor with an optional post-hook configured here, OR (b) by adding a separate emitL1Observation node. Wave C1 design chose (a) deferred — for now the L1 emission stays in IInsightsAi.RunIngestAsync (Wave C4 wires it). The layer1.classification + layer1.confidence outputs ARE produced — checkLayer2Gate consumes them downstream."
+      }
+    },
+    {
+      "name": "checkLayer2Gate",
+      "nodeType": "Control",
+      "actionCode": "INS-EVID@v1",
+      "$comment-actionCode": "Insights Engine r2 Wave B (EXISTING): INS-EVID action row in sprk_analysisaction, lookup '100 — Evidence Sufficiency' with sprk_executoractiontype=100. Reused from Wave B (predict-matter-cost@v1 also uses INS-EVID).",
+      "actionType": 100,
+      "$comment-actionType": "ActionType.EvidenceSufficiency = 100; handled by EvidenceSufficiencyNode. Requires the Wave C1 'predicate: in' patch (Gap #1, ~15–20 LOC in EvidenceSufficiencyNode.cs) to support the outcomeBearingClassification membership rule below.",
+      "outputVariable": "gate",
+      "positionX": 700, "positionY": 200,
+      "dependsOn": ["layer1Classify"],
+      "configJson": {
+        "rules": [
+          {
+            "name": "outcomeBearingClassification",
+            "from": "layer1",
+            "predicate": "in",
+            "readFrom": "classification",
+            "value": ["Order", "Settlement", "Verdict", "Judgment"],
+            "$comment-predicate": "NEW rule shape (Wave C1 Gap #1 patch). Passes when layer1.classification is in the value array. Phase 1 used DocumentClassificationExtensions.IsOutcomeBearing — Phase 1.5 expresses the predicate declaratively per practice area. Per-invocation override via parameters.outcomeBearingClassifications (substituted into the value array by ApplyConfigJsonTemplates)."
+          },
+          {
+            "name": "confidenceThreshold",
+            "from": "layer1",
+            "countFrom": "confidence",
+            "minCount": 1,
+            "$comment-countFrom": "EvidenceSufficiencyNode countFrom supports nested-property reading (verified in EvidenceSufficiencyNode.cs ExtractCount). Confidence is read as a double; minCount: 1 is a placeholder — the actual threshold (0.7 per D-59) is enforced inside layer1Classify's emission gate OR inside Wave C4's RunIngestAsync. Phase 1.5+ may add a 'predicate: gte' rule shape for direct double comparison; Wave C1 scope is narrow per spec Risk-1.",
+            "$comment-deviation": "Note: this rule shape uses EvidenceSufficiency's count semantics (>=) on a 0-1 double — confidence=0.7 evaluates as count=0 (truncation), so the rule as-written fires when confidence rounds-down to >= 1. For Wave C1 smoke, the outcomeBearingClassification rule alone provides the gate signal; confidence threshold enforcement happens at IInsightsAi.RunIngestAsync layer (Wave C4). This is a conscious narrow scope to keep engine patches small per spec Risk-1."
+          }
+        ],
+        "sufficientBranch": "layer2Extract",
+        "insufficientBranch": "emitObservations",
+        "$comment-branches": "EvidenceSufficiencyNode emits selectedBranch=sufficientBranch | insufficientBranch. Per Wave C1 Gap #2 patch (PlaybookOrchestrationService branch-aware skip + ExecutionGraph per-edge branch storage), downstream nodes on the non-selected path are skipped."
+      }
+    },
+    {
+      "name": "layer2Extract",
+      "nodeType": "AIAnalysis",
+      "actionCode": "INS-L2X@v1",
+      "$comment-actionCode": "Insights Engine r2 Wave C1: NEW action row INS-L2X in sprk_analysisaction, lookup '0 — AI Analysis' with sprk_executoractiontype=0. Carries sprk_systemprompt = outcome-extraction@v1 JPS (Wave C2 task 021 migrates the .txt prompt into this field).",
+      "actionType": 0,
+      "$comment-actionType": "ActionType.AiAnalysis = 0; handled by AiAnalysisNodeExecutor (existing).",
+      "outputVariable": "layer2",
+      "positionX": 1000, "positionY": 100,
+      "dependsOn": ["checkLayer2Gate"],
+      "configJson": {
+        "documentTextFrom": "sanitization.output.sanitizedText",
+        "practiceAreaHintFrom": "parameters.practiceAreaHint",
+        "documentTypeHintFrom": "parameters.documentTypeHint",
+        "model": "gpt-4o",
+        "$comment-model": "Per Phase 1 D-59 cheap-gates-expensive: Layer 2 = gpt-4o. Per-action override via sprk_systemprompt.parameters.model.",
+        "$comment-branch": "Reached ONLY when checkLayer2Gate.selectedBranch == 'layer2Extract' (Wave C1 Gap #2 engine patch enforces this). When checkLayer2Gate routes to 'emitObservations' (insufficient), this node is skipped — preventing the expensive gpt-4o call when gate=insufficient (cost concern + correctness concern per design-a5 §7.2)."
+      }
+    },
+    {
+      "name": "groundingVerify",
+      "nodeType": "Control",
+      "actionCode": "INS-GRND@v1",
+      "$comment-actionCode": "Insights Engine r2 Wave B (EXISTING): INS-GRND action row in sprk_analysisaction, lookup '70 — Grounding Verify' with sprk_executoractiontype=70. Reused from Wave B (predict-matter-cost@v1 also uses INS-GRND).",
+      "actionType": 70,
+      "$comment-actionType": "ActionType.GroundingVerify = 70; handled by GroundingVerifyNode (existing).",
+      "outputVariable": "grounded",
+      "positionX": 1300, "positionY": 100,
+      "dependsOn": ["layer2Extract"],
+      "configJson": {
+        "citationsFrom": "layer2",
+        "citationsJsonPath": "candidates",
+        "sourceChunksFrom": "sanitization",
+        "sourceChunksJsonPath": "chunks",
+        "$comment": "Same shape as predict-matter-cost groundCitations node. Quote-level verification against raw chunks; failed citations are dropped from downstream (Verdict ≠ Verified ∧ ≠ VerifiedApproximate per r1 IngestOrchestrator BuildExtractionResultAsync)."
+      }
+    },
+    {
+      "name": "emitObservations",
+      "nodeType": "Output",
+      "actionCode": "INS-OBSE@v1",
+      "$comment-actionCode": "Insights Engine r2 Wave C1: NEW action row INS-OBSE in sprk_analysisaction, lookup '140 — Observation Emit' with sprk_executoractiontype=140. Created during Wave C1 deploy step.",
+      "actionType": 140,
+      "$comment-actionType": "ActionType.ObservationEmit = 140 (NEW in Wave C1). Handled by ObservationEmitterNodeExecutor; wraps IObservationEmitter + IObservationIndexUpserter + IObservationMirror.",
+      "outputVariable": "emission",
+      "positionX": 1600, "positionY": 200,
+      "dependsOn": ["groundingVerify", "checkLayer2Gate"],
+      "$comment-dependsOn": "TWO upstreams — groundingVerify (sufficient path) AND checkLayer2Gate (insufficient path). Branch-aware skip (Gap #2 patch) handles OR-semantics: when groundingVerify is skipped (insufficient), emitObservations sees its dep as 'Ok(null) skip-success' (per PlaybookOrchestrationService.ExecuteNodeAsync line 857) and runs anyway. When sufficient, groundingVerify produces grounded.candidates and emitObservations emits N L2 observations (one per surviving candidate).",
+      "configJson": {
+        "groundedFrom": "grounded",
+        "groundedJsonPath": "candidates",
+        "documentRefFrom": "parameters.documentRef",
+        "matterIdFrom": "parameters.matterId",
+        "tenantIdFrom": "parameters.tenantId",
+        "gateFrom": "gate",
+        "$comment": "ObservationEmitterNodeExecutor emits N observations (one per surviving L2 candidate after grounding) + the L1 observation (already emitted in layer1Classify executor's post-LLM emission hook — TODO Wave C4). Output shape matches r1 InsightsIngestResult exactly: { observationsEmitted: int, layer1Classification: string, layer2Triggered: boolean }. Returned to caller via IInsightsAi.RunIngestAsync."
+      }
+    }
+  ],
+
+  "dependsOnGraph": {
+    "$comment": "Documentation-only view of the dependency graph. Realized in Dataverse via sprk_dependsonjson on each node row. The seed script Deploy-Playbook.ps1 sets these from the 'dependsOn' arrays above. Per-edge 'branch' labels feed Gap #2 engine patch — ExecutionGraph stores them, PlaybookOrchestrationService.ExecuteNodeAsync consults selectedBranch on EvidenceSufficiencyResult to skip non-selected-branch downstream nodes. Note: Deploy-Playbook.ps1 currently does NOT persist per-edge branch labels — Wave C1 Gap #2 patch reads them at orchestrator construction time from a NEW sprk_branchedgejson field on each node row, OR inferentially: an edge from an EvidenceSufficiencyNode carries the downstream node's name vs sufficientBranch/insufficientBranch comparison.",
+    "edges": [
+      { "from": "sanitize", "to": "layer1Classify" },
+      { "from": "layer1Classify", "to": "checkLayer2Gate" },
+      { "from": "checkLayer2Gate", "to": "layer2Extract", "branch": "layer2Extract" },
+      { "from": "checkLayer2Gate", "to": "emitObservations", "branch": "emitObservations" },
+      { "from": "layer2Extract", "to": "groundingVerify" },
+      { "from": "groundingVerify", "to": "emitObservations" }
+    ]
+  },
+
+  "acceptanceCriteria": {
+    "$comment": "Mirrors task 020 POML <acceptance-criteria>. Used as documentation + as fixture targets for UniversalIngestPlaybookTests.cs.",
+    "criteria": [
+      "Playbook publishes successfully (sprk_analysisplaybook row + 6 sprk_playbooknodes rows in Dataverse, name='universal-ingest@v1', isSystemPlaybook=true)",
+      "Lint check passes — all 6 nodes have actionCode references (INS-SANI, INS-L1C, INS-EVID, INS-L2X, INS-GRND, INS-OBSE)",
+      "PlaybookExecutionEngine builds a 6-active-node execution graph at invocation",
+      "Sufficient-evidence smoke test: classification=Settlement, confidence=0.85 → 6 nodes execute end-to-end, layer2Extract runs, N L2 observations emitted (verified by inspecting spaarke-insights-index after smoke)",
+      "Insufficient-evidence smoke test: classification=Correspondence (not outcome-bearing) → checkLayer2Gate=insufficient → layer2Extract + groundingVerify SKIPPED (Gap #2 patch), emitObservations runs and emits only the L1 observation",
+      "Behavior parity with r1 IngestOrchestrator.cs on the same fixture document — same Observations land in spaarke-insights-index (differences documented + intentional)"
+    ]
+  }
+}

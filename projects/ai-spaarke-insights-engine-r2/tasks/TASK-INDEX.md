@@ -40,12 +40,12 @@
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [010](010-architecture-overview-refresh.poml) | A1 | Architecture overview refresh (Phase 1.5 framing) | 🔲 | 4h | ✅ | — |
-| [011](011-operator-guide-refresh.poml) | A2 | Operator/developer guide refresh | 🔲 | 4h | ✅ | — |
-| [012](012-2d-taxonomy-design.poml) | A3 | 2D taxonomy design + initial 3 practice areas | 🔲 | 1d | ✅ | — |
-| [013](013-prompt-variant-versioning-design.poml) | A4 | Prompt-variant + versioning + per-tenant-override design | 🔲 | 1d | ✅ | — |
-| [014](014-universal-ingest-jps-refactor-design.poml) | A5 | Universal-ingest JPS refactor design | 🔲 | 6h | ✅ | — |
-| [015](015-multi-entity-subject-design.poml) | A6 | Multi-entity subject design | 🔲 | 6h | ✅ | — |
+| [010](010-architecture-overview-refresh.poml) | A1 | Architecture overview refresh (Phase 1.5 framing) | ✅ | 4h | ✅ | — |
+| [011](011-operator-guide-refresh.poml) | A2 | Operator/developer guide refresh | ✅ | 4h | ✅ | — |
+| [012](012-2d-taxonomy-design.poml) | A3 | 2D taxonomy design + initial 3 practice areas | ✅ | 1d | ✅ | — |
+| [013](013-prompt-variant-versioning-design.poml) | A4 | Prompt-variant + versioning + per-tenant-override design | ✅ | 1d | ✅ | — |
+| [014](014-universal-ingest-jps-refactor-design.poml) | A5 | Universal-ingest JPS refactor design | ✅ | 6h | ✅ | — |
+| [015](015-multi-entity-subject-design.poml) | A6 | Multi-entity subject design | ✅ | 6h | ✅ | — |
 
 ---
 
@@ -53,11 +53,11 @@
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [020](020-universal-ingest-jps-playbook.poml) | C1 | Author universal-ingest@v1 JPS playbook | 🔲 | 2d | ❌ | 013, 014 |
-| [021](021-prompts-to-jps-storage.poml) | C2 | Migrate prompts from .txt → sprk_analysisaction.sprk_systemprompt | 🔲 | 1d | ✅ | 013 |
-| [022](022-retire-ingest-orchestrator.poml) | C3 | Retire IngestOrchestrator.cs | 🔲 | 4h | ❌ | 020, 023 |
-| [023](023-iinsightsai-facade-rewire.poml) | C4 | Update IInsightsAi.RunIngestAsync to invoke JPS playbook | 🔲 | 4h | ❌ | 020 |
-| [024](024-universal-ingest-parameterization.poml) | C5 | Universal-ingest parameterization | 🔲 | 4h | ✅ | 020 |
+| [020](020-universal-ingest-jps-playbook.poml) | C1 | Author universal-ingest@v1 JPS playbook | ✅ | 2d | ❌ | 013, 014 |
+| [021](021-prompts-to-jps-storage.poml) | C2 | Migrate prompts from .txt → sprk_analysisaction.sprk_systemprompt | ✅ | 1d | ✅ | 013 |
+| [022](022-retire-ingest-orchestrator.poml) | C3 | Retire IngestOrchestrator.cs | ✅ | 4h | ❌ | 020, 023 |
+| [023](023-iinsightsai-facade-rewire.poml) | C4 | Update IInsightsAi.RunIngestAsync to invoke JPS playbook | ✅ | 4h | ❌ | 020 |
+| [024](024-universal-ingest-parameterization.poml) | C5 | Universal-ingest parameterization | ✅ | 4h | ✅ | 020 |
 
 ---
 

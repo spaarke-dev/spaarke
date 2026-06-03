@@ -37,7 +37,8 @@ namespace Sprk.Bff.Api.Services.Insights.Observations;
 /// evidence (e.g., <c>spe://drive/{driveId}/item/{itemId}</c> →
 /// <c>sprk_document.sprk_driveitemid = itemId</c>). When the lookup fails (no document
 /// row with the matching drive-item id), the mirror logs a Warning and skips the write
-/// — per the §3.5 fire-and-forget contract, the caller (Zone A IngestOrchestrator) treats
+/// — per the §3.5 fire-and-forget contract, the caller (Zone A universal-ingest@v1
+/// node executor; legacy IngestOrchestrator retired Wave C-G4 / task 022) treats
 /// this as non-fatal.
 /// </para>
 /// <para>
@@ -188,8 +189,10 @@ public sealed class DataverseObservationMirror : IObservationMirror
         catch (Exception ex)
         {
             // Per IObservationMirror contract: write failures are non-fatal. The Zone A
-            // IngestOrchestrator already wraps MirrorAsync in try/catch; this defense-in-depth
-            // log captures the failure with stable EventId for App Insights queries.
+            // universal-ingest@v1 ObservationEmitterNodeExecutor wraps MirrorAsync in
+            // try/catch (matches the legacy IngestOrchestrator pattern retired Wave C-G4 /
+            // task 022); this defense-in-depth log captures the failure with stable
+            // EventId for App Insights queries.
             _logger.Log(
                 LogLevel.Warning,
                 MirrorWriteFailedEvent,

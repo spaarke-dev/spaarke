@@ -1,7 +1,8 @@
 <task id="023" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>C4 — Update IInsightsAi.RunIngestAsync to invoke universal-ingest JPS playbook</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-date>2026-06-02</completed-date>
     <wave>C</wave>
     <estimated-effort>4h</estimated-effort>
     <tags>facade, IInsightsAi, jps-invocation, zone-a, bff-api</tags>
@@ -63,4 +64,81 @@
     <criterion testable="true">Unit tests pass; §3.5 grep clean</criterion>
     <criterion testable="true">Facade contract (IInsightsAi.RunIngestAsync signature) unchanged</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Wave C-G3 completed 2026-06-02. Facade rewire lands the new playbook-invocation path inside
+    InsightsOrchestrator (the IInsightsAi impl) without breaking the Zone-B-importable contract.
+
+    DELIVERABLES (5 files: 3 production, 2 test):
+    - src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs (+320 LOC):
+      RunIngestAsync routes through a new RunIngestViaPlaybookAsync helper that assembles
+      JPS parameters from InsightsIngestRequest, invokes PlaybookOrchestrationService.RunAsync
+      for "universal-ingest@v1", and adapts PlaybookRunResult → InsightsIngestResult via
+      AdaptPlaybookResult (1:1 mapping from ObservationEmissionResult — parity-tested in C1).
+    - src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsIngestOptions.cs (NEW, 105 LOC):
+      Runtime feature flag UseUniversalIngestPlaybook (default true). NOT a DI-time conditional
+      registration — both implementations are registered unconditionally; the flag switches
+      between two real impls. §F.1 inspection documented inline in the XML doc.
+    - src/server/api/Sprk.Bff.Api/Infrastructure/DI/InsightsFacadeModule.cs (+10 LOC):
+      Options registration via standard IOptions pattern; no asymmetric registration.
+    - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/InsightsOrchestratorTests.cs (+547 LOC):
+      14 new tests covering happy-path adapter, parameter assembly invariants (required keys +
+      InvariantCulture serialization + omitted-overrides absent), 2 fallback paths
+      (RunFailed event + engine throws), 2 kill-switch paths (flag-off + empty playbook Guid),
+      defensive case (no emission output), document-not-indexable parity with r1.
+    - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Playbooks/PredictMatterCostPlaybookTests.cs
+      (+10 LOC): minor regression adjustments.
+
+    KEY DESIGN DECISIONS:
+    1. Result adapter projects ObservationEmissionResult (final node output) → InsightsIngestResult
+       1:1. Wave C1's ObservationEmitterNodeExecutor was already parity-tested against r1's
+       InsightsIngestResult shape, so the adapter is mechanical mapping.
+    2. Defensive fallback strategy: playbook engine THROW or RunFailed event → fall back to
+       legacy IIngestOrchestrator. Two exit paths, both logged with distinct EventIds:
+       - 8060: routed-to-playbook (happy path)
+       - 8061: routed-to-legacy (fallback or flag-off)
+       - 8062: adapter-mismatch (defensive)
+       - 8063: playbook-failed (engine reported RunFailed)
+       Observability tooling can attribute every code path unambiguously.
+    3. InvariantCulture for numeric serialization: CostCapOverride/Layer2Threshold serialize
+       as "1.50"/"0.7" regardless of host culture. Test explicitly verifies.
+    4. Optional overrides OMITTED from parameters dict when null (not sent as empty/null
+       string) — playbook parameterSchema defaults can apply per design-a5 §6.
+    5. CancellationToken propagated through all 3 awaited paths; OperationCanceledException
+       rethrown specifically before generic catch.
+    6. legacy IIngestOrchestrator registration STAYS active (Wave C-G4 task 022 retires it).
+
+    QUALITY GATES (FULL rigor):
+    - dotnet build src/server/api/Sprk.Bff.Api/: 0 errors, 0 warnings
+    - InsightsOrchestratorTests: 56 pass (42 pre-existing + 14 new), 0 fail, ~145ms
+    - code-review: 0 critical, 0 blocking warnings, 2 informational suggestions
+    - adr-check: 0 violations
+    - §10 BFF hygiene: clean (placement justified, ADRs cited, no new packages, no new
+      direct CRUD→AI dep, feature-module DI, §F.1 inspection documented inline)
+
+    KNOWN INFORMATIONAL OBSERVATIONS (not blocking):
+    - InsightsOrchestrator ctor now at 8 params (above ADR-010 soft cap 7). Justified by §3.5
+      facade boundary — cannot subdivide without violating Zone A/B. Wave C-G4 task 022 will
+      retire IIngestOrchestrator dep, bringing the ctor back to 7.
+    - InsightsOrchestrator file grew 351 → 659 lines (+88%). Above 500-line "critical"
+      threshold. Justified by cohesive single concern (the rewire); splitting harms
+      readability of the orchestration sequence.
+
+    DEPLOY ORDERING NOTE (per bff-extensions §F.4):
+    Runtime activation of the new path requires THREE deploys to align:
+    1. BFF deploy carrying THIS task's code + Wave C1's engine patches (Deploy-BffApi.ps1)
+    2. Universal-ingest@v1 playbook deploy to Spaarke Dev (Deploy-Playbook.ps1)
+    3. 4 sprk_analysisaction rows (INS-SANI@v1/INS-L1C@v1/INS-L2X@v1/INS-OBSE@v1) —
+       already DONE by Wave C2 (021) + schema-bump (7671aea6).
+    Until 1+2 align, the runtime flag falls through to legacy IIngestOrchestrator
+    (registered unchanged for this exact reason).
+
+    OPEN FOLLOW-UPS FOR WAVE C-G4 (task 022):
+    - Retire IngestOrchestrator.cs + IIngestOrchestrator interface
+    - Remove IIngestOrchestrator dep from InsightsOrchestrator ctor (8 → 7 params)
+    - Delete RunIngestViaLegacyAsync helper + related fallback EventIds
+    - Delete remaining .txt prompt files in Services/Ai/Insights/Prompts/ + IInsightsPromptLoader
+    - Remove 2 .schema.json files referenced by IInsightsPromptLoader
+    - Flag UseUniversalIngestPlaybook can be removed (or kept as kill-switch — owner decision)
+  </notes>
 </task>
