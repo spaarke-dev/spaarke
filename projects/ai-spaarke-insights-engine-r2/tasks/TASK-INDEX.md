@@ -65,7 +65,7 @@
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [030](030-document-type-and-matrix-schema.poml) | D1 | sprk_documenttype_ref + sprk_practicearea_documenttype N:N | 🔲 | 1d | ❌ | 012 |
+| [030](030-document-type-and-matrix-schema.poml) | D1 | sprk_documenttype_ref + sprk_practicearea_documenttype N:N | ✅ | 1d | ❌ | 012 |
 | [031](031-per-practice-area-layer1-prompts.poml) | D2 | Per-practice-area Layer 1 (3 areas) | 🔲 | 3d | ✅ | 030, 021 |
 | [032](032-per-area-doctype-layer2-schemas.poml) | D3 | Per-(area, doc-type) Layer 2 schemas (3–5 pairs) | 🔲 | 3d | ✅ | 030, 021 |
 | [033](033-universal-ingest-per-area-routing.poml) | D4 | Universal-ingest routes by practice-area | 🔲 | 1d | ❌ | 020, 031, 032 |
