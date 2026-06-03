@@ -45,7 +45,7 @@
 | 023 | Build Custom Pages sprk_kpiassessmentspage + sprk_invoicespage | FULL | ✅ | 015,021,022 | — | 025 |
 | 024 | Update VisualHost chart-def sprk_drillthroughtarget (2 records) | MINIMAL | ✅ | 023 | — | 025 |
 | 025 | Phase C deploy (Custom Pages + Dataverse solution) | STANDARD | ✅ | 021,022,023,024 | — | 026 |
-| 026 | Phase C UAT (Matter Health + Budget Performance drill-through) | STANDARD | 🔲 | 025 | — | — |
+| 026 | Phase C UAT (Matter Health + Budget Performance drill-through) | STANDARD | ✅ | 025 | — | — |
 
 ### Phase D — EventsPage Migration (6 tasks)
 
