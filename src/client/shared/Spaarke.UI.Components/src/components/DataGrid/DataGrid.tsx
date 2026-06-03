@@ -218,14 +218,17 @@ const useStyles = makeStyles({
     ...shorthands.padding(tokens.spacingVerticalM),
   },
   emptyState: {
+    // Sits inside gridScroll BELOW the (always-rendered) FluentDataGrid header
+    // row so the column-header chevron menus (Filter by / Sort) stay reachable
+    // when a filter returns 0 rows. Power Apps OOB pattern.
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    height: '100%',
     columnGap: tokens.spacingVerticalS,
     rowGap: tokens.spacingVerticalS,
     color: tokens.colorNeutralForeground3,
+    minHeight: '120px',
     ...shorthands.padding(tokens.spacingVerticalXXL),
   },
   sentinel: {
@@ -1012,64 +1015,73 @@ export const DataGrid: React.FC<DataGridProps> = props => {
            * row instead.
            */}
 
-          {isEmpty ? (
-            <div className={styles.emptyState}>
-              <Text size={400} weight="semibold">
-                {resolved.display.emptyStateMessage ?? 'No records to display'}
-              </Text>
-            </div>
-          ) : (
-            <div className={styles.gridScroll} ref={scrollContainerRef}>
-              <FluentDataGrid
-                items={items}
-                columns={tableColumns}
-                selectionMode={
-                  resolved.behavior.selectionMode === 'none'
-                    ? undefined
-                    : resolved.behavior.selectionMode === 'single'
-                      ? 'single'
-                      : 'multiselect'
-                }
-                selectedItems={selectedRowIds}
-                onSelectionChange={handleSelectionChange}
-                sortable={resolved.behavior.enableSorting}
-                resizableColumns={resolved.behavior.enableColumnResize}
-                columnSizingOptions={columnSizingOptions}
-                focusMode="composite"
-                size={density}
-                getRowId={(item: GridItem) => item._rowId}
-                style={{ width: '100%' }}
-                aria-label={contextValue.currentView}
-              >
-                <DataGridHeader>
-                  <DataGridRow selectionCell={{ checkboxIndicator: { 'aria-label': 'Select all rows' } }}>
-                    {({ renderHeaderCell }) => (
-                      <DataGridHeaderCell className={styles.headerCell}>{renderHeaderCell()}</DataGridHeaderCell>
-                    )}
-                  </DataGridRow>
-                </DataGridHeader>
-                <DataGridBody<GridItem>>
-                  {({ item, rowId }) => (
-                    <DataGridRow<GridItem>
-                      key={rowId}
-                      selectionCell={{ checkboxIndicator: { 'aria-label': 'Select row' } }}
-                    >
-                      {({ renderCell }) => <DataGridCell className={styles.cell}>{renderCell(item)}</DataGridCell>}
-                    </DataGridRow>
+          <div className={styles.gridScroll} ref={scrollContainerRef}>
+            {/*
+             * The FluentDataGrid is ALWAYS rendered (even when there are zero
+             * rows) so the column-header row — which hosts the chevron menus
+             * for Sort / Filter by / Column width — stays visible. If we
+             * unmounted it on the empty path, a filter that yielded 0 rows
+             * would leave the user with no way back to clear the filter.
+             * Power Apps OOB pattern: header always visible, body empty,
+             * empty-state message sits below the (empty) body.
+             */}
+            <FluentDataGrid
+              items={items}
+              columns={tableColumns}
+              selectionMode={
+                resolved.behavior.selectionMode === 'none'
+                  ? undefined
+                  : resolved.behavior.selectionMode === 'single'
+                    ? 'single'
+                    : 'multiselect'
+              }
+              selectedItems={selectedRowIds}
+              onSelectionChange={handleSelectionChange}
+              sortable={resolved.behavior.enableSorting}
+              resizableColumns={resolved.behavior.enableColumnResize}
+              columnSizingOptions={columnSizingOptions}
+              focusMode="composite"
+              size={density}
+              getRowId={(item: GridItem) => item._rowId}
+              style={{ width: '100%' }}
+              aria-label={contextValue.currentView}
+            >
+              <DataGridHeader>
+                <DataGridRow selectionCell={{ checkboxIndicator: { 'aria-label': 'Select all rows' } }}>
+                  {({ renderHeaderCell }) => (
+                    <DataGridHeaderCell className={styles.headerCell}>{renderHeaderCell()}</DataGridHeaderCell>
                   )}
-                </DataGridBody>
-              </FluentDataGrid>
+                </DataGridRow>
+              </DataGridHeader>
+              <DataGridBody<GridItem>>
+                {({ item, rowId }) => (
+                  <DataGridRow<GridItem>
+                    key={rowId}
+                    selectionCell={{ checkboxIndicator: { 'aria-label': 'Select row' } }}
+                  >
+                    {({ renderCell }) => <DataGridCell className={styles.cell}>{renderCell(item)}</DataGridCell>}
+                  </DataGridRow>
+                )}
+              </DataGridBody>
+            </FluentDataGrid>
 
-              {isLoadingRows && (
-                <div className={styles.loadMoreContainer}>
-                  <Spinner size="small" label="Loading more..." />
-                </div>
-              )}
+            {isEmpty && (
+              <div className={styles.emptyState}>
+                <Text size={400} weight="semibold">
+                  {resolved.display.emptyStateMessage ?? 'No records to display'}
+                </Text>
+              </div>
+            )}
 
-              {/* Infinite-scroll sentinel — IntersectionObserver wired above in useEffect. */}
-              <div ref={sentinelRef} className={styles.sentinel} aria-hidden="true" />
-            </div>
-          )}
+            {isLoadingRows && (
+              <div className={styles.loadMoreContainer}>
+                <Spinner size="small" label="Loading more..." />
+              </div>
+            )}
+
+            {/* Infinite-scroll sentinel — IntersectionObserver wired above in useEffect. */}
+            <div ref={sentinelRef} className={styles.sentinel} aria-hidden="true" />
+          </div>
 
           <div className={styles.footer} role="status" aria-live="polite">
             <Text size={200}>
