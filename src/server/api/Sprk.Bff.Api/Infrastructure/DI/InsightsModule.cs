@@ -66,21 +66,61 @@ public static class InsightsModule
         // Azure.Search.Documents.Indexes.SearchIndexClient already registered in Program.cs.
         services.AddScoped<IPrecedentProjectionSync, PrecedentProjectionSync>();
 
-        // ILiveFactResolver — D-P12 task 022 swap-path-preservation seam.
-        // Task 071 (Wave 8.5 pre-deploy gap fix, 2026-05-29): swapped from StubLiveFactResolver
-        // to DataverseLiveFactResolver. The stub threw LiveFactNotSupportedException on every
-        // call, which broke the predict-matter-cost playbook (D-P14 task 060) — the playbook's
-        // first node is a LiveFactNode that reads matter facts from sprk_matter. Stub stays in
-        // place at Services/Insights/LiveFacts/StubLiveFactResolver.cs as a test-only fallback
-        // (tests inject their own ILiveFactResolver; the stub is not consumed in production).
+        // ILiveFactResolver — D-P12 swap-path-preservation seam.
         //
-        // Scoped lifetime: matches DataversePrecedentBoard (Zone B Dataverse-read pattern) and
-        // matches IGenericEntityService which is typically resolved per-request. The previous
-        // Singleton lifetime worked only because the stub was stateless and never invoked.
+        // r2 Wave D5 (task 034) — Multi-entity per-entity resolvers per design-a6 §3 + §6.
+        // Per A6-D1 (resolver registration pattern), three concrete resolvers are registered
+        // unconditionally:
+        //   - MatterLiveFactResolver   (renamed from r1's DataverseLiveFactResolver; behavior 1:1)
+        //   - ProjectLiveFactResolver  (NEW; reads sprk_project per design-a6 §6.2)
+        //   - InvoiceLiveFactResolver  (NEW; reads sprk_invoice per design-a6 §6.3)
         //
-        // Zone B per SPEC §3.5 — DataverseLiveFactResolver imports IGenericEntityService only;
-        // ZERO AI-internal imports. Verified by .github/workflows/insights-eval.yml grep gate.
-        services.AddScoped<ILiveFactResolver, DataverseLiveFactResolver>();
+        // Dispatched via IReadOnlyDictionary<string, ILiveFactResolver> keyed by entity-type
+        // name (lower-case). LiveFactNode (Zone A) parses subjects via ISubjectParser and
+        // looks up the right resolver per-call.
+        //
+        // ADR-032 (BFF Null-Object Kill-Switch Pattern) / bff-extensions.md §F.1 inspection:
+        //   - These 3 resolvers are registered UNCONDITIONALLY (outside any `if (flag)` block)
+        //     per A6-D6. Their consumer LiveFactNode is registered in AnalysisServicesModule
+        //     unconditionally too. The asymmetric-registration anti-pattern does NOT apply.
+        //   - If a future task gates an additional resolver behind a feature flag AND that
+        //     resolver is consumed by an unconditionally-mapped endpoint, apply ADR-032 P3
+        //     (Fail-fast Null-Object — throws FeatureDisabledException) per design-a6 §7. P2
+        //     Quiet no-op is FORBIDDEN for query services like ILiveFactResolver per ADR-032.
+        //   - Static-scan recipe (per ADR-032 §10): no new `if (flag) { ... }` blocks added
+        //     by this registration; pattern verified compliant.
+        //
+        // DI minimalism (ADR-010) — net delta vs r1 = +4 registrations (parser + 2 new
+        // resolvers + dictionary; matter resolver replaces the existing single ILiveFactResolver
+        // registration). Within ADR-010 ≤15 non-framework target per design-a6 §3.4 + spec NFR-05.
+        //
+        // Lifetime per A6-D8:
+        //   - Concrete resolvers: Scoped (matches IGenericEntityService and r1 lifetime)
+        //   - Subject parser: Singleton (stateless; reads IOptions snapshot at construction)
+        //   - Dictionary: Scoped (carries scoped resolvers; lifetime must match)
+        //
+        // Zone B per SPEC §3.5 — all three resolvers import IGenericEntityService only; ZERO
+        // AI-internal imports. Verified by .github/workflows/insights-eval.yml grep gate.
+        //
+        // Subject scheme catalog binding — supports adding new schemes (e.g., 'client:',
+        // 'contract:') via appsettings.json without a code deploy, PROVIDED a matching
+        // resolver registration is also added here per the same pattern (A6-D1 + §2.3).
+        services.AddOptions<SubjectSchemeCatalogOptions>()
+            .BindConfiguration(SubjectSchemeCatalogOptions.SectionName);
+
+        services.AddSingleton<ISubjectParser, SubjectParser>();
+
+        services.AddScoped<MatterLiveFactResolver>();
+        services.AddScoped<ProjectLiveFactResolver>();
+        services.AddScoped<InvoiceLiveFactResolver>();
+
+        services.AddScoped<IReadOnlyDictionary<string, ILiveFactResolver>>(sp =>
+            new Dictionary<string, ILiveFactResolver>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["matter"]  = sp.GetRequiredService<MatterLiveFactResolver>(),
+                ["project"] = sp.GetRequiredService<ProjectLiveFactResolver>(),
+                ["invoice"] = sp.GetRequiredService<InvoiceLiveFactResolver>()
+            });
 
         // IObservationMirror — D-P11 task 051. SWAP OUT the NoOp registered by
         // InsightsIngestModule (Zone A) with the real DataverseObservationMirror impl

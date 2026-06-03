@@ -6,13 +6,20 @@ using Sprk.Bff.Api.Models.Insights;
 namespace Sprk.Bff.Api.Services.Insights.LiveFacts;
 
 /// <summary>
-/// Production <see cref="ILiveFactResolver"/> that reads <c>sprk_matter</c> via
-/// <see cref="IGenericEntityService"/> and returns a deterministic <see cref="FactArtifact"/>
-/// for each predicate the D-P14 <c>predict-matter-cost</c> synthesis playbook needs.
-/// Replaces <see cref="StubLiveFactResolver"/> as the DI-registered implementation per
-/// task 071 (Wave 8.5 pre-deploy gap fix).
+/// Production <see cref="ILiveFactResolver"/> for the <c>matter:</c> subject scheme. Reads
+/// <c>sprk_matter</c> via <see cref="IGenericEntityService"/> and returns a deterministic
+/// <see cref="FactArtifact"/> for each predicate the D-P14 <c>predict-matter-cost</c>
+/// synthesis playbook needs.
 /// </summary>
 /// <remarks>
+/// <para>
+/// <b>r2 Wave D5 (task 034)</b> — RENAMED from <c>DataverseLiveFactResolver</c> as part of the
+/// multi-entity subject design (Wave A6 / design-a6-multi-entity.md §6.1). The matter resolver
+/// is now one of three per-entity resolvers (matter, project, invoice) keyed by entity-type
+/// name in <c>IReadOnlyDictionary&lt;string, ILiveFactResolver&gt;</c> per A6-D1. Behavior
+/// is preserved 1:1 from r1 (D-P14 predict-matter-cost playbook continues to work without
+/// change).
+/// </para>
 /// <para>
 /// <b>Zone B placement</b> per SPEC §3.5 — lives under <c>Services/Insights/LiveFacts/</c>
 /// and consumes <see cref="IGenericEntityService"/> only. ZERO AI-internal imports (no
@@ -20,7 +27,7 @@ namespace Sprk.Bff.Api.Services.Insights.LiveFacts;
 /// Verified by the §3.5.4 forbidden-imports grep in <c>.github/workflows/insights-eval.yml</c>.
 /// </para>
 /// <para>
-/// <b>Supported predicates (Phase 1)</b> — see
+/// <b>Supported predicates (Phase 1, preserved into Phase 1.5)</b> — see
 /// <c>projects/ai-spaarke-insights-engine-r1/notes/sprk-matter-livefact-predicates.md</c>
 /// for the schema mapping rationale:
 /// <list type="bullet">
@@ -41,7 +48,10 @@ namespace Sprk.Bff.Api.Services.Insights.LiveFacts;
 /// <b>Subject format</b>: <c>matter:{guid}</c>. The <c>matter:</c> prefix is mandatory;
 /// the suffix must parse as a <see cref="Guid"/>. Invalid formats throw
 /// <see cref="LiveFactNotSupportedException"/> so playbook errors surface as
-/// node-level <c>InvalidConfiguration</c> rather than runtime exceptions.
+/// node-level <c>InvalidConfiguration</c> rather than runtime exceptions. r2 Wave D5
+/// preserves the per-resolver subject parsing for backward compatibility; the dispatch
+/// layer (<see cref="Sprk.Bff.Api.Services.Ai.Nodes.LiveFactNode"/>) also validates the
+/// scheme via <see cref="ISubjectParser"/> before routing here.
 /// </para>
 /// <para>
 /// <b>Confidence</b>: every returned <see cref="FactArtifact"/> carries
@@ -54,7 +64,7 @@ namespace Sprk.Bff.Api.Services.Insights.LiveFacts;
 /// lifetime in this codebase (consistent with <see cref="Precedents.DataversePrecedentBoard"/>).
 /// </para>
 /// </remarks>
-public sealed class DataverseLiveFactResolver : ILiveFactResolver
+public sealed class MatterLiveFactResolver : ILiveFactResolver
 {
     /// <summary>Logical name of the Dataverse entity this resolver reads.</summary>
     internal const string MatterEntityName = "sprk_matter";
@@ -91,11 +101,11 @@ public sealed class DataverseLiveFactResolver : ILiveFactResolver
     private const string PredicateCurrentMatterFacts = "currentMatterFacts";
 
     private readonly IGenericEntityService _entityService;
-    private readonly ILogger<DataverseLiveFactResolver> _logger;
+    private readonly ILogger<MatterLiveFactResolver> _logger;
 
-    public DataverseLiveFactResolver(
+    public MatterLiveFactResolver(
         IGenericEntityService entityService,
-        ILogger<DataverseLiveFactResolver> logger)
+        ILogger<MatterLiveFactResolver> logger)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -112,7 +122,7 @@ public sealed class DataverseLiveFactResolver : ILiveFactResolver
         ArgumentException.ThrowIfNullOrWhiteSpace(predicate);
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
 
-        // Parse "matter:{guid}" — only matter: scheme supported in Phase 1.
+        // Parse "matter:{guid}" — only matter: scheme supported by this resolver.
         // Invalid format surfaces as LiveFactNotSupportedException so the LiveFactNode
         // emits a node-level InvalidConfiguration error (graceful authoring feedback).
         var matterId = ParseMatterSubject(subject);
@@ -140,7 +150,7 @@ public sealed class DataverseLiveFactResolver : ILiveFactResolver
                 || ex.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase)))
         {
             _logger.LogDebug(
-                "DataverseLiveFactResolver: matter {MatterId} not found in Dataverse; returning null",
+                "MatterLiveFactResolver: matter {MatterId} not found in Dataverse; returning null",
                 matterId);
             return null;
         }
@@ -195,7 +205,7 @@ public sealed class DataverseLiveFactResolver : ILiveFactResolver
         if (lookup is null || lookup.Id == Guid.Empty)
         {
             _logger.LogDebug(
-                "DataverseLiveFactResolver: matter {MatterId} has no value for field {Field}; returning null for predicate {Predicate}",
+                "MatterLiveFactResolver: matter {MatterId} has no value for field {Field}; returning null for predicate {Predicate}",
                 matter.Id, fieldName, predicate);
             return null;
         }
@@ -233,7 +243,7 @@ public sealed class DataverseLiveFactResolver : ILiveFactResolver
     /// Build the composite <c>currentMatterFacts</c> Fact — a single FactArtifact whose
     /// <see cref="Value.Raw"/> is a JSON object containing all 4 sub-predicates. This
     /// shape matches the existing predict-matter-cost playbook's LiveFactNode ConfigJson
-    /// (predicate = "currentMatterFacts") so deploy in task 080 needs no playbook re-deploy.
+    /// (predicate = "currentMatterFacts") so the playbook continues to work unchanged.
     /// </summary>
     private FactArtifact BuildCompositeFact(
         Entity matter,

@@ -1,7 +1,7 @@
 <task id="034" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>D5 — Multi-entity subject schemes + per-entity ILiveFactResolver (matter, project, invoice)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>D</wave>
     <estimated-effort>2d</estimated-effort>
     <tags>multi-entity, ILiveFactResolver, subject-parser, di, zone-a, bff-api</tags>
@@ -9,6 +9,7 @@
     <parallel-safe>true</parallel-safe>
     <rigor>FULL</rigor>
     <wave-item>D5</wave-item>
+    <completed-date>2026-06-03</completed-date>
   </metadata>
 
   <prompt>
@@ -62,4 +63,58 @@
     <criterion testable="true">DI count within ADR-010 ≤15 target</criterion>
     <criterion testable="true">spec.md FR-03 demonstrably met</criterion>
   </acceptance-criteria>
+
+  <notes date="2026-06-03">
+    Completed via parallel dispatch in Wave D (concurrent with tasks 032 + 035).
+
+    DELIVERABLES:
+    - Renamed: DataverseLiveFactResolver.cs → MatterLiveFactResolver.cs (behavior 1:1)
+    - NEW: ProjectLiveFactResolver.cs (5 predicates: projectName, projectManager, client, projectStatus, currentProjectFacts)
+    - NEW: InvoiceLiveFactResolver.cs (5 predicates: invoiceNumber, invoiceTotal, invoiceStatus, relatedMatter, currentInvoiceFacts; relatedMatter returns {id,name} only — no recursion per A6-D7)
+    - NEW: SubjectSchemeCatalogOptions.cs + SubjectSchemeOptions (config-catalog per A6-D3)
+    - NEW: ISubjectParser + SubjectParser + InvalidSubjectFormatException + UnknownSubjectSchemeException + ParsedSubject
+    - MODIFIED: LiveFactNode.cs — dispatches via IReadOnlyDictionary&lt;string, ILiveFactResolver&gt; keyed by entity-type; constructor signature changed
+    - MODIFIED: InsightsModule.cs — registry registration (matter + project + invoice; SubjectParser; SubjectSchemeCatalogOptions binding)
+    - MODIFIED: StubLiveFactResolver.cs — updated comments + error message
+    - Tests NEW: ProjectLiveFactResolverTests.cs (13 tests), InvoiceLiveFactResolverTests.cs (13 tests), SubjectParserTests.cs (16 tests)
+    - Tests RENAMED: DataverseLiveFactResolverTests.cs → MatterLiveFactResolverTests.cs (28 tests; preserved behavior coverage)
+    - Tests UPDATED: LiveFactNodeTests.cs (12 tests inc. NEW multi-entity dispatch coverage), InsightsNodesIntegrationTests.cs (helper updated to wire registry; GUIDs replace legacy "M-1234" stub IDs)
+
+    DECISIONS:
+    - Predicate impls: ProjectLiveFactResolver and InvoiceLiveFactResolver use placeholder Dataverse attribute names per design-a6 §6.2/§6.3. D5-Q1 (project schema confirm) + D5-Q2 (invoice schema confirm) remain open follow-ups for Wave D7 fixtures. The dispatch logic + Value shapes are load-bearing and tested; the attribute name strings can be updated when Dataverse schema confirms.
+    - Registry pattern: explicit factory registration (per design-a6 §3.4 sample) — keyed lookup via Dictionary&lt;string, ILiveFactResolver&gt; with StringComparer.OrdinalIgnoreCase. NOT auto-discovery (a NodeExecutorRegistry-style scan would require a marker interface; explicit registration is simpler and matches A6-D1 + design-a6 §3.3 reasoning).
+    - ADR-032 (P1/P2/P3): NONE — all 3 resolvers registered UNCONDITIONALLY per A6-D6. §F.1 inspection performed inline in InsightsModule.cs XML doc. No new `if (flag)` blocks; asymmetric-registration anti-pattern does not apply. If a future task gates a resolver behind a flag AND the resolver is consumed by an unconditionally-mapped endpoint, apply P3 Fail-fast Null-Object per ADR-032 (P2 forbidden for query services).
+
+    LIFETIME / LIFETIMES PRESERVED:
+    - Concrete resolvers: Scoped (matches r1 + IGenericEntityService)
+    - SubjectParser: Singleton (stateless; IOptions snapshot at construction)
+    - Dictionary: Scoped (carries scoped resolvers)
+    - LiveFactNode (Singleton in AnalysisServicesModule): unchanged — same captive-dependency landmine as r1 (Scoped resolvers via Singleton consumer) preserved with no new exposure
+
+    DI NET DELTA: +5 unconditional registrations (parser + 2 new resolvers + dictionary + options binding). Within ADR-010 ≤15 non-framework target. Per design-a6 §3.4 the design-time estimate was +4; the extra +1 is the explicit AddOptions().BindConfiguration() for SubjectSchemeCatalogOptions.
+
+    ACCEPTANCE CRITERIA:
+    - matter regression-free ✅ — 28 MatterLiveFactResolverTests preserve 1:1 behavior; LiveFactNode integration tests routed through dispatcher continue to pass for matter subjects
+    - project subject resolves ✅ — 13 ProjectLiveFactResolverTests cover the 5 predicates + composite + error paths
+    - invoice subject resolves ✅ — 13 InvoiceLiveFactResolverTests cover the 5 predicates + Money/decimal unwrapping + A6-D7 no-recursion verification
+    - Unknown scheme returns 400 (dispatcher surfaces InvalidConfiguration; endpoint translates to 400) ✅ — covered by LiveFactNodeTests.ExecuteAsync_UnknownScheme_ReturnsInvalidConfiguration + SubjectParserTests.TryParse_UnregisteredScheme_Fails
+    - DI count within ≤15 ✅
+    - FR-03 met ✅ (project + invoice subjects functional end-to-end)
+
+    QUALITY GATES:
+    - Build: Sprk.Bff.Api ✅ 0 errors / 0 NEW warnings; Tests project ✅ same
+    - Tests: Insights filter — 395 passed / 0 failed; LiveFact|Resolver|SubjectParser filter — 221 passed / 0 failed; Node|LiveFact|Resolver|Module|Orchestrator filter — 564 passed / 2 skipped (pre-existing) / 0 failed
+    - DI host build verified at test-runtime: "Registering 18 node executors" log confirms full service-provider construction succeeds with the new registry pattern
+
+    COORDINATION (parallel with 032 + 035):
+    - Did NOT touch InsightsOrchestrator.cs (035 may also touch it for scope-shape changes — no collision)
+    - Touched InsightsModule.cs (035 may also; my changes are additive — new registrations near the existing ILiveFactResolver block, no rewrites of surrounding registrations)
+    - Did NOT touch Models/Insights/InsightArtifact.cs (035 owns the Scope.EntityType + Scope.EntityId addition; resolvers leave Scope.MatterId null for non-matter subjects until 035 lands)
+
+    OPEN FOLLOW-UPS:
+    - D5-Q1: confirm sprk_project predicate attribute names with playbook-author SME at Wave D7 fixtures
+    - D5-Q2: confirm sprk_invoice predicate attribute names (especially sprk_matter lookup field name) against Spaarke Dev schema at Wave D7 fixtures
+    - Index migration: scope.entityType + scope.entityId additions land in 035 (Wave D6); resolvers will populate them once the model fields exist
+    - A6-D6 P3 kill-switch: deferred unless/until a future task gates a resolver behind a feature flag
+  </notes>
 </task>

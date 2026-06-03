@@ -211,6 +211,58 @@
       "retrievable": true,
       "sortable": false,
       "facetable": true
+    },
+    {
+      "_comment_": "Wave D6 (task 035) — top-level scope ComplexType for multi-entity subjects per design-a6 §4. Hybrid backward-compat: scope.matterId is kept for Phase 1 matter-subject queries (NFR-08); scope.entityType + scope.entityId are the canonical generalized fields for matter, project, invoice, and future schemes. Reader dual-read filter (design-a6 §4.5): for matter subjects, OR-filter scope/matterId OR (scope/entityType eq 'matter' and scope/entityId eq ...). All three fields are filterable strings; nullable (Phase 1 Observations omit them entirely and remain queryable via tenantId + subject).",
+      "name": "scope",
+      "type": "Edm.ComplexType",
+      "fields": [
+        {
+          "name": "matterId",
+          "type": "Edm.String",
+          "searchable": false,
+          "filterable": true,
+          "retrievable": true,
+          "sortable": false,
+          "facetable": true
+        },
+        {
+          "name": "entityType",
+          "type": "Edm.String",
+          "searchable": false,
+          "filterable": true,
+          "retrievable": true,
+          "sortable": false,
+          "facetable": true
+        },
+        {
+          "name": "entityId",
+          "type": "Edm.String",
+          "searchable": false,
+          "filterable": true,
+          "retrievable": true,
+          "sortable": false,
+          "facetable": false
+        },
+        {
+          "name": "tenantId",
+          "type": "Edm.String",
+          "searchable": false,
+          "filterable": true,
+          "retrievable": true,
+          "sortable": false,
+          "facetable": false
+        },
+        {
+          "name": "practiceArea",
+          "type": "Edm.String",
+          "searchable": false,
+          "filterable": true,
+          "retrievable": true,
+          "sortable": false,
+          "facetable": true
+        }
+      ]
     }
   ],
   "similarity": {
