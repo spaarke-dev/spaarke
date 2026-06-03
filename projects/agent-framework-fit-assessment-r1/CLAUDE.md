@@ -44,7 +44,7 @@ This project **blocks** [`projects/agent-framework-knowledge-r1/`](../agent-fram
 | S2 | AnalysisOrchestration + JPS playbooks | `Services/Ai/AnalysisOrchestrationService.cs`, `IPlaybookExecutionEngine.cs`, `IPlaybookOrchestrationService.cs`, `Nodes/*Executor.cs`, `ExecutionGraph.cs` |
 | S3 | Builder agent | `Services/Ai/Builder/BuilderAgentService.cs`, `BuilderToolDefinitions.cs`, `BuilderToolExecutor.cs`, `BuilderScopeImporter.cs` |
 | S4 | Background AI jobs | `Services/Jobs/`, `Services/Ai/Jobs/` (whatever exists), `ServiceBusJobProcessor.cs` |
-| S5 | Foundry Agent Service overlap | `knowledge/foundry-agent-service/`, no Spaarke code yet |
+| S5 | Foundry Agent Service overlap | **Bimodal**: `src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/` (shipped wrapper, default-OFF per ADR-018) + `knowledge/foundry-agent-service/` (curated canonical durable/HITL surface, no Spaarke code yet) |
 | S6 | M365 Copilot / Declarative Agent surface | `projects/ai-m365-copilot-integration/` design + spec docs |
 | S7 | Insights Engine MCP server | `projects/ai-spaarke-insights-engine-r1/` design + spec docs |
 | S8 | Future / discovered surfaces | Whatever surfaces during task 001 inventory |

@@ -4,7 +4,8 @@
     <phase>1</phase>
     <tags>assessment, inventory, foundry, copilot, mcp, insights-engine</tags>
     <estimate>1h</estimate>
-    <status>pending</status>
+    <status>completed</status>
+    <completion-summary>Completed 2026-06-03 via parallel sub-agent (commit dae72474). Output: notes/02-non-bff-ai-touchpoints-inventory.md (3 surface sections + 3 cross-cutting observations + 6 UNKNOWNs). Key findings: (1) S5 is BIMODAL — shipped in-BFF Foundry wrapper at Services/Ai/Foundry/ using Azure.AI.Projects.AgentsClient (default-OFF per ADR-018, consumed by AgentServiceRoutingMiddleware + JPS AgentServiceNodeExecutor ActionType=60) PLUS planned canonical durable/HITL legal workflows (curated-only); SPEC §3 S5 row was factually wrong and has been corrected; (2) S6 M365 Copilot uses Microsoft.Agents.Builder / Microsoft.Agents.Core (M365 Agents SDK), NOT Agent Framework; MCP server is Tier 3 deferred to R2; (3) S7 Insights Engine MCP IMPLEMENTATION DEFERRED to Phase 2 — only the SPEC D-A20 contract is in Phase 1 scope; (4) Negative-result greps: FoundryAgentClient, AIProjectClient, McpTool, HostedAgent, ModelContextProtocol all returned zero matches in src/.</completion-summary>
     <parallel-group>A</parallel-group>
     <parallel-safe>true</parallel-safe>
     <dependencies>000</dependencies>

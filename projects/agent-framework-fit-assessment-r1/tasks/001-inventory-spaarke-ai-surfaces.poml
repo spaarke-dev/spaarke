@@ -4,7 +4,8 @@
     <phase>1</phase>
     <tags>assessment, inventory, spaarke-ai, read-only</tags>
     <estimate>1.5h</estimate>
-    <status>pending</status>
+    <status>completed</status>
+    <completion-summary>Completed 2026-06-03 via parallel sub-agent (commit cb883dd9). Output: notes/01-spaarke-ai-surfaces-inventory.md (5 surfaces + 7 cross-cutting observations). Key findings: (1) Microsoft.Agents.AI package is referenced in Sprk.Bff.Api.csproj but ZERO source usage — clean evidence for "half-adopted" framing; (2) S1 SprkChat is the ONLY surface using Extensions.AI primitives; S2/S3/S4 use IOpenAiClient wrapper or OpenAI.Chat SDK directly; (3) Middleware decorates ISprkChatAgent (Spaarke interface) not IChatClient — Spaarke missed canonical chatClient.AsBuilder().Use(...).Build() idiom; (4) Two S8 surfaces discovered: SessionSummarizationService + CapabilityRouter — recommend folding into S1 perimeter for task 004; (5) GitHub Issue #6268 carried forward as RED FLAG on S1 lift-to-ChatClientAgent.</completion-summary>
     <parallel-group>A</parallel-group>
     <parallel-safe>true</parallel-safe>
     <dependencies>000</dependencies>

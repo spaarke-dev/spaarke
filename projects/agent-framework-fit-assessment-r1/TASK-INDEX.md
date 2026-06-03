@@ -11,7 +11,7 @@ Canonical plan: [`SPEC.md`](./SPEC.md) · Project conventions: [`CLAUDE.md`](./C
 | # | Phase | Status | Notes |
 |---|---|---|---|
 | 0 | Primary-source baseline (task 000) | ✅ | Done 2026-06-03. SHA afa7834e (1.9 release). 34 primary sources, 100% within recency floor. Critical findings: AF 1.0 GA April 2026; #6268 streaming bug affects S1; massive sample catalog expansion. |
-| 1 | Inventory current state (tasks 001-002) | 🔲 | Read Spaarke AI code + non-BFF AI touchpoints; produce structured findings tables |
+| 1 | Inventory current state (tasks 001-002) | ✅ | Done 2026-06-03 (parallel-group A, both commits landed). 001: S1 only Extensions.AI user; S2/S3/S4 use IOpenAiClient or raw OpenAI SDK; Microsoft.Agents.AI package referenced but ZERO source usage; 2 S8 surfaces discovered (SessionSummarizationService, CapabilityRouter) recommended for S1 perimeter. 002: S5 is BIMODAL — shipped in-BFF Foundry wrapper (Services/Ai/Foundry/, ADR-018 default-OFF) + planned canonical durable surface (curated only); S6 uses M365 Agents SDK not Agent Framework; S7 MCP deferred to Phase 2. |
 | 2 | Agent Framework feature mapping (task 003) | 🔲 | Map Microsoft.Agents.AI + Workflows surface area; **mandatory live-URL citations** from notes/00 |
 | 3 | Per-surface decision analysis (task 004) | 🔲 | Apply SPEC §4 criteria to each of S1-S8 |
 | 4 | Deployment + migration (task 005) | 🔲 | Deployment model + aggregated migration cost / risks |
@@ -23,8 +23,8 @@ Canonical plan: [`SPEC.md`](./SPEC.md) · Project conventions: [`CLAUDE.md`](./C
 | ID | Title | Phase | Rigor | Parallel group | Status | Owner |
 |---|---|---|---|---|---|---|
 | [000](tasks/000-refresh-primary-sources.poml) | Refresh primary sources baseline (recent-content-only) | 0 | STANDARD | — | ✅ | Claude (2026-06-03) |
-| [001](tasks/001-inventory-spaarke-ai-surfaces.poml) | Inventory Spaarke AI code surfaces (S1-S4 + S8 catch) | 1 | STANDARD | A | 🔲 | — |
-| [002](tasks/002-inventory-non-bff-ai-touchpoints.poml) | Inventory non-BFF AI touchpoints (S5-S7) | 1 | STANDARD | A | 🔲 | — |
+| [001](tasks/001-inventory-spaarke-ai-surfaces.poml) | Inventory Spaarke AI code surfaces (S1-S4 + S8 catch) | 1 | STANDARD | A | ✅ | Claude (2026-06-03, sub-agent commit cb883dd9) |
+| [002](tasks/002-inventory-non-bff-ai-touchpoints.poml) | Inventory non-BFF AI touchpoints (S5-S7) | 1 | STANDARD | A | ✅ | Claude (2026-06-03, sub-agent commit dae72474) |
 | [003](tasks/003-map-agent-framework-features.poml) | Map Agent Framework feature surface vs. Extensions.AI baseline | 2 | STANDARD | B | 🔲 | — |
 | [004](tasks/004-per-surface-decision-analysis.poml) | Apply decision criteria to each surface; produce per-surface matrix | 3 | STANDARD | — | 🔲 | — |
 | [005](tasks/005-deployment-and-migration-analysis.poml) | Deployment model recommendations + aggregated migration cost analysis | 4 | STANDARD | — | 🔲 | — |
@@ -41,7 +41,9 @@ Canonical plan: [`SPEC.md`](./SPEC.md) · Project conventions: [`CLAUDE.md`](./C
 
 ## Gaps / blocks log
 
-_None yet — populate as tasks execute._
+- **2026-06-03 (task 002)**: SPEC §3 S5 row was factually wrong — claimed "no Spaarke production code yet" but task 002 found a shipped in-BFF Foundry wrapper at `src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/` (5 .cs files, default-OFF kill switch per ADR-018, consumed by `AgentServiceRoutingMiddleware` + JPS `AgentServiceNodeExecutor`). **Action**: SPEC.md S5 row + CLAUDE.md S5 row updated 2026-06-03 to describe S5 as bimodal (shipped wrapper + planned canonical surface). Task 004 decision matrix must address BOTH facets.
+- **2026-06-03 (task 001)**: Two S8 surfaces discovered via Grep — `Services/Ai/Sessions/SessionSummarizationService.cs` and `Services/Ai/Capabilities/CapabilityRouter.cs` both use `IChatClient` outside the inventoried S1/S2/S3/S4 perimeters. Task 001 inventory recommends folding into S1 perimeter; task 004 must apply the decision matrix to them.
+- **2026-06-03 (task 001 + #6268)**: GitHub Issue #6268 (.NET `ChatClientAgent.RunStreamingAsync` ends with no assistant text on multi-tool turns) — RED FLAG carried into S1 inventory. Task 004's S1 ADOPT recommendation must condition on resolution/workaround; task 007 must re-fetch the issue at adversarial-review time and re-evaluate.
 
 ## Reference
 
