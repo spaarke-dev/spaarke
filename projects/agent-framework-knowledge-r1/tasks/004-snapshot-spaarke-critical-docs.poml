@@ -1,0 +1,62 @@
+<task id="004" project="agent-framework-knowledge-r1">
+  <metadata>
+    <title>Snapshot Spaarke-critical docs (middleware, observability, MCP clients)</title>
+    <phase>2</phase>
+    <tags>knowledge-base, agent-framework, documentation, middleware, observability, mcp</tags>
+    <estimate>1.5h</estimate>
+    <status>pending</status>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Snapshot the Microsoft Learn reference docs covering the three Agent Framework areas where Spaarke has the deepest production investment: middleware (Spaarke has AgentTelemetry / AgentContentSafety / AgentCostControl middleware), observability (OpenTelemetry pipeline to Application Insights), and MCP client tools (BFF consuming external MCP servers — separate from the Spaarke MCP server pattern).</goal>
+    <context>SprkChatAgent.cs uses IChatClient with UseFunctionInvocation — the middleware pattern is directly applicable. AgentTelemetryMiddleware emits structured telemetry per the OTel docs. Spaarke also has hosted-mcp tool integration. These three pages are the highest-leverage references for modifying the existing middleware pipeline.</context>
+    <constraints>
+      - YAML frontmatter on every doc (source + fetched + optional note)
+      - WebFetch each URL; if 404, search learn.microsoft.com for canonical replacement and log substitution
+      - Capture content verbatim
+      - Sub-agents may write to knowledge/ but NOT to .claude/
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>knowledge/agent-framework/SOURCE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentTelemetryMiddleware.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentContentSafetyMiddleware.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentCostControlMiddleware.cs</file>
+      <file>projects/agent-framework-knowledge-r1/SPEC.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read the 3 Spaarke middleware files in &lt;knowledge&gt; to identify what the middleware actually does — used to verify upstream docs map to Spaarke's pattern</step>
+    <step>middleware.md ← https://learn.microsoft.com/en-us/agent-framework/agents/middleware (or fallback /agents/extending-agents if 404). Capture verbatim including IChatClient.AsBuilder().Use*().Build() composition</step>
+    <step>observability.md ← https://learn.microsoft.com/en-us/agent-framework/agents/observability (or fallback /agents/telemetry). Capture OTel source-name conventions, Azure Monitor exporter wiring</step>
+    <step>hosted-mcp-tools.md ← https://learn.microsoft.com/en-us/agent-framework/agents/tools/hosted-mcp-tools (Spaarke BFF as MCP consumer pattern)</step>
+    <step>mcp-clients.md ← https://learn.microsoft.com/en-us/agent-framework/agents/mcp-clients (or fallback). If page does not exist as a separate URL, log GAP and capture the relevant section from tools/ overview instead</step>
+    <step>For each successful fetch: write knowledge/agent-framework/docs/&lt;name&gt;.md with YAML frontmatter</step>
+    <step>Update knowledge/agent-framework/SOURCE.md "Reference docs snapshot" table</step>
+    <step>For each 404 or substitution: log in SOURCE.md GAPs</step>
+    <step>Commit: `docs(knowledge): snapshot agent-framework middleware/observability/mcp docs (R1 task 004)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>WebFetch</tool>
+    <tool>WebSearch</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>knowledge/agent-framework/docs/middleware.md</output>
+    <output>knowledge/agent-framework/docs/observability.md</output>
+    <output>knowledge/agent-framework/docs/hosted-mcp-tools.md</output>
+    <output>knowledge/agent-framework/docs/mcp-clients.md (or GAP entry if not separately documented)</output>
+    <output>knowledge/agent-framework/SOURCE.md (updated)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>At least 3 new .md docs under knowledge/agent-framework/docs/ (middleware, observability, hosted-mcp-tools must succeed; mcp-clients may GAP)</criterion>
+    <criterion>YAML provenance on every fetched doc</criterion>
+    <criterion>SOURCE.md table updated; substitutions logged</criterion>
+  </acceptance-criteria>
+</task>

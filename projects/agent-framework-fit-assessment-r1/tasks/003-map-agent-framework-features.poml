@@ -1,0 +1,71 @@
+<task id="003" project="agent-framework-fit-assessment-r1">
+  <metadata>
+    <title>Map Agent Framework feature surface vs. Extensions.AI baseline</title>
+    <phase>2</phase>
+    <tags>assessment, feature-mapping, agent-framework, extensions-ai</tags>
+    <estimate>1.5h</estimate>
+    <status>pending</status>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>000</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Produce a feature catalog answering: "What does Microsoft.Agents.AI provide that raw Microsoft.Extensions.AI does NOT?" Be specific — name the types, capabilities, and behavior gaps. Every feature claim MUST cite a live Microsoft Learn URL (with fetched date) or an upstream sample at the SHA pinned by task 000. Output: projects/agent-framework-fit-assessment-r1/notes/03-agent-framework-feature-map.md. This catalog is the input to task 004's per-surface decision matrix.</goal>
+    <context>Spaarke is already using Extensions.AI (IChatClient, AIFunction, ChatResponseUpdate). The question is what Agents.AI adds. Without a sharp feature map, the per-surface analysis collapses into "Agent Framework is a framework, frameworks are good." Specific feature claims (e.g., "AIAgent base provides A2A proxy support; Extensions.AI does not") let the assessment make grounded recommendations. The platform was released early 2026; today is 2026-06-03. Every feature description MUST be grounded in primary sources captured by task 000 (notes/00-primary-source-baseline.md), NOT in curated knowledge/agent-framework/ snapshots which are 3+ weeks stale.</context>
+    <constraints>
+      - Primary sources MANDATORY: every feature description cites a live Microsoft Learn URL (with the fetched date from notes/00-primary-source-baseline.md) OR an upstream sample at the SHA pinned by task 000. NOT just the curated docs snapshot
+      - Citation format: each feature has a "Primary sources:" line listing the URLs + fetched dates used to ground the claim
+      - For each feature: name the Microsoft.Agents.AI type or capability, what it provides over the Extensions.AI baseline, and an explicit Spaarke-applicability note ("would replace X in S1; not relevant to S2 because Y")
+      - Do NOT just summarize Agent Framework docs — explicitly call out what's NEW vs. what's already in Extensions.AI. This is the entire point of the feature map
+      - Curated knowledge/agent-framework/ snapshots may be used for ORIENTATION but NOT as primary citation source — live URLs win when they conflict
+      - Where notes/00-primary-source-baseline.md identifies a documentation gap (page 404, no recent content, JS-rendered), invoke the researcher subagent OR re-WebFetch at task time; if still gap, log honestly and mark the feature claim as "evidence-thin"
+      - Workflows (Microsoft.Agents.AI.Workflows): include but distinguish from agents — Workflows is a separate surface; cite workflows/ Learn page primary
+      - MCP client integration: include — cite agents/tools/hosted-mcp-tools and any MCP-client-specific page from notes/00-
+      - A2A proxies: include — cite agents/ A2A subsection
+      - Sessions / context providers: include — cite agents/sessions-and-state + agents/context-providers if separately documented
+      - Output format: one section per feature with subsections "What it is" / "What Extensions.AI provides (or doesn't)" / "Spaarke applicability" / "Primary sources" (list of URLs + fetched dates)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/agent-framework-fit-assessment-r1/SPEC.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/notes/00-primary-source-baseline.md</file>
+      <file>knowledge/agent-framework/docs/overview.md</file>
+      <file>knowledge/agent-framework/docs/agents.md</file>
+      <file>knowledge/agent-framework/docs/workflows.md</file>
+      <file>knowledge/agent-framework/SOURCE.md</file>
+      <file>knowledge/agent-framework/NOTES.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read notes/00-primary-source-baseline.md FIRST — this is the authoritative source list. The curated docs are orientation only</step>
+    <step>Read the curated overview/agents/workflows snapshots for orientation; note explicitly which curated claims will need re-verification against the live URLs from notes/00-</step>
+    <step>Identify the feature categories: (1) agent abstractions — AIAgent / ChatClientAgent / common base, (2) sessions — service-side + in-memory state management, (3) context providers — pluggable RAG / memory plumbing, (4) middleware framework — IChatClient.AsBuilder().Use*().Build() composition, (5) structured outputs — schema-bound response parsing, (6) tools — AIFunctionFactory + [Description] + hosted MCP tools + code execution, (7) workflows — graph-based orchestration with checkpoints + supersteps + HITL, (8) MCP client — first-class MCP server consumption, (9) A2A proxies — remote-agent invocation, (10) observability — built-in OTel source-name conventions</step>
+    <step>For each feature: pull the relevant Learn page captures + samples references from notes/00-. Where notes/00- recorded a URL but only summarized content, WebFetch the full page now to capture details (Read the captured summary + fetch live for completeness). Record fetched-date on every citation</step>
+    <step>For each: distinguish Microsoft.Agents.AI primitive (NEW) from Microsoft.Extensions.AI primitive (BASELINE). Cite the namespace explicitly per primary source. Concretely — IChatClient is Extensions.AI; ChatClientAgent is Agents.AI. AIFunction is Extensions.AI; AIAgent base is Agents.AI. Get this right; everything else hinges on it</step>
+    <step>For each: Spaarke applicability note keyed to surfaces S1-S7. Be specific: "AIAgent base would replace Spaarke's ad-hoc ISprkChatAgent interface in S1, gaining A2A proxy support for free; not relevant to S2 because that surface is JPS-driven and never invokes an LLM directly through an agent interface"</step>
+    <step>Where notes/00- identified an evidence gap (no recent Learn page, JS-rendered, 404) OR where a feature is more nuanced than the page describes: invoke researcher subagent with a narrow question + recency-floor instruction ("only cite sources dated 2026-04-01 or later"). Capture the researcher's findings inline with provenance</step>
+    <step>Recency self-check: for every primary source cited in the feature map, verify the fetched date is from this project (2026-06-XX). If any citation traces back to the 2026-05-14 curated snapshot only, either upgrade to a live citation or flag the feature as "evidence-thin from current sources"</step>
+    <step>Write notes/03-agent-framework-feature-map.md — section per feature with the 4 subsections (What it is / Extensions.AI baseline / Spaarke applicability / Primary sources)</step>
+    <step>Commit: `docs(assessment): feature map with live primary-source citations (R1 task 003)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>WebFetch</tool>
+    <tool>Write</tool>
+    <tool>Agent(researcher)</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>projects/agent-framework-fit-assessment-r1/notes/03-agent-framework-feature-map.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>notes/03-agent-framework-feature-map.md exists with at least 10 features documented</criterion>
+    <criterion>Each feature has the 4 subsections: What it is / Extensions.AI baseline / Spaarke applicability / Primary sources</criterion>
+    <criterion>Microsoft.Agents.AI vs Microsoft.Extensions.AI distinction is sharp — never conflated</criterion>
+    <criterion>Each feature has a Spaarke-applicability note keyed to specific surfaces S1-S7</criterion>
+    <criterion>Every feature has at least 1 primary-source URL with fetched date from this project (NOT solely the 2026-05-14 curated snapshot)</criterion>
+    <criterion>Recency self-check section confirms ≥80% of citations dated 2026-04-01 onwards; remaining flagged with evidence-thin note</criterion>
+    <criterion>Researcher subagent invocations recorded inline with provenance + recency-floor instruction passed</criterion>
+  </acceptance-criteria>
+</task>

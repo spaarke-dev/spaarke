@@ -1,0 +1,59 @@
+<task id="005" project="agent-framework-knowledge-r1">
+  <metadata>
+    <title>Snapshot migration + hosted-agents docs</title>
+    <phase>2</phase>
+    <tags>knowledge-base, agent-framework, documentation, migration, semantic-kernel, autogen, hosting</tags>
+    <estimate>1h</estimate>
+    <status>pending</status>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Snapshot the Microsoft Learn migration guides (from Semantic Kernel and from AutoGen) and the hosted-agents / deployment reference. These are useful for: (a) understanding which Agent Framework primitives subsume Semantic Kernel / AutoGen idioms Claude may otherwise reach for, (b) Spaarke's deployment-model decisions when hosting Agent Framework-based code.</goal>
+    <context>Agent Framework is the explicit successor to both Semantic Kernel and AutoGen (per overview.md). Many engineers (and Claude) will have SK / AutoGen patterns in working memory. The migration guides encode the correct upstream mapping. The hosted-agents / deployment reference covers durable hosting options — relevant for the agent-vs-Workflow-vs-Foundry decision documented in NOTES.md.</context>
+    <constraints>
+      - YAML frontmatter on every doc
+      - WebFetch each URL; if 404, search learn.microsoft.com and log substitution
+      - Capture verbatim
+      - Sub-agents may write to knowledge/ but NOT to .claude/
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>knowledge/agent-framework/SOURCE.md</file>
+      <file>knowledge/agent-framework/docs/overview.md</file>
+      <file>projects/agent-framework-knowledge-r1/SPEC.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>migration-from-semantic-kernel.md ← https://learn.microsoft.com/en-us/agent-framework/migration/from-semantic-kernel (or fallback /migration-guide/from-semantic-kernel)</step>
+    <step>migration-from-autogen.md ← https://learn.microsoft.com/en-us/agent-framework/migration/from-autogen</step>
+    <step>hosted-agents.md ← https://learn.microsoft.com/en-us/agent-framework/hosting/ (or /agents/hosting if 404)</step>
+    <step>samples-overview.md ← https://learn.microsoft.com/en-us/agent-framework/samples (orientation index of upstream samples — useful for future curation)</step>
+    <step>For each: write knowledge/agent-framework/docs/&lt;name&gt;.md with YAML frontmatter</step>
+    <step>Update knowledge/agent-framework/SOURCE.md "Reference docs snapshot" table</step>
+    <step>For each 404 / substitution: log in SOURCE.md GAPs</step>
+    <step>Commit: `docs(knowledge): snapshot agent-framework migration + hosting docs (R1 task 005)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>WebFetch</tool>
+    <tool>WebSearch</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>knowledge/agent-framework/docs/migration-from-semantic-kernel.md</output>
+    <output>knowledge/agent-framework/docs/migration-from-autogen.md</output>
+    <output>knowledge/agent-framework/docs/hosted-agents.md</output>
+    <output>knowledge/agent-framework/docs/samples-overview.md</output>
+    <output>knowledge/agent-framework/SOURCE.md (updated)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>At least 3 of 4 target docs successfully snapshotted (samples-overview is nice-to-have)</criterion>
+    <criterion>YAML provenance on every doc</criterion>
+    <criterion>SOURCE.md updated</criterion>
+  </acceptance-criteria>
+</task>

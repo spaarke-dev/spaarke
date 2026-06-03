@@ -1,0 +1,57 @@
+<task id="002" project="agent-framework-fit-assessment-r1">
+  <metadata>
+    <title>Inventory non-BFF AI touchpoints (S5-S7)</title>
+    <phase>1</phase>
+    <tags>assessment, inventory, foundry, copilot, mcp, insights-engine</tags>
+    <estimate>1h</estimate>
+    <status>pending</status>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>000</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Produce a structured inventory of Spaarke's AI touchpoints that live OUTSIDE the BFF process: S5 Foundry Agent Service overlap, S6 M365 Copilot / Declarative Agent surface, S7 Insights Engine MCP server. Output: projects/agent-framework-fit-assessment-r1/notes/02-non-bff-ai-touchpoints-inventory.md.</goal>
+    <context>The fit assessment is incomplete without these surfaces. Foundry Agent Service is the canonical durable / HITL / A2A platform — Agent Framework's relationship to it must be clear before recommending adoption boundaries. M365 Copilot integration uses declarative agents + plugins — Agent Framework's role there is different from the BFF chat agent. The Insights Engine MCP is a separate deployable — the assessment must consider whether it should host Agent Framework agents.</context>
+    <constraints>
+      - READ-ONLY across all surfaces
+      - For each surface: capture (a) current implementation status (production / in-flight / planned), (b) primary spec/design docs to cite, (c) which Microsoft.* abstractions are involved (or planned), (d) deployment model, (e) integration seam with BFF (if any), (f) HITL / durability requirements
+      - Read project design docs and SPECs in each referenced project directory — these are the source of truth for in-flight work
+      - S5 has no Spaarke code yet — inventory is from knowledge/foundry-agent-service/ + ADR-013 references + any project that planned to use Foundry
+      - Where information is genuinely unknown, write "UNKNOWN (no current source)" — do not invent
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/agent-framework-fit-assessment-r1/SPEC.md</file>
+      <file>knowledge/foundry-agent-service/NOTES.md</file>
+      <file>knowledge/foundry-agent-service/SOURCE.md</file>
+      <file>projects/ai-m365-copilot-integration/README.md</file>
+      <file>projects/ai-spaarke-insights-engine-r1/README.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>S5 Foundry Agent Service overlap: Read knowledge/foundry-agent-service/NOTES.md + SOURCE.md + docs/hosted-agents.md + docs/GAP-memory.md. Glob src/ for any Foundry-related code (FoundryAgentClient, AIProjectClient, Microsoft.Agents.AI.Foundry). Inventory: what's curated, what's planned, what (if anything) is in Spaarke code already</step>
+    <step>S6 M365 Copilot / Declarative Agent surface: Read projects/ai-m365-copilot-integration/README.md + any SPEC.md/design.md/plan.md in that project. Inventory: Copilot integration approach (declarative agent + plugins? MCP?), how it surfaces BFF capabilities, whether Agent Framework agents host any of this surface</step>
+    <step>S7 Insights Engine MCP server: Read projects/ai-spaarke-insights-engine-r1/README.md + SPEC.md if present + the design docs under that project. Inventory: what the MCP server does, how it's deployed (separate from BFF?), what AI capabilities it exposes, whether it would host Agent Framework agents</step>
+    <step>For each surface: capture the 6 fields from constraints (status / docs / abstractions / deployment / BFF seam / HITL+durability needs)</step>
+    <step>Write notes/02-non-bff-ai-touchpoints-inventory.md with sections: S5 Foundry overlap | S6 M365 Copilot | S7 Insights Engine MCP | Cross-cutting observations (e.g., "two of three surfaces are external consumers; one is durable/HITL territory")</step>
+    <step>Commit: `docs(assessment): inventory non-BFF AI touchpoints (R1 task 002)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+    <tool>Write</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>projects/agent-framework-fit-assessment-r1/notes/02-non-bff-ai-touchpoints-inventory.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>notes/02-non-bff-ai-touchpoints-inventory.md exists with sections for S5, S6, S7</criterion>
+    <criterion>Each surface has all 6 fields populated (status / docs / abstractions / deployment / BFF seam / HITL+durability)</criterion>
+    <criterion>Unknown information is explicitly marked "UNKNOWN", not invented</criterion>
+    <criterion>Cross-cutting observations identifies at least 2 patterns</criterion>
+  </acceptance-criteria>
+</task>

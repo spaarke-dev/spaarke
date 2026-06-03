@@ -1,0 +1,63 @@
+<task id="005" project="agent-framework-fit-assessment-r1">
+  <metadata>
+    <title>Deployment model recommendations + aggregated migration cost analysis</title>
+    <phase>4</phase>
+    <tags>assessment, deployment, migration, adr-013, bff-extensions</tags>
+    <estimate>1.5h</estimate>
+    <status>pending</status>
+    <parallel-group>—</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>004</dependencies>
+  </metadata>
+  <prompt>
+    <goal>For surfaces with ADOPT or PARTIAL recommendations from task 004, produce: (a) explicit deployment-model recommendation keyed to ADR-013 + ADR-001 + bff-extensions.md, (b) aggregated migration cost + risk analysis. Output: projects/agent-framework-fit-assessment-r1/notes/05-deployment-and-migration.md. This feeds assessment doc §6 (deployment recommendations) and §7 (migration cost + risks).</goal>
+    <context>Deployment is the question that turns "should we use Agent Framework" into "where exactly does it live." Per ADR-013, default is in-process BFF. Per SPEC §4d, exceptions require all four criteria + the agent-specific deployment options (in-process BFF / MCP server / Function / hosted Foundry Agent). For each adopt-surface, the assessment must commit to a model.</context>
+    <constraints>
+      - Skip surfaces with DON'T ADOPT recommendations from task 004 (note them as "no migration; no deployment change")
+      - For each adopt-surface: explicit deployment model — one of (in-process BFF | MCP server | Azure Function | hosted Foundry Agent | mixed-with-specifics)
+      - Cite ADR-013 §4 criteria explicitly when justifying a non-default deployment
+      - Cite bff-extensions.md publish-size baseline (~60 MB compressed) when discussing package impact
+      - Aggregate migration cost: total estimated dev effort (rough — person-weeks), risk areas (publish-size, OTel pipeline disruption, test infrastructure changes, team learning), reversibility per surface
+      - Surface BFF publish-size risk explicitly if any adoption adds new top-level NuGet refs — bff-extensions.md says baseline is ~60 MB compressed; the BFF jumped to 75+ MB in 2026-05-19 from accumulated additions
+      - If any deployment model is genuinely novel for Spaarke (e.g., hosting Agent Framework agents AS Foundry agents): flag it as needing prototyping, not direct adoption
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/agent-framework-fit-assessment-r1/SPEC.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/notes/04-per-surface-decision-matrix.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Re-read notes/04 to inventory ADOPT and PARTIAL surfaces; note DON'T ADOPT surfaces</step>
+    <step>Re-read ADR-013 §"Exceptions" — the 4-criteria gate for non-BFF deployables; ADR-001 §Functions scope</step>
+    <step>For each ADOPT/PARTIAL surface: evaluate the 4 ADR-013 criteria explicitly (latency coupling? transactional coupling? bounded surface? component-duplication?). Recommend deployment model. Cite criteria results</step>
+    <step>For deployment models other than in-process BFF: state additional considerations — MCP server scaling, Function event-driven trigger pattern, Foundry Agent hosting + cost</step>
+    <step>Aggregate migration cost: across all ADOPT/PARTIAL surfaces, sum estimated dev effort. Identify shared infrastructure changes (e.g., "all 4 adopt-surfaces require lifting middleware from per-instance to IChatClient.AsBuilder().Use*() composition — this is one shared infra change, not four separate ones")</step>
+    <step>Publish-size analysis: enumerate new NuGet refs implied by adoption — Microsoft.Agents.AI.*, Microsoft.Agents.AI.Foundry, Microsoft.Agents.AI.Workflows if applicable. Estimate compressed size delta. Flag if exceeds bff-extensions.md baseline tolerance</step>
+    <step>Risk register: 5-10 risks across adopt-surfaces. For each: surface(s) affected, mitigation, severity</step>
+    <step>Reversibility analysis per adopt-surface: if adoption goes badly, what's the rollback path? (this informs §8 open questions in the synthesis)</step>
+    <step>Write notes/05-deployment-and-migration.md with sections: Deployment-model recommendations (per surface) | Shared infrastructure changes | Publish-size impact | Risk register | Reversibility analysis | DON'T ADOPT surfaces (one line each — "no migration")</step>
+    <step>Commit: `docs(assessment): deployment + migration analysis (R1 task 005)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>projects/agent-framework-fit-assessment-r1/notes/05-deployment-and-migration.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Every ADOPT/PARTIAL surface has explicit deployment-model recommendation</criterion>
+    <criterion>Each non-default (non-in-process-BFF) deployment cites ADR-013 §4 criteria</criterion>
+    <criterion>Publish-size analysis enumerates new NuGet refs + estimated size delta</criterion>
+    <criterion>Risk register has 5-10 items with surface / mitigation / severity</criterion>
+    <criterion>DON'T ADOPT surfaces listed with one-line "no migration" notes</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,78 @@
+<task id="000" project="agent-framework-fit-assessment-r1">
+  <metadata>
+    <title>Refresh primary sources baseline — recent-content-only</title>
+    <phase>0</phase>
+    <tags>assessment, primary-sources, provenance, refresh, web-research, recency</tags>
+    <estimate>1.5h</estimate>
+    <status>completed</status>
+    <completion-summary>Completed 2026-06-03. Output: notes/00-primary-source-baseline.md (9 sections, 34 citable primary sources, 100% within 2026-04-01 recency floor). New upstream SHA: afa7834e (2026-06-03, "1.9 release"). Major findings: Agent Framework 1.0 GA April 2026; 1.9 ships today at BUILD 2026; GitHub Issue #6268 (.NET ChatClientAgent multi-tool streaming bug) directly affects S1 decision; samples catalog expanded massively vs. 2026-05-14 curated baseline (4 → 50+ samples across 5 categories).</completion-summary>
+    <parallel-group>—</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Build a current-date primary-source baseline for the assessment by (a) re-pulling microsoft/agent-framework at HEAD, (b) WebFetching the relevant live Microsoft Learn pages, (c) sweeping Microsoft Devblogs + GitHub Issues + Discussions for content dated 2026-04-01 onwards, (d) inventorying the upstream samples tree at HEAD. Output: projects/agent-framework-fit-assessment-r1/notes/00-primary-source-baseline.md — every URL captured with fetched date, every claim downstream tasks make must cite this baseline.</goal>
+    <context>Agent Framework was released early 2026; today is 2026-06-03. The existing knowledge/agent-framework/ curated snapshot is pinned at SHA 3256550c (2026-05-14) — 3 weeks of upstream drift for a fast-moving release. The user's explicit constraint: this is a new area of capability, so sources must be very recent. Decision-grade output cannot ground itself in 3-week-old snapshots when the platform itself is months old. This task locks the source baseline to current date BEFORE any inventory or analysis runs.</context>
+    <constraints>
+      - Recency floor: prefer content dated 2026-05-01 onwards; accept 2026-04-01 onwards; older content acceptable ONLY for: (a) SHA-pinned upstream samples that haven't changed, (b) the foundational overview/concepts pages that don't typically rev, (c) ADRs / Spaarke internal docs. Every captured source MUST have a YYYY-MM-DD date field — if no date can be established, flag in GAPs and do not cite as primary
+      - Live URL discipline: every captured page records (i) URL, (ii) fetched date (today), (iii) any publication / last-modified date visible, (iv) one-line summary, (v) Spaarke-relevance note keyed to S1-S7
+      - GitHub provenance: capture the repo HEAD SHA at clone time + the commit date. Diff the 4 existing curated samples against fresh clone; log any drift
+      - GitHub Issues / Discussions sweep: filter open + last 60 days; capture issue/discussion titles + URLs + one-line summaries; prioritize labels: bug, breaking-change, dotnet, samples, observability, middleware
+      - Devblog sweep: target devblogs.microsoft.com/semantic-kernel/, devblogs.microsoft.com/ai/, devblogs.microsoft.com/dotnet/. Use WebSearch with date filter when possible. Capture posts dated 2026-04-01 onwards mentioning Agent Framework
+      - Microsoft Learn page set (minimum): overview, agents/, agents/tools/, agents/middleware, agents/observability, agents/sessions-and-state, agents/providers/, agents/structured-outputs (or equivalent), workflows/, hosting/ (or agents/hosting), migration/from-semantic-kernel, migration/from-autogen, samples. WebFetch each; if 404, find canonical replacement and log substitution
+      - Samples directory survey: shallow clone is enough. Walk dotnet/samples/ at HEAD; produce a one-line catalog of every numbered category and key sample folder. This catalog informs task 003's feature mapping
+      - Honest gaps: if a source 404s, is paywalled, or is JS-rendered and WebFetch returns a stub — log it. Do NOT invent. Do NOT cite a curated snapshot as primary when the live URL fails — log the substitution
+      - This task does NOT update knowledge/agent-framework/SOURCE.md or NOTES.md. Its output lives in the project's notes/ directory only. Knowledge curation refresh is a separate concern (the parked agent-framework-knowledge-r1 project)
+      - Use c:/tmp/agent-framework/ for the shallow clone; delete after task
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/agent-framework-fit-assessment-r1/SPEC.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/CLAUDE.md</file>
+      <file>knowledge/agent-framework/SOURCE.md</file>
+      <file>knowledge/agent-framework/docs/overview.md</file>
+      <file>knowledge/agent-framework/docs/agents.md</file>
+      <file>knowledge/agent-framework/docs/workflows.md</file>
+      <file>knowledge/agent-framework/NOTES.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Create projects/agent-framework-fit-assessment-r1/notes/ directory if not present</step>
+    <step>Read the existing curated snapshot (knowledge/agent-framework/SOURCE.md + docs/overview.md + docs/agents.md + docs/workflows.md) so the baseline can record what's NEW vs. what's already curated</step>
+    <step>Shallow clone microsoft/agent-framework to c:/tmp/agent-framework via `git clone --depth 1 https://github.com/microsoft/agent-framework c:/tmp/agent-framework`</step>
+    <step>Capture new HEAD SHA + commit date + subject via `git -C c:/tmp/agent-framework log -1 --format="%H%n%ci%n%s"`. Note SHA delta vs. 2026-05-14 baseline (3256550c)</step>
+    <step>Diff the 4 existing curated samples (01-get-started/02_add_tools, 02-agents/Agents/Agent_Step05_Observability, 03-workflows/_StartHere/01_Streaming, 03-workflows/Orchestration/Handoff) against fresh clone. Note any drift</step>
+    <step>Walk dotnet/samples/ at HEAD — produce a structured catalog: every numbered category, count of samples per category, list of new category names not in the curated SOURCE.md table. This catalog goes into the baseline document</step>
+    <step>WebFetch the Microsoft Learn page set (per constraints — minimum 13 pages). For each: record URL, fetched date, page-visible last-modified date if shown, headings, one-line summary, S1-S7 relevance. If 404, search learn.microsoft.com for canonical replacement</step>
+    <step>WebSearch + WebFetch Microsoft Devblogs for posts dated 2026-04-01 onwards. Queries: `"Microsoft Agent Framework" site:devblogs.microsoft.com after:2026-04-01`, `"Microsoft Agent Framework" Azure OpenAI`, `"Microsoft Agent Framework" middleware OR observability`. Capture top results with publication date</step>
+    <step>GitHub Issues sweep: WebFetch github.com/microsoft/agent-framework/issues?q=is:issue+is:open + filter visually for last-60-days activity. Capture top 10-15 by relevance to: dotnet, observability, middleware, breaking changes, samples</step>
+    <step>GitHub Discussions sweep: WebFetch github.com/microsoft/agent-framework/discussions. Capture top 10 dated 2026-04-01 onwards prioritizing adoption/migration questions</step>
+    <step>Write notes/00-primary-source-baseline.md with sections: (1) Refresh metadata — fetched at, executor; (2) Upstream repo state — SHA, commit date, drift vs. 2026-05-14; (3) Samples catalog — directory tree at HEAD, NEW samples; (4) Microsoft Learn pages captured — table with URL/fetched/last-modified/relevance; (5) Devblog posts captured — table with URL/published/title/Spaarke-relevance; (6) GitHub Issues + Discussions — table with URL/date/topic; (7) Recency audit — count of citations by month, % satisfying ≥2026-04-01 floor; (8) GAPs — 404s, paywalled, JS-rendered, no date, etc.; (9) Provenance citation rules for downstream tasks</step>
+    <step>Delete c:/tmp/agent-framework</step>
+    <step>Commit: `docs(assessment): primary-source baseline at YYYY-MM-DD for fit assessment (R1 task 000)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Bash</tool>
+    <tool>WebFetch</tool>
+    <tool>WebSearch</tool>
+    <tool>Write</tool>
+    <tool>Glob</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>projects/agent-framework-fit-assessment-r1/notes/00-primary-source-baseline.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Baseline document exists with all 9 sections per constraints</criterion>
+    <criterion>Current upstream HEAD SHA + commit date recorded + drift-from-2026-05-14 noted</criterion>
+    <criterion>At least 13 Microsoft Learn pages WebFetched and tabled with URL + fetched-date + relevance</criterion>
+    <criterion>At least 3 Devblog posts dated 2026-04-01 onwards captured (or honest GAPs entry stating "no recent posts surfaced" with the searches that were run)</criterion>
+    <criterion>At least 10 GitHub Issues OR Discussions from last 60 days captured</criterion>
+    <criterion>Samples catalog enumerates every numbered category in dotnet/samples/ at HEAD</criterion>
+    <criterion>Recency audit shows ≥70% of new citations dated 2026-04-01 onwards (older permitted only for SHA-pinned samples + ADRs + foundational overview pages)</criterion>
+    <criterion>Every captured URL has a fetched date; every cited claim downstream MUST trace back to this baseline</criterion>
+    <criterion>c:/tmp/agent-framework deleted</criterion>
+  </acceptance-criteria>
+</task>
