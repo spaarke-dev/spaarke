@@ -89,6 +89,7 @@ import {
   Filter16Filled,
   Filter20Filled,
   Filter20Regular,
+  FilterDismiss20Regular,
   ArrowAutofitWidth20Regular,
   ArrowUp20Regular,
   ArrowDown20Regular,
@@ -714,6 +715,12 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
     setTimeout(() => setFilterOpen(true), 50);
   }, []);
 
+  const handleClearFilter = React.useCallback(() => {
+    if (!descriptor) return;
+    onStateChange(setChipValue(state, descriptor.attribute, undefined));
+    setMenuOpen(false);
+  }, [descriptor, onStateChange, state]);
+
   // ─────────────────────────────────────────────────────────────────────────
   // Render path 1 — plain label (no menu)
   // ─────────────────────────────────────────────────────────────────────────
@@ -749,17 +756,20 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
               descriptor ? `header-cell-content-trigger-${descriptor.attribute}` : 'header-cell-content-trigger'
             }
           >
-            {active && (
-              <span className={styles.filterIndicator} aria-hidden="true">
-                <Filter16Filled />
-              </span>
-            )}
             <Text className={styles.label} title={label}>
               {label}
             </Text>
             {effectiveSort !== null && (
               <span className={styles.sortIndicator} aria-hidden="true">
                 {effectiveSort === 'asc' ? '▲' : '▼'}
+              </span>
+            )}
+            {/* Active-filter glyph lives inside the chevron group (between
+                sort indicator and dropdown chevron) so the column looks like
+                `Name ↑ ▼ ⌄` — Power Apps OOB pattern. */}
+            {active && (
+              <span className={styles.filterIndicator} aria-hidden="true">
+                <Filter16Filled />
               </span>
             )}
             <span className={styles.dropdownChevron} aria-hidden="true">
@@ -810,6 +820,19 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
                     data-testid={`header-cell-content-menu-filter-${descriptor!.attribute}`}
                   >
                     Filter by
+                  </MenuItem>
+                )}
+
+                {/* Clear filter — only rendered when this column has an
+                    active filter. Drops the chipState entry for the column's
+                    attribute, restoring all rows for the current view. */}
+                {filterable && active && (
+                  <MenuItem
+                    icon={<FilterDismiss20Regular />}
+                    onClick={handleClearFilter}
+                    data-testid={`header-cell-content-menu-clear-filter-${descriptor!.attribute}`}
+                  >
+                    Clear filter
                   </MenuItem>
                 )}
 
