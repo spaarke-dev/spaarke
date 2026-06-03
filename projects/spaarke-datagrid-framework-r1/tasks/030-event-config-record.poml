@@ -3,7 +3,7 @@
   <metadata>
     <title>Author sprk_gridconfiguration record for sprk_event (EventsPage migration anchor)</title>
     <phase>4: Phase D — EventsPage Migration</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>009</dependencies>
     <blocks>031,033,034</blocks>
@@ -82,6 +82,8 @@
 
   <notes>
     The `rowOpen.type` choice is the load-bearing element — `webResource` closes the record-link bug. Anything else would re-introduce the bug. Do NOT skip step 1 (read design.md Appendix verbatim).
+
+    **Completed 2026-06-03**: Record id `e15c2b93-a05f-f111-a825-70a8a59455f4` created in DEV (spaarkedev1). Configjson authored verbatim from design.md Appendix. Acceptance criteria all met. Smoke test (step 6) deferred to task 031 — wiring a standalone harness to throw away after the EventsPage rewrite would be wasted effort; task 031 IS the real first consumer. See [`notes/drafts/030-config-record-id.md`](../notes/drafts/030-config-record-id.md) for record details + downstream task wiring.
   </notes>
 
   <execution>

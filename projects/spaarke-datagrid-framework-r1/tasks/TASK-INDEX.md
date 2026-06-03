@@ -51,7 +51,7 @@
 
 | ID | Title | Rigor | Status | Dependencies | Parallel | Blocks |
 |---|---|---|---|---|---|---|
-| 030 | sprk_gridconfiguration record for sprk_event (anchor) | STANDARD | 🔲 | 009 | — | 031,033,034 |
+| 030 | sprk_gridconfiguration record for sprk_event (anchor) | STANDARD | ✅ | 009 | — | 031,033,034 |
 | 031 | Rewrite EventsPage/App.tsx as ~150-line thin host | FULL | 🔲 | 009,030 | — | 032,034 |
 | 032 | Retire @spaarke/events-components/{GridSection,AssignedToFilter,RecordTypeFilter,StatusFilter} | STANDARD | 🔲 | 031 | D1 | 034 |
 | 033 | SpaarkeAi Calendar widget migrate to new DataGrid — UQ-06 | FULL | 🔲 | 030,031 | D1 | 034 |
