@@ -72,13 +72,15 @@ jobs:
           skip-dirs: 'knowledge'
           trivyignores: '.trivyignore'
 
-      - name: Upload Trivy scan results to GitHub Security tab
-        # TEMPORARY: SARIF upload disabled to remove blocking Code Scanning check.
-        # Set to `if: always()` (or delete this line) to re-enable. See header block.
-        if: false
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: 'trivy-results.sarif'
+      # TEMPORARY (2026-06-02): SARIF upload disabled to remove the blocking
+      # GitHub Code Scanning result check while the CVE backlog is cleared
+      # (project: trivy-cve-backlog-cleanup-r1). To re-enable, uncomment the
+      # step below. See header block for full rationale.
+      # - name: Upload Trivy scan results to GitHub Security tab
+      #   uses: github/codeql-action/upload-sarif@v4
+      #   if: always()
+      #   with:
+      #     sarif_file: 'trivy-results.sarif'
 
   build-test:
     name: Build & Test
