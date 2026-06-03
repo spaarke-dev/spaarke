@@ -29,8 +29,8 @@
  */
 
 import * as React from 'react';
-import { makeStyles, tokens, shorthands, Text, Button } from '@fluentui/react-components';
-import { DismissRegular, Calendar24Regular } from '@fluentui/react-icons';
+import { makeStyles, tokens, shorthands, Text, Button, CounterBadge } from '@fluentui/react-components';
+import { DismissRegular, Calendar24Regular, ErrorCircle12Filled } from '@fluentui/react-icons';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -63,11 +63,24 @@ export interface CalendarFilterClear {
 export type CalendarFilterOutput = CalendarFilterSingle | CalendarFilterRange | CalendarFilterClear;
 
 /**
- * Event date info for calendar indicators
+ * Event date info for calendar indicators.
+ *
+ * Task 064 (R4 B-8): added optional `overdue` flag. Call sites that produce
+ * IEventDateInfo[] MAY surface overdue-event days; CalendarSection renders a
+ * Fluent v9 token-based indicator (no hex) when `overdue === true`. Omitting
+ * the field (or passing `false`) preserves prior behavior (no indicator).
+ * The `count` field is also surfaced as a Fluent v9 `CounterBadge` when
+ * `count > 1` — single-event dates render without badge clutter.
  */
 export interface IEventDateInfo {
   date: string;
   count: number;
+  /**
+   * Optional overdue flag (task 064 / R4 B-8). When `true`, CalendarSection
+   * renders an overdue indicator on that day cell using Fluent v9 semantic
+   * danger tokens (per ADR-021). Backward-compatible — omit for no change.
+   */
+  overdue?: boolean;
 }
 
 /**
@@ -357,6 +370,41 @@ const useStyles = makeStyles({
   eventIndicatorSelected: {
     backgroundColor: tokens.colorNeutralForegroundOnBrand,
   },
+  // Task 064 (R4 B-8): event-count badge for days with count > 1. Uses
+  // Fluent v9 CounterBadge (semantic tokens, no hex/rgba per ADR-021).
+  // Positioned top-right of the day cell — visual sibling of the day number
+  // without competing with the dayWithEvents background or the overdue
+  // indicator (which sits bottom-right). Single-event days (count === 1)
+  // skip the badge entirely (parity rule).
+  countBadgeWrapper: {
+    position: 'absolute',
+    top: '1px',
+    right: '1px',
+    pointerEvents: 'none',
+  },
+  // Task 064 (R4 B-8): overdue indicator — small danger-colored dot in the
+  // bottom-right of the day cell. Uses Fluent v9 `colorStatusDangerForeground1`
+  // (per ADR-021 — no hex). Only renders when IEventDateInfo.overdue === true;
+  // absent or false preserves prior behavior (no indicator).
+  overdueIndicator: {
+    position: 'absolute',
+    bottom: '2px',
+    right: '2px',
+    color: tokens.colorStatusDangerForeground1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'none',
+    // When the day cell uses the dayWithEvents brand background, the
+    // status-danger token may not contrast enough. Override to the
+    // foreground-on-brand pair so the indicator stays visible.
+  },
+  // Task 064: when the cell has the brand-blue event background, the danger
+  // foreground token doesn't contrast well; swap to the inverted token via a
+  // sibling rule. Applied conditionally in the render loop.
+  overdueIndicatorOnBrand: {
+    color: tokens.colorNeutralForegroundOnBrand,
+  },
   footer: {
     display: 'flex',
     alignItems: 'center',
@@ -532,11 +580,17 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
   const [rangeStart, setRangeStart] = React.useState<string | null>(null);
   const [rangeEnd, setRangeEnd] = React.useState<string | null>(null);
 
-  // Build event date lookup for O(1) access
+  // Build event date lookup for O(1) access.
+  //
+  // Task 064 (R4 B-8): map value upgraded from `number` (count only) to the
+  // full IEventDateInfo so renderers can surface event-count badges (when
+  // count > 1) and overdue indicators (when overdue === true) per FR-11.
+  // Behavior parity preserved — single-event days (count === 1) skip the
+  // badge, and days without `overdue` skip the indicator.
   const eventDateMap = React.useMemo(() => {
-    const map = new Map<string, number>();
-    eventDates.forEach(({ date, count }) => {
-      map.set(date, count);
+    const map = new Map<string, IEventDateInfo>();
+    eventDates.forEach(info => {
+      map.set(info.date, info);
     });
     return map;
   }, [eventDates]);
@@ -684,7 +738,12 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
               const isToday = isSameDay(day, today);
               const dateState = getDateState(day);
               const dateStr = toIsoDateString(day);
-              const hasEvents = eventDateMap.has(dateStr);
+              // Task 064 (R4 B-8): eventDateMap value is now the full
+              // IEventDateInfo (was just `count`). `hasEvents` is the
+              // map-presence check; `eventInfo` exposes count + overdue
+              // for the new badge / indicator renders below.
+              const eventInfo = eventDateMap.get(dateStr);
+              const hasEvents = eventInfo !== undefined;
 
               // Task 122 (Round 13 follow-up #2): event-day highlight must
               // dominate the in-range visualization. Operator showed a screenshot
@@ -736,6 +795,35 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
                   <span className={styles.dayNumber}>{day.getDate()}</span>
                   {/* Task 126: legacy event-indicator dot removed (redundant
                       with the solid brand-blue background from dayWithEvents). */}
+
+                  {/* Task 064 (R4 B-8): count badge — only when count > 1
+                      (parity: single-event days stay clutter-free). Uses
+                      Fluent v9 CounterBadge (semantic tokens, ADR-021). */}
+                  {eventInfo && eventInfo.count > 1 && (
+                    <span className={styles.countBadgeWrapper} aria-hidden="true">
+                      <CounterBadge
+                        count={eventInfo.count}
+                        size="small"
+                        appearance="filled"
+                        color="informative"
+                        overflowCount={99}
+                      />
+                    </span>
+                  )}
+
+                  {/* Task 064 (R4 B-8): overdue indicator — only when
+                      IEventDateInfo.overdue === true. Uses v9 status-danger
+                      token (no hex). On the brand-blue event background, the
+                      indicator swaps to the foregroundOnBrand token so it
+                      remains legible. */}
+                  {eventInfo?.overdue === true && (
+                    <span
+                      className={`${styles.overdueIndicator} ${showEventsTint ? styles.overdueIndicatorOnBrand : ''}`}
+                      aria-label="Overdue"
+                    >
+                      <ErrorCircle12Filled />
+                    </span>
+                  )}
                 </div>
               );
             })}

@@ -488,7 +488,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
       },
       retrieveRecord: (entityName: string, id: string, options?: string) =>
         dataService.retrieveRecord(entityName, id, options),
-      retrieveMultipleRecords: (entityName: string, options?: string, maxPageSize?: number) =>
+      retrieveMultipleRecords: (entityName: string, options?: string, _maxPageSize?: number) =>
         dataService.retrieveMultipleRecords(entityName, options),
       updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
         await dataService.updateRecord(entityName, id, data);

@@ -37,7 +37,12 @@ import {
   MessageBar,
   MessageBarBody,
 } from '@fluentui/react-components';
-import type { SliderOnChangeData, ComboboxProps } from '@fluentui/react-components';
+import type {
+  SliderOnChangeData,
+  ComboboxProps,
+  OptionOnSelectData,
+  SelectionEvents,
+} from '@fluentui/react-components';
 import { SaveRegular, InfoRegular, DeleteRegular, CheckmarkRegular, OpenRegular } from '@fluentui/react-icons';
 import type { ITodoRecord, ITodoExtension, IEventFieldUpdates, ITodoExtensionUpdates, IContactOption } from './types';
 
@@ -318,7 +323,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     onSaveTodoExtFields,
     onDeactivateTodoExt,
     onRemoveTodo,
-    onClose,
+    onClose: _onClose,
     onSearchContacts,
     onOpenRegardingRecord,
   }) => {
@@ -472,10 +477,10 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     );
 
     // Debounced contact search (uses onSearchContacts callback prop)
-    const searchTimerRef = React.useRef<ReturnType<typeof setTimeout>>();
+    const searchTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     const handleContactInput: ComboboxProps['onInput'] = React.useCallback(
-      (ev: React.ChangeEvent<HTMLInputElement>) => {
-        const q = ev.target.value;
+      (ev: React.FormEvent<HTMLInputElement>) => {
+        const q = ev.currentTarget.value;
         setContactQuery(q);
         clearTimeout(searchTimerRef.current);
         if (q.length < 2) {
@@ -492,15 +497,18 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       [onSearchContacts]
     );
 
-    const handleContactSelect: ComboboxProps['onOptionSelect'] = React.useCallback((_ev, data) => {
-      if (data.optionValue && data.optionText) {
-        setAssignedToId(data.optionValue);
-        setAssignedToName(data.optionText);
-        setContactQuery('');
-        setContactOptions([]);
-        setIsEditingAssignedTo(false);
-      }
-    }, []);
+    const handleContactSelect: ComboboxProps['onOptionSelect'] = React.useCallback(
+      (_ev: SelectionEvents, data: OptionOnSelectData) => {
+        if (data.optionValue && data.optionText) {
+          setAssignedToId(data.optionValue);
+          setAssignedToName(data.optionText);
+          setContactQuery('');
+          setContactOptions([]);
+          setIsEditingAssignedTo(false);
+        }
+      },
+      []
+    );
 
     // Save dirty fields to the correct entities
     const handleSave = React.useCallback(async () => {

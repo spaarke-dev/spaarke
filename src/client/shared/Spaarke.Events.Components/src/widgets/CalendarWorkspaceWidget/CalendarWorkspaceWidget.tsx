@@ -105,6 +105,7 @@ import type { IEventDateInfo } from '../../components/CalendarSection/CalendarSe
 import { GridSection } from '../../components/GridSection/GridSection';
 import type { IEventRecord } from '../../components/GridSection/GridSection';
 import { addMonths, startOfMonth } from '../../utils/dateMath';
+import { useEventsBulkActions, EventStatus, EVENT_ENTITY_NAME } from '../../hooks/useEventsBulkActions';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Xrm typing — host-provided global
@@ -114,27 +115,8 @@ import { addMonths, startOfMonth } from '../../utils/dateMath';
 declare const Xrm: any;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-const EVENT_ENTITY_NAME = 'sprk_event';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Event status values (mirror sprk_event_ribbon_commands.js — task 115)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const EventStatus = {
-  DRAFT: 0,
-  OPEN: 1,
-  COMPLETED: 2,
-  CLOSED: 3,
-  ON_HOLD: 4,
-  CANCELLED: 5,
-  REASSIGNED: 6,
-  ARCHIVED: 7,
-} as const;
-
-const StateCode = {
-  ACTIVE: 0,
-  INACTIVE: 1,
-} as const;
+// R4 task 063 (B-7): EVENT_ENTITY_NAME + EventStatus + StateCode now imported
+// from the shared `useEventsBulkActions` hook above. Inline duplicates removed.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Event Status options (Task 130) — mirrors STATUS_FILTER_OPTIONS in
@@ -433,7 +415,9 @@ const useStyles = makeStyles({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Xrm context resolution + bulk-action helpers (mirror EventsPage App.tsx)
+// Xrm context resolution — cross-frame Xrm lookup. R4 task 063 (B-7):
+// `bulkStatusUpdate`, `bulkArchive`, and `confirmDialog` helpers moved into
+// the shared `useEventsBulkActions` hook and consumed inside the layout.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function getXrm(): typeof Xrm | null {
@@ -450,60 +434,12 @@ function getXrm(): typeof Xrm | null {
   return null;
 }
 
-async function bulkStatusUpdate(
-  ids: string[],
-  newStatus: number,
-  label: string,
-  extra?: Record<string, unknown>
-): Promise<boolean> {
-  const xrm = getXrm();
-  if (!xrm?.WebApi) return false;
-  const clean = ids.map(id => id.replace(/[{}]/g, ''));
-  const payload: Record<string, unknown> = { sprk_eventstatus: newStatus, ...extra };
-  try {
-    await Promise.all(clean.map(id => xrm.WebApi.updateRecord(EVENT_ENTITY_NAME, id, payload)));
-    xrm.App?.addGlobalNotification?.({
-      type: 2,
-      level: 1,
-      message: `${ids.length} event(s) set to ${label}`,
-      showCloseButton: true,
-    });
-    return true;
-  } catch (e) {
-    console.error('[CalendarWidget] Bulk status update failed:', e);
-    return false;
-  }
-}
-
-async function bulkArchive(ids: string[]): Promise<boolean> {
-  const xrm = getXrm();
-  if (!xrm?.WebApi) return false;
-  const clean = ids.map(id => id.replace(/[{}]/g, ''));
-  try {
-    await Promise.all(
-      clean.map(async id => {
-        await xrm.WebApi.updateRecord(EVENT_ENTITY_NAME, id, {
-          sprk_eventstatus: EventStatus.ARCHIVED,
-        });
-        await xrm.WebApi.updateRecord(EVENT_ENTITY_NAME, id, {
-          statecode: StateCode.INACTIVE,
-          statuscode: 2,
-        });
-      })
-    );
-    xrm.App?.addGlobalNotification?.({
-      type: 2,
-      level: 1,
-      message: `${ids.length} event(s) archived`,
-      showCloseButton: true,
-    });
-    return true;
-  } catch (e) {
-    console.error('[CalendarWidget] Bulk archive failed:', e);
-    return false;
-  }
-}
-
+/**
+ * Local confirm-dialog helper retained for the widget's Delete handler only.
+ * The five bulk status/archive actions go through `useEventsBulkActions` which
+ * has its own confirm-dialog handling. Delete is consumer territory (no
+ * status-write semantics) so it stays inline.
+ */
 async function confirmDialog(title: string, text: string, confirmLabel: string): Promise<boolean> {
   const xrm = getXrm();
   if (xrm?.Navigation?.openConfirmDialog) {
@@ -587,7 +523,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
       const counts = new Map<string, number>();
       const eventDateObjects: Date[] = [];
       for (const r of records) {
-        const dateStr = r.sprk_duedate || (r as unknown as { createdon?: string }).createdon;
+        const dateStr = r.sprk_duedate || r.createdon;
         if (!dateStr) continue;
         const d = new Date(dateStr);
         if (Number.isNaN(d.getTime())) continue;
@@ -757,6 +693,12 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
   // ── Selection state (driven by GridSection) ──────────────────────────────
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
 
+  // ── Bulk-action API (R4 task 063, B-7) ───────────────────────────────────
+  // Single source of truth shared with EventsPage standalone code page.
+  const { completeEvents, closeEvents, cancelEvents, holdEvents, archiveSelectedEvents } = useEventsBulkActions({
+    getXrm,
+  });
+
   // ── Toolbar handlers ─────────────────────────────────────────────────────
   const hasSelection = selectedIds.length > 0;
 
@@ -784,49 +726,33 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
 
   const onComplete = React.useCallback(async () => {
     if (!hasSelection) return;
-    const ok = await confirmDialog('Complete Events', `Mark ${selectedIds.length} event(s) as complete?`, 'Complete');
-    if (!ok) return;
-    await bulkStatusUpdate(selectedIds, EventStatus.COMPLETED, 'Completed', {
-      sprk_completeddate: new Date().toISOString(),
-    });
-    refreshGrid();
-  }, [hasSelection, selectedIds, refreshGrid]);
+    const success = await completeEvents(selectedIds);
+    if (success) refreshGrid();
+  }, [hasSelection, selectedIds, refreshGrid, completeEvents]);
 
   const onClose = React.useCallback(async () => {
     if (!hasSelection) return;
-    const ok = await confirmDialog('Close Events', `Close ${selectedIds.length} event(s) without action?`, 'Close');
-    if (!ok) return;
-    await bulkStatusUpdate(selectedIds, EventStatus.CLOSED, 'Closed');
-    refreshGrid();
-  }, [hasSelection, selectedIds, refreshGrid]);
+    const success = await closeEvents(selectedIds);
+    if (success) refreshGrid();
+  }, [hasSelection, selectedIds, refreshGrid, closeEvents]);
 
   const onCancel = React.useCallback(async () => {
     if (!hasSelection) return;
-    const ok = await confirmDialog('Cancel Events', `Cancel ${selectedIds.length} event(s)?`, 'Cancel Events');
-    if (!ok) return;
-    await bulkStatusUpdate(selectedIds, EventStatus.CANCELLED, 'Cancelled');
-    refreshGrid();
-  }, [hasSelection, selectedIds, refreshGrid]);
+    const success = await cancelEvents(selectedIds);
+    if (success) refreshGrid();
+  }, [hasSelection, selectedIds, refreshGrid, cancelEvents]);
 
   const onOnHold = React.useCallback(async () => {
     if (!hasSelection) return;
-    const ok = await confirmDialog('Put Events On Hold', `Put ${selectedIds.length} event(s) on hold?`, 'Put On Hold');
-    if (!ok) return;
-    await bulkStatusUpdate(selectedIds, EventStatus.ON_HOLD, 'On Hold');
-    refreshGrid();
-  }, [hasSelection, selectedIds, refreshGrid]);
+    const success = await holdEvents(selectedIds);
+    if (success) refreshGrid();
+  }, [hasSelection, selectedIds, refreshGrid, holdEvents]);
 
   const onArchive = React.useCallback(async () => {
     if (!hasSelection) return;
-    const ok = await confirmDialog(
-      'Archive Events',
-      `Archive ${selectedIds.length} event(s)? This will hide them from active views.`,
-      'Archive'
-    );
-    if (!ok) return;
-    await bulkArchive(selectedIds);
-    refreshGrid();
-  }, [hasSelection, selectedIds, refreshGrid]);
+    const success = await archiveSelectedEvents(selectedIds);
+    if (success) refreshGrid();
+  }, [hasSelection, selectedIds, refreshGrid, archiveSelectedEvents]);
 
   const onRefresh = React.useCallback(() => {
     refreshGrid();
@@ -1077,7 +1003,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
           </Tooltip>
           <div ref={stripRef} className={styles.calendarStrip}>
             <CalendarSection
-              eventDates={eventDates as IEventDateInfo[]}
+              eventDates={eventDates}
               onFilterChange={filter => setCalendarFilter(filter)}
               viewDate={viewDate}
               monthsToShow={monthsToShow}

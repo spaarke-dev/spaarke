@@ -56,9 +56,10 @@
  */
 
 import * as React from "react";
-import { makeStyles, tokens, Toaster, useToastController, useId, Toast, ToastTitle } from "@fluentui/react-components";
+import { makeStyles, Toaster, useToastController, useId, Toast, ToastTitle } from "@fluentui/react-components";
 import { ChatRegular, AppsListRegular, DocumentRegular } from "@fluentui/react-icons";
 import { ThreePaneLayout } from "@spaarke/ui-components";
+import type { EntityContext, EntityType } from "@spaarke/ai-context";
 import {
   PaneEventBusProvider,
   usePaneEvent,
@@ -176,10 +177,13 @@ export function usePaneCollapseContext(): PaneCollapseContextValue | null {
 export interface ThreePaneShellProps {
   /** BFF API base URL resolved at bootstrap from Dataverse env vars. */
   bffBaseUrl: string;
-  /** BFF access token acquired via @spaarke/auth. Null while acquiring. */
-  token: string | null;
-  /** Whether authentication has completed successfully. */
-  isAuthenticated: boolean;
+  /** BFF access token acquired via @spaarke/auth. Null while acquiring.
+   * Deprecated — auth state is now read via useAiSession() inside panes.
+   * Task 021 will remove this prop entirely. */
+  token?: string | null;
+  /** Whether authentication has completed successfully.
+   * Deprecated — see token. */
+  isAuthenticated?: boolean;
   /** Dataverse entity logical name from URL (e.g. "sprk_matter"). Optional. */
   entityLogicalName?: string;
   /** Dataverse entity record GUID from URL. Optional. */
@@ -444,7 +448,7 @@ function SessionRestoreManager({ children, sessionId }: SessionRestoreManagerPro
   const dispatch = useDispatchPaneEvent();
   const { toActiveChat } = useShellStage();
 
-  const { restoreSpec, isRestoring, restoreError, isNotFound } = useSessionRestore(
+  const { restoreSpec, isRestoring: _isRestoring, restoreError, isNotFound } = useSessionRestore(
     sessionId,
     bffBaseUrl,
     authenticatedFetch,
@@ -573,10 +577,14 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
   // Build the entity context for AiSessionProvider from URL params.
   // R2: entityContext is resolved at the shell level and passed down via
   // AiSessionProvider rather than being resolved inside StandaloneAiProvider.
-  const entityContext = React.useMemo(() => {
+  const entityContext = React.useMemo<EntityContext | null>(() => {
     if (!entityLogicalName || !entityId) return null;
     return {
-      entityType: entityLogicalName,
+      // entityLogicalName comes from URL (e.g. "sprk_matter") and may not
+      // narrow to the EntityType literal union at compile time. Downstream
+      // consumers normalize / map the value, so we widen via cast at the
+      // source-of-truth (per task 075 minimum-viable nullability fix).
+      entityType: entityLogicalName as EntityType,
       entityId,
       ...(matterId ? { matterId } : {}),
     };

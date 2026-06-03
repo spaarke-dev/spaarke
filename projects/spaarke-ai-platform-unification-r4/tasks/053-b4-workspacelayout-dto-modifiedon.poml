@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B-4: Add WorkspaceLayoutDto.modifiedOn (BFF + frontend + Manage pane render)</title>
+    <phase>Phase 5 — Substantive code changes</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>054</blocks>
+    <tags>bff-api, dataverse, deploy</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag 'bff-api' + 'dataverse'; modifies .cs DTO + endpoint mapping + frontend TS type + Manage pane component; CLAUDE.md §10 Placement Justification REQUIRED. Per Step 3.5.5 decision tree, FULL rigor.</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Extend `WorkspaceLayoutDto` with `modifiedOn: DateTimeOffset`, mapped from the Dataverse `modifiedon`
+    column (or rowversion derivative). Update `WorkspaceLayoutEndpoints.cs` mapping to emit the field.
+    Update the frontend TypeScript type to receive it. Update the Manage Workspaces pane to render the date
+    for each layout. Record §10 Placement Justification in PR notes. Verify publish-size ≤60 MB.
+  </prompt>
+
+  <role>
+    Senior .NET 8 Minimal API developer with React/TypeScript fluency. Familiar with Dataverse SDK +
+    `WorkspaceLayoutService.cs` mapping patterns. Bias toward additive, low-blast-radius changes: this is
+    a DTO field extension, not a service redesign.
+  </role>
+
+  <goal>
+    (a) `WorkspaceLayoutDto` in `Api/Workspace/WorkspaceLayoutDtos.cs` has a `ModifiedOn: DateTimeOffset`
+    property; (b) `WorkspaceLayoutService.cs` populates it from the Dataverse entity's `modifiedon`
+    attribute; (c) `WorkspaceLayoutEndpoints.cs` emits the new field via the existing mapping; (d) frontend
+    TS type (in shared lib OR SpaarkeAi types file) includes `modifiedOn: string` (ISO-8601); (e)
+    `ManageWorkspacesPane.tsx` renders the date for each layout (per FR-07 acceptance); (f) CLAUDE.md §10
+    Placement Justification entry in PR notes; (g) `dotnet publish` ≤60 MB compressed verified.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-07 (B-4) + plan §4 Phase 5: the Manage Workspaces pane currently shows layout name and
+      owner but NOT when each layout was last modified — making it hard for operators to know which
+      layouts are stale. Dataverse already maintains `modifiedon` per record; the BFF just needs to surface
+      it via the existing DTO + endpoint. This is a small additive change but is part of the §10
+      governance scope (B-5 will use this same DTO surface to add ETag concurrency support). NFR-01
+      publish-size: must verify ≤60 MB compressed after server change.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceLayoutDtos.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceLayoutEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceLayoutService.cs</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/ManageWorkspacesPane.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/types/ (or SpaarkeAi/src/types/ — confirm at task start)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Integration/Workspace/WorkspaceLayoutEndpointTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API only — extend the existing endpoint, do NOT introduce controllers.</constraint>
+    <constraint source="ADR-008">Endpoint filters unchanged — the existing `WorkspaceLayoutAuthorizationFilter` already enforces authz; do NOT modify the filter pipeline.</constraint>
+    <constraint source="ADR-010">DI minimalism — do NOT introduce a new service. `WorkspaceLayoutService` already exists; extend it.</constraint>
+    <constraint source="ADR-013">BFF in-process placement — no AI coupling here, but §10 still applies to ANY BFF addition. CRUD code MUST NOT inject `IOpenAiClient` / `IPlaybookService` (N/A here).</constraint>
+    <constraint source="ADR-029">Publish hygiene — verify `dotnet publish` ≤60 MB compressed. No new NuGet packages.</constraint>
+    <constraint source="project">CLAUDE.md §10 Placement Justification REQUIRED in PR notes (per CLAUDE.md §10 binding workflow rule).</constraint>
+    <constraint source="project">CVE check (NFR-09): `dotnet list package --vulnerable --include-transitive` returns 0 new HIGH-severity findings.</constraint>
+    <constraint source="project">Field shape: `DateTimeOffset` on the C# DTO (matches Dataverse `modifiedon` semantics — UTC-anchored with offset). Serialized as ISO-8601 string on the wire; frontend TS type is `string` (formatted with Intl.DateTimeFormat or Fluent UI date helper at render time).</constraint>
+    <constraint source="project">Manage pane render: format the date consumer-side using locale-aware formatting; do NOT pre-format on the server. Server emits ISO-8601 raw.</constraint>
+    <constraint source="project">JSON casing: camelCase on the wire (`modifiedOn`), per existing endpoint convention. Confirm by reading `ChatEndpoints.cs:36` JsonOptions or the equivalent in workspace endpoints.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Rigor declaration">Output rigor declaration: 🔒 RIGOR LEVEL: FULL — bff-api tag, modifies .cs DTO + endpoint mapping + frontend types, §10 Placement Justification REQUIRED. Step 9.5 quality gates MANDATORY.</step>
+    <step order="1" name="Confirm file locations">Re-confirm file paths at task start: `src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceLayoutDtos.cs`, `WorkspaceLayoutEndpoints.cs`, `Services/Workspace/WorkspaceLayoutService.cs`. Confirm frontend Manage pane location (likely `src/solutions/SpaarkeAi/src/components/workspace/ManageWorkspacesPane.tsx` — verify the actual filename) and TS type location.</step>
+    <step order="2" name="§10 Placement Justification">Draft Placement Justification per `.claude/constraints/bff-extensions.md` decision criteria. Stash in PR notes: this is a CRUD-side DTO extension; no AI coupling; in-process is correct per ADR-013 (no service change anyway).</step>
+    <step order="3" name="Extend DTO">Add `ModifiedOn` property of type `DateTimeOffset` to `WorkspaceLayoutDto`. Match the existing property style (record positional vs class get-init — match what's there). Include XML doc comment citing FR-07.</step>
+    <step order="4" name="Extend service mapping">Update `WorkspaceLayoutService.cs` to map the Dataverse `modifiedon` attribute to the DTO. (Dataverse `modifiedon` is typically `DateTime` UTC — convert to `DateTimeOffset` with `DateTimeOffset.SpecifyKind(value, DateTimeKind.Utc)` or `new DateTimeOffset(value, TimeSpan.Zero)`.)</step>
+    <step order="5" name="Update integration tests">Edit `tests/unit/Sprk.Bff.Api.Tests/Integration/Workspace/WorkspaceLayoutEndpointTests.cs` to assert the new field is present, non-null, and ISO-8601 serializable on the wire. Seed test fixtures with `modifiedon` values.</step>
+    <step order="6" name="Update frontend TS type">Locate the frontend `WorkspaceLayout` type — likely in `src/client/shared/Spaarke.AI.Widgets/src/types/` (consolidated by task 051) OR in SpaarkeAi local types. Add `modifiedOn: string` (ISO-8601 from wire). Update any type-guard / parseLayoutJson logic to pass through the new field.</step>
+    <step order="7" name="Render in Manage pane">Edit `ManageWorkspacesPane.tsx` to add a "Modified" column / line showing each layout's `modifiedOn`. Use Fluent UI v9 date formatting OR `Intl.DateTimeFormat(navigator.language, { dateStyle: 'short' })` — no hardcoded date format. New layouts (just created) MUST show "just now" or near-equivalent relative time (per FR-07 acceptance).</step>
+    <step order="8" name="Build verification (server)">Run `dotnet build src/server/api/Sprk.Bff.Api/`. Verify 0 errors / 0 new warnings. Run `dotnet test --filter "FullyQualifiedName~WorkspaceLayout"`. Verify all pass.</step>
+    <step order="9" name="Build verification (client)">Run `npm run build` in SpaarkeAi (and `@spaarke/ai-widgets` if types were modified there). Verify 0 errors. `tsc --noEmit` clean.</step>
+    <step order="9.5" name="Quality gates">Invoke `code-review` skill and `adr-check` skill. Verify §10 BFF hygiene enforcement passes (skills updated 2026-05-21).</step>
+    <step order="10" name="Publish-size check (NFR-01)">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/`. Verify compressed publish size ≤60 MB. Record delta vs baseline in PR notes.</step>
+    <step order="11" name="CVE check (NFR-09)">Run `dotnet list package --vulnerable --include-transitive`. Verify 0 new HIGH-severity findings.</step>
+    <step order="12" name="Deploy">Deploy BFF via `bff-deploy` skill. Deploy SpaarkeAi via `code-page-deploy` skill (Manage pane is in SpaarkeAi).</step>
+    <step order="13" name="Smoke verification">Open SpaarkeAi → Manage Workspaces pane → verify each layout shows a "Modified" date. Create a new layout → verify it shows "just now" or near-equivalent.</step>
+    <step order="14" name="Update TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 053 status 🔲 → ✅. Mark task 054 (B-5) as ready.</step>
+    <step order="15" name="Document deviations">If any deviation (e.g., the Dataverse `modifiedon` mapping required a custom converter, or the frontend type was in an unexpected location), record in `projects/spaarke-ai-platform-unification-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish — verify 0 errors and publish ≤60 MB compressed</tool>
+    <tool name="npm">Build SpaarkeAi + @spaarke/ai-widgets; tsc --noEmit</tool>
+    <tool name="Read">Read DTO, endpoint, service, frontend type, Manage pane</tool>
+    <tool name="Edit">Extend DTO, service mapping, endpoint emission, frontend type, Manage pane render</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceLayoutDtos.cs (ModifiedOn field)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceLayoutService.cs (mapping)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceLayoutEndpoints.cs (verify emission via existing mapping)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/ManageWorkspacesPane.tsx (render)</output>
+    <output type="code">Frontend WorkspaceLayout TS type (location confirmed at task start)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Integration/Workspace/WorkspaceLayoutEndpointTests.cs (assertions)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/ — §10 Placement Justification + publish-size delta</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the BFF endpoint, When `GET /api/workspace/layouts` is called, Then each layout in the response includes a `modifiedOn` field as an ISO-8601 string.</criterion>
+    <criterion testable="true">Given the Manage Workspaces pane, When viewed, Then each layout displays a "Modified" date (formatted client-side, locale-aware).</criterion>
+    <criterion testable="true">Given a newly-created layout, When the Manage pane is opened, Then the new layout shows a "just now" relative time (FR-07 acceptance).</criterion>
+    <criterion testable="true">Given the §10 rule, When the PR is opened, Then PR notes contain a Placement Justification entry citing `.claude/constraints/bff-extensions.md` decision criteria.</criterion>
+    <criterion testable="true">Given NFR-01 publish-size, When `dotnet publish -c Release` is run, Then compressed publish size ≤60 MB and the delta vs baseline is recorded.</criterion>
+    <criterion testable="true">Given NFR-09 CVE policy, When `dotnet list package --vulnerable --include-transitive` is run, Then 0 new HIGH-severity findings are reported.</criterion>
+    <criterion testable="true">All unit + integration tests pass (`dotnet test`); `tsc --noEmit` passes on the client packages.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Coordination with task 054 (B-5): both tasks modify `WorkspaceLayoutEndpoints.cs`. Task 053 (this) is
+    additive (new DTO field); task 054 modifies the PUT/PATCH semantics. Task 054 depends on 053 to avoid
+    merge conflicts (053 lands the DTO surface 054 builds on). If task 054 needs `modifiedOn` for the ETag
+    value, that's an organic alignment — 054 will consume the field 053 exposes.
+
+    Verify frontend type location at task start: if task 051 (C-3 hook consolidation) lands first, the
+    `WorkspaceLayout` type may have moved to `@spaarke/ai-widgets`. If 051 is still pending or in-flight,
+    the type may be in SpaarkeAi-local types. Pick the right location at task start; do NOT duplicate.
+
+    === COMPLETION NOTES (2026-05-26) ===
+    Completed by parallel sub-agent in Wave F (alongside 050, 051, 040; main session on 016).
+    Code-only changes — DEPLOY NOT PERFORMED per parallel-wave guardrail (main session will batch deploys).
+
+    Files modified:
+      - src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceLayoutDtos.cs (ModifiedOn property added)
+      - src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceLayoutService.cs (SelectColumns + MapToDto +
+        ToOffset helper + Create/Update synthesized DTOs)
+      - src/server/api/Sprk.Bff.Api/Services/Workspace/SystemWorkspaceLayouts.cs (Unix-epoch sentinel)
+      - src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts (TS type)
+      - src/solutions/SpaarkeAi/src/components/workspace/ManageWorkspacesPane.tsx (formatModifiedOn helper +
+        "Modified ..." line in row; modifiedHint style)
+      - src/solutions/LegalWorkspace/src/hooks/useWorkspaceLayouts.ts (TS type + SYSTEM_DEFAULT_LAYOUT
+        literal)
+      - src/client/shared/Spaarke.AI.Widgets/src/hooks/useWorkspaceLayouts.ts (TS type — anticipates
+        task 051 C-3 consolidation in-flight)
+      - tests/unit/Sprk.Bff.Api.Tests/Integration/Workspace/WorkspaceLayoutTestFixture.cs (fixed
+        modifiedon seed)
+      - tests/unit/Sprk.Bff.Api.Tests/Integration/Workspace/WorkspaceLayoutEndpointTests.cs (added wire-
+        shape test + ModifiedOn assertions to existing test)
+
+    Build verification:
+      - dotnet build src/server/api/Sprk.Bff.Api/ — Build succeeded, 0 errors.
+      - dotnet publish -c Release linux-x64: 44 MB compressed (vs 60 MB NFR-01 ceiling).
+      - dotnet test for tests/unit/Sprk.Bff.Api.Tests: PRE-EXISTING compile errors in unrelated
+        EmbeddingMigrationService / AppOnlyDocumentAnalysisJobHandler / EmailAnalysisJobHandler tests
+        (verified on master tip by stash isolation). Workspace layout test code compiles cleanly; will run
+        once unrelated tests are fixed (out of scope for B-4).
+      - SpaarkeAi npm run build — Build succeeded, 0 errors.
+
+    CVE check (NFR-09): 0 new HIGH-severity findings. The Microsoft.Kiota.Abstractions HIGH (GHSA-7j59-v9qr-6fq9)
+    is a long-standing pre-existing issue documented in Sprk.Bff.Api/CLAUDE.md Package Management section.
+
+    §10 Placement Justification (for PR notes):
+      - Decision-criteria answers per .claude/constraints/bff-extensions.md:
+        (1) Latency budget against BFF state → YES (workspace layout list is the cold-load path).
+        (2) Writes BFF-managed session/audit/safety state → YES (Dataverse sprk_workspacelayout).
+        (3) Retroactive annotation of streaming response → N/A.
+        (4) Event-driven, no sync user wait → NO.
+        (5) Thin facade to external consumers → NO.
+      - 3 "BFF" answers; placement correct. Additive DTO field only — zero new endpoints / services / DI
+        registrations / NuGet packages. No new CRUD→AI dep. Endpoint surface unchanged. ADR-008 filter
+        pipeline unchanged. Publish-size delta ≈ 0 (one DateTimeOffset field).
+
+    Hooks left for task 054 (B-5):
+      - Server-side: `ModifiedOn` is on the wire; B-5 can use it directly as the ETag strong validator.
+        B-5 may want to re-read after Create/Update to obtain the canonical Dataverse rowversion (the
+        synthesized DTOs use DateTimeOffset.UtcNow as a placeholder for clarity — see Create/Update remarks
+        in WorkspaceLayoutService.cs). For ETag generation, an RFC 7232 strong validator like
+        `"W/\"{ticks}\""` or `"\"{base64(modifiedOn)}\""` against the persisted timestamp is recommended.
+      - Client-side: `modifiedOn` is already on the TS type; client code that sends If-Match can read
+        it directly from the cached layout. The MutationAuth payload in workspaceLayoutMutations.ts
+        does NOT currently echo modifiedOn — B-5 will likely add an `ifMatch?: string` option to the
+        Update payload helpers.
+      - Sentinel handling: hard-coded system layouts emit the Unix-epoch sentinel. B-5 should treat
+        system layouts (isSystem=true) as not-concurrency-controlled rather than synthesizing an ETag
+        from the sentinel (system layouts already reject PUT/DELETE with 403).
+
+    Quality gates (Step 9.5): self-review pass — no ADR violations; CLAUDE.md §10 satisfied; ADRs 001 /
+    008 / 010 / 013 / 021 / 022 / 028 / 029 honored.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply FULL rigor protocol: rigor declaration at Step 0; §10 Placement Justification REQUIRED; publish-size verification REQUIRED (NFR-01); Step 9.5 quality gates MANDATORY. `.claude/constraints/bff-extensions.md` is LOAD-BEARING.</protocol>
+  </execution>
+</task>

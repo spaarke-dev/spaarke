@@ -20,7 +20,7 @@ import {
   IFieldMappingProfile,
   IFieldMappingRule,
   IMappingResult,
-  IMappingError,
+  IMappingError as _IMappingError,
   MappingErrorCode,
   FieldType,
   CompatibilityMode,
@@ -51,8 +51,8 @@ const MAX_CASCADING_PASSES = 2;
 /**
  * Dataverse table names for field mapping entities
  */
-const PROFILE_TABLE = 'sprk_fieldmappingprofile';
-const RULE_TABLE = 'sprk_fieldmappingrule';
+const _PROFILE_TABLE = 'sprk_fieldmappingprofile';
+const _RULE_TABLE = 'sprk_fieldmappingrule';
 
 /**
  * FieldMappingService - Core service for field mapping operations.
@@ -133,7 +133,7 @@ export class FieldMappingService {
     const filterString = filters.length > 0 ? `$filter=${filters.join(' and ')}` : '';
     const selectString =
       '$select=sprk_fieldmappingprofileid,sprk_name,sprk_sourceentity,sprk_targetentity,sprk_mappingdirection,sprk_syncmode,sprk_isactive,sprk_description';
-    const query = [filterString, selectString].filter(Boolean).join('&');
+    const _query = [filterString, selectString].filter(Boolean).join('&');
 
     // STUB: [API] - S010-01: Replace with actual Dataverse query when sprk_fieldmappingprofile entity exists (Task 001)
     // For now, return empty array - real implementation would be:
@@ -208,7 +208,7 @@ export class FieldMappingService {
     const selectString =
       '$select=sprk_fieldmappingruleid,sprk_name,sprk_sourcefield,sprk_sourcefieldtype,sprk_targetfield,sprk_targetfieldtype,sprk_compatibilitymode,sprk_isrequired,sprk_defaultvalue,sprk_iscascadingsource,sprk_executionorder,sprk_isactive';
     const orderString = '$orderby=sprk_executionorder asc';
-    const query = `?${filterString}&${selectString}&${orderString}`;
+    const _query = `?${filterString}&${selectString}&${orderString}`;
 
     // STUB: [API] - S010-02: Replace with actual Dataverse query when sprk_fieldmappingrule entity exists (Task 002)
     // For now, return empty array - real implementation would be:
@@ -242,7 +242,7 @@ export class FieldMappingService {
       return {};
     }
 
-    const selectString = fields.join(',');
+    const _selectString = fields.join(',');
 
     // STUB: [API] - S010-03: Replace with actual Dataverse query (Task 010)
     // const record = await this.webApi.retrieveRecord(sourceEntity, recordId, `?$select=${selectString}`);
@@ -715,7 +715,7 @@ export class FieldMappingService {
    * @param sourceType - Source field type (for formatting)
    * @returns Text representation
    */
-  private convertToText(value: unknown, sourceType?: FieldType): string {
+  private convertToText(value: unknown, _sourceType?: FieldType): string {
     if (value === null || value === undefined) {
       return '';
     }

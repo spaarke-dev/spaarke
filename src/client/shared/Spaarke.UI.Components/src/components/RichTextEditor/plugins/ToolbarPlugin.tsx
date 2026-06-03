@@ -21,7 +21,7 @@ import {
   TextHeader1Regular,
   TextHeader2Regular,
   TextHeader3Regular,
-  TextQuoteRegular,
+  TextQuoteRegular as _TextQuoteRegular,
   TextBulletListRegular,
   TextNumberListLtrRegular,
   ArrowUndoRegular,

@@ -41,7 +41,7 @@ import {
 } from '@fluentui/react-components';
 import { ICreateProjectFormState, EMPTY_PROJECT_FORM } from './projectFormTypes';
 import { ProjectService } from './projectService';
-import { LookupField, DataverseLookupField } from '../LookupField';
+import { DataverseLookupField } from '../LookupField';
 import { AiFieldTag } from '../AiFieldTag';
 import { SecureProjectSection } from './SecureProjectSection';
 import type { ILookupItem } from '../../types/LookupTypes';
@@ -245,7 +245,6 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
 
   React.useEffect(() => {
     onFormValuesRef.current(formState);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formState]);
 
   // ── AI Pre-fill via shared hook ────────────────────────────────────────

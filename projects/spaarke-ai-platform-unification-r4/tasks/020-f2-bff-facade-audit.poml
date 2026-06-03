@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>F-2 BFF AI facade audit — count remaining direct CRUD→AI injections (NFR-03)</title>
+    <phase>Phase 2: BFF governance audit</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, governance, audit</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only audit producing a memo; no production code changes. STANDARD rigor — tag `bff-api` but no code modification.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only audit. No shared file writes. Safe to run alongside other independent tasks.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Execute the F-2 BFF AI facade audit (NFR-03). Count remaining direct injections of `IOpenAiClient` and `IPlaybookService` consumed OUTSIDE `src/server/api/Sprk.Bff.Api/Services/Ai/`. Compare against the 2026-05-20 baseline of 20. Classify each hit (Endpoint / CRUD service / Job handler). If count is non-zero, recommend migration scope. Publish memo to `projects/spaarke-ai-platform-unification-r4/notes/bff-ai-facade-audit-2026-05.md`.
+  </prompt>
+
+  <role>
+    Senior BFF reviewer fluent in ADR-013 (refined 2026-05-20) and CLAUDE.md §10 BFF Hygiene. Comfortable with ripgrep audits and the `Services/Ai/PublicContracts/` facade boundary. Bias toward precise file/line evidence.
+  </role>
+
+  <goal>
+    Verification memo at `projects/spaarke-ai-platform-unification-r4/notes/bff-ai-facade-audit-2026-05.md` containing: (a) current count of direct `IOpenAiClient` + `IPlaybookService` consumers OUTSIDE `Services/Ai/`; (b) one-row-per-hit table with file + line + classification; (c) delta vs baseline of 20; (d) roll-up verdict (CLEAN / PROGRESS / STABLE / REGRESSED) plus prioritized migration plan if non-zero.
+  </goal>
+
+  <context>
+    <background>
+      CLAUDE.md §10 (binding 2026-05-19): CRUD code outside `Services/Ai/` MUST consume AI via `Services/Ai/PublicContracts/` facade — NOT by injecting `IOpenAiClient` / `IPlaybookService` directly. The 2026-05-20 extraction assessment counted 20 existing direct dependencies as the migration baseline. F-2 is the periodic audit. R4 audit COUNTS only — no remediation here. Migration (if needed) is a follow-on.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IPlaybookService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/bff-ai-facade-audit-2026-05.md (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">CRUD code outside `Services/Ai/` MUST consume AI through `PublicContracts/` facade — NOT direct injection of `IOpenAiClient` / `IPlaybookService`.</constraint>
+    <constraint source="root-CLAUDE.md §10">F-2 audit is the periodic check against the 2026-05-20 baseline of 20 direct deps.</constraint>
+    <constraint source="spec">NFR-03 — memo published at the documented path; compares against baseline of 20; recommends forward scope if non-zero.</constraint>
+    <constraint source="project">READ-ONLY audit. Do NOT migrate any consumer. Recommendation only.</constraint>
+    <constraint source="project">Classification taxonomy: Endpoint (`Api/**`), CRUD service (`Services/**` outside `Services/Ai/**`), Job handler, DI registration (noise unless wires non-Ai), Test (note but exclude from count). Definition files (`IOpenAiClient.cs`, `IPlaybookService.cs`) are noise.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvoiceAi.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IBriefingAi.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IWorkspacePrefillAi.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="PublicContracts facade" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/">
+        Each `I{Feature}Ai` is the sanctioned entry point for CRUD code needing AI. CRUD consumers inject the contract, not internal AI types.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read baseline">Open `docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`. Confirm the baseline count (20) and the taxonomy used. Anchors the comparison.</step>
+    <step order="2" name="Grep direct consumers">Run two Greps across `src/server/api/Sprk.Bff.Api/` for `IOpenAiClient\b` and `IPlaybookService\b` in `.cs` files. Record file + line. Flag definition files and DI module registrations as noise (list separately, not in count).</step>
+    <step order="3" name="Classify each hit">Apply taxonomy: ALLOWED (inside `Services/Ai/` or `PublicContracts/`) → don't count. COUNT (Endpoint in `Api/**`, CRUD service outside `Services/Ai/`, Job handler consumed from non-Ai). NOISE (DI modules, tests).</step>
+    <step order="4" name="Spot-check 3-5 hits">For 3-5 classified hits, READ a small window around the line and verify it's a real constructor injection / field — not a comment or string literal. Verify the surrounding class is not itself inside `Services/Ai/`. Discard false positives.</step>
+    <step order="5" name="Compute delta">Final count = filtered hits across both interfaces. Delta = current - 20. `delta &gt; 0` → REGRESSED. `delta &lt; 0` → PROGRESS. `delta == 0` → STABLE.</step>
+    <step order="6" name="Recommend forward scope">If non-zero: cluster hits, suggest migration order, cite `PublicContracts/` pattern, T-shirt size each cluster (S/M/L). Do NOT open the migration task here.</step>
+    <step order="7" name="Write memo">Create the memo with: header (date, scope, auditor, baseline source); methodology (Grep commands, taxonomy, false-positive review); findings table (file:line, interface, classification, target contract); noise-excluded section; roll-up verdict; migration recommendation if non-zero.</step>
+    <step order="8" name="Verify + update TASK-INDEX">No build needed. Update TASK-INDEX.md row 020 → ✅ completed. If verdict is REGRESSED, flag in TASK-INDEX so the project owner sees it without reading the full memo.</step>
+    <step order="9" name="Document deviations">If anything deviated (taxonomy changed, additional interfaces audited, baseline reinterpreted), document in `projects/spaarke-ai-platform-unification-r4/notes/` alongside the memo.</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Enumerate IOpenAiClient + IPlaybookService consumers</tool>
+    <tool name="Read">Read baseline assessment + spot-check hits</tool>
+    <tool name="Write">Audit memo</tool>
+    <tool name="Edit">TASK-INDEX.md status update</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/bff-ai-facade-audit-2026-05.md (NEW)</output>
+    <output type="report">Task completion report with CLEAN / PROGRESS / STABLE / REGRESSED verdict + count delta vs baseline of 20</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Memo exists at the documented path and is dated.</criterion>
+    <criterion testable="true">Memo cites the 2026-05-20 baseline of 20 and lists the methodology (Grep commands + classification taxonomy).</criterion>
+    <criterion testable="true">Findings table contains one row per countable hit with file:line + classification.</criterion>
+    <criterion testable="true">Memo issues a single roll-up verdict (CLEAN / PROGRESS / STABLE / REGRESSED) with explicit count and delta.</criterion>
+    <criterion testable="true">If count is non-zero, memo includes prioritized migration recommendation citing the `PublicContracts/` facade pattern. No production code changed.</criterion>
+    <criterion testable="true">TASK-INDEX.md row 020 → ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the periodic NFR-03 measurement gate, NOT a remediation task. Per CLAUDE.md §10, the baseline (20) is the line in the sand — this audit tells the operator whether to open follow-on migration work. Spot-checking is non-optional (Grep over-matches). If REGRESSED, surface it loudly in the memo header and TASK-INDEX.
+  </notes>
+
+  <execution>
+    Execute via `task-execute` skill. STANDARD rigor — no quality gates at Step 9.5 (no code changes). The memo IS the deliverable.
+  </execution>
+</task>

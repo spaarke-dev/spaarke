@@ -52,7 +52,7 @@
  *
  * Telemetry (FR-24 / OC-09):
  *   - Error-only. On fetch failure (network error OR non-2xx response) emit
- *     `logTelemetryError(TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE, ...)`.
+ *     `logTelemetryError(TELEMETRY_HISTORY_LOAD_FAILURE, ...)`.
  *
  * Accessibility (NFR-05):
  *   - Fluent v9 `<Menu>` is keyboard-navigable out of the box (Tab to enter,
@@ -71,7 +71,7 @@
  * @see ConversationPane.tsx — wires this into the PaneHeader rightSlot
  * @see WorkspacePaneMenu.tsx — sibling pattern this mirrors (task 089)
  * @see ContextPaneMenu.tsx — sibling pattern this mirrors (task 095)
- * @see errorTelemetry.ts — TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE constant
+ * @see errorTelemetry.ts — TELEMETRY_HISTORY_LOAD_FAILURE constant
  */
 
 import * as React from "react";
@@ -92,7 +92,7 @@ import { ChevronDownRegular } from "@fluentui/react-icons";
 import { buildBffApiUrl, type AuthenticatedFetchFn } from "@spaarke/auth";
 import {
   logTelemetryError,
-  TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE,
+  TELEMETRY_HISTORY_LOAD_FAILURE,
 } from "../../telemetry/errorTelemetry";
 
 // ---------------------------------------------------------------------------
@@ -310,7 +310,7 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
         });
 
         if (!response.ok) {
-          logTelemetryError(TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE, {
+          logTelemetryError(TELEMETRY_HISTORY_LOAD_FAILURE, {
             status: response.status,
             message: `HTTP ${response.status}`,
           });
@@ -342,7 +342,7 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        logTelemetryError(TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE, {
+        logTelemetryError(TELEMETRY_HISTORY_LOAD_FAILURE, {
           status: 0,
           message,
         });

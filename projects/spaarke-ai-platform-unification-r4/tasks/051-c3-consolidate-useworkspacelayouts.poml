@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>C-3: Consolidate dual useWorkspaceLayouts hooks into a single shared-lib hook</title>
+    <phase>Phase 5 — Substantive code changes</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>052</blocks>
+    <tags>frontend, react, refactoring, hooks</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag 'frontend' + 'refactoring'; modifies .ts/.tsx files across 2 consumer surfaces (LegalWorkspace + SpaarkeAi) + 1 shared lib; 6+ steps; Risk R-3 (dual-consumer regression). Per Step 3.5.5 decision tree, FULL rigor is mandatory.</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Consolidate the two divergent `useWorkspaceLayouts` hooks (LegalWorkspace + SpaarkeAi) into a single
+    shared-lib hook in `@spaarke/ai-widgets` (or a new `@spaarke/workspace-layouts` package). The consolidated
+    hook MUST accept `bffBaseUrl + authenticatedFetch + isAuthenticated` as injected dependencies + optional
+    `parseLayoutJson` + `fallbackLayout` flags. SessionStorage cache MUST be centralized inside the hook.
+    Both LegalWorkspace and SpaarkeAi adapt to import + consume the shared hook. ZERO behavioral regression
+    on either consumer surface (Risk R-3 mitigation — test BOTH end-to-end).
+  </prompt>
+
+  <role>
+    Senior React/TypeScript developer with shared-lib refactor experience. ADR-012 + ADR-028 are
+    load-bearing — the hook must remain context-agnostic and accept auth as injected deps (not via token
+    snapshots). Bias toward exact behavioral parity over "cleaner" rewrites.
+  </role>
+
+  <goal>
+    (a) A single `useWorkspaceLayouts` hook exists in `@spaarke/ai-widgets/src/hooks/` (or a new
+    `@spaarke/workspace-layouts` package); (b) hook signature accepts `bffBaseUrl + authenticatedFetch +
+    isAuthenticated` as injected deps + optional `parseLayoutJson` + `fallbackLayout` flags; (c) SessionStorage
+    cache is centralized inside the hook (single source of cache invalidation); (d)
+    `src/solutions/LegalWorkspace/src/hooks/useWorkspaceLayouts.ts` is deleted and the LegalWorkspace consumer
+    imports from the shared lib; (e) `src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts` is deleted
+    and the SpaarkeAi consumer imports from the shared lib; (f) both consumers verified end-to-end (Risk
+    R-3); (g) `tsc --noEmit` passes on all three packages; (h) `npm test` passes on the shared lib.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-13 (C-3) + plan §4 Phase 5: SPAARKEAI-COMPONENTIZATION-AUDIT.md surfaced the dual-hook
+      divergence — both LegalWorkspace and SpaarkeAi maintain their own `useWorkspaceLayouts.ts`. They
+      share ~90% logic but have diverged in cache TTL, error handling, and auth-source assumptions. The
+      consolidation is the prerequisite for C-4 (WorkspaceRenderer interface, task 052), which depends on
+      a single hook the renderer can consume. Risk R-3 (consolidation breaks one consumer) is the explicit
+      mitigation focus: keep auth-source flexible via injected `authenticatedFetch`, regression-test BOTH
+      consumers end-to-end BEFORE merging.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/hooks/useWorkspaceLayouts.ts</file>
+      <file>src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/hooks/</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/index.ts</file>
+      <file>src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Shared components MUST live in `@spaarke/*` lib family and remain context-agnostic. The consolidated hook accepts injected deps — it MUST NOT import from `src/solutions/*` or assume a specific host context.</constraint>
+    <constraint source="ADR-022">React 19 only for Code Pages. Hook uses standard React APIs (useState, useEffect, useCallback, useMemo, useRef). No React 18-only fallbacks.</constraint>
+    <constraint source="ADR-028">Function-based auth — the hook accepts `authenticatedFetch: (url: string, init?: RequestInit) =&gt; Promise&lt;Response&gt;` as an injected dependency. NO token snapshots in hook state, refs, or closures. NO direct `useAuth()` calls inside the hook (that would couple it to a host context). The host passes the function in.</constraint>
+    <constraint source="project">Hook signature MUST accept: `bffBaseUrl: string`, `authenticatedFetch: AuthenticatedFetch`, `isAuthenticated: boolean`, and OPTIONAL `parseLayoutJson?: (raw: unknown) =&gt; WorkspaceLayout`, `fallbackLayout?: WorkspaceLayout`. (Per spec FR-13.)</constraint>
+    <constraint source="project">SessionStorage cache key + TTL + invalidation logic MUST be centralized inside the hook. Consumers MUST NOT manage their own cache layer for layouts.</constraint>
+    <constraint source="project">Risk R-3 mitigation (mandatory): BOTH consumers (LegalWorkspace + SpaarkeAi) MUST be tested end-to-end after the migration. Pre-change behavioral snapshot REQUIRED. Document in `notes/c3-dual-consumer-regression.md`.</constraint>
+    <constraint source="project">ZERO behavioral regression on either consumer. If divergent behaviors are identified during diff, document the choice in the notes file and verify with operator if uncertain.</constraint>
+    <constraint source="project">Bundle-size impact (NFR-08): consolidation should REDUCE total bundle size (one copy instead of two). Measure SpaarkeAi gzip bundle before/after; expected delta ≤ 0 KB.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Rigor declaration">Output rigor declaration: 🔒 RIGOR LEVEL: FULL — frontend + refactoring tags, touches 3 packages, Risk R-3 dual-consumer regression. Step 9.5 quality gates MANDATORY.</step>
+    <step order="1" name="Pre-change behavioral snapshot">Read both `useWorkspaceLayouts.ts` files (LegalWorkspace + SpaarkeAi). Diff them. Document every divergence in `projects/spaarke-ai-platform-unification-r4/notes/c3-pre-change-diff.md`: cache TTL, error handling, auth-source assumption, fetch URL construction, fallback layout strategy, retry policy. This snapshot is the regression-test reference.</step>
+    <step order="2" name="Design consolidated signature">Draft the consolidated hook interface in `notes/c3-consolidated-hook-design.md`: exported types (`WorkspaceLayout`, `UseWorkspaceLayoutsOptions`, `UseWorkspaceLayoutsResult`); injected deps (`bffBaseUrl`, `authenticatedFetch`, `isAuthenticated`); optional flags (`parseLayoutJson`, `fallbackLayout`); cache key strategy; return shape. Confirm with `.claude/patterns/auth/spaarke-sso-binding.md` invariants.</step>
+    <step order="3" name="Implement consolidated hook">Create `src/client/shared/Spaarke.AI.Widgets/src/hooks/useWorkspaceLayouts.ts` (or new package — judgment call; default to existing `@spaarke/ai-widgets`). Implement per the design. Centralize sessionStorage cache. Export from `src/client/shared/Spaarke.AI.Widgets/src/index.ts`.</step>
+    <step order="4" name="Adapt LegalWorkspace consumer">Update `src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx` (and any other LegalWorkspace files importing the local hook) to import from `@spaarke/ai-widgets`. Pass `bffBaseUrl` + `authenticatedFetch` + `isAuthenticated` from the LegalWorkspace auth + config layer. Delete `src/solutions/LegalWorkspace/src/hooks/useWorkspaceLayouts.ts`.</step>
+    <step order="5" name="Adapt SpaarkeAi consumer">Update `src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx` (and any other SpaarkeAi files importing the local hook) to import from `@spaarke/ai-widgets`. Pass the same injected deps from the SpaarkeAi auth layer. Delete `src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts`.</step>
+    <step order="6" name="Build verification">Run `tsc --noEmit` on `@spaarke/ai-widgets`, `LegalWorkspace`, and `SpaarkeAi` packages. Verify 0 errors. Run `npm run build` on each. Verify clean builds.</step>
+    <step order="7" name="Unit tests for consolidated hook">Add/update unit tests for the consolidated hook in `@spaarke/ai-widgets` — cover cache hit, cache miss, fallback layout, parseLayoutJson override, auth not ready (isAuthenticated=false), and 401/403 error paths.</step>
+    <step order="8" name="Regression diff against snapshot">Re-run the pre-change behavioral snapshot tests (from step 1's diff). Confirm: (a) cache behavior identical; (b) error UX identical; (c) fallback identical; (d) network requests identical (URL + headers). Any divergence MUST be flagged and either justified in notes or fixed.</step>
+    <step order="9" name="Bundle-size measurement">Build both consumer solutions and measure gzip bundle. Compare against pre-change baseline. Expected: ≤ 0 KB delta (consolidation reduces total). Record actual in PR notes.</step>
+    <step order="9.5" name="Quality gates">Invoke `code-review` skill and `adr-check` skill. Verify ADR-012 (shared lib placement), ADR-022 (React 19 patterns), ADR-028 (function-based auth, no token snapshots). Fix any HIGH-severity findings before proceeding.</step>
+    <step order="10" name="UI tests (both consumers)">Invoke `ui-test` skill for the two end-to-end consumer-parity tests defined below.</step>
+    <step order="11" name="Deploy">Deploy SpaarkeAi via `code-page-deploy`. (LegalWorkspace deployment depends on W-6 retirement status — coordinate; if standalone LW is already retired, only SpaarkeAi deploy is needed.)</step>
+    <step order="12" name="Update TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 051 status 🔲 → ✅. Mark task 052 (C-4) as ready (dependency cleared).</step>
+    <step order="13" name="Document deviations">If any divergence between the two original hooks was resolved by a choice rather than parity, record the decision + rationale in `projects/spaarke-ai-platform-unification-r4/notes/c3-divergence-resolutions.md` for R4 lessons-learned.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test + tsc --noEmit per package</tool>
+    <tool name="Read">Read both pre-existing hooks + consumers</tool>
+    <tool name="Edit">Update consumers; delete pre-existing hooks</tool>
+    <tool name="Write">Create consolidated hook + diff notes + design doc</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/hooks/useWorkspaceLayouts.ts (new, consolidated)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/index.ts (export added)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx (import + injected deps)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx (import + injected deps)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/hooks/useWorkspaceLayouts.ts (deleted)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts (deleted)</output>
+    <output type="test">src/client/shared/Spaarke.AI.Widgets/src/hooks/__tests__/useWorkspaceLayouts.test.ts (new)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/c3-pre-change-diff.md</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/c3-consolidated-hook-design.md</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="LegalWorkspace consumer parity">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_corporateworkspace</url>
+      <steps>
+        <step>Open LegalWorkspace standalone code page (or embedded inside SpaarkeAi if standalone is retired per W-6)</step>
+        <step>Verify the layout dropdown is populated (sessionStorage cache OR fresh BFF fetch)</step>
+        <step>Switch layouts and verify the dashboard re-renders with the new section set</step>
+        <step>Refresh the page and verify the last-selected layout persists (sessionStorage cache hit)</step>
+        <step>Check browser console for any errors or warnings related to layout fetch / cache / auth</step>
+      </steps>
+      <expected>Behavior IDENTICAL to pre-change snapshot: layouts load, switch, persist on refresh, no console errors.</expected>
+    </test>
+
+    <test name="SpaarkeAi consumer parity">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Open SpaarkeAi page → Workspace pane</step>
+        <step>Verify the layout selector is populated</step>
+        <step>Switch layouts and verify the workspace re-renders</step>
+        <step>Open the Manage Workspace Layouts pane and verify list is correct (cache or fresh)</step>
+        <step>Refresh and verify cache hit (no spurious 401/403 from auth not-ready timing)</step>
+        <step>Check console for errors or warnings</step>
+      </steps>
+      <expected>Behavior IDENTICAL to pre-change snapshot: layouts load, switch, persist, no console errors. Auth timing (isAuthenticated gating) unchanged.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the two pre-existing `useWorkspaceLayouts.ts` files, When this task completes, Then they are deleted and a single consolidated hook lives in `@spaarke/ai-widgets/src/hooks/useWorkspaceLayouts.ts`.</criterion>
+    <criterion testable="true">Given the consolidated hook signature, When inspected, Then it accepts `bffBaseUrl + authenticatedFetch + isAuthenticated` as required injected deps + optional `parseLayoutJson + fallbackLayout` flags (FR-13 acceptance).</criterion>
+    <criterion testable="true">Given ADR-028 function-based auth, When the hook is inspected, Then it contains NO token snapshots — only the injected `authenticatedFetch` function is used for BFF calls.</criterion>
+    <criterion testable="true">Given Risk R-3 (dual-consumer regression), When both LegalWorkspace and SpaarkeAi are exercised end-to-end, Then behavior is identical to the pre-change snapshot (cache, switch, persist, error UX).</criterion>
+    <criterion testable="true">Given `tsc --noEmit`, When run on `@spaarke/ai-widgets`, `LegalWorkspace`, and `SpaarkeAi`, Then 0 type errors are reported.</criterion>
+    <criterion testable="true">Given NFR-08 bundle-size budget, When SpaarkeAi gzip bundle is measured, Then the delta vs pre-change baseline is ≤ 0 KB (consolidation should reduce total).</criterion>
+    <criterion testable="true">All unit tests for the consolidated hook pass (`npm test`).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    OPEN QUESTION (task-time decision): Use existing `@spaarke/ai-widgets` package OR create a new
+    `@spaarke/workspace-layouts` package? Default: extend `@spaarke/ai-widgets` (already exports related
+    types via `WorkspaceLayoutWidget`). Creating a new package is only justified if the hook + types are
+    consumed independently of the widget — which they currently are not. Pick the simpler option unless
+    a strong forcing function emerges.
+
+    Risk R-3 is the SINGLE BIGGEST risk in Phase 5. Do NOT skip the pre-change diff snapshot (step 1).
+    Do NOT skip the dual-consumer end-to-end test. The original spec authoring noted: "Test BOTH consumers
+    (LegalWorkspace + SpaarkeAi) end-to-end after consolidation; keep auth-source flexible (hook-deps style)."
+
+    LW retirement context: W-6 retires the LegalWorkspace standalone code page deploy but RETAINS the
+    components as a library. Therefore the LegalWorkspace consumer in step 4 is still REAL code that
+    matters — it is the dashboard renderer (`LegalWorkspaceApp`) consumed by SpaarkeAi. Test parity
+    via the embedded path if standalone is already gone.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply FULL rigor protocol: declare rigor at Step 0; pre-change behavioral snapshot is MANDATORY (Risk R-3 mitigation); Step 9.5 quality gates MANDATORY; ADR-012 + ADR-028 are LOAD-BEARING — verify no shared-lib coupling and no token snapshots in the consolidated hook.</protocol>
+  </execution>
+</task>

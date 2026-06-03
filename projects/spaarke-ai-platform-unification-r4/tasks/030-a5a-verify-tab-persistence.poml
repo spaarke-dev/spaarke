@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>A-5a Verify current tab-persistence behavior (FR-05 verify phase)</title>
+    <phase>Phase 3: UQ-03 verify + fix</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>031</blocks>
+    <tags>frontend, react, investigation, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Investigation-only spike producing a verification memo. STANDARD rigor — no code modification, but produces durable artifact that gates 031.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only investigation + operator smoke test. No file writes outside `notes/`. Safe to run alongside other independent tasks.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Execute the A-5a verification spike (FR-05 verify phase). Per OC-R4-02, the R3 UQ-03 verification said tabs persist; recent operator feedback contradicts that finding. Verify-then-fix protocol: this task is VERIFICATION ONLY. Do NOT remediate. Answer five questions with operator-observable evidence: (1) Do tabs persist across browser REFRESH today? (2) Do tabs persist across browser CLOSE/REOPEN today? (3) On reopen, does the active tab default to Home, last-active, or something else? (4) Where is state stored — sessionStorage, localStorage, BFF, Cosmos? (5) Is the spec/UX expectation that browser-reopen → Home tab? Publish to `projects/spaarke-ai-platform-unification-r4/notes/tab-persistence-verification-2026-05.md`. Task 031 is BLOCKED until this memo lands.
+  </prompt>
+
+  <role>
+    Frontend investigator with React 19 + browser-storage familiarity (sessionStorage vs localStorage, BFF/Cosmos write-through from R2 D-06). Reads code AND probes browser behavior — does not infer from code alone.
+  </role>
+
+  <goal>
+    Verification memo at `projects/spaarke-ai-platform-unification-r4/notes/tab-persistence-verification-2026-05.md` answering the five questions with: (a) code evidence (file:line citations for the persistence layer) and (b) operator-observable smoke evidence (refresh + close/reopen). Concludes with the operator-confirmed "actually broken gap" — the acceptance target for 031.
+  </goal>
+
+  <context>
+    <background>
+      R3 task 065 implemented `SessionPersistenceService` extension with workspace tabs[] write-through to Cosmos via BFF (`PATCH/GET /ai/chat/sessions/{sessionId}/tabs`). R3 task 063 marked NFR-09 satisfied. OC-R4-02 records operator feedback contradicting that finding — original verification likely measured refresh-within-session but NOT close/reopen across browser sessions.
+
+      Stack (from existing code): `WorkspaceTabManager.ts` (in-memory + serialize/restore methods); `WorkspacePane.tsx` (debounced PATCH on mutation, GET on mount); BFF `SessionPersistenceService` persists to Cosmos with `/tenantId` partition key. `chatSessionId` comes from `useAiSession()` — its lifetime is the key open question (sessionStorage = refresh-only; localStorage = close-survives; auth-derived = depends on token cache).
+
+      Verify-then-fix is non-negotiable per CLAUDE.md §1 / OC-R4-02. Do NOT pre-build a fix.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/StoredSession.cs</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/ (find prior verification memos via Glob)</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/tab-persistence-verification-2026-05.md (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-05 — verify CURRENT behavior; remediation in 031 addresses the actually-broken gap. Verify is non-negotiable per OC-R4-02.</constraint>
+    <constraint source="project">DO NOT modify production code in this task. If an obvious fix presents itself, DEFER to 031.</constraint>
+    <constraint source="project">Operator-observable evidence required for Q1 and Q2. Code reading alone is insufficient. If browser smoke is unavailable, document steps verbatim and request operator-driven smoke as a pre-031 gate.</constraint>
+    <constraint source="project">All five questions answered explicitly. Inconclusive answers flagged ("undetermined — requires operator smoke") rather than silently omitted.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="R3 task 065 baseline" location="src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx">
+        Debounced PATCH on mutation + GET on mount. Key question: does `chatSessionId` from `useAiSession()` survive browser-close or only refresh.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Locate R3 prior verification">Glob `projects/spaarke-ai-platform-unification-r3/notes/*tab*`, `*nfr-09*`, `*backwards-compat*`. Read R3 memo(s); extract scenarios tested, evidence captured, whether close/reopen was distinguished from refresh.</step>
+    <step order="2" name="Read persistence stack">Read `WorkspaceTabManager.ts` (focus on serialize/restore) and `WorkspacePane.tsx` (focus on PATCH/GET effects + chatSessionId dependency). Capture where chatSessionId comes from and what happens when it's missing on mount.</step>
+    <step order="3" name="Trace chatSessionId lifetime">Grep for `chatSessionId`, `setChatSessionId`, the `useAiSession` implementation. Determine: does the id survive browser CLOSE? (Check storage type: sessionStorage / localStorage / auth-derived.)</step>
+    <step order="4" name="Identify storage ground truth">Grep `src/solutions/SpaarkeAi/` and `src/client/shared/Spaarke.AI.Widgets/` for `sessionStorage`, `localStorage`, `IndexedDB`. Cross-reference with BFF Cosmos persistence — confirm tabs themselves live in Cosmos, but the lookup KEY (chatSessionId) is what determines survival.</step>
+    <step order="5" name="Operator smoke — refresh">Either via `ui-test` skill or operator-driven: (1) open SpaarkeAi; (2) open 3 non-Home tabs via Context wizards; (3) refresh (Ctrl+R); (4) observe — do all 3 tabs return? Which tab is active? Capture PASS/FAIL/PARTIAL with screenshot or trace.</step>
+    <step order="6" name="Operator smoke — close/reopen">Same setup. Then: (1) CLOSE the entire browser process; (2) reopen browser, navigate to SpaarkeAi; (3) observe — do tabs return? Active tab Home or last-active? Capture result. THIS IS THE SCENARIO OC-R4-02 SAYS WAS MISSED IN R3.</step>
+    <step order="7" name="Document spec expectation">Read FR-05 in `spec.md` and OC-R4-02 in `plan.original.md`. Document expectation: "browser-reopen restores tabs" OR "browser-reopen defaults to Home"? If ambiguous, flag as open question.</step>
+    <step order="8" name="Synthesize the actually-broken gap">Cross-reference actual behavior (steps 5+6) vs spec expectation (step 7). Identify the delta. Possible gaps: sessionStorage→localStorage migration needed / BFF session-id stability needed / default-active-tab logic needs correction / no gap exists (R3 was correct).</step>
+    <step order="9" name="Write verification memo">Create the memo with: header (date, scope, investigator); Q1-Q5 answers with code citations + smoke evidence; actually-broken gap section (synthesized delta); recommendation for task 031 (which of three paths, with rationale); open questions for operator.</step>
+    <step order="10" name="Verify + update TASK-INDEX">No code changed, no build. Update TASK-INDEX.md row 030 → ✅ completed. Add note pointing to memo + recommended fix path. If memo concludes "no gap — R3 was correct," surface to operator before 031 runs (031 may be downscoped or cancelled).</step>
+    <step order="11" name="Document deviations">If any deviation (browser smoke unavailable, scope expanded, additional storage layers discovered), document in `notes/` alongside the memo.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Persistence-stack source files</tool>
+    <tool name="Grep">Trace chatSessionId, sessionStorage, localStorage</tool>
+    <tool name="Glob">Locate R3 prior verification memos</tool>
+    <tool name="Write">Verification memo</tool>
+    <tool name="Edit">TASK-INDEX.md status update</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/tab-persistence-verification-2026-05.md (NEW)</output>
+    <output type="report">Completion report with actually-broken gap definition + recommendation for task 031 fix path</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Memo exists at the documented path and is dated.</criterion>
+    <criterion testable="true">All five questions answered explicitly (Q1 refresh, Q2 close/reopen, Q3 default-active-tab, Q4 storage layer, Q5 spec expectation). Inconclusive answers flagged, not omitted.</criterion>
+    <criterion testable="true">Memo includes operator-observable smoke evidence for at least Q1 and Q2 — code reading alone is insufficient.</criterion>
+    <criterion testable="true">Memo synthesizes an "actually-broken gap" statement OR explicitly concludes "no gap, R3 was correct."</criterion>
+    <criterion testable="true">Memo recommends a fix path for task 031 (or recommends downscoping/cancelling 031 if no gap).</criterion>
+    <criterion testable="true">NO production code modified. `git status` shows changes only under `projects/spaarke-ai-platform-unification-r4/`.</criterion>
+    <criterion testable="true">TASK-INDEX.md row 030 → ✅ completed; row 031 either unblocked with fix-path note or marked needing operator review.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Verify-first is the load-bearing protocol (OC-R4-02). If an obvious fix presents itself, DEFER to 031 — A-5a vs A-5b are two tasks precisely because R3 verification got it wrong. If browser smoke is impossible autonomously (no Chrome integration), document steps verbatim and request operator smoke as a pre-031 gate. The memo's fix-path recommendation IS the acceptance target for 031 — vagueness here propagates downstream.
+  </notes>
+
+  <execution>
+    Execute via `task-execute` skill. STANDARD rigor — no code changes, but produces durable memo gating 031. If Chrome integration is available, Steps 5+6 may invoke `ui-test` for smoke automation; otherwise hand off to operator.
+  </execution>
+</task>

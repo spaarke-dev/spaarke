@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B.1: Fix 10 react-hooks/rules-of-hooks violations in DatasetGrid (GridView + ListView)</title>
+    <phase>6.5: R4 add-on cleanup</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>065</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, react, refactoring, correctness-bug</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>REAL CORRECTNESS BUG. Hooks called after conditional return — violates React's Rules of Hooks. Can cause runtime crashes or incorrect rendering if the conditional fires. FULL per Step 3.5.5 (modifies hot-path code, ADR-022, REAL bug).</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches DatasetGrid/GridView.tsx + ListView.tsx ONLY — explicitly excluded from 074 scope. Different files from 072, 075, 076, 077.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Filed 2026-05-27 per operator mandate. Surfaced by task 065 (ESLint flat config) which
+    demoted react-hooks/rules-of-hooks from error → warn to keep the lint gate green. These
+    are REAL pre-existing correctness bugs: hooks (useMemo, useCallback) called AFTER an
+    early conditional `return` at GridView.tsx:90. React's invariant is that hooks must
+    run in the same order on every render — violating this can crash or misrender at
+    runtime.
+
+    Fix the hook order. Then promote the rule from warn → error in eslint.config.js.
+  </prompt>
+
+  <role>
+    React 19 engineer fluent in hook rules. Bias toward hoisting all hooks above conditional
+    returns. Apply minimum-viable refactor — don't rewrite the component, just relocate the
+    hooks.
+  </role>
+
+  <goal>
+    (1) 10 react-hooks/rules-of-hooks violations resolved in `GridView.tsx` (lines 107, 115,
+    136, 155, 164) and `ListView.tsx` (lines 145, 151, 167, 178, 188). (2) All hooks hoisted
+    ABOVE the conditional `return` at line ~90. (3) `eslint.config.js` updated to promote
+    `react-hooks/rules-of-hooks` from `warn` → `error`. (4) `npm run lint` passes. (5)
+    Existing DatasetGrid tests pass. (6) UI smoke note: no visual regression.
+  </goal>
+
+  <context>
+    <background>
+      Per notes/b9-lint-warnings.md §B-11 / future-task escalation list: the early `return` at
+      GridView.tsx:90 (`if (virtualization.shouldVirtualize && props.records.length > 1000)
+      return (...)`) is followed by `useMemo`/`useCallback` calls at lines 107, 115, 136, 155,
+      164. Same pattern in ListView.tsx at line 90 with hooks at 145, 151, 167, 178, 188.
+
+      React's invariant: hooks must run in the same order on every render. When the conditional
+      return fires, the second-render hook list will diverge from the first-render hook list →
+      React error or incorrect state preservation.
+
+      Fix: hoist all hooks above the conditional return. The conditional becomes either:
+      (a) A useMemo gate: `const virtualizedView = useMemo(() => shouldVirtualize ? <VirtualizedGrid .../> : null, [...]); if (virtualizedView) return virtualizedView;` — but this still calls hooks AFTER, so doesn't help.
+      (b) Restructure: hoist ALL hooks to top, then have the conditional `return` come after them. Each hook runs unconditionally; the chosen branch decides which UI to render. THIS is the correct fix.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/GridView.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/ListView.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/eslint.config.js</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/__tests__/GridView.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">React 19 patterns only. No legacy hook workarounds.</constraint>
+    <constraint source="project">Minimum-viable refactor — hoist hooks, don't redesign the component.</constraint>
+    <constraint source="project">All hooks (useMemo, useCallback, useEffect, useRef, useState, custom hooks) MUST run unconditionally on every render.</constraint>
+    <constraint source="project">Behavior parity is mandatory. Virtualized large-record path must still render correctly when triggered.</constraint>
+    <constraint source="project">Promote `react-hooks/rules-of-hooks` from `warn` to `error` in `eslint.config.js` AFTER fixes land. Lint must pass at that level.</constraint>
+    <constraint source="project">Do NOT touch other DatasetGrid files in this task. ViewSelector.tsx (also DatasetGrid) belongs to task 074.</constraint>
+    <constraint source="project">If a hook depends on data that's only available in one branch (e.g., virtualized vs. standard), use the data inside the hook body conditionally — but ALWAYS call the hook.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/b9-lint-warnings.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read both files">Read `GridView.tsx` and `ListView.tsx` entirely. Catalog ALL hook calls and their positions relative to the conditional return at line ~90.</step>
+    <step order="2" name="Design the refactor">For each file: design the hoisting plan. Move every `useMemo`/`useCallback`/`useEffect`/etc. call to BEFORE the conditional return. The hooks now run unconditionally; the conditional return uses their results to choose the render output.</step>
+    <step order="3" name="Apply refactor to GridView.tsx">Apply the hoisting. Verify the conditional return still produces the virtualized path when triggered. The hook bodies may need adjustment to handle the case where the data they process is meant for the virtualized vs. standard branch.</step>
+    <step order="4" name="Apply refactor to ListView.tsx">Same pattern.</step>
+    <step order="5" name="Lint verification">Run `npm run lint` in `Spaarke.UI.Components`. The 10 rules-of-hooks warnings should be gone.</step>
+    <step order="6" name="Promote rule to error">Edit `eslint.config.js`: change `'react-hooks/rules-of-hooks': 'warn'` → `'react-hooks/rules-of-hooks': 'error'`. Re-run `npm run lint`. Must pass with 0 errors.</step>
+    <step order="7" name="Test verification">Run `npm test` for DatasetGrid tests. All pass. If any hook order changes break tests, that's expected — fix tests if they relied on pre-refactor hook order; ESCALATE if it's a real behavior regression.</step>
+    <step order="8" name="Document">Write `projects/spaarke-ai-platform-unification-r4/notes/073-datasetgrid-hooks-fix.md` with: before/after hook positions, virtualization branch handling, lint promotion confirmation, test results.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Inspect GridView.tsx + ListView.tsx</tool>
+    <tool name="Edit">Hoist hooks; update eslint.config.js</tool>
+    <tool name="Bash">npm run lint, npm test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/GridView.tsx (refactored — hooks hoisted)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/ListView.tsx (refactored — hooks hoisted)</output>
+    <output type="config">src/client/shared/Spaarke.UI.Components/eslint.config.js (rule promoted to error)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/073-datasetgrid-hooks-fix.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the refactor, When `npm run lint` runs in `Spaarke.UI.Components`, Then 0 `react-hooks/rules-of-hooks` violations (even with the rule set to `error`).</criterion>
+    <criterion testable="true">Given the refactor, When `GridView.tsx` is inspected, Then no hook call appears AFTER any conditional `return` statement.</criterion>
+    <criterion testable="true">Given the refactor, When `ListView.tsx` is inspected, Then no hook call appears AFTER any conditional `return` statement.</criterion>
+    <criterion testable="true">Given the eslint config update, When `eslint.config.js` is inspected, Then `'react-hooks/rules-of-hooks': 'error'` (not `'warn'`).</criterion>
+    <criterion testable="true">Given the change, When `npm test` runs in `Spaarke.UI.Components`, Then DatasetGrid tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    These are REAL pre-existing bugs. The reason React's rule exists is exactly this — hooks
+    called after a conditional return will misbehave when the conditional fires. The fix is
+    standard React 19 pattern: all hooks at the top, conditional rendering at the bottom.
+
+    Out of scope: any other DatasetGrid file (ViewSelector.tsx etc. is task 074's domain).
+    Do not address `react-hooks/exhaustive-deps` warnings in the same files — those are
+    separate (and lower priority per b9-lint-warnings.md).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor — Step 9.5 quality gates (code-review + adr-check) after implementation.</protocol>
+  </execution>
+</task>

@@ -46,9 +46,14 @@ describe('SprkChatInput', () => {
     });
 
     it('should display Ctrl+Enter hint', () => {
-      renderWithProviders(<SprkChatInput onSend={mockOnSend} />);
+      const { container } = renderWithProviders(<SprkChatInput onSend={mockOnSend} />);
 
-      expect(screen.getByText('Ctrl+Enter to send')).toBeInTheDocument();
+      // Task 071: SprkChatInput.tsx:283 now renders
+      //   "Ctrl+Enter to send · / for commands"
+      // as a single Fluent <Text>. Earlier function matcher matched too many
+      // ancestor nodes ("Found multiple elements"). Use a direct textContent
+      // check against the container instead.
+      expect(container.textContent).toContain('Ctrl+Enter to send');
     });
 
     it('should display character count as 0/2000 initially', () => {

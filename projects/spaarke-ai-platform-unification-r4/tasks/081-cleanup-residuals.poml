@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>Pre-wrap-up residuals: fix useKeyboardShortcuts TypeError + untrack 272 deploy artifacts</title>
+    <phase>7: R4 deploy + wrap-up</phase>
+    <status>completed</status>
+    <estimated-hours>0.25</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>090</blocks>
+    <tags>frontend, react, hygiene, governance</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Two narrow, defensive fixes (1-line code change + git rm --cached). No production behavior risk.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Main session only — pre-wrap-up housekeeping</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Filed 2026-05-27 during R4 final review #3. Operator review of residuals identified two
+    items quick + cheap to clear before 090 wrap-up: (1) a real production bug surfaced by
+    the CommandBar test crash, (2) the master-level deploy-artifact tracking issue that R4
+    task 060 fixed locally but didn't reach master.
+  </prompt>
+
+  <role>
+    Spaarke close-out engineer. Surgical defensive fixes.
+  </role>
+
+  <goal>
+    (1) `useKeyboardShortcuts` no longer crashes when `commands` is undefined.
+    (2) `deploy/api-publish/*` is untracked from git on the R4 branch (durable fix
+    that will reach master via merge).
+  </goal>
+
+  <context>
+    <background>
+      **Fix 1: useKeyboardShortcuts TypeError**
+
+      Source: `src/client/shared/Spaarke.UI.Components/src/hooks/useKeyboardShortcuts.ts`
+      Line 32 (runtime): `commands.find(cmd => cmd.keyboardShortcut === shortcut)`
+
+      The hook destructures `const { commands, context, enabled = true } = options;` with
+      no default for `commands`. TypeScript marks `commands: ICommand[]` as required, but
+      cannot enforce at runtime — a consumer rendering before its command list is loaded
+      (e.g., async fetch path) crashes the app with
+      `TypeError: Cannot read properties of undefined (reading 'find')`.
+
+      This crash blocked the `CommandBar.test.tsx` suite (23 tests) from running entirely.
+      It was first flagged by task 074 sub-agent ("verified pre-existing"), again by 077,
+      and again by 078. Per task 078 memo §carry-over recommendation: "Real bug to address
+      in a follow-up."
+
+      Fix: defensive default `const { commands = [], context, enabled = true } = options;`
+      `[].find(...)` returns undefined cleanly, hook becomes a no-op.
+
+      **Fix 2: deploy artifact tracking**
+
+      `.gitignore` line 122 has `deploy/` rule, but 272 files in `deploy/api-publish/*`
+      were tracked in git BEFORE the rule was added. Once tracked, `.gitignore` cannot
+      untrack — only `git rm --cached` does.
+
+      R4 task 060 (B-1) ran `git rm --cached -r deploy/api-publish/` on the R4 branch,
+      but the fix never reached master. Other projects (auth-v2, BFF remediation,
+      matter-ui-r1) re-tracked the files during their deploys. When R4 synced master on
+      2026-05-27, those files came back tracked.
+
+      Fix: re-run `git rm --cached -r deploy/api-publish/` on the R4 branch. After
+      merge-to-master, master inherits the untracking. Then `.gitignore` actually works —
+      `git add deploy/api-publish/...` is ignored unless deliberate `-f` override.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/useKeyboardShortcuts.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/PageChrome/__tests__/CommandBar.test.tsx</file>
+      <file>deploy/api-publish/ (272 tracked files; .gitignore line 122 covers)</file>
+      <file>.gitignore</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Fix 1 must be defensive — no runtime behavior change for valid inputs (only graceful handling of undefined).</constraint>
+    <constraint source="project">Fix 2 must not delete files from disk — `git rm --cached` only.</constraint>
+    <constraint source="project">After fixes: BFF build still clean. UI.Components tests still pass. No new failures.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/078-eslint-sweep.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/079-deploy-verification.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Fix 1: add default to commands">Edit `useKeyboardShortcuts.ts:15`: `{ commands, context, enabled = true }` → `{ commands = [], context, enabled = true }`. Add comment citing task 081 + reason.</step>
+    <step order="2" name="Verify CommandBar test">Run `npx jest src/components/PageChrome/__tests__/CommandBar.test.tsx`. Suite must pass (23 tests). Previously crashed at startup.</step>
+    <step order="3" name="Fix 2: untrack deploy artifacts">`git rm --cached -r deploy/api-publish/`. Verify `git ls-files deploy/api-publish/` returns 0. Verify `ls deploy/api-publish/` still shows files (disk unchanged).</step>
+    <step order="4" name="Verify .gitignore covers it">`git check-ignore deploy/api-publish/Sprk.Bff.Api.dll` should succeed.</step>
+    <step order="5" name="Full test suite regression">`npm test` in `@spaarke/ui-components` — expect 1074/1074 (was 1051 + 23 newly-unblocked from CommandBar).</step>
+    <step order="6" name="Build regression">`dotnet build src/server/api/Sprk.Bff.Api/` — 0 errors.</step>
+    <step order="7" name="Document">Write `projects/spaarke-ai-platform-unification-r4/notes/081-cleanup-residuals.md` capturing both fixes + verification.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">useKeyboardShortcuts.ts</tool>
+    <tool name="Bash">git rm --cached, npm test, dotnet build, git check-ignore</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/hooks/useKeyboardShortcuts.ts (default value)</output>
+    <output type="governance">deploy/api-publish/ (272 files untracked from git index, kept on disk)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/081-cleanup-residuals.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the default-value fix, When `useKeyboardShortcuts` is called with `options.commands = undefined`, Then it no longer throws TypeError.</criterion>
+    <criterion testable="true">Given the test reachability, When CommandBar.test.tsx runs, Then 23/23 tests pass (was 0 — suite crashed at startup).</criterion>
+    <criterion testable="true">Given the untrack, When `git ls-files deploy/api-publish/` runs, Then returns 0 files.</criterion>
+    <criterion testable="true">Given the untrack, When `ls deploy/api-publish/` runs, Then files still present on disk.</criterion>
+    <criterion testable="true">Given `.gitignore` line 122, When `git check-ignore deploy/api-publish/X.dll` runs, Then exit 0 (gitignored).</criterion>
+    <criterion testable="true">Given `npm test` in UI.Components, Then 1074/1074 tests pass.</criterion>
+    <criterion testable="true">Given `dotnet build` BFF, Then 0 errors (deploy/api-publish/ disk state unchanged for build/publish workflow).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor — defensive fixes only.</protocol>
+  </execution>
+</task>

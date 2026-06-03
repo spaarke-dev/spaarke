@@ -12,6 +12,7 @@
  */
 
 import type { SectionRegistration, SectionCategory } from "@spaarke/ui-components";
+import { SECTION_METADATA_CATALOG } from "@spaarke/ui-components";
 import { getStartedRegistration } from "./sections/getStarted.registration";
 import { quickSummaryRegistration } from "./sections/quickSummary.registration";
 import { latestUpdatesRegistration } from "./sections/latestUpdates.registration";
@@ -32,9 +33,17 @@ export const SECTION_REGISTRY: readonly SectionRegistration[] = [
 ] as const;
 
 // ---------------------------------------------------------------------------
-// Development guard: detect duplicate section IDs at module load time.
+// Development guard: detect duplicate section IDs + drift vs the shared
+// SECTION_METADATA_CATALOG (the single source of truth for wizard pickability).
+//
+// R4 W-3 (task 040, 2026-05-26): the wizard's picker reads
+// `SECTION_METADATA_CATALOG` from `@spaarke/ui-components`. Any new section
+// added HERE without a matching metadata entry would not appear in the wizard
+// (and vice versa: a metadata entry without a registration would render
+// nothing). This guard catches both directions of drift in dev builds.
 // ---------------------------------------------------------------------------
 if (process.env.NODE_ENV !== "production") {
+  // (a) Duplicate IDs across registrations.
   const seen = new Set<string>();
   for (const reg of SECTION_REGISTRY) {
     if (seen.has(reg.id)) {
@@ -44,6 +53,30 @@ if (process.env.NODE_ENV !== "production") {
       );
     }
     seen.add(reg.id);
+  }
+
+  // (b) Registry vs metadata catalog drift.
+  const registryIds = new Set(SECTION_REGISTRY.map((r) => r.id));
+  const metadataIds = new Set(SECTION_METADATA_CATALOG.map((m) => m.id));
+
+  for (const id of registryIds) {
+    if (!metadataIds.has(id)) {
+      console.error(
+        `[sectionRegistry] Section "${id}" is in SECTION_REGISTRY but missing ` +
+          "from SECTION_METADATA_CATALOG in @spaarke/ui-components. " +
+          "Add a matching entry to sectionMetadataCatalog.ts so the wizard " +
+          "picker includes it.",
+      );
+    }
+  }
+  for (const id of metadataIds) {
+    if (!registryIds.has(id)) {
+      console.error(
+        `[sectionRegistry] Section "${id}" is in SECTION_METADATA_CATALOG ` +
+          "but has no matching SECTION_REGISTRY entry. " +
+          "Either add a registration in sections/ or remove the metadata entry.",
+      );
+    }
   }
 }
 

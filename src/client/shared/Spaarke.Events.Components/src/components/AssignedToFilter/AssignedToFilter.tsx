@@ -220,10 +220,15 @@ export const AssignedToFilter: React.FC<AssignedToFilterProps> = ({
   );
 
   /**
-   * Handle search text change
+   * Handle search text change.
+   *
+   * Fluent v9 Combobox uses the standard `onInput` event (typed as
+   * React.FormEventHandler<HTMLInputElement>) — the input's current value
+   * is read from `event.currentTarget.value`. Earlier ad-hoc `(event, data)`
+   * handler shape was a v8 holdover; aligned with v9 in B-11 (task 067).
    */
-  const handleSearchChange = React.useCallback((_event: any, data: { value: string }) => {
-    setSearchText(data.value);
+  const handleSearchChange = React.useCallback<React.FormEventHandler<HTMLInputElement>>(event => {
+    setSearchText(event.currentTarget.value);
   }, []);
 
   // Filter users based on search text
@@ -277,10 +282,7 @@ export const AssignedToFilter: React.FC<AssignedToFilterProps> = ({
         selectedOptions={selectedUserIds}
         onOptionSelect={handleOptionSelect}
         value={selectedValue}
-        // Task 114 note: handler signature (event, data) pre-dates Fluent v9
-        // InputEventHandler API change to single-arg. Cast is a pre-existing
-        // type-drift bridge — flagged for follow-up.
-        onInput={handleSearchChange as unknown as React.FormEventHandler<HTMLInputElement>}
+        onInput={handleSearchChange}
         disabled={disabled}
         aria-label="Filter by assigned user"
       >

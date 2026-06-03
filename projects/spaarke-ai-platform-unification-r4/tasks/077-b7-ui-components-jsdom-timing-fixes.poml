@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="077" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B.7: Fix 4 remaining jsdom timing/isolation test failures in useChatFileAttachment + SprkChat.attachments</title>
+    <phase>6.5: R4 add-on cleanup</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>071</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, testing, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test-content fixes only — no production code modification. STANDARD per Step 3.5.5.</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches @spaarke/ui-components/src/components/SprkChat/__tests__/ only — different from 072, 073, 074, 075, 076 (which all touch production code)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Filed 2026-05-27. Task 071 closed at 4 remaining failures (target was ≤10) but operator
+    mandate: the next project will touch SprkChat heavily and these failures will resurface.
+    Fix here. All 4 are jsdom + React 19 testing-infrastructure gaps (mammoth dynamic-import
+    mock-cache + SSE microtask timing under RTL v16 act-batching). NOT production bugs —
+    verified at runtime in R2 task 026.
+  </prompt>
+
+  <role>
+    React 19 + Jest + RTL v16 test-infrastructure engineer. Bias toward jest.isolateModules()
+    and per-test fresh registries over global mock-state. Knowledgeable about React 19 effect
+    cleanup + jsdom microtask scheduling quirks.
+  </role>
+
+  <goal>
+    (1) `npm test` in `@spaarke/ui-components` passes with 0 (or ≤2) failures (down from 4).
+    (2) All R4-added tests pass (042 SprkChat.onAttachmentReady 6/6, 050 SprkChat.attachments
+    boundary 3/3 — currently 2/3). (3) Production code untouched. (4) The fix approach is
+    documented so the pattern can be reused on future SprkChat tests.
+  </goal>
+
+  <context>
+    <background>
+      Per notes/test-content-failures-triage-2026-05-26.md §4 "Carry-overs" — 4 failures:
+
+      1. `useChatFileAttachment > FR-24 telemetry > does not throw when onExtractionError callback itself throws`
+         - Root cause: `jest.mock('mammoth', …)` is module-global. The hook's `ensureMammoth()` memoizes the resolved promise per-hook-instance, but the mock methods are reset between tests via `clearAllMocks()`. Net effect: a test that sets `mockExtractRawText.mockRejectedValue(...)` AFTER the cached promise resolved doesn't trigger the rejection path.
+         - Fix: use `jest.isolateModules(() => { … })` per test that needs a fresh module registry, OR refactor the test mocking strategy to override the mock implementation BEFORE the first import resolves.
+
+      2-3. `useChatFileAttachment > mutations > removeFile(0) ...` and `... clearAll empties chips, attachments, and errors`
+         - Root cause: when run AFTER the "does not throw" test, `renderHook(...).result.current` returns `null`. Suspected: React-19 commit-cycle interaction with leaked extraction-pipeline microtasks from the prior test.
+         - Fix: add `afterEach(async () => { await act(() => Promise.resolve()); cleanup(); })` to flush microtasks before unmounting. Or move these tests into their own `describe` block with isolated setup.
+
+      4. `SprkChat.attachments > calls clearAll on successful stream completion`
+         - Root cause: SSE reader microtask doesn't flush within `waitFor`'s 3000ms timeout under jsdom + RTL v16 act-batching.
+         - Fix options: (a) increase timeout to 10s — quick but cosmetic; (b) refactor the test to mock the SSE reader output directly (skip the streaming entirely); (c) defer to ui-test skill (Chrome integration).
+
+      Recommended: fix (1), (2), (3) with `jest.isolateModules()` + `afterEach` microtask flush. Fix (4) by mocking the SSE reader output directly (cleaner than timeout extension).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/useChatFileAttachment.test.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/SprkChat.attachments.test.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/jest.setup.js</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">NO production code modification. Verify via `git diff --stat src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx`.</constraint>
+    <constraint source="project">If a failing test reveals a real production bug, ESCALATE per CLAUDE.md §6 — do NOT modify production code to make tests pass.</constraint>
+    <constraint source="ADR-022">React 19 patterns. No regression to React 16 mocks.</constraint>
+    <constraint source="project">Acceptance is ≤2 remaining failures (was 4). Hitting 0 is ideal but not required.</constraint>
+    <constraint source="project">Document the fix pattern so future SprkChat test additions can avoid the same trap.</constraint>
+    <constraint source="project">If the fix requires moving a test to a Chrome integration test via ui-test skill, document the migration plan — do not actually move (out of R4 scope).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/test-content-failures-triage-2026-05-26.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Baseline">Run `npm test` in `@spaarke/ui-components`. Confirm 4 failures (or fewer). Capture exact stack traces.</step>
+    <step order="2" name="Fix mammoth dynamic-import mock isolation">Edit `useChatFileAttachment.test.ts`. For the "does not throw" test, wrap in `jest.isolateModules(() => { /* re-import + re-mock */ })` OR restructure the mock setup so the rejection mock activates BEFORE the cached promise resolves. Pattern docs: https://jestjs.io/docs/jest-object#jestisolatemoduleswarning--callback</step>
+    <step order="3" name="Fix cross-test microtask leakage">Add `afterEach(async () => { await act(() => Promise.resolve()); cleanup(); })` to the affected describe block. This flushes pending microtasks before the next test starts. Verify removeFile + clearAll tests now pass.</step>
+    <step order="4" name="Fix SSE stream completion test">Edit `SprkChat.attachments.test.tsx` `calls clearAll on successful stream completion`. Refactor to mock the SSE reader output directly (return a pre-resolved iterator that yields the `done` event immediately). This eliminates the timing dependency on jsdom microtask scheduling.</step>
+    <step order="5" name="Verification">Re-run `npm test`. Target: 0 (or ≤2) remaining failures.</step>
+    <step order="6" name="Confirm no production diff">`git diff --stat src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx` → empty.</step>
+    <step order="7" name="Document">Write `projects/spaarke-ai-platform-unification-r4/notes/077-jsdom-timing-fix.md` with:
+      - 4-failure root causes
+      - Per-fix pattern applied
+      - Reusable patterns for future SprkChat test additions
+      - Recommendation: which tests should eventually migrate to ui-test (Chrome integration) for cleaner isolation
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Inspect test files + jest.setup.js</tool>
+    <tool name="Edit">Update test mock strategies</tool>
+    <tool name="Bash">npm test</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/useChatFileAttachment.test.ts (mock isolation)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/SprkChat.attachments.test.tsx (SSE reader mock)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/077-jsdom-timing-fix.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the fixes, When `npm test` runs in `@spaarke/ui-components`, Then ≤2 failures remain (target: 0).</criterion>
+    <criterion testable="true">Given the fixes, When 042 + 050 R4-added tests are inspected, Then 042 SprkChat.onAttachmentReady is 6/6 ✅ and 050 SprkChat.attachments boundary is 3/3 ✅.</criterion>
+    <criterion testable="true">Given the change, When `git diff --stat src/client/shared/Spaarke.UI.Components/src/components/SprkChat/` runs, Then ONLY `__tests__/` files appear in the diff (no production code change).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor — test-content fixes only.</protocol>
+  </execution>
+</task>

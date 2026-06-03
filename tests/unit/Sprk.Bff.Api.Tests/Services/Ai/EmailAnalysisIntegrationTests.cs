@@ -8,7 +8,6 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Jobs;
-using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Telemetry;
 using Xunit;
 

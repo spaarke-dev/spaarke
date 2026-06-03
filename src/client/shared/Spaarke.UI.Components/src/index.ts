@@ -24,3 +24,6 @@ export * from './services';
 
 // Components
 export * from './components';
+
+// Workspace renderer interface + default-renderer slot (R4 task 052 / C-4)
+export * from './workspace';

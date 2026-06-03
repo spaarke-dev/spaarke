@@ -168,7 +168,7 @@ export function detectDarkModeFromNavbar(): boolean | null {
  * @param context - PCF context (optional)
  * @returns true if dark mode should be active
  */
-export function getEffectiveDarkMode(context?: any): boolean {
+export function getEffectiveDarkMode(context?: unknown): boolean {
   const preference = getUserThemePreference();
 
   // Explicit user choice
@@ -176,8 +176,9 @@ export function getEffectiveDarkMode(context?: any): boolean {
   if (preference === 'light') return false;
 
   // Auto mode: check Power Platform context first
-  if (context?.fluentDesignLanguage?.isDarkTheme !== undefined) {
-    return context.fluentDesignLanguage.isDarkTheme;
+  const ctx = context as { fluentDesignLanguage?: { isDarkTheme?: boolean } } | undefined;
+  if (ctx?.fluentDesignLanguage?.isDarkTheme !== undefined) {
+    return ctx.fluentDesignLanguage.isDarkTheme;
   }
 
   // Navbar DOM detection
@@ -193,7 +194,7 @@ export function getEffectiveDarkMode(context?: any): boolean {
  * @param context - PCF context (optional)
  * @returns Fluent UI v9 Theme (webDarkTheme or webLightTheme)
  */
-export function resolveThemeWithUserPreference(context?: any): Theme {
+export function resolveThemeWithUserPreference(context?: unknown): Theme {
   return getEffectiveDarkMode(context) ? webDarkTheme : webLightTheme;
 }
 
@@ -313,7 +314,7 @@ export interface ThemeChangeHandler {
  * @param context - PCF context (optional, for re-evaluating effective theme)
  * @returns Cleanup function to remove listeners
  */
-export function setupThemeListener(onChange: ThemeChangeHandler, context?: any): () => void {
+export function setupThemeListener(onChange: ThemeChangeHandler, context?: unknown): () => void {
   const handleStorageChange = (event: StorageEvent) => {
     if (event.key === THEME_STORAGE_KEY) {
       onChange(getEffectiveDarkMode(context));
@@ -410,9 +411,13 @@ export function setupCodePageThemeListener(onChange: CodePageThemeChangeHandler)
  * Compatible with both Xrm.WebApi and BFF API adapters (ADR-012).
  */
 export interface IThemeWebApi {
-  retrieveMultipleRecords(entityType: string, options: string, maxPageSize?: number): Promise<{ entities: any[] }>;
-  createRecord(entityType: string, data: Record<string, any>): Promise<{ id: string }>;
-  updateRecord(entityType: string, id: string, data: Record<string, any>): Promise<void>;
+  retrieveMultipleRecords(
+    entityType: string,
+    options: string,
+    maxPageSize?: number
+  ): Promise<{ entities: Record<string, unknown>[] }>;
+  createRecord(entityType: string, data: Record<string, unknown>): Promise<{ id: string }>;
+  updateRecord(entityType: string, id: string, data: Record<string, unknown>): Promise<void>;
 }
 
 /**

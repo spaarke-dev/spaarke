@@ -1,79 +1,115 @@
 /**
- * useWorkspaceLayouts — fetches workspace layouts from the BFF API and manages
- * the active layout state.
+ * useWorkspaceLayouts — LegalWorkspace adapter for the consolidated shared-lib hook.
  *
- * On mount, fetches the user's default layout and full layout list in parallel.
- * Falls back to SYSTEM_DEFAULT_LAYOUT_JSON if the API is unavailable or returns
- * no layouts — ensuring the workspace always renders.
+ * # Why this file exists (R4 task 051 / C-3, 2026-05-26)
  *
- * Standards: ADR-012 (shared components), ADR-008 (endpoint filters)
+ * The two pre-existing divergent copies of `useWorkspaceLayouts` (one here in
+ * LegalWorkspace, one in `src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts`)
+ * have been consolidated into a single context-agnostic hook in
+ * `@spaarke/ai-widgets/src/hooks/useWorkspaceLayouts.ts` (per FR-13).
+ *
+ * This file is now a thin LegalWorkspace-specific ADAPTER that:
+ *
+ *   1. Sources `authenticatedFetch` + `bffBaseUrl` from LegalWorkspace's
+ *      module-level `services/authInit.ts` + `config/runtimeConfig.ts`
+ *      (the pre-change behaviour).
+ *
+ *   2. Wires LegalWorkspace's `parseLayoutJson` (returning the in-app
+ *      `LayoutJson` type from `@spaarke/ui-components`) so consumers receive
+ *      `activeLayoutJson` exactly as before.
+ *
+ *   3. Wires the `SYSTEM_DEFAULT_LAYOUT` hardcoded fallback so the workspace
+ *      always renders even when the BFF is unavailable (the pre-change
+ *      LegalWorkspace behaviour — `status: "first-visit"`).
+ *
+ *   4. Preserves the LegalWorkspace cache namespace `sprk:workspace:*` so
+ *      sessionStorage entries written by the old hook continue to hydrate
+ *      mounts post-migration (zero cache loss across the cut-over).
+ *
+ *   5. Preserves the existing call signatures:
+ *        - Positional: `useWorkspaceLayouts("layout-id")`
+ *        - Options:    `useWorkspaceLayouts({ initialWorkspaceId, embedded })`
+ *      So zero consumer file changes are required (FR-13 acceptance,
+ *      Risk R-3 mitigation — behavioural parity with the pre-change hook).
+ *
+ *   6. Re-exports `invalidateLayoutCache` so wizard save handlers continue
+ *      to clear the cache without importing from a new path.
+ *
+ * # Source reference
+ *
+ * Consolidated implementation: `src/client/shared/Spaarke.AI.Widgets/src/hooks/useWorkspaceLayouts.ts`
+ *
+ * # Standards
+ *
+ *   - ADR-012 (consolidated logic in `@spaarke/*` lib; this file is a thin
+ *     consumer adapter — not a re-implementation)
+ *   - ADR-028 (function-based auth — adapter sources `authenticatedFetch`
+ *     from LW's `services/authInit.ts` and forwards it as an injected dep)
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useMemo } from "react";
+// Deep-import directly from the hook module to avoid pulling in the heavy
+// `@spaarke/ai-widgets` barrel (which registers ALL widget components via
+// side-effect imports). LegalWorkspace only needs the hook — NOT the widget
+// registry — so deep-importing keeps the LW bundle byte-equivalent to
+// pre-change (NFR-08 bundle-size budget).
+import {
+  useWorkspaceLayouts as useSharedWorkspaceLayouts,
+  invalidateLayoutCache as invalidateSharedLayoutCache,
+  type WorkspaceLayoutDto,
+  type WorkspaceLoadingStatus,
+  type UseWorkspaceLayoutsResult as SharedUseWorkspaceLayoutsResult,
+} from "@spaarke/ai-widgets/hooks/useWorkspaceLayouts";
 import { authenticatedFetch } from "../services/authInit";
 import { getBffBaseUrl } from "../config/runtimeConfig";
 import type { LayoutJson } from "../workspace/buildDynamicWorkspaceConfig";
 import { SYSTEM_DEFAULT_LAYOUT_JSON } from "../workspace/buildDynamicWorkspaceConfig";
-import {
-  getCachedActiveLayout,
-  getCachedLayoutsList,
-  setCachedActiveLayout,
-  setCachedLayoutsList,
-  invalidateLayoutCache,
-} from "../workspace/layoutCache";
 
-// Re-export invalidateLayoutCache so consumers (e.g., wizard save handlers) can
-// clear stale data without importing from layoutCache directly.
-export { invalidateLayoutCache } from "../workspace/layoutCache";
+// Re-export type aliases so existing LegalWorkspace imports continue to resolve
+// from this path.
+export type { WorkspaceLayoutDto, WorkspaceLoadingStatus };
 
-// ---------------------------------------------------------------------------
-// Types (mirror BFF WorkspaceLayoutDto shape)
-// ---------------------------------------------------------------------------
-
-/** Client-side representation of a workspace layout from the BFF. */
-export interface WorkspaceLayoutDto {
-  id: string;
-  name: string;
-  layoutTemplateId: string;
-  sectionsJson: string;
-  isDefault: boolean;
-  sortOrder: number | null;
-  isSystem: boolean;
-}
+/** Cache namespace prefix used by the LegalWorkspace adapter. */
+const LW_CACHE_KEY_PREFIX = "sprk:workspace";
 
 /**
- * Workspace loading status — determines which UI state to render.
+ * Re-exported invalidate helper. Wizard save handlers call this to clear
+ * stale data so the next mount re-fetches fresh from the BFF.
  *
- * - "loading":     Initial fetch in progress (no cached data available).
- * - "loaded":      Layouts fetched successfully (or served from cache).
- * - "error":       Fetch failed; workspace renders fallback layout.
- * - "first-visit": Fetch succeeded but user has zero user-created layouts
- *                  (only system layouts). System default renders immediately
- *                  with a "Personalize your workspace" banner.
+ * (LegalWorkspace uses the `sprk:workspace` cache namespace — passed
+ * explicitly so this adapter remains the only place the namespace literal
+ * appears in LegalWorkspace.)
  */
-export type WorkspaceLoadingStatus = "loading" | "loaded" | "error" | "first-visit";
-
-export interface UseWorkspaceLayoutsResult {
-  /** All available layouts (system + user). Empty array while loading. */
-  layouts: WorkspaceLayoutDto[];
-  /** The currently active layout. Null only during initial load. */
-  activeLayout: WorkspaceLayoutDto | null;
-  /** Parsed LayoutJson from the active layout's sectionsJson. Falls back to system default. */
-  activeLayoutJson: LayoutJson;
-  /** True while the initial fetch is in progress. */
-  isLoading: boolean;
-  /** Computed status for rendering loading states: "loading" | "loaded" | "error" | "first-visit". */
-  status: WorkspaceLoadingStatus;
-  /** Error message if layout fetch failed (workspace still renders with fallback). */
-  error: string | null;
-  /** Switch to a different layout by ID. Fetches layout details if needed. */
-  setActiveLayoutById: (layoutId: string) => void;
-  /** Refresh the layouts list from the BFF. */
-  refetch: () => void;
+export function invalidateLayoutCache(): void {
+  invalidateSharedLayoutCache(LW_CACHE_KEY_PREFIX);
 }
 
 // ---------------------------------------------------------------------------
-// System default layout stub (used when API is unavailable)
+// LegalWorkspace's parseLayoutJson — maps raw `sectionsJson` to LayoutJson.
+//
+// The shared hook calls this with either the parsed JSON object (from the
+// active layout's `sectionsJson`) OR `undefined` when there is no active
+// layout / parsing failed. LegalWorkspace's pre-change behaviour returns
+// `SYSTEM_DEFAULT_LAYOUT_JSON` in both fallback cases, so we mirror that.
+// ---------------------------------------------------------------------------
+
+function parseLayoutJson(raw: unknown): LayoutJson {
+  if (raw && typeof raw === "object") {
+    const candidate = raw as Partial<LayoutJson>;
+    if (
+      typeof candidate.schemaVersion === "number" &&
+      Array.isArray(candidate.rows)
+    ) {
+      return candidate as LayoutJson;
+    }
+  }
+  return SYSTEM_DEFAULT_LAYOUT_JSON;
+}
+
+// ---------------------------------------------------------------------------
+// System default layout stub — preserved EXACTLY from pre-change LegalWorkspace
+// hook (Round 4 Fix 4.1) so the workspace always renders even when the API
+// is unavailable.
 // ---------------------------------------------------------------------------
 
 const SYSTEM_DEFAULT_LAYOUT: WorkspaceLayoutDto = {
@@ -84,44 +120,20 @@ const SYSTEM_DEFAULT_LAYOUT: WorkspaceLayoutDto = {
   isDefault: true,
   sortOrder: 0,
   isSystem: true,
+  // R4 task 053 (B-4 / FR-07): Unix-epoch sentinel for hard-coded system
+  // layouts — `ManageWorkspacesPane` treats this as "—" / no modified date.
+  modifiedOn: "1970-01-01T00:00:00+00:00",
 };
 
 // ---------------------------------------------------------------------------
-// JSON parse helper
-// ---------------------------------------------------------------------------
-
-function parseLayoutJson(sectionsJson: string): LayoutJson {
-  try {
-    const parsed = JSON.parse(sectionsJson) as LayoutJson;
-    if (parsed && typeof parsed.schemaVersion === "number" && Array.isArray(parsed.rows)) {
-      return parsed;
-    }
-  } catch (err) {
-    console.warn("[useWorkspaceLayouts] Failed to parse sectionsJson:", err);
-  }
-  return SYSTEM_DEFAULT_LAYOUT_JSON;
-}
-
-// ---------------------------------------------------------------------------
-// Hook
+// Options + Result types — preserved exactly so consumers don't change
 // ---------------------------------------------------------------------------
 
 /**
- * Options for `useWorkspaceLayouts`.
+ * Options for `useWorkspaceLayouts` (LegalWorkspace adapter).
  *
- * Round 4 Fix 4.1 (2026-05-21): added the `embedded` flag so multiple instances
- * of LegalWorkspaceApp can coexist as sibling tabs inside SpaarkeAi without
- * clobbering each other's active-layout state. When `embedded=true`, the hook:
- *   - NEVER reads `sessionStorage` cache (each tab gets its own deep-linked
- *     layout from `initialWorkspaceId` — cache is shared across tabs).
- *   - NEVER writes `sessionStorage` cache (avoids polluting the global
- *     "Switch Workspace" picker's pinned layout from a tab's selection).
- *   - Uses `initialWorkspaceId` as the source of truth for the active layout;
- *     falls back to the BFF default only if the deep-link is missing or 404s.
- *
- * Standalone LegalWorkspace continues to call this hook without `embedded`,
- * so the cache-first hydration path is preserved (FR-25 / NFR-10 — no
- * behavioural change to the standalone bundle).
+ * The `embedded` flag and `initialWorkspaceId` come from Round 4 Fix 4.1
+ * (2026-05-21) — see the consolidated shared-lib hook for behaviour details.
  */
 export interface UseWorkspaceLayoutsOptions {
   /** Deep-link target layout id (preferred over BFF default when set). */
@@ -134,10 +146,39 @@ export interface UseWorkspaceLayoutsOptions {
   embedded?: boolean;
 }
 
+export interface UseWorkspaceLayoutsResult {
+  /** All available layouts (system + user). */
+  layouts: WorkspaceLayoutDto[];
+  /** The currently active layout. */
+  activeLayout: WorkspaceLayoutDto | null;
+  /** Parsed LayoutJson from the active layout's sectionsJson. */
+  activeLayoutJson: LayoutJson;
+  /** True while the initial fetch is in progress. */
+  isLoading: boolean;
+  /** Computed status for rendering loading states. */
+  status: WorkspaceLoadingStatus;
+  /** Error message if layout fetch failed. */
+  error: string | null;
+  /** Switch to a different layout by ID. */
+  setActiveLayoutById: (layoutId: string) => void;
+  /** Refresh the layouts list from the BFF. */
+  refetch: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Hook — preserves the legacy positional + object overloads
+// ---------------------------------------------------------------------------
+
 /**
- * Backwards-compatible overload: callers may pass either the legacy
- * `initialWorkspaceId` positional argument (LegalWorkspace's existing call
- * shape) or the new options object. We normalize both to an internal shape.
+ * Adapter hook — delegates to the consolidated `@spaarke/ai-widgets`
+ * implementation with LegalWorkspace-specific options baked in.
+ *
+ * Accepts either:
+ *   - The legacy positional `initialWorkspaceId` argument, OR
+ *   - The new options object form.
+ *
+ * Mirrors the pre-change LegalWorkspace `useWorkspaceLayouts` signature 1:1
+ * so consumers (notably `WorkspaceGrid.tsx`) require ZERO changes.
  */
 export function useWorkspaceLayouts(
   initialWorkspaceIdOrOptions?: string | UseWorkspaceLayoutsOptions,
@@ -148,275 +189,55 @@ export function useWorkspaceLayouts(
     initialWorkspaceIdOrOptions !== null
       ? initialWorkspaceIdOrOptions
       : { initialWorkspaceId: initialWorkspaceIdOrOptions };
-  const initialWorkspaceId = opts.initialWorkspaceId;
-  const embedded = opts.embedded === true;
-
-  const [layouts, setLayouts] = useState<WorkspaceLayoutDto[]>([]);
-  const [activeLayout, setActiveLayout] = useState<WorkspaceLayoutDto | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [fetchKey, setFetchKey] = useState(0);
-
-  // Track mount state to avoid state updates after unmount
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
 
   // -------------------------------------------------------------------------
-  // Fetch layouts on mount (and on refetch)
+  // bffBaseUrl resolution — preserves pre-change LW behaviour of falling back
+  // to the SYSTEM_DEFAULT_LAYOUT when runtime config is not initialized.
+  //
+  // The shared hook handles this internally: when bffBaseUrl === "" AND a
+  // fallbackLayout is supplied, the shared hook renders the fallback
+  // immediately without attempting a fetch. We compute the safe bffBaseUrl
+  // here and let the shared hook do the right thing.
   // -------------------------------------------------------------------------
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function fetchLayouts() {
-      // -----------------------------------------------------------------
-      // Cache-first: if sessionStorage has layout data, use it for instant
-      // render and then continue to revalidate from the API in the background.
-      //
-      // Round 4 Fix 4.1: embedded mode SKIPS cache reads entirely. Each
-      // embedded LegalWorkspaceApp tab inside SpaarkeAi must show its own
-      // `initialWorkspaceId` workspace — not the cached "last-active"
-      // workspace which is shared across all tabs.
-      // -----------------------------------------------------------------
-      const cachedList = embedded ? null : getCachedLayoutsList();
-      const cachedActive = embedded ? null : getCachedActiveLayout();
-      const hasCachedData = cachedList && cachedList.length > 0 && cachedActive;
-
-      if (hasCachedData && !cancelled && mountedRef.current) {
-        setLayouts(cachedList);
-        setActiveLayout(cachedActive);
-        setIsLoading(false);
-        // Continue to fetch from API below to revalidate
-      } else {
-        setIsLoading(true);
-      }
-      setError(null);
-
-      let bffBaseUrl: string;
-      try {
-        bffBaseUrl = getBffBaseUrl();
-      } catch {
-        // Runtime config not initialized — use fallback
-        console.warn("[useWorkspaceLayouts] BFF base URL not available, using fallback layout");
-        if (!cancelled && mountedRef.current) {
-          setLayouts([SYSTEM_DEFAULT_LAYOUT]);
-          setActiveLayout(SYSTEM_DEFAULT_LAYOUT);
-          setIsLoading(false);
-        }
-        return;
-      }
-
-      try {
-        // Fetch default layout and all layouts in parallel
-        const apiBase = bffBaseUrl.replace(/\/$/, '');
-        const [defaultRes, listRes] = await Promise.all([
-          authenticatedFetch(`${apiBase}/api/workspace/layouts/default`),
-          authenticatedFetch(`${apiBase}/api/workspace/layouts`),
-        ]);
-
-        if (cancelled || !mountedRef.current) return;
-
-        // Parse layouts list
-        let allLayouts: WorkspaceLayoutDto[] = [];
-        if (listRes.ok) {
-          allLayouts = await listRes.json();
-        } else {
-          console.warn(
-            `[useWorkspaceLayouts] Failed to fetch layouts list: ${listRes.status}`,
-          );
-        }
-
-        // Parse default layout
-        let defaultLayout: WorkspaceLayoutDto | null = null;
-        if (defaultRes.ok) {
-          defaultLayout = await defaultRes.json();
-        } else {
-          console.warn(
-            `[useWorkspaceLayouts] Failed to fetch default layout: ${defaultRes.status}`,
-          );
-        }
-
-        if (cancelled || !mountedRef.current) return;
-
-        // Apply results with fallback
-        if (allLayouts.length > 0) {
-          setLayouts(allLayouts);
-        } else {
-          setLayouts([SYSTEM_DEFAULT_LAYOUT]);
-        }
-
-        // -----------------------------------------------------------------------
-        // Deep-link: if initialWorkspaceId was provided, try to use that layout
-        // instead of the default. Falls back silently on 404 or error.
-        // -----------------------------------------------------------------------
-
-        let resolvedActive: WorkspaceLayoutDto | null = null;
-
-        if (initialWorkspaceId) {
-          // Check if the deep-linked layout is already in the fetched list
-          const fromList = allLayouts.find((l) => l.id === initialWorkspaceId);
-          if (fromList) {
-            resolvedActive = fromList;
-          } else {
-            // Fetch by ID from the BFF
-            try {
-              const deepLinkRes = await authenticatedFetch(
-                `${apiBase}/api/workspace/layouts/${initialWorkspaceId}`,
-              );
-              if (cancelled || !mountedRef.current) return;
-
-              if (deepLinkRes.ok) {
-                resolvedActive = await deepLinkRes.json();
-              } else {
-                console.warn(
-                  `[useWorkspaceLayouts] Deep-linked layout ${initialWorkspaceId} not found (${deepLinkRes.status}), falling back to default`,
-                );
-              }
-            } catch (deepLinkErr) {
-              console.warn(
-                "[useWorkspaceLayouts] Failed to fetch deep-linked layout, falling back to default:",
-                deepLinkErr,
-              );
-            }
-          }
-        }
-
-        // If deep-link didn't resolve, fall back to normal default selection
-        if (!resolvedActive) {
-          if (defaultLayout) {
-            resolvedActive = defaultLayout;
-          } else if (allLayouts.length > 0) {
-            // Pick the first default layout, or the first system layout
-            resolvedActive =
-              allLayouts.find((l) => l.isDefault) ??
-              allLayouts.find((l) => l.isSystem) ??
-              allLayouts[0];
-          } else {
-            resolvedActive = SYSTEM_DEFAULT_LAYOUT;
-          }
-        }
-
-        if (!cancelled && mountedRef.current) {
-          setActiveLayout(resolvedActive);
-
-          // Update sessionStorage cache for instant render on next navigation.
-          // Round 4 Fix 4.1: embedded mode NEVER writes cache so it doesn't
-          // pollute the SpaarkeAi WorkspacePaneMenu's pinned-layout state nor
-          // a sibling tab's deep-link.
-          if (!embedded) {
-            setCachedActiveLayout(resolvedActive);
-            const listToCache = allLayouts.length > 0 ? allLayouts : [SYSTEM_DEFAULT_LAYOUT];
-            setCachedLayoutsList(listToCache);
-          }
-        }
-
-        setIsLoading(false);
-      } catch (err) {
-        if (cancelled || !mountedRef.current) return;
-
-        const message = err instanceof Error ? err.message : "Unknown error";
-        console.warn("[useWorkspaceLayouts] Layout fetch failed, using fallback:", message);
-
-        setError(message);
-        setLayouts([SYSTEM_DEFAULT_LAYOUT]);
-        setActiveLayout(SYSTEM_DEFAULT_LAYOUT);
-        setIsLoading(false);
-      }
+  const bffBaseUrl = useMemo(() => {
+    try {
+      return getBffBaseUrl();
+    } catch {
+      // Runtime config not initialized — pass "" so the shared hook renders
+      // the fallback layout instead of attempting an invalid fetch.
+      return "";
     }
-
-    fetchLayouts();
-
-    return () => { cancelled = true; };
-  }, [fetchKey, initialWorkspaceId, embedded]);
-
-  // -------------------------------------------------------------------------
-  // Switch active layout
-  // -------------------------------------------------------------------------
-
-  const setActiveLayoutById = useCallback(
-    (layoutId: string) => {
-      // Look up in the current layouts list first
-      const found = layouts.find((l) => l.id === layoutId);
-      if (found) {
-        setActiveLayout(found);
-        // Round 4 Fix 4.1: embedded mode never writes cache (see effect above).
-        if (!embedded) {
-          setCachedActiveLayout(found);
-        }
-        return;
-      }
-
-      // If not found locally, fetch by ID from the BFF
-      (async () => {
-        try {
-          const bffBaseUrl = getBffBaseUrl();
-          const res = await authenticatedFetch(
-            `${bffBaseUrl.replace(/\/$/, '')}/api/workspace/layouts/${layoutId}`,
-          );
-          if (res.ok) {
-            const layout: WorkspaceLayoutDto = await res.json();
-            if (mountedRef.current) {
-              setActiveLayout(layout);
-              if (!embedded) {
-                setCachedActiveLayout(layout);
-              }
-            }
-          } else {
-            console.warn(
-              `[useWorkspaceLayouts] Failed to fetch layout ${layoutId}: ${res.status}`,
-            );
-          }
-        } catch (err) {
-          console.warn("[useWorkspaceLayouts] Failed to fetch layout by ID:", err);
-        }
-      })();
-    },
-    [layouts, embedded],
-  );
-
-  // -------------------------------------------------------------------------
-  // Refetch
-  // -------------------------------------------------------------------------
-
-  const refetch = useCallback(() => {
-    // Invalidate cache so the next fetch gets fresh data from the API.
-    // This is called when the wizard dialog closes after a save.
-    invalidateLayoutCache();
-    setFetchKey((k) => k + 1);
   }, []);
 
   // -------------------------------------------------------------------------
-  // Derived: parse active layout JSON
+  // Delegate to shared-lib hook
+  //
+  // `isAuthenticated: true` mirrors LegalWorkspace's pre-change behaviour
+  // (no auth-state gating — `authenticatedFetch` internally awaits init).
+  // The empty-bffBaseUrl branch in the shared hook still renders fallback.
   // -------------------------------------------------------------------------
+  const result: SharedUseWorkspaceLayoutsResult<LayoutJson> =
+    useSharedWorkspaceLayouts<LayoutJson>({
+      bffBaseUrl,
+      authenticatedFetch,
+      isAuthenticated: true,
+      parseLayoutJson,
+      fallbackLayout: SYSTEM_DEFAULT_LAYOUT,
+      initialWorkspaceId: opts.initialWorkspaceId,
+      embedded: opts.embedded === true,
+      cacheKeyPrefix: LW_CACHE_KEY_PREFIX,
+    });
 
-  const activeLayoutJson: LayoutJson = activeLayout
-    ? parseLayoutJson(activeLayout.sectionsJson)
-    : SYSTEM_DEFAULT_LAYOUT_JSON;
-
-  // -------------------------------------------------------------------------
-  // Derived: computed loading status for rendering loading states
-  // -------------------------------------------------------------------------
-
-  const status: WorkspaceLoadingStatus = (() => {
-    if (isLoading) return "loading";
-    if (error) return "error";
-    // First visit: user has zero user-created layouts (only system layouts exist)
-    const hasUserLayouts = layouts.some((l) => !l.isSystem);
-    if (!hasUserLayouts) return "first-visit";
-    return "loaded";
-  })();
-
+  // Map shared-lib result → LW-shaped result (rename parsedActiveLayout →
+  // activeLayoutJson, ensure non-undefined LayoutJson).
   return {
-    layouts,
-    activeLayout,
-    activeLayoutJson,
-    isLoading,
-    status,
-    error,
-    setActiveLayoutById,
-    refetch,
+    layouts: result.layouts,
+    activeLayout: result.activeLayout,
+    activeLayoutJson: result.parsedActiveLayout ?? SYSTEM_DEFAULT_LAYOUT_JSON,
+    isLoading: result.isLoading,
+    status: result.status,
+    error: result.error,
+    setActiveLayoutById: result.setActiveLayoutById,
+    refetch: result.refetch,
   };
 }

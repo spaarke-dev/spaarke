@@ -153,7 +153,7 @@ export class FetchXmlService {
       const filterXml = this.buildFilterXml(doc, filterGroup);
 
       // Find existing filter or create new one
-      let existingFilter = entityElement.querySelector(':scope > filter');
+      const existingFilter = entityElement.querySelector(':scope > filter');
 
       if (existingFilter) {
         // Wrap existing filter and new filter in an AND group

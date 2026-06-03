@@ -10,7 +10,7 @@ export type ScrollBehavior = 'Auto' | 'Infinite' | 'Paged';
 export interface IDatasetRecord {
   id: string;
   entityName: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface IDatasetColumn {

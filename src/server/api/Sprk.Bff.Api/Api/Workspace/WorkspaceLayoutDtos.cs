@@ -47,6 +47,27 @@ public record WorkspaceLayoutDto
     /// as a defense-in-depth complement to client-side disable affordances.
     /// </summary>
     public bool IsSystem { get; init; }
+
+    /// <summary>
+    /// When the layout was last modified, as a UTC-anchored DateTimeOffset.
+    /// SERVER-CONTROLLED — Dataverse maintains <c>modifiedon</c> automatically;
+    /// the DTO surfaces it so the Manage Workspaces pane can render "Modified ..."
+    /// per FR-07 (R4 task 053 / B-4) and so a future PATCH/If-Match concurrency
+    /// surface (R4 task 054 / B-5) can use it as a strong validator / ETag value.
+    ///
+    /// Wire shape: ISO-8601 string (e.g., "2026-05-26T14:23:11+00:00"). The
+    /// frontend type is <c>string</c>; consumer-side code formats with
+    /// <c>Date.parse</c> + locale-aware formatting (do NOT pre-format on the
+    /// server).
+    ///
+    /// Backfill behavior: <see cref="SystemWorkspaceLayouts.CorporateWorkspace"/>
+    /// is a code constant (never persisted in Dataverse) so its <c>ModifiedOn</c>
+    /// is initialized to the process start time as a deterministic-per-build
+    /// placeholder. Dataverse-sourced records (system-seeded or user-owned)
+    /// carry the real <c>modifiedon</c> attribute mapped in
+    /// <see cref="Services.Workspace.WorkspaceLayoutService"/>.<c>MapToDto</c>.
+    /// </summary>
+    public DateTimeOffset ModifiedOn { get; init; }
 }
 
 // ---------------------------------------------------------------------------

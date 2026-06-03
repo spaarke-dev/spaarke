@@ -1,7 +1,39 @@
 # Deploy CorporateWorkspace Web Resource to Dataverse
+#
+# RETIRED (2026-05-26, R4 task 041 / OC-R4-05):
+# The standalone `sprk_corporateworkspace` web resource is no longer deployed.
+# See: docs/architecture/LEGALWORKSPACE-RETIREMENT.md
+# This script is preserved (not deleted) for history; the deploy body below is gated by
+# an early-exit guard so callers fail gracefully (exit 0 with a clear log message).
+# To force a deploy in an emergency rollback scenario, pass -ForceRetiredDeploy.
+
 param(
-    [string]$DataverseUrl = $env:DATAVERSE_URL
+    [string]$DataverseUrl = $env:DATAVERSE_URL,
+    [switch]$ForceRetiredDeploy
 )
+
+# ---- Retirement guard --------------------------------------------------------
+if (-not $ForceRetiredDeploy) {
+    Write-Host ''
+    Write-Host '====================================================================' -ForegroundColor Yellow
+    Write-Host '  CorporateWorkspace Deploy SKIPPED — sprk_corporateworkspace RETIRED' -ForegroundColor Yellow
+    Write-Host '====================================================================' -ForegroundColor Yellow
+    Write-Host '  Per operator decision OC-R4-05 (2026-05-25), the standalone' -ForegroundColor Gray
+    Write-Host '  LegalWorkspace code page is no longer deployed. LegalWorkspace' -ForegroundColor Gray
+    Write-Host '  components remain available as a library, consumed by SpaarkeAi' -ForegroundColor Gray
+    Write-Host '  via embedded mode.' -ForegroundColor Gray
+    Write-Host ''
+    Write-Host '  Retirement doc: docs/architecture/LEGALWORKSPACE-RETIREMENT.md' -ForegroundColor Cyan
+    Write-Host '  To override (emergency rollback only): -ForceRetiredDeploy' -ForegroundColor Gray
+    Write-Host '====================================================================' -ForegroundColor Yellow
+    Write-Host ''
+    exit 0
+}
+
+Write-Host ''
+Write-Host '*** -ForceRetiredDeploy specified — proceeding with deploy of RETIRED resource ***' -ForegroundColor Red
+Write-Host '*** This is an emergency-rollback path only. See LEGALWORKSPACE-RETIREMENT.md.   ***' -ForegroundColor Red
+Write-Host ''
 
 if (-not $DataverseUrl) {
     Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
