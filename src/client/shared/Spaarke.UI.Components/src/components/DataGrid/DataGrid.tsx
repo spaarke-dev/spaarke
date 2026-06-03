@@ -964,7 +964,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     (loadState.savedQuery
       ? // Match the active savedQuery against availableViews by name; the savedQuery
         // result doesn't carry its own id field.
-        loadState.availableViews.find(v => v.name === loadState.savedQuery?.name)?.id ?? '__active__'
+        (loadState.availableViews.find(v => v.name === loadState.savedQuery?.name)?.id ?? '__active__')
       : '');
 
   return (
@@ -1020,56 +1020,56 @@ export const DataGrid: React.FC<DataGridProps> = props => {
             </div>
           ) : (
             <div className={styles.gridScroll} ref={scrollContainerRef}>
-            <FluentDataGrid
-              items={items}
-              columns={tableColumns}
-              selectionMode={
-                resolved.behavior.selectionMode === 'none'
-                  ? undefined
-                  : resolved.behavior.selectionMode === 'single'
-                    ? 'single'
-                    : 'multiselect'
-              }
-              selectedItems={selectedRowIds}
-              onSelectionChange={handleSelectionChange}
-              sortable={resolved.behavior.enableSorting}
-              resizableColumns={resolved.behavior.enableColumnResize}
-              columnSizingOptions={columnSizingOptions}
-              focusMode="composite"
-              size={density}
-              getRowId={(item: GridItem) => item._rowId}
-              style={{ width: '100%' }}
-              aria-label={contextValue.currentView}
-            >
-              <DataGridHeader>
-                <DataGridRow selectionCell={{ checkboxIndicator: { 'aria-label': 'Select all rows' } }}>
-                  {({ renderHeaderCell }) => (
-                    <DataGridHeaderCell className={styles.headerCell}>{renderHeaderCell()}</DataGridHeaderCell>
-                  )}
-                </DataGridRow>
-              </DataGridHeader>
-              <DataGridBody<GridItem>>
-                {({ item, rowId }) => (
-                  <DataGridRow<GridItem>
-                    key={rowId}
-                    selectionCell={{ checkboxIndicator: { 'aria-label': 'Select row' } }}
-                  >
-                    {({ renderCell }) => <DataGridCell className={styles.cell}>{renderCell(item)}</DataGridCell>}
+              <FluentDataGrid
+                items={items}
+                columns={tableColumns}
+                selectionMode={
+                  resolved.behavior.selectionMode === 'none'
+                    ? undefined
+                    : resolved.behavior.selectionMode === 'single'
+                      ? 'single'
+                      : 'multiselect'
+                }
+                selectedItems={selectedRowIds}
+                onSelectionChange={handleSelectionChange}
+                sortable={resolved.behavior.enableSorting}
+                resizableColumns={resolved.behavior.enableColumnResize}
+                columnSizingOptions={columnSizingOptions}
+                focusMode="composite"
+                size={density}
+                getRowId={(item: GridItem) => item._rowId}
+                style={{ width: '100%' }}
+                aria-label={contextValue.currentView}
+              >
+                <DataGridHeader>
+                  <DataGridRow selectionCell={{ checkboxIndicator: { 'aria-label': 'Select all rows' } }}>
+                    {({ renderHeaderCell }) => (
+                      <DataGridHeaderCell className={styles.headerCell}>{renderHeaderCell()}</DataGridHeaderCell>
+                    )}
                   </DataGridRow>
-                )}
-              </DataGridBody>
-            </FluentDataGrid>
+                </DataGridHeader>
+                <DataGridBody<GridItem>>
+                  {({ item, rowId }) => (
+                    <DataGridRow<GridItem>
+                      key={rowId}
+                      selectionCell={{ checkboxIndicator: { 'aria-label': 'Select row' } }}
+                    >
+                      {({ renderCell }) => <DataGridCell className={styles.cell}>{renderCell(item)}</DataGridCell>}
+                    </DataGridRow>
+                  )}
+                </DataGridBody>
+              </FluentDataGrid>
 
-            {isLoadingRows && (
-              <div className={styles.loadMoreContainer}>
-                <Spinner size="small" label="Loading more..." />
-              </div>
-            )}
+              {isLoadingRows && (
+                <div className={styles.loadMoreContainer}>
+                  <Spinner size="small" label="Loading more..." />
+                </div>
+              )}
 
-            {/* Infinite-scroll sentinel — IntersectionObserver wired above in useEffect. */}
-            <div ref={sentinelRef} className={styles.sentinel} aria-hidden="true" />
-          </div>
-        )}
+              {/* Infinite-scroll sentinel — IntersectionObserver wired above in useEffect. */}
+              <div ref={sentinelRef} className={styles.sentinel} aria-hidden="true" />
+            </div>
+          )}
 
           <div className={styles.footer} role="status" aria-live="polite">
             <Text size={200}>

@@ -146,28 +146,19 @@ export const ViewSelector: React.FC<ViewSelectorProps> = ({
 }) => {
   const styles = useStyles();
 
-  const activeView = React.useMemo(
-    () => views.find(v => v.id === activeViewId),
-    [views, activeViewId],
-  );
+  const activeView = React.useMemo(() => views.find(v => v.id === activeViewId), [views, activeViewId]);
   const activeLabel = activeView?.name ?? '';
   const hasChoices = views.length > 1;
 
-  const checkedValues = React.useMemo(
-    () => ({ view: [activeViewId] }),
-    [activeViewId],
-  );
+  const checkedValues = React.useMemo(() => ({ view: [activeViewId] }), [activeViewId]);
 
   const handleCheckedValueChange = React.useCallback(
-    (
-      _ev: unknown,
-      data: { name: string; checkedItems: string[] },
-    ) => {
+    (_ev: unknown, data: { name: string; checkedItems: string[] }) => {
       if (data.name !== 'view') return;
       const next = data.checkedItems[0];
       if (next && next !== activeViewId) onViewChange(next);
     },
-    [activeViewId, onViewChange],
+    [activeViewId, onViewChange]
   );
 
   const triggerContent = (
@@ -189,21 +180,12 @@ export const ViewSelector: React.FC<ViewSelectorProps> = ({
     <div className={mergeClasses(styles.root, className)}>
       {onBack && (
         <>
-          <Button
-            appearance="subtle"
-            icon={<ArrowLeft20Regular />}
-            aria-label="Back"
-            onClick={onBack}
-          />
+          <Button appearance="subtle" icon={<ArrowLeft20Regular />} aria-label="Back" onClick={onBack} />
           <span aria-hidden="true" className={styles.divider} />
         </>
       )}
       {hasChoices ? (
-        <Menu
-          checkedValues={checkedValues}
-          onCheckedValueChange={handleCheckedValueChange}
-          positioning="below-start"
-        >
+        <Menu checkedValues={checkedValues} onCheckedValueChange={handleCheckedValueChange} positioning="below-start">
           <MenuTrigger disableButtonEnhancement>{triggerContent}</MenuTrigger>
           <MenuPopover className={styles.popoverSurface}>
             {/* NFR-03: re-wrap portal surface so dark mode resolves inside the menu. */}
@@ -212,9 +194,7 @@ export const ViewSelector: React.FC<ViewSelectorProps> = ({
                 {views.map(v => (
                   <MenuItemRadio key={v.id} name="view" value={v.id}>
                     {v.name}
-                    {v.isDefault && (
-                      <Text className={styles.defaultBadge}>Default</Text>
-                    )}
+                    {v.isDefault && <Text className={styles.defaultBadge}>Default</Text>}
                   </MenuItemRadio>
                 ))}
               </MenuList>

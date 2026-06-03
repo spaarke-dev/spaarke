@@ -325,14 +325,8 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
   // ── Partition: first inlineLimit go inline, rest go in the overflow menu ─
   // Clamp the limit so 0 / negative / too-large all behave intuitively.
   const normalizedLimit = Math.max(0, Math.min(inlineLimit, effectiveItems.length));
-  const inlineItems = React.useMemo(
-    () => effectiveItems.slice(0, normalizedLimit),
-    [effectiveItems, normalizedLimit]
-  );
-  const overflowItems = React.useMemo(
-    () => effectiveItems.slice(normalizedLimit),
-    [effectiveItems, normalizedLimit]
-  );
+  const inlineItems = React.useMemo(() => effectiveItems.slice(0, normalizedLimit), [effectiveItems, normalizedLimit]);
+  const overflowItems = React.useMemo(() => effectiveItems.slice(normalizedLimit), [effectiveItems, normalizedLimit]);
 
   // Shared context passed to default + custom handlers.
   const handlerContext: DefaultHandlerContext = React.useMemo(
@@ -463,11 +457,7 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
     return (
       <Menu>
         <MenuTrigger disableButtonEnhancement>
-          <Button
-            appearance="subtle"
-            icon={<MoreHorizontal20Regular />}
-            aria-label="More commands"
-          />
+          <Button appearance="subtle" icon={<MoreHorizontal20Regular />} aria-label="More commands" />
         </MenuTrigger>
         <MenuPopover>
           {/*
@@ -503,11 +493,7 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
   const showDivider = inlineItems.length > 0 && overflowItems.length > 0;
 
   return (
-    <div
-      className={mergeClasses(styles.root, className)}
-      role="toolbar"
-      aria-label="Grid actions"
-    >
+    <div className={mergeClasses(styles.root, className)} role="toolbar" aria-label="Grid actions">
       {inlineItems.map(item => renderInlineButton(item))}
       {showDivider ? <Divider vertical className={styles.divider} /> : null}
       {renderOverflowMenu()}

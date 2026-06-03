@@ -255,8 +255,7 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
     ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke3),
     borderRadius: tokens.borderRadiusMedium,
-    boxShadow:
-      '0 8px 24px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.16)',
+    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.16)',
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalS,
@@ -456,8 +455,7 @@ const PopoverFilterControl: React.FC<PopoverFilterControlProps> = ({ descriptor,
 
   // Local draft state — committed to chipState only when Apply is clicked.
   const initialText = current?.kind === 'text' ? current.value : '';
-  const initialOp: 'equals' | 'contains' | 'begins' =
-    (current?.kind === 'text' && current.op) || 'contains';
+  const initialOp: 'equals' | 'contains' | 'begins' = (current?.kind === 'text' && current.op) || 'contains';
   const [textDraft, setTextDraft] = React.useState<string>(initialText);
   const [textOp, setTextOp] = React.useState<'equals' | 'contains' | 'begins'>(initialOp);
   React.useEffect(() => {
@@ -476,7 +474,9 @@ const PopoverFilterControl: React.FC<PopoverFilterControlProps> = ({ descriptor,
 
   const initialChoices = new Set<number>(
     current?.kind === 'optionset'
-      ? current.values.map(v => (typeof v === 'number' ? v : Number.parseInt(String(v), 10))).filter(n => !Number.isNaN(n))
+      ? current.values
+          .map(v => (typeof v === 'number' ? v : Number.parseInt(String(v), 10)))
+          .filter(n => !Number.isNaN(n))
       : []
   );
   const [choiceDraft, setChoiceDraft] = React.useState<Set<number>>(initialChoices);
@@ -487,11 +487,7 @@ const PopoverFilterControl: React.FC<PopoverFilterControlProps> = ({ descriptor,
   const applyText = () => {
     const next = textDraft.trim();
     onStateChange(
-      setChipValue(
-        state,
-        descriptor.attribute,
-        next ? { kind: 'text', value: next, op: textOp } : undefined
-      )
+      setChipValue(state, descriptor.attribute, next ? { kind: 'text', value: next, op: textOp } : undefined)
     );
   };
   const applyDate = () => {
@@ -553,12 +549,7 @@ const PopoverFilterControl: React.FC<PopoverFilterControlProps> = ({ descriptor,
             appearance="outline"
           />
           <div className={styles.oobButtonRow}>
-            <Button
-              appearance="primary"
-              size="small"
-              className={styles.oobApplyButton}
-              onClick={applyText}
-            >
+            <Button appearance="primary" size="small" className={styles.oobApplyButton} onClick={applyText}>
               Apply
             </Button>
             <Button
@@ -595,12 +586,7 @@ const PopoverFilterControl: React.FC<PopoverFilterControlProps> = ({ descriptor,
           </div>
           <Divider />
           <div className={styles.oobButtonRow}>
-            <Button
-              appearance="primary"
-              size="small"
-              className={styles.oobApplyButton}
-              onClick={applyChoice}
-            >
+            <Button appearance="primary" size="small" className={styles.oobApplyButton} onClick={applyChoice}>
               Apply
             </Button>
             <Button
@@ -637,12 +623,7 @@ const PopoverFilterControl: React.FC<PopoverFilterControlProps> = ({ descriptor,
             appearance="outline"
           />
           <div className={styles.oobButtonRow}>
-            <Button
-              appearance="primary"
-              size="small"
-              className={styles.oobApplyButton}
-              onClick={applyDate}
-            >
+            <Button appearance="primary" size="small" className={styles.oobApplyButton} onClick={applyDate}>
               Apply
             </Button>
             <Button
@@ -765,9 +746,7 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
             className={styles.triggerButton}
             aria-label={`${label} column options`}
             data-testid={
-              descriptor
-                ? `header-cell-content-trigger-${descriptor.attribute}`
-                : 'header-cell-content-trigger'
+              descriptor ? `header-cell-content-trigger-${descriptor.attribute}` : 'header-cell-content-trigger'
             }
           >
             {active && (
@@ -796,58 +775,57 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
           // applied to the popover surface itself (a transparent layer), so
           // its drop-shadow follows the rounded `menuCard` silhouette.
           style={{
-            filter:
-              'drop-shadow(0 6px 12px rgba(0,0,0,0.18)) drop-shadow(0 2px 4px rgba(0,0,0,0.12))',
+            filter: 'drop-shadow(0 6px 12px rgba(0,0,0,0.18)) drop-shadow(0 2px 4px rgba(0,0,0,0.12))',
           }}
         >
           {/* PORTAL FIX (NFR-03): re-wrap popover body in FluentProvider so
               dark mode + customer-tenant themes propagate through React portals. */}
           <FluentProvider applyStylesToPortals theme={effectiveTheme}>
             <div className={styles.menuCard}>
-            <MenuList>
-              {sortable && (
-                <>
+              <MenuList>
+                {sortable && (
+                  <>
+                    <MenuItem
+                      icon={<ArrowUp20Regular />}
+                      onClick={handleSortAsc}
+                      data-testid="header-cell-content-menu-sort-asc"
+                    >
+                      A to Z
+                    </MenuItem>
+                    <MenuItem
+                      icon={<ArrowDown20Regular />}
+                      onClick={handleSortDesc}
+                      data-testid="header-cell-content-menu-sort-desc"
+                    >
+                      Z to A
+                    </MenuItem>
+                    {(filterable || true) && <MenuDivider />}
+                  </>
+                )}
+
+                {filterable && (
                   <MenuItem
-                    icon={<ArrowUp20Regular />}
-                    onClick={handleSortAsc}
-                    data-testid="header-cell-content-menu-sort-asc"
+                    icon={<Filter20Filled />}
+                    onClick={handleFilterByClick}
+                    data-testid={`header-cell-content-menu-filter-${descriptor!.attribute}`}
                   >
-                    A to Z
+                    Filter by
                   </MenuItem>
+                )}
+
+                <MenuDivider />
+
+                {/* Column width — R1 placeholder, disabled. */}
+                <Tooltip content="Coming in R2" relationship="description">
                   <MenuItem
-                    icon={<ArrowDown20Regular />}
-                    onClick={handleSortDesc}
-                    data-testid="header-cell-content-menu-sort-desc"
+                    icon={<ArrowAutofitWidth20Regular />}
+                    disabled
+                    data-testid="header-cell-content-menu-column-width"
                   >
-                    Z to A
+                    Column width
                   </MenuItem>
-                  {(filterable || true) && <MenuDivider />}
-                </>
-              )}
-
-              {filterable && (
-                <MenuItem
-                  icon={<Filter20Filled />}
-                  onClick={handleFilterByClick}
-                  data-testid={`header-cell-content-menu-filter-${descriptor!.attribute}`}
-                >
-                  Filter by
-                </MenuItem>
-              )}
-
-              <MenuDivider />
-
-              {/* Column width — R1 placeholder, disabled. */}
-              <Tooltip content="Coming in R2" relationship="description">
-                <MenuItem
-                  icon={<ArrowAutofitWidth20Regular />}
-                  disabled
-                  data-testid="header-cell-content-menu-column-width"
-                >
-                  Column width
-                </MenuItem>
-              </Tooltip>
-            </MenuList>
+                </Tooltip>
+              </MenuList>
             </div>
           </FluentProvider>
         </MenuPopover>
@@ -899,11 +877,7 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
                       data-testid={`header-cell-content-filter-close-${descriptor!.attribute}`}
                     />
                   </div>
-                  <PopoverFilterControl
-                    descriptor={descriptor!}
-                    state={state}
-                    onStateChange={onStateChange}
-                  />
+                  <PopoverFilterControl descriptor={descriptor!} state={state} onStateChange={onStateChange} />
                 </div>
               </div>
             </FluentProvider>
