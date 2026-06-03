@@ -101,8 +101,8 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
    # For a new service Foo:
    rg -t cs -n "[\s,(]Foo\s+\w+[,)]" src/server/api/Sprk.Bff.Api/Api/
    ```
-2. **For each consuming endpoint, verify**: Is the `MapXxxEndpoints()` call in `Infrastructure/DI/EndpointMappingExtensions.cs` ITSELF wrapped in the same `if (flag)` block? If NO → apply ADR-030.
-3. **Apply ADR-030 per the 3 patterns** (P1 Promote-to-unconditional / P2 Quiet no-op / P3 Fail-fast Null-Object). See [`.claude/adr/ADR-030-bff-nullobject-kill-switch.md`](../adr/ADR-030-bff-nullobject-kill-switch.md) §10 for the PR review checklist and full static-scan recipe.
+2. **For each consuming endpoint, verify**: Is the `MapXxxEndpoints()` call in `Infrastructure/DI/EndpointMappingExtensions.cs` ITSELF wrapped in the same `if (flag)` block? If NO → apply ADR-032.
+3. **Apply ADR-032 per the 3 patterns** (P1 Promote-to-unconditional / P2 Quiet no-op / P3 Fail-fast Null-Object). See [`.claude/adr/ADR-032-bff-nullobject-kill-switch.md`](../adr/ADR-032-bff-nullobject-kill-switch.md) §10 for the PR review checklist and full static-scan recipe.
 
 **Why this rule exists**: r2 task 011 Phase 1a inventory identified 13 conditional services + matching unconditional consumers via a static pass. Phase 1c + Step 9.5 surfaced 5 MORE that the static pass missed — because:
 - Phase 1a focused on "find conditional registrations" + "find unconditional endpoint mappings" but did NOT systematically cross-reference all CONSUMERS of conditional services across the full endpoint surface
@@ -111,7 +111,7 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 **The pattern is easy to introduce by accident** — it requires explicit reviewer discipline + the static-scan recipe to prevent. Apply to every PR touching `*Module.cs` DI files.
 
 **Cross-reference**:
-- ADR-030 (canonical pattern) — [`.claude/adr/ADR-030-bff-nullobject-kill-switch.md`](../adr/ADR-030-bff-nullobject-kill-switch.md)
+- ADR-032 (canonical pattern) — [`.claude/adr/ADR-032-bff-nullobject-kill-switch.md`](../adr/ADR-032-bff-nullobject-kill-switch.md)
 - r2 evidence — [`projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md`](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md) §2.1 + Appendix A
 - Phase 5 procedure-doc codification — [`docs/procedures/testing-and-code-quality.md`](../../docs/procedures/testing-and-code-quality.md) §18.1
 - Per-service inventory — [`projects/sdap.bff.api-test-suite-repair-r2/baseline/asymmetric-registration-inventory-2026-06-01.md`](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/asymmetric-registration-inventory-2026-06-01.md)

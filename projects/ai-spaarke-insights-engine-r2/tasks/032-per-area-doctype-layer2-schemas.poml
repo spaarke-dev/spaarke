@@ -1,7 +1,7 @@
 <task id="032" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>D3 — Per-(practice-area, document-type) Layer 2 extraction schemas (3–5 high-value pairs)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>D</wave>
     <estimated-effort>3d</estimated-effort>
     <tags>prompts, layer2-extraction, schemas, practice-area, document-type, sprk_analysisaction</tags>
@@ -53,4 +53,21 @@
     <criterion testable="true">Each schema verified against fixture documents</criterion>
     <criterion testable="true">Observation emission shape preserves r1 D-P10 contract (confidence ≥ threshold, per-field emission)</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-03 (Wave D-G2). 5 new `sprk_analysisaction` rows authored with `sprk_executoractiontype=0` (AiAnalysis), JPS shape derived from `INS-L2X@v1`:
+    - `INS-L2X-CTRNS-CLOSING@v1` (Guid 84967adf-8c5f-f111-a825-70a8a59455f4) — fields: settlement_amount, settlement_date, parties_settling, parties_settled, jurisdiction, governing_law, key_dispositive_terms
+    - `INS-L2X-CTRNS-APA@v1` (Guid 0752f2f1-8c5f-f111-a825-70a8a59455f4) — fields: purchase_price, assets_acquired, buyer, seller, effective_date, escrow_terms, key_dispositive_terms
+    - `INS-L2X-IPPAT-PATAPP@v1` (Guid 9d6b3b0a-8d5f-f111-a825-70a8a59455f4) — fields: inventor_names, filing_date, application_number, priority_claim, technology_domain, abstract_summary
+    - `INS-L2X-IPPAT-OA@v1` (Guid 5dea3e22-8d5f-f111-a825-70a8a59455f4) — fields: action_type, response_due_date, rejections_summary, examiner, claims_affected, attorney_action_required
+    - `INS-L2X-BNKF-LOAN@v1` (Guid 25362a41-8d5f-f111-a825-70a8a59455f4) — fields: principal_amount, interest_rate, maturity_date, borrower, lender, collateral_summary, key_covenants
+
+    5 intersect `sprk_practicearea_documenttype` rows PATCHed to point at the new codes. CTRNS × NDA row (23941f9c-495f-f111-a825-70a8a59455f4) preserved at `sprk_layer2actioncode=NULL` per design-a3 §5.2 example 5 (canonical gate-fail).
+
+    Each JPS preserves the INS-L2X@v1 grounding contract (verbatim `evidence` quotes per scalar field, ADR-013) and `parameters.model=gpt-4o, temperature=0`. `metadata.derivedFrom="INS-L2X@v1"` + `metadata.practiceAreaScope` + `metadata.documentType` carry the lineage.
+
+    Acceptance criterion 2 (fixture verification) is deferred to Wave D7 (task 036 — synthetic test fixtures) which is the canonical fixture-authoring task; D3 produces schemas ready for D7's fixture-based smoke. Criteria 1 + 3 are satisfied empirically.
+
+    OPEN follow-up for Wave D-G3 (033 — universal-ingest per-area routing): `universal-ingest@v1` playbook must resolve `(practiceAreaHint + classification.document_type)` → `sprk_practicearea_documenttype.sprk_layer2actioncode` at runtime and dispatch via that action code. If `sprk_layer2actioncode IS NULL` (e.g., CTRNS × NDA), emit Layer-1-only Observation per design-a3 §2.5 step 4 (structured gate-fail).
+  </notes>
 </task>

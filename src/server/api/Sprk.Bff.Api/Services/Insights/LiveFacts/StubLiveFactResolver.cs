@@ -9,9 +9,11 @@ namespace Sprk.Bff.Api.Services.Insights.LiveFacts;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Production uses <see cref="DataverseLiveFactResolver"/></b> (task 071, Wave 8.5
-/// pre-deploy gap fix, 2026-05-29) — see
-/// <c>Infrastructure/DI/InsightsModule.cs</c>. This stub is retained for two reasons:
+/// <b>Production uses per-entity resolvers</b> registered via
+/// <c>IReadOnlyDictionary&lt;string, ILiveFactResolver&gt;</c> (task 034 r2 Wave D5;
+/// originally <see cref="MatterLiveFactResolver"/> only per task 071, Wave 8.5 pre-deploy
+/// gap fix, 2026-05-29) — see <c>Infrastructure/DI/InsightsModule.cs</c>. This stub is
+/// retained for two reasons:
 /// </para>
 /// <list type="bullet">
 ///   <item>
@@ -47,7 +49,8 @@ internal sealed class StubLiveFactResolver : ILiveFactResolver
     {
         throw new LiveFactNotSupportedException(
             $"StubLiveFactResolver (test-only): subject='{subject}' predicate='{predicate}'. " +
-            "Production uses DataverseLiveFactResolver (task 071, Wave 8.5). " +
+            "Production uses per-entity resolvers (MatterLiveFactResolver / ProjectLiveFactResolver / " +
+            "InvoiceLiveFactResolver) registered via IReadOnlyDictionary<string, ILiveFactResolver>. " +
             "If you see this in production, InsightsModule DI registration is misconfigured.");
     }
 }

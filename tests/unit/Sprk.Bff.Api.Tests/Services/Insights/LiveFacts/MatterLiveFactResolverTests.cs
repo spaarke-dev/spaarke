@@ -11,14 +11,15 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Services.Insights.LiveFacts;
 
 /// <summary>
-/// Unit tests for <see cref="DataverseLiveFactResolver"/> (task 071, Wave 8.5 pre-deploy
-/// gap fix, 2026-05-29). Verifies each of the 4 predicates the D-P14 predict-matter-cost
-/// synthesis playbook needs resolves to a deterministic <see cref="FactArtifact"/> with
-/// confidence 1.0 and proper evidence reference shape per design.md §2.1 + SPEC §3.4.1.
+/// Unit tests for <see cref="MatterLiveFactResolver"/> (r2 Wave D5 task 034 rename of
+/// the original <c>DataverseLiveFactResolver</c> per A6-D5). Verifies each of the 4
+/// predicates the D-P14 predict-matter-cost synthesis playbook needs resolves to a
+/// deterministic <see cref="FactArtifact"/> with confidence 1.0 and proper evidence
+/// reference shape per design.md §2.1 + SPEC §3.4.1.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Scope</b>:
+/// <b>Scope</b> (behavior preserved 1:1 from r1):
 /// <list type="bullet">
 ///   <item>Each of 4 predicates (attorney, client, matterType, opposingCounsel) →
 ///   returns FactArtifact with correct value/predicate/confidence</item>
@@ -32,10 +33,10 @@ namespace Sprk.Bff.Api.Tests.Services.Insights.LiveFacts;
 /// </para>
 /// <para>
 /// <b>Zone B placement</b> per SPEC §3.5 — these tests verify
-/// DataverseLiveFactResolver depends ONLY on IGenericEntityService. No AI internals.
+/// MatterLiveFactResolver depends ONLY on IGenericEntityService. No AI internals.
 /// </para>
 /// </remarks>
-public class DataverseLiveFactResolverTests
+public class MatterLiveFactResolverTests
 {
     private const string TenantId = "tenant-acme";
     private static readonly Guid MatterId = Guid.Parse("11111111-1111-1111-1111-111111111111");
@@ -48,8 +49,8 @@ public class DataverseLiveFactResolverTests
 
     private readonly Mock<IGenericEntityService> _entityServiceMock = new(MockBehavior.Strict);
 
-    private DataverseLiveFactResolver CreateSut()
-        => new(_entityServiceMock.Object, NullLogger<DataverseLiveFactResolver>.Instance);
+    private MatterLiveFactResolver CreateSut()
+        => new(_entityServiceMock.Object, NullLogger<MatterLiveFactResolver>.Instance);
 
     /// <summary>
     /// Build a fully-populated sprk_matter Entity for the happy-path tests.
@@ -237,9 +238,11 @@ public class DataverseLiveFactResolverTests
     [Fact]
     public async Task ResolveAsync_InvalidSubjectScheme_ThrowsLiveFactNotSupportedException()
     {
-        // Only matter: subject scheme is supported in Phase 1. document:, party:, etc. are
-        // reserved for Phase 1.5+. Invalid scheme MUST surface as LiveFactNotSupportedException
-        // (NOT silently return null) so playbook authoring errors are loud, not silent.
+        // The matter resolver still rejects non-matter schemes as LiveFactNotSupportedException
+        // (NOT silently return null) so direct-call mis-routings are loud, not silent. (At the
+        // dispatcher layer (LiveFactNode), the scheme is validated up-front via ISubjectParser
+        // before routing to the per-entity resolver — but the resolver retains its own scheme
+        // check as a defensive measure.)
         var sut = CreateSut();
 
         Func<Task> act = () => sut.ResolveAsync("document:abc-123", "attorney", TenantId, CancellationToken.None);
@@ -325,14 +328,14 @@ public class DataverseLiveFactResolverTests
     [Fact]
     public void Constructor_NullEntityService_Throws()
     {
-        Action act = () => new DataverseLiveFactResolver(null!, NullLogger<DataverseLiveFactResolver>.Instance);
+        Action act = () => new MatterLiveFactResolver(null!, NullLogger<MatterLiveFactResolver>.Instance);
         act.Should().Throw<ArgumentNullException>().WithParameterName("entityService");
     }
 
     [Fact]
     public void Constructor_NullLogger_Throws()
     {
-        Action act = () => new DataverseLiveFactResolver(_entityServiceMock.Object, null!);
+        Action act = () => new MatterLiveFactResolver(_entityServiceMock.Object, null!);
         act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
     }
 
@@ -344,7 +347,7 @@ public class DataverseLiveFactResolverTests
     [InlineData("matter: 11111111-1111-1111-1111-111111111111 ", "11111111-1111-1111-1111-111111111111")] // tolerates whitespace
     public void ParseMatterSubject_ValidFormats_ReturnsGuid(string subject, string expectedGuid)
     {
-        var result = DataverseLiveFactResolver.ParseMatterSubject(subject);
+        var result = MatterLiveFactResolver.ParseMatterSubject(subject);
         result.Should().NotBeNull();
         result!.Value.Should().Be(Guid.Parse(expectedGuid));
     }
@@ -358,7 +361,7 @@ public class DataverseLiveFactResolverTests
     [InlineData("matter:00000000-0000-0000-0000-000000000000")]    // Guid.Empty
     public void ParseMatterSubject_InvalidFormats_ReturnsNull(string subject)
     {
-        var result = DataverseLiveFactResolver.ParseMatterSubject(subject);
+        var result = MatterLiveFactResolver.ParseMatterSubject(subject);
         result.Should().BeNull();
     }
 }

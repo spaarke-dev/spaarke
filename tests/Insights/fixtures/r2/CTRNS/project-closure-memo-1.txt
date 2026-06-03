@@ -1,0 +1,103 @@
+PROJECT CLOSURE MEMORANDUM
+
+To:        Devorah Anand, Lead Partner; Greene & Marlow LLP Practice Committee
+From:      Camille Whittaker, Project Manager
+Date:      May 8, 2026
+Re:        Project CTRNS-2026-038 — Verdant Solar / Pelican Bay APA Transaction
+Status:    CLOSED — Closing achieved April 17, 2026; Project administratively
+           closed with the exception of escrow-administration carry-forward
+           per § 4 below.
+
+1. PROJECT OVERVIEW (RECAP)
+
+The Verdant Solar / Pelican Bay APA transaction closed on April 17, 2026,
+on the original target date and within budget. The Purchase Price was
+$42,500,000, settled per the Closing Statement of even date and the
+funds-flow memorandum circulated April 14, 2026.
+
+2. OUTCOMES VS PLAN
+
+   Outcome Metric                       Plan          Actual
+   ---------------------------------------------------------------------
+   Closing date                         Apr 17 2026   Apr 17 2026 ✅
+   Total fees                           $1,250,000    $1,178,400  ✅ under cap
+   Hours billed (total)                 ~980          927         ✅ under
+   Open closing-blocking issues at close 0            0           ✅
+   Disclosure schedule cycles           2             3 (one extra
+                                                       refresh round
+                                                       requested by Buyer
+                                                       on March 26 —
+                                                       absorbed without
+                                                       schedule slip)
+   Post-closing dispute opened          0             0           ✅ (TBD —
+                                                       12-month escrow
+                                                       period still open)
+
+3. KEY EVENTS DURING THE PROJECT
+
+   - Feb 11, 2026: APA executed.
+   - Feb 25, 2026: HSR filing submitted.
+   - Mar 26, 2026: Buyer requested additional refresh of Section 4.10
+     (Employee Matters) disclosure schedule following the public
+     announcement of a Northern District of California whistleblower
+     complaint against a Verdant Solar subsidiary; the refresh was completed
+     within five (5) Business Days and did not affect the signing
+     representations.
+   - Apr 1, 2026: HSR waiting period expired.
+   - Apr 14, 2026: Funds-flow memorandum finalized and circulated.
+   - Apr 17, 2026: Closing achieved at 11:47 a.m. CT.
+
+4. CARRY-FORWARD ITEMS (TRANSITION TO NEW PROJECT)
+
+A new project code (CTRNS-2026-074, "Verdant Solar — Post-Close Escrow
+Administration") has been opened to track the following 12-month
+carry-forward activities:
+
+   a) Working Capital true-up determination (target: July 17, 2026)
+   b) Defense of indemnity claims, if any, against the $3,000,000 Holdback
+      Escrow held by Atlas Trust Services Inc. (escrow release date:
+      April 17, 2027)
+   c) Annual escrow-account audit and reporting to client
+   d) Coordination with TSA counterparties during the 12-month TSA term
+
+The estimated budget for the carry-forward project is $185,000 (T&M with
+cap). A separate SOW for CTRNS-2026-074 will be issued by May 22, 2026.
+
+5. LESSONS LEARNED
+
+   - The Buyer-requested March 26 disclosure-refresh cycle could have been
+     anticipated had the project team monitored client-side public
+     announcements more actively. Recommend a public-information watch
+     during pre-closing windows on future deals.
+   - The Working Capital target-setting workstream slipped one week in early
+     March due to client-side accounting delays. Recommend setting an
+     explicit covenant in future engagement letters requiring monthly
+     client-side accounting closes by a specified business day.
+   - The Escrow Agreement negotiation moved more efficiently than past
+     deals because Atlas Trust Services Inc. agreed to use the firm's form
+     escrow agreement as the starting point. Recommend Atlas as a preferred
+     escrow agent for future Greene & Marlow transactional engagements.
+
+6. CLIENT FEEDBACK
+
+A debrief call was held with Verdant Solar CFO Camille Whittaker (the firm's
+project liaison) on April 30, 2026. Client expressed satisfaction with the
+team's responsiveness during the March 26 disclosure-refresh incident.
+Client confirmed they will retain Greene & Marlow for the post-close escrow
+administration carry-forward project.
+
+7. APPROVALS
+
+This Project Closure Memorandum is hereby submitted for filing in the firm's
+project knowledge base.
+
+Submitted by:    Camille Whittaker, Project Manager
+                 Date: May 8, 2026
+
+Reviewed by:     Devorah Anand, Lead Partner
+                 Date: May 9, 2026
+
+Approved for filing:
+                 ___________________________
+                 Practice Committee Chair
+                 Date: ____________________

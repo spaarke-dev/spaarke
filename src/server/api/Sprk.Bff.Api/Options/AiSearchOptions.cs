@@ -25,4 +25,16 @@ public class AiSearchOptions
     /// Default matches SPEC §3.4 / D-P2 naming (<c>spaarke-insights-index</c>).
     /// </summary>
     public string InsightsIndexName { get; init; } = "spaarke-insights-index";
+
+    /// <summary>
+    /// Wave D6 (task 035) — hybrid backward-compat dual-write toggle per design-a6 §4.4 + §5.3.
+    /// When true (default), the writer populates <c>scope.matterId</c> for matter-subject
+    /// Observations in addition to <c>scope.entityType</c> + <c>scope.entityId</c>, preserving
+    /// NFR-08 backward-compat for any consumer that filters by <c>scope/matterId eq '…'</c>.
+    /// Set to false to disable dual-write (matter Observations would only carry the canonical
+    /// <c>scope.entityType</c>/<c>scope.entityId</c> fields). The reader (IndexRetrieveNode) uses
+    /// OR-filter logic per design-a6 §4.5 regardless of this flag, so flipping it does NOT
+    /// break reads — it only stops emitting the legacy field on NEW writes.
+    /// </summary>
+    public bool DualWriteScopeMatterId { get; init; } = true;
 }

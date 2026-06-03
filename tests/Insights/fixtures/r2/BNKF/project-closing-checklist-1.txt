@@ -1,0 +1,131 @@
+CLOSING CHECKLIST AND PROJECT DELIVERABLES INDEX
+
+Project Code:        BNKF-2026-031
+Project Name:        Mariner Logistics Senior Secured Credit Facility
+                     Refinancing
+Project Manager:     Aliyah Brennan (Senior Associate)
+Closing Date:        February 27, 2026
+Document Status:     FINAL — All items resolved or completed at Closing
+Prepared by:         Marlena Vogel, Paralegal
+Reviewed by:         Patrick Devanney, Lead Partner
+Issued:              February 27, 2026 (Pre-Closing version);
+                     Final version March 3, 2026 (post-perfection)
+
+NOTE: This Closing Checklist is the canonical project record of all
+deliverables for the Engagement. It is shared with all parties at Closing and
+filed as part of the Mariner Logistics deal file.
+
+1. PRINCIPAL LOAN DOCUMENTS
+
+   #  Document                                        Resp. Party       Status
+   ---------------------------------------------------------------------------
+   1  Credit and Security Agreement                  HSA               ✅
+   2  Notes (term + revolving)                       HSA               ✅
+   3  Security Agreement                             HSA               ✅
+   4  Guaranty — Mariner Holdings, Inc.              HSA               ✅
+   5  Guaranty — Mariner Coastal Operations LLC      HSA               ✅
+   6  Mortgage — Norfolk Facility                    HSA               ✅
+   7  Pledge Agreement (Mariner subsidiaries)        HSA               ✅
+   8  Subordination Agreement (intercompany)         HSA               ✅
+   9  Intercreditor Agreement                        Lender's counsel  ❌ N/A
+                                                                      (no second
+                                                                      lien)
+   10 Fee Letter                                     Linden Trust      ✅
+
+2. CLOSING DELIVERABLES — BORROWER SIDE
+
+   #  Document                                        Resp. Party       Status
+   ---------------------------------------------------------------------------
+   11 Borrower's Officer's Closing Certificate       Mariner CFO       ✅
+   12 Guarantor's Officer's Closing Certificate (×2) Each Guarantor    ✅
+   13 Incumbency Certificate (each Loan Party)       Each Loan Party   ✅
+   14 Certified Good Standing Certificates (DE, VA,
+      OR, NY, MA — each jurisdiction of formation
+      or qualification per Schedule 11(d))           Mariner Corp Sec  ✅
+   15 Certified Resolutions of Loan Parties          Mariner Corp Sec  ✅
+   16 Legal Opinion of HSA (borrower's counsel)      HSA               ✅
+   17 Legal Opinion of Local Counsel — VA            VA Counsel        ✅
+   18 Legal Opinion of Local Counsel — OR            OR Counsel        ✅
+   19 Insurance Certificates (CGL + Property + UMB)  Mariner Risk Mgmt ✅
+   20 Solvency Certificate                           Mariner CFO       ✅
+   21 KYC / Beneficial Ownership Certifications     Mariner Compliance ✅
+
+3. PAYOFF AND RELEASE DOCUMENTS — EXISTING CREDIT FACILITY
+
+   #  Document                                        Resp. Party       Status
+   ---------------------------------------------------------------------------
+   22 Payoff Letter from existing Agent              Existing Agent    ✅
+   23 UCC-3 Termination Authorization (existing)     Existing Agent    ✅
+   24 Mortgage Satisfaction (Norfolk)                Existing Agent    ✅
+   25 IP Security Agreement Releases                 Existing Agent    ✅
+   26 Returned originals of Existing Notes           Existing Agent    ✅
+                                                                      (marked
+                                                                      "PAID IN
+                                                                      FULL")
+
+4. PERFECTION DELIVERABLES
+
+   #  Document                                        Resp. Party       Status
+   ---------------------------------------------------------------------------
+   27 UCC-1 Financing Statements                     HSA               ✅
+      (filed: DE, VA, NV, NC, NY)
+   28 Mortgage Recordation (Hampton Roads, VA)       VA Counsel        ✅
+                                                                      (recorded
+                                                                      Feb 28)
+   29 Patent Security Agreement (filed USPTO)        HSA               ⏳
+                                                                      (post-close
+                                                                      window;
+                                                                      complete
+                                                                      by Mar 13)
+   30 Trademark Security Agreement (filed USPTO)     HSA               ⏳
+                                                                      (post-close
+                                                                      window;
+                                                                      complete
+                                                                      by Mar 13)
+   31 Deposit Account Control Agreements (5 banks)   HSA               ⏳
+                                                                      (60-day
+                                                                      post-close
+                                                                      window;
+                                                                      complete
+                                                                      by Apr 28)
+
+5. ANCILLARY AGREEMENTS
+
+   #  Document                                        Resp. Party       Status
+   ---------------------------------------------------------------------------
+   32 Funds Flow Memorandum (final)                  Linden Trust      ✅
+   33 Closing Statement                              HSA               ✅
+   34 Form W-9s for all payee parties                Various           ✅
+   35 OFAC Compliance Certifications                 Mariner           ✅
+
+6. POST-CLOSING ACTION ITEMS
+
+   M-06.1  Patent + Trademark Security Agreement filing      Mar 13, 2026
+   M-06.2  DACA execution and delivery (5 accounts)          Apr 28, 2026
+   M-06.3  Mortgage recordation evidence to Agent            Mar 6, 2026
+   M-06.4  UCC continuation tickler set for 4.5 years        Aug 2030
+
+7. SIGNATURES (CHECKLIST APPROVED)
+
+The undersigned acknowledge that the items marked ✅ have been delivered to
+the Administrative Agent's satisfaction at Closing on February 27, 2026, and
+that items marked ⏳ remain post-closing deliverables to be completed within
+the windows indicated.
+
+For Borrower (Mariner Logistics Group LLC):
+
+___________________________
+Imani Okafor, Chief Executive Officer
+Date: February 27, 2026
+
+For Administrative Agent (Linden Trust National Bank, N.A.):
+
+___________________________
+Hiroshi Brenner, Senior Vice President
+Date: February 27, 2026
+
+For Borrower's Counsel (Holwell, Strand & Adichie LLP):
+
+___________________________
+Patrick Devanney, Lead Partner
+Date: February 27, 2026

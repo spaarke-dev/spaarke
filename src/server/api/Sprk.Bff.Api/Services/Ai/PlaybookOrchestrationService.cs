@@ -5,6 +5,7 @@ using System.Threading.Channels;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai.Insights.Routing;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Ai.Schemas;
 
@@ -42,6 +43,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     private readonly INodeExecutorRegistry _executorRegistry;
     private readonly IScopeResolverService _scopeResolver;
     private readonly IAnalysisOrchestrationService _legacyOrchestrator;
+    private readonly IInsightsActionRouter _insightsRouter;
     private readonly ILogger<PlaybookOrchestrationService> _logger;
 
     // In-memory run tracking (Phase 1) - replaced with Dataverse in Phase 2
@@ -52,12 +54,14 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         INodeExecutorRegistry executorRegistry,
         IScopeResolverService scopeResolver,
         IAnalysisOrchestrationService legacyOrchestrator,
+        IInsightsActionRouter insightsRouter,
         ILogger<PlaybookOrchestrationService> logger)
     {
         _nodeService = nodeService;
         _executorRegistry = executorRegistry;
         _scopeResolver = scopeResolver;
         _legacyOrchestrator = legacyOrchestrator;
+        _insightsRouter = insightsRouter ?? throw new ArgumentNullException(nameof(insightsRouter));
         _logger = logger;
     }
 
@@ -1079,6 +1083,47 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             // and collect UpdateRecord-type nodes with their ConfigJson (which contains fieldMappings).
             var downstreamNodes = CollectDownstreamNodeInfo(node, graph);
 
+            // Insights Engine r2 Wave D4 (task 033) — per-(area, type) routing for universal-ingest@v1.
+            // Layer 1 (layer1Classify): if parameters.practiceAreaHint is set AND a per-area action row
+            // INS-L1C-<AREA>@v1 exists, swap the resolved action for the per-area variant. Fall back to
+            // the generic action row otherwise — preserves the "every matter classifies" invariant per
+            // design-a3 §2.5.
+            //
+            // Layer 2 (layer2Extract): consult the sprk_practicearea_documenttype matrix for
+            // (practiceAreaHint, layer1.documentTypeCode). Outcomes:
+            //   - per-pair action: swap action, run executor against per-pair prompt
+            //   - NULL sprk_layer2actioncode (gate-fail by design, e.g., CTRNS × NDA): skip the node,
+            //     emit Layer-1-only Observation (handled by setting branchSkipped flag below)
+            //   - no matrix row (unmapped pair): fall back to generic INS-L2X@v1
+            //   - missing inputs: PassThrough (no change)
+            //
+            // Routing decisions are cached in-process (15-min sliding TTL) per InsightsActionRouter.
+            // The routing happens BEFORE template substitution so the substituted prompt + parameters
+            // reach the executor as a single coherent payload.
+            (action, var insightsL2GateFail) = await ApplyInsightsRoutingAsync(
+                node, action, runContext, cancellationToken).ConfigureAwait(false);
+
+            if (insightsL2GateFail)
+            {
+                // Structured Layer 2 gate-fail per design-a3 §2.5 step 4 (CTRNS × NDA pattern).
+                // Surface as a successful skip so emitObservations downstream still runs with
+                // Layer-1-only output. Mirrors the dependency-failure-skip semantics already
+                // used by the branch-aware skip path.
+                var skipReason = "Insights Layer 2 routing: matrix row carries NULL sprk_layer2actioncode (intentional per-pair gate-fail)";
+                _logger.LogInformation(
+                    "Insights Layer 2 gate-fail for node '{NodeName}' (runId={RunId}, playbookId={PlaybookId}) — {SkipReason}. Universal-ingest will emit Layer-1-only Observation downstream.",
+                    node.Name, runContext.RunId, runContext.PlaybookId, skipReason);
+
+                var skipOutput = NodeOutput.Ok(node.Id, node.OutputVariable, null, skipReason);
+                runContext.RecordNodeSkipped();
+                runContext.StoreNodeOutput(skipOutput);
+
+                await writer.WriteAsync(PlaybookStreamEvent.NodeSkipped(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipReason), cancellationToken);
+
+                return skipOutput;
+            }
+
             // Apply {{paramName}} template substitution to ConfigJson before the executor
             // runs. Variables come from runContext.Parameters (populated by the caller +
             // enriched by InsightsOrchestrator with matterId/projectId/invoiceId derived from
@@ -1352,6 +1397,161 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Universal-ingest@v1 Layer 1 node name (per <c>universal-ingest.playbook.json</c>).
+    /// Detection point for per-area Layer 1 routing.
+    /// </summary>
+    private const string UniversalIngestLayer1NodeName = "layer1Classify";
+
+    /// <summary>
+    /// Universal-ingest@v1 Layer 2 node name (per <c>universal-ingest.playbook.json</c>).
+    /// Detection point for per-(area, type) Layer 2 routing.
+    /// </summary>
+    private const string UniversalIngestLayer2NodeName = "layer2Extract";
+
+    /// <summary>
+    /// Universal-ingest@v1 Layer 1 output variable name (consumed by Layer 2 routing
+    /// to read the <c>document_type_code</c> classification result).
+    /// </summary>
+    private const string UniversalIngestLayer1OutputVariable = "layer1";
+
+    /// <summary>
+    /// Apply Insights Engine r2 Wave D4 (task 033) per-(area, type) routing to the
+    /// universal-ingest@v1 playbook's Layer 1 and Layer 2 nodes. Returns the (possibly
+    /// swapped) action plus a flag indicating whether the node should be skipped
+    /// with a structured Layer 2 gate-fail.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Routing is identified by <see cref="PlaybookNodeDto.Name"/> matching the canonical
+    /// universal-ingest node names. Other playbooks (including future Insights variants
+    /// that don't follow this naming) flow through unchanged — routing is OPT-IN by
+    /// node name, never silently applied.
+    /// </para>
+    /// <para>
+    /// <b>Layer 1 routing</b>: reads <c>parameters.practiceAreaHint</c>, asks the router
+    /// for the per-area action; on miss, returns the orchestrator's default action.
+    /// </para>
+    /// <para>
+    /// <b>Layer 2 routing</b>: reads <c>parameters.practiceAreaHint</c> + extracts the
+    /// <c>document_type_code</c> from the upstream <c>layer1</c> node output, asks the
+    /// router for the matrix lookup. Returns one of:
+    /// <list type="bullet">
+    ///   <item>PassThrough — inputs missing, action unchanged</item>
+    ///   <item>UsePerPairAction — swap action to per-pair variant</item>
+    ///   <item>GateFailNullActionCode — gate-fail flag set; caller emits Skip output</item>
+    ///   <item>FallbackToGeneric — unmapped pair, action unchanged</item>
+    /// </list>
+    /// </para>
+    /// </remarks>
+    private async Task<(AnalysisAction Action, bool GateFailLayer2)> ApplyInsightsRoutingAsync(
+        PlaybookNodeDto node,
+        AnalysisAction action,
+        PlaybookRunContext runContext,
+        CancellationToken cancellationToken)
+    {
+        // Identify the universal-ingest L1/L2 nodes by name. Other playbooks (and
+        // synthesis playbooks like predict-matter-cost@v1) pass through unchanged.
+        if (string.IsNullOrEmpty(node.Name))
+        {
+            return (action, false);
+        }
+
+        var practiceAreaHint = TryGetParameter(runContext.Parameters, "practiceAreaHint");
+
+        if (string.Equals(node.Name, UniversalIngestLayer1NodeName, StringComparison.Ordinal))
+        {
+            var routed = await _insightsRouter.ResolveLayer1ActionAsync(
+                practiceAreaHint, action, cancellationToken).ConfigureAwait(false);
+            return (routed, false);
+        }
+
+        if (string.Equals(node.Name, UniversalIngestLayer2NodeName, StringComparison.Ordinal))
+        {
+            // Read the Layer 1 output to extract the document_type_code. When unavailable
+            // (sanitize short-circuited OR a prior node failed before Layer 1 ran), fall
+            // through to the default action — the orchestrator's branch-aware skip handles
+            // the rest.
+            var documentTypeHint = TryGetParameter(runContext.Parameters, "documentTypeHint")
+                ?? ExtractDocumentTypeFromLayer1Output(runContext);
+
+            var routing = await _insightsRouter.ResolveLayer2ActionAsync(
+                practiceAreaHint, documentTypeHint, action, cancellationToken).ConfigureAwait(false);
+
+            return routing.Decision switch
+            {
+                InsightsLayer2RoutingDecision.GateFailNullActionCode => (action, true),
+                InsightsLayer2RoutingDecision.UsePerPairAction => (routing.Action, false),
+                _ => (action, false)
+            };
+        }
+
+        return (action, false);
+    }
+
+    /// <summary>
+    /// Safe lookup of a string parameter from the run context's parameter dictionary.
+    /// Returns null when missing or empty; never throws.
+    /// </summary>
+    private static string? TryGetParameter(IReadOnlyDictionary<string, string>? parameters, string key)
+    {
+        if (parameters is null) return null;
+        return parameters.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : null;
+    }
+
+    /// <summary>
+    /// Extract <c>document_type_code</c> from the upstream <c>layer1</c> node's structured
+    /// output. The Layer 1 prompt emits a JSON object shape
+    /// <c>{ document_type_code, signals { ... }, confidence, rationale }</c> per
+    /// design-a3 §5.1. Returns null when the layer1 output is absent or malformed —
+    /// caller falls back to the default action.
+    /// </summary>
+    private string? ExtractDocumentTypeFromLayer1Output(PlaybookRunContext runContext)
+    {
+        var layer1Output = runContext.GetOutput(UniversalIngestLayer1OutputVariable);
+        if (layer1Output is null || !layer1Output.Success || layer1Output.StructuredData is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var root = layer1Output.StructuredData.Value;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            // Try canonical key first (design-a3 §5.1), then a couple of common
+            // case variants in case prompt authors emit camelCase.
+            if (TryReadStringProperty(root, "document_type_code", out var v1)) return v1;
+            if (TryReadStringProperty(root, "documentTypeCode", out var v2)) return v2;
+            if (TryReadStringProperty(root, "classification", out var v3)) return v3;
+
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex,
+                "PlaybookOrchestrationService.ExtractDocumentTypeFromLayer1Output: malformed layer1 output; falling back to default Layer 2 action.");
+            return null;
+        }
+    }
+
+    private static bool TryReadStringProperty(JsonElement root, string propertyName, out string? value)
+    {
+        if (root.TryGetProperty(propertyName, out var element)
+            && element.ValueKind == JsonValueKind.String)
+        {
+            value = element.GetString();
+            return !string.IsNullOrWhiteSpace(value);
+        }
+        value = null;
+        return false;
     }
 
     /// <summary>
