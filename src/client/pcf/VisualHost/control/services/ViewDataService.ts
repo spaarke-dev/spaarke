@@ -192,14 +192,37 @@ export function injectContextFilter(fetchXml: string, fieldName: string, recordI
 
   const entityTagEnd = fetchXml.indexOf('>', fetchXml.indexOf(entityMatch[0])) + 1;
 
-  // Look for an existing top-level <filter> element (first one after <entity>)
-  const afterEntity = fetchXml.substring(entityTagEnd);
+  // v1.4.14 — Walk past every `<link-entity>...</link-entity>` block so the
+  // first `<filter>` we find is the entity-level filter on `<entity>`, NOT
+  // a filter nested INSIDE a link-entity (whose conditions would apply to
+  // the linked table, not the queried entity). The previous logic naively
+  // took the first `<filter>` in the FetchXML, which fails for queries that
+  // declare a link-entity BEFORE the entity-level filter (the FetchXML's
+  // own canonical ordering) — Dataverse then rejects the query with
+  // "<linkedEntity> doesn't contain attribute <contextfield>" because the
+  // injected condition lands on the wrong table.
+  //
+  // Strategy: find the offset of the last top-level `</link-entity>` inside
+  // the entity body and search for `<filter>` from there. Link-entities are
+  // not nested inside other link-entities at the entity level in any
+  // FetchXML we currently author, so a simple lastIndexOf is sufficient.
+  const beforeEntityClose = fetchXml.lastIndexOf('</entity>');
+  const entityContents =
+    beforeEntityClose > entityTagEnd
+      ? fetchXml.substring(entityTagEnd, beforeEntityClose)
+      : fetchXml.substring(entityTagEnd);
+  const lastLinkEntityCloseIdx = entityContents.lastIndexOf('</link-entity>');
+  const searchStartInContents = lastLinkEntityCloseIdx >= 0 ? lastLinkEntityCloseIdx + '</link-entity>'.length : 0;
+  const afterEntity = entityContents.substring(searchStartInContents);
   const existingFilterMatch = afterEntity.match(/(<filter[^>]*>)/i);
+  // Absolute base offset for translating positions back to `fetchXml`.
+  const searchBaseOffset = entityTagEnd + searchStartInContents;
 
   if (existingFilterMatch) {
-    // There's already a filter - wrap existing filter content and our condition in an AND
-    // Find the position of the existing <filter> tag
-    const filterPos = entityTagEnd + afterEntity.indexOf(existingFilterMatch[0]);
+    // There's already an entity-level filter — wrap existing filter content
+    // and our condition in an AND. Position is relative to `fetchXml` via
+    // the searchBaseOffset computed above (which skips past link-entities).
+    const filterPos = searchBaseOffset + afterEntity.indexOf(existingFilterMatch[0]);
     const filterTag = existingFilterMatch[0];
 
     // Check if existing filter already has type="and"
@@ -221,7 +244,18 @@ export function injectContextFilter(fetchXml: string, fieldName: string, recordI
     }
   }
 
-  // No existing filter - inject a new one right after <entity ...>
+  // No existing entity-level filter — insert one right BEFORE </entity>
+  // (i.e., AFTER any link-entity blocks). This keeps the new filter at the
+  // entity level so its conditions apply to the queried entity, not a link.
+  if (beforeEntityClose > entityTagEnd) {
+    return (
+      fetchXml.substring(0, beforeEntityClose) +
+      `<filter type="and">${condition}</filter>` +
+      fetchXml.substring(beforeEntityClose)
+    );
+  }
+
+  // Fallback: prepend a filter right after the opening <entity> tag.
   return (
     fetchXml.substring(0, entityTagEnd) + `<filter type="and">${condition}</filter>` + fetchXml.substring(entityTagEnd)
   );

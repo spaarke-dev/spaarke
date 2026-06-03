@@ -10,6 +10,7 @@ import { Spinner, makeStyles, tokens, Text, MessageBar, MessageBarBody } from '@
 import { EventDueDateCard, type IEventDueDateCardProps } from './EventDueDateCard';
 import type { IChartDefinition } from '../types';
 import type { IConfigWebApi } from '../services/ConfigurationLoader';
+import { substituteParameters } from '../services/ViewDataService';
 import { logger } from '../utils/logger';
 
 export interface IDueDateCardVisualProps {
@@ -26,6 +27,9 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     width: '100%',
     minHeight: '80px',
+    // v1.4.12 — visual <body> top padding so the chart content sits below
+    // CardChrome's header with consistent breathing room (per UAT).
+    paddingTop: '20px',
   },
   empty: {
     color: tokens.colorNeutralForeground3,
@@ -54,7 +58,28 @@ function calculateDaysUntilDue(dueDate: Date): {
  * Map a Dataverse event record to EventDueDateCard props
  */
 function mapEventToCardProps(record: Record<string, unknown>): IEventDueDateCardProps {
-  const dueDate = record.sprk_duedate ? new Date(record.sprk_duedate as string) : new Date();
+  // v1.4.15 — same "active date" selection as DueDateCardList: prefer
+  // sprk_duedate when it's today-or-future; fall back to sprk_finalduedate
+  // when sprk_duedate has passed (the extended date is the new active
+  // deadline). See DueDateCardList.tsx for full rationale.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+
+  const duedateStr = record.sprk_duedate as string | undefined;
+  const finalduedateStr = record.sprk_finalduedate as string | undefined;
+  const duedate = duedateStr ? new Date(duedateStr) : null;
+  const finalduedate = finalduedateStr ? new Date(finalduedateStr) : null;
+
+  let dueDate: Date;
+  if (duedate && duedate.getTime() >= todayMs) {
+    dueDate = duedate;
+  } else if (finalduedate && finalduedate.getTime() >= todayMs) {
+    dueDate = finalduedate;
+  } else {
+    dueDate = duedate || finalduedate || new Date();
+  }
+
   const { daysUntilDue, isOverdue } = calculateDaysUntilDue(dueDate);
 
   // Event type from FetchXML link-entity alias or formatted value
@@ -98,7 +123,7 @@ export const DueDateCardVisual: React.FC<IDueDateCardVisualProps> = ({
       setLoading(true);
       setError(null);
 
-      // For single card, we need a record ID - either from context or from the chart definition
+      const entityName = chartDefinition.sprk_entitylogicalname || 'sprk_event';
       const recordId = contextRecordId;
       if (!recordId) {
         setLoading(false);
@@ -106,30 +131,47 @@ export const DueDateCardVisual: React.FC<IDueDateCardVisualProps> = ({
         return;
       }
 
-      // Use FetchXML with link-entity for event type (avoids navigation property naming issues)
-      const entityName = chartDefinition.sprk_entitylogicalname || 'sprk_event';
-      const cleanRecordId = recordId.replace(/[{}]/g, '');
-      const singleFetchXml = [
-        `<fetch top="1">`,
-        `  <entity name="${entityName}">`,
-        `    <attribute name="sprk_eventid" />`,
-        `    <attribute name="sprk_eventname" />`,
-        `    <attribute name="sprk_duedate" />`,
-        `    <attribute name="sprk_description" />`,
-        `    <attribute name="sprk_assignedto" />`,
-        `    <attribute name="sprk_eventtype_ref" />`,
-        `    <link-entity name="sprk_eventtype_ref" from="sprk_eventtype_refid" to="sprk_eventtype_ref" link-type="outer" alias="eventtype">`,
-        `      <attribute name="sprk_name" />`,
-        `      <attribute name="sprk_eventtypecolor" />`,
-        `    </link-entity>`,
-        `    <filter type="and">`,
-        `      <condition attribute="sprk_eventid" operator="eq" value="${cleanRecordId}" />`,
-        `    </filter>`,
-        `  </entity>`,
-        `</fetch>`,
-      ].join('');
+      // v1.4.5 — Prefer the chart definition's FetchXML when set, with token
+      // substitution. Falls back to the hardcoded `sprk_eventid = recordId`
+      // lookup only when no FetchXML is configured (preserves the historical
+      // single-event-lookup behavior for any chart def that depends on it).
+      //
+      // The configured FetchXML is the right path for "Matter Next Date" and
+      // similar parent-context cards where contextRecordId is the parent
+      // (e.g. Matter) and the query filters event records related to it via
+      // sprk_regardingmatter / sprk_regardingproject / etc.
+      let fetchXml: string;
+      if (chartDefinition.sprk_fetchxmlquery && chartDefinition.sprk_fetchxmlquery.trim().length > 0) {
+        fetchXml = substituteParameters(
+          chartDefinition.sprk_fetchxmlquery,
+          { contextRecordId: recordId },
+          chartDefinition.sprk_fetchxmlparams || undefined
+        );
+      } else {
+        // Hardcoded single-event-lookup fallback (pre-v1.4.5 behavior).
+        const cleanRecordId = recordId.replace(/[{}]/g, '');
+        fetchXml = [
+          `<fetch top="1">`,
+          `  <entity name="${entityName}">`,
+          `    <attribute name="sprk_eventid" />`,
+          `    <attribute name="sprk_eventname" />`,
+          `    <attribute name="sprk_duedate" />`,
+          `    <attribute name="sprk_description" />`,
+          `    <attribute name="sprk_assignedto" />`,
+          `    <attribute name="sprk_eventtype_ref" />`,
+          `    <link-entity name="sprk_eventtype_ref" from="sprk_eventtype_refid" to="sprk_eventtype_ref" link-type="outer" alias="eventtype">`,
+          `      <attribute name="sprk_name" />`,
+          `      <attribute name="sprk_eventtypecolor" />`,
+          `    </link-entity>`,
+          `    <filter type="and">`,
+          `      <condition attribute="sprk_eventid" operator="eq" value="${cleanRecordId}" />`,
+          `    </filter>`,
+          `  </entity>`,
+          `</fetch>`,
+        ].join('');
+      }
 
-      const encodedFetchXml = encodeURIComponent(singleFetchXml);
+      const encodedFetchXml = encodeURIComponent(fetchXml);
       const result = await webApi.retrieveMultipleRecords(entityName, `?fetchXml=${encodedFetchXml}`);
       const record = result.entities[0];
       if (!record) {

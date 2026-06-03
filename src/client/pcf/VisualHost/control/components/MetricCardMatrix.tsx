@@ -215,6 +215,9 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     width: '100%',
     boxSizing: 'border-box',
+    // v1.4.12 — visual <body> top padding so the metric card(s) sit below
+    // CardChrome's header with consistent breathing room (per UAT).
+    paddingTop: '20px',
   },
   title: {
     fontSize: tokens.fontSizeBase200,
