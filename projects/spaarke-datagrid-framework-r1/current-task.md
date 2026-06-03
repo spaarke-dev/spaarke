@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-02 (after C-Wave-4 deploy lands)
+> **Last Updated**: 2026-06-03 (pre-compact handoff after Round-23 of UAT iteration)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (C-Wave-4 = task 025 ✅ deploy verified via API smoke test; B-Wave-3 = task 017 BFF deploy DEFERRED ⏸ pending insights-engine-r2 master merge) |
-| **Step** | — |
-| **Status** | none |
-| **Next Action** | C-Wave-5 = task 026 (Phase C UAT). REQUIRES HUMAN IN THE LOOP — open Power Apps, navigate to a Matter detail page, click VisualHost CardChrome expand on Matter Health card → verify `sprk_kpiassessmentspage` opens with Matter filter; same on Budget Performance → `sprk_invoicespage`. Verify dark mode + portal styling (NFR-11). Sub-agent cannot drive browser MDA. Web resources deployed: KPI=`8329ddcf-9e5e-f111-ab0c-7c1e521b425f`, Invoice=`b329ddcf-9e5e-f111-ab0c-7c1e521b425f`. |
+| **Task** | 026 — Phase C UAT (in progress, ~23 rounds of fixes deployed to DEV, all uncommitted) |
+| **Step** | UAT close-out — 2 outstanding items |
+| **Status** | in-progress |
+| **Next Action** | Resume from handoff file `notes/handoffs/2026-06-03-uat-iteration-22.md`. Post-compact priorities: (1) **WRITE THE DOC** — user explicitly requested canonical doc for parent-context-filtered grids (handoff file contains the complete content to drop into `projects/spaarke-datagrid-framework-r1/notes/parent-context-pattern.md`); (2) verify chart-def Dataverse MCP fix landed for both records (`a8b8df8b-...` + `7bf5b79e-...`, `sprk_contextfieldname = '_sprk_matter_value'`); (3) verify column-menu drop-shadow (Round-23 inline `filter: drop-shadow` on MenuPopover); (4) commit + push everything (~30 files) → PR #329; (5) close task 026 + transition to Phase D / E / F. Web resources at KPI=`8329ddcf-9e5e-f111-ab0c-7c1e521b425f`, Invoice=`b329ddcf-9e5e-f111-ab0c-7c1e521b425f` (Round-23 SHA `3cfd1481...` / `797aef5d...`). |
 
 ### Files Modified This Session
 

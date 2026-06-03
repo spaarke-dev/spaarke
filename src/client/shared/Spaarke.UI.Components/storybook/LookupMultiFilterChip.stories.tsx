@@ -27,14 +27,7 @@
  */
 
 import * as React from 'react';
-import {
-  FluentProvider,
-  Text,
-  webLightTheme,
-  webDarkTheme,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { FluentProvider, Text, webLightTheme, webDarkTheme, makeStyles, tokens } from '@fluentui/react-components';
 import { LookupMultiFilterChip, type LookupRecord } from '../src/components/DataGrid/chips/LookupMultiFilterChip';
 import type {
   IDataverseClient,
@@ -119,7 +112,7 @@ function createMockClient(corpus: MockEmployee[] = buildMockCorpus()): MockClien
     }),
     retrieveMultipleRecords: async <T = Record<string, unknown>,>(
       _entity: string,
-      fetchXml: string,
+      fetchXml: string
     ): Promise<FetchMultipleResult<T>> => {
       callCount++;
       // Parse the `like %term%` filter if present.
@@ -128,10 +121,8 @@ function createMockClient(corpus: MockEmployee[] = buildMockCorpus()): MockClien
       const topMatch = fetchXml.match(/top="(\d+)"/);
       const top = topMatch ? Number.parseInt(topMatch[1], 10) : 50;
       // Simulate ~100ms server latency so the spinner shows up.
-      await new Promise<void>((resolve) => setTimeout(resolve, 100));
-      const filtered = search
-        ? corpus.filter((r) => r.fullname.toLowerCase().includes(search))
-        : corpus;
+      await new Promise<void>(resolve => setTimeout(resolve, 100));
+      const filtered = search ? corpus.filter(r => r.fullname.toLowerCase().includes(search)) : corpus;
       const slice = filtered.slice(0, top);
       return {
         entities: slice as unknown as T[],
@@ -141,9 +132,9 @@ function createMockClient(corpus: MockEmployee[] = buildMockCorpus()): MockClien
     retrieveRecord: async <T = Record<string, unknown>,>(
       _entity: string,
       id: string,
-      _select?: string[],
+      _select?: string[]
     ): Promise<T> => {
-      const hit = corpus.find((r) => r.systemuserid === id);
+      const hit = corpus.find(r => r.systemuserid === id);
       if (!hit) throw new Error(`Record ${id} not found`);
       return hit as unknown as T;
     },
@@ -175,10 +166,7 @@ interface StoryArgs {
   theme: 'light' | 'dark';
 }
 
-const StoryShell: React.FC<{ theme: 'light' | 'dark'; children: React.ReactNode }> = ({
-  theme,
-  children,
-}) => {
+const StoryShell: React.FC<{ theme: 'light' | 'dark'; children: React.ReactNode }> = ({ theme, children }) => {
   // NFR-03: applyStylesToPortals on the root provider so the Popover surface
   // — which renders into a React portal — inherits the active theme.
   return (
@@ -252,8 +240,8 @@ export const Typing = (args: StoryArgs) => {
     <StoryShell theme={args.theme}>
       <div className={styles.canvas}>
         <Text size={300}>
-          State: typing. Type <strong>&quot;Acme&quot;</strong> in the chip — after 300ms
-          you should see exactly ONE lookup call (debounce verified).
+          State: typing. Type <strong>&quot;Acme&quot;</strong> in the chip — after 300ms you should see exactly ONE
+          lookup call (debounce verified).
         </Text>
         <Text className={styles.counter}>
           Lookup calls so far: <strong data-testid="story-call-counter">{callCount}</strong>
@@ -280,16 +268,12 @@ Typing.storyName = 'Typing (debounce verification)';
 export const SingleSelect = (args: StoryArgs) => {
   const client = React.useMemo(() => createMockClient(), []);
   const [value, setValue] = React.useState<Set<string>>(new Set(['acme-1']));
-  const selectedRecords: ReadonlyArray<LookupRecord> = [
-    { id: 'acme-1', name: 'Acme employee 1' },
-  ];
+  const selectedRecords: ReadonlyArray<LookupRecord> = [{ id: 'acme-1', name: 'Acme employee 1' }];
   const styles = useStoryStyles();
   return (
     <StoryShell theme={args.theme}>
       <div className={styles.canvas}>
-        <Text size={300}>
-          State: single-select. The chip label reads &quot;Acme employee 1&quot;.
-        </Text>
+        <Text size={300}>State: single-select. The chip label reads &quot;Acme employee 1&quot;.</Text>
         <LookupMultiFilterChip
           lookupTargetEntity="systemuser"
           primaryNameAttribute="fullname"
@@ -313,9 +297,7 @@ SingleSelect.storyName = 'Single-select';
 
 export const MultiSelect = (args: StoryArgs) => {
   const client = React.useMemo(() => createMockClient(), []);
-  const [value, setValue] = React.useState<Set<string>>(
-    new Set(['acme-1', 'acme-2', 'beta-3']),
-  );
+  const [value, setValue] = React.useState<Set<string>>(new Set(['acme-1', 'acme-2', 'beta-3']));
   const selectedRecords: ReadonlyArray<LookupRecord> = [
     { id: 'acme-1', name: 'Acme employee 1' },
     { id: 'acme-2', name: 'Acme employee 2' },
@@ -326,8 +308,7 @@ export const MultiSelect = (args: StoryArgs) => {
     <StoryShell theme={args.theme}>
       <div className={styles.canvas}>
         <Text size={300}>
-          State: multi-select. The chip label reads
-          &quot;Acme employee 1 +2 more&quot;. Opening the popover shows three
+          State: multi-select. The chip label reads &quot;Acme employee 1 +2 more&quot;. Opening the popover shows three
           dismissible pills.
         </Text>
         <LookupMultiFilterChip
@@ -375,9 +356,8 @@ export const Cleared = (args: StoryArgs) => {
     <StoryShell theme={args.theme}>
       <div className={styles.canvas}>
         <Text size={300}>
-          State: cleared. Initial state has 2 selections; use the chip&apos;s
-          &quot;Clear all&quot; button (or the reset buttons below) to toggle.
-          When cleared the label reverts to <strong>&quot;Owner&quot;</strong>.
+          State: cleared. Initial state has 2 selections; use the chip&apos;s &quot;Clear all&quot; button (or the reset
+          buttons below) to toggle. When cleared the label reverts to <strong>&quot;Owner&quot;</strong>.
         </Text>
         <LookupMultiFilterChip
           lookupTargetEntity="systemuser"

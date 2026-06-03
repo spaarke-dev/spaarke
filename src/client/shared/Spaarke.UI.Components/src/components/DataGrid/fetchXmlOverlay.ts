@@ -14,9 +14,7 @@
  * @see ParentContextFilter — schema in `types/DataGridConfiguration.ts`
  * @see DataGrid.tsx — calls this helper before passing fetchXml to useLazyLoad
  */
-import type {
-  ParentContextFilter,
-} from '../../types/DataGridConfiguration';
+import type { ParentContextFilter } from '../../types/DataGridConfiguration';
 
 /**
  * Parent-context value bag passed via the DataGrid's `parentContext` prop.
@@ -48,7 +46,7 @@ export type DataGridParentContextLike = Record<string, unknown> | undefined;
 export function overlayParentContextFilter(
   fetchXml: string,
   filter: ParentContextFilter | undefined,
-  parentContext: DataGridParentContextLike,
+  parentContext: DataGridParentContextLike
 ): string {
   if (!fetchXml || !filter) return fetchXml;
 

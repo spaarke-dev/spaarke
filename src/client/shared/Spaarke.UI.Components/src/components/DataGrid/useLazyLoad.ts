@@ -19,10 +19,7 @@
  */
 
 import * as React from 'react';
-import type {
-  IDataverseClient,
-  FetchMultipleResult,
-} from '../../services/IDataverseClient';
+import type { IDataverseClient, FetchMultipleResult } from '../../services/IDataverseClient';
 
 /**
  * Caller-provided knobs for {@link useLazyLoad}.
@@ -78,12 +75,7 @@ export interface UseLazyLoadResult<T = Record<string, unknown>> {
  * Tolerant of malformed input: returns the original string on parse failure
  * (the downstream `retrieveMultipleRecords` call will surface the error properly).
  */
-function applyPaging(
-  fetchXml: string,
-  page: number,
-  pageSize: number,
-  pagingCookie?: string,
-): string {
+function applyPaging(fetchXml: string, page: number, pageSize: number, pagingCookie?: string): string {
   if (!fetchXml || pageSize <= 0) return fetchXml;
   try {
     const parser = new DOMParser();
@@ -181,7 +173,7 @@ export function useLazyLoad<T = Record<string, unknown>>({
           }
           pageRef.current = targetPage;
           cookieRef.current = result.pagingCookie;
-          setRecords((prev) => (mode === 'reset' ? result.entities : prev.concat(result.entities)));
+          setRecords(prev => (mode === 'reset' ? result.entities : prev.concat(result.entities)));
           setHasMore(result.moreRecords === true);
           setIsLoading(false);
         })
@@ -193,7 +185,7 @@ export function useLazyLoad<T = Record<string, unknown>>({
           setIsLoading(false);
         });
     },
-    [dataverseClient, entityName, fetchXml, pageSize],
+    [dataverseClient, entityName, fetchXml, pageSize]
   );
 
   // Auto-reset on fetchXml / entityName / pageSize change.

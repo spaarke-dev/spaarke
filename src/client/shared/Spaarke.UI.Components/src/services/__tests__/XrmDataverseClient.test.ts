@@ -14,8 +14,7 @@
 
 import { XrmDataverseClient } from '../XrmDataverseClient';
 
-const XRM_MISSING_MESSAGE =
-  'XrmDataverseClient requires Xrm context. Use BffDataverseClient outside MDA.';
+const XRM_MISSING_MESSAGE = 'XrmDataverseClient requires Xrm context. Use BffDataverseClient outside MDA.';
 
 interface MockXrm {
   WebApi: {
@@ -147,7 +146,7 @@ describe('XrmDataverseClient', () => {
       expect(xrm.WebApi.retrieveRecord).toHaveBeenCalledWith(
         'savedquery',
         'guid-1',
-        expect.stringContaining('returnedtypecode'),
+        expect.stringContaining('returnedtypecode')
       );
       const optionsArg = xrm.WebApi.retrieveRecord.mock.calls[0][2] as string;
       expect(optionsArg).toContain('$select=name');
@@ -298,9 +297,7 @@ describe('XrmDataverseClient', () => {
       setWindowXrm(xrm);
 
       const client = new XrmDataverseClient();
-      await expect(client.retrieveEntityMetadata('sprk_event')).rejects.toThrow(
-        /Xrm\.Utility/,
-      );
+      await expect(client.retrieveEntityMetadata('sprk_event')).rejects.toThrow(/Xrm\.Utility/);
     });
   });
 
@@ -316,14 +313,11 @@ describe('XrmDataverseClient', () => {
       setWindowXrm(xrm);
 
       const client = new XrmDataverseClient();
-      const result = await client.retrieveMultipleRecords<{ sprk_eventid: string }>(
-        'sprk_event',
-        fetchXml,
-      );
+      const result = await client.retrieveMultipleRecords<{ sprk_eventid: string }>('sprk_event', fetchXml);
 
       expect(xrm.WebApi.retrieveMultipleRecords).toHaveBeenCalledWith(
         'sprk_event',
-        `?fetchXml=${encodeURIComponent(fetchXml)}`,
+        `?fetchXml=${encodeURIComponent(fetchXml)}`
       );
       expect(result.entities).toHaveLength(2);
       expect(result.entities[0].sprk_eventid).toBe('r1');
@@ -366,17 +360,12 @@ describe('XrmDataverseClient', () => {
       setWindowXrm(xrm);
 
       const client = new XrmDataverseClient();
-      const result = await client.retrieveRecord<{ sprk_eventid: string; sprk_name: string }>(
-        'sprk_event',
-        'r1',
-        ['sprk_eventid', 'sprk_name'],
-      );
+      const result = await client.retrieveRecord<{ sprk_eventid: string; sprk_name: string }>('sprk_event', 'r1', [
+        'sprk_eventid',
+        'sprk_name',
+      ]);
 
-      expect(xrm.WebApi.retrieveRecord).toHaveBeenCalledWith(
-        'sprk_event',
-        'r1',
-        '?$select=sprk_eventid,sprk_name',
-      );
+      expect(xrm.WebApi.retrieveRecord).toHaveBeenCalledWith('sprk_event', 'r1', '?$select=sprk_eventid,sprk_name');
       expect(result.sprk_name).toBe('Hello');
     });
 

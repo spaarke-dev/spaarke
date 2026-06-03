@@ -65,10 +65,7 @@ import type {
  * `import { authenticatedFetch } from '@spaarke/auth'` — it handles token
  * acquisition, 401 retry, and `Authorization: Bearer <jwt>` header attachment.
  */
-export type AuthenticatedFetchFn = (
-  url: string,
-  init?: RequestInit,
-) => Promise<Response>;
+export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
 /**
  * Constructor options for {@link BffDataverseClient}.
@@ -114,7 +111,7 @@ export class BffDataverseClientError extends Error {
     public readonly errorCode: string,
     public readonly status: number,
     public readonly correlationId: string | undefined,
-    message: string,
+    message: string
   ) {
     super(message);
     this.name = 'BffDataverseClientError';
@@ -237,10 +234,7 @@ async function tryParseProblemDetails(response: Response): Promise<ProblemDetail
   try {
     const contentType = response.headers.get('content-type') ?? '';
     // Accept application/json (Spaarke BFF) and application/problem+json (canonical RFC 7807).
-    if (
-      !contentType.includes('application/json') &&
-      !contentType.includes('application/problem+json')
-    ) {
+    if (!contentType.includes('application/json') && !contentType.includes('application/problem+json')) {
       return null;
     }
     const body = await response.json();
@@ -264,8 +258,7 @@ async function mapErrorResponse(response: Response): Promise<BffDataverseClientE
   const problem = await tryParseProblemDetails(response);
   const errorCode = problem?.errorCode ?? 'BFF_UNKNOWN_ERROR';
   const correlationId = problem?.correlationId;
-  const message =
-    problem?.detail ?? problem?.title ?? `HTTP ${response.status} ${response.statusText}`.trim();
+  const message = problem?.detail ?? problem?.title ?? `HTTP ${response.status} ${response.statusText}`.trim();
   const status = response.status;
 
   if (status === 404) {
@@ -299,7 +292,7 @@ export class BffDataverseClient implements IDataverseClient {
   constructor(options: BffDataverseClientOptions) {
     if (!options || typeof options.authenticatedFetch !== 'function') {
       throw new BffDataverseClientConfigurationError(
-        'BffDataverseClient requires options.authenticatedFetch (from @spaarke/auth).',
+        'BffDataverseClient requires options.authenticatedFetch (from @spaarke/auth).'
       );
     }
     this.authenticatedFetch = options.authenticatedFetch;
@@ -379,7 +372,7 @@ export class BffDataverseClient implements IDataverseClient {
    */
   async retrieveMultipleRecords<T = Record<string, unknown>>(
     entityName: string,
-    fetchXml: string,
+    fetchXml: string
   ): Promise<FetchMultipleResult<T>> {
     const url = `${this.bffBaseUrl}/api/dataverse/fetch`;
     const response = await this.authenticatedFetch(url, {
@@ -406,13 +399,8 @@ export class BffDataverseClient implements IDataverseClient {
    * When `select` is empty/undefined, the `$select` query string is omitted
    * and the BFF returns the default projection.
    */
-  async retrieveRecord<T = Record<string, unknown>>(
-    entityName: string,
-    id: string,
-    select?: string[],
-  ): Promise<T> {
-    const selectClause =
-      select && select.length > 0 ? `?$select=${select.join(',')}` : '';
+  async retrieveRecord<T = Record<string, unknown>>(entityName: string, id: string, select?: string[]): Promise<T> {
+    const selectClause = select && select.length > 0 ? `?$select=${select.join(',')}` : '';
     const url =
       `${this.bffBaseUrl}/api/dataverse/record/${encodeURIComponent(entityName)}/` +
       `${encodeURIComponent(id)}${selectClause}`;

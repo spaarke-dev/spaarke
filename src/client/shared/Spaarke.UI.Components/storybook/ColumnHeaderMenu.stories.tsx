@@ -24,11 +24,7 @@
  */
 
 import * as React from 'react';
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-} from '@fluentui/react-components';
+import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { ColumnHeaderMenu } from '../src/components/DataGrid/columnHeader/ColumnHeaderMenu';
 import { ColumnFilterHeader } from '../src/components/DataGrid/columnHeader/ColumnFilterHeader';
 
@@ -102,10 +98,7 @@ const wrapInTable = (header: React.ReactNode): React.ReactNode => (
  * provider that hosts a popover-bearing primitive — the column header opens both
  * a Menu and a Popover, so both must inherit the theme.
  */
-const withFluentProvider = (
-  theme: 'light' | 'dark',
-  content: React.ReactNode,
-): React.ReactNode => {
+const withFluentProvider = (theme: 'light' | 'dark', content: React.ReactNode): React.ReactNode => {
   const themeObject = theme === 'dark' ? webDarkTheme : webLightTheme;
   return (
     <FluentProvider
@@ -127,12 +120,8 @@ const withFluentProvider = (
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const HeaderMenuLight = (args: StoryArgs) => {
-  const [filterValue, setFilterValue] = React.useState<
-    string | (string | number)[] | null
-  >(null);
-  const [sortDirection, setSortDirection] = React.useState<
-    'asc' | 'desc' | null
-  >(null);
+  const [filterValue, setFilterValue] = React.useState<string | (string | number)[] | null>(null);
+  const [sortDirection, setSortDirection] = React.useState<'asc' | 'desc' | null>(null);
 
   return withFluentProvider(
     args.theme,
@@ -142,13 +131,13 @@ export const HeaderMenuLight = (args: StoryArgs) => {
         title="Account Name"
         filterType="text"
         filterValue={typeof filterValue === 'string' ? filterValue : ''}
-        onFilterChange={(v) => setFilterValue(v)}
+        onFilterChange={v => setFilterValue(v)}
         hasActiveFilter={Boolean(filterValue)}
         sortDirection={sortDirection}
-        onSortChange={(d) => setSortDirection(d)}
+        onSortChange={d => setSortDirection(d)}
         theme={args.theme === 'dark' ? webDarkTheme : webLightTheme}
-      />,
-    ),
+      />
+    )
   );
 };
 HeaderMenuLight.args = { theme: 'light' as const };
@@ -160,9 +149,7 @@ HeaderMenuLight.storyName = 'ColumnHeaderMenu — Light (text filter)';
 
 export const HeaderMenuDark = (args: StoryArgs) => {
   const [selected, setSelected] = React.useState<(string | number)[]>([]);
-  const [sortDirection, setSortDirection] = React.useState<
-    'asc' | 'desc' | null
-  >('asc');
+  const [sortDirection, setSortDirection] = React.useState<'asc' | 'desc' | null>('asc');
 
   return withFluentProvider(
     args.theme,
@@ -173,29 +160,24 @@ export const HeaderMenuDark = (args: StoryArgs) => {
         filterType="choice"
         options={choiceOptions}
         selectedValues={selected}
-        onFilterChange={(v) =>
-          setSelected(Array.isArray(v) ? v : v === null ? [] : [v as string])
-        }
+        onFilterChange={v => setSelected(Array.isArray(v) ? v : v === null ? [] : [v as string])}
         hasActiveFilter={selected.length > 0}
         sortDirection={sortDirection}
-        onSortChange={(d) => setSortDirection(d)}
+        onSortChange={d => setSortDirection(d)}
         theme={args.theme === 'dark' ? webDarkTheme : webLightTheme}
-      />,
-    ),
+      />
+    )
   );
 };
 HeaderMenuDark.args = { theme: 'dark' as const };
-HeaderMenuDark.storyName =
-  'ColumnHeaderMenu — Dark (choice filter, NFR-03 verification)';
+HeaderMenuDark.storyName = 'ColumnHeaderMenu — Dark (choice filter, NFR-03 verification)';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Story 3: ColumnFilterHeader — Light theme (default)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const FilterHeaderLight = (args: StoryArgs) => {
-  const [filterValue, setFilterValue] = React.useState<
-    string | (string | number)[] | null
-  >(null);
+  const [filterValue, setFilterValue] = React.useState<string | (string | number)[] | null>(null);
 
   return withFluentProvider(
     args.theme,
@@ -205,11 +187,11 @@ export const FilterHeaderLight = (args: StoryArgs) => {
         title="Owner"
         filterType="text"
         filterValue={typeof filterValue === 'string' ? filterValue : ''}
-        onFilterChange={(v) => setFilterValue(v)}
+        onFilterChange={v => setFilterValue(v)}
         hasActiveFilter={Boolean(filterValue)}
         theme={args.theme === 'dark' ? webDarkTheme : webLightTheme}
-      />,
-    ),
+      />
+    )
   );
 };
 FilterHeaderLight.args = { theme: 'light' as const };
@@ -231,15 +213,12 @@ export const FilterHeaderDark = (args: StoryArgs) => {
         filterType="choice"
         options={choiceOptions}
         selectedValues={selected}
-        onFilterChange={(v) =>
-          setSelected(Array.isArray(v) ? v : v === null ? [] : [v as string])
-        }
+        onFilterChange={v => setSelected(Array.isArray(v) ? v : v === null ? [] : [v as string])}
         hasActiveFilter={selected.length > 0}
         theme={args.theme === 'dark' ? webDarkTheme : webLightTheme}
-      />,
-    ),
+      />
+    )
   );
 };
 FilterHeaderDark.args = { theme: 'dark' as const };
-FilterHeaderDark.storyName =
-  'ColumnFilterHeader — Dark (choice filter, NFR-03 verification)';
+FilterHeaderDark.storyName = 'ColumnFilterHeader — Dark (choice filter, NFR-03 verification)';

@@ -17,11 +17,7 @@
  */
 
 import * as React from 'react';
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-} from '@fluentui/react-components';
+import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { DataGrid } from '../src/components/DataGrid';
 import type {
   IDataverseClient,
@@ -183,7 +179,7 @@ function createLazyLoadingClient(): IDataverseClient {
     retrieveEntityMetadata: async (): Promise<EntityMetadata> => baseMetadata,
     retrieveMultipleRecords: async <T,>(
       _entityName: string,
-      pagedFetchXml: string,
+      pagedFetchXml: string
     ): Promise<FetchMultipleResult<T>> => {
       const pageMatch = pagedFetchXml.match(/\bpage="(\d+)"/);
       const page = pageMatch ? Number.parseInt(pageMatch[1], 10) : 1;
@@ -200,7 +196,9 @@ function createLazyLoadingClient(): IDataverseClient {
     },
     retrieveRecord: async <T,>(entityName: string): Promise<T> => {
       if (entityName === 'sprk_gridconfiguration') {
-        return { sprk_configjson: JSON.stringify({ ...baseConfig, behavior: { ...baseConfig.behavior, pageSize: 100 } }) } as unknown as T;
+        return {
+          sprk_configjson: JSON.stringify({ ...baseConfig, behavior: { ...baseConfig.behavior, pageSize: 100 } }),
+        } as unknown as T;
       }
       throw new Error('not found');
     },
@@ -238,10 +236,7 @@ interface StoryArgs {
   theme: 'light' | 'dark';
 }
 
-const withFluentProvider = (
-  theme: 'light' | 'dark',
-  content: React.ReactNode,
-): React.ReactNode => (
+const withFluentProvider = (theme: 'light' | 'dark', content: React.ReactNode): React.ReactNode => (
   <FluentProvider
     applyStylesToPortals
     theme={theme === 'dark' ? webDarkTheme : webLightTheme}
@@ -257,10 +252,7 @@ const withFluentProvider = (
 
 export const Empty = (args: StoryArgs) => {
   const client = React.useMemo(() => createEmptyClient(), []);
-  return withFluentProvider(
-    args.theme,
-    <DataGrid configId="story-edge-empty" dataverseClient={client} />,
-  );
+  return withFluentProvider(args.theme, <DataGrid configId="story-edge-empty" dataverseClient={client} />);
 };
 Empty.args = { theme: 'light' as const };
 Empty.storyName = 'Empty (zero records — empty-state surface)';
@@ -271,10 +263,7 @@ Empty.storyName = 'Empty (zero records — empty-state surface)';
 
 export const Loading = (args: StoryArgs) => {
   const client = React.useMemo(() => createLoadingClient(), []);
-  return withFluentProvider(
-    args.theme,
-    <DataGrid configId="story-edge-loading" dataverseClient={client} />,
-  );
+  return withFluentProvider(args.theme, <DataGrid configId="story-edge-loading" dataverseClient={client} />);
 };
 Loading.args = { theme: 'light' as const };
 Loading.storyName = 'Loading (config fetch in flight — Spinner)';
@@ -285,10 +274,7 @@ Loading.storyName = 'Loading (config fetch in flight — Spinner)';
 
 export const Error = (args: StoryArgs) => {
   const client = React.useMemo(() => createErrorClient(), []);
-  return withFluentProvider(
-    args.theme,
-    <DataGrid configId="story-edge-error" dataverseClient={client} />,
-  );
+  return withFluentProvider(args.theme, <DataGrid configId="story-edge-error" dataverseClient={client} />);
 };
 Error.args = { theme: 'light' as const };
 Error.storyName = 'Error (savedquery throws — role="alert" banner)';
@@ -301,7 +287,7 @@ export const LazyLoadInProgress = (args: StoryArgs) => {
   const client = React.useMemo(() => createLazyLoadingClient(), []);
   return withFluentProvider(
     args.theme,
-    <DataGrid configId="story-edge-lazyload-in-progress" dataverseClient={client} />,
+    <DataGrid configId="story-edge-lazyload-in-progress" dataverseClient={client} />
   );
 };
 LazyLoadInProgress.args = { theme: 'light' as const };

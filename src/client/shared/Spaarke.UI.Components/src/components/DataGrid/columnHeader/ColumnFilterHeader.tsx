@@ -46,11 +46,7 @@ import {
   webLightTheme,
   type PartialTheme,
 } from '@fluentui/react-components';
-import {
-  Filter20Regular,
-  Filter20Filled,
-  Dismiss16Regular,
-} from '@fluentui/react-icons';
+import { Filter20Regular, Filter20Filled, Dismiss16Regular } from '@fluentui/react-icons';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -231,7 +227,7 @@ export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
       }
       onFilterChange(Array.from(currentSet));
     },
-    [selectedValues, onFilterChange],
+    [selectedValues, onFilterChange]
   );
 
   const handleClear = React.useCallback(() => {
@@ -246,7 +242,7 @@ export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
         handleTextFilterApply();
       }
     },
-    [handleTextFilterApply],
+    [handleTextFilterApply]
   );
 
   const renderFilterContent = (): React.ReactNode => {
@@ -283,13 +279,11 @@ export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
         return (
           <>
             <div className={styles.optionsList}>
-              {options.map((option) => (
+              {options.map(option => (
                 <div key={String(option.value)} className={styles.optionItem}>
                   <Checkbox
                     checked={selectedValues.includes(option.value)}
-                    onChange={(_, data) =>
-                      handleChoiceToggle(option.value, data.checked === true)
-                    }
+                    onChange={(_, data) => handleChoiceToggle(option.value, data.checked === true)}
                     label={option.label}
                   />
                 </div>
@@ -346,20 +340,13 @@ export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
     <th className={mergeClasses(styles.th, className)}>
       <div className={styles.headerContent}>
         <span>{title}</span>
-        <Popover
-          open={isOpen}
-          onOpenChange={(_, data) => setIsOpen(data.open)}
-          positioning="below-end"
-        >
+        <Popover open={isOpen} onOpenChange={(_, data) => setIsOpen(data.open)} positioning="below-end">
           <PopoverTrigger disableButtonEnhancement>
             <Button
               appearance="subtle"
               size="small"
               icon={hasActiveFilter ? <Filter20Filled /> : <Filter20Regular />}
-              className={mergeClasses(
-                styles.filterButton,
-                hasActiveFilter ? styles.filterButtonActive : undefined,
-              )}
+              className={mergeClasses(styles.filterButton, hasActiveFilter ? styles.filterButtonActive : undefined)}
               aria-label={`Filter ${title}`}
               aria-haspopup="dialog"
               aria-expanded={isOpen}

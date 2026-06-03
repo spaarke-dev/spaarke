@@ -29,12 +29,17 @@ export const dataGridTokens = {
     shadow: tokens.shadow4,
   },
 
-  /** Sticky header row above the body. */
+  /**
+   * Sticky header row above the body. Power Apps OOB grid headers are
+   * regular-weight (NOT semibold) with the muted `Foreground2` color and a
+   * background flush with the grid surface — visually lighter than our cells.
+   * See `projects/spaarke-datagrid-framework-r1/notes/testing-screenshots/oob-view-modal.jpg`.
+   */
   header: {
-    background: tokens.colorNeutralBackground2,
+    background: tokens.colorNeutralBackground1,
     foreground: tokens.colorNeutralForeground2,
-    fontWeight: tokens.fontWeightSemibold,
-    borderBottom: tokens.colorNeutralStroke1,
+    fontWeight: tokens.fontWeightRegular,
+    borderBottom: tokens.colorNeutralStroke2,
   },
 
   /** Body cell typography + padding + bottom border. */
@@ -63,12 +68,18 @@ export const dataGridTokens = {
     hoverTextDecoration: 'underline' as const,
   },
 
-  /** Separate container immediately above the grid (own border + radius + elevation). */
+  /**
+   * Command bar — sits flush inside the outer DataGrid card. The outer card
+   * already provides the floating elevation (per
+   * `.claude/patterns/ui/fluent-v9-host-visual-fit.md`), so the command bar
+   * itself is borderless / shadowless / radiusless and inherits the page
+   * background. This matches Power Apps OOB which has no nested chrome.
+   */
   commandBar: {
-    background: tokens.colorNeutralBackground1,
-    border: tokens.colorNeutralStroke1,
-    borderRadius: tokens.borderRadiusMedium,
-    shadow: tokens.shadow4,
+    background: 'transparent',
+    border: 'transparent',
+    borderRadius: '0',
+    shadow: 'none',
   },
 
   /** Filter chip strip layout. */

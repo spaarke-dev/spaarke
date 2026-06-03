@@ -19,13 +19,5 @@ export * from './useTheme';
 export * from './useDocumentMultiSelect';
 
 // DataGrid framework (task 003)
-export {
-  DataGridContextProvider,
-  useDataGridContext,
-  useDataGridContextOptional,
-} from './useDataGridContext';
-export type {
-  DataGridContextValue,
-  DataGridContextProviderProps,
-  DataGridParentContext,
-} from './useDataGridContext';
+export { DataGridContextProvider, useDataGridContext, useDataGridContextOptional } from './useDataGridContext';
+export type { DataGridContextValue, DataGridContextProviderProps, DataGridParentContext } from './useDataGridContext';

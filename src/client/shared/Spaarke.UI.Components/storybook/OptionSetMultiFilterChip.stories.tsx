@@ -21,12 +21,7 @@
  */
 
 import * as React from 'react';
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-  type Theme,
-} from '@fluentui/react-components';
+import { FluentProvider, webLightTheme, webDarkTheme, type Theme } from '@fluentui/react-components';
 import { OptionSetMultiFilterChip } from '../src/components/DataGrid/chips/OptionSetMultiFilterChip';
 import type { EntityMetadata } from '../src/services/IDataverseClient';
 
@@ -171,7 +166,7 @@ export const Picklist = (args: StoryArgs) => {
       onChange={setValue}
       label="Priority"
       theme={args.theme === 'dark' ? webDarkTheme : webLightTheme}
-    />,
+    />
   );
 };
 Picklist.args = { theme: 'light' as const, cleared: false };
@@ -198,7 +193,7 @@ export const Status = (args: StoryArgs) => {
       onChange={setValue}
       label="Status"
       theme={args.theme === 'dark' ? webDarkTheme : webLightTheme}
-    />,
+    />
   );
 };
 Status.args = { theme: 'light' as const, cleared: false };
@@ -225,7 +220,7 @@ export const State = (args: StoryArgs) => {
       onChange={setValue}
       label="State"
       theme={args.theme === 'dark' ? webDarkTheme : webLightTheme}
-    />,
+    />
   );
 };
 State.args = { theme: 'light' as const, cleared: false };
@@ -268,7 +263,7 @@ export const AllCleared = (args: StoryArgs) => {
         label="State"
         theme={portalTheme}
       />
-    </div>,
+    </div>
   );
 };
 AllCleared.args = { theme: 'light' as const, cleared: true };

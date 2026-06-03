@@ -22,10 +22,7 @@
  */
 
 import * as React from 'react';
-import type {
-  IDataverseClient,
-  EntityMetadata,
-} from '../services/IDataverseClient';
+import type { IDataverseClient, EntityMetadata } from '../services/IDataverseClient';
 
 /**
  * Drill-through context — propagated from the host (e.g., a Custom Page embedded
@@ -86,18 +83,11 @@ export interface DataGridContextProviderProps {
  *
  * Hosts typically do NOT instantiate this directly.
  */
-export const DataGridContextProvider: React.FC<DataGridContextProviderProps> = ({
-  value,
-  children,
-}) => {
+export const DataGridContextProvider: React.FC<DataGridContextProviderProps> = ({ value, children }) => {
   // Authored with `React.createElement` (not JSX) so this module stays `.ts` per
   // the task 003 brief grep check. The actual `<DataGrid />` component file
   // (DataGrid.tsx) imports and renders this provider via JSX as normal.
-  return React.createElement(
-    DataGridContext.Provider,
-    { value },
-    children,
-  );
+  return React.createElement(DataGridContext.Provider, { value }, children);
 };
 
 /**
@@ -124,7 +114,7 @@ export function useDataGridContext(): DataGridContextValue {
   if (ctx === null) {
     throw new Error(
       '[useDataGridContext] Called outside a <DataGridContextProvider>. ' +
-        'This hook may only be used in components rendered inside <DataGrid />.',
+        'This hook may only be used in components rendered inside <DataGrid />.'
     );
   }
   return ctx;

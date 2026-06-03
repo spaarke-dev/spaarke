@@ -31,13 +31,7 @@ const { TextDecoder: NodeTextDecoder } = require('node:util');
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).TextDecoder = NodeTextDecoder;
 
-import {
-  exportCsv,
-  escapeCsvField,
-  csvFilename,
-  formatYyyymmdd,
-  UTF8_BOM,
-} from '../csvExport';
+import { exportCsv, escapeCsvField, csvFilename, formatYyyymmdd, UTF8_BOM } from '../csvExport';
 import type { ResolvedColumn } from '../../configResolution';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -180,9 +174,7 @@ describe('csvFilename', () => {
 
   it('replaces unsafe filename characters with underscores', () => {
     const d = new Date(2026, 0, 1);
-    expect(csvFilename('account', 'Q1/Q2 Pipeline: 2026', d)).toBe(
-      'account-Q1_Q2_Pipeline__2026-20260101.csv',
-    );
+    expect(csvFilename('account', 'Q1/Q2 Pipeline: 2026', d)).toBe('account-Q1_Q2_Pipeline__2026-20260101.csv');
   });
 
   it('collapses whitespace runs into single underscores', () => {
@@ -217,9 +209,7 @@ describe('exportCsv — end-to-end', () => {
     ];
     const blob = exportCsv(records, columns, 'My View', 'sprk_event');
     const text = await readBlobAsText(blob);
-    expect(text).toBe(
-      `${UTF8_BOM}Name,Status,Amount\r\nAlice,Open,100\r\nBob,Closed,200`,
-    );
+    expect(text).toBe(`${UTF8_BOM}Name,Status,Amount\r\nAlice,Open,100\r\nBob,Closed,200`);
   });
 
   it('quotes cells with commas, quotes, and newlines all together', async () => {
@@ -256,10 +246,7 @@ describe('exportCsv — end-to-end', () => {
         isPrimaryName: false,
       },
     ];
-    const records = [
-      { sprk_owner: { id: '1', name: 'Acme, Inc.' } },
-      { sprk_owner: { id: '2', name: 'Plain Name' } },
-    ];
+    const records = [{ sprk_owner: { id: '1', name: 'Acme, Inc.' } }, { sprk_owner: { id: '2', name: 'Plain Name' } }];
     const blob = exportCsv(records, cols, 'View', 'account');
     const text = await readBlobAsText(blob);
     // First lookup contains a comma → must be quoted; second is plain.

@@ -74,12 +74,7 @@ export interface DisplayConfig {
 // Filter chips — auto-derived from metadata unless overridden
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type FilterChipKind =
-  | 'optionset-multi'
-  | 'lookup-multi'
-  | 'date-range'
-  | 'text'
-  | 'bool';
+export type FilterChipKind = 'optionset-multi' | 'lookup-multi' | 'date-range' | 'text' | 'bool';
 
 export type BadgeAppearance = 'filled' | 'outline' | 'tint';
 
@@ -97,9 +92,7 @@ export interface ExplicitFilterChip {
    * - `systemusers` for owner / assigned-to-style lookups
    * - `entity` for arbitrary lookup target overrides
    */
-  valueSource?:
-    | { type: 'systemusers' }
-    | { type: 'entity'; entity: string; nameField: string };
+  valueSource?: { type: 'systemusers' } | { type: 'entity'; entity: string; nameField: string };
   /** Optional per-option badge appearance overrides keyed by option value. */
   valueColors?: Record<number, BadgeAppearance>;
 }
@@ -174,13 +167,7 @@ export interface CommandBarConfig {
 // Row open — what happens when the user clicks the primary-name link
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type RowOpenType =
-  | 'sidePane'
-  | 'wizard'
-  | 'navigateToForm'
-  | 'dialog'
-  | 'webResource'
-  | 'custom';
+export type RowOpenType = 'sidePane' | 'wizard' | 'navigateToForm' | 'dialog' | 'webResource' | 'custom';
 
 /**
  * `rowOpen` is intentionally a flat shape (not a discriminated union per type)
@@ -227,12 +214,7 @@ export interface RowOpenConfig {
 // Secondary actions — per-row + bulk action affordances
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type SecondaryActionKind =
-  | 'ai-assistant'
-  | 'playbook'
-  | 'wizard'
-  | 'navigate'
-  | 'custom';
+export type SecondaryActionKind = 'ai-assistant' | 'playbook' | 'wizard' | 'navigate' | 'custom';
 
 export interface SecondaryAction {
   id: string;
@@ -382,9 +364,7 @@ export interface DataGridConfiguration {
  * @param value - Anything (typically `JSON.parse(sprk_configjson)`).
  * @returns `true` if `value` matches the v1.0 discriminators, `false` otherwise.
  */
-export function isValidDataGridConfiguration(
-  value: unknown,
-): value is DataGridConfiguration {
+export function isValidDataGridConfiguration(value: unknown): value is DataGridConfiguration {
   if (value === null || typeof value !== 'object') {
     return false;
   }
@@ -396,11 +376,7 @@ export function isValidDataGridConfiguration(
     return false;
   }
   const source = obj.source as Record<string, unknown>;
-  if (
-    source.type !== 'savedquery' &&
-    source.type !== 'inline' &&
-    source.type !== 'savedquery-set'
-  ) {
+  if (source.type !== 'savedquery' && source.type !== 'inline' && source.type !== 'savedquery-set') {
     return false;
   }
   return true;

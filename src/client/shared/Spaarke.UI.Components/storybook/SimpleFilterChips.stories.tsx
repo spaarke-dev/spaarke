@@ -23,23 +23,11 @@
  */
 
 import * as React from 'react';
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { FluentProvider, webLightTheme, webDarkTheme, makeStyles, tokens } from '@fluentui/react-components';
 
-import {
-  DateRangeFilterChip,
-  type UtcDateBounds,
-} from '../src/components/DataGrid/chips/DateRangeFilterChip';
+import { DateRangeFilterChip, type UtcDateBounds } from '../src/components/DataGrid/chips/DateRangeFilterChip';
 import { TextFilterChip } from '../src/components/DataGrid/chips/TextFilterChip';
-import {
-  BoolFilterChip,
-  type BoolFilterValue,
-} from '../src/components/DataGrid/chips/BoolFilterChip';
+import { BoolFilterChip, type BoolFilterValue } from '../src/components/DataGrid/chips/BoolFilterChip';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared layout + provider helper
@@ -69,10 +57,7 @@ interface StoryArgs {
   theme: 'light' | 'dark';
 }
 
-const withFluentProvider = (
-  theme: 'light' | 'dark',
-  content: React.ReactNode,
-): React.ReactNode => {
+const withFluentProvider = (theme: 'light' | 'dark', content: React.ReactNode): React.ReactNode => {
   return (
     <FluentProvider
       applyStylesToPortals
@@ -116,12 +101,9 @@ export const DateRangeDefault = (args: StoryArgs) => {
         <DateRangeFilterChip label="Created on" value={value} onChange={setValue} />
       </div>
       <div className={styles.caption}>
-        value:{' '}
-        {value
-          ? `${value.startUtc.toISOString()} → ${value.endUtc.toISOString()}`
-          : '(cleared)'}
+        value: {value ? `${value.startUtc.toISOString()} → ${value.endUtc.toISOString()}` : '(cleared)'}
       </div>
-    </div>,
+    </div>
   );
 };
 DateRangeDefault.args = { theme: 'light' as const };
@@ -137,15 +119,7 @@ export const DateRangeWithValue = (args: StoryArgs) => {
     // Initialise to LOCAL "first day of this month → today".
     const today = new Date();
     const start = new Date(today.getFullYear(), today.getMonth(), 1, 0, 0, 0, 0);
-    const end = new Date(
-      today.getFullYear(),
-      today.getMonth(),
-      today.getDate(),
-      23,
-      59,
-      59,
-      999,
-    );
+    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
     return { startUtc: start, endUtc: end };
   }, []);
   const [value, setValue] = React.useState<UtcDateBounds | null>(initial);
@@ -157,12 +131,9 @@ export const DateRangeWithValue = (args: StoryArgs) => {
         <DateRangeFilterChip label="Created on" value={value} onChange={setValue} />
       </div>
       <div className={styles.caption}>
-        value:{' '}
-        {value
-          ? `${value.startUtc.toISOString()} → ${value.endUtc.toISOString()}`
-          : '(cleared)'}
+        value: {value ? `${value.startUtc.toISOString()} → ${value.endUtc.toISOString()}` : '(cleared)'}
       </div>
-    </div>,
+    </div>
   );
 };
 DateRangeWithValue.args = { theme: 'light' as const };
@@ -182,10 +153,8 @@ export const TextDefault = (args: StoryArgs) => {
       <div className={styles.strip}>
         <TextFilterChip label="Name contains" value={value} onChange={setValue} />
       </div>
-      <div className={styles.caption}>
-        value: {value === undefined ? '(cleared)' : JSON.stringify(value)}
-      </div>
-    </div>,
+      <div className={styles.caption}>value: {value === undefined ? '(cleared)' : JSON.stringify(value)}</div>
+    </div>
   );
 };
 TextDefault.args = { theme: 'light' as const };
@@ -205,10 +174,8 @@ export const TextWithValue = (args: StoryArgs) => {
       <div className={styles.strip}>
         <TextFilterChip label="Name contains" value={value} onChange={setValue} />
       </div>
-      <div className={styles.caption}>
-        value: {value === undefined ? '(cleared)' : JSON.stringify(value)}
-      </div>
-    </div>,
+      <div className={styles.caption}>value: {value === undefined ? '(cleared)' : JSON.stringify(value)}</div>
+    </div>
   );
 };
 TextWithValue.args = { theme: 'light' as const };
@@ -228,10 +195,8 @@ export const BoolDefault = (args: StoryArgs) => {
       <div className={styles.strip}>
         <BoolFilterChip label="Is active" value={value} onChange={setValue} />
       </div>
-      <div className={styles.caption}>
-        value: {value === null ? 'null (Any)' : String(value)}
-      </div>
-    </div>,
+      <div className={styles.caption}>value: {value === null ? 'null (Any)' : String(value)}</div>
+    </div>
   );
 };
 BoolDefault.args = { theme: 'light' as const };
@@ -251,10 +216,8 @@ export const BoolWithYes = (args: StoryArgs) => {
       <div className={styles.strip}>
         <BoolFilterChip label="Is active" value={value} onChange={setValue} />
       </div>
-      <div className={styles.caption}>
-        value: {value === null ? 'null (Any)' : String(value)}
-      </div>
-    </div>,
+      <div className={styles.caption}>value: {value === null ? 'null (Any)' : String(value)}</div>
+    </div>
   );
 };
 BoolWithYes.args = { theme: 'light' as const };
@@ -279,16 +242,13 @@ export const AllThreeChipsInOneRow = (args: StoryArgs) => {
         <BoolFilterChip label="Is active" value={boolValue} onChange={setBoolValue} />
       </div>
       <div className={styles.caption}>
-        dateValue:{' '}
-        {dateValue
-          ? `${dateValue.startUtc.toISOString()} → ${dateValue.endUtc.toISOString()}`
-          : '(cleared)'}
+        dateValue: {dateValue ? `${dateValue.startUtc.toISOString()} → ${dateValue.endUtc.toISOString()}` : '(cleared)'}
         <br />
         textValue: {textValue === undefined ? '(cleared)' : JSON.stringify(textValue)}
         <br />
         boolValue: {boolValue === null ? 'null (Any)' : String(boolValue)}
       </div>
-    </div>,
+    </div>
   );
 };
 AllThreeChipsInOneRow.args = { theme: 'light' as const };

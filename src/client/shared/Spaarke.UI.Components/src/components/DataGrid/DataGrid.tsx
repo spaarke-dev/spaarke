@@ -37,17 +37,15 @@ import {
   mergeClasses,
   shorthands,
   tokens,
+  webLightTheme,
+  type Theme,
   type TableColumnDefinition,
   type DataGridProps as FluentDataGridProps,
   type TableRowId,
   type TableColumnSizingOptions,
 } from '@fluentui/react-components';
 
-import type {
-  IDataverseClient,
-  EntityMetadata,
-  SavedQueryResult,
-} from '../../services/IDataverseClient';
+import type { IDataverseClient, EntityMetadata, SavedQueryResult } from '../../services/IDataverseClient';
 import { XrmDataverseClient } from '../../services/XrmDataverseClient';
 import type { DataGridConfiguration } from '../../types/DataGridConfiguration';
 import { isValidDataGridConfiguration } from '../../types/DataGridConfiguration';
@@ -57,14 +55,20 @@ import {
   type DataGridParentContext,
 } from '../../hooks/useDataGridContext';
 import { dataGridTokens } from './tokens';
-import {
-  resolveConfig,
-  type DataGridOverrides,
-  type ResolvedConfig,
-  type ResolvedColumn,
-} from './configResolution';
+import { resolveConfig, type DataGridOverrides, type ResolvedConfig, type ResolvedColumn } from './configResolution';
 import { useLazyLoad } from './useLazyLoad';
 import { overlayParentContextFilter } from './fetchXmlOverlay';
+import { CommandBar as DataGridCommandBar } from './commandBar/CommandBar';
+import {
+  discoverChips,
+  augmentFetchXmlWithChips,
+  FilterChipBar,
+  type ChipDescriptor,
+  type ChipState,
+} from './filterChips';
+import { HeaderCellContent } from './HeaderCellContent';
+import { ViewSelector, type SavedView } from './ViewSelector';
+import type { SavedQuerySummary } from '../../services/IDataverseClient';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -102,29 +106,35 @@ export interface DataGridProps {
   parentContext?: DataGridParentContext;
 
   /** OPTIONAL — fires when the user clicks the primary-name link on a row. */
-  onRecordOpen?: (
-    recordId: string,
-    record: Record<string, unknown>,
-    ctx: DataGridHostContext,
-  ) => void;
+  onRecordOpen?: (recordId: string, record: Record<string, unknown>, ctx: DataGridHostContext) => void;
 
   /** OPTIONAL — fires when the user invokes a per-row secondary action. */
   onRecordAction?: (
     actionId: string,
     recordId: string,
     record: Record<string, unknown>,
-    ctx: DataGridHostContext,
+    ctx: DataGridHostContext
   ) => void;
 
   /** OPTIONAL — fires when the user invokes a command bar action. */
-  onCommandInvoke?: (
-    commandId: string,
-    selectedIds: string[],
-    ctx: DataGridHostContext,
-  ) => void;
+  onCommandInvoke?: (commandId: string, selectedIds: string[], ctx: DataGridHostContext) => void;
 
   /** OPTIONAL — escape-hatch overrides for column renderers, badge map, filter chip allowlist. */
   overrides?: DataGridOverrides;
+
+  /**
+   * OPTIONAL — active Fluent v9 theme. Passed to inner CommandBar so dialog portals
+   * resolve dark/light correctly (NFR-03). Defaults to `webLightTheme`. Hosts that
+   * render the grid inside a themed `<FluentProvider>` SHOULD pass the same theme.
+   */
+  theme?: Theme;
+
+  /**
+   * OPTIONAL — fires when the user clicks the back arrow next to the view picker.
+   * When undefined, the back arrow is HIDDEN. Custom Pages should pass a handler
+   * that closes the dialog (typically `() => window.close()`).
+   */
+  onBack?: () => void;
 
   /** OPTIONAL — additional class merged AFTER component classes (per Spaarke convention). */
   className?: string;
@@ -136,21 +146,57 @@ export interface DataGridProps {
 
 const useStyles = makeStyles({
   root: {
+    // Outer wrapper is purely structural — the visual depth lives on the two
+    // nested cards (`headerCard` + `innerCard`) so they read as separate
+    // sections in the Power Apps OOB style. Outer surface stays flush with the
+    // host modal background.
+    //
+    // Tight paddings so the two cards fit cleanly inside a Power Apps dialog
+    // (`navigateTo` dialog frames have ~30px fixed chrome top + bottom; over-
+    // padding here makes the bottom of the grid extend past the dialog).
     display: 'flex',
     flexDirection: 'column',
     width: '100%',
     height: '100%',
     position: 'relative',
-    backgroundColor: dataGridTokens.container.background,
-    ...shorthands.border('1px', 'solid', dataGridTokens.container.border),
-    borderRadius: dataGridTokens.container.borderRadius,
-    boxShadow: dataGridTokens.container.shadow,
+    backgroundColor: tokens.colorNeutralBackground2,
     overflow: 'hidden',
+    // Generous outer padding so the two cards have visible breathing room
+    // from the modal frame — matches the OOB layout dimensions (see
+    // `projects/spaarke-datagrid-framework-r1/notes/testing-screenshots/oob-layout-dimensions.jpg`).
+    rowGap: tokens.spacingVerticalM,
+    paddingTop: tokens.spacingVerticalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingBottom: tokens.spacingVerticalM,
   },
   gridScroll: {
     flex: 1,
     overflow: 'auto',
     position: 'relative',
+    // Inset the rows away from the inner-card border so per-row bottom borders
+    // stop short of the outer card edge (Power Apps OOB pattern — the grid
+    // sits inside its container with breathing room on the left/right).
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    // Thin overlay scrollbar so the right edge looks clean even when content
+    // overflows. Native overlay scrollbars on macOS/iOS already auto-hide;
+    // these declarations cover Windows Chrome/Edge + Firefox.
+    scrollbarWidth: 'thin',
+    '::-webkit-scrollbar': {
+      width: '8px',
+      height: '8px',
+    },
+    '::-webkit-scrollbar-track': {
+      backgroundColor: 'transparent',
+    },
+    '::-webkit-scrollbar-thumb': {
+      backgroundColor: tokens.colorNeutralStroke2,
+      borderRadius: '4px',
+    },
+    '::-webkit-scrollbar-thumb:hover': {
+      backgroundColor: tokens.colorNeutralStroke1,
+    },
   },
   loadingOverlay: {
     position: 'absolute',
@@ -190,16 +236,27 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: tokens.spacingHorizontalS,
-    fontFamily: dataGridTokens.cell.fontFamily,
-    fontSize: dataGridTokens.cell.fontSize,
-    fontWeight: dataGridTokens.cell.fontWeight,
+    // Power Apps OOB body row height ≈ 38px.
+    minHeight: '38px',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    fontFamily: "'Segoe UI', 'Segoe UI Web', Arial, sans-serif",
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightRegular,
+    color: tokens.colorNeutralForeground1,
   },
   headerCell: {
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: tokens.spacingHorizontalS,
-    fontWeight: dataGridTokens.header.fontWeight,
+    // Power Apps OOB header row height ≈ 41px.
+    minHeight: '41px',
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    fontFamily: "'Segoe UI', 'Segoe UI Web', Arial, sans-serif",
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
     backgroundColor: dataGridTokens.header.background,
     color: dataGridTokens.header.foreground,
   },
@@ -211,6 +268,86 @@ const useStyles = makeStyles({
     ':hover': {
       textDecorationLine: 'underline',
     },
+  },
+  /**
+   * Header CARD — own card with border + matching depth. Holds:
+   *   [← | ViewSelector ⌄]            [Refresh] [Delete] [⌄] [⋯]
+   * Matches the grid card visual so the modal reads as two equal sections,
+   * per `projects/spaarke-datagrid-framework-r1/notes/testing-screenshots/oob-view-modal.jpg`.
+   *
+   * `minWidth: 0` + `overflow: hidden` are critical — without them the right-
+   * side CommandBar (with subtle buttons + overflow menu) can extend past the
+   * dialog viewport when many commands are configured.
+   */
+  headerCard: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalXS,
+    backgroundColor: tokens.colorNeutralBackground1,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke3),
+    borderRadius: tokens.borderRadiusMedium,
+    boxShadow: tokens.shadow4,
+    flexShrink: 0,
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+  /**
+   * Inner grid CARD — wraps the FilterChipBar + grid header/body + footer. Same
+   * border + depth as `headerCard` so the two sections read as equals.
+   */
+  innerCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: 1,
+    minHeight: 0,
+    backgroundColor: tokens.colorNeutralBackground1,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke3),
+    borderRadius: tokens.borderRadiusMedium,
+    boxShadow: tokens.shadow4,
+    overflow: 'hidden',
+  },
+  /** Vertical divider between the back arrow and the view selector label. */
+  backDivider: {
+    width: '1px',
+    height: '24px',
+    backgroundColor: tokens.colorNeutralStroke2,
+    marginLeft: tokens.spacingHorizontalXS,
+    marginRight: tokens.spacingHorizontalXS,
+    flexShrink: 0,
+  },
+  headerLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    minWidth: 0,
+  },
+  title: {
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+    // Power Apps "Active Invoices" title is ~fontSizeBase500 (20px).
+    fontSize: tokens.fontSizeBase500,
+    lineHeight: tokens.lineHeightBase500,
+  },
+  footer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    // Footer is taller than a single row so the "Rows: N" text reads as a
+    // distinct status band rather than a cell remnant.
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    backgroundColor: tokens.colorNeutralBackground1,
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke2),
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    flexShrink: 0,
+    minHeight: '40px',
   },
   errorBanner: {
     display: 'flex',
@@ -276,6 +413,11 @@ interface ConfigLoadState {
   configRecord: DataGridConfiguration | null;
   savedQuery: SavedQueryResult | null;
   entityMetadata: EntityMetadata | null;
+  /**
+   * Sibling saved queries for the active entity (drives the ViewSelector menu).
+   * Populated best-effort after entity resolution; failure is non-fatal.
+   */
+  availableViews: ReadonlyArray<SavedQuerySummary>;
   isLoading: boolean;
   error: Error | null;
 }
@@ -284,6 +426,7 @@ const INITIAL_LOAD_STATE: ConfigLoadState = {
   configRecord: null,
   savedQuery: null,
   entityMetadata: null,
+  availableViews: [],
   isLoading: true,
   error: null,
 };
@@ -294,14 +437,12 @@ const INITIAL_LOAD_STATE: ConfigLoadState = {
  */
 async function fetchConfigRecord(
   dataverseClient: IDataverseClient,
-  configId: string,
+  configId: string
 ): Promise<DataGridConfiguration | null> {
   try {
-    const rec = await dataverseClient.retrieveRecord<Record<string, unknown>>(
-      'sprk_gridconfiguration',
-      configId,
-      ['sprk_configjson'],
-    );
+    const rec = await dataverseClient.retrieveRecord<Record<string, unknown>>('sprk_gridconfiguration', configId, [
+      'sprk_configjson',
+    ]);
     const raw = rec['sprk_configjson'];
     if (typeof raw !== 'string' || raw.trim() === '') return null;
     let parsed: unknown;
@@ -332,7 +473,7 @@ async function fetchConfigRecord(
 async function resolveSource(
   dataverseClient: IDataverseClient,
   configRecord: DataGridConfiguration | null,
-  fallbackEntityName: string | undefined,
+  fallbackEntityName: string | undefined
 ): Promise<SavedQueryResult | null> {
   if (!configRecord) {
     // No config record — caller may pass `fallbackEntityName` for synthesized fallback.
@@ -360,7 +501,7 @@ async function resolveSource(
   if (source.type === 'savedquery-set') {
     try {
       const queries = await dataverseClient.retrieveSavedQueriesForEntity(source.entityLogicalName);
-      const def = queries.find((q) => q.isDefault) ?? queries[0];
+      const def = queries.find(q => q.isDefault) ?? queries[0];
       if (!def) return null;
       return await dataverseClient.retrieveSavedQuery(def.id);
     } catch {
@@ -391,15 +532,17 @@ function extractEntityFromFetchXml(fetchXml: string): string | undefined {
  *
  * See module-level JSDoc for the full feature list and ADR references.
  */
-export const DataGrid: React.FC<DataGridProps> = (props) => {
+export const DataGrid: React.FC<DataGridProps> = props => {
   const {
     configId,
     dataverseClient: dataverseClientProp,
     parentContext,
     onRecordOpen,
     onRecordAction: _onRecordAction,
-    onCommandInvoke: _onCommandInvoke,
+    onCommandInvoke,
     overrides,
+    theme = webLightTheme,
+    onBack,
     className,
   } = props;
 
@@ -418,6 +561,16 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
   const [loadState, setLoadState] = React.useState<ConfigLoadState>(INITIAL_LOAD_STATE);
   const isMountedRef = React.useRef<boolean>(true);
   const [refreshCounter, setRefreshCounter] = React.useState<number>(0);
+  /**
+   * Active saved query id — `undefined` means "use the configRecord default
+   * (configRecord.source.savedQueryId or the default of the savedquery-set)".
+   * Set by the ViewSelector when the user picks a different view.
+   * Reset to `undefined` whenever `configId` changes (different grid surface).
+   */
+  const [activeSavedQueryId, setActiveSavedQueryId] = React.useState<string | undefined>(undefined);
+  React.useEffect(() => {
+    setActiveSavedQueryId(undefined);
+  }, [configId]);
 
   React.useEffect(() => {
     isMountedRef.current = true;
@@ -428,17 +581,19 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
 
   React.useEffect(() => {
     let cancelled = false;
-    setLoadState((prev) => ({ ...prev, isLoading: true, error: null }));
+    setLoadState(prev => ({ ...prev, isLoading: true, error: null }));
 
     (async () => {
       try {
         const configRecord = await fetchConfigRecord(dataverseClient, configId);
-        const savedQuery = await resolveSource(dataverseClient, configRecord, undefined);
+        // If the user has switched views via the ViewSelector, that id takes
+        // precedence over the configRecord's default savedQueryId.
+        const savedQuery: SavedQueryResult | null = activeSavedQueryId
+          ? await dataverseClient.retrieveSavedQuery(activeSavedQueryId).catch(() => null)
+          : await resolveSource(dataverseClient, configRecord, undefined);
         const entityName =
           savedQuery?.entityName ??
-          (configRecord?.source?.type === 'savedquery-set'
-            ? configRecord.source.entityLogicalName
-            : undefined);
+          (configRecord?.source?.type === 'savedquery-set' ? configRecord.source.entityLogicalName : undefined);
 
         if (!entityName) {
           // Cannot fetch metadata without an entity name. Surface a graceful empty state.
@@ -447,20 +602,27 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
             configRecord,
             savedQuery,
             entityMetadata: null,
+            availableViews: [],
             isLoading: false,
             error: new Error(
               `[DataGrid] Cannot resolve entityName from configId=${configId}. ` +
-                'No savedquery, inline fetchXml, or savedquery-set entityLogicalName was available.',
+                'No savedquery, inline fetchXml, or savedquery-set entityLogicalName was available.'
             ),
           });
           return;
         }
-        const entityMetadata = await dataverseClient.retrieveEntityMetadata(entityName);
+        // Fetch metadata + sibling saved views in parallel. View list is best-effort;
+        // on failure we fall back to a single-view ViewSelector (just the active view).
+        const [entityMetadata, availableViews] = await Promise.all([
+          dataverseClient.retrieveEntityMetadata(entityName),
+          dataverseClient.retrieveSavedQueriesForEntity(entityName).catch(() => [] as SavedQuerySummary[]),
+        ]);
         if (cancelled || !isMountedRef.current) return;
         setLoadState({
           configRecord,
           savedQuery,
           entityMetadata,
+          availableViews,
           isLoading: false,
           error: null,
         });
@@ -470,6 +632,7 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
           configRecord: null,
           savedQuery: null,
           entityMetadata: null,
+          availableViews: [],
           isLoading: false,
           error: err instanceof Error ? err : new Error(String(err)),
         });
@@ -479,7 +642,7 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
     return () => {
       cancelled = true;
     };
-  }, [dataverseClient, configId, refreshCounter]);
+  }, [dataverseClient, configId, refreshCounter, activeSavedQueryId]);
 
   // Once we have metadata, resolve the full configuration.
   const resolved: ResolvedConfig | null = React.useMemo(() => {
@@ -489,21 +652,59 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
       loadState.configRecord,
       loadState.entityMetadata,
       loadState.savedQuery?.layoutXml,
-      loadState.savedQuery?.entityName,
+      loadState.savedQuery?.entityName
     );
   }, [loadState.entityMetadata, loadState.configRecord, loadState.savedQuery, overrides]);
 
-  // Lazy load — only kicks off once we have entityName + fetchXml
-  // Apply parent-context filter overlay if both the configjson declares one AND
-  // the consumer passed a value for it (task 020 D-020-02 / FR-CON-01 / FR-CON-02).
-  // Memoized on (fetchXml, parentContextFilter, parentContext) so identical inputs
-  // produce identical results (idempotent for the lazy-load reset detector).
+  // Filter chip state (controlled inside DataGrid). Reset on configId or
+  // activeSavedQueryId change (different grid / different view).
+  const [chipState, setChipState] = React.useState<ChipState>({});
+  React.useEffect(() => {
+    setChipState({});
+  }, [configId, activeSavedQueryId]);
+
+  // Discover chip descriptors from the resolved filterChips config + metadata.
+  // FALLBACK: when metadata is too thin to classify any column (older Xrm
+  // clients return a slimmed-down attribute payload), synthesize a `text`
+  // chip for each visible non-primary-id column so every header still gets
+  // a working "Filter by" affordance. The OOB Power Apps grid always offers
+  // Filter by, so the user's mental model expects it on every column.
+  const chipDescriptors = React.useMemo(() => {
+    if (!resolved || !loadState.entityMetadata) return [];
+    const discovered = discoverChips(resolved.filterChips, resolved.columns, loadState.entityMetadata);
+    if (discovered.length > 0) return discovered;
+    return resolved.columns
+      .filter(c => !c.hidden && c.name !== resolved.primaryIdAttribute)
+      .map(c => ({
+        kind: 'text' as const,
+        attribute: c.name,
+        label: c.label,
+      }));
+  }, [resolved, loadState.entityMetadata]);
+
+  // Lazy load — only kicks off once we have entityName + fetchXml.
+  // FetchXML composition order: base savedQuery → parent-context overlay → chip
+  // augmentation. Each step is a pure string transform; identical inputs ⇒
+  // identical output (lazy-load reset detector relies on referential stability).
   const fetchXml = React.useMemo(() => {
-    const baseFetchXml = loadState.savedQuery?.fetchXml ?? '';
-    const filter = resolved?.behavior?.parentContextFilter;
-    if (!baseFetchXml || !filter) return baseFetchXml;
-    return overlayParentContextFilter(baseFetchXml, filter, parentContext);
-  }, [loadState.savedQuery, resolved?.behavior?.parentContextFilter, parentContext]);
+    let xml = loadState.savedQuery?.fetchXml ?? '';
+    const parentFilter = resolved?.behavior?.parentContextFilter;
+    if (xml && parentFilter) {
+      xml = overlayParentContextFilter(xml, parentFilter, parentContext);
+    }
+    if (xml && chipDescriptors.length > 0) {
+      xml = augmentFetchXmlWithChips(xml, chipDescriptors, chipState);
+    }
+    // eslint-disable-next-line no-console
+    console.info('[DataGrid] fetchXml composition', {
+      parentContext,
+      parentFilter,
+      hasParentFilterMatch: Boolean(parentFilter && parentContext?.[parentFilter.parentContextKey]),
+      chipStateKeys: Object.keys(chipState),
+      fetchXml: xml,
+    });
+    return xml;
+  }, [loadState.savedQuery, resolved?.behavior?.parentContextFilter, parentContext, chipDescriptors, chipState]);
   const entityNameForLoad = resolved?.entityName ?? '';
   const pageSize = resolved?.behavior.pageSize ?? 100;
 
@@ -531,12 +732,12 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
     const sentinel = sentinelRef.current;
     if (!sentinel || !hasMore || isLoadingRows) return;
     const observer = new IntersectionObserver(
-      (entries) => {
+      entries => {
         if (entries[0]?.isIntersecting) {
           fetchNextPage();
         }
       },
-      { root: scrollContainerRef.current, rootMargin: '200px', threshold: 0 },
+      { root: scrollContainerRef.current, rootMargin: '200px', threshold: 0 }
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
@@ -548,13 +749,41 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
   type GridItem = Record<string, unknown> & { _rowId: string };
 
   const visibleColumns: ReadonlyArray<ResolvedColumn> = React.useMemo(
-    () => (resolved?.columns ?? []).filter((c) => !c.hidden),
-    [resolved],
+    () => (resolved?.columns ?? []).filter(c => !c.hidden),
+    [resolved]
   );
+
+  // Quick lookup: attribute logical name → chip descriptor (for inline column filter).
+  const chipDescriptorByAttribute: ReadonlyMap<string, ChipDescriptor> = React.useMemo(() => {
+    const map = new Map<string, ChipDescriptor>();
+    for (const d of chipDescriptors) map.set(d.attribute, d);
+    return map;
+  }, [chipDescriptors]);
+
+  /**
+   * Default record-open handler: opens the record's form in a new browser tab via
+   * `window.open` against the MDA `main.aspx?pagetype=entityrecord&etn=…&id=…` URL.
+   * The current modal stays open in the parent tab — matches OOB Power Apps
+   * "open in new tab" behavior. Used only when the host did NOT pass `onRecordOpen`.
+   */
+  const defaultRecordOpen = React.useCallback(
+    (recordId: string, _record: Record<string, unknown>, ctx: DataGridHostContext) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = (window.parent as any)?.Xrm ?? (window as any).Xrm;
+      const clientUrl = xrm?.Utility?.getGlobalContext?.().getClientUrl?.();
+      if (!clientUrl || !ctx.entityName || !recordId) return;
+      const url =
+        `${clientUrl}/main.aspx?pagetype=entityrecord` +
+        `&etn=${encodeURIComponent(ctx.entityName)}&id=${encodeURIComponent(recordId)}`;
+      window.open(url, '_blank', 'noopener,noreferrer');
+    },
+    []
+  );
+  const effectiveRecordOpen = onRecordOpen ?? defaultRecordOpen;
 
   const tableColumns: TableColumnDefinition<GridItem>[] = React.useMemo(() => {
     if (!resolved) return [];
-    return visibleColumns.map((col) =>
+    return visibleColumns.map(col =>
       createTableColumn<GridItem>({
         columnId: col.name,
         compare: (a, b) => {
@@ -565,11 +794,29 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
           }
           return String(aVal ?? '').localeCompare(String(bVal ?? ''));
         },
-        renderHeaderCell: () => col.label,
-        renderCell: (item) => {
+        renderHeaderCell: () => (
+          <HeaderCellContent
+            label={col.label}
+            descriptor={chipDescriptorByAttribute.get(col.name)}
+            state={chipState}
+            onStateChange={setChipState}
+            theme={theme}
+            // Always passing `onSortChange` so the chevron menu always renders
+            // (HeaderCellContent hides the trigger when BOTH descriptor and
+            // onSortChange are undefined). The actual sort is still applied
+            // by Fluent v9's native `sortable={true}` header click — the menu
+            // items just give a discoverable surface for the same action.
+            onSortChange={() => {
+              // no-op — Fluent v9 native sort is wired via `sortable` on the
+              // DataGrid below; future enhancement: pass through to Fluent
+              // sort state explicitly so the menu can drive sort programmatically.
+            }}
+          />
+        ),
+        renderCell: item => {
           const value = item[col.name];
 
-          if (col.isPrimaryName && resolved && onRecordOpen) {
+          if (col.isPrimaryName && resolved) {
             const idValue = String(item[resolved.primaryIdAttribute] ?? item._rowId ?? '');
             const label = renderCellValue(value, 'default') || '(no name)';
             return React.createElement(
@@ -578,7 +825,7 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
                 as: 'button',
                 className: styles.primaryNameLink,
                 onClick: () => {
-                  onRecordOpen(idValue, item, {
+                  effectiveRecordOpen(idValue, item, {
                     configId,
                     entityName: resolved.entityName,
                     parentContext,
@@ -586,7 +833,7 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
                   });
                 },
               },
-              label,
+              label
             );
           }
 
@@ -597,9 +844,20 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
           }
           return renderCellValue(value, col.renderer);
         },
-      }),
+      })
     );
-  }, [resolved, visibleColumns, onRecordOpen, configId, parentContext, selectedRowIds, styles.primaryNameLink]);
+  }, [
+    resolved,
+    visibleColumns,
+    effectiveRecordOpen,
+    configId,
+    parentContext,
+    selectedRowIds,
+    styles.primaryNameLink,
+    chipDescriptorByAttribute,
+    chipState,
+    theme,
+  ]);
 
   const columnSizingOptions: TableColumnSizingOptions = React.useMemo(() => {
     const options: TableColumnSizingOptions = {};
@@ -626,24 +884,35 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
     (_ev, data: { selectedItems: Set<TableRowId> }) => {
       setSelectedRowIds(data.selectedItems);
     },
-    [],
+    []
   );
 
   const refresh = React.useCallback(() => {
     // Re-fetch from config (in case the underlying record changed) AND reset lazy load.
-    setRefreshCounter((n) => n + 1);
+    setRefreshCounter(n => n + 1);
     resetLazyLoad();
   }, [resetLazyLoad]);
 
-  // Selection ids as strings — passed into context for extensions.
-  const selectedIds = React.useMemo(
-    () => new Set<string>(Array.from(selectedRowIds).map(String)),
-    [selectedRowIds],
+  // Command-bar dispatcher. `useCallback` MUST run unconditionally — declared
+  // here BEFORE the loading/error early-returns so hook order stays stable
+  // across renders (React error #310 otherwise).
+  const handleCommandInvoke = React.useCallback(
+    (commandId: string, ids: ReadonlyArray<string>) => {
+      onCommandInvoke?.(commandId, Array.from(ids), {
+        configId,
+        entityName: resolved?.entityName ?? '',
+        parentContext,
+        selectedIds: Array.from(ids),
+      });
+    },
+    [onCommandInvoke, configId, resolved?.entityName, parentContext]
   );
 
+  // Selection ids as strings — passed into context for extensions.
+  const selectedIds = React.useMemo(() => new Set<string>(Array.from(selectedRowIds).map(String)), [selectedRowIds]);
+
   // Density derives from configjson; consumer may toggle via a later command-bar primitive.
-  const density: 'medium' | 'small' =
-    resolved?.display.densityDefault === 'compact' ? 'small' : 'medium';
+  const density: 'medium' | 'small' = resolved?.display.densityDefault === 'compact' ? 'small' : 'medium';
 
   // ───────────────────────────────────────────────────────────────────────────
   // Loading / error / empty states
@@ -662,9 +931,7 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
     return (
       <div className={mergeClasses(styles.root, className)} role="alert">
         <div className={styles.errorBanner}>
-          <Text size={300}>
-            {loadState.error?.message ?? 'DataGrid configuration could not be resolved.'}
-          </Text>
+          <Text size={300}>{loadState.error?.message ?? 'DataGrid configuration could not be resolved.'}</Text>
         </div>
       </div>
     );
@@ -680,26 +947,89 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
   };
 
   const isEmpty = !isLoadingRows && records.length === 0 && !loadState.isLoading;
+  const selectedCount = selectedRowIds.size;
+  const totalCount = records.length;
+  const visibleTitle = resolved.display.title ?? loadState.savedQuery?.name ?? '';
+
+  // ViewSelector data — sibling savedqueries surfaced as `SavedView[]`. Falls
+  // back to a single-entry list (the active view) when sibling fetch failed.
+  const selectorViews: ReadonlyArray<SavedView> =
+    loadState.availableViews.length > 0
+      ? loadState.availableViews.map(v => ({ id: v.id, name: v.name, isDefault: v.isDefault }))
+      : loadState.savedQuery
+        ? [{ id: '__active__', name: loadState.savedQuery.name || visibleTitle || 'View' }]
+        : [];
+  const currentViewId =
+    activeSavedQueryId ??
+    (loadState.savedQuery
+      ? // Match the active savedQuery against availableViews by name; the savedQuery
+        // result doesn't carry its own id field.
+        loadState.availableViews.find(v => v.name === loadState.savedQuery?.name)?.id ?? '__active__'
+      : '');
 
   return (
     <DataGridContextProvider value={contextValue}>
       <div className={mergeClasses(styles.root, className)} aria-label={contextValue.currentView}>
-        {isEmpty ? (
-          <div className={styles.emptyState}>
-            <Text size={400} weight="semibold">
-              {resolved.display.emptyStateMessage ?? 'No records to display'}
-            </Text>
+        <div className={styles.headerCard}>
+          <div className={styles.headerLeft}>
+            {selectorViews.length > 0 ? (
+              <ViewSelector
+                views={selectorViews}
+                activeViewId={currentViewId}
+                onViewChange={setActiveSavedQueryId}
+                onBack={onBack}
+                theme={theme}
+              />
+            ) : (
+              <span aria-hidden="true" />
+            )}
           </div>
-        ) : (
-          <div className={styles.gridScroll} ref={scrollContainerRef}>
+          <DataGridCommandBar
+            config={resolved.commandBar}
+            entityName={resolved.entityName}
+            selectedIds={Array.from(selectedRowIds).map(String)}
+            records={records}
+            columns={visibleColumns}
+            currentView={contextValue.currentView}
+            refresh={refresh}
+            theme={theme}
+            // OOB pattern: top 3 actions (Refresh, Delete, View Switcher caret)
+            // stay inline; the rest live in the `⋯` overflow menu. The header
+            // card has `overflow: hidden` to clip safely if the dialog is too
+            // narrow to fit all 3.
+            inlineLimit={3}
+            onCommandInvoke={handleCommandInvoke}
+          />
+        </div>
+
+        <div className={styles.innerCard}>
+          {/*
+           * The horizontal FilterChipBar primitive is INTENTIONALLY not mounted
+           * here. Filter UI lives inside the column-header chevron menu
+           * (`HeaderCellContent` → `Filter by` → popover) — the Power Apps OOB
+           * pattern. The FilterChipBar primitive remains exported from
+           * `@spaarke/ui-components` for hosts that want a strip-style filter
+           * row instead.
+           */}
+
+          {isEmpty ? (
+            <div className={styles.emptyState}>
+              <Text size={400} weight="semibold">
+                {resolved.display.emptyStateMessage ?? 'No records to display'}
+              </Text>
+            </div>
+          ) : (
+            <div className={styles.gridScroll} ref={scrollContainerRef}>
             <FluentDataGrid
               items={items}
               columns={tableColumns}
-              selectionMode={resolved.behavior.selectionMode === 'none'
-                ? undefined
-                : resolved.behavior.selectionMode === 'single'
-                  ? 'single'
-                  : 'multiselect'}
+              selectionMode={
+                resolved.behavior.selectionMode === 'none'
+                  ? undefined
+                  : resolved.behavior.selectionMode === 'single'
+                    ? 'single'
+                    : 'multiselect'
+              }
               selectedItems={selectedRowIds}
               onSelectionChange={handleSelectionChange}
               sortable={resolved.behavior.enableSorting}
@@ -707,19 +1037,14 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
               columnSizingOptions={columnSizingOptions}
               focusMode="composite"
               size={density}
-              subtleSelection
               getRowId={(item: GridItem) => item._rowId}
-              style={{ minWidth: '100%' }}
+              style={{ width: '100%' }}
               aria-label={contextValue.currentView}
             >
               <DataGridHeader>
-                <DataGridRow
-                  selectionCell={{ checkboxIndicator: { 'aria-label': 'Select all rows' } }}
-                >
+                <DataGridRow selectionCell={{ checkboxIndicator: { 'aria-label': 'Select all rows' } }}>
                   {({ renderHeaderCell }) => (
-                    <DataGridHeaderCell className={styles.headerCell}>
-                      {renderHeaderCell()}
-                    </DataGridHeaderCell>
+                    <DataGridHeaderCell className={styles.headerCell}>{renderHeaderCell()}</DataGridHeaderCell>
                   )}
                 </DataGridRow>
               </DataGridHeader>
@@ -729,9 +1054,7 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
                     key={rowId}
                     selectionCell={{ checkboxIndicator: { 'aria-label': 'Select row' } }}
                   >
-                    {({ renderCell }) => (
-                      <DataGridCell className={styles.cell}>{renderCell(item)}</DataGridCell>
-                    )}
+                    {({ renderCell }) => <DataGridCell className={styles.cell}>{renderCell(item)}</DataGridCell>}
                   </DataGridRow>
                 )}
               </DataGridBody>
@@ -747,6 +1070,15 @@ export const DataGrid: React.FC<DataGridProps> = (props) => {
             <div ref={sentinelRef} className={styles.sentinel} aria-hidden="true" />
           </div>
         )}
+
+          <div className={styles.footer} role="status" aria-live="polite">
+            <Text size={200}>
+              Rows: {totalCount}
+              {hasMore ? '+' : ''}
+              {selectedCount > 0 ? ` • ${selectedCount} selected` : ''}
+            </Text>
+          </div>
+        </div>
       </div>
     </DataGridContextProvider>
   );

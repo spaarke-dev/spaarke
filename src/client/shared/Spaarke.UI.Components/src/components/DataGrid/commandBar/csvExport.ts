@@ -109,11 +109,7 @@ export function formatYyyymmdd(d: Date = new Date()): string {
  * in `<a download="…">` (Windows + macOS overlap: `/ \ ? % * : | " < >`) is
  * replaced with `_`. Whitespace runs collapsed to single `_`.
  */
-export function csvFilename(
-  entityName: string,
-  savedQueryName: string,
-  date: Date = new Date(),
-): string {
+export function csvFilename(entityName: string, savedQueryName: string, date: Date = new Date()): string {
   // Trim leading / trailing whitespace BEFORE collapsing internal whitespace
   // runs so `'  My   View  '` → `'My_View'` (not `'_My_View_'`). The
   // `\s+` -> `_` collapse otherwise turns trim-able padding into underscores.
@@ -161,15 +157,15 @@ export function exportCsv(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   savedQueryName: string,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  entityName: string,
+  entityName: string
 ): Blob {
   const lines: string[] = [];
 
   if (columns.length > 0) {
     // Header row uses column.label so the CSV is human-readable.
-    lines.push(columns.map((c) => escapeCsvField(c.label)).join(','));
+    lines.push(columns.map(c => escapeCsvField(c.label)).join(','));
     for (const record of records) {
-      lines.push(columns.map((c) => escapeCsvField(record[c.name])).join(','));
+      lines.push(columns.map(c => escapeCsvField(record[c.name])).join(','));
     }
   }
 

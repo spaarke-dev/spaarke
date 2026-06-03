@@ -129,7 +129,7 @@ describe('localDateToUtcBounds', () => {
     // the helper must align both bounds to LOCAL day boundaries
     // (start = 00:00:00.000, end = 23:59:59.999).
     const start = new Date(2026, 5, 1, 17, 30, 45, 123); // 5:30:45.123 PM
-    const end = new Date(2026, 5, 30, 8, 15, 0, 0);      // 8:15:00 AM
+    const end = new Date(2026, 5, 30, 8, 15, 0, 0); // 8:15:00 AM
     const { startUtc, endUtc } = localDateToUtcBounds(start, end);
 
     expect(startUtc.toISOString()).toBe('2026-06-01T04:00:00.000Z');

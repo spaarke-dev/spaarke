@@ -25,20 +25,59 @@ import {
 // Configuration ID from task 022 (sprk_gridconfiguration record for Invoices).
 const CONFIG_ID = "d021827b-9b5e-f111-ab0c-7c1e521545d7";
 
-/** Parse matterId from URL: ?matterId= OR ?filterValue= OR JSON-encoded ?data=... envelope. */
+/**
+ * Parse matterId from URL.
+ *
+ * VisualHost CardChrome opens this page via `Xrm.Navigation.navigateTo({
+ *   pageType: 'webresource', webresourceName, data: '<form-encoded string>'
+ * })` — the `data` envelope is a URL-encoded form string (NOT JSON) with keys
+ * `entityName`, `filterField`, `filterValue`, `viewId`, `mode`. The Matter
+ * record id arrives as `filterValue` inside that envelope.
+ *
+ * Also tolerates direct-launch URLs (`?matterId=…`) and a JSON envelope for
+ * legacy callers.
+ */
 function parseMatterId(): string {
   const params = new URLSearchParams(window.location.search);
   let id = params.get("matterId") ?? params.get("filterValue") ?? "";
   if (!id) {
     const raw = params.get("data");
     if (raw) {
-      try {
-        const obj = JSON.parse(raw) as { matterId?: string };
-        if (obj?.matterId) id = obj.matterId;
-      } catch { /* graceful */ }
+      // 1) Form-encoded envelope (VisualHost CardChrome path).
+      const inner = new URLSearchParams(raw);
+      id = inner.get("filterValue") ?? inner.get("matterId") ?? "";
+      // 2) JSON envelope (legacy fallback).
+      if (!id) {
+        try {
+          const obj = JSON.parse(raw) as { matterId?: string };
+          if (obj?.matterId) id = obj.matterId;
+        } catch { /* graceful */ }
+      }
     }
   }
-  return id;
+  // 3) Fallback: read the active parent Matter form's record id via Xrm.
+  //    The Custom Page dialog is nested deeper than one frame, so we walk
+  //    BOTH `window.parent` AND `window.top` and try multiple Xrm APIs.
+  if (!id) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const candidateWindows: any[] = [];
+    try { candidateWindows.push(window.parent); } catch { /* same-origin only */ }
+    try { candidateWindows.push(window.top); } catch { /* same-origin only */ }
+    for (const w of candidateWindows) {
+      if (!w) continue;
+      try {
+        const xrm = w.Xrm;
+        const legacyId: string | undefined = xrm?.Page?.data?.entity?.getId?.();
+        if (legacyId) { id = legacyId; break; }
+        const pageCtx = xrm?.Utility?.getPageContext?.();
+        const entityId: string | undefined = pageCtx?.input?.entityId;
+        if (entityId) { id = entityId; break; }
+      } catch { /* cross-origin or unavailable */ }
+    }
+  }
+  // eslint-disable-next-line no-console
+  console.info("[sprk_invoicespage] parseMatterId resolved to:", id);
+  return id.replace(/[{}]/g, "");
 }
 
 const App: React.FC = () => {
@@ -51,6 +90,8 @@ const App: React.FC = () => {
         configId={CONFIG_ID}
         parentContext={parentContext}
         dataverseClient={new XrmDataverseClient()}
+        theme={theme}
+        onBack={() => window.close()}
       />
     </FluentProvider>
   );

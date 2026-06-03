@@ -91,6 +91,11 @@ export interface EntityAttributeMetadata {
   attributeType: MetadataAttributeType;
   /** Sub-type for String attributes (e.g., 'Email', 'Phone', 'Url', 'TextArea'). */
   format?: string;
+  /**
+   * User-localized DisplayName (e.g., "Invoice Number") from Xrm/BFF metadata.
+   * Framework column-label resolution prefers this over humanized logical names.
+   */
+  displayName?: string;
   isPrimaryName?: boolean;
   isPrimaryId?: boolean;
   /** Option set values (Picklist, Status, State only). */
@@ -176,7 +181,7 @@ export interface IDataverseClient {
    */
   retrieveMultipleRecords<T = Record<string, unknown>>(
     entityName: string,
-    fetchXml: string,
+    fetchXml: string
   ): Promise<FetchMultipleResult<T>>;
 
   /**
@@ -188,9 +193,5 @@ export interface IDataverseClient {
    * @param select - Optional list of attribute logical names to project. When omitted,
    *                 implementations SHOULD return at least the primary id + primary name.
    */
-  retrieveRecord<T = Record<string, unknown>>(
-    entityName: string,
-    id: string,
-    select?: string[],
-  ): Promise<T>;
+  retrieveRecord<T = Record<string, unknown>>(entityName: string, id: string, select?: string[]): Promise<T>;
 }

@@ -18,20 +18,10 @@
  */
 
 import * as React from 'react';
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-} from '@fluentui/react-components';
+import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { CommandBar } from '../src/components/DataGrid/commandBar/CommandBar';
-import {
-  registerCommandHandler,
-  unregisterCommandHandler,
-} from '../src/components/DataGrid/commandBar/registry';
-import type {
-  CommandBarConfig,
-  CommandBarItem,
-} from '../src/types/DataGridConfiguration';
+import { registerCommandHandler, unregisterCommandHandler } from '../src/components/DataGrid/commandBar/registry';
+import type { CommandBarConfig, CommandBarItem } from '../src/types/DataGridConfiguration';
 import type { ResolvedColumn } from '../src/components/DataGrid/configResolution';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -101,17 +91,13 @@ interface StoryArgs {
 
 const withFluentProvider = (
   themeName: 'light' | 'dark',
-  content: (theme: typeof webLightTheme) => React.ReactNode,
+  content: (theme: typeof webLightTheme) => React.ReactNode
 ): React.ReactNode => {
   const theme = themeName === 'dark' ? webDarkTheme : webLightTheme;
   // `applyStylesToPortals` is MANDATORY per NFR-03 — Toolbar overflow Menu +
   // Dialog surface render in portals and must inherit the active theme.
   return (
-    <FluentProvider
-      applyStylesToPortals
-      theme={theme}
-      style={{ padding: '16px', minHeight: '300px' }}
-    >
+    <FluentProvider applyStylesToPortals theme={theme} style={{ padding: '16px', minHeight: '300px' }}>
       {content(theme)}
     </FluentProvider>
   );
@@ -127,7 +113,7 @@ export const Default = (args: StoryArgs) => {
   const config: CommandBarConfig = {
     showDefaultCommands: { editColumns: true },
   };
-  return withFluentProvider(args.theme, (theme) => (
+  return withFluentProvider(args.theme, theme => (
     <CommandBar
       config={config}
       entityName="sprk_event"
@@ -153,7 +139,7 @@ Default.storyName = 'Default (6 actions, light + dark)';
 
 export const CustomHandlerRegistered = (args: StoryArgs) => {
   React.useEffect(() => {
-    registerCommandHandler('mark-paid', async (ctx) => {
+    registerCommandHandler('mark-paid', async ctx => {
       // eslint-disable-next-line no-console
       console.log(`[Storybook] mark-paid invoked for ${ctx.selectedIds.length} record(s)`);
     });
@@ -181,7 +167,7 @@ export const CustomHandlerRegistered = (args: StoryArgs) => {
     primary: [customAction],
   };
 
-  return withFluentProvider(args.theme, (theme) => (
+  return withFluentProvider(args.theme, theme => (
     <CommandBar
       config={config}
       entityName="sprk_invoice"
@@ -205,7 +191,7 @@ export const BulkDeleteConfirmation = (args: StoryArgs) => {
   // Pre-select 3 records so user can immediately exercise the Dialog flow.
   const selectedIds = ['evt-0001', 'evt-0002', 'evt-0003'];
   const config: CommandBarConfig = {};
-  return withFluentProvider(args.theme, (theme) => (
+  return withFluentProvider(args.theme, theme => (
     <CommandBar
       config={config}
       entityName="sprk_event"
@@ -241,7 +227,7 @@ export const CsvExportTrigger = (args: StoryArgs) => {
       editFilters: false,
     },
   };
-  return withFluentProvider(args.theme, (theme) => (
+  return withFluentProvider(args.theme, theme => (
     <CommandBar
       config={config}
       entityName="sprk_event"

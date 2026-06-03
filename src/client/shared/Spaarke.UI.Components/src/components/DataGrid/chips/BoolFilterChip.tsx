@@ -22,13 +22,7 @@
  */
 
 import * as React from 'react';
-import {
-  Dropdown,
-  Option,
-  makeStyles,
-  mergeClasses,
-  tokens,
-} from '@fluentui/react-components';
+import { Dropdown, Option, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import type { DropdownProps } from '@fluentui/react-components';
 
 import { dataGridTokens } from '../tokens';
@@ -125,20 +119,13 @@ const useStyles = makeStyles({
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const BoolFilterChip: React.FC<BoolFilterChipProps> = ({
-  value,
-  onChange,
-  label,
-  optionLabels,
-  className,
-}) => {
+export const BoolFilterChip: React.FC<BoolFilterChipProps> = ({ value, onChange, label, optionLabels, className }) => {
   const styles = useStyles();
 
   const labels = optionLabels ?? { any: 'Any', yes: 'Yes', no: 'No' };
 
   const selectedKey = valueToKey(value);
-  const displayValue: string =
-    value === null ? labels.any : value === true ? labels.yes : labels.no;
+  const displayValue: string = value === null ? labels.any : value === true ? labels.yes : labels.no;
 
   const handleOptionSelect: DropdownProps['onOptionSelect'] = React.useCallback(
     (_event, data) => {
@@ -147,7 +134,7 @@ export const BoolFilterChip: React.FC<BoolFilterChipProps> = ({
       const key = data.optionValue ?? data.selectedOptions[0] ?? VALUE_ANY;
       onChange(keyToValue(key));
     },
-    [onChange],
+    [onChange]
   );
 
   return (

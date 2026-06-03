@@ -343,7 +343,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
       }
       onFilterChange(Array.from(currentSet));
     },
-    [selectedValues, onFilterChange],
+    [selectedValues, onFilterChange]
   );
 
   const handleClear = React.useCallback(() => {
@@ -358,7 +358,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
         handleTextFilterApply();
       }
     },
-    [handleTextFilterApply],
+    [handleTextFilterApply]
   );
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -367,11 +367,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
 
   const renderSortIndicator = (): React.ReactNode => {
     if (!sortDirection) return null;
-    return (
-      <span className={styles.sortIndicator}>
-        {sortDirection === 'asc' ? '▲' : '▼'}
-      </span>
-    );
+    return <span className={styles.sortIndicator}>{sortDirection === 'asc' ? '▲' : '▼'}</span>;
   };
 
   const renderFilterContent = (): React.ReactNode => {
@@ -418,13 +414,11 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
         return (
           <>
             <div className={styles.optionsList}>
-              {options.map((option) => (
+              {options.map(option => (
                 <div key={String(option.value)} className={styles.optionItem}>
                   <Checkbox
                     checked={selectedValues.includes(option.value)}
-                    onChange={(_, data) =>
-                      handleChoiceToggle(option.value, data.checked === true)
-                    }
+                    onChange={(_, data) => handleChoiceToggle(option.value, data.checked === true)}
                     label={option.label}
                   />
                 </div>
@@ -487,10 +481,10 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
             aria-label={`${title} column options`}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            onKeyDown={(e) => {
+            onKeyDown={e => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                setMenuOpen((prev) => !prev);
+                setMenuOpen(prev => !prev);
               }
             }}
           >
@@ -546,11 +540,7 @@ export const ColumnHeaderMenu: React.FC<ColumnHeaderMenuProps> = ({
 
               <MenuItem
                 className={styles.menuItem}
-                icon={
-                  <span className={styles.menuItemCheckmark}>
-                    {hasActiveFilter && <Filter20Filled />}
-                  </span>
-                }
+                icon={<span className={styles.menuItemCheckmark}>{hasActiveFilter && <Filter20Filled />}</span>}
                 secondaryContent={<Filter20Regular />}
                 onClick={handleFilterByClick}
               >

@@ -39,7 +39,7 @@ interface XrmWebApiLike {
   retrieveMultipleRecords(
     entityLogicalName: string,
     options?: string,
-    maxPageSize?: number,
+    maxPageSize?: number
   ): Promise<{
     entities: Array<Record<string, any>>;
     '@Microsoft.Dynamics.CRM.morerecords'?: boolean;
@@ -48,12 +48,21 @@ interface XrmWebApiLike {
   }>;
 }
 
+interface XrmGlobalContextLike {
+  getClientUrl(): string;
+}
+
 interface XrmUtilityLike {
   /**
    * `Xrm.Utility.getEntityMetadata` returns a Promise of an EntityMetadata object
    * whose shape mirrors the Web API. We project to our framework's narrower shape.
    */
   getEntityMetadata(entityName: string, attributes?: string[]): Promise<any>;
+  /**
+   * Returns the global Xrm context (used to derive the MDA base URL for direct
+   * EntityDefinitions Web API calls when fetching attribute DisplayName labels).
+   */
+  getGlobalContext?: () => XrmGlobalContextLike;
 }
 
 interface XrmLike {
@@ -61,8 +70,7 @@ interface XrmLike {
   Utility?: XrmUtilityLike;
 }
 
-const XRM_MISSING_MESSAGE =
-  'XrmDataverseClient requires Xrm context. Use BffDataverseClient outside MDA.';
+const XRM_MISSING_MESSAGE = 'XrmDataverseClient requires Xrm context. Use BffDataverseClient outside MDA.';
 
 /**
  * Resolve the Xrm object from `window` or `window.parent` (Custom Page iframe case).
@@ -137,9 +145,7 @@ function projectOptions(optionSet: any): OptionSetOption[] | undefined {
   }
   return options.map(opt => {
     const label =
-      opt?.Label?.UserLocalizedLabel?.Label ??
-      opt?.Label?.LocalizedLabels?.[0]?.Label ??
-      String(opt?.Value ?? '');
+      opt?.Label?.UserLocalizedLabel?.Label ?? opt?.Label?.LocalizedLabels?.[0]?.Label ?? String(opt?.Value ?? '');
     return {
       value: Number(opt?.Value ?? 0),
       label,
@@ -161,26 +167,87 @@ function projectAttribute(attr: any): EntityAttributeMetadata {
 
   // Format is most relevant for String attributes; preserve when present.
   const format =
-    typeof attr?.Format === 'string'
-      ? attr.Format
-      : typeof attr?.format === 'string'
-        ? attr.format
-        : undefined;
+    typeof attr?.Format === 'string' ? attr.Format : typeof attr?.format === 'string' ? attr.format : undefined;
 
   // OptionSet location varies across Xrm versions: top-level OptionSet, GlobalOptionSet,
   // or nested under attribute. Probe in priority order.
   const optionSet =
-    projectOptions(attr?.OptionSet) ??
-    projectOptions(attr?.GlobalOptionSet) ??
-    projectOptions(attr?.optionSet);
+    projectOptions(attr?.OptionSet) ?? projectOptions(attr?.GlobalOptionSet) ?? projectOptions(attr?.optionSet);
+
+  // DisplayName: Xrm exposes `DisplayName.UserLocalizedLabel.Label` (preferred) or
+  // falls back to the first entry in `LocalizedLabels`. Some Xrm builds also use the
+  // lowercase `displayName` directly.
+  const displayName: string | undefined =
+    attr?.DisplayName?.UserLocalizedLabel?.Label ??
+    attr?.DisplayName?.LocalizedLabels?.[0]?.Label ??
+    (typeof attr?.displayName === 'string' ? attr.displayName : undefined);
 
   return {
     attributeType,
     format,
+    displayName,
     isPrimaryName: attr?.IsPrimaryName === true || attr?.isPrimaryName === true || undefined,
     isPrimaryId: attr?.IsPrimaryId === true || attr?.isPrimaryId === true || undefined,
     optionSet,
   };
+}
+
+/**
+ * Fetch attribute DisplayName labels for the given entity via the EntityDefinitions
+ * Web API. Returns a Map of `logicalName → user-localized label`.
+ *
+ * The EntityDefinitions endpoint is the canonical metadata surface and is the only
+ * Xrm API that returns attribute-level DisplayName labels with locale resolution.
+ *
+ * Uses `Xrm.WebApi.retrieveMultipleRecords('EntityDefinition', '?$filter=...&$expand=Attributes(...)')`.
+ * The first argument is the SINGULAR entity name (`EntityDefinition`); Xrm
+ * translates it to the plural collection (`EntityDefinitions`) automatically.
+ * `$expand=Attributes($select=LogicalName,DisplayName)` returns the AttributeMetadata
+ * children with the DisplayName fields populated by Dataverse's locale resolver.
+ *
+ * Best-effort: the caller (`retrieveEntityMetadata`) catches any throw and falls
+ * back to humanized logical names.
+ */
+/**
+ * Result of the EntityDefinitions metadata fetch: per-attribute label AND
+ * attribute type. The framework uses BOTH:
+ *  - `displayName` populates the column header label
+ *  - `attributeType` lets chip-discovery work even if `Xrm.Utility.getEntityMetadata`
+ *    didn't include the attribute in its response (older Xrm clients can return
+ *    a slimmed-down attribute set)
+ */
+interface AttributeFetchEntry {
+  displayName?: string;
+  attributeType?: string;
+}
+
+async function fetchAttributeDisplayNames(
+  xrm: XrmLike,
+  entityLogicalName: string
+): Promise<Map<string, AttributeFetchEntry>> {
+  const options =
+    `?$select=LogicalName&$filter=LogicalName eq '${entityLogicalName}'` +
+    `&$expand=Attributes($select=LogicalName,DisplayName,AttributeType)`;
+  const result = await xrm.WebApi.retrieveMultipleRecords('EntityDefinition', options);
+  const out = new Map<string, AttributeFetchEntry>();
+  const entityDefs = (result as { entities?: ReadonlyArray<Record<string, unknown>> })?.entities ?? [];
+  for (const ed of entityDefs) {
+    const attrs = (ed?.Attributes as ReadonlyArray<Record<string, unknown>> | undefined) ?? [];
+    for (const a of attrs) {
+      const logicalName = a?.LogicalName as string | undefined;
+      if (!logicalName) continue;
+      const dn = a?.DisplayName as
+        | {
+            UserLocalizedLabel?: { Label?: string };
+            LocalizedLabels?: ReadonlyArray<{ Label?: string }>;
+          }
+        | undefined;
+      const label = dn?.UserLocalizedLabel?.Label ?? dn?.LocalizedLabels?.[0]?.Label;
+      const attributeType = a?.AttributeType as string | undefined;
+      out.set(logicalName, { displayName: label, attributeType });
+    }
+  }
+  return out;
 }
 
 /**
@@ -191,10 +258,8 @@ function projectAttribute(attr: any): EntityAttributeMetadata {
  * or a `get()`-style collection. We support both forms for resilience.
  */
 function projectEntityMetadata(meta: any): EntityMetadata {
-  const primaryIdAttribute: string =
-    meta?.PrimaryIdAttribute ?? meta?.primaryIdAttribute ?? '';
-  const primaryNameAttribute: string =
-    meta?.PrimaryNameAttribute ?? meta?.primaryNameAttribute ?? '';
+  const primaryIdAttribute: string = meta?.PrimaryIdAttribute ?? meta?.primaryIdAttribute ?? '';
+  const primaryNameAttribute: string = meta?.PrimaryNameAttribute ?? meta?.primaryNameAttribute ?? '';
 
   const rawAttributes = meta?.Attributes ?? meta?.attributes ?? [];
   let attributeArray: any[] = [];
@@ -215,8 +280,7 @@ function projectEntityMetadata(meta: any): EntityMetadata {
 
   const attributes: Record<string, EntityAttributeMetadata> = {};
   for (const attr of attributeArray) {
-    const logicalName: string | undefined =
-      attr?.LogicalName ?? attr?.logicalName ?? attr?.Name ?? attr?.name;
+    const logicalName: string | undefined = attr?.LogicalName ?? attr?.logicalName ?? attr?.Name ?? attr?.name;
     if (!logicalName) {
       continue;
     }
@@ -264,11 +328,7 @@ export class XrmDataverseClient implements IDataverseClient {
    */
   async retrieveSavedQuery(savedQueryId: string): Promise<SavedQueryResult> {
     const xrm = this.getXrm();
-    const result = await xrm.WebApi.retrieveRecord(
-      'savedquery',
-      savedQueryId,
-      SAVEDQUERY_SINGLE_SELECT,
-    );
+    const result = await xrm.WebApi.retrieveRecord('savedquery', savedQueryId, SAVEDQUERY_SINGLE_SELECT);
 
     return {
       entityName: result?.returnedtypecode ?? '',
@@ -285,7 +345,7 @@ export class XrmDataverseClient implements IDataverseClient {
     const xrm = this.getXrm();
     const result = await xrm.WebApi.retrieveMultipleRecords(
       'savedquery',
-      buildSavedQueriesForEntityOptions(entityName),
+      buildSavedQueriesForEntityOptions(entityName)
     );
 
     return (result?.entities ?? []).map(row => ({
@@ -297,19 +357,61 @@ export class XrmDataverseClient implements IDataverseClient {
   }
 
   /**
-   * Retrieve projected entity metadata via `Xrm.Utility.getEntityMetadata`.
+   * Retrieve projected entity metadata via `Xrm.Utility.getEntityMetadata` and
+   * (in parallel) fetch attribute DisplayName labels via the EntityDefinitions
+   * Web API.
    *
-   * Throws if `Xrm.Utility` is unavailable (rare — older clients only).
+   * **Why two calls**: `Xrm.Utility.getEntityMetadata` returns AttributeType, Format,
+   * OptionSet etc. but does NOT populate attribute-level DisplayName labels (known
+   * SDK gap). DisplayName comes from `/EntityDefinitions(LogicalName='X')/Attributes`
+   * which exposes the full `DisplayName.UserLocalizedLabel.Label`. We merge the two
+   * payloads so column headers can render localized labels instead of logical names.
+   *
+   * Throws if `Xrm.Utility` is unavailable (rare — older clients only). The
+   * DisplayName fetch is best-effort: a failure logs a warning and falls back to
+   * the humanized logical name in `configResolution.buildResolvedColumn`.
    */
   async retrieveEntityMetadata(entityName: string): Promise<EntityMetadata> {
     const xrm = this.getXrm();
     if (!xrm.Utility) {
-      throw new Error(
-        `XrmDataverseClient.retrieveEntityMetadata requires Xrm.Utility (entity: ${entityName}).`,
-      );
+      throw new Error(`XrmDataverseClient.retrieveEntityMetadata requires Xrm.Utility (entity: ${entityName}).`);
     }
-    const meta = await xrm.Utility.getEntityMetadata(entityName, ['Attributes']);
-    return projectEntityMetadata(meta);
+    const [legacyMeta, attributeFetchMap] = await Promise.all([
+      // Second arg is an OData attribute FILTER (not a "include this section"
+      // hint). Omit it so Xrm returns the full entity metadata including
+      // every attribute's `AttributeType` / `OptionSet` / `IsPrimaryName`.
+      xrm.Utility.getEntityMetadata(entityName),
+      fetchAttributeDisplayNames(xrm, entityName).catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[XrmDataverseClient] Attribute metadata fetch failed for ${entityName}; falling back to Xrm.Utility values only.`,
+          err
+        );
+        return new Map<string, AttributeFetchEntry>();
+      }),
+    ]);
+    const projected = projectEntityMetadata(legacyMeta);
+    // eslint-disable-next-line no-console
+    console.info(
+      `[XrmDataverseClient] retrieveEntityMetadata(${entityName}): ` +
+        `legacyMeta.Attributes=${(legacyMeta as { Attributes?: unknown[] })?.Attributes?.length ?? 0}, ` +
+        `projected.attributes=${Object.keys(projected.attributes).length}, ` +
+        `displayNameFetch=${attributeFetchMap.size}`
+    );
+    // Merge EntityDefinitions attribute payload into the projected attribute
+    // map. Synthesize entries when Xrm.Utility didn't include them so chip
+    // discovery + column DisplayName labels still work end-to-end.
+    for (const [logicalName, entry] of attributeFetchMap) {
+      let attr = projected.attributes[logicalName];
+      if (!attr) {
+        attr = { attributeType: normalizeAttributeType(entry.attributeType) };
+        projected.attributes[logicalName] = attr;
+      }
+      if (!attr.displayName && entry.displayName) {
+        attr.displayName = entry.displayName;
+      }
+    }
+    return projected;
   }
 
   /**
@@ -320,15 +422,14 @@ export class XrmDataverseClient implements IDataverseClient {
    */
   async retrieveMultipleRecords<T = Record<string, unknown>>(
     entityName: string,
-    fetchXml: string,
+    fetchXml: string
   ): Promise<FetchMultipleResult<T>> {
     const xrm = this.getXrm();
     const options = `?fetchXml=${encodeURIComponent(fetchXml)}`;
     const result = await xrm.WebApi.retrieveMultipleRecords(entityName, options);
 
     const moreRecords =
-      result?.['@Microsoft.Dynamics.CRM.morerecords'] === true ||
-      result?.['@odata.nextLink'] !== undefined;
+      result?.['@Microsoft.Dynamics.CRM.morerecords'] === true || result?.['@odata.nextLink'] !== undefined;
     const pagingCookie = result?.['@Microsoft.Dynamics.CRM.fetchxmlpagingcookie'];
 
     return {
@@ -342,14 +443,9 @@ export class XrmDataverseClient implements IDataverseClient {
    * Retrieve a single record by ID. When `select` is provided, builds an OData
    * `$select` clause; otherwise lets Xrm return its default projection.
    */
-  async retrieveRecord<T = Record<string, unknown>>(
-    entityName: string,
-    id: string,
-    select?: string[],
-  ): Promise<T> {
+  async retrieveRecord<T = Record<string, unknown>>(entityName: string, id: string, select?: string[]): Promise<T> {
     const xrm = this.getXrm();
-    const options =
-      select && select.length > 0 ? `?$select=${select.join(',')}` : undefined;
+    const options = select && select.length > 0 ? `?$select=${select.join(',')}` : undefined;
     const result = await xrm.WebApi.retrieveRecord(entityName, id, options);
     return result as T;
   }

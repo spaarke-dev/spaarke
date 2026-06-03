@@ -41,11 +41,7 @@
  */
 
 import * as React from 'react';
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-} from '@fluentui/react-components';
+import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { DataGrid } from '../src/components/DataGrid';
 import type {
   IDataverseClient,
@@ -126,8 +122,7 @@ function createMockDataverseClient(options: MockClientOptions = {}): IDataverseC
   const allRecords: Record<string, unknown>[] = Array.from({ length: recordCount }, (_, i) => ({
     sprk_eventid: `evt-${String(i + 1).padStart(4, '0')}`,
     sprk_eventname: `Event ${i + 1}`,
-    sprk_status:
-      i % 3 === 0 ? 100000000 : i % 3 === 1 ? 100000001 : 100000002,
+    sprk_status: i % 3 === 0 ? 100000000 : i % 3 === 1 ? 100000001 : 100000002,
     sprk_amount: 1000 + i * 37.5,
     sprk_duedate: new Date(Date.now() + i * 86_400_000).toISOString(),
     sprk_owner: { name: `User ${1 + (i % 5)}` },
@@ -146,7 +141,7 @@ function createMockDataverseClient(options: MockClientOptions = {}): IDataverseC
     retrieveEntityMetadata: async (_entityName: string): Promise<EntityMetadata> => entityMetadata,
     retrieveMultipleRecords: async <T = Record<string, unknown>,>(
       _entityName: string,
-      pagedFetchXml: string,
+      pagedFetchXml: string
     ): Promise<FetchMultipleResult<T>> => {
       const pageMatch = pagedFetchXml.match(/\bpage="(\d+)"/);
       const countMatch = pagedFetchXml.match(/\bcount="(\d+)"/);
@@ -164,13 +159,13 @@ function createMockDataverseClient(options: MockClientOptions = {}): IDataverseC
     retrieveRecord: async <T = Record<string, unknown>,>(
       entityName: string,
       id: string,
-      _select?: string[],
+      _select?: string[]
     ): Promise<T> => {
       if (entityName === 'sprk_gridconfiguration') {
         if (id === 'nonexistent') throw new Error('Record not found');
         return { sprk_configjson: JSON.stringify(configJson) } as unknown as T;
       }
-      const hit = allRecords.find((r) => r.sprk_eventid === id);
+      const hit = allRecords.find(r => r.sprk_eventid === id);
       if (!hit) throw new Error(`Record ${id} not found`);
       return hit as unknown as T;
     },
@@ -214,11 +209,7 @@ interface StoryArgs {
   theme: 'light' | 'dark';
 }
 
-const withFluentProvider = (
-  theme: 'light' | 'dark',
-  content: React.ReactNode,
-  height = '600px',
-): React.ReactNode => (
+const withFluentProvider = (theme: 'light' | 'dark', content: React.ReactNode, height = '600px'): React.ReactNode => (
   <FluentProvider
     applyStylesToPortals
     theme={theme === 'dark' ? webDarkTheme : webLightTheme}
@@ -244,12 +235,9 @@ export const SelectionSingle = (args: StoryArgs) => {
           behavior: { selectionMode: 'single', pageSize: 50, enableSorting: true, enableColumnResize: true },
         },
       }),
-    [],
+    []
   );
-  return withFluentProvider(
-    args.theme,
-    <DataGrid configId="story-selection-single" dataverseClient={client} />,
-  );
+  return withFluentProvider(args.theme, <DataGrid configId="story-selection-single" dataverseClient={client} />);
 };
 SelectionSingle.args = { theme: 'light' as const };
 SelectionSingle.storyName = 'Selection — single (selectionMode="single")';
@@ -270,12 +258,9 @@ export const SelectionMulti = (args: StoryArgs) => {
           behavior: { selectionMode: 'multi', pageSize: 50, enableSorting: true, enableColumnResize: true },
         },
       }),
-    [],
+    []
   );
-  return withFluentProvider(
-    args.theme,
-    <DataGrid configId="story-selection-multi" dataverseClient={client} />,
-  );
+  return withFluentProvider(args.theme, <DataGrid configId="story-selection-multi" dataverseClient={client} />);
 };
 SelectionMulti.args = { theme: 'light' as const };
 SelectionMulti.storyName = 'Selection — multi (selectionMode="multiselect")';
@@ -296,12 +281,9 @@ export const SelectionSelectAll = (args: StoryArgs) => {
           behavior: { selectionMode: 'multi', pageSize: 50, enableSorting: true, enableColumnResize: true },
         },
       }),
-    [],
+    []
   );
-  return withFluentProvider(
-    args.theme,
-    <DataGrid configId="story-selection-all" dataverseClient={client} />,
-  );
+  return withFluentProvider(args.theme, <DataGrid configId="story-selection-all" dataverseClient={client} />);
 };
 SelectionSelectAll.args = { theme: 'light' as const };
 SelectionSelectAll.storyName = 'Selection — select all (header checkboxIndicator)';
@@ -322,12 +304,9 @@ export const SortableColumns = (args: StoryArgs) => {
           behavior: { selectionMode: 'multi', pageSize: 50, enableSorting: true, enableColumnResize: true },
         },
       }),
-    [],
+    []
   );
-  return withFluentProvider(
-    args.theme,
-    <DataGrid configId="story-sort" dataverseClient={client} />,
-  );
+  return withFluentProvider(args.theme, <DataGrid configId="story-sort" dataverseClient={client} />);
 };
 SortableColumns.args = { theme: 'light' as const };
 SortableColumns.storyName = 'Sort (sortable + createTableColumn.compare)';
@@ -348,12 +327,9 @@ export const ResizableColumns = (args: StoryArgs) => {
           behavior: { selectionMode: 'multi', pageSize: 50, enableSorting: true, enableColumnResize: true },
         },
       }),
-    [],
+    []
   );
-  return withFluentProvider(
-    args.theme,
-    <DataGrid configId="story-resize" dataverseClient={client} />,
-  );
+  return withFluentProvider(args.theme, <DataGrid configId="story-resize" dataverseClient={client} />);
 };
 ResizableColumns.args = { theme: 'light' as const };
 ResizableColumns.storyName = 'Resize (resizableColumns + columnSizingOptions)';
@@ -374,12 +350,9 @@ export const KeyboardNavigation = (args: StoryArgs) => {
           behavior: { selectionMode: 'multi', pageSize: 50, enableSorting: true, enableColumnResize: true },
         },
       }),
-    [],
+    []
   );
-  return withFluentProvider(
-    args.theme,
-    <DataGrid configId="story-keyboard-nav" dataverseClient={client} />,
-  );
+  return withFluentProvider(args.theme, <DataGrid configId="story-keyboard-nav" dataverseClient={client} />);
 };
 KeyboardNavigation.args = { theme: 'light' as const };
 KeyboardNavigation.storyName = 'Keyboard nav (focusMode="composite")';
@@ -404,12 +377,9 @@ export const DensityExtraSmall = (args: StoryArgs) => {
           behavior: { selectionMode: 'multi', pageSize: 50, enableSorting: true, enableColumnResize: true },
         },
       }),
-    [],
+    []
   );
-  return withFluentProvider(
-    args.theme,
-    <DataGrid configId="story-density-xs" dataverseClient={client} />,
-  );
+  return withFluentProvider(args.theme, <DataGrid configId="story-density-xs" dataverseClient={client} />);
 };
 DensityExtraSmall.args = { theme: 'light' as const };
 DensityExtraSmall.storyName = 'Density — extra-small (size="small", wrapper note)';
@@ -430,12 +400,9 @@ export const DensitySmall = (args: StoryArgs) => {
           behavior: { selectionMode: 'multi', pageSize: 50, enableSorting: true, enableColumnResize: true },
         },
       }),
-    [],
+    []
   );
-  return withFluentProvider(
-    args.theme,
-    <DataGrid configId="story-density-small" dataverseClient={client} />,
-  );
+  return withFluentProvider(args.theme, <DataGrid configId="story-density-small" dataverseClient={client} />);
 };
 DensitySmall.args = { theme: 'light' as const };
 DensitySmall.storyName = 'Density — small (size="small")';
@@ -456,12 +423,9 @@ export const DensityMedium = (args: StoryArgs) => {
           behavior: { selectionMode: 'multi', pageSize: 50, enableSorting: true, enableColumnResize: true },
         },
       }),
-    [],
+    []
   );
-  return withFluentProvider(
-    args.theme,
-    <DataGrid configId="story-density-medium" dataverseClient={client} />,
-  );
+  return withFluentProvider(args.theme, <DataGrid configId="story-density-medium" dataverseClient={client} />);
 };
 DensityMedium.args = { theme: 'light' as const };
 DensityMedium.storyName = 'Density — medium (size="medium")';
@@ -485,12 +449,12 @@ export const StickyHeader = (args: StoryArgs) => {
           behavior: { selectionMode: 'multi', pageSize: 100, enableSorting: true, enableColumnResize: true },
         },
       }),
-    [],
+    []
   );
   return withFluentProvider(
     args.theme,
     <DataGrid configId="story-sticky-header" dataverseClient={client} />,
-    '400px', // constrain height so the user has something to scroll past
+    '400px' // constrain height so the user has something to scroll past
   );
 };
 StickyHeader.args = { theme: 'light' as const };

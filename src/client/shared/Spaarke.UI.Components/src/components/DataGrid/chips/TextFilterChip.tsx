@@ -110,13 +110,7 @@ const useStyles = makeStyles({
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const TextFilterChip: React.FC<TextFilterChipProps> = ({
-  value,
-  onChange,
-  label,
-  placeholder,
-  className,
-}) => {
+export const TextFilterChip: React.FC<TextFilterChipProps> = ({ value, onChange, label, placeholder, className }) => {
   const styles = useStyles();
 
   // Open/close + draft text state
@@ -131,12 +125,12 @@ export const TextFilterChip: React.FC<TextFilterChipProps> = ({
       }
       setOpen(data.open);
     },
-    [value],
+    [value]
   );
 
   const handleInputChange: React.ChangeEventHandler<HTMLInputElement> = React.useCallback(
-    (ev) => setDraft(ev.target.value),
-    [],
+    ev => setDraft(ev.target.value),
+    []
   );
 
   const handleApply = React.useCallback(() => {
@@ -153,25 +147,20 @@ export const TextFilterChip: React.FC<TextFilterChipProps> = ({
 
   // Enter submits (matches typical filter-bar UX).
   const handleKeyDown: React.KeyboardEventHandler<HTMLInputElement> = React.useCallback(
-    (ev) => {
+    ev => {
       if (ev.key === 'Enter') {
         ev.preventDefault();
         handleApply();
       }
     },
-    [handleApply],
+    [handleApply]
   );
 
   const triggerLabel: string = value ? `"${value}"` : label;
 
   return (
     <div className={mergeClasses(styles.root, className)} data-testid="text-filter-chip">
-      <Popover
-        open={open}
-        onOpenChange={handleOpenChange}
-        trapFocus
-        positioning="below-start"
-      >
+      <Popover open={open} onOpenChange={handleOpenChange} trapFocus positioning="below-start">
         <PopoverTrigger disableButtonEnhancement>
           <Button
             className={styles.trigger}

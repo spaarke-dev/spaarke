@@ -111,8 +111,8 @@ export interface ResolvedConfig {
  * resolved shape — it's a per-grid configuration (consumed when present, omitted
  * when absent). Other fields have sensible framework defaults.
  */
-type ResolvedBehavior = Required<Omit<BehaviorConfig, 'parentContextFilter'>>
-  & Pick<BehaviorConfig, 'parentContextFilter'>;
+type ResolvedBehavior = Required<Omit<BehaviorConfig, 'parentContextFilter'>> &
+  Pick<BehaviorConfig, 'parentContextFilter'>;
 
 const FRAMEWORK_DEFAULT_BEHAVIOR: ResolvedBehavior = {
   selectionMode: 'multi',
@@ -152,9 +152,10 @@ interface LayoutColumn {
  * framework's `getRowId` derivation can use it (Phase A/B detail — see
  * `useLazyLoad` consumer code).
  */
-export function parseLayoutColumns(
-  layoutXml: string | undefined,
-): { columns: LayoutColumn[]; rowIdAttribute: string | undefined } {
+export function parseLayoutColumns(layoutXml: string | undefined): {
+  columns: LayoutColumn[];
+  rowIdAttribute: string | undefined;
+} {
   if (!layoutXml || typeof layoutXml !== 'string') {
     return { columns: [], rowIdAttribute: undefined };
   }
@@ -175,9 +176,7 @@ export function parseLayoutColumns(
       const widthParsed = widthRaw ? Number.parseInt(widthRaw, 10) : NaN;
       columns.push({
         name,
-        width: Number.isFinite(widthParsed) && widthParsed > 0
-          ? widthParsed
-          : FRAMEWORK_DEFAULT_COLUMN_WIDTH,
+        width: Number.isFinite(widthParsed) && widthParsed > 0 ? widthParsed : FRAMEWORK_DEFAULT_COLUMN_WIDTH,
         isFirstCell: cell.getAttribute('isfirstcell') === 'true' || index === 0,
         rowId: rowIdAttribute,
       });
@@ -192,10 +191,7 @@ export function parseLayoutColumns(
 // Renderer derivation from attribute type — used when configjson does not override
 // ─────────────────────────────────────────────────────────────────────────────
 
-function rendererFromAttributeType(
-  attributeType: string | undefined,
-  format: string | undefined,
-): string {
+function rendererFromAttributeType(attributeType: string | undefined, format: string | undefined): string {
   if (!attributeType) return 'default';
   switch (attributeType) {
     case 'Money':
@@ -247,16 +243,14 @@ export function resolveConfig(
   configRecord: DataGridConfiguration | null,
   entityMetadata: EntityMetadata,
   layoutXml: string | undefined,
-  entityNameFromSavedQuery?: string,
+  entityNameFromSavedQuery?: string
 ): ResolvedConfig {
   const safeOverrides: DataGridOverrides = overrides ?? {};
 
   // Tier 1: entity name
   const entityName =
     entityNameFromSavedQuery ??
-    (configRecord?.source?.type === 'savedquery-set'
-      ? configRecord.source.entityLogicalName
-      : undefined) ??
+    (configRecord?.source?.type === 'savedquery-set' ? configRecord.source.entityLogicalName : undefined) ??
     // last-ditch: derive from primaryIdAttribute (e.g., `sprk_eventid` ⇒ `sprk_event`)
     entityMetadata.primaryIdAttribute.replace(/id$/i, '');
 
@@ -273,8 +267,7 @@ export function resolveConfig(
   };
 
   // Tier 4: filter chips
-  const filterChips: FilterChipsConfig =
-    configRecord?.filterChips ?? { mode: 'auto' };
+  const filterChips: FilterChipsConfig = configRecord?.filterChips ?? { mode: 'auto' };
 
   // Tier 5: command bar (just pass through; framework defaults filled by command-bar primitive)
   const commandBar: CommandBarConfig = configRecord?.commandBar ?? {};
@@ -287,8 +280,8 @@ export function resolveConfig(
   const layout = parseLayoutColumns(layoutXml);
   const configColumnOverrides: Record<string, ColumnOverride> = configRecord?.columns ?? {};
 
-  const columnsFromLayout = layout.columns.map((layoutCol) =>
-    buildResolvedColumn(layoutCol, entityMetadata, configColumnOverrides[layoutCol.name]),
+  const columnsFromLayout = layout.columns.map(layoutCol =>
+    buildResolvedColumn(layoutCol, entityMetadata, configColumnOverrides[layoutCol.name])
   );
 
   // Fallback: if layoutXml is empty (e.g., savedquery-set with no loaded savedquery yet,
@@ -317,21 +310,17 @@ export function resolveConfig(
 function buildResolvedColumn(
   layoutCol: LayoutColumn,
   entityMetadata: EntityMetadata,
-  override: ColumnOverride | undefined,
+  override: ColumnOverride | undefined
 ): ResolvedColumn {
   const attrMeta = entityMetadata.attributes[layoutCol.name];
   const isPrimaryName =
-    layoutCol.name === entityMetadata.primaryNameAttribute ||
-    attrMeta?.isPrimaryName === true ||
-    layoutCol.isFirstCell;
+    layoutCol.name === entityMetadata.primaryNameAttribute || attrMeta?.isPrimaryName === true || layoutCol.isFirstCell;
 
-  const derivedRenderer = isPrimaryName
-    ? 'link'
-    : rendererFromAttributeType(attrMeta?.attributeType, attrMeta?.format);
+  const derivedRenderer = isPrimaryName ? 'link' : rendererFromAttributeType(attrMeta?.attributeType, attrMeta?.format);
 
   return {
     name: layoutCol.name,
-    label: override?.label ?? humanizeLogicalName(layoutCol.name),
+    label: override?.label ?? attrMeta?.displayName ?? humanizeLogicalName(layoutCol.name),
     width: override?.width ?? layoutCol.width,
     renderer: override?.renderer ?? derivedRenderer,
     align: override?.align ?? defaultAlignFor(attrMeta?.attributeType),
@@ -343,7 +332,7 @@ function buildResolvedColumn(
 
 function synthesizeColumnsFromMetadata(
   entityMetadata: EntityMetadata,
-  configColumnOverrides: Record<string, ColumnOverride>,
+  configColumnOverrides: Record<string, ColumnOverride>
 ): ResolvedColumn[] {
   const result: ResolvedColumn[] = [];
   const seen = new Set<string>();
@@ -359,8 +348,8 @@ function synthesizeColumnsFromMetadata(
           isFirstCell: true,
         },
         entityMetadata,
-        configColumnOverrides[primaryName],
-      ),
+        configColumnOverrides[primaryName]
+      )
     );
     seen.add(primaryName);
   }
@@ -389,8 +378,8 @@ function synthesizeColumnsFromMetadata(
           isFirstCell: result.length === 0,
         },
         entityMetadata,
-        configColumnOverrides[attrName],
-      ),
+        configColumnOverrides[attrName]
+      )
     );
     seen.add(attrName);
   }
@@ -398,9 +387,7 @@ function synthesizeColumnsFromMetadata(
   return result;
 }
 
-function defaultAlignFor(
-  attributeType: string | undefined,
-): 'left' | 'center' | 'right' {
+function defaultAlignFor(attributeType: string | undefined): 'left' | 'center' | 'right' {
   if (attributeType === 'Money' || attributeType === 'Decimal' || attributeType === 'Integer') {
     return 'right';
   }
@@ -417,6 +404,6 @@ function humanizeLogicalName(logicalName: string): string {
     .replace(/\s+/g, ' ')
     .trim()
     .split(' ')
-    .map((w) => (w.length > 0 ? w[0].toUpperCase() + w.slice(1) : w))
+    .map(w => (w.length > 0 ? w[0].toUpperCase() + w.slice(1) : w))
     .join(' ');
 }

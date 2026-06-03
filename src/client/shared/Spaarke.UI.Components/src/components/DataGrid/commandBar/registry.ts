@@ -56,9 +56,7 @@ const commandHandlers = new Map<string, DefaultHandler>();
 export function registerCommandHandler(id: string, handler: DefaultHandler): void {
   if (commandHandlers.has(id)) {
     // eslint-disable-next-line no-console
-    console.warn(
-      `[CommandRegistry] Handler "${id}" already registered. Overwriting (last-write-wins per OC-34).`,
-    );
+    console.warn(`[CommandRegistry] Handler "${id}" already registered. Overwriting (last-write-wins per OC-34).`);
   }
   commandHandlers.set(id, handler);
 }

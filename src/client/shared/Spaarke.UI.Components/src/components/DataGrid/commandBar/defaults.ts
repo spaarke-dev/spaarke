@@ -79,8 +79,14 @@ export interface DefaultActionMeta {
   appearance: 'subtle' | 'primary' | 'secondary';
 }
 
+/**
+ * Default labels + icons per built-in action. Every default action renders as
+ * `appearance: 'subtle'` to match the Power Apps OOB grid command bar pattern
+ * (icon + text, no background fill, no primary blue button). Hosts that want
+ * an explicit primary call-to-action must author it explicitly in configjson.
+ */
 export const DEFAULT_ACTION_META: Record<string, DefaultActionMeta> = {
-  'create-form': { label: 'New', icon: 'Add20Regular', appearance: 'primary' },
+  'create-form': { label: 'New', icon: 'Add20Regular', appearance: 'subtle' },
   'delete-selected': { label: 'Delete', icon: 'Delete20Regular', appearance: 'subtle' },
   refresh: { label: 'Refresh', icon: 'ArrowSync20Regular', appearance: 'subtle' },
   'export-excel': { label: 'Export to Excel', icon: 'ArrowDownload20Regular', appearance: 'subtle' },
@@ -154,7 +160,7 @@ function downloadBlob(blob: Blob, filename: string): void {
  * Lifted from `openNewEventForm` (EventsPage App.tsx:461). Generalized to any
  * entity by reading `ctx.entityName` instead of the hard-coded `EVENT_ENTITY_NAME`.
  */
-export const defaultCreateFormHandler: DefaultHandler = async (ctx) => {
+export const defaultCreateFormHandler: DefaultHandler = async ctx => {
   const xrm = getXrm();
   if (!xrm?.Navigation?.openForm) {
     // eslint-disable-next-line no-console
@@ -191,7 +197,7 @@ export const defaultCreateFormHandler: DefaultHandler = async (ctx) => {
  * After all deletes resolve, `ctx.refresh()` is invoked so the grid re-fetches
  * page 1 and the freshly-deleted rows disappear.
  */
-export const defaultDeleteSelectedHandler: DefaultHandler = async (ctx) => {
+export const defaultDeleteSelectedHandler: DefaultHandler = async ctx => {
   if (ctx.selectedIds.length === 0) return;
   const xrm = getXrm();
   if (!xrm?.WebApi?.deleteRecord) {
@@ -200,9 +206,7 @@ export const defaultDeleteSelectedHandler: DefaultHandler = async (ctx) => {
     return;
   }
   try {
-    await Promise.all(
-      ctx.selectedIds.map((id) => xrm.WebApi.deleteRecord(ctx.entityName, cleanGuid(id))),
-    );
+    await Promise.all(ctx.selectedIds.map(id => xrm.WebApi.deleteRecord(ctx.entityName, cleanGuid(id))));
     // eslint-disable-next-line no-console
     console.log(`[CommandBar] Deleted ${ctx.selectedIds.length} ${ctx.entityName} record(s).`);
     ctx.refresh();
@@ -226,7 +230,7 @@ export const defaultDeleteSelectedHandler: DefaultHandler = async (ctx) => {
  * Trigger a hard refresh — delegates to `ctx.refresh()` from the
  * `<DataGrid />`'s context (re-fetches page 1, preserves filter/sort state).
  */
-export const defaultRefreshHandler: DefaultHandler = async (ctx) => {
+export const defaultRefreshHandler: DefaultHandler = async ctx => {
   ctx.refresh();
 };
 
@@ -240,13 +244,8 @@ export const defaultRefreshHandler: DefaultHandler = async (ctx) => {
  *
  * Filename format: `{entityName}-{savedQueryName}-{yyyymmdd}.csv`.
  */
-export const defaultExportExcelHandler: DefaultHandler = async (ctx) => {
-  const blob = exportCsv(
-    ctx.records as Record<string, unknown>[],
-    ctx.columns,
-    ctx.currentView,
-    ctx.entityName,
-  );
+export const defaultExportExcelHandler: DefaultHandler = async ctx => {
+  const blob = exportCsv(ctx.records as Record<string, unknown>[], ctx.columns, ctx.currentView, ctx.entityName);
   const filename = csvFilename(ctx.entityName, ctx.currentView);
   downloadBlob(blob, filename);
 };
@@ -257,7 +256,7 @@ export const defaultExportExcelHandler: DefaultHandler = async (ctx) => {
  * cleanly; the `<CommandBar />` itself short-circuits rendering an `edit-columns`
  * button by default.
  */
-export const defaultEditColumnsHandler: DefaultHandler = async (_ctx) => {
+export const defaultEditColumnsHandler: DefaultHandler = async _ctx => {
   // eslint-disable-next-line no-console
   console.log('[CommandBar] Edit columns is not available in R1.');
 };
@@ -271,7 +270,7 @@ export const defaultEditColumnsHandler: DefaultHandler = async (_ctx) => {
  * action remains useful as a hook point without forcing a `<CommandBar />`
  * dependency on a filter-strip controller it does not own.
  */
-export const defaultEditFiltersHandler: DefaultHandler = async (_ctx) => {
+export const defaultEditFiltersHandler: DefaultHandler = async _ctx => {
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
     try {
       window.dispatchEvent(new CustomEvent('spaarke-datagrid:toggle-filter-strip'));

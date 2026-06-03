@@ -20,10 +20,7 @@ export { XrmDataverseClient } from './XrmDataverseClient';
 // Constructor takes `authenticatedFetch` from `@spaarke/auth` (DI for decoupling)
 // and an optional `bffBaseUrl` (falls back to window.SPAARKE_BFF_URL / env).
 export { BffDataverseClient } from './BffDataverseClient';
-export type {
-  BffDataverseClientOptions,
-  AuthenticatedFetchFn as BffAuthenticatedFetchFn,
-} from './BffDataverseClient';
+export type { BffDataverseClientOptions, AuthenticatedFetchFn as BffAuthenticatedFetchFn } from './BffDataverseClient';
 export {
   BffDataverseClientError,
   BffDataverseClientConfigurationError,

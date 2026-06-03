@@ -36,7 +36,7 @@ import {
 function makeResponse(
   status: number,
   body: unknown,
-  options: { contentType?: string; statusText?: string } = {},
+  options: { contentType?: string; statusText?: string } = {}
 ): Response {
   const contentType = options.contentType ?? 'application/json';
   const headers = new Headers({ 'content-type': contentType });
@@ -96,7 +96,7 @@ describe('BffDataverseClient', () => {
           fetchXml: '<fetch/>',
           layoutXml: '<grid/>',
           name: 'My View',
-        }),
+        })
       );
       const client = new BffDataverseClient({
         authenticatedFetch: fetchFn,
@@ -104,10 +104,7 @@ describe('BffDataverseClient', () => {
       });
       await client.retrieveSavedQuery('id-1');
 
-      expect(fetchFn).toHaveBeenCalledWith(
-        `${BASE_URL}/api/dataverse/savedquery/id-1`,
-        expect.any(Object),
-      );
+      expect(fetchFn).toHaveBeenCalledWith(`${BASE_URL}/api/dataverse/savedquery/id-1`, expect.any(Object));
     });
 
     it('trims trailing slash from bffBaseUrl', async () => {
@@ -132,10 +129,7 @@ describe('BffDataverseClient', () => {
       const client = new BffDataverseClient({ authenticatedFetch: fetchFn });
       await client.retrieveSavedQueriesForEntity('sprk_event');
 
-      expect(fetchFn).toHaveBeenCalledWith(
-        `${BASE_URL}/api/dataverse/savedqueries/sprk_event`,
-        expect.any(Object),
-      );
+      expect(fetchFn).toHaveBeenCalledWith(`${BASE_URL}/api/dataverse/savedqueries/sprk_event`, expect.any(Object));
     });
 
     it('falls back to process.env.SPAARKE_BFF_URL when window global absent', async () => {
@@ -146,17 +140,14 @@ describe('BffDataverseClient', () => {
       const client = new BffDataverseClient({ authenticatedFetch: fetchFn });
       await client.retrieveSavedQueriesForEntity('sprk_event');
 
-      expect(fetchFn).toHaveBeenCalledWith(
-        `${BASE_URL}/api/dataverse/savedqueries/sprk_event`,
-        expect.any(Object),
-      );
+      expect(fetchFn).toHaveBeenCalledWith(`${BASE_URL}/api/dataverse/savedqueries/sprk_event`, expect.any(Object));
     });
 
     it('throws BffDataverseClientConfigurationError when no bffBaseUrl is resolvable', () => {
       const fetchFn = makeMockFetch();
       // No options.bffBaseUrl, no window.SPAARKE_BFF_URL, no process.env.SPAARKE_BFF_URL.
       expect(() => new BffDataverseClient({ authenticatedFetch: fetchFn })).toThrow(
-        BffDataverseClientConfigurationError,
+        BffDataverseClientConfigurationError
       );
     });
 
@@ -167,7 +158,7 @@ describe('BffDataverseClient', () => {
             // @ts-expect-error — intentional: testing runtime guard.
             authenticatedFetch: undefined,
             bffBaseUrl: BASE_URL,
-          }),
+          })
       ).toThrow(BffDataverseClientConfigurationError);
     });
   });
@@ -185,7 +176,7 @@ describe('BffDataverseClient', () => {
           fetchXml: '<fetch top="50"/>',
           layoutXml: '<grid/>',
           name: 'Active Events',
-        }),
+        })
       );
       const client = new BffDataverseClient({
         authenticatedFetch: fetchFn,
@@ -207,9 +198,7 @@ describe('BffDataverseClient', () => {
 
     it('encodes the savedQueryId in the URL (encodeURIComponent applied)', async () => {
       const fetchFn = makeMockFetch();
-      fetchFn.mockResolvedValue(
-        makeResponse(200, { entityName: '', fetchXml: '', layoutXml: '', name: '' }),
-      );
+      fetchFn.mockResolvedValue(makeResponse(200, { entityName: '', fetchXml: '', layoutXml: '', name: '' }));
       const client = new BffDataverseClient({
         authenticatedFetch: fetchFn,
         bffBaseUrl: BASE_URL,
@@ -233,7 +222,7 @@ describe('BffDataverseClient', () => {
         makeResponse(200, [
           { id: 'v1', name: 'All Events', isDefault: true, queryType: 0 },
           { id: 'v2', name: 'My Events', isDefault: false, queryType: 0 },
-        ]),
+        ])
       );
       const client = new BffDataverseClient({
         authenticatedFetch: fetchFn,
@@ -271,7 +260,7 @@ describe('BffDataverseClient', () => {
               ],
             },
           },
-        }),
+        })
       );
       const client = new BffDataverseClient({
         authenticatedFetch: fetchFn,
@@ -298,17 +287,14 @@ describe('BffDataverseClient', () => {
         makeResponse(200, {
           entities: [{ sprk_eventid: 'r1' }],
           moreRecords: false,
-        }),
+        })
       );
       const client = new BffDataverseClient({
         authenticatedFetch: fetchFn,
         bffBaseUrl: BASE_URL,
       });
       const fetchXml = '<fetch top="50"><entity name="sprk_event"/></fetch>';
-      const result = await client.retrieveMultipleRecords<{ sprk_eventid: string }>(
-        'sprk_event',
-        fetchXml,
-      );
+      const result = await client.retrieveMultipleRecords<{ sprk_eventid: string }>('sprk_event', fetchXml);
 
       const [url, init] = fetchFn.mock.calls[0];
       expect(url).toBe(`${BASE_URL}/api/dataverse/fetch`);
@@ -335,7 +321,7 @@ describe('BffDataverseClient', () => {
           entities: [{ id: '1' }],
           moreRecords: true,
           pagingCookie: 'cookie-xyz',
-        }),
+        })
       );
       const client = new BffDataverseClient({
         authenticatedFetch: fetchFn,
@@ -355,9 +341,7 @@ describe('BffDataverseClient', () => {
   describe('retrieveRecord', () => {
     it('builds $select clause when select fields are provided', async () => {
       const fetchFn = makeMockFetch();
-      fetchFn.mockResolvedValue(
-        makeResponse(200, { sprk_eventid: 'r1', sprk_name: 'Hello' }),
-      );
+      fetchFn.mockResolvedValue(makeResponse(200, { sprk_eventid: 'r1', sprk_name: 'Hello' }));
       const client = new BffDataverseClient({
         authenticatedFetch: fetchFn,
         bffBaseUrl: BASE_URL,
@@ -368,9 +352,7 @@ describe('BffDataverseClient', () => {
       }>('sprk_event', 'r1', ['sprk_eventid', 'sprk_name']);
 
       const calledUrl = fetchFn.mock.calls[0][0] as string;
-      expect(calledUrl).toBe(
-        `${BASE_URL}/api/dataverse/record/sprk_event/r1?$select=sprk_eventid,sprk_name`,
-      );
+      expect(calledUrl).toBe(`${BASE_URL}/api/dataverse/record/sprk_event/r1?$select=sprk_eventid,sprk_name`);
       expect(result.sprk_name).toBe('Hello');
     });
 
@@ -414,9 +396,7 @@ describe('BffDataverseClient', () => {
       await client.retrieveRecord('sprk_event', 'id with space/slash');
 
       const calledUrl = fetchFn.mock.calls[0][0] as string;
-      expect(calledUrl).toBe(
-        `${BASE_URL}/api/dataverse/record/sprk_event/id%20with%20space%2Fslash`,
-      );
+      expect(calledUrl).toBe(`${BASE_URL}/api/dataverse/record/sprk_event/id%20with%20space%2Fslash`);
     });
   });
 
@@ -438,8 +418,8 @@ describe('BffDataverseClient', () => {
             errorCode: 'DV_SAVEDQUERY_NOT_FOUND',
             correlationId: 'corr-1',
           },
-          { contentType: 'application/problem+json' },
-        ),
+          { contentType: 'application/problem+json' }
+        )
       );
       const client = new BffDataverseClient({
         authenticatedFetch: fetchFn,
@@ -452,9 +432,7 @@ describe('BffDataverseClient', () => {
         errorCode: 'DV_SAVEDQUERY_NOT_FOUND',
         correlationId: 'corr-1',
       });
-      await expect(client.retrieveSavedQuery('missing')).rejects.toBeInstanceOf(
-        BffNotFoundError,
-      );
+      await expect(client.retrieveSavedQuery('missing')).rejects.toBeInstanceOf(BffNotFoundError);
     });
 
     it('403 ProblemDetails (DV_PRIVILEGE_DENIED) → BffForbiddenError', async () => {
@@ -466,16 +444,14 @@ describe('BffDataverseClient', () => {
           detail: 'Caller lacks Read privilege on sprk_event.',
           errorCode: 'DV_PRIVILEGE_DENIED',
           correlationId: 'corr-2',
-        }),
+        })
       );
       const client = new BffDataverseClient({
         authenticatedFetch: fetchFn,
         bffBaseUrl: BASE_URL,
       });
 
-      const error = (await client
-        .retrieveSavedQueriesForEntity('sprk_event')
-        .catch(e => e)) as BffForbiddenError;
+      const error = (await client.retrieveSavedQueriesForEntity('sprk_event').catch(e => e)) as BffForbiddenError;
 
       expect(error).toBeInstanceOf(BffForbiddenError);
       expect(error.errorCode).toBe('DV_PRIVILEGE_DENIED');
@@ -492,16 +468,14 @@ describe('BffDataverseClient', () => {
           detail: 'FetchXML is malformed.',
           errorCode: 'DV_FETCHXML_MALFORMED',
           correlationId: 'corr-3',
-        }),
+        })
       );
       const client = new BffDataverseClient({
         authenticatedFetch: fetchFn,
         bffBaseUrl: BASE_URL,
       });
 
-      const error = (await client
-        .retrieveMultipleRecords('sprk_event', 'not xml')
-        .catch(e => e)) as BffBadRequestError;
+      const error = (await client.retrieveMultipleRecords('sprk_event', 'not xml').catch(e => e)) as BffBadRequestError;
 
       expect(error).toBeInstanceOf(BffBadRequestError);
       expect(error.errorCode).toBe('DV_FETCHXML_MALFORMED');
@@ -518,16 +492,14 @@ describe('BffDataverseClient', () => {
           detail: 'Upstream Dataverse call failed.',
           errorCode: 'DV_INTERNAL_ERROR',
           correlationId: 'corr-4',
-        }),
+        })
       );
       const client = new BffDataverseClient({
         authenticatedFetch: fetchFn,
         bffBaseUrl: BASE_URL,
       });
 
-      const error = (await client
-        .retrieveEntityMetadata('sprk_event')
-        .catch(e => e)) as BffServerError;
+      const error = (await client.retrieveEntityMetadata('sprk_event').catch(e => e)) as BffServerError;
 
       expect(error).toBeInstanceOf(BffServerError);
       expect(error.status).toBe(500);
@@ -542,9 +514,7 @@ describe('BffDataverseClient', () => {
         bffBaseUrl: BASE_URL,
       });
 
-      const error = (await client
-        .retrieveSavedQuery('id-1')
-        .catch(e => e)) as BffServerError;
+      const error = (await client.retrieveSavedQuery('id-1').catch(e => e)) as BffServerError;
 
       expect(error).toBeInstanceOf(BffServerError);
       expect(error.errorCode).toBe('BFF_UNKNOWN_ERROR');
@@ -558,17 +528,9 @@ describe('BffDataverseClient', () => {
   // -------------------------------------------------------------------------
 
   it('all typed errors inherit from BffDataverseClientError', () => {
-    expect(new BffNotFoundError('X', undefined, 'm')).toBeInstanceOf(
-      BffDataverseClientError,
-    );
-    expect(new BffForbiddenError('X', undefined, 'm')).toBeInstanceOf(
-      BffDataverseClientError,
-    );
-    expect(new BffBadRequestError('X', undefined, 'm')).toBeInstanceOf(
-      BffDataverseClientError,
-    );
-    expect(new BffServerError('X', 500, undefined, 'm')).toBeInstanceOf(
-      BffDataverseClientError,
-    );
+    expect(new BffNotFoundError('X', undefined, 'm')).toBeInstanceOf(BffDataverseClientError);
+    expect(new BffForbiddenError('X', undefined, 'm')).toBeInstanceOf(BffDataverseClientError);
+    expect(new BffBadRequestError('X', undefined, 'm')).toBeInstanceOf(BffDataverseClientError);
+    expect(new BffServerError('X', 500, undefined, 'm')).toBeInstanceOf(BffDataverseClientError);
   });
 });

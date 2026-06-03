@@ -58,10 +58,7 @@ import {
 import { ChevronDownRegular } from '@fluentui/react-icons';
 
 import { dataGridTokens } from '../tokens';
-import type {
-  EntityMetadata,
-  OptionSetOption,
-} from '../../../services/IDataverseClient';
+import type { EntityMetadata, OptionSetOption } from '../../../services/IDataverseClient';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -188,7 +185,7 @@ const useStyles = makeStyles({
 function toCheckedValues(value: Set<number>): Record<string, string[]> {
   const arr: string[] = [];
   // `for…of` keeps Set iteration React-16-safe (no Array.from polyfill assumptions).
-  value.forEach((v) => {
+  value.forEach(v => {
     arr.push(String(v));
   });
   return { [CHECKBOX_GROUP_NAME]: arr };
@@ -212,10 +209,7 @@ function fromCheckedItems(checkedItems: string[]): Set<number> {
  * Resolve the option-set definition for a column. Returns `[]` when the
  * attribute is missing or has no `optionSet`, so the chip can render nothing.
  */
-function getOptions(
-  entityMetadata: EntityMetadata,
-  columnLogicalName: string,
-): OptionSetOption[] {
+function getOptions(entityMetadata: EntityMetadata, columnLogicalName: string): OptionSetOption[] {
   const attr = entityMetadata.attributes?.[columnLogicalName];
   return attr?.optionSet ?? [];
 }
@@ -242,7 +236,7 @@ export const OptionSetMultiFilterChip: React.FC<OptionSetMultiFilterChipProps> =
   // re-renders triggered by selection changes.
   const options = React.useMemo(
     () => getOptions(entityMetadata, columnLogicalName),
-    [entityMetadata, columnLogicalName],
+    [entityMetadata, columnLogicalName]
   );
 
   // Map value-Set → Fluent `Record<name, string[]>` on every render. The Set
@@ -254,7 +248,7 @@ export const OptionSetMultiFilterChip: React.FC<OptionSetMultiFilterChipProps> =
       if (data.name !== CHECKBOX_GROUP_NAME) return;
       onChange(fromCheckedItems(data.checkedItems));
     },
-    [onChange],
+    [onChange]
   );
 
   // Trigger label: "Status" with no selection, "Active" with one, "Active +2"
@@ -310,9 +304,7 @@ export const OptionSetMultiFilterChip: React.FC<OptionSetMultiFilterChipProps> =
             iconPosition="after"
             icon={<ChevronDownRegular aria-hidden="true" />}
             aria-label={
-              value.size > 0
-                ? `${label ?? columnLogicalName} (${value.size} selected)`
-                : (label ?? columnLogicalName)
+              value.size > 0 ? `${label ?? columnLogicalName} (${value.size} selected)` : (label ?? columnLogicalName)
             }
             data-testid="optionset-multi-filter-chip-trigger"
           >
@@ -330,7 +322,7 @@ export const OptionSetMultiFilterChip: React.FC<OptionSetMultiFilterChipProps> =
           */}
           <FluentProvider applyStylesToPortals={true} theme={portalTheme}>
             <MenuList>
-              {options.map((opt) => (
+              {options.map(opt => (
                 <MenuItemCheckbox
                   key={opt.value}
                   name={CHECKBOX_GROUP_NAME}

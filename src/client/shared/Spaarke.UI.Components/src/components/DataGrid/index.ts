@@ -29,11 +29,7 @@ export { useLazyLoad } from './useLazyLoad';
 export type { UseLazyLoadOptions, UseLazyLoadResult } from './useLazyLoad';
 
 export { resolveConfig, parseLayoutColumns } from './configResolution';
-export type {
-  DataGridOverrides,
-  ResolvedConfig,
-  ResolvedColumn,
-} from './configResolution';
+export type { DataGridOverrides, ResolvedConfig, ResolvedColumn } from './configResolution';
 
 // ─── Parent-context FetchXML overlay (task 020 D-020-02 follow-up) ───
 export { overlayParentContextFilter } from './fetchXmlOverlay';
@@ -41,29 +37,32 @@ export type { DataGridParentContextLike } from './fetchXmlOverlay';
 
 // ─── Column header primitives (task 004) ───
 export { ColumnHeaderMenu } from './columnHeader/ColumnHeaderMenu';
-export type {
-  ColumnHeaderMenuProps,
-  SortDirection,
-} from './columnHeader/ColumnHeaderMenu';
+export type { ColumnHeaderMenuProps, SortDirection } from './columnHeader/ColumnHeaderMenu';
 export { ColumnFilterHeader } from './columnHeader/ColumnFilterHeader';
 export type { ColumnFilterHeaderProps } from './columnHeader/ColumnFilterHeader';
 // (ColumnFilterType + ColumnFilterOption are internal; import from source if needed.)
 
+// ─── Per-column header content (Power-Apps-OOB-style chevron menu) ───
+export { HeaderCellContent, default as HeaderCellContentDefault } from './HeaderCellContent';
+export type { HeaderCellContentProps, HeaderSortDirection } from './HeaderCellContent';
+
+// ─── View picker (shared — reusable by Phase D EventsPage + Phase E SearchResultsGrid) ───
+// Renamed at barrel to `DataGridViewSelector` to avoid collision with the legacy
+// `ViewSelector` exported by `components/DatasetGrid/ViewSelector` (retired in Phase F).
+// The internal name in `./ViewSelector.tsx` stays `ViewSelector` — deep imports
+// still work via `./ViewSelector` direct path.
+export { ViewSelector as DataGridViewSelector, default as DataGridViewSelectorDefault } from './ViewSelector';
+export type { ViewSelectorProps as DataGridViewSelectorProps, SavedView } from './ViewSelector';
+
 // ─── Filter chip primitives (tasks 005-007) ───
 export { LookupMultiFilterChip, useDebouncedValue } from './chips/LookupMultiFilterChip';
-export type {
-  LookupMultiFilterChipProps,
-  LookupRecord,
-} from './chips/LookupMultiFilterChip';
+export type { LookupMultiFilterChipProps, LookupRecord } from './chips/LookupMultiFilterChip';
 
 export { OptionSetMultiFilterChip } from './chips/OptionSetMultiFilterChip';
 export type { OptionSetMultiFilterChipProps } from './chips/OptionSetMultiFilterChip';
 
 export { DateRangeFilterChip, localDateToUtcBounds } from './chips/DateRangeFilterChip';
-export type {
-  DateRangeFilterChipProps,
-  UtcDateBounds,
-} from './chips/DateRangeFilterChip';
+export type { DateRangeFilterChipProps, UtcDateBounds } from './chips/DateRangeFilterChip';
 
 export { TextFilterChip } from './chips/TextFilterChip';
 export type { TextFilterChipProps } from './chips/TextFilterChip';
@@ -88,19 +87,9 @@ export {
   DEFAULT_ACTION_META,
   DEFAULT_ACTION_HANDLERS,
 } from './commandBar/defaults';
-export type {
-  DefaultHandler,
-  DefaultHandlerContext,
-  DefaultActionMeta,
-} from './commandBar/defaults';
+export type { DefaultHandler, DefaultHandlerContext, DefaultActionMeta } from './commandBar/defaults';
 
-export {
-  exportCsv,
-  escapeCsvField,
-  csvFilename,
-  formatYyyymmdd,
-  UTF8_BOM,
-} from './commandBar/csvExport';
+export { exportCsv, escapeCsvField, csvFilename, formatYyyymmdd, UTF8_BOM } from './commandBar/csvExport';
 
 export {
   registerCommandHandler,
@@ -109,3 +98,9 @@ export {
   clearCommandHandlers,
   listCommandHandlers,
 } from './commandBar/registry';
+
+// ─── Filter chip composition layer (filterChips/) ───
+// Composes the Phase A primitive chips with the configjson FilterChipsConfig
+// + entity metadata + the savedquery's FetchXML. See filterChips/index.ts.
+export { FilterChipBar, discoverChips, augmentFetchXmlWithChips, deriveChipKindFromMetadata } from './filterChips';
+export type { FilterChipBarProps, ChipDescriptor, ChipKind, ChipState, ChipValue } from './filterChips';

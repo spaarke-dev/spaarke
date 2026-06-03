@@ -1,24 +1,38 @@
 /**
  * <CommandBar /> — the DataGrid framework's command bar primitive.
  *
- * Renders a Fluent v9 `<Toolbar />` with up to 6 built-in actions
- * (`create-form`, `delete-selected`, `refresh`, `export-excel`, `edit-columns`,
- * `edit-filters`) plus host-registered `custom` actions, driven by the
- * `CommandBarConfig` slice of the resolved configuration.
+ * Renders a Power Apps OOB-style grid command bar: a small number of
+ * `inlineLimit` subtle icon+text buttons followed by a `…` overflow menu that
+ * holds the remainder. Built-in actions resolved from `CommandBarConfig` are
+ * `refresh`, `delete-selected`, `create-form`, `export-excel`, `edit-columns`,
+ * `edit-filters`, plus host-registered `custom` actions.
+ *
+ * **Layout (matches Power Apps OOB grid header)**:
+ *   [↻ Refresh] [🗑 Delete]  │  [⋯]
+ *                            │   └─ MenuPopover with remaining items
+ *                            │
+ *                            └─ thin vertical Divider
+ *
+ * All inline triggers AND menu items use `appearance="subtle"` — no primary
+ * blue, no background fill. `+New` no longer gets prominent CTA styling; it
+ * lives in the overflow menu by default (callers can raise `inlineLimit` if
+ * they need it inline).
  *
  * **Lifted from**: `src/solutions/EventsPage/src/App.tsx` (`openNewEventForm`,
  * `deleteSelectedEvents`, `executeBulkStatusUpdate`). All three are now generic
  * over `entityName` (see `defaults.ts`).
  *
- * **Key behavior changes vs. the lifted code**:
+ * **Key behavior preserved from the lifted code**:
  *  - Confirmation for `delete-selected` uses a Fluent v9 `<Dialog>` (NOT `window.confirm`).
  *  - Bulk operations use `Promise.all` + a `<Spinner>` overlay for >10 records.
  *  - The Dialog surface is re-wrapped in `<FluentProvider applyStylesToPortals theme={…} />`
  *    so dark mode renders correctly inside the portal (NFR-03).
- *  - Overflow menu appears when there are >6 items.
- *  - Primary action (typically `create-form`) renders with `appearance="primary"`.
+ *  - `onCommandInvoke?(commandId, selectedIds)` fires for every invocation.
+ *  - `requiresSelection` ('single' | 'multi') drives the disabled state in both
+ *    inline buttons AND menu items.
+ *  - Custom handler registry (`getCommandHandler`) is consulted for `custom` actions.
  *
- * **ADR**: ADR-021 (Fluent v9 + dark mode), ADR-022 (React-16-safe),
+ * **ADR**: ADR-021 (Fluent v9 + dark mode, tokens-only), ADR-022 (React-16-safe),
  *          NFR-03 (`applyStylesToPortals` on Dialog).
  * **FR**: FR-DG-08, FR-DG-14, FR-DG-17.
  *
@@ -28,10 +42,8 @@
 
 import * as React from 'react';
 import {
-  Toolbar,
-  ToolbarButton,
-  ToolbarDivider,
   Button,
+  Divider,
   Menu,
   MenuTrigger,
   MenuPopover,
@@ -65,11 +77,7 @@ import {
 } from '@fluentui/react-icons';
 
 import { dataGridTokens } from '../tokens';
-import type {
-  CommandBarConfig,
-  CommandBarItem,
-  CommandBarAction,
-} from '../../../types/DataGridConfiguration';
+import type { CommandBarConfig, CommandBarItem, CommandBarAction } from '../../../types/DataGridConfiguration';
 import type { ResolvedColumn } from '../configResolution';
 import {
   DEFAULT_ACTION_META,
@@ -86,8 +94,11 @@ import { getCommandHandler } from './registry';
 /** Threshold above which bulk delete shows a progress spinner. */
 const BULK_PROGRESS_THRESHOLD = 10;
 
-/** Threshold above which extra items spill into the overflow menu. */
-const OVERFLOW_THRESHOLD = 6;
+/**
+ * Default number of inline subtle buttons before the overflow `…` menu.
+ * Matches Power Apps OOB: `Refresh + Delete` inline, everything else in the menu.
+ */
+const DEFAULT_INLINE_LIMIT = 2;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -125,6 +136,12 @@ export interface CommandBarProps {
   theme?: Theme;
   /** Fires when the user invokes ANY command (default or custom). */
   onCommandInvoke?: (commandId: string, selectedIds: ReadonlyArray<string>) => void;
+  /**
+   * Number of items rendered as inline subtle buttons before the overflow `…` menu.
+   * Defaults to 2 to match Power Apps OOB (Refresh + Delete inline; rest in overflow).
+   * Set to 0 to push EVERYTHING into the overflow menu.
+   */
+  inlineLimit?: number;
   /** Optional className appended after component classes (Spaarke convention). */
   className?: string;
 }
@@ -137,8 +154,14 @@ const useStyles = makeStyles({
   root: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
+    // Right-align items by default — matches Power Apps OOB grid header chrome.
+    // The outer DataGrid composition puts the title on the left and the command
+    // bar on the right of a single flex band.
+    justifyContent: 'flex-end',
+    columnGap: tokens.spacingHorizontalXS,
+    // Width auto so the bar shrinks to its content; the parent flex container
+    // owns the left/right layout.
+    width: 'auto',
     backgroundColor: dataGridTokens.commandBar.background,
     ...shorthands.border('1px', 'solid', dataGridTokens.commandBar.border),
     borderRadius: dataGridTokens.commandBar.borderRadius,
@@ -146,17 +169,17 @@ const useStyles = makeStyles({
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
   },
-  toolbar: {
-    flexGrow: 1,
-    minWidth: 0,
+  inlineButton: {
+    // Icon + label, subtle appearance. Fluent v9's `Button` places the icon
+    // slot on the LEFT of the children by default — exactly what OOB shows.
+    // No extra rules needed; we rely on tokens via `appearance="subtle"`.
+    minWidth: 'auto',
   },
-  rightCluster: {
-    display: 'flex',
-    alignItems: 'center',
-    columnGap: tokens.spacingHorizontalXS,
-  },
-  primaryButton: {
-    // Slight emphasis — Fluent v9 `appearance="primary"` handles the brand color.
+  divider: {
+    // Fluent v9 vertical Divider needs an explicit height to render inside a
+    // flex row. We target the OOB ~20px tall thin separator.
+    height: '20px',
+    flexGrow: 0,
   },
   dialogStatus: {
     display: 'flex',
@@ -190,12 +213,17 @@ function resolveIcon(name: string | undefined): React.ReactElement | undefined {
 // ─────────────────────────────────────────────────────────────────────────────
 // Build the effective item list — merges configjson `primary` + `secondary`
 // with `showDefaultCommands` toggles.
+//
+// Auto-injection order is intentionally [refresh, delete-selected, create-form,
+// export-excel, edit-columns, edit-filters] so the OOB inlineLimit=2 default
+// renders `Refresh + Delete` inline (matches reference screenshot). Hosts that
+// author explicit `primary`/`secondary` keep their authored ordering.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ALL_DEFAULT_ACTIONS: CommandBarAction[] = [
-  'create-form',
-  'delete-selected',
   'refresh',
+  'delete-selected',
+  'create-form',
   'export-excel',
   'edit-columns',
   'edit-filters',
@@ -231,20 +259,12 @@ function makeDefaultItem(action: CommandBarAction): CommandBarItem {
   };
 }
 
-interface BuiltItems {
-  primary: CommandBarItem[];
-  overflow: CommandBarItem[];
-}
-
-function buildEffectiveItems(config: CommandBarConfig): BuiltItems {
-  const explicitItems: CommandBarItem[] = [
-    ...(config.primary ?? []),
-    ...(config.secondary ?? []),
-  ];
+function buildEffectiveItems(config: CommandBarConfig): CommandBarItem[] {
+  const explicitItems: CommandBarItem[] = [...(config.primary ?? []), ...(config.secondary ?? [])];
 
   // Determine which built-ins to add — by default ON, except `edit-columns` (off in R1).
   const showDefault = config.showDefaultCommands ?? {};
-  const explicitActions = new Set(explicitItems.map((it) => it.action));
+  const explicitActions = new Set(explicitItems.map(it => it.action));
 
   for (const action of ALL_DEFAULT_ACTIONS) {
     if (explicitActions.has(action)) continue; // already authored explicitly
@@ -263,10 +283,7 @@ function buildEffectiveItems(config: CommandBarConfig): BuiltItems {
     explicitItems.push(makeDefaultItem(action));
   }
 
-  // Split into primary (first N) and overflow (remainder).
-  const primary = explicitItems.slice(0, OVERFLOW_THRESHOLD);
-  const overflow = explicitItems.slice(OVERFLOW_THRESHOLD);
-  return { primary, overflow };
+  return explicitItems;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -274,12 +291,13 @@ function buildEffectiveItems(config: CommandBarConfig): BuiltItems {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Renders the grid's command bar — Fluent v9 `<Toolbar />` with 1–6 visible
- * actions + an optional overflow `<Menu />` when more items are configured.
+ * Renders the grid's command bar in the Power Apps OOB pattern — the first
+ * `inlineLimit` items as subtle icon+text buttons, then a `…` overflow menu
+ * containing everything else.
  *
- * See module JSDoc for full feature list.
+ * See module JSDoc for the visual mental model.
  */
-export const CommandBar: React.FC<CommandBarProps> = (props) => {
+export const CommandBar: React.FC<CommandBarProps> = props => {
   const {
     config,
     entityName,
@@ -291,6 +309,7 @@ export const CommandBar: React.FC<CommandBarProps> = (props) => {
     parentContext,
     theme = webLightTheme,
     onCommandInvoke,
+    inlineLimit = DEFAULT_INLINE_LIMIT,
     className,
   } = props;
 
@@ -301,7 +320,19 @@ export const CommandBar: React.FC<CommandBarProps> = (props) => {
   const [isDeleting, setIsDeleting] = React.useState<boolean>(false);
 
   // ── Build effective item list (defaults + configjson + showDefaultCommands) ─
-  const items = React.useMemo(() => buildEffectiveItems(config), [config]);
+  const effectiveItems = React.useMemo(() => buildEffectiveItems(config), [config]);
+
+  // ── Partition: first inlineLimit go inline, rest go in the overflow menu ─
+  // Clamp the limit so 0 / negative / too-large all behave intuitively.
+  const normalizedLimit = Math.max(0, Math.min(inlineLimit, effectiveItems.length));
+  const inlineItems = React.useMemo(
+    () => effectiveItems.slice(0, normalizedLimit),
+    [effectiveItems, normalizedLimit]
+  );
+  const overflowItems = React.useMemo(
+    () => effectiveItems.slice(normalizedLimit),
+    [effectiveItems, normalizedLimit]
+  );
 
   // Shared context passed to default + custom handlers.
   const handlerContext: DefaultHandlerContext = React.useMemo(
@@ -314,32 +345,29 @@ export const CommandBar: React.FC<CommandBarProps> = (props) => {
       refresh,
       parentContext,
     }),
-    [entityName, selectedIds, records, columns, currentView, refresh, parentContext],
+    [entityName, selectedIds, records, columns, currentView, refresh, parentContext]
   );
 
   // ── Resolve a handler for a given item ──────────────────────────────────
-  const resolveHandler = React.useCallback(
-    (item: CommandBarItem): DefaultHandler | undefined => {
-      if (item.action === 'custom') {
-        if (!item.customHandlerId) {
-          // eslint-disable-next-line no-console
-          console.warn(`[CommandBar] custom action "${item.id}" missing customHandlerId.`);
-          return undefined;
-        }
-        const handler = getCommandHandler(item.customHandlerId);
-        if (!handler) {
-          // eslint-disable-next-line no-console
-          console.warn(
-            `[CommandBar] No registered handler for "${item.customHandlerId}". ` +
-              `Register one with registerCommandHandler() before rendering.`,
-          );
-        }
-        return handler;
+  const resolveHandler = React.useCallback((item: CommandBarItem): DefaultHandler | undefined => {
+    if (item.action === 'custom') {
+      if (!item.customHandlerId) {
+        // eslint-disable-next-line no-console
+        console.warn(`[CommandBar] custom action "${item.id}" missing customHandlerId.`);
+        return undefined;
       }
-      return DEFAULT_ACTION_HANDLERS[item.action];
-    },
-    [],
-  );
+      const handler = getCommandHandler(item.customHandlerId);
+      if (!handler) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[CommandBar] No registered handler for "${item.customHandlerId}". ` +
+            `Register one with registerCommandHandler() before rendering.`
+        );
+      }
+      return handler;
+    }
+    return DEFAULT_ACTION_HANDLERS[item.action];
+  }, []);
 
   // ── Invocation flow — bulk delete short-circuits to Dialog ─────────────
   const invokeItem = React.useCallback(
@@ -363,7 +391,7 @@ export const CommandBar: React.FC<CommandBarProps> = (props) => {
         console.error(`[CommandBar] Handler for "${item.id}" threw:`, err);
       }
     },
-    [onCommandInvoke, selectedIds, resolveHandler, handlerContext],
+    [onCommandInvoke, selectedIds, resolveHandler, handlerContext]
   );
 
   // ── Bulk delete confirmation handler — only runs after Dialog confirm ──
@@ -392,45 +420,46 @@ export const CommandBar: React.FC<CommandBarProps> = (props) => {
       }
       return false;
     },
-    [selectedIds],
+    [selectedIds]
   );
 
-  // ── Render a single Toolbar entry ─────────────────────────────────────
-  const renderToolbarItem = (item: CommandBarItem, index: number): React.ReactNode => {
+  // ── Render a single inline subtle button (icon + Text label) ───────────
+  const renderInlineButton = (item: CommandBarItem): React.ReactNode => {
     const icon = resolveIcon(item.icon);
     const disabled = isDisabled(item);
-    const buttonContent = (
-      <ToolbarButton
+    // OOB pattern: every inline button is subtle. We intentionally ignore
+    // `item.appearance` here — primary blue CTA buttons are NOT part of the
+    // Power Apps grid pattern. Hosts that need a primary CTA should render it
+    // outside the CommandBar.
+    const button = (
+      <Button
         key={item.id}
+        appearance="subtle"
         icon={icon}
         disabled={disabled}
-        appearance={item.appearance === 'primary' ? 'primary' : 'subtle'}
         onClick={() => {
           void invokeItem(item);
         }}
         aria-label={item.label}
+        className={styles.inlineButton}
       >
-        {item.label}
-      </ToolbarButton>
+        <Text>{item.label}</Text>
+      </Button>
     );
-
-    return (
-      <React.Fragment key={`${item.id}-${index}`}>
-        {item.divider && index > 0 ? <ToolbarDivider /> : null}
-        {disabled ? (
-          buttonContent
-        ) : (
-          <Tooltip content={item.label} relationship="label" withArrow>
-            {buttonContent}
-          </Tooltip>
-        )}
-      </React.Fragment>
+    // Tooltip on enabled items only — disabled buttons swallow pointer events
+    // in some browsers, which breaks Fluent's Tooltip relationship="label".
+    return disabled ? (
+      button
+    ) : (
+      <Tooltip key={`tip-${item.id}`} content={item.label} relationship="label" withArrow>
+        {button}
+      </Tooltip>
     );
   };
 
-  // ── Render the overflow menu when items.overflow is non-empty ───────────
-  const renderOverflow = (): React.ReactNode => {
-    if (items.overflow.length === 0) return null;
+  // ── Render the overflow `…` menu containing everything past inlineLimit ─
+  const renderOverflowMenu = (): React.ReactNode => {
+    if (overflowItems.length === 0) return null;
     return (
       <Menu>
         <MenuTrigger disableButtonEnhancement>
@@ -441,40 +470,47 @@ export const CommandBar: React.FC<CommandBarProps> = (props) => {
           />
         </MenuTrigger>
         <MenuPopover>
-          <MenuList>
-            {items.overflow.map((item) => (
-              <MenuItem
-                key={item.id}
-                icon={resolveIcon(item.icon)}
-                disabled={isDisabled(item)}
-                onClick={() => {
-                  void invokeItem(item);
-                }}
-              >
-                {item.label}
-              </MenuItem>
-            ))}
-          </MenuList>
+          {/*
+           * NFR-03 belt-and-suspenders: re-wrap the popover surface so dark
+           * mode applies inside the portal. `MenuList` already inherits from
+           * the page-level FluentProvider when `applyStylesToPortals` is set,
+           * but the inner provider guarantees correct rendering even when
+           * a host forgets to opt in at the root.
+           */}
+          <FluentProvider applyStylesToPortals theme={theme}>
+            <MenuList>
+              {overflowItems.map(item => (
+                <MenuItem
+                  key={item.id}
+                  icon={resolveIcon(item.icon)}
+                  disabled={isDisabled(item)}
+                  onClick={() => {
+                    void invokeItem(item);
+                  }}
+                >
+                  {item.label}
+                </MenuItem>
+              ))}
+            </MenuList>
+          </FluentProvider>
         </MenuPopover>
       </Menu>
     );
   };
 
-  // ── Cleanup: ensure spinner clears if component unmounts mid-delete ─────
-  React.useEffect(() => {
-    return () => {
-      // No-op: state is local and React handles teardown. The block exists so
-      // future "fetch in flight" cancellation logic can land here cleanly.
-    };
-  }, []);
+  // The divider between inline buttons and the overflow trigger only appears
+  // when BOTH sides have content — otherwise it's visual noise.
+  const showDivider = inlineItems.length > 0 && overflowItems.length > 0;
 
   return (
-    <div className={mergeClasses(styles.root, className)} role="toolbar" aria-label="Grid actions">
-      <Toolbar className={styles.toolbar} aria-label="Primary grid actions" size="small">
-        {items.primary.map((item, index) => renderToolbarItem(item, index))}
-      </Toolbar>
-
-      <div className={styles.rightCluster}>{renderOverflow()}</div>
+    <div
+      className={mergeClasses(styles.root, className)}
+      role="toolbar"
+      aria-label="Grid actions"
+    >
+      {inlineItems.map(item => renderInlineButton(item))}
+      {showDivider ? <Divider vertical className={styles.divider} /> : null}
+      {renderOverflowMenu()}
 
       {/* ── Bulk-delete confirmation Dialog ─────────────────────────────── */}
       <Dialog
@@ -495,7 +531,9 @@ export const CommandBar: React.FC<CommandBarProps> = (props) => {
         <DialogSurface>
           <FluentProvider applyStylesToPortals theme={theme}>
             <DialogBody>
-              <DialogTitle>Delete {selectedIds.length} record{selectedIds.length === 1 ? '' : 's'}?</DialogTitle>
+              <DialogTitle>
+                Delete {selectedIds.length} record{selectedIds.length === 1 ? '' : 's'}?
+              </DialogTitle>
               <DialogContent>
                 {isDeleting ? (
                   <div className={styles.dialogStatus}>
@@ -515,11 +553,7 @@ export const CommandBar: React.FC<CommandBarProps> = (props) => {
                 )}
               </DialogContent>
               <DialogActions>
-                <Button
-                  appearance="secondary"
-                  disabled={isDeleting}
-                  onClick={() => setDeleteDialogOpen(false)}
-                >
+                <Button appearance="secondary" disabled={isDeleting} onClick={() => setDeleteDialogOpen(false)}>
                   Cancel
                 </Button>
                 <Button

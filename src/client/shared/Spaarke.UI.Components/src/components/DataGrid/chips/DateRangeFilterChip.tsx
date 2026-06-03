@@ -139,24 +139,8 @@ export function localDateToUtcBounds(start: Date, end: Date): UtcDateBounds {
   // and `.toISOString()` returns the corresponding UTC instant — exactly
   // what the GridSection helper does for a single day, repeated for two
   // bounds.
-  const startLocal = new Date(
-    start.getFullYear(),
-    start.getMonth(),
-    start.getDate(),
-    0,
-    0,
-    0,
-    0,
-  );
-  const endLocal = new Date(
-    end.getFullYear(),
-    end.getMonth(),
-    end.getDate(),
-    23,
-    59,
-    59,
-    999,
-  );
+  const startLocal = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0, 0);
+  const endLocal = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999);
   return { startUtc: startLocal, endUtc: endLocal };
 }
 
@@ -248,12 +232,7 @@ const useStyles = makeStyles({
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const DateRangeFilterChip: React.FC<DateRangeFilterChipProps> = ({
-  value,
-  onChange,
-  label,
-  className,
-}) => {
+export const DateRangeFilterChip: React.FC<DateRangeFilterChipProps> = ({ value, onChange, label, className }) => {
   const styles = useStyles();
 
   // ── Open/close + draft pick state ──────────────────────────────────────────
@@ -279,17 +258,17 @@ export const DateRangeFilterChip: React.FC<DateRangeFilterChipProps> = ({
       }
       setOpen(data.open);
     },
-    [value],
+    [value]
   );
 
   const handleStartChange: React.ChangeEventHandler<HTMLInputElement> = React.useCallback(
-    (ev) => setDraftStart(ev.target.value),
-    [],
+    ev => setDraftStart(ev.target.value),
+    []
   );
 
   const handleEndChange: React.ChangeEventHandler<HTMLInputElement> = React.useCallback(
-    (ev) => setDraftEnd(ev.target.value),
-    [],
+    ev => setDraftEnd(ev.target.value),
+    []
   );
 
   const parsedStart = React.useMemo(() => parseLocalDate(draftStart), [draftStart]);
@@ -297,14 +276,10 @@ export const DateRangeFilterChip: React.FC<DateRangeFilterChipProps> = ({
 
   /** Both ends required; end ≥ start. */
   const isValidRange: boolean =
-    parsedStart !== null &&
-    parsedEnd !== null &&
-    parsedEnd.getTime() >= parsedStart.getTime();
+    parsedStart !== null && parsedEnd !== null && parsedEnd.getTime() >= parsedStart.getTime();
 
   const isReversedRange: boolean =
-    parsedStart !== null &&
-    parsedEnd !== null &&
-    parsedEnd.getTime() < parsedStart.getTime();
+    parsedStart !== null && parsedEnd !== null && parsedEnd.getTime() < parsedStart.getTime();
 
   const handleApply = React.useCallback(() => {
     if (!parsedStart || !parsedEnd || !isValidRange) return;
@@ -328,12 +303,7 @@ export const DateRangeFilterChip: React.FC<DateRangeFilterChipProps> = ({
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className={mergeClasses(styles.root, className)} data-testid="date-range-filter-chip">
-      <Popover
-        open={open}
-        onOpenChange={handleOpenChange}
-        trapFocus
-        positioning="below-start"
-      >
+      <Popover open={open} onOpenChange={handleOpenChange} trapFocus positioning="below-start">
         <PopoverTrigger disableButtonEnhancement>
           <Button
             className={styles.trigger}

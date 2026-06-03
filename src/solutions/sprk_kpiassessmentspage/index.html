@@ -6,6 +6,12 @@
     <title>KPI Assessments - Matter Health</title>
     <style>
       /* Reset styles for Dataverse Custom Page context */
+      /* `box-sizing: border-box` is REQUIRED — without it, the DataGrid root's
+         inner padding adds to the 100%-of-viewport width/height and the grid
+         overflows the Power Apps modal frame on the right and bottom. */
+      *, *::before, *::after {
+        box-sizing: border-box;
+      }
       html, body, #root {
         margin: 0;
         padding: 0;

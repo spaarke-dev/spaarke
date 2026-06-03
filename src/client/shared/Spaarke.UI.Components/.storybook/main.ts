@@ -33,8 +33,8 @@ const config: StorybookConfig = {
 
   addons: [
     '@storybook/addon-essentials', // controls, viewport, backgrounds, toolbars
-    '@storybook/addon-a11y',       // axe-core scan per story (NFR-04)
-    '@storybook/addon-viewport',   // zoom-level / responsive testing (NFR-01)
+    '@storybook/addon-a11y', // axe-core scan per story (NFR-04)
+    '@storybook/addon-viewport', // zoom-level / responsive testing (NFR-01)
   ],
 
   framework: {

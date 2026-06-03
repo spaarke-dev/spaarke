@@ -158,20 +158,12 @@ const SEARCH_PAGE_SIZE = 50;
  * systemuserid, sprk_matter → sprk_matterid). Custom-id attributes (rare)
  * would need a future `primaryIdAttribute` prop; out of scope for R1.
  */
-function buildFetchXml(
-  lookupTargetEntity: string,
-  primaryNameAttribute: string,
-  search: string,
-): string {
+function buildFetchXml(lookupTargetEntity: string, primaryNameAttribute: string, search: string): string {
   const primaryId = `${lookupTargetEntity}id`;
   // XML-encode user input — even though Dataverse will tolerate most characters
   // inside an attribute value, `&`, `<`, `"` MUST be escaped to keep the
   // resulting FetchXML well-formed.
-  const escaped = search
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  const escaped = search.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
   const isEmpty = search.length === 0;
   const top = isEmpty ? EMPTY_SEARCH_TOP_N : SEARCH_PAGE_SIZE;
@@ -200,11 +192,7 @@ function buildFetchXml(
 }
 
 /** Project a raw Dataverse row to the chip's narrower {@link LookupRecord}. */
-function projectRow(
-  row: Record<string, unknown>,
-  primaryId: string,
-  primaryNameAttribute: string,
-): LookupRecord {
+function projectRow(row: Record<string, unknown>, primaryId: string, primaryNameAttribute: string): LookupRecord {
   const id = String(row[primaryId] ?? '');
   const rawName = row[primaryNameAttribute];
   const name = typeof rawName === 'string' && rawName !== '' ? rawName : id;
@@ -398,15 +386,13 @@ export const LookupMultiFilterChip: React.FC<LookupMultiFilterChipProps> = ({
       try {
         const result = await dataverseClient.retrieveMultipleRecords<Record<string, unknown>>(
           lookupTargetEntity,
-          fetchXml,
+          fetchXml
         );
         // Ignore stale responses (user typed more before this one returned).
         if (cancelled || !isMountedRef.current) return;
         if (latestRequestKeyRef.current !== key) return;
 
-        const projected = (result.entities ?? []).map((row) =>
-          projectRow(row, primaryId, primaryNameAttribute),
-        );
+        const projected = (result.entities ?? []).map(row => projectRow(row, primaryId, primaryNameAttribute));
         cacheRef.current.set(key, { at: Date.now(), records: projected });
         setResults(projected);
         setIsLoading(false);
@@ -433,7 +419,7 @@ export const LookupMultiFilterChip: React.FC<LookupMultiFilterChipProps> = ({
       const next = new Set<string>(data.selectedOptions);
       onChange(next);
     },
-    [onChange],
+    [onChange]
   );
 
   // Removing a single tag from the selected-pills row.
@@ -443,26 +429,23 @@ export const LookupMultiFilterChip: React.FC<LookupMultiFilterChipProps> = ({
       next.delete(idToRemove);
       onChange(next);
     },
-    [onChange, value],
+    [onChange, value]
   );
 
   const handleClearAll = React.useCallback(() => {
     onChange(new Set<string>());
   }, [onChange]);
 
-  const handleOpenChange = React.useCallback(
-    (_event: unknown, data: { open: boolean }) => {
-      setOpen(data.open);
-      // Reset the search box when closing so re-opening starts fresh.
-      if (!data.open) {
-        setSearchInput('');
-      }
-    },
-    [],
-  );
+  const handleOpenChange = React.useCallback((_event: unknown, data: { open: boolean }) => {
+    setOpen(data.open);
+    // Reset the search box when closing so re-opening starts fresh.
+    if (!data.open) {
+      setSearchInput('');
+    }
+  }, []);
 
   // Combobox `onInput` provides raw text typed by the user (freeform mode).
-  const handleInput: React.FormEventHandler<HTMLInputElement> = React.useCallback((ev) => {
+  const handleInput: React.FormEventHandler<HTMLInputElement> = React.useCallback(ev => {
     setSearchInput((ev.target as HTMLInputElement).value ?? '');
   }, []);
 
@@ -476,9 +459,9 @@ export const LookupMultiFilterChip: React.FC<LookupMultiFilterChipProps> = ({
   // than it saves.
   const selectedIds: string[] = Array.from(value);
   const lookupName = (id: string): string => {
-    const fromProp = selectedRecords?.find((r) => r.id === id);
+    const fromProp = selectedRecords?.find(r => r.id === id);
     if (fromProp) return fromProp.name;
-    const fromResults = results.find((r) => r.id === id);
+    const fromResults = results.find(r => r.id === id);
     if (fromResults) return fromResults.name;
     return id;
   };
@@ -515,23 +498,14 @@ export const LookupMultiFilterChip: React.FC<LookupMultiFilterChipProps> = ({
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className={mergeClasses(styles.root, className)} data-testid="lookup-multi-filter-chip">
-      <Popover
-        open={open}
-        onOpenChange={handleOpenChange}
-        trapFocus
-        positioning="below-start"
-      >
+      <Popover open={open} onOpenChange={handleOpenChange} trapFocus positioning="below-start">
         <PopoverTrigger disableButtonEnhancement>
           <Button
             className={styles.trigger}
             appearance="subtle"
             iconPosition="after"
             icon={<ChevronDownRegular aria-hidden="true" />}
-            aria-label={
-              selectedIds.length > 0
-                ? `${label} (${selectedIds.length} selected): ${triggerLabel}`
-                : label
-            }
+            aria-label={selectedIds.length > 0 ? `${label} (${selectedIds.length} selected): ${triggerLabel}` : label}
             data-testid="lookup-multi-filter-chip-trigger"
           >
             {triggerLabel}
@@ -585,7 +559,7 @@ export const LookupMultiFilterChip: React.FC<LookupMultiFilterChipProps> = ({
                   </div>
                 ) : null}
 
-                {optionRecords.map((rec) => (
+                {optionRecords.map(rec => (
                   <Option key={rec.id} value={rec.id} text={rec.name}>
                     {rec.name}
                   </Option>
@@ -599,7 +573,7 @@ export const LookupMultiFilterChip: React.FC<LookupMultiFilterChipProps> = ({
                   aria-label={`Selected ${label} filters`}
                   data-testid="lookup-multi-filter-chip-selected"
                 >
-                  {selectedIds.map((id) => {
+                  {selectedIds.map(id => {
                     const name = lookupName(id);
                     return (
                       <Tag
