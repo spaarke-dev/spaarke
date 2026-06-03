@@ -45,7 +45,7 @@
     {
       "name": "resolveLiveFacts",
       "nodeType": "AIAnalysis",
-      "actionCode": "INS-FACT",
+      "actionCode": "INS-FACT@v1",
       "$comment-actionCode": "Insights Engine r2 Wave B (D-01 path-b): action row INS-FACT in sprk_analysisaction, sprk_actiontypeid -> '80 - Live Fact Resolver' with sprk_executoractiontype=80. Deploy-Playbook.ps1 line 673 resolves actionCode -> sprk_actionid FK at deploy time.",
       "actionType": 80,
       "$comment-actionType": "ActionType.LiveFact = 80; handled by LiveFactNode (task 022)",
@@ -60,7 +60,7 @@
     {
       "name": "retrieveCohortObservations",
       "nodeType": "AIAnalysis",
-      "actionCode": "INS-IDXR",
+      "actionCode": "INS-IDXR@v1",
       "$comment-actionCode": "Insights Engine r2 Wave B: INS-IDXR action row; lookup '90 - Index Retrieve' with sprk_executoractiontype=90.",
       "actionType": 90,
       "$comment-actionType": "ActionType.IndexRetrieve = 90; handled by IndexRetrieveNode (task 022)",
@@ -80,7 +80,7 @@
     {
       "name": "retrievePrecedents",
       "nodeType": "AIAnalysis",
-      "actionCode": "INS-IDXR",
+      "actionCode": "INS-IDXR@v1",
       "$comment-actionCode": "Insights Engine r2 Wave B: same INS-IDXR action row as retrieveCohortObservations (two nodes reference one action row — different configJson distinguishes the queries).",
       "actionType": 90,
       "$comment-actionType": "ActionType.IndexRetrieve = 90; second IndexRetrieveNode query (precedents)",
@@ -100,7 +100,7 @@
     {
       "name": "checkSufficiency",
       "nodeType": "Control",
-      "actionCode": "INS-EVID",
+      "actionCode": "INS-EVID@v1",
       "$comment-actionCode": "Insights Engine r2 Wave B: INS-EVID action row; lookup '100 - Evidence Sufficiency' with sprk_executoractiontype=100.",
       "actionType": 100,
       "$comment-actionType": "ActionType.EvidenceSufficiency = 100; handled by EvidenceSufficiencyNode (task 022)",
@@ -122,7 +122,7 @@
     {
       "name": "synthesize",
       "nodeType": "AIAnalysis",
-      "actionCode": "INS-AGNT",
+      "actionCode": "INS-AGNT@v1",
       "$comment-actionCode": "Insights Engine r2 Wave B: INS-AGNT action row (Insights — Agent Service Synthesis); lookup '60 - Agent Service' with sprk_executoractiontype=60.",
       "actionType": 60,
       "$comment-actionType": "ActionType.AgentService = 60; handled by AgentServiceNodeExecutor. Used here (not AiAnalysisNodeExecutor) because synthesis composes prior-node outputs into a prompt — no document bound. See top-of-file $comment-deviation.",
@@ -139,7 +139,7 @@
     {
       "name": "groundCitations",
       "nodeType": "Control",
-      "actionCode": "INS-GRND",
+      "actionCode": "INS-GRND@v1",
       "$comment-actionCode": "Insights Engine r2 Wave B: INS-GRND action row; lookup '70 - Grounding Verify' with sprk_executoractiontype=70.",
       "actionType": 70,
       "$comment-actionType": "ActionType.GroundingVerify = 70; handled by GroundingVerifyNode (task 020)",
@@ -159,7 +159,7 @@
       "name": "ReturnInsightArtifactNode",
       "$comment-name": "MUST be exactly 'ReturnInsightArtifactNode' (case-sensitive). InsightsPlaybookExecutionCache.ReturnInsightArtifactNodeName is hardcoded to this string for stream draining — see InsightsPlaybookExecutionCache.cs line 59.",
       "nodeType": "Output",
-      "actionCode": "INS-RART",
+      "actionCode": "INS-RART@v1",
       "$comment-actionCode": "Insights Engine r2 Wave B: INS-RART action row; lookup '120 - Return Insight Artifact' with sprk_executoractiontype=120.",
       "actionType": 120,
       "$comment-actionType": "ActionType.ReturnInsightArtifact = 120; handled by ReturnInsightArtifactNode (task 022)",
@@ -186,7 +186,7 @@
     {
       "name": "declineInsufficient",
       "nodeType": "Output",
-      "actionCode": "INS-DECL",
+      "actionCode": "INS-DECL@v1",
       "$comment-actionCode": "Insights Engine r2 Wave B: INS-DECL action row; lookup '110 - Decline to Find' with sprk_executoractiontype=110.",
       "actionType": 110,
       "$comment-actionType": "ActionType.DeclineToFind = 110; handled by DeclineToFindNode (task 022). Insufficient-evidence branch.",

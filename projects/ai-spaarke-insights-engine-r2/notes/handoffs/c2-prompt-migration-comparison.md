@@ -166,11 +166,11 @@ This matches the design-a4 §10 sequencing where "C2 migrates prompt content" is
 
 | ID | Owner wave | Description |
 |---|---|---|
-| C2-FU-1 | post-C2 / owner | **design-a4 §10 erratum**: clarify that `@vN` suffix on `sprk_actioncode` is BLOCKED by 10-char schema limit on `sprk_analysisaction`. Recommend (a) schema MaxLength increase as Phase 2 prereq, OR (b) explicit Phase 1.5 convention that "current rows are v1; v2 will require schema change". |
+| C2-FU-1 | ~~post-C2 / owner~~ | ~~**design-a4 §10 erratum**~~ — **DONE 2026-06-02**: schema bumped to MaxLength=64 + 11 rows renamed to `@v1`. Design-a4 §10 stays as authored. See [`schema-bump-actioncode-64.md`](./schema-bump-actioncode-64.md). |
 | C2-FU-2 | C3 (task 022) | Delete the 3 .txt files in `Services/Ai/Insights/Prompts/` as part of IngestOrchestrator retirement. Also delete `IInsightsPromptLoader` + `InsightsPromptLoader` + the 2 .schema.json files (rolled into `sprk_systemprompt.output` per JPS structuredOutput). |
 | C2-FU-3 | C4 (task 023) / D2 (task 031) | When `IInsightsAi.RunIngestAsync` is rewired to invoke universal-ingest@v1 playbook, the AiAnalysisNodeExecutor must read `sprk_systemprompt` from the resolved `sprk_analysisaction` row (existing behavior — verify with task 023 implementor that schema validation flows through correctly). |
-| C2-FU-4 | C4 or later | Decide canonical synthesis prompt source: `predict-matter-cost.playbook.json` `$ref:.txt` (deploy-time inline) vs `INS-AGNT.sprk_systemprompt` (runtime read). After C2, both paths exist; pick one before the .txt is deleted in C3. Recommend `sprk_systemprompt` per design-a4 §10 + FR-06 SME-iterate-without-deploy. |
-| C2-FU-5 | Phase 2+ | Add `sprk_actioncode` MaxLength=32 in a managed-solution update; enables design-a4 §3 `@vN` versioning convention. |
+| C2-FU-4 | C4 or later | Decide canonical synthesis prompt source: `predict-matter-cost.playbook.json` `$ref:.txt` (deploy-time inline) vs `INS-AGNT@v1.sprk_systemprompt` (runtime read). After C2, both paths exist; pick one before the .txt is deleted in C3. Recommend `sprk_systemprompt` per design-a4 §10 + FR-06 SME-iterate-without-deploy. |
+| C2-FU-5 | ~~Phase 2+~~ | ~~Add `sprk_actioncode` MaxLength=32 in a managed-solution update~~ — **DONE 2026-06-02**: schema bumped to MaxLength=64 directly on Spaarke Dev (unmanaged path per ADR-027 amendment). See [`schema-bump-actioncode-64.md`](./schema-bump-actioncode-64.md). |
 
 ---
 
