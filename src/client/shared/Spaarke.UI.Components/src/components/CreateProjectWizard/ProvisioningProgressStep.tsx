@@ -19,18 +19,8 @@
  */
 
 import * as React from 'react';
-import {
-  Spinner,
-  Text,
-  makeStyles,
-  tokens,
-  MessageBar,
-  MessageBarBody,
-} from '@fluentui/react-components';
-import {
-  CheckmarkCircleFilled,
-  DismissCircleFilled,
-} from '@fluentui/react-icons';
+import { Spinner, Text, makeStyles, tokens, MessageBar, MessageBarBody } from '@fluentui/react-components';
+import { CheckmarkCircleFilled, DismissCircleFilled } from '@fluentui/react-icons';
 import { PROVISIONING_STEPS, type ProvisioningStepKey } from './provisioningService';
 
 // ---------------------------------------------------------------------------
@@ -145,14 +135,11 @@ const useStyles = makeStyles({
 // ProvisioningProgressStep (exported)
 // ---------------------------------------------------------------------------
 
-export const ProvisioningProgressStep: React.FC<IProvisioningProgressStepProps> = ({
-  steps,
-  errorMessage,
-}) => {
+export const ProvisioningProgressStep: React.FC<IProvisioningProgressStepProps> = ({ steps, errorMessage }) => {
   const styles = useStyles();
 
-  const isComplete = steps.every((s) => s.status === 'done');
-  const hasError = !!errorMessage || steps.some((s) => s.status === 'error');
+  const isComplete = steps.every(s => s.status === 'done');
+  const hasError = !!errorMessage || steps.some(s => s.status === 'error');
 
   return (
     <div className={styles.root}>
@@ -162,36 +149,30 @@ export const ProvisioningProgressStep: React.FC<IProvisioningProgressStepProps> 
           {hasError
             ? 'Provisioning failed'
             : isComplete
-            ? 'Infrastructure provisioned!'
-            : 'Setting up Secure Project\u2026'}
+              ? 'Infrastructure provisioned!'
+              : 'Setting up Secure Project\u2026'}
         </Text>
         <Text size={200} className={styles.subtitle}>
           {hasError
             ? 'An error occurred during provisioning. The project record has been created but some infrastructure may need manual setup.'
             : isComplete
-            ? 'All infrastructure has been provisioned. The project is ready for external access.'
-            : 'Please wait while we provision the required infrastructure. This may take a few seconds.'}
+              ? 'All infrastructure has been provisioned. The project is ready for external access.'
+              : 'Please wait while we provision the required infrastructure. This may take a few seconds.'}
         </Text>
       </div>
 
       {/* Step list */}
       <div className={styles.stepList} role="list" aria-label="Provisioning steps">
-        {steps.map((step) => {
-          const stepDef = PROVISIONING_STEPS.find((s) => s.key === step.key);
+        {steps.map(step => {
+          const stepDef = PROVISIONING_STEPS.find(s => s.key === step.key);
           const label = stepDef?.label ?? step.key;
 
           return (
             <div key={step.key} className={styles.stepRow} role="listitem">
               {/* Status icon */}
-              {step.status === 'pending' && (
-                <div className={styles.stepIconPending} aria-hidden="true" />
-              )}
+              {step.status === 'pending' && <div className={styles.stepIconPending} aria-hidden="true" />}
               {step.status === 'active' && (
-                <Spinner
-                  size="extra-tiny"
-                  className={styles.stepIconActive}
-                  aria-label="In progress"
-                />
+                <Spinner size="extra-tiny" className={styles.stepIconActive} aria-label="In progress" />
               )}
               {step.status === 'done' && (
                 <span className={styles.stepIconDone} aria-label="Complete">
@@ -211,15 +192,13 @@ export const ProvisioningProgressStep: React.FC<IProvisioningProgressStepProps> 
                   step.status === 'pending'
                     ? styles.stepTextPending
                     : step.status === 'active'
-                    ? styles.stepTextActive
-                    : step.status === 'done'
-                    ? styles.stepTextDone
-                    : styles.stepTextError
+                      ? styles.stepTextActive
+                      : step.status === 'done'
+                        ? styles.stepTextDone
+                        : styles.stepTextError
                 }
               >
-                {step.status === 'done'
-                  ? label.replace('\u2026', '')
-                  : label}
+                {step.status === 'done' ? label.replace('\u2026', '') : label}
               </Text>
             </div>
           );

@@ -135,15 +135,12 @@ export function validateRuntimeMsalConfig(config: RuntimeMsalConfig): void {
 
   if (!config.redirectUri) {
     throw new Error(
-      '[MSAL Config] redirectUri not resolved. ' +
-        'Ensure the Dataverse environment URL is available from Xrm context.'
+      '[MSAL Config] redirectUri not resolved. ' + 'Ensure the Dataverse environment URL is available from Xrm context.'
     );
   }
 
   if (!config.redirectUri.startsWith('https://')) {
-    throw new Error(
-      `[MSAL Config] redirectUri must use HTTPS: "${config.redirectUri}".`
-    );
+    throw new Error(`[MSAL Config] redirectUri must use HTTPS: "${config.redirectUri}".`);
   }
 
   if (!config.bffApiAppIdUri) {

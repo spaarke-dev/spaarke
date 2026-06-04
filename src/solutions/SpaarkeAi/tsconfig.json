@@ -30,6 +30,8 @@
       "@spaarke/ai-widgets/*": ["../../client/shared/Spaarke.AI.Widgets/src/*"],
       "@spaarke/events-components": ["../../client/shared/Spaarke.Events.Components/src/index.ts"],
       "@spaarke/events-components/*": ["../../client/shared/Spaarke.Events.Components/src/*"],
+      "@spaarke/legal-workspace": ["../LegalWorkspace/src/index.d.ts"],
+      "@spaarke/legal-workspace/*": ["../LegalWorkspace/src/*"],
       "@azure/msal-browser": ["./node_modules/@azure/msal-browser"],
       "@fluentui/react-components": ["./node_modules/@fluentui/react-components"],
       "@fluentui/react-icons": ["./node_modules/@fluentui/react-icons"]

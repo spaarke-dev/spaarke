@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.1.44" display-name-key="Semantic Search Control" description-key="PCF control for semantic document search with natural language queries (v1.1.44)" control-type="virtual" api-version="1.3.18">
+  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.1.72" display-name-key="Semantic Search Control" description-key="PCF control for semantic document search with natural language queries (v1.1.72)" control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="true">
       <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>
@@ -20,6 +20,11 @@
     <property name="resultsLimit" display-name-key="Results Limit" description-key="Number of results per load" of-type="Whole.None" usage="input" required="false"/>
     <property name="placeholder" display-name-key="Placeholder" description-key="Search input placeholder text" of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="compactMode" display-name-key="Compact Mode" description-key="Enable compact layout for form sections" of-type="TwoOptions" usage="input" required="false"/>
+    <property name="showViewToggle" display-name-key="Show View Toggle" description-key="Show the list/card view toggle group in the command bar. When false, the view is locked to defaultView." of-type="TwoOptions" usage="input" required="false"/>
+    <property name="defaultView" display-name-key="Default View" description-key="Initial view mode. Also the locked view when Show View Toggle is false." of-type="Enum" usage="input" required="false">
+      <value name="list" display-name-key="List">list</value>
+      <value name="card" display-name-key="Card">card</value>
+    </property>
     <property name="selectedDocumentId" display-name-key="Selected Document ID" description-key="The document selected by the user" of-type="SingleLine.Text" usage="output"/>
     <resources>
       <code path="bundle.js" order="1"/>

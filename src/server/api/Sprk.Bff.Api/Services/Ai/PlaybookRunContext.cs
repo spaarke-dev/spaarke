@@ -313,6 +313,7 @@ public class PlaybookRunContext
             Scopes = scopes,
             Document = Document,
             PreviousOutputs = NodeOutputs,
+            Parameters = Parameters,
             TenantId = TenantId,
             UserContext = UserContext,
             UserId = UserId,

@@ -1,0 +1,72 @@
+<task id="011" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P3 (entity) — sprk_precedent Dataverse entity + relationship tables</title>
+    <status>completed</status>
+    <wave>2</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>dataverse, entity-creation, sprk-precedent, schema</tags>
+    <dependencies></dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <d-p>D-P3</d-p>
+    <first-step-blocker>Confirm Phase 1 Precedent seeding count from SME engagement (zero OK; 1-2 sufficient for smoke test)</first-step-blocker>
+  </metadata>
+
+  <prompt>
+    Create `sprk_precedent` Dataverse entity (system of record for Precedents per D-46) + relationship tables. Phase 1 supports manual SME authoring only (D-61). Schema captures: human-readable pattern statement, supporting matters cluster, status lifecycle (Tentative/Confirmed/UnderDriftReview), reviewer attribution. Matches the SME mockup in [SPEC-phase-1-minimum.md §2](../SPEC-phase-1-minimum.md).
+  </prompt>
+
+  <role>Dataverse platform engineer familiar with PAC CLI, Web API metadata creation, entity + relationship + option-set authoring.</role>
+
+  <goal>
+    `sprk_precedent` entity + relationship tables provisioned in Spaarke Dev and queryable via Dataverse Web API. Entity has fields for pattern statement, status (option set), reviewer attribution, supporting-matters N:N. Solution exported and tracked in repo.
+  </prompt>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P3 entity)</file>
+    <file purpose="rationale">projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md (§2 Precedent mockup with data model details, §2.3 storage)</file>
+    <file purpose="decisions">projects/ai-spaarke-insights-engine-r1/decisions.md (D-46 Precedent Board; D-61 two-mode authoring)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="D-61">Phase 1 ships manual mode only; data model supports Phase 1.5+ system-proposed mode (lifecycle states, reviewer attribution)</constraint>
+    <constraint source="dataverse-conventions">Spaarke naming: sprk_ prefix; use existing solution `spaarke_core` or new `spaarke_insights`</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse-schema, entity-creation, relationships, option-sets</topic>
+    <files>
+      <file>knowledge/dataverse-sync/INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="First-step blocker">Confirm Precedent seeding count and solution name (spaarke_core extension vs new solution)</step>
+    <step order="1" name="Invoke dataverse-create-schema skill">Use skill to create entity via Web API + PowerShell pattern</step>
+    <step order="2" name="Define entity fields">sprk_patternstatement (text 4000), sprk_status (option set: Tentative/Confirmed/UnderDriftReview/Deprecated/Retired), sprk_reviewerby (lookup systemuser), sprk_reviewdate, sprk_effectivenessscore (decimal, Phase 1.5+), sprk_clusterdefinition (text), sprk_samplesize (int)</step>
+    <step order="3" name="Define N:N relationships">sprk_precedent_observation (Phase 1.5+ usage; provision now); sprk_precedent_related (self N:N)</step>
+    <step order="4" name="Define M:1 supporting matters">N:N between sprk_precedent and sprk_matter (so SME can attach 14 supporting matters per mockup)</step>
+    <step order="5" name="Create views">All Precedents (default); Tentative; Confirmed; Under Review; Deprecated</step>
+    <step order="6" name="Add model-driven form">Basic form for admin authoring (Phase 1 mode)</step>
+    <step order="7" name="Pack + commit solution">Export solution, unpack to source, commit</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">PAC CLI for solution operations</tool>
+    <tool name="dataverse-create-schema">Skill for entity creation patterns</tool>
+  </tools>
+
+  <outputs>
+    <output type="entity">sprk_precedent + relationships in Dataverse</output>
+    <output type="solution">src/solutions/spaarke_insights/ unpacked solution files</output>
+    <output type="docs">Updated CLAUDE.md or notes with entity field reference</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_precedent entity exists in Spaarke Dev; queryable via Dataverse Web API</criterion>
+    <criterion testable="true">All fields per SPEC-phase-1-minimum.md §2 mockup present (pattern statement, status, reviewer fields, supporting matters N:N)</criterion>
+    <criterion testable="true">Status option set has 5 values (Tentative/Confirmed/UnderDriftReview/Deprecated/Retired)</criterion>
+    <criterion testable="true">Solution exported and unpacked to repo</criterion>
+  </acceptance-criteria>
+</task>

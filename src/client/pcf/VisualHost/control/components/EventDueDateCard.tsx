@@ -31,7 +31,12 @@ const useStyles = makeStyles({
     flexDirection: 'row',
     alignItems: 'stretch',
     cursor: 'pointer',
-    minHeight: '80px',
+    // v1.4.7 — reduced further (56 → 44) per UAT feedback ("reduce height of
+    // the card"). v1.4.6 changed minHeight alone but the card content's
+    // internal padding kept actual rendered height ~80px. This round also
+    // tightens dateColumn + content paddings + font sizes so the floor is
+    // actually visible.
+    minHeight: '44px',
     overflow: 'hidden',
     padding: '0',
     ':hover': {
@@ -47,27 +52,32 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: '64px',
-    padding: tokens.spacingVerticalS,
+    // v1.4.8 — wider column to fit single-line "DD-MMM-YYYY" format
+    minWidth: '120px',
+    paddingTop: tokens.spacingVerticalXXS,
+    paddingBottom: tokens.spacingVerticalXXS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground1,
   },
-  dateDay: {
-    fontSize: tokens.fontSizeHero700,
-    fontWeight: tokens.fontWeightBold,
-    lineHeight: tokens.lineHeightHero700,
-  },
-  dateMonth: {
-    fontSize: tokens.fontSizeBase200,
+  // v1.4.8 — single-line "DD-MMM-YYYY" replaces the prior stacked
+  // dateDay+dateMonth pattern. Larger, bolder so the date reads at a glance
+  // (semibold + base300, tabular-nums to keep digits aligned across cards).
+  dateLabel: {
+    fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
-    textTransform: 'uppercase' as const,
+    fontVariantNumeric: 'tabular-nums',
+    lineHeight: tokens.lineHeightBase300,
+    whiteSpace: 'nowrap',
   },
   content: {
     display: 'flex',
     flexDirection: 'column',
     flex: 1,
-    padding: tokens.spacingVerticalS,
+    paddingTop: tokens.spacingVerticalXXS,
+    paddingBottom: tokens.spacingVerticalXXS,
     paddingLeft: tokens.spacingHorizontalM,
-    gap: tokens.spacingVerticalXS,
+    gap: tokens.spacingVerticalXXS,
     overflow: 'hidden',
     justifyContent: 'center',
   },
@@ -84,20 +94,24 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     display: '-webkit-box',
-    WebkitLineClamp: 2,
+    WebkitLineClamp: 1,
     WebkitBoxOrient: 'vertical' as const,
   },
   assignedTo: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
   },
+  // v1.4.8 — horizontal layout: "Days left" label LEFT of the pill (was
+  // stacked vertically). Tighter padding to keep the card compact.
+  // v1.4.12 — gap bumped to 5px per UAT ("add 5px space between label and pill").
   badgeColumn: {
     display: 'flex',
-    flexDirection: 'column',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: tokens.spacingHorizontalM,
-    gap: tokens.spacingVerticalXXS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    gap: '5px',
   },
   badgeLabel: {
     fontSize: tokens.fontSizeBase100,
@@ -122,16 +136,19 @@ function getDueBadgeAppearance(daysUntilDue: number, isOverdue: boolean): 'dange
 
 /**
  * Get urgency-based background color for the date column.
- * Uses CSS custom properties from Fluent v9 theme for dark mode support.
+ * v1.4.7 — switched from `colorStatusXxxBackground2` (pastel tints) to
+ * `colorPaletteXxxBackground2` so the date column tints align with the
+ * donut/HSBar palette (same `colorPalette*` family the rest of Matter UI
+ * uses). Reads cleanly in both light and dark mode.
  */
 function getUrgencyDateStyle(daysUntilDue: number, isOverdue: boolean): React.CSSProperties {
   if (isOverdue || daysUntilDue < 3) {
-    return { backgroundColor: 'var(--colorStatusDangerBackground2)' };
+    return { backgroundColor: tokens.colorPaletteRedBackground2 };
   }
   if (daysUntilDue <= 5) {
-    return { backgroundColor: 'var(--colorStatusWarningBackground2)' };
+    return { backgroundColor: tokens.colorPaletteYellowBackground2 };
   }
-  return { backgroundColor: 'var(--colorStatusSuccessBackground2)' };
+  return { backgroundColor: tokens.colorPaletteGreenBackground2 };
 }
 
 function getDueBadgeText(daysUntilDue: number, isOverdue: boolean): string {
@@ -162,8 +179,13 @@ export const EventDueDateCard: React.FC<IEventDueDateCardProps> = props => {
   // Urgency-based date column coloring: <3d red, 3-5d yellow, 6+d green
   const dateColumnStyle = getUrgencyDateStyle(props.daysUntilDue, props.isOverdue);
 
-  const day = props.dueDate.getDate();
-  const month = MONTH_ABBREVS[props.dueDate.getMonth()];
+  // v1.4.8 — single-line "DD-MMM-YYYY" format (e.g., "01-JUL-2026") replaces
+  // the prior 2-line "DD" + "MMM" stacked layout. Day is zero-padded; month
+  // is the 3-letter abbreviation in uppercase.
+  const day = String(props.dueDate.getDate()).padStart(2, '0');
+  const month = MONTH_ABBREVS[props.dueDate.getMonth()].toUpperCase();
+  const year = props.dueDate.getFullYear();
+  const dateLabel = `${day}-${month}-${year}`;
 
   return (
     <Card
@@ -172,11 +194,10 @@ export const EventDueDateCard: React.FC<IEventDueDateCardProps> = props => {
       onKeyDown={handleKeyDown}
       role="button"
       tabIndex={0}
-      aria-label={`${props.eventTypeName}: ${props.eventName}, due ${month} ${day}`}
+      aria-label={`${props.eventTypeName}: ${props.eventName}, due ${dateLabel}`}
     >
       <div className={styles.dateColumn} style={dateColumnStyle}>
-        <span className={styles.dateDay}>{day}</span>
-        <span className={styles.dateMonth}>{month}</span>
+        <span className={styles.dateLabel}>{dateLabel}</span>
       </div>
 
       <div className={styles.content}>
@@ -193,7 +214,7 @@ export const EventDueDateCard: React.FC<IEventDueDateCardProps> = props => {
         </div>
       ) : (
         <div className={styles.badgeColumn}>
-          <Text className={styles.badgeLabel}>{props.isOverdue ? 'Overdue' : 'Days Left'}</Text>
+          <Text className={styles.badgeLabel}>{props.isOverdue ? 'Overdue' : 'Days left'}</Text>
           <Badge appearance="filled" color={getDueBadgeAppearance(props.daysUntilDue, props.isOverdue)} size="large">
             {getDueBadgeText(props.daysUntilDue, props.isOverdue)}
           </Badge>

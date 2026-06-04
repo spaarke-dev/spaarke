@@ -191,11 +191,12 @@ export interface SidePane {
  * ```
  */
 export function getXrm(): XrmContext | undefined {
+  // SDK boundary: Xrm is injected at runtime by the host (PCF / Custom Page).
   // Try window.Xrm first (PCF controls or direct script access)
   try {
-    const windowXrm = (window as any).Xrm;
+    const windowXrm = (window as unknown as { Xrm?: XrmContext }).Xrm;
     if (windowXrm?.WebApi) {
-      return windowXrm as XrmContext;
+      return windowXrm;
     }
   } catch {
     // window.Xrm not available
@@ -204,9 +205,9 @@ export function getXrm(): XrmContext | undefined {
   // Try parent.Xrm for Custom Pages running in iframe
   try {
     if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
-      const parentXrm = (window.parent as any).Xrm;
+      const parentXrm = (window.parent as unknown as { Xrm?: XrmContext }).Xrm;
       if (parentXrm?.WebApi) {
-        return parentXrm as XrmContext;
+        return parentXrm;
       }
     }
   } catch {
@@ -236,7 +237,9 @@ export function isCustomPageContext(): boolean {
  */
 export function isPcfContext(): boolean {
   try {
-    return typeof (window as any).Xrm !== 'undefined' && (window as any).Xrm?.WebApi !== undefined;
+    // SDK boundary: Xrm runtime
+    const xrm = (window as unknown as { Xrm?: { WebApi?: unknown } }).Xrm;
+    return typeof xrm !== 'undefined' && xrm?.WebApi !== undefined;
   } catch {
     return false;
   }

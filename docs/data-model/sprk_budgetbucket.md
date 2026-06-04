@@ -1,0 +1,4 @@
+| Logical Name        | Schema Name         | Display Name  | Attribute Type   | Description                            | Custom Attribute | Type   | Additional data                     |
+| ------------------- | ------------------- | ------------- | ---------------- | -------------------------------------- | ---------------- | ------ | ----------------------------------- |
+| sprk_budgetbucketid | sprk_BudgetBucketId | Budget Bucket | Uniqueidentifier | Unique identifier for entity instances | False            | Simple |                                     |
+| sprk_name           | sprk_Name           | Name          | Text             |                                        | True             | Simple | Format: Text<br><br>Max length: 850 |

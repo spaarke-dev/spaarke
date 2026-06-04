@@ -13,15 +13,7 @@
  */
 
 import React from 'react';
-import {
-  RadioGroup,
-  Radio,
-  Spinner,
-  Text,
-  makeStyles,
-  tokens,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { RadioGroup, Radio, Spinner, Text, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
 import { DocumentRegular } from '@fluentui/react-icons';
 import type { IDataService } from '../../types/serviceInterfaces';
 
@@ -136,9 +128,7 @@ export const DocumentSelector: React.FC<IDocumentSelectorProps> = ({
         // Build an OData filter for the provided IDs.
         // Maximum supported by Dataverse in a single filter is well above the
         // expected handful of docs for this MVP scenario.
-        const idList = documentIds
-          .map(id => `sprk_documentid eq '${id}'`)
-          .join(' or ');
+        const idList = documentIds.map(id => `sprk_documentid eq '${id}'`).join(' or ');
         const options = `?$select=sprk_documentid,sprk_name&$filter=${idList}`;
 
         const result = await dataService.retrieveMultipleRecords('sprk_document', options);

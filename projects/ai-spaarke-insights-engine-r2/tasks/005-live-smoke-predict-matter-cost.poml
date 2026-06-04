@@ -1,0 +1,62 @@
+<task id="005" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>B5 — Live smoke verification: predict-matter-cost end-to-end on Spaarke Dev</title>
+    <status>completed</status>
+    <completed>2026-06-02</completed>
+    <wave>B</wave>
+    <estimated-effort>1h</estimated-effort>
+    <tags>smoke-test, live-verification, predict-matter-cost, acceptance-criteria-SC-01</tags>
+    <dependencies>004</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>B5</wave-item>
+  </metadata>
+
+  <prompt>
+    Hit POST /api/insights/ask on the live Spaarke Dev BFF with question="predict_matter_cost_v1" + subject="matter:<real-guid>" and verify the response is either (a) a real InsightArtifact with ≥12 evidence refs from real Observations, or (b) a real DeclineResponse with structured MinimumEvidenceNeeded from EvidenceSufficiencyNode. NOT the defensive scaffold decline. This is the SC-01 acceptance verification — the load-bearing closing of the Phase 1 live-deploy gap.
+  </prompt>
+
+  <role>Live-system verifier + integration tester.</role>
+
+  <goal>
+    Demonstrably-real predict-matter-cost@v1 execution on Spaarke Dev. Verified by: (1) Application Insights / log traces showing all 8 nodes executed; (2) response body contains real evidence refs OR a structured Decline with MinimumEvidenceNeeded; (3) NO "defensive scaffold no-artifact-produced" string in the response.
+  </prompt>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r2/spec.md (SC-01 + FR-01)</file>
+    <file purpose="endpoint">existing /api/insights/ask route in Sprk.Bff.Api</file>
+    <file purpose="env">Spaarke Dev — live BFF deployment</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-01">Response MUST be real Inference OR real Decline — not scaffold</constraint>
+    <constraint source="spec.md NFR-08">Phase 1 Observations (scope.matterId only) must remain queryable</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Pick a real Spaarke Dev matter">Query sprk_matter via MCP for a matter with sufficient Observations (≥12 if testing sufficient-evidence path; <12 if testing insufficient-evidence path)</step>
+    <step order="2" name="Construct test request">curl/Invoke-RestMethod against POST /api/insights/ask with question="predict_matter_cost_v1" + subject="matter:&lt;guid&gt;" + auth header</step>
+    <step order="3" name="Execute and capture response">Save full response body + Application Insights trace for the invocation</step>
+    <step order="4" name="Verify sufficient-evidence path (if applicable)">Response is InsightArtifact with evidence[] containing ≥12 refs; each ref resolves to a real Observation row in spaarke-insights-index</step>
+    <step order="5" name="Verify insufficient-evidence path (if applicable)">Response is DeclineResponse with structured MinimumEvidenceNeeded field populated; NOT scaffold</step>
+    <step order="6" name="Test both paths">Repeat with a low-evidence matter to confirm Decline path also works</step>
+    <step order="7" name="Document smoke results">notes/handoffs/wave-b5-smoke-results.md with curl commands, responses, App Insights trace links</step>
+  </steps>
+
+  <tools>
+    <tool name="curl">Or pwsh Invoke-RestMethod</tool>
+    <tool name="mcp__dataverse__read_query">Pick test matter + verify Observations</tool>
+    <tool name="az">Auth for App Insights query</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-r2/notes/handoffs/wave-b5-smoke-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">At least one sufficient-evidence run returns InsightArtifact with ≥12 evidence refs</criterion>
+    <criterion testable="true">At least one insufficient-evidence run returns DeclineResponse with structured MinimumEvidenceNeeded</criterion>
+    <criterion testable="true">NEITHER response contains the "defensive scaffold no-artifact-produced" string</criterion>
+    <criterion testable="true">App Insights trace shows all 8 nodes executed (LiveFact, IndexRetrieve×2, EvidenceSufficiency, AiAnalysis OR DeclineToFind, GroundingVerify OR skipped, ReturnInsightArtifact)</criterion>
+  </acceptance-criteria>
+</task>

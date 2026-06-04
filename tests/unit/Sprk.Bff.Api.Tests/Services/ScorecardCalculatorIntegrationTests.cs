@@ -12,6 +12,7 @@ namespace Sprk.Bff.Api.Tests.Services;
 /// create assessments, run calculator, verify grades, averages, trends, and matter updates.
 /// Validates acceptance criteria from task 050.
 /// </summary>
+[Trait("status", "repaired")]
 public class ScorecardCalculatorIntegrationTests
 {
     private readonly Mock<IDataverseService> _dataverseServiceMock;

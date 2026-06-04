@@ -77,10 +77,7 @@ export interface PaneEventBusProviderProps {
  *   );
  * }
  */
-export function PaneEventBusProvider({
-  children,
-  bus: externalBus,
-}: PaneEventBusProviderProps): React.JSX.Element {
+export function PaneEventBusProvider({ children, bus: externalBus }: PaneEventBusProviderProps): React.JSX.Element {
   // useRef — the bus is created at most once per provider lifetime. This
   // avoids the "new instance on every render" pitfall of useState initialisers
   // when an external bus is not provided.
@@ -93,11 +90,7 @@ export function PaneEventBusProvider({
     busRef.current = externalBus;
   }
 
-  return (
-    <PaneEventBusContext.Provider value={busRef.current}>
-      {children}
-    </PaneEventBusContext.Provider>
-  );
+  return <PaneEventBusContext.Provider value={busRef.current}>{children}</PaneEventBusContext.Provider>;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +112,7 @@ export function usePaneEventBus(): PaneEventBus {
   if (bus === null) {
     throw new Error(
       '[PaneEventBus] usePaneEvent / useDispatchPaneEvent must be called inside a <PaneEventBusProvider>. ' +
-      'Wrap the three-pane shell root with <PaneEventBusProvider> to fix this.'
+        'Wrap the three-pane shell root with <PaneEventBusProvider> to fix this.'
     );
   }
 

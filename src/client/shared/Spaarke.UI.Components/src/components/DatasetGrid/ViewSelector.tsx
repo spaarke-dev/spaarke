@@ -10,7 +10,7 @@
 
 import * as React from 'react';
 import { Dropdown, Option, OptionGroup, Spinner, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
-import type { DropdownProps } from '@fluentui/react-components';
+import type { DropdownProps, OptionOnSelectData, SelectionEvents } from '@fluentui/react-components';
 import type { IViewDefinition, ViewType } from '../../types/FetchXmlTypes';
 import { ViewService, IGetViewsOptions } from '../../services/ViewService';
 import type { XrmContext } from '../../utils/xrmContext';
@@ -157,7 +157,7 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
 
   // Handle selection change
   const handleSelectionChange: DropdownProps['onOptionSelect'] = React.useCallback(
-    (_event, data) => {
+    (_event: SelectionEvents, data: OptionOnSelectData) => {
       const viewId = data.optionValue;
       if (viewId && onViewChange) {
         const selectedView = views.find(v => v.id === viewId);

@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B-8: Upgrade CalendarDrawer.eventDates from string[] to IEventDateInfo[]</title>
+    <phase>Phase 6 — Build hygiene cluster</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>063</dependencies>
+    <blocks>067</blocks>
+    <tags>frontend, react, refactoring, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation refactor on .tsx files; modifies shared library + call sites; UI render change (badges/counts); behavior parity required. FULL per Step 3.5.5 (modifies code with rendering change + cross-call-site impact + ADR-021 constraint).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>same lib as 063 (@spaarke/events-components); sequence to avoid file overlap and to consume 063's hook-shared placement</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per spec FR-11 / plan B-8: upgrade `CalendarDrawer.eventDates` API from `string[]` to
+    `IEventDateInfo[]`. Today, `CalendarDrawer.tsx` (in `@spaarke/events-components`)
+    declares `eventDates: string[]` but casts to `IEventDateInfo[]` internally
+    (`eventDates as unknown as IEventDateInfo[]`) — see lines 40, 120-124 of
+    `CalendarDrawer.tsx`. Update the prop type to `IEventDateInfo[]`, update call sites to
+    pass the rich shape, update rendering to use rich info (event-count badges, overdue
+    indicators). Drops the `unknown` cast.
+  </prompt>
+
+  <role>
+    SPAARKE React/TypeScript developer with shared-component (ADR-012) + Fluent v9 (ADR-021)
+    experience. Bias toward type-safe call-site updates that surface the rich `IEventDateInfo`
+    shape to the drawer's rendering layer. The `unknown` cast at line 124 is the smell — the
+    fix is upstream (prop type + call-site shape), not downstream (drawer hack-rendering).
+  </role>
+
+  <goal>
+    (1) `CalendarDrawer.tsx` prop type changes: `eventDates: IEventDateInfo[]` (was `string[]`);
+    cast `eventDates as unknown as IEventDateInfo[]` REMOVED. (2) Every call site passes the
+    richer shape — typically from a transform that converts grouped event records into
+    `IEventDateInfo` (date string + count + overdue flag, per `IEventDateInfo` definition).
+    (3) Rendering uses event-count badges + overdue indicators per the rich shape. (4)
+    Behavior matches the FR-11 acceptance: drawer shows event-count badges + overdue
+    indicators. (5) Build + typecheck clean.
+  </goal>
+
+  <context>
+    <background>
+      Per backlog B-8: `CalendarDrawer.tsx` already has the `IEventDateInfo` type available
+      (imported from `CalendarSection`) and casts to it internally. Task 114 (R3) added a
+      note: "CalendarDrawer's eventDates prop pre-dates the CalendarSection IEventDateInfo[]
+      API drift (counts per date)". This task closes that drift. The fix is API-narrow —
+      change prop type + update call sites + drop cast. Depends on task 063 (B-7) for
+      stable `@spaarke/events-components` package state (063 introduces the bulk-actions
+      hook in the same package; sequencing avoids merge conflicts in `src/index.ts` and
+      `src/hooks/index.ts`).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/CalendarSection/CalendarDrawer.tsx</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/CalendarSection/CalendarSection.tsx</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/CalendarSection/index.ts</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/types/index.ts</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">CalendarDrawer + IEventDateInfo are context-agnostic shared components. Call sites in `@spaarke/events-components/widgets/` may transform host data into IEventDateInfo[]; do NOT push host-specific logic into CalendarDrawer.</constraint>
+    <constraint source="ADR-021">Badge + overdue-indicator rendering MUST use Fluent UI v9 tokens. No hex, no rgba, no v8 components. Use `Badge` from `@fluentui/react-components` with v9 semantic colors (e.g., `dangerForeground1` for overdue).</constraint>
+    <constraint source="ADR-022">React 19 only — no legacy hook patterns.</constraint>
+    <constraint source="project">Drop the `eventDates as unknown as IEventDateInfo[]` cast at line ~124. If after the prop type change any cast remains necessary, the API design is still wrong — fix upstream.</constraint>
+    <constraint source="project">All CalendarDrawer call sites MUST be updated. Grep for `&lt;CalendarDrawer` and verify each.</constraint>
+    <constraint source="project">Behavior parity for surfaces that did NOT use the rich info: the drawer MUST still render correctly when `count` is 1 (no badge clutter for single-event dates) and when `overdue` is false (no indicator).</constraint>
+    <constraint source="project">Carry-over: if call sites cannot easily produce `IEventDateInfo[]` (e.g., grouping logic missing), task 067 (B-11) MAY pick up the residual type-tightening — document the boundary.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>src/client/shared/Spaarke.Events.Components/README.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Inspect IEventDateInfo shape">Read `IEventDateInfo` definition (in `CalendarSection.tsx` or `types/index.ts`). Catalog its fields (likely: `date: string`, `count: number`, `overdue?: boolean`, possibly `hasNote` or status flags). This is the shape every call site must produce.</step>
+    <step order="2" name="Inventory call sites">Run `grep -rn "&lt;CalendarDrawer" --include="*.tsx" --include="*.ts"` across `src/` to enumerate every place CalendarDrawer is rendered. For each, note where `eventDates` comes from (a transform? hard-coded? from a hook?). This determines call-site update scope.</step>
+    <step order="3" name="Update prop type">Edit `CalendarDrawer.tsx`: change `eventDates: string[]` (line 40) to `eventDates: IEventDateInfo[]`. Update the prop destructuring + the pass-through to `CalendarSection` (line ~124) — remove the `as unknown as IEventDateInfo[]` cast.</step>
+    <step order="4" name="Update rendering for rich shape">Inside `CalendarDrawer.tsx` (or its `CalendarSection` consumer), wire badge/count rendering using Fluent v9 `Badge`. For each `IEventDateInfo` with `count &gt; 1`, render a count badge. For each with `overdue === true`, render an overdue indicator (Fluent v9 token-based color). NO hex colors.</step>
+    <step order="5" name="Update call sites">For each call site from step 2: transform whatever data it currently passes into `IEventDateInfo[]`. The transform may be a small inline `.map()` or a new helper. Do NOT pass `string[]` and rely on the drawer to default `count`/`overdue` — produce the rich shape at the call site.</step>
+    <step order="6" name="Build verification">Run `npm run build` on `src/client/shared/Spaarke.Events.Components/` + consumer packages (`src/solutions/EventsPage/`, `src/solutions/SpaarkeAi/`, `src/solutions/CalendarSidePane/`). All 0 errors. Run `tsc --noEmit` on each — clean.</step>
+    <step order="7" name="Lint clean">Run `npm run lint` on touched packages. 0 errors.</step>
+    <step order="8" name="UI smoke + parity test">Run the &lt;ui-tests&gt; below. Confirm badges + overdue indicators render correctly; dark-mode parity.</step>
+    <step order="9" name="Update TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 064 from 🔲 → ✅ completed.</step>
+    <step order="10" name="Document deviations">If any call site couldn't produce the rich shape without significant refactor (e.g., grouping data not available), document the carry-over to task 067 (B-11) and ship the parts that work cleanly. Record in `projects/spaarke-ai-platform-unification-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">grep, npm run build, npx tsc --noEmit, npm run lint</tool>
+    <tool name="Read">Inspect CalendarDrawer, CalendarSection, IEventDateInfo type</tool>
+    <tool name="Edit">Modify prop type + rendering + call sites</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Events.Components/src/components/CalendarSection/CalendarDrawer.tsx (modified)</output>
+    <output type="code">src/client/shared/Spaarke.Events.Components/src/components/CalendarSection/CalendarSection.tsx (modified if needed for rendering)</output>
+    <output type="code">(call sites) — modifications to wherever CalendarDrawer is rendered (from grep in step 2)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md (status flip)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="CalendarDrawer renders event-count badges">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=webresource&amp;webresourceName=sprk_spaarkeai</url>
+      <steps>
+        <step>Open SpaarkeAi; mount Calendar widget into a workspace tab</step>
+        <step>Open the CalendarDrawer (UI affordance — month picker or expand button)</step>
+        <step>Locate a date with multiple events (count &gt; 1)</step>
+        <step>Verify a Fluent v9 Badge displays the count</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Dates with count &gt; 1 show a numeric badge; dates with count = 1 show no badge clutter; no console errors.</expected>
+    </test>
+
+    <test name="CalendarDrawer renders overdue indicators">
+      <steps>
+        <step>Open CalendarDrawer on a month where overdue events exist</step>
+        <step>Verify dates with overdue events show a visual indicator (icon or color treatment using v9 dangerForeground1 or similar)</step>
+        <step>Verify indicator does NOT appear on dates without overdue events</step>
+      </steps>
+      <expected>Overdue indicators render via Fluent v9 semantic tokens; clean visual separation from regular dates.</expected>
+    </test>
+
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Open CalendarDrawer</step>
+        <step>Verify Badge + overdue indicator colors adapt (no hardcoded white/black/red)</step>
+        <step>Verify backgrounds use v9 semantic surface tokens</step>
+      </steps>
+      <expected>All colors use Fluent UI v9 semantic tokens per ADR-021; no hex/rgba leaks.</expected>
+    </test>
+
+    <test name="Behavior parity (no regression)">
+      <steps>
+        <step>On a fresh load, open CalendarDrawer</step>
+        <step>Verify date selection still works (click a date, verify event list updates)</step>
+        <step>Verify month navigation still works</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>All pre-existing CalendarDrawer behavior unchanged; no console errors.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the prop type change, When `CalendarDrawer.tsx` is grepped, Then `eventDates: IEventDateInfo[]` appears and `eventDates as unknown as IEventDateInfo[]` does NOT appear.</criterion>
+    <criterion testable="true">Given the call-site updates, When every `&lt;CalendarDrawer eventDates={...}` is inspected, Then each passes `IEventDateInfo[]` (not `string[]`) and TypeScript compiles without cast or `any`.</criterion>
+    <criterion testable="true">Given the UI smoke test, When CalendarDrawer renders a month with multi-event dates, Then count badges appear via Fluent v9 Badge component.</criterion>
+    <criterion testable="true">Given the UI smoke test, When CalendarDrawer renders a month with overdue events, Then overdue indicators appear using v9 semantic tokens.</criterion>
+    <criterion testable="true">Given `npm run build` runs on `Spaarke.Events.Components` and all CalendarDrawer consumers, Then all build with 0 errors.</criterion>
+    <criterion testable="true">Given task 064 is being executed, When this task completes, Then TASK-INDEX.md shows task 064 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Task 064 explicitly depends on 063 to keep changes within `@spaarke/events-components`
+    serialized — both tasks touch the package's barrels + components. Task 067 (B-11
+    type-drift cleanup) will pick up any residual casts revealed by this fix. The R3 task
+    114 comment in `CalendarDrawer.tsx` lines 120-122 is the historical anchor for "why
+    the cast exists today" — that comment should be REMOVED as part of step 3.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply FULL rigor protocol — Step 9.5 quality gates (code-review + adr-check) run after implementation. Checkpointing every 3 steps. current-task.md tracking. UI tests via ui-test skill at Step 9.7 if Chrome integration enabled.</protocol>
+  </execution>
+</task>

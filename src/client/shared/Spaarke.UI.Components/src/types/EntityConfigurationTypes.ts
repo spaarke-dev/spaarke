@@ -12,7 +12,7 @@ export type CustomCommandActionType = 'customapi' | 'action' | 'function' | 'wor
 /**
  * Custom command parameter value (supports token interpolation)
  */
-export type CommandParameterValue = string | number | boolean | Record<string, any>;
+export type CommandParameterValue = string | number | boolean | Record<string, unknown>;
 
 /**
  * Custom command configuration from JSON

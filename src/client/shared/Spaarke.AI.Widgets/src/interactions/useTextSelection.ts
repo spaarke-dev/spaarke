@@ -95,11 +95,7 @@ export interface UseTextSelectionResult {
  *   'Clause list',
  * );
  */
-export function useTextSelection(
-  widgetId: string,
-  widgetType: string,
-  contextLabel?: string
-): UseTextSelectionResult {
+export function useTextSelection(widgetId: string, widgetType: string, contextLabel?: string): UseTextSelectionResult {
   const dispatch = useDispatchPaneEvent();
 
   const label = contextLabel ?? widgetType;

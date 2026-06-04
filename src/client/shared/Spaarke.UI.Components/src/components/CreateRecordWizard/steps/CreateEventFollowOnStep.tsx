@@ -21,7 +21,7 @@ import * as React from 'react';
 import { Text, makeStyles, tokens } from '@fluentui/react-components';
 import { CreateEventStep } from '../../CreateEventWizard/CreateEventStep';
 import type { ICreateEventFormState } from '../../CreateEventWizard/formTypes';
-import { EMPTY_EVENT_FORM } from '../../CreateEventWizard/formTypes';
+import { EMPTY_EVENT_FORM as _EMPTY_EVENT_FORM } from '../../CreateEventWizard/formTypes';
 import type { IDataService } from '../../../types/serviceInterfaces';
 
 // ---------------------------------------------------------------------------
@@ -88,8 +88,7 @@ export const CreateEventFollowOnStep: React.FC<ICreateEventFollowOnStepProps> = 
           Create Event
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Enter details for the event. It will be created and linked to the record when you click
-          Finish.
+          Enter details for the event. It will be created and linked to the record when you click Finish.
         </Text>
       </div>
 

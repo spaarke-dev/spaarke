@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="068" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>Test infra: fix Jest + React 19 env (RTL `react-dom/client` resolve failure)</title>
+    <phase>6: Build hygiene cluster</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, react, typescript, testing, config, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test-infrastructure config change (no production code modified). Affects `@spaarke/ui-components` test runner. STANDARD per Step 3.5.5 — new config/setup with explicit constraints, no .cs/.ts/.tsx production-code modification.</rigor-reason>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Modifies test-env config files (jest.config, setup.ts, devDependencies in package.json). Production code untouched. Independent of other R4 work.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Filed 2026-05-26 as a Phase 6 build-hygiene task after pre-existing test infra issue was
+    flagged repeatedly during R4 by sub-agents executing tasks 050 + 053 + 054 + 042: the
+    SprkChat test files cannot execute because `react-dom/client` cannot be resolved by Jest.
+    This is a React 19 + RTL + Jest module-resolution drift that pre-dates R4 but blocks
+    verification of R4 tests (`SprkChat.attachments.test.tsx`, `SprkChat.onAttachmentReady.test.tsx`,
+    etc.). Operator approved adding to R4 scope (2026-05-26).
+  </prompt>
+
+  <role>
+    Test-infrastructure engineer familiar with Jest + React 19 + React Testing Library compatibility.
+    The fix may involve jest-environment-jsdom version bump, RTL version pin, or `moduleDirectories`
+    / `moduleNameMapper` tweaks to resolve the new React 19 import paths (`react-dom/client` was added
+    in React 18 but its module resolution under Jest changed with React 19's package.exports).
+  </role>
+
+  <goal>
+    All SprkChat test files (and any other React 19 + RTL tests in `@spaarke/ui-components`) execute
+    without `Cannot find module 'react-dom/client'` errors. Test suite runs end-to-end. No
+    production code modified. Existing tests pass.
+  </goal>
+
+  <context>
+    <background>
+      Reported by R4 sub-agents (tasks 050 + 053 + 054 + 042). Verified pre-existing — error
+      reproduces on master branch baseline. Affects: `SprkChat.test.tsx`, `SprkChat.attachments.test.tsx`,
+      and any new SprkChat tests added by R4 (e.g., task 050's boundary tests and task 042's
+      `SprkChat.onAttachmentReady.test.tsx`).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/jest.config.js</file>
+      <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/</file>
+      <file>src/client/shared/Spaarke.UI.Components/setup/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">React 19 is required for Code Pages. Do NOT downgrade to React 18 to fix the test env — fix at the test layer.</constraint>
+    <constraint source="ADR-012">Test infrastructure for `@spaarke/ui-components` lives in that package; do NOT relocate to solutions/.</constraint>
+    <constraint source="project">No production-code modification. This is test-infra only.</constraint>
+    <constraint source="project">Don't introduce a Vitest migration as part of this task — narrowly fix Jest + React 19. Vitest migration (if desired) is a separate scope.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+      <file>src/client/shared/Spaarke.UI.Components/jest.config.js</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Reproduce">Run `npm test SprkChat.attachments.test.tsx` (or similar) in `src/client/shared/Spaarke.UI.Components/`. Capture the exact error message.</step>
+    <step order="2" name="Diagnose">Identify whether the failure is: (a) `jest-environment-jsdom` version mismatch with React 19's new `react-dom/client` entry; (b) `moduleDirectories`/`moduleNameMapper` not resolving the new React 19 exports map; (c) `@testing-library/react` version incompatible with React 19; (d) `setupFilesAfterEach` or test-setup file conflict.</step>
+    <step order="3" name="Plan minimal fix">Pick the narrowest fix: bump jest-environment, pin RTL to React-19-compatible version, add `moduleNameMapper`, etc. Document the chosen path.</step>
+    <step order="4" name="Apply">Edit jest config / package.json devDependencies / setup files as required. Run `npm install` to pull any new deps.</step>
+    <step order="5" name="Verify SprkChat tests">Run all SprkChat tests (including R4-added ones). 0 module-resolution errors. Existing passing tests still pass.</step>
+    <step order="6" name="Verify other React 19 tests">Run other R4-touched test files that use React 19 + RTL: e.g., `@spaarke/ai-widgets` widget tests (task 042's DocumentViewerWidget). Confirm no regressions.</step>
+    <step order="7" name="Document">Write `projects/spaarke-ai-platform-unification-r4/notes/test-infra-jest-react19-fix-2026-05-26.md` with: error captured, root cause identified, fix applied, before/after pass counts.</step>
+    <step order="8" name="Update TASK-INDEX">Change task 068 status to ✅ completed.</step>
+    <step order="9" name="Deviations">If the fix requires more than `package.json` / `jest.config.js` edits (e.g., test refactor), document why in deviations note.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Inspect jest configs + package.json</tool>
+    <tool name="Edit">Update jest config + package.json</tool>
+    <tool name="Bash">Run npm test + npm install</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/client/shared/Spaarke.UI.Components/jest.config.js (modified)</output>
+    <output type="config">src/client/shared/Spaarke.UI.Components/package.json (devDependencies bumped)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/test-infra-jest-react19-fix-2026-05-26.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`npm test SprkChat.attachments.test.tsx` runs without `Cannot find module 'react-dom/client'` (or equivalent) error.</criterion>
+    <criterion testable="true">`npm test SprkChat.onAttachmentReady.test.tsx` (R4 task 042 addition) executes.</criterion>
+    <criterion testable="true">All previously-passing tests in `@spaarke/ui-components` still pass (no regressions).</criterion>
+    <criterion testable="true">No production code modified — only `jest.config.js`, `package.json`, and any test-setup files.</criterion>
+    <criterion testable="true">Memo at `notes/test-infra-jest-react19-fix-2026-05-26.md` documents root cause + fix.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Pre-existing issue documented by multiple sub-agents across R4. Likely fix paths (ordered by simplicity):
+    1. Bump `jest-environment-jsdom` to v29.7+ (React 19 support)
+    2. Pin `@testing-library/react` to v16+ (React 19 compatible)
+    3. Add `moduleNameMapper` to resolve `react-dom/client` explicitly if package.exports drift
+    4. Switch to `jsdom` env with React 19's new server-component handling
+
+    If pre-existing baseline already has React 19 + Jest working elsewhere in the repo, look at THAT setup
+    (e.g., `@spaarke/ai-widgets` ran 14 widget tests successfully in task 042) and align.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor — test-infra config change. Quality gates SKIPPED per Step 0.5.</protocol>
+  </execution>
+</task>

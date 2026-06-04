@@ -31,6 +31,13 @@ export interface ITokenSetColors {
   borderAccent?: string;
   valueText?: string;
   iconColor?: string;
+  /**
+   * Saturated-but-soft fill color for donut/pie segments and inline color
+   * swatches. Foreground2-tier tokens — readable, not vibrating, and visually
+   * consistent with SemanticSearchControl's chip pattern
+   * (Background2/Foreground2 pairing).
+   */
+  donutSegment?: string;
 }
 
 /**
@@ -47,6 +54,7 @@ export function getTokenSetColors(tokenSet: ColorTokenSet): ITokenSetColors {
         borderAccent: tokens.colorBrandBackground,
         valueText: tokens.colorBrandForeground1,
         iconColor: tokens.colorBrandForeground2,
+        donutSegment: tokens.colorBrandForeground2,
       };
     case 'warning':
       return {
@@ -54,6 +62,7 @@ export function getTokenSetColors(tokenSet: ColorTokenSet): ITokenSetColors {
         borderAccent: tokens.colorPaletteYellowBorderActive,
         valueText: tokens.colorPaletteYellowForeground2,
         iconColor: tokens.colorPaletteYellowForeground2,
+        donutSegment: tokens.colorPaletteYellowForeground2,
       };
     case 'danger':
       return {
@@ -61,6 +70,7 @@ export function getTokenSetColors(tokenSet: ColorTokenSet): ITokenSetColors {
         borderAccent: tokens.colorPaletteRedBorderActive,
         valueText: tokens.colorPaletteRedForeground1,
         iconColor: tokens.colorPaletteRedForeground1,
+        donutSegment: tokens.colorPaletteRedForeground2,
       };
     case 'success':
       return {
@@ -68,6 +78,7 @@ export function getTokenSetColors(tokenSet: ColorTokenSet): ITokenSetColors {
         borderAccent: tokens.colorPaletteGreenBorderActive,
         valueText: tokens.colorPaletteGreenForeground1,
         iconColor: tokens.colorPaletteGreenForeground1,
+        donutSegment: tokens.colorPaletteGreenForeground2,
       };
     case 'neutral':
     default:
@@ -76,6 +87,7 @@ export function getTokenSetColors(tokenSet: ColorTokenSet): ITokenSetColors {
         borderAccent: tokens.colorNeutralStroke1,
         valueText: tokens.colorNeutralForeground3,
         iconColor: tokens.colorNeutralForeground3,
+        donutSegment: tokens.colorNeutralForeground2,
       };
   }
 }

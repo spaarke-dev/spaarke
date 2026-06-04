@@ -6,7 +6,7 @@
  * @see ADR-021 — Fluent UI v9 design system
  */
 
-import type { INavigationService } from "../../types/serviceInterfaces";
+import type { INavigationService } from '../../types/serviceInterfaces';
 
 export type { INavigationService };
 

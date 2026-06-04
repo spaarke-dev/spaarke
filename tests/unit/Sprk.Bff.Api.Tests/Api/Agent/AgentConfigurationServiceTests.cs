@@ -18,6 +18,7 @@ namespace Sprk.Bff.Api.Tests.Api.Agent;
 /// Unit tests for AgentConfigurationService.
 /// Validates caching behavior, capability toggles, and role-based access.
 /// </summary>
+[Trait("status", "repaired")]
 public class AgentConfigurationServiceTests
 {
     private const string TenantId = "test-tenant-001";

@@ -125,22 +125,11 @@ export const ListView: React.FC<IListViewProps> = props => {
     return props.columns.filter(col => col.canRead !== false);
   }, [props.columns]);
 
-  // Use virtualized view for large datasets
-  if (virtualization.shouldVirtualize) {
-    return (
-      <VirtualizedListView
-        records={props.records}
-        columns={readableColumns}
-        selectedRecordIds={props.selectedRecordIds}
-        itemHeight={virtualization.itemHeight}
-        overscanCount={virtualization.overscanCount}
-        onRecordClick={recordId => {
-          const record = props.records.find(r => r.id === recordId);
-          if (record) props.onRecordClick(record);
-        }}
-      />
-    );
-  }
+  // Task 073 (B.1): All hooks hoisted ABOVE the conditional returns below to
+  // satisfy React's Rules of Hooks. Hooks now run unconditionally on every
+  // render; the conditional branches use these values to choose the render
+  // output. Hooks below are only consumed in the standard (non-virtualized)
+  // branch — they are computed regardless to preserve hook-call order.
 
   const isInfiniteScroll = React.useMemo(() => {
     if (props.scrollBehavior === 'Infinite') return true;
@@ -188,6 +177,23 @@ export const ListView: React.FC<IListViewProps> = props => {
   const displayColumns = React.useMemo(() => {
     return readableColumns.slice(0, 3);
   }, [readableColumns]);
+
+  // Use virtualized view for large datasets
+  if (virtualization.shouldVirtualize) {
+    return (
+      <VirtualizedListView
+        records={props.records}
+        columns={readableColumns}
+        selectedRecordIds={props.selectedRecordIds}
+        itemHeight={virtualization.itemHeight}
+        overscanCount={virtualization.overscanCount}
+        onRecordClick={recordId => {
+          const record = props.records.find(r => r.id === recordId);
+          if (record) props.onRecordClick(record);
+        }}
+      />
+    );
+  }
 
   if (props.records.length === 0 && !props.loading) {
     return (

@@ -85,23 +85,11 @@ export const GridView: React.FC<IGridViewProps> = props => {
     return props.columns.filter(col => col.canRead !== false);
   }, [props.columns]);
 
-  // Use custom virtualized grid for very large datasets (>1000 records)
-  // For 100-1000 records, rely on Fluent DataGrid's built-in virtualization
-  if (virtualization.shouldVirtualize && props.records.length > 1000) {
-    return (
-      <VirtualizedGridView
-        records={props.records}
-        columns={readableColumns}
-        selectedRecordIds={props.selectedRecordIds}
-        itemHeight={virtualization.itemHeight}
-        overscanCount={virtualization.overscanCount}
-        onRecordClick={recordId => {
-          const record = props.records.find(r => r.id === recordId);
-          if (record) props.onRecordClick(record);
-        }}
-      />
-    );
-  }
+  // Task 073 (B.1): All hooks hoisted ABOVE the conditional returns below to
+  // satisfy React's Rules of Hooks. Hooks now run unconditionally on every
+  // render; the conditional branches use these values to choose the render
+  // output. Hooks below are only consumed in the standard (non-virtualized)
+  // branch — they are computed regardless to preserve hook-call order.
 
   // Determine if infinite scroll should be active
   const isInfiniteScroll = React.useMemo(() => {
@@ -167,6 +155,24 @@ export const GridView: React.FC<IGridViewProps> = props => {
     },
     [props]
   );
+
+  // Use custom virtualized grid for very large datasets (>1000 records)
+  // For 100-1000 records, rely on Fluent DataGrid's built-in virtualization
+  if (virtualization.shouldVirtualize && props.records.length > 1000) {
+    return (
+      <VirtualizedGridView
+        records={props.records}
+        columns={readableColumns}
+        selectedRecordIds={props.selectedRecordIds}
+        itemHeight={virtualization.itemHeight}
+        overscanCount={virtualization.overscanCount}
+        onRecordClick={recordId => {
+          const record = props.records.find(r => r.id === recordId);
+          if (record) props.onRecordClick(record);
+        }}
+      />
+    );
+  }
 
   // Empty state
   if (props.records.length === 0 && !props.loading) {

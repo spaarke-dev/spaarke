@@ -42,13 +42,7 @@ const useStyles = makeStyles({
 /**
  * SearchInput component with text input, search button, and info icon.
  */
-export const SearchInput: React.FC<ISearchInputProps> = ({
-  value,
-  placeholder,
-  disabled,
-  onValueChange,
-  onSearch,
-}) => {
+export const SearchInput: React.FC<ISearchInputProps> = ({ value, placeholder, disabled, onValueChange, onSearch }) => {
   const styles = useStyles();
   const [infoOpen, setInfoOpen] = useState(false);
 
@@ -87,36 +81,30 @@ export const SearchInput: React.FC<ISearchInputProps> = ({
         appearance="outline"
         size="medium"
       />
+      {/* v1.1.51 (Item 8) — Toned-down Search button.
+          Switched from appearance="primary" (saturated brand fill) to
+          appearance="outline" so the button reads as a brand-stroked
+          neutral surface. Lines up with the lighter pill palette adopted
+          in Item 7. Behavior is unchanged. */}
       <Button
         className={styles.searchButton}
-        appearance="primary"
+        appearance="outline"
         disabled={disabled}
         onClick={handleSearchClick}
         icon={disabled ? <Spinner size="tiny" /> : undefined}
       >
         {disabled ? 'Searching...' : 'Search'}
       </Button>
-      <Popover
-        open={infoOpen}
-        onOpenChange={(_ev, data) => setInfoOpen(data.open)}
-        positioning="below-end"
-        withArrow
-      >
+      <Popover open={infoOpen} onOpenChange={(_ev, data) => setInfoOpen(data.open)} positioning="below-end" withArrow>
         <PopoverTrigger disableButtonEnhancement>
           <Tooltip content="How semantic search works" relationship="label">
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<Info20Regular />}
-              aria-label="Search info"
-            />
+            <Button appearance="subtle" size="small" icon={<Info20Regular />} aria-label="Search info" />
           </Tooltip>
         </PopoverTrigger>
         <PopoverSurface style={{ maxWidth: '300px', padding: tokens.spacingHorizontalM }}>
           <Text size={200}>
-            Semantic search finds documents by meaning, not just keywords. Results are ranked by
-            similarity to your query. Toggle "Associated Only" in the filter panel to show only
-            documents directly linked to this record.
+            Semantic search finds documents by meaning, not just keywords. Results are ranked by similarity to your
+            query. Toggle "Associated Only" in the filter panel to show only documents directly linked to this record.
           </Text>
         </PopoverSurface>
       </Popover>

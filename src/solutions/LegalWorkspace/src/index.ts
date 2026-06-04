@@ -20,6 +20,54 @@
 export { LegalWorkspaceApp } from "./LegalWorkspaceApp";
 export type { ILegalWorkspaceAppProps } from "./LegalWorkspaceApp";
 
+// ---------------------------------------------------------------------------
+// R4 task 052 (C-4): WorkspaceRenderer interface binding
+//
+// `LegalWorkspaceApp` satisfies the `WorkspaceRenderer` contract from
+// `@spaarke/ui-components` (its prop shape `ILegalWorkspaceAppProps` mirrors
+// `WorkspaceRendererProps` exactly). This re-export provides a `WorkspaceRenderer`
+// -typed binding so host bootstraps (e.g. SpaarkeAi `main.tsx`) can register
+// it as the default renderer without import-site type assertions:
+//
+//   import { LegalWorkspaceRenderer } from "@spaarke/legal-workspace";
+//   import { setDefaultWorkspaceRenderer } from "@spaarke/ui-components";
+//   setDefaultWorkspaceRenderer(LegalWorkspaceRenderer);
+//
+// The binding is the SAME component as `LegalWorkspaceApp` (no wrapping, no
+// behavioural change — Risk R-4: zero observable diff). The named export
+// `LegalWorkspaceApp` is preserved for callers that already import it directly
+// (notably `WorkspaceLayoutWidget` until its C-4 refactor lands in parallel).
+// ---------------------------------------------------------------------------
+
+import { LegalWorkspaceApp as _LegalWorkspaceApp } from "./LegalWorkspaceApp";
+import type { WorkspaceRenderer } from "@spaarke/ui-components";
+
+/**
+ * `LegalWorkspaceApp` re-exported under its `WorkspaceRenderer` contract.
+ * Use this binding (or `LegalWorkspaceApp` directly) when registering as the
+ * default renderer in a host bootstrap. The runtime behaviour is identical
+ * to `LegalWorkspaceApp`.
+ *
+ * # Type assignment (R4 task 072 / A.2, 2026-05-27)
+ *
+ * `ILegalWorkspaceAppProps` and `WorkspaceRendererProps` are now structurally
+ * equivalent name-for-name AND method-for-method on `webApi`. The previous
+ * variance mismatch (LegalWorkspace required methods; `WorkspaceRendererWebApi`
+ * made them optional) was removed in task 072 by tightening
+ * `WorkspaceRendererWebApi` so all 5 Dataverse-WebApi methods are REQUIRED.
+ *
+ * Operator architectural decision 2026-05-27 (Path 2a): LegalWorkspace IS the
+ * dashboard renderer; new dashboard pieces are added INSIDE that library, not
+ * as separate renderers. The "loose-interface flexibility for many renderers"
+ * use case that motivated the previous all-optional shape was fictional. The
+ * cast `as unknown as WorkspaceRenderer` was static-type debt for that
+ * fictional flexibility and has been removed.
+ *
+ * TypeScript now accepts the assignment directly via structural typing — no
+ * cast, no wrapper component, no runtime adapter.
+ */
+export const LegalWorkspaceRenderer: WorkspaceRenderer = _LegalWorkspaceApp;
+
 /**
  * Round 4 Fix 4.1 (2026-05-21): `setRuntimeConfig` exposed so embedding shells
  * (SpaarkeAi) can initialize LegalWorkspace's runtime-config singleton

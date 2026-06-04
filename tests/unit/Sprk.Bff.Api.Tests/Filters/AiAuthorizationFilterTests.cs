@@ -13,6 +13,7 @@ using AuthorizationResult = Sprk.Bff.Api.Services.Ai.AuthorizationResult;
 
 namespace Sprk.Bff.Api.Tests.Filters;
 
+[Trait("status", "repaired")]
 public class AiAuthorizationFilterTests
 {
     private readonly Mock<IAiAuthorizationService> _authServiceMock;

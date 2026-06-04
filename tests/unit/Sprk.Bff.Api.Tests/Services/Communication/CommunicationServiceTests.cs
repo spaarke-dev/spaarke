@@ -19,6 +19,14 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Communication;
 
+/// <remarks>
+/// 2026-05-31 (task 011 / P1.A2 verify+repair): trait-tagged per §6.2 taxonomy. Tests that
+/// exercise the validation/sender-resolution paths (which short-circuit before the Dataverse
+/// write) pass unchanged. Tests that exercise the happy-path of SendAsync now flow through the
+/// IGenericEntityService writer (mocked via Mock.Of&lt;IGenericEntityService&gt;() — returns
+/// Guid.Empty; CommunicationId assertions use Guid.Empty accordingly).
+/// </remarks>
+[Trait("status", "repaired")]
 public class CommunicationServiceTests
 {
     #region Test Infrastructure
@@ -55,8 +63,9 @@ public class CommunicationServiceTests
         _sut = new CommunicationService(
             _graphClientFactoryMock.Object,
             senderValidator,
-            Mock.Of<IDataverseService>(),
-            Mock.Of<IDataverseService>(),
+            Mock.Of<ICommunicationDataverseService>(),
+            Mock.Of<IGenericEntityService>(),
+            Mock.Of<IDocumentDataverseService>(),
             null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here
             null!, // CommunicationAccountService — not tested here
@@ -138,8 +147,9 @@ public class CommunicationServiceTests
         return new CommunicationService(
             _graphClientFactoryMock.Object,
             senderValidator,
-            Mock.Of<IDataverseService>(),
-            Mock.Of<IDataverseService>(),
+            Mock.Of<ICommunicationDataverseService>(),
+            Mock.Of<IGenericEntityService>(),
+            Mock.Of<IDocumentDataverseService>(),
             null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here
             null!, // CommunicationAccountService — not tested here
@@ -315,7 +325,7 @@ public class CommunicationServiceTests
         response.CorrelationId.Should().Be("test-corr-123");
         response.GraphMessageId.Should().Be("test-corr-123");
         response.SentAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
-        response.CommunicationId.Should().Be(Guid.Empty, "Mock IDataverseService.CreateAsync returns Guid.Empty");
+        response.CommunicationId.Should().Be(Guid.Empty, "Mock.Of<IGenericEntityService>().CreateAsync returns Guid.Empty");
     }
 
     #endregion

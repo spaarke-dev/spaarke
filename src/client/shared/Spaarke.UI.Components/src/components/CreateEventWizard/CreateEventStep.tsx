@@ -15,16 +15,7 @@
  * @see IDataService — high-level data access abstraction
  */
 import * as React from 'react';
-import {
-  Text,
-  Input,
-  Textarea,
-  Dropdown,
-  Option,
-  Field,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Text, Input, Textarea, Dropdown, Option, Field, makeStyles, tokens } from '@fluentui/react-components';
 import { LookupField } from '../LookupField/LookupField';
 import type { ILookupItem } from '../../types/LookupTypes';
 import { EventService } from './eventService';
@@ -91,9 +82,7 @@ export const CreateEventStep: React.FC<ICreateEventStepProps> = ({
 }) => {
   const styles = useStyles();
 
-  const [formValues, setFormValues] = React.useState<ICreateEventFormState>(
-    initialFormValues ?? EMPTY_EVENT_FORM
-  );
+  const [formValues, setFormValues] = React.useState<ICreateEventFormState>(initialFormValues ?? EMPTY_EVENT_FORM);
 
   const serviceRef = React.useRef<EventService | null>(null);
   if (!serviceRef.current) {
@@ -109,50 +98,32 @@ export const CreateEventStep: React.FC<ICreateEventStepProps> = ({
 
   // -- Field handlers --------------------------------------------------------
 
-  const handleNameChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setFormValues((prev) => ({ ...prev, eventName: e.target.value }));
-    },
-    []
-  );
+  const handleNameChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormValues(prev => ({ ...prev, eventName: e.target.value }));
+  }, []);
 
-  const handleEventTypeChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setFormValues((prev) => ({
-        ...prev,
-        eventTypeId: item?.id ?? '',
-        eventTypeName: item?.name ?? '',
-      }));
-    },
-    []
-  );
+  const handleEventTypeChange = React.useCallback((item: ILookupItem | null) => {
+    setFormValues(prev => ({
+      ...prev,
+      eventTypeId: item?.id ?? '',
+      eventTypeName: item?.name ?? '',
+    }));
+  }, []);
 
-  const handleSearchEventTypes = React.useCallback(
-    (query: string) => serviceRef.current!.searchEventTypes(query),
-    []
-  );
+  const handleSearchEventTypes = React.useCallback((query: string) => serviceRef.current!.searchEventTypes(query), []);
 
-  const handleDueDateChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setFormValues((prev) => ({ ...prev, dueDate: e.target.value }));
-    },
-    []
-  );
+  const handleDueDateChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormValues(prev => ({ ...prev, dueDate: e.target.value }));
+  }, []);
 
-  const handlePriorityChange = React.useCallback(
-    (_e: unknown, data: { optionValue?: string }) => {
-      const val = parseInt(data.optionValue ?? '100000001', 10);
-      setFormValues((prev) => ({ ...prev, priority: val }));
-    },
-    []
-  );
+  const handlePriorityChange = React.useCallback((_e: unknown, data: { optionValue?: string }) => {
+    const val = parseInt(data.optionValue ?? '100000001', 10);
+    setFormValues(prev => ({ ...prev, priority: val }));
+  }, []);
 
-  const handleDescriptionChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setFormValues((prev) => ({ ...prev, description: e.target.value }));
-    },
-    []
-  );
+  const handleDescriptionChange = React.useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setFormValues(prev => ({ ...prev, description: e.target.value }));
+  }, []);
 
   // -- Render ----------------------------------------------------------------
 
@@ -160,7 +131,7 @@ export const CreateEventStep: React.FC<ICreateEventStepProps> = ({
     ? { id: formValues.eventTypeId, name: formValues.eventTypeName }
     : null;
 
-  const selectedPriorityText = PRIORITY_OPTIONS.find((o) => o.key === formValues.priority)?.text ?? 'Normal';
+  const selectedPriorityText = PRIORITY_OPTIONS.find(o => o.key === formValues.priority)?.text ?? 'Normal';
 
   return (
     <div className={styles.form}>
@@ -192,11 +163,7 @@ export const CreateEventStep: React.FC<ICreateEventStepProps> = ({
 
       <div className={styles.row}>
         <Field label="Due Date">
-          <Input
-            type="date"
-            value={formValues.dueDate}
-            onChange={handleDueDateChange}
-          />
+          <Input type="date" value={formValues.dueDate} onChange={handleDueDateChange} />
         </Field>
         <Field label="Priority">
           <Dropdown
@@ -204,7 +171,7 @@ export const CreateEventStep: React.FC<ICreateEventStepProps> = ({
             selectedOptions={[String(formValues.priority)]}
             onOptionSelect={handlePriorityChange}
           >
-            {PRIORITY_OPTIONS.map((opt) => (
+            {PRIORITY_OPTIONS.map(opt => (
               <Option key={opt.key} value={String(opt.key)}>
                 {opt.text}
               </Option>

@@ -223,7 +223,7 @@ public class PromptLibraryServiceTests
         var vars = new Dictionary<string, string>
         {
             ["client.name"] = "Acme Corp",
-            ["matter.id"]   = "M-2026-001"
+            ["matter.id"] = "M-2026-001"
         };
 
         var rendered = PromptLibraryService.RenderBody(template, vars);
@@ -373,18 +373,18 @@ public class PromptLibraryServiceTests
         string ownerId,
         PromptOwnership ownership,
         string? id = null) => new()
-    {
-        Id = id ?? Guid.NewGuid().ToString("D"),
-        TenantId = TenantId,
-        OwnerId = ownerId,
-        Ownership = ownership,
-        Name = $"{ownership} Template",
-        Body = "Hello {{name}}",
-        Tags = [],
-        Variables = [],
-        CreatedAt = DateTimeOffset.UtcNow,
-        UpdatedAt = DateTimeOffset.UtcNow
-    };
+        {
+            Id = id ?? Guid.NewGuid().ToString("D"),
+            TenantId = TenantId,
+            OwnerId = ownerId,
+            Ownership = ownership,
+            Name = $"{ownership} Template",
+            Body = "Hello {{name}}",
+            Tags = [],
+            Variables = [],
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
 
     private static PromptTemplate BuildTemplate(
         string body,

@@ -95,6 +95,7 @@ import {
   shorthands,
   tokens,
   Button,
+  Checkbox,
   Dropdown,
   Option,
   Label,
@@ -108,6 +109,11 @@ import {
   FolderRegular,
   ReceiptRegular,
 } from '@fluentui/react-icons';
+import {
+  useDispatchPaneEvent,
+  SEARCH_CRITERIA_RESULT_WIDGET_TYPE,
+} from '@spaarke/ai-widgets';
+import type { SearchCriteriaResultWidgetData } from '@spaarke/ai-widgets';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -523,6 +529,17 @@ const useStyles = makeStyles({
   searchButton: {
     width: '100%',
   },
+
+  // R4 task 043 (W-5) — "Also add to Workspace" opt-in row sits between the
+  // Date Range dropdown and the Search button. Uses the same vertical
+  // spacing as the criteria fields above so the opt-in doesn't visually
+  // detach from the form. Fluent v9 Checkbox carries its own label styling;
+  // we only need the row container.
+  addToWorkspaceRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    marginTop: tokens.spacingVerticalXS,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -543,6 +560,23 @@ export const SemanticSearchCriteriaTool: React.FC = () => {
   const [criteria, setCriteria] = React.useState<PersistedCriteria>(() =>
     readPersistedCriteria(),
   );
+
+  // ── R4 task 043 (W-5) — "Also add to Workspace" opt-in for the Context →
+  // Workspace mount-source demo (FR-03). Defaults to UNCHECKED — the modal
+  // search launch is the production path; mounting a workspace tab is opt-in
+  // per the task spec's "MUST be optional" constraint.
+  //
+  // State is intentionally NOT persisted to localStorage — each search-click
+  // re-affirms whether the user wants a tab this time. Persisting would be
+  // a surprise-affecting-default after a single click.
+  const [addToWorkspace, setAddToWorkspace] = React.useState<boolean>(false);
+
+  // Dispatcher for PaneEventBus workspace channel (ADR-030).
+  // Mirrors the R4 task 042 / W-4 pattern in
+  // src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx
+  // (`handleAttachmentReady`). Both task 042 and task 043 use the same
+  // dispatch hook and the same `widget_load` event-type discriminant.
+  const dispatch = useDispatchPaneEvent();
 
   // Mirror every change back to localStorage so a modal close (or tool switch)
   // restores the last-typed criteria.
@@ -607,9 +641,77 @@ export const SemanticSearchCriteriaTool: React.FC = () => {
     [updateCriteria],
   );
 
+  /**
+   * R4 task 043 (W-5) — handles the "Also add to Workspace" opt-in.
+   *
+   * When the checkbox is checked, this function dispatches a typed
+   * `widget_load` event on the `workspace` PaneEventBus channel BEFORE
+   * launching the Semantic Search modal. The Workspace pane (subscribed
+   * via `usePaneEvent`) resolves the widget via WorkspaceWidgetRegistry and
+   * mounts SearchCriteriaResultWidget as a new tab labeled "Search:
+   * <domain>".
+   *
+   * Per ADR-030: payload is typed end-to-end via `SearchCriteriaResultWidgetData`
+   * (NO `any` cast).
+   *
+   * Per ADR-028: no auth surface — the criteria are pure user input.
+   * `authenticatedFetch` is NOT used at this dispatch site because no BFF
+   * call is made here (the modal search path runs its own auth bootstrap).
+   *
+   * Per the task spec "MUST be optional" constraint: when the checkbox is
+   * UNCHECKED, no dispatch occurs and the workspace pane is unchanged.
+   * After dispatch, the checkbox is reset to its default (unchecked) so
+   * each search-click re-affirms the user's intent.
+   */
+  const dispatchSearchCriteriaWidget = React.useCallback(
+    (current: PersistedCriteria): void => {
+      const widgetData: SearchCriteriaResultWidgetData = {
+        query: current.query,
+        domain: current.domain,
+        documentType: current.documentType,
+        fileType: current.fileType,
+        matterType: current.matterType,
+        dateRange: current.dateRange,
+        capturedAt: new Date().toISOString(),
+      };
+      // Tab label: prefer a short, query-derived label so the tab is
+      // recognizable when several searches are open. Falls back to the
+      // domain name if the query is empty.
+      const queryPreview = current.query.trim().slice(0, 40);
+      const displayName =
+        queryPreview.length > 0
+          ? `Search: ${queryPreview}${current.query.trim().length > 40 ? '…' : ''}`
+          : `Search: ${current.domain}`;
+
+      dispatch('workspace', {
+        type: 'widget_load',
+        widgetType: SEARCH_CRITERIA_RESULT_WIDGET_TYPE,
+        widgetData,
+        displayName,
+      });
+    },
+    [dispatch],
+  );
+
+  const handleAddToWorkspaceChange = React.useCallback(
+    (_e: unknown, data: { checked: boolean | 'mixed' }) => {
+      // Fluent v9 Checkbox can emit 'mixed' for indeterminate; we never
+      // surface that state, so coerce to a plain boolean.
+      setAddToWorkspace(data.checked === true);
+    },
+    [],
+  );
+
   const handleSearchClick = React.useCallback(() => {
+    if (addToWorkspace) {
+      dispatchSearchCriteriaWidget(criteria);
+      // Reset the opt-in for the next search-click so the user must
+      // re-affirm. This matches the "MUST be optional" task-spec invariant
+      // and prevents accidental tab pile-up.
+      setAddToWorkspace(false);
+    }
     launchSemanticSearch(criteria);
-  }, [criteria]);
+  }, [addToWorkspace, criteria, dispatchSearchCriteriaWidget]);
 
   // Per-domain filter visibility. Mirrors SearchFilterPane.tsx logic:
   //   - documents → Document Type + File Type + Matter Type
@@ -771,6 +873,21 @@ export const SemanticSearchCriteriaTool: React.FC = () => {
             </Option>
           ))}
         </Dropdown>
+      </div>
+
+      {/* R4 task 043 (W-5) — "Also add to Workspace" opt-in checkbox.
+          Renders above the Search button. Unchecked by default (the task spec
+          requires this be optional; the modal search remains the production
+          path). When checked, clicking Search dispatches `widget_load` on the
+          workspace channel, mounting a SearchCriteriaResultWidget tab.
+       */}
+      <div className={styles.addToWorkspaceRow}>
+        <Checkbox
+          checked={addToWorkspace}
+          onChange={handleAddToWorkspaceChange}
+          label="Also add to Workspace"
+          data-testid="semantic-search-criteria-add-to-workspace"
+        />
       </div>
 
       {/* Search button (full-width primary) ------------------------------- */}

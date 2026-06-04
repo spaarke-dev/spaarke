@@ -75,7 +75,7 @@ public sealed class ConfidenceScoringService : IConfidenceScoringService
         if (request.GroundednessResult is not null)
         {
             ungroundedCount = request.GroundednessResult.UngroundedSegments.Count;
-            totalSegments   = EstimateTotalSegments(request.GroundednessResult);
+            totalSegments = EstimateTotalSegments(request.GroundednessResult);
             groundednessRatio = (double)(totalSegments - ungroundedCount) / Math.Max(totalSegments, 1);
         }
         else
@@ -83,8 +83,8 @@ public sealed class ConfidenceScoringService : IConfidenceScoringService
             // Fallback heuristic: no groundedness data → assume optimistic ratio,
             // but discount the source_score-only path slightly below full confidence.
             groundednessRatio = 1.0;
-            totalSegments     = 0;
-            ungroundedCount   = 0;
+            totalSegments = 0;
+            ungroundedCount = 0;
         }
 
         // source_score: capped at 1.0 once 5+ passages are present.
@@ -99,16 +99,16 @@ public sealed class ConfidenceScoringService : IConfidenceScoringService
         var level = MapToLevel(rawScore);
 
         return new ConfidenceScoringResult(
-            Level:    level,
-            Score:    (float)rawScore,
+            Level: level,
+            Score: (float)rawScore,
             Rationale: BuildRationale(
                 sourcePassageCount: request.SourcePassageCount,
-                groundednessRatio:  request.GroundednessResult is not null ? groundednessRatio : null,
-                ungroundedCount:    ungroundedCount,
-                totalSegments:      totalSegments,
-                sourceScore:        sourceScore,
-                rawScore:           rawScore,
-                overrideReason:     null));
+                groundednessRatio: request.GroundednessResult is not null ? groundednessRatio : null,
+                ungroundedCount: ungroundedCount,
+                totalSegments: totalSegments,
+                sourceScore: sourceScore,
+                rawScore: rawScore,
+                overrideReason: null));
     }
 
     // -------------------------------------------------------------------------
@@ -120,9 +120,9 @@ public sealed class ConfidenceScoringService : IConfidenceScoringService
     /// </summary>
     private static ConfidenceLevel MapToLevel(double rawScore) => rawScore switch
     {
-        >= HighThreshold   => ConfidenceLevel.High,
+        >= HighThreshold => ConfidenceLevel.High,
         >= MediumThreshold => ConfidenceLevel.Medium,
-        _                  => ConfidenceLevel.Low,
+        _ => ConfidenceLevel.Low,
     };
 
     /// <summary>
@@ -158,10 +158,10 @@ public sealed class ConfidenceScoringService : IConfidenceScoringService
     /// Builds a human-readable rationale string (ADR-015: counts only, no raw text).
     /// </summary>
     private static string BuildRationale(
-        int    sourcePassageCount,
+        int sourcePassageCount,
         double? groundednessRatio,
-        int    ungroundedCount,
-        int    totalSegments,
+        int ungroundedCount,
+        int totalSegments,
         double sourceScore,
         double rawScore,
         string? overrideReason)

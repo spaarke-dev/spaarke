@@ -34,6 +34,76 @@ export type PaneChannel = 'workspace' | 'context' | 'conversation' | 'safety';
 // ---------------------------------------------------------------------------
 
 /**
+ * Typed payload for `workspace.widget_load` events dispatched by mount-source
+ * panes (Assistant pane W-4 / task 042; Context pane W-5 / task 043).
+ *
+ * The Assistant or Context pane constructs one of these payloads, embeds it
+ * into a `WorkspacePaneEvent` with `type: 'widget_load'`, and dispatches on
+ * the `workspace` channel. The Workspace pane's existing subscriber (in
+ * `src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx`)
+ * resolves `widgetType` via `WorkspaceWidgetRegistry` and renders the widget
+ * as a new tab.
+ *
+ * This type intentionally narrows the existing `WorkspacePaneEvent` shape
+ * (which carries optional fields shared across all discriminants) for the
+ * specific subset of fields required when MOUNT-SOURCE panes initiate a
+ * widget load. Subscribers (e.g. WorkspacePane) continue to read from the
+ * underlying `WorkspacePaneEvent` interface — this type is a convenience
+ * contract for DISPATCHERS only. No new event-type discriminant is needed:
+ * `widget_load` already exists on the union (R2 origin).
+ *
+ * Per ADR-030: NO `any` payloads. `widgetData` is typed via a discriminated
+ * union per known widget type; unknown widget types use the `unknown` shape
+ * with subscriber-side narrowing.
+ *
+ * Reusable for both W-4 (task 042 — Assistant pane) and W-5 (task 043 —
+ * Context pane).
+ *
+ * @see WorkspacePane.tsx — receiver
+ * @see WorkspaceWidgetRegistry.ts — widgetType resolution
+ * @see ADR-030 — typed PaneEventBus channels
+ */
+export interface WorkspaceWidgetLoadEvent {
+  /** Always `'widget_load'` — discriminant on the workspace channel. */
+  type: 'widget_load';
+
+  /**
+   * Registered widget type ID. MUST match a key registered via
+   * `registerWorkspaceWidget()` (see register-workspace-widgets.ts). Unknown
+   * types fall back to `GenericTextWidget` per the registry contract.
+   *
+   * Known mount-source-relevant types (extend as new widgets are wired):
+   * - `'document-viewer'`        — chat PDF/file upload preview (task 042)
+   * - `'AnalysisEditor'`         — R1-origin analysis editor
+   * - `'redline-viewer'`         — document comparison
+   * - `'create-matter-wizard'`   — embedded create-matter flow
+   * - `'document-upload-wizard'` — embedded document upload flow
+   * - `'workspace'`              — embedded LegalWorkspaceApp layout
+   */
+  widgetType: string;
+
+  /**
+   * Widget-specific data payload. Shape is widget-dependent — each widget
+   * declares its own data interface (e.g. `DocumentViewerWidgetData`,
+   * `RedlineViewerData`). Subscribers narrow via `widgetType`.
+   *
+   * Typed as `unknown` here (NOT `any`) so dispatchers must explicitly cast
+   * at the call site to the widget's declared data shape, and subscribers
+   * must narrow before use. Per ADR-030: `unknown` is acceptable for genuinely
+   * polymorphic fields; `any` is not.
+   */
+  widgetData?: unknown;
+
+  /**
+   * Optional human-readable display name for the new workspace tab. When
+   * present, WorkspacePane uses this as the tab label instead of the
+   * registry metadata's generic `displayName` (e.g. "Contract.pdf" instead
+   * of the registry's "Document Viewer").
+   */
+  displayName?: string;
+}
+
+/**
  * Events emitted on the `workspace` channel.
  *
  * The workspace pane dispatches these when widgets load, update, or trigger
@@ -59,7 +129,18 @@ export interface WorkspacePaneEvent {
    *                              infrastructure — no consumers yet, just the foundation for future
    *                              pane coordination)
    */
-  type: 'widget_load' | 'widget_update' | 'widget_action' | 'tab_change' | 'tab_count_change' | 'selection_changed' | 'tabs_clear' | 'wizard_step' | 'entity_resolved' | 'session_reset' | 'active_widget_changed';
+  type:
+    | 'widget_load'
+    | 'widget_update'
+    | 'widget_action'
+    | 'tab_change'
+    | 'tab_count_change'
+    | 'selection_changed'
+    | 'tabs_clear'
+    | 'wizard_step'
+    | 'entity_resolved'
+    | 'session_reset'
+    | 'active_widget_changed';
 
   /** Identifies the widget kind (e.g. `"document-summary"`, `"clause-list"`). */
   widgetType?: string;

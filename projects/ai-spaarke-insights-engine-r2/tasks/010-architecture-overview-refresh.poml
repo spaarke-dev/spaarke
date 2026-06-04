@@ -1,0 +1,75 @@
+<task id="010" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>A1 — Architecture overview refresh (Phase 1.5 framing)</title>
+    <status>completed</status>
+    <completed-date>2026-06-02</completed-date>
+    <wave>A</wave>
+    <estimated-effort>4h</estimated-effort>
+    <tags>docs, architecture, foundations, phase-1.5-framing</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>MINIMAL</rigor>
+    <wave-item>A1</wave-item>
+  </metadata>
+
+  <prompt>
+    Refresh docs/architecture/INSIGHTS-ENGINE-ARCHITECTURE.md to reflect Phase 1.5 architectural decisions (D-P15-01..D-P15-09 from design.md). The §0a callout (Phase 1 + Phase 1.5 framing) was authored on 2026-05-30; this task updates the body with the post-design refinements (Terminology, no new sprk_prompt entity, practice areas sourced from sprk_practicearea_ref, etc.) and adds wave-organized status.
+  </prompt>
+
+  <role>Documentation architect + Spaarke-wide doc maintainer.</role>
+
+  <goal>
+    INSIGHTS-ENGINE-ARCHITECTURE.md body sections incorporate the Phase 1.5 refinements; the document accurately reflects (a) Terminology (JPS vs PlaybookExecutionEngine vs INodeExecutor vs sprk_analysisaction); (b) the 2D practice-area × document-type taxonomy; (c) multi-entity subject scheme; (d) hybrid playbook + RAG consumption; (e) prompts in sprk_analysisaction (no new entity). r2 design.md and spec.md remain the canonical Phase 1.5 references; the architecture doc points readers to them where appropriate.
+  </prompt>
+
+  <inputs>
+    <file purpose="canonical-arch">docs/architecture/INSIGHTS-ENGINE-ARCHITECTURE.md</file>
+    <file purpose="phase-1.5-design">projects/ai-spaarke-insights-engine-r2/design.md</file>
+    <file purpose="phase-1.5-spec">projects/ai-spaarke-insights-engine-r2/spec.md</file>
+    <file purpose="repo-architecture-NEW">docs/architecture/SPAARKE-REPOSITORY-ARCHITECTURE.md (NEW per 2026-06-01 — cross-reference for repo-wide context)</file>
+    <file purpose="new-adr-030">.claude/adr/ADR-030-bff-nullobject-kill-switch.md (NEW 2026-06-01 — surfaces in INSIGHTS-ENGINE-ARCHITECTURE.md "Operational" section if applicable)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="docs-architecture-skill">Use the docs-architecture skill conventions when refreshing</constraint>
+    <constraint source="spec.md PR-1">Do NOT introduce a new sprk_prompt entity in any architectural diagrams or text</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read existing arch doc + §0a callout">Identify sections that need refresh per Phase 1.5 decisions</step>
+    <step order="2" name="Invoke docs-architecture skill">Or refresh inline; update Terminology section, 2D taxonomy section, multi-entity subject section, prompt-storage section</step>
+    <step order="3" name="Update cross-refs">Ensure design.md, spec.md, plan.md links work</step>
+    <step order="4" name="Verify drift">Re-check doc against spec.md for any remaining inconsistencies</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">docs/architecture/INSIGHTS-ENGINE-ARCHITECTURE.md (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Terminology section accurately defines JPS, PlaybookExecutionEngine, INodeExecutor, sprk_analysisaction</criterion>
+    <criterion testable="true">No reference to a "sprk_prompt" entity (it was superseded per PR-1)</criterion>
+    <criterion testable="true">Practice-area examples reference real codes from sprk_practicearea_ref (no hardcoded "litigation/real-estate/patent/transactional")</criterion>
+    <criterion testable="true">Cross-refs to design.md, spec.md, plan.md, CLAUDE.md work</criterion>
+  </acceptance-criteria>
+
+  <notes date="2026-06-02">
+    Executed at MINIMAL rigor (docs-only refresh; no .cs/.ts/Bicep changes; no DI registrations).
+
+    Modified files:
+    - docs/architecture/INSIGHTS-ENGINE-ARCHITECTURE.md (frontmatter, §0a Terminology subsection added, §0a Correction 4 practice-area examples replaced with sprk_practicearea_ref codes, §0a Phase 1.5 scope table refreshed with wave-organized status, §0a Architectural anchors expanded with two new anchors, §0a Pointer summary expanded with spec.md/plan.md/CLAUDE.md/SPAARKE-REPOSITORY-ARCHITECTURE.md, §23.1 Related expanded with r2 project docs grouped by phase, §23.2 added SPAARKE-REPOSITORY-ARCHITECTURE.md, §23.3 added ADR-029 and ADR-030)
+
+    Acceptance criteria:
+    1. Terminology section accurately defines JPS / PlaybookExecutionEngine / INodeExecutor / sprk_analysisaction — PASS (new subsection in §0a, lifted from spec.md §Terminology to lock the canonical meanings in the architecture doc).
+    2. No reference to a "sprk_prompt" entity — PASS (grep confirms only negative-context mentions remain: "No new `sprk_prompt` entity" in the wave-status row and the architectural anchors list).
+    3. Practice-area examples reference real codes from sprk_practicearea_ref — PASS (Correction 4 now cites BNKF, CTRNS, IPPAT examples; new architectural anchor explicitly forbids hardcoding; §4.9 synthetic-corpus references kept as-is because they describe fictional corpus diversity, not Phase 1.5 taxonomy assertions).
+    4. Cross-refs to design.md, spec.md, plan.md, CLAUDE.md work — PASS (all four r2 project docs now present in §0a Pointer summary AND §23.1 Related; file existence verified at task close).
+
+    No `.claude/` writes attempted; permission-boundary clean.
+
+    Decisions worth documenting:
+    - Kept §4.9 (synthetic-corpus generation paragraph) untouched — its "IP licensing / employment / commercial litigation / regulatory / M&A / real estate" mix describes fictional matter diversity for fixture generation, not Phase 1.5 prescribed practice-area codes. Different from the POML's prohibited hardcoded set ("litigation/real-estate/patent/transactional") because the synthetic data context is about test-fixture realism, not taxonomy assertion.
+    - Body sections §§1–23 (r2 May-20 content) left untouched per Phase 1.5 doc strategy: §0a is the load-bearing callout; body remains historical reference. The new Terminology subsection in §0a explicitly tells readers "when body §§1–23 disagree with Terminology, Terminology wins" — avoids the large-scale body rewrite that would otherwise be needed.
+    - Wave-organized status reflects PR #330 (Wave B complete 2026-06-02 per MEMORY.md) and current Wave A in progress.
+  </notes>
+</task>

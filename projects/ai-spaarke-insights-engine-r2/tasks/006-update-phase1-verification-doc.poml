@@ -1,0 +1,50 @@
+<task id="006" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>B6 — Update Phase 1 verification doc with closed-gap status (Wave B complete)</title>
+    <status>completed</status>
+    <completed>2026-06-02</completed>
+    <wave>B</wave>
+    <estimated-effort>30m</estimated-effort>
+    <tags>docs, wave-b-close, traceability</tags>
+    <dependencies>005</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>MINIMAL</rigor>
+    <wave-item>B6</wave-item>
+  </metadata>
+
+  <prompt>
+    **Re-scoped 2026-06-02 per D-01 + owner direction**: this task now ALSO documents the new operational rule surfaced by D-01 §2.4 — "do NOT open Insights playbooks in the Make Playbook Designer UI after deploy" (canvas Designer wipes sprk_configjson custom contents). Add this rule to INSIGHTS-ENGINE-GUIDE.md (Wave A2 will polish) + close decision record D-01 with the final outcome. See D-01 §4 path-b re-scope.
+
+    Update the Phase 1 deployment-verification doc (in r1 project or the Spaarke-wide architecture doc) to reflect that the predict-matter-cost@v1 live-execution gap is CLOSED. This is documentation hygiene closing out the Wave B unblock. Per owner direction R1-1, the broader r1 wrap-up is NOT in r2 scope — this is a targeted doc update on the specific gap that Wave B fixed. PATH-B EXTENSION: also document Designer-no-open rule + close D-01.
+  </prompt>
+
+  <role>Documentation maintainer.</role>
+
+  <goal>
+    The Phase 1 verification doc reflects the post-Wave-B state: 8 active nodes wired to action codes; live smoke verified (with link to wave-b5-smoke-results.md); closes the gap noted in r1's verification doc that "predict-matter-cost doesn't fire end-to-end live."
+  </prompt>
+
+  <inputs>
+    <file purpose="r1-verification">projects/ai-spaarke-insights-engine-r1/notes/handoffs/ (look for Phase 1 verification handoff) OR docs/architecture/INSIGHTS-ENGINE-ARCHITECTURE.md §0a (Phase 1 completion)</file>
+    <file purpose="wave-b-results">projects/ai-spaarke-insights-engine-r2/notes/handoffs/wave-b5-smoke-results.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="owner-direction-R1-1">Do NOT pull broader r1 wrap-up work into r2 scope; only the predict-matter-cost gap update</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Locate the Phase 1 verification doc">Most likely INSIGHTS-ENGINE-ARCHITECTURE.md §0a or a dedicated r1 handoff doc</step>
+    <step order="2" name="Update gap status">Mark the predict-matter-cost live-execution gap as CLOSED (date, link to wave-b5-smoke-results.md, link to this r2 project)</step>
+    <step order="3" name="Commit single change">"docs(insights-engine-r2): mark Phase 1 predict-matter-cost gap CLOSED via Wave B"</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">Updated Phase 1 verification doc (modified in place)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Phase 1 verification doc references the post-Wave-B state with link to wave-b5-smoke-results.md</criterion>
+    <criterion testable="true">No other r1 docs modified (scope guard per R1-1)</criterion>
+  </acceptance-criteria>
+</task>

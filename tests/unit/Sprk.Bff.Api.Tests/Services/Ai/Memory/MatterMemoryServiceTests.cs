@@ -1,9 +1,9 @@
+using System.Net;
 using FluentAssertions;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Services.Ai.Memory;
-using System.Net;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Memory;

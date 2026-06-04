@@ -276,4 +276,35 @@ export interface IWizardShellProps {
    * Use for additional actions like "Delete" that apply to the whole wizard.
    */
   footerLeftExtra?: React.ReactNode;
+  /**
+   * Optional override for the dialog surface `max-width`. Defaults to
+   * `'95vw'` (preserves existing consumers — DocumentRelationshipViewer
+   * sizing is unchanged).
+   *
+   * Pass an explicit pixel value (e.g. `'1280px'`) to match a sibling
+   * host dialog like the SemanticSearchControl FilePreviewDialog so the
+   * wizard footprint mirrors the preview surface when stacked.
+   *
+   * Applied as an inline style on `DialogSurface` so Fluent v9's
+   * makeStyles cascade cannot override it (same pattern as
+   * SendEmailDialog `maxWidth` since v1.1.52).
+   *
+   * @since v1.1.63 (SemanticSearchControl UAT polish round — wizard
+   *   sizing to match FilePreviewDialog footprint)
+   */
+  maxWidth?: string;
+  /**
+   * Optional override for the dialog surface `height` (and
+   * `min-height`). Defaults to `'70vh'` (preserves existing
+   * consumers — current WizardShell `body` style hard-codes `70vh`).
+   *
+   * Pass a viewport-relative value (e.g. `'85vh'`) to give the wizard
+   * a tall presence matching a sibling host dialog. Applied to both
+   * `height` and `minHeight` on the inline `style` of `DialogSurface`
+   * so Fluent v9's content-sizing cannot collapse the surface below
+   * the requested size.
+   *
+   * @since v1.1.63
+   */
+  height?: string;
 }

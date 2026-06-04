@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B-5: BFF workspace-layout updates — PUT + If-Match ETag OR PATCH + JSON Patch (concurrency safety)</title>
+    <phase>Phase 5 — Substantive code changes</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>053</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, deploy</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag 'bff-api'; modifies endpoint semantics (concurrency safety); §10 Placement Justification REQUIRED; depends on 053 ModifiedOn field. Per Step 3.5.5 decision tree, FULL rigor.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>same file as task 053 (WorkspaceLayoutEndpoints.cs + WorkspaceLayoutDtos.cs + WorkspaceLayoutService.cs); 054 builds on 053's ModifiedOn field for ETag derivation. MUST sequence after 053.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add concurrency safety to BFF workspace-layout updates. Pick ONE of two designs at task start
+    (per OC-R4-08): (a) KEEP PUT semantics and add `If-Match` ETag header validation (ETag derived from
+    `modifiedOn` rowversion exposed by task 053); OR (b) introduce a separate PATCH endpoint using
+    RFC 6902 JSON Patch. Decision criterion: client-side complexity tradeoff. Two concurrent edits MUST
+    result in the second being rejected (412 Precondition Failed) OR merged (JSON Patch). Record §10
+    Placement Justification. Verify publish-size ≤60 MB.
+  </prompt>
+
+  <role>
+    Senior .NET 8 Minimal API developer with concurrency-safety design experience. Familiar with HTTP
+    semantics (RFC 7232 If-Match, RFC 6902 JSON Patch). Bias toward the simpler client-side option;
+    document the tradeoff at task start before coding.
+  </role>
+
+  <goal>
+    (a) BFF workspace-layout update endpoint supports concurrency safety via either: PUT + `If-Match`
+    ETag validation (412 on mismatch) OR PATCH + RFC 6902 JSON Patch (server-side merge); (b) ETag value
+    derived from `modifiedOn` (provided by task 053); (c) frontend write path adapted to send `If-Match`
+    header or JSON Patch body; (d) integration test: 2 concurrent edits — second rejected with 412 (PUT)
+    or merged (PATCH); (e) §10 Placement Justification entry; (f) `dotnet publish` ≤60 MB compressed
+    verified.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-08 (B-5) + plan §4 Phase 5 + OC-R4-08 (decision at task time): workspace layouts are
+      multi-edit surfaces (the Manage pane shows them all; multiple operators or even the same operator
+      across tabs can edit concurrently). Today the BFF accepts the last write unconditionally — silently
+      losing concurrent edits. Adding concurrency safety is a §10 BFF addition (governance applies).
+
+      OC-R4-08 explicitly left the design choice open: PUT + If-Match (simpler client, no merge logic)
+      vs PATCH + JSON Patch (richer semantics, server-side merge possible, more client complexity to
+      generate the patch document). The decision criterion is client-side complexity tradeoff — pick at
+      task start based on whether the frontend already has a diff/patch story or needs to build one.
+
+      Task 053 (B-4) exposes `modifiedOn` on the DTO; this task (054) consumes that field as the ETag
+      value source (or rowversion source) — that's why 054 must sequence after 053.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceLayoutEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceLayoutDtos.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceLayoutService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/WorkspaceLayoutAuthorizationFilter.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Integration/Workspace/WorkspaceLayoutEndpointTests.cs</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/hooks/useWorkspaceLayouts.ts (consolidated by task 051 — write path)</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/ManageWorkspacesPane.tsx (write trigger)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API only. Extend the existing endpoint group; do NOT introduce controllers.</constraint>
+    <constraint source="ADR-008">Endpoint filters: PATCH endpoint (if chosen) inherits the existing `WorkspaceLayoutAuthorizationFilter` filter pipeline. Filters fire BEFORE concurrency-check handler logic.</constraint>
+    <constraint source="ADR-010">DI minimalism — extend `WorkspaceLayoutService`; do NOT introduce a new service.</constraint>
+    <constraint source="ADR-013">BFF in-process placement. No AI coupling. §10 still applies to this BFF addition. CRUD code MUST NOT inject `IOpenAiClient` / `IPlaybookService` (N/A here).</constraint>
+    <constraint source="ADR-029">Publish hygiene — verify `dotnet publish` ≤60 MB compressed. If adding a JSON Patch library (e.g., `Microsoft.AspNetCore.JsonPatch` or `Marvin.JsonPatch.Dynamic`), measure the publish-size impact carefully.</constraint>
+    <constraint source="project">CLAUDE.md §10 Placement Justification REQUIRED in PR notes citing `.claude/constraints/bff-extensions.md` decision criteria.</constraint>
+    <constraint source="project">CVE check (NFR-09): any new NuGet package (JSON Patch lib if PATCH path chosen) MUST report 0 new HIGH-severity findings via `dotnet list package --vulnerable --include-transitive`.</constraint>
+    <constraint source="project">Design decision (OC-R4-08): pick PUT+If-Match OR PATCH+JSON-Patch at task start. Record decision + rationale in `notes/b5-design-decision.md` BEFORE writing code.</constraint>
+    <constraint source="project">ETag derivation (if PUT+If-Match chosen): use `modifiedOn` value as the ETag (weak ETag W/"timestamp" is acceptable; strong ETag from row version is preferred if available). Per RFC 7232.</constraint>
+    <constraint source="project">JSON Patch (if PATCH chosen): conform to RFC 6902 (operations: add, remove, replace, move, copy, test). Server MUST validate patch operations against the layout schema before applying.</constraint>
+    <constraint source="project">Concurrency rejection response: 412 Precondition Failed for PUT+If-Match mismatch. PATCH may return 412 (server detects conflict) OR succeed via merge — document semantics in the OpenAPI annotation.</constraint>
+    <constraint source="project">Client write path must be updated to consume the new semantic — either send `If-Match` from the cached layout's `modifiedOn` OR generate a JSON Patch document on save.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Rigor declaration">Output rigor declaration: 🔒 RIGOR LEVEL: FULL — bff-api tag, concurrency semantics change, §10 Placement Justification REQUIRED. Step 9.5 quality gates MANDATORY.</step>
+    <step order="1" name="Confirm dependency 053 landed">Verify task 053 (B-4 ModifiedOn) is ✅ in TASK-INDEX.md. The DTO `ModifiedOn` field is the ETag source. If 053 is pending, BLOCK.</step>
+    <step order="2" name="Design decision (OC-R4-08)">Read the spec note + RFC 6902 / RFC 7232 external refs. Inspect the frontend write path (in the consolidated hook from task 051 and ManageWorkspacesPane). Decide: PUT+If-Match OR PATCH+JSON-Patch. Criterion: client-side complexity. Write decision + rationale in `projects/spaarke-ai-platform-unification-r4/notes/b5-design-decision.md` BEFORE coding.</step>
+    <step order="3" name="§10 Placement Justification">Draft Placement Justification per `.claude/constraints/bff-extensions.md`. Stash in PR notes: CRUD-side endpoint semantics change; no AI coupling; ADR-013 in-process correct; publish-size impact known (zero new packages if PUT+If-Match; JSON Patch lib if PATCH).</step>
+    <step order="4" name="Implement endpoint (PUT+If-Match path)">If PUT+If-Match chosen: extend `WorkspaceLayoutEndpoints.cs` PUT handler to read `If-Match` header, compare against current layout's `modifiedOn` value (or rowversion). Return 412 Precondition Failed on mismatch. Add ETag response header on read (GET emits ETag from `modifiedOn`). Update OpenAPI annotations (`Produces`, `ProducesProblem(412)`).</step>
+    <step order="4b" name="Implement endpoint (PATCH+JSON-Patch path)">If PATCH+JSON-Patch chosen: add `MapPatch("/{id}", PatchLayoutAsync)` to the endpoint group with the existing filter pipeline. Accept `JsonPatchDocument&lt;WorkspaceLayoutDto&gt;` body. Validate operations + apply to current entity + persist. Add the NuGet package if not present (`Microsoft.AspNetCore.JsonPatch` is the canonical choice; verify publish-size impact &lt;1 MB).</step>
+    <step order="5" name="Service layer update">Extend `WorkspaceLayoutService.cs` to support the chosen concurrency check (rowversion read+compare, or patch-apply with merge). Keep the existing service signature; ADD a new method if needed rather than overloading the existing one.</step>
+    <step order="6" name="Integration tests">Edit `WorkspaceLayoutEndpointTests.cs` to add the concurrency-conflict test: (a) fetch layout (record ETag/modifiedOn); (b) make a successful update; (c) attempt second update with the OLD ETag; (d) assert 412 (PUT) or assert merge behavior (PATCH). Also add: ETag round-trip test (GET → update with returned ETag → success).</step>
+    <step order="7" name="Frontend write-path adaptation">Update `useWorkspaceLayouts.ts` (consolidated by task 051) write path to either send `If-Match` from the cached layout's `modifiedOn` OR generate a JSON Patch document. Update `ManageWorkspacesPane.tsx` to surface a clear "Edit conflict — refresh and retry" UX on 412 responses.</step>
+    <step order="8" name="Build verification (server)">Run `dotnet build src/server/api/Sprk.Bff.Api/`. Verify 0 errors / 0 new warnings. Run `dotnet test --filter "FullyQualifiedName~WorkspaceLayout"`. Verify all pass including new concurrency tests.</step>
+    <step order="9" name="Build verification (client)">Run `tsc --noEmit` + `npm run build` for `@spaarke/ai-widgets` + SpaarkeAi. Verify 0 errors.</step>
+    <step order="9.5" name="Quality gates">Invoke `code-review` skill and `adr-check` skill. Verify ADR-001/008/010/013/029 compliance; verify §10 BFF hygiene enforcement passes.</step>
+    <step order="10" name="Publish-size check (NFR-01)">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/`. Verify ≤60 MB compressed. Record delta vs baseline. PATCH path: confirm the JSON Patch lib adds &lt;1 MB.</step>
+    <step order="11" name="CVE check (NFR-09)">Run `dotnet list package --vulnerable --include-transitive`. Verify 0 new HIGH-severity findings. Important if a new lib was added.</step>
+    <step order="12" name="Deploy">Deploy BFF via `bff-deploy` skill. Deploy SpaarkeAi via `code-page-deploy` skill.</step>
+    <step order="13" name="Smoke verification">In SpaarkeAi → Manage Workspaces: open the same layout in two browser tabs, edit + save tab 1 → confirm tab 2's subsequent save fails with a clear "edit conflict" message.</step>
+    <step order="14" name="Update TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 054 status 🔲 → ✅.</step>
+    <step order="15" name="Document deviations">If the chosen design encountered surprises (e.g., merge semantics for PATCH proved tricky), document in `projects/spaarke-ai-platform-unification-r4/notes/` for R4 lessons-learned.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish — verify 0 errors and publish ≤60 MB compressed</tool>
+    <tool name="npm">Build @spaarke/ai-widgets + SpaarkeAi; tsc --noEmit</tool>
+    <tool name="Read">Read endpoints, service, frontend write path</tool>
+    <tool name="Edit">Extend endpoint, service, frontend write path, tests</tool>
+    <tool name="WebFetch">Reference RFC 7232 If-Match + RFC 6902 JSON Patch as needed</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceLayoutEndpoints.cs (concurrency safety)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceLayoutService.cs (concurrency check OR patch-apply)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/hooks/useWorkspaceLayouts.ts (write-path adaptation)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/ManageWorkspacesPane.tsx (conflict UX)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Integration/Workspace/WorkspaceLayoutEndpointTests.cs (concurrency tests)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/b5-design-decision.md (PUT+If-Match vs PATCH+JSON-Patch decision)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/ — §10 Placement Justification + publish-size delta</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given two concurrent edits to the same workspace layout, When both are submitted, Then the second submission is REJECTED with HTTP 412 (PUT+If-Match) OR merged successfully (PATCH+JSON-Patch) — FR-08 acceptance.</criterion>
+    <criterion testable="true">Given the §10 rule, When the PR is opened, Then PR notes contain a Placement Justification entry citing `.claude/constraints/bff-extensions.md` decision criteria.</criterion>
+    <criterion testable="true">Given OC-R4-08 decision criterion, When the design decision is made, Then `notes/b5-design-decision.md` documents the choice + rationale BEFORE code is written.</criterion>
+    <criterion testable="true">Given the frontend write path, When a concurrent-edit conflict occurs, Then the user sees a clear "edit conflict — refresh and retry" message in the Manage pane.</criterion>
+    <criterion testable="true">Given NFR-01 publish-size, When `dotnet publish -c Release` is run, Then compressed publish size ≤60 MB and delta vs baseline is recorded.</criterion>
+    <criterion testable="true">Given NFR-09 CVE policy, When `dotnet list package --vulnerable --include-transitive` is run, Then 0 new HIGH-severity findings are reported (especially relevant if a JSON Patch NuGet package was added).</criterion>
+    <criterion testable="true">All unit + integration tests pass (`dotnet test`); concurrency-conflict test is among the passing set.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    OPEN at task start (OC-R4-08): PUT+If-Match vs PATCH+JSON-Patch. Default recommendation: PUT+If-Match
+    if the frontend already sends full layout JSON on save (no patch document needed); PATCH+JSON-Patch
+    if the frontend wants partial updates (e.g., reorder sections without resending full layout). The
+    Manage pane today likely sends full JSON — so PUT+If-Match is the simpler answer unless task 052
+    (renderer interface) or a future host needs partial updates.
+
+    External refs (per spec): RFC 6902 https://datatracker.ietf.org/doc/html/rfc6902 ; RFC 7232 If-Match
+    https://datatracker.ietf.org/doc/html/rfc7232 . Read at least the relevant sections (RFC 7232 §3.1
+    If-Match; RFC 6902 §4 operations) before coding.
+
+    Same-file warning: task 053 modifies WorkspaceLayoutEndpoints.cs + WorkspaceLayoutDtos.cs +
+    WorkspaceLayoutService.cs. Task 054 modifies the SAME FILES. Sequence is enforced via dependency.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply FULL rigor protocol: rigor declaration at Step 0; OC-R4-08 design decision MUST be recorded BEFORE coding (step 2); §10 Placement Justification REQUIRED; publish-size verification REQUIRED (NFR-01); Step 9.5 quality gates MANDATORY. `.claude/constraints/bff-extensions.md` is LOAD-BEARING.</protocol>
+  </execution>
+</task>

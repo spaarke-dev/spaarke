@@ -29,7 +29,7 @@ export type { ImageViewerData };
  */
 const ImageViewerContextWidget = createContextWidgetAdapter<ImageViewerData>(
   ImageViewerWidget,
-  createNoOpHighlighter<ImageViewerData>(),
+  createNoOpHighlighter<ImageViewerData>()
 );
 
 ImageViewerContextWidget.displayName = 'ImageViewerContextWidget';

@@ -1,0 +1,122 @@
+<task id="012" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P1.A3 — Repair Ai/Tools + Ai/Sessions compile-broken files</title>
+    <status>completed</status>
+    <estimated-effort>1-1.5 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-1, compile-fix, bff-api, testing, p1-a, ai</tags>
+    <parallel-group>1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>3 disjoint files in Services/Ai/Tools/ and Services/Ai/Sessions/; no overlap with batches 010, 011, 013, 015, 017, 020, 021, 022, 024</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Repair 3 compile-broken test files in `Services/Ai/Tools/` and `Services/Ai/Sessions/` from
+    the design.md §3.2 list. Errors are mechanical signature drift (CS7036/CS1503/CS1061) in
+    AI-coupled test surfaces.
+
+    Per project CLAUDE.md NFR-02: repair only; &gt;50% replacement requires §4.8 escalation. Per
+    NFR-01: NO production changes. Per ADR-013 refined: do NOT inject `IOpenAiClient` /
+    `IPlaybookService` directly in CRUD test paths — if a test needs an AI dependency, the SUT
+    determines the right type, not the test.
+  </prompt>
+
+  <role>Senior .NET test repair specialist familiar with AI/Tools handler patterns.</role>
+
+  <goal>
+    The 3 listed test files compile cleanly under `dotnet build -warnaserror`. Every touched test
+    gets `[Trait("status", "repaired")]`. Build error count drops by ~20.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/compile-errors-2026-MM-DD.txt</file>
+    <file purpose="target-1">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Tools/SendCommunicationToolHandlerRegistrationTests.cs</file>
+    <file purpose="target-2">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Tools/SendCommunicationToolHandlerScenarioTests.cs</file>
+    <file purpose="target-3">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/SessionRestoreServiceTests.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code in `src/Services/Ai/`</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation</constraint>
+    <constraint source="NFR-11">All files compile under `-warnaserror`</constraint>
+    <constraint source="§6.2">Every touched test gets `[Trait("status", "repaired")]`</constraint>
+    <constraint source="ADR-013 refined">Tests for CRUD-side handlers MUST go through `Services/Ai/PublicContracts/` facade — do NOT inject `IOpenAiClient` / `IPlaybookService` in CRUD test paths</constraint>
+    <constraint source="§4.5">MUST NOT touch `CustomWebAppFactory.cs`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      These 3 files cover the SendCommunication tool handler (registration + scenario) and the
+      Session restore service. Tool handler tests broke when handler constructor was updated for
+      richer telemetry/logging dependencies; SessionRestore broke when the service moved to a
+      more strict OpenAI options shape. All mechanical signature updates per design.md §3.2.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Baseline TRX + compile-errors log produced</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Tools/SendCommunicationToolHandlerRegistrationTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Tools/SendCommunicationToolHandlerScenarioTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/SessionRestoreServiceTests.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read the 3 target files. For each, identify SUT in `src/Services/Ai/Tools/` or `src/Services/Ai/Sessions/` and inspect current constructor signatures.</step>
+    <step order="2">Classify compile errors from baseline log: CS7036 / CS1503 / CS1061. Plan the fix per file.</step>
+    <step order="3">Compute pre-edit line counts. If any planned edit exceeds 50% → HALT and file `escalations/rewrite-request-T-012-{FileName}.md`.</step>
+    <step order="4">Apply edits one file at a time; verify error drop after each.</step>
+    <step order="5">Add `[Trait("status", "repaired")]` to every touched test class.</step>
+    <step order="6">Final compile gate: `dotnet build tests/unit/Sprk.Bff.Api.Tests/ -c Release -warnaserror` returns 0 on the 3 target files.</step>
+    <step order="7">Update `current-task.md` with per-file LOC delta + new error total.</step>
+    <step order="8">Verify `git status` shows NO production modifications.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Tools/SendCommunicationToolHandlerRegistrationTests.cs (repaired)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Tools/SendCommunicationToolHandlerScenarioTests.cs (repaired)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/SessionRestoreServiceTests.cs (repaired)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 3 files compile under `dotnet build -c Release -warnaserror`</criterion>
+    <criterion testable="true">Build error count drops by ~20 vs Phase 0 baseline</criterion>
+    <criterion testable="true">Per-file diff &lt;50% line replacement; if exceeded, escalation file exists</criterion>
+    <criterion testable="true">Every touched test has `[Trait("status", "repaired")]`</criterion>
+    <criterion testable="true">No modifications to `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">`CustomWebAppFactory.cs` NOT modified</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <scope-revision date="2026-05-31" source="Wave 1 baseline + owner directive (absorb deviations)">
+      Phase 0 Wave 1 task 001 measured 0 compile errors in the unit-test project (down from
+      design.md §3.2's expected 17 files / 138 errors). The Ai/Tools + Ai/Sessions files in
+      this batch appear to compile clean at execution time.
+
+      EXECUTION GUIDANCE: confirm clean build, then proceed to test-level repair + §6.2
+      trait-tagging. If runtime tests fail, tag appropriately. Cross-reference:
+      `baseline/README.md`, `notes/handoffs/phase23-scope-delta-2026-05-31.md` (from task 008).
+    </scope-revision>
+  </notes>
+</task>

@@ -1,0 +1,97 @@
+<task id="001" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P1 — InsightArtifact envelope POCOs (four-tier taxonomy)</title>
+    <status>completed</status>
+    <wave>1</wave>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>bff-api, models, domain-types, four-tier, dotnet</tags>
+    <dependencies></dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>D-P1</d-p>
+  </metadata>
+
+  <prompt>
+    Implement the `InsightArtifact` envelope POCOs in `Sprk.Bff.Api/Models/Insights/` for the four-tier taxonomy (Fact / Observation / Precedent / Inference). These are the canonical wire shape returned by the Engine to every consumer. POCOs only — Zone B per §3.5 facade boundary; no AI internals imports.
+  </prompt>
+
+  <role>Senior .NET developer familiar with C# records, JSON serialization (System.Text.Json), and clean POCO modeling.</role>
+
+  <goal>
+    A complete set of `InsightArtifact` POCOs that round-trip through System.Text.Json correctly for all four tiers, matching the envelope shape in [design.md §2.2](../design.md) and worked examples in [SPEC.md §3.4.1-§3.4.3](../SPEC.md). Includes: `InsightArtifact` base type with `Type` discriminator, `Evidence[]` array, `ProducedBy.Version`, `Scope`, `TenantId`, optional `Embedding`. Subtypes for the four tiers. Companion `DeclineResponse` type per D-49.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P1, §3.4 envelope schema, §3.4.1-§3.4.3 worked examples)</file>
+    <file purpose="design">projects/ai-spaarke-insights-engine-r1/design.md (§2.2 envelope, §2.1 four-tier)</file>
+    <file purpose="rationale">projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md (§1 four-tier examples)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md (boundaries; ADRs to load)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">Models live in Models/Insights/; pure POCOs; no AI internals imports per §3.5 facade boundary</constraint>
+    <constraint source="ADR-010">DI minimalism — no service registrations needed; POCOs only</constraint>
+    <constraint source="design.md §2.2">Required fields: id, type, subject, predicate, value, evidence[], asOf, producedBy, scope, tenantId. Optional: confidence, embedding, validFrom/validTo</constraint>
+    <constraint source="D-A23">Evidence-bearing types must be defensible against empty Evidence[] at consumption — POCO doesn't enforce, but consumers will</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>domain-types, four-tier-taxonomy, json-serialization</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read SPEC §3.4 + design.md §2.2">Confirm envelope shape and four worked examples</step>
+    <step order="2" name="Create folder">Create `src/server/api/Sprk.Bff.Api/Models/Insights/` if not exists</step>
+    <step order="3" name="Author InsightArtifact base">Record types: InsightArtifact (with TypeDiscriminator string), EvidenceRef, ProducedBy, Scope, Value (with Raw + DisplayHint)</step>
+    <step order="4" name="Author tier subtypes">FactArtifact (confidence always 1.0), ObservationArtifact (confidence 0-1), PrecedentArtifact (no confidence; SME-confirmed), InferenceArtifact (confidence 0-1)</step>
+    <step order="5" name="Author DeclineResponse">DeclineResponse { Reason, Explanation, MinimumEvidenceNeeded, SuggestedActions, ConfidenceInDecline } per D-49</step>
+    <step order="6" name="Round-trip tests">Unit tests in tests/Insights/Models/ verifying each tier serializes/deserializes with correct discriminator</step>
+    <step order="7" name="Quality gates">Run code-review + adr-check skills at Step 9.5</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run unit tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Insights/InsightArtifact.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Insights/EvidenceRef.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Insights/DeclineResponse.cs</output>
+    <output type="test">tests/unit/Models/Insights/InsightArtifactTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of Fact / Observation / Precedent / Inference round-trips through System.Text.Json with correct discriminator</criterion>
+    <criterion testable="true">EvidenceRef serializes with refType + ref + optional quote per worked examples in SPEC §3.4.1</criterion>
+    <criterion testable="true">DeclineResponse round-trips with all five fields per D-49</criterion>
+    <criterion testable="true">`Sprk.Bff.Api` builds clean; zero new warnings</criterion>
+    <criterion testable="true">No imports from Services/Ai/* in this Models/Insights/ code (zone-B grep clean per §3.5.4)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-05-28. Delivered:
+    - Models/Insights/InsightArtifact.cs — polymorphic envelope (System.Text.Json `[JsonPolymorphic]` on `type` discriminator) + FactArtifact / ObservationArtifact / PrecedentArtifact / InferenceArtifact subtypes + Value / ProducedBy / Scope companion records.
+    - Models/Insights/EvidenceRef.cs — refType / ref / optional quote shape per SPEC §3.4.1 worked example.
+    - Models/Insights/DeclineResponse.cs — five-field shape per D-49 (Reason / Explanation / MinimumEvidenceNeeded / SuggestedActions / ConfidenceInDecline).
+    - tests/unit/Sprk.Bff.Api.Tests/Models/Insights/InsightArtifactTests.cs — 7 xunit Facts; all pass: per-tier round-trip + EvidenceRef shape + DeclineResponse round-trip + heterogeneous polymorphic array.
+
+    Verification:
+    - `dotnet build src/server/api/Sprk.Bff.Api/` succeeded clean — zero new warnings, zero errors (17 pre-existing warnings unchanged).
+    - 7/7 tests pass via standalone runner (test project Sprk.Bff.Api.Tests has pre-existing compile errors in EmbeddingMigrationServiceTests / AppOnlyDocumentAnalysisJobHandlerTests / EmailAnalysisIntegrationTests referencing types not present in current Sprk.Bff.Api — verified pre-existing by stashing my work, build still fails with same 7 errors; unrelated to this task and out of scope).
+    - SPEC §3.5.4 forbidden-imports grep clean: zero matches in Models/Insights/.
+
+    Quality gates:
+    - code-review: PASS — zero AI smells, zero warnings, zero criticals; metrics within thresholds; positive patterns acknowledged.
+    - adr-check: PASS — ADR-013 §3.5 facade boundary compliant, ADR-010 POCO-only (no DI footprint), ADR-007 N/A (no Graph), no violations.
+
+    Judgment calls:
+    - Used C# records (immutable) over classes — matches POML "Record types" wording, cleaner serialization, no accidental mutation in pipelines.
+    - `PrecedentArtifact` does NOT carry `confidence` on the wire (matches SPEC §3.4.2 worked example `"confidence": null`; Precedents are SME-confirmed per D-46) and adds `Status` (lifecycle state per design §2.1 Precedent row + SPEC §3.4.2 `"status": "confirmed"`).
+    - `Value.Raw` typed as `JsonElement` to preserve arbitrary JSON (string enum, integer, nested Precedent object) without custom converters.
+    - All POCOs marked `sealed record` per Spaarke modern-C# convention.
+  </notes>
+</task>

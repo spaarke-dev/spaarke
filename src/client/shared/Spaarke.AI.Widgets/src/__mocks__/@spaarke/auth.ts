@@ -13,10 +13,7 @@
  * fetch is short-circuited by passing entityContext=null.
  */
 
-export type AuthenticatedFetchFn = (
-  url: string,
-  init?: RequestInit
-) => Promise<Response>;
+export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
 export function buildBffApiUrl(base: string, path: string): string {
   return `${base}${path}`;

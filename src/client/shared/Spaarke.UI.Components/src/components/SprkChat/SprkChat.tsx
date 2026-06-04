@@ -328,6 +328,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   onDocumentStreamEvent: onDocumentStreamEventProp,
   initialMessages,
   onPaneEvent: onPaneEventProp,
+  onAttachmentReady,
 }) => {
   const styles = useStyles();
   const messageListRef = React.useRef<HTMLDivElement>(null);
@@ -471,6 +472,48 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     removeFile: removeAttachmentFile,
     clearAll: clearAttachments,
   } = useChatFileAttachment();
+
+  // ── R4 task 042 (W-4): onAttachmentReady host callback ────────────────────
+  //
+  // Fires the host callback once per file that transitions to `ready` state.
+  // Hosts (e.g. ConversationPane in SpaarkeAi) use this to dispatch
+  // `widget_load` on the workspace PaneEventBus channel so the file mounts as
+  // a workspace tab while the user composes their message.
+  //
+  // The ref tracks which attachment IDs have already been signalled — prevents
+  // double-firing when the chip list re-renders for unrelated reasons (status
+  // patches, removals, etc.). Cleared when chips are removed so re-adding the
+  // same file re-fires the callback (operator-visible intent: re-uploading
+  // should re-open the tab).
+  const notifiedReadyRef = React.useRef<Set<string>>(new Set());
+  React.useEffect(() => {
+    if (!onAttachmentReady) return;
+
+    const currentIds = new Set<string>();
+    for (const chip of attachmentFiles) {
+      currentIds.add(chip.id);
+      if (chip.status !== 'ready') continue;
+      if (notifiedReadyRef.current.has(chip.id)) continue;
+      if (typeof chip.textContent !== 'string') continue;
+
+      notifiedReadyRef.current.add(chip.id);
+      try {
+        onAttachmentReady({
+          filename: chip.filename,
+          contentType: chip.mimeType,
+          textContent: chip.textContent,
+        });
+      } catch {
+        // Host callback errors must not break SprkChat's attachment lifecycle.
+        // Errors are swallowed; the host is responsible for its own telemetry.
+      }
+    }
+
+    // Prune the notified set so re-adding a previously-removed file re-fires.
+    for (const id of Array.from(notifiedReadyRef.current)) {
+      if (!currentIds.has(id)) notifiedReadyRef.current.delete(id);
+    }
+  }, [attachmentFiles, onAttachmentReady]);
 
   // Imperative handle for SprkChatInput so the [Prompt] button in our controls
   // strip can open the slash menu without re-implementing the wiring (FR-09).
@@ -912,11 +955,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           textContent: a.textContent,
         }));
       }
-      startStream(
-        `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/messages`,
-        body,
-        getAccessToken
-      );
+      startStream(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/messages`, body, getAccessToken);
     },
     [
       session,
@@ -1007,7 +1046,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       // the UI thread stays responsive.
       void addAttachmentFiles(list);
     },
-    [addAttachmentFiles],
+    [addAttachmentFiles]
   );
 
   // FR-09: opens the slash command menu from the strip-mounted [Prompt] button.
@@ -2223,19 +2262,19 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                 ? `${styles.attachmentChip} ${styles.attachmentChipError}`
                 : styles.attachmentChip;
               const statusNode =
-                file.status === 'extracting'
-                  ? <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
-                  : file.status === 'ready'
-                    ? <CheckmarkCircleRegular aria-label="Ready" data-testid={`attachment-chip-status-ready-${index}`} />
-                    : <WarningRegular aria-label="Extraction failed" data-testid={`attachment-chip-status-error-${index}`} />;
+                file.status === 'extracting' ? (
+                  <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
+                ) : file.status === 'ready' ? (
+                  <CheckmarkCircleRegular aria-label="Ready" data-testid={`attachment-chip-status-ready-${index}`} />
+                ) : (
+                  <WarningRegular
+                    aria-label="Extraction failed"
+                    data-testid={`attachment-chip-status-error-${index}`}
+                  />
+                );
 
               const chipBody = (
-                <div
-                  key={file.id}
-                  className={chipClassName}
-                  role="listitem"
-                  data-testid={`attachment-chip-${index}`}
-                >
+                <div key={file.id} className={chipClassName} role="listitem" data-testid={`attachment-chip-${index}`}>
                   <span className={styles.attachmentChipStatus} aria-hidden={file.status === 'ready'}>
                     {statusNode}
                   </span>
@@ -2256,24 +2295,24 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
               );
 
               // For error chips, wrap in a Tooltip exposing the parse error.
-              return isError && file.error
-                ? (
-                    <Tooltip
-                      key={file.id}
-                      content={file.error}
-                      relationship="description"
-                      withArrow
-                    >
-                      {chipBody}
-                    </Tooltip>
-                  )
-                : chipBody;
+              return isError && file.error ? (
+                <Tooltip key={file.id} content={file.error} relationship="description" withArrow>
+                  {chipBody}
+                </Tooltip>
+              ) : (
+                chipBody
+              );
             })}
           </div>
         )}
 
         {/* Region 2: controls strip — [ Prompt ▾ ] [ + Attach ] (FR-09) */}
-        <div className={styles.controlsStrip} role="toolbar" aria-label="Chat input actions" data-testid="chat-input-controls-strip">
+        <div
+          className={styles.controlsStrip}
+          role="toolbar"
+          aria-label="Chat input actions"
+          data-testid="chat-input-controls-strip"
+        >
           <Button
             appearance="subtle"
             icon={<PromptRegular />}

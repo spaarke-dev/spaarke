@@ -12,6 +12,7 @@ namespace Sprk.Bff.Api.Tests.Services;
 /// Validates NFR-03: graceful error handling in the calculator service.
 /// Covers exception propagation, cancellation, partial failures, and invalid data resilience.
 /// </summary>
+[Trait("status", "repaired")]
 public class ScorecardCalculatorErrorTests
 {
     private readonly Mock<IDataverseService> _dataverseServiceMock;

@@ -90,7 +90,7 @@ export type ActionHandlerMap = Record<string, ActionHandler>;
 // Hook Options
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface UseActionHandlersOptions extends ActionHandlerContext {}
+export type UseActionHandlersOptions = ActionHandlerContext;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Hook Result
@@ -220,7 +220,8 @@ export function openCodePageDialog(payload: IDialogOpenPayload): void {
   if (!xrm?.Navigation?.navigateTo) {
     console.warn(
       '[useActionHandlers] Xrm.Navigation.navigateTo not available — dialog_open event ignored.',
-      'targetPage:', payload.targetPage,
+      'targetPage:',
+      payload.targetPage,
       'Environment may be Storybook, dev, or non-Dataverse context.'
     );
     return;
@@ -268,8 +269,10 @@ export function navigateToTarget(payload: INavigatePayload): void {
   if (!xrm?.Navigation) {
     console.warn(
       '[useActionHandlers] Xrm.Navigation not available — navigate event ignored.',
-      'targetPage:', payload.targetPage,
-      'url:', payload.url,
+      'targetPage:',
+      payload.targetPage,
+      'url:',
+      payload.url,
       'Environment may be Storybook, dev, or non-Dataverse context.'
     );
     return;
@@ -302,7 +305,8 @@ export function navigateToTarget(payload: INavigatePayload): void {
 
   console.warn(
     '[useActionHandlers] navigate event has neither url nor targetPage — ignoring.',
-    'parameters:', payload.parameters
+    'parameters:',
+    payload.parameters
   );
 }
 

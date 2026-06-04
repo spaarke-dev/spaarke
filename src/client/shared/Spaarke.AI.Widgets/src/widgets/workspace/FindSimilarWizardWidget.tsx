@@ -56,18 +56,8 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Button,
-  Spinner,
-  Text,
-  makeStyles,
-  mergeClasses,
-  tokens,
-} from '@fluentui/react-components';
-import {
-  DocumentSearchRegular,
-  OpenRegular,
-} from '@fluentui/react-icons';
+import { Button, Spinner, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { DocumentSearchRegular, OpenRegular } from '@fluentui/react-icons';
 
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import type { WidgetState } from '../../types/shared';
@@ -207,9 +197,7 @@ async function openFindSimilar(
 ): Promise<void> {
   const nav = resolveXrmNavigation();
   if (!nav) {
-    throw new Error(
-      'Xrm.Navigation is unavailable. Find Similar Documents can only be opened from a Dataverse host.'
-    );
+    throw new Error('Xrm.Navigation is unavailable. Find Similar Documents can only be opened from a Dataverse host.');
   }
 
   const params: string[] = [];
@@ -260,9 +248,7 @@ const FindSimilarWizardWidget: React.FC<WorkspaceWidgetProps<FindSimilarWizardDa
   const styles = useStyles();
 
   /** UI state. */
-  const [launchState, setLaunchState] = useState<'launching' | 'opened' | 'error' | 'unavailable'>(
-    'launching'
-  );
+  const [launchState, setLaunchState] = useState<'launching' | 'opened' | 'error' | 'unavailable'>('launching');
   const [launchError, setLaunchError] = useState<string | null>(null);
 
   /** Guard against double-launch in React 19 StrictMode (effects run twice in dev). */
@@ -323,8 +309,8 @@ const FindSimilarWizardWidget: React.FC<WorkspaceWidgetProps<FindSimilarWizardDa
           {DISPLAY_NAME}
         </Text>
         <Text size={300} className={styles.subtitle}>
-          Find Similar Documents is only available inside a Dataverse host.
-          Open this page from within Power Apps to search for similar documents.
+          Find Similar Documents is only available inside a Dataverse host. Open this page from within Power Apps to
+          search for similar documents.
         </Text>
       </div>
     );
@@ -338,9 +324,7 @@ const FindSimilarWizardWidget: React.FC<WorkspaceWidgetProps<FindSimilarWizardDa
         <Text as="h2" size={500} weight="semibold" className={styles.title}>
           {DISPLAY_NAME}
         </Text>
-        <Text className={styles.errorText}>
-          {launchError ?? 'Failed to open Find Similar Documents.'}
-        </Text>
+        <Text className={styles.errorText}>{launchError ?? 'Failed to open Find Similar Documents.'}</Text>
         <Button
           appearance="primary"
           icon={<OpenRegular />}

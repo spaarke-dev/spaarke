@@ -13,7 +13,7 @@
  * ADR-022: React 18 functional component (createRoot is in main.tsx).
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   DataGrid,
   DataGridHeader,
@@ -39,21 +39,21 @@ import {
   MessageBar,
   MessageBarBody,
   Divider,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   ArrowDownloadRegular,
   ArrowUploadRegular,
   HistoryRegular,
   DocumentRegular,
   DismissRegular,
-} from "@fluentui/react-icons";
+} from '@fluentui/react-icons';
 // Deep component imports — avoids loading Virtualized* components that need react-window
-import { FileUploadZone, UploadedFileList } from "@spaarke/ui-components/components/FileUpload";
-import type { IUploadedFile, IFileValidationError } from "@spaarke/ui-components/components/FileUpload";
-import { AiSummaryPopover } from "@spaarke/ui-components/components/AiSummaryPopover";
-import { getDocuments, ODataDocument } from "../api/web-api-client";
-import { bffApiCall } from "../auth/bff-client";
-import { AccessLevel } from "../types";
+import { FileUploadZone, UploadedFileList } from '@spaarke/ui-components/components/FileUpload';
+import type { IUploadedFile, IFileValidationError } from '@spaarke/ui-components/components/FileUpload';
+import { AiSummaryPopover } from '@spaarke/ui-components/components/AiSummaryPopover';
+import { getDocuments, ODataDocument } from '../api/web-api-client';
+import { bffApiCall } from '../auth/bff-client';
+import { AccessLevel } from '../types';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -61,104 +61,104 @@ import { AccessLevel } from "../types";
 
 const useStyles = makeStyles({
   root: {
-    width: "100%",
-    display: "flex",
-    flexDirection: "column",
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   toolbar: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: tokens.spacingHorizontalM,
   },
   toolbarLeft: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   toolbarRight: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   gridContainer: {
-    width: "100%",
-    overflowX: "auto",
-    borderWidth: "1px",
-    borderStyle: "solid",
+    width: '100%',
+    overflowX: 'auto',
+    borderWidth: '1px',
+    borderStyle: 'solid',
     borderColor: tokens.colorNeutralStroke2,
     borderRadius: tokens.borderRadiusMedium,
   },
   documentName: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     color: tokens.colorBrandForeground1,
-    cursor: "pointer",
-    ":hover": {
-      textDecoration: "underline",
+    cursor: 'pointer',
+    ':hover': {
+      textDecoration: 'underline',
     },
   },
   documentNameIcon: {
-    flexShrink: "0",
+    flexShrink: '0',
     color: tokens.colorNeutralForeground3,
   },
   summaryText: {
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase200,
   },
   emptyState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "240px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '240px',
     gap: tokens.spacingVerticalM,
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
     padding: tokens.spacingHorizontalXL,
   },
   emptyStateIcon: {
-    fontSize: "40px",
+    fontSize: '40px',
     color: tokens.colorNeutralForeground4,
   },
   emptyStateText: {
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
+    textAlign: 'center',
   },
   loadingContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "200px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '200px',
     gap: tokens.spacingVerticalM,
   },
   actionButtons: {
-    display: "flex",
-    flexDirection: "row",
+    display: 'flex',
+    flexDirection: 'row',
     gap: tokens.spacingHorizontalXS,
   },
   versionList: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
-    minWidth: "320px",
-    maxHeight: "360px",
-    overflowY: "auto",
+    minWidth: '320px',
+    maxHeight: '360px',
+    overflowY: 'auto',
   },
   versionItem: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "2px",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
   },
@@ -167,14 +167,14 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
   },
   uploadDialogContent: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   noSummaryText: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
-    fontStyle: "italic",
+    fontStyle: 'italic',
   },
 });
 
@@ -207,8 +207,8 @@ interface DocumentVersionsResponse {
  * Format a file size in bytes to a human-readable string.
  */
 function formatFileSize(bytes: number | null | undefined): string {
-  if (bytes == null || bytes <= 0) return "—";
-  const units = ["B", "KB", "MB", "GB"];
+  if (bytes == null || bytes <= 0) return '—';
+  const units = ['B', 'KB', 'MB', 'GB'];
   let value = bytes;
   let unitIndex = 0;
   while (value >= 1024 && unitIndex < units.length - 1) {
@@ -222,12 +222,12 @@ function formatFileSize(bytes: number | null | undefined): string {
  * Format a Dataverse ISO date string for display.
  */
 function formatDate(isoDate: string | null | undefined): string {
-  if (!isoDate) return "—";
+  if (!isoDate) return '—';
   try {
-    return new Intl.DateTimeFormat("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
+    return new Intl.DateTimeFormat('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
     }).format(new Date(isoDate));
   } catch {
     return isoDate;
@@ -238,10 +238,7 @@ function formatDate(isoDate: string | null | undefined): string {
  * Returns true when the access level allows upload and download.
  */
 function canUploadOrDownload(accessLevel: AccessLevel): boolean {
-  return (
-    accessLevel === AccessLevel.Collaborate ||
-    accessLevel === AccessLevel.FullAccess
-  );
+  return accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess;
 }
 
 // AiSummaryCell is now rendered inline using AiSummaryPopover from @spaarke/ui-components.
@@ -257,12 +254,7 @@ interface VersionHistoryPanelProps {
   onClose: () => void;
 }
 
-const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
-  documentId,
-  documentName,
-  open,
-  onClose,
-}) => {
+const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({ documentId, documentName, open, onClose }) => {
   const styles = useStyles();
   const [versions, setVersions] = React.useState<DocumentVersion[]>([]);
   const [loading, setLoading] = React.useState<boolean>(false);
@@ -287,8 +279,8 @@ const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
         }
       } catch (err) {
         if (!cancelled) {
-          setError("Failed to load version history. Please try again.");
-          console.error("[DocumentLibrary] Version history fetch failed:", err);
+          setError('Failed to load version history. Please try again.');
+          console.error('[DocumentLibrary] Version history fetch failed:', err);
         }
       } finally {
         if (!cancelled) {
@@ -305,17 +297,15 @@ const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
   }, [documentId, open]);
 
   return (
-    <Dialog open={open} onOpenChange={(_ev, data) => { if (!data.open) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(_ev, data) => {
+        if (!data.open) onClose();
+      }}
+    >
       <DialogSurface>
         <DialogTitle
-          action={
-            <Button
-              appearance="subtle"
-              aria-label="Close"
-              icon={<DismissRegular />}
-              onClick={onClose}
-            />
-          }
+          action={<Button appearance="subtle" aria-label="Close" icon={<DismissRegular />} onClick={onClose} />}
         >
           Version History — {documentName}
         </DialogTitle>
@@ -350,10 +340,8 @@ const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
                       </Text>
                       <Text size={200} className={styles.versionLabel}>
                         {formatDate(version.createdAt)}
-                        {version.createdByName ? ` · ${version.createdByName}` : ""}
-                        {version.fileSizeBytes != null
-                          ? ` · ${formatFileSize(version.fileSizeBytes)}`
-                          : ""}
+                        {version.createdByName ? ` · ${version.createdByName}` : ''}
+                        {version.fileSizeBytes != null ? ` · ${formatFileSize(version.fileSizeBytes)}` : ''}
                       </Text>
                     </div>
                   </React.Fragment>
@@ -383,12 +371,7 @@ interface UploadDialogProps {
   onUploadComplete: () => void;
 }
 
-const UploadDialog: React.FC<UploadDialogProps> = ({
-  projectId,
-  open,
-  onClose,
-  onUploadComplete,
-}) => {
+const UploadDialog: React.FC<UploadDialogProps> = ({ projectId, open, onClose, onUploadComplete }) => {
   const styles = useStyles();
   const [selectedFiles, setSelectedFiles] = React.useState<IUploadedFile[]>([]);
   const [validationErrors, setValidationErrors] = React.useState<IFileValidationError[]>([]);
@@ -407,7 +390,7 @@ const UploadDialog: React.FC<UploadDialogProps> = ({
   };
 
   const handleRemoveFile = (fileId: string) => {
-    setSelectedFiles((prev) => prev.filter((f) => f.id !== fileId));
+    setSelectedFiles(prev => prev.filter(f => f.id !== fileId));
   };
 
   const handleUpload = async () => {
@@ -418,13 +401,13 @@ const UploadDialog: React.FC<UploadDialogProps> = ({
 
     try {
       const formData = new FormData();
-      formData.append("file", selectedFiles[0].file);
-      formData.append("projectId", projectId);
+      formData.append('file', selectedFiles[0].file);
+      formData.append('projectId', projectId);
 
       // Use bffApiCall for authenticated upload — omit Content-Type so the browser
       // sets the correct multipart/form-data boundary automatically.
-      await bffApiCall<void>("/api/v1/external/documents/upload", {
-        method: "POST",
+      await bffApiCall<void>('/api/v1/external/documents/upload', {
+        method: 'POST',
         body: formData,
         headers: {},
       });
@@ -433,10 +416,8 @@ const UploadDialog: React.FC<UploadDialogProps> = ({
       onUploadComplete();
       onClose();
     } catch (err) {
-      console.error("[DocumentLibrary] Upload failed:", err);
-      setUploadError(
-        "Failed to upload the document. Please check the file and try again."
-      );
+      console.error('[DocumentLibrary] Upload failed:', err);
+      setUploadError('Failed to upload the document. Please check the file and try again.');
     } finally {
       setUploading(false);
     }
@@ -482,9 +463,7 @@ const UploadDialog: React.FC<UploadDialogProps> = ({
 
               {validationErrors.length > 0 && (
                 <MessageBar intent="warning">
-                  <MessageBarBody>
-                    {validationErrors.map((e) => `${e.fileName}: ${e.reason}`).join(" · ")}
-                  </MessageBarBody>
+                  <MessageBarBody>{validationErrors.map(e => `${e.fileName}: ${e.reason}`).join(' · ')}</MessageBarBody>
                 </MessageBar>
               )}
 
@@ -494,11 +473,7 @@ const UploadDialog: React.FC<UploadDialogProps> = ({
                 disabled={uploading}
               />
 
-              <UploadedFileList
-                files={selectedFiles}
-                onRemove={handleRemoveFile}
-                disabled={uploading}
-              />
+              <UploadedFileList files={selectedFiles} onRemove={handleRemoveFile} disabled={uploading} />
             </div>
           </DialogContent>
         </DialogBody>
@@ -509,13 +484,9 @@ const UploadDialog: React.FC<UploadDialogProps> = ({
             onClick={() => void handleUpload()}
             disabled={selectedFiles.length === 0 || uploading}
           >
-            {uploading ? "Uploading…" : "Upload"}
+            {uploading ? 'Uploading…' : 'Upload'}
           </Button>
-          <Button
-            appearance="secondary"
-            onClick={handleDialogClose}
-            disabled={uploading}
-          >
+          <Button appearance="secondary" onClick={handleDialogClose} disabled={uploading}>
             Cancel
           </Button>
         </DialogActions>
@@ -556,10 +527,7 @@ export interface DocumentLibraryProps {
  *
  * ADR-021: Fluent UI v9 only. makeStyles + tokens. No hard-coded colors.
  */
-export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
-  projectId,
-  accessLevel,
-}) => {
+export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, accessLevel }) => {
   const styles = useStyles();
 
   // ---------------------------------------------------------------------------
@@ -570,8 +538,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   const [loading, setLoading] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = React.useState<boolean>(false);
-  const [versionHistoryDoc, setVersionHistoryDoc] =
-    React.useState<ODataDocument | null>(null);
+  const [versionHistoryDoc, setVersionHistoryDoc] = React.useState<ODataDocument | null>(null);
   const [downloadingId, setDownloadingId] = React.useState<string | null>(null);
 
   const canActOnDocuments = canUploadOrDownload(accessLevel);
@@ -590,8 +557,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       const data = await getDocuments(projectId);
       setDocuments(data);
     } catch (err) {
-      console.error("[DocumentLibrary] Failed to load documents:", err);
-      setError("Failed to load documents. Please try refreshing the page.");
+      console.error('[DocumentLibrary] Failed to load documents:', err);
+      setError('Failed to load documents. Please try refreshing the page.');
     } finally {
       setLoading(false);
     }
@@ -619,18 +586,15 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         );
 
         // Trigger browser download via a temporary anchor element
-        const anchor = window.document.createElement("a");
+        const anchor = window.document.createElement('a');
         anchor.href = result.downloadUrl;
         anchor.download = doc.sprk_name;
-        anchor.style.display = "none";
+        anchor.style.display = 'none';
         window.document.body.appendChild(anchor);
         anchor.click();
         window.document.body.removeChild(anchor);
       } catch (err) {
-        console.error(
-          `[DocumentLibrary] Download failed for document ${doc.sprk_documentid}:`,
-          err
-        );
+        console.error(`[DocumentLibrary] Download failed for document ${doc.sprk_documentid}:`, err);
       } finally {
         setDownloadingId(null);
       }
@@ -646,11 +610,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     (): TableColumnDefinition<ODataDocument>[] => [
       // --- Name ---
       createTableColumn<ODataDocument>({
-        columnId: "name",
-        compare: (a, b) =>
-          (a.sprk_name ?? "").localeCompare(b.sprk_name ?? ""),
-        renderHeaderCell: () => "Name",
-        renderCell: (item) => (
+        columnId: 'name',
+        compare: (a, b) => (a.sprk_name ?? '').localeCompare(b.sprk_name ?? ''),
+        renderHeaderCell: () => 'Name',
+        renderCell: item => (
           <div className={styles.documentName}>
             <DocumentRegular className={styles.documentNameIcon} fontSize={16} />
             <Text size={300} weight="semibold" truncate wrap={false}>
@@ -662,11 +625,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
 
       // --- Type ---
       createTableColumn<ODataDocument>({
-        columnId: "type",
-        compare: (a, b) =>
-          (a.sprk_documenttype ?? "").localeCompare(b.sprk_documenttype ?? ""),
-        renderHeaderCell: () => "Type",
-        renderCell: (item) =>
+        columnId: 'type',
+        compare: (a, b) => (a.sprk_documenttype ?? '').localeCompare(b.sprk_documenttype ?? ''),
+        renderHeaderCell: () => 'Type',
+        renderCell: item =>
           item.sprk_documenttype ? (
             <Badge appearance="tint" size="small">
               {item.sprk_documenttype}
@@ -680,11 +642,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
 
       // --- Modified Date ---
       createTableColumn<ODataDocument>({
-        columnId: "modifiedDate",
-        compare: (a, b) =>
-          (a.createdon ?? "").localeCompare(b.createdon ?? ""),
-        renderHeaderCell: () => "Date Added",
-        renderCell: (item) => (
+        columnId: 'modifiedDate',
+        compare: (a, b) => (a.createdon ?? '').localeCompare(b.createdon ?? ''),
+        renderHeaderCell: () => 'Date Added',
+        renderCell: item => (
           <Text size={200} className={styles.versionLabel}>
             {formatDate(item.createdon)}
           </Text>
@@ -693,11 +654,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
 
       // --- AI Summary ---
       createTableColumn<ODataDocument>({
-        columnId: "aiSummary",
-        compare: (a, b) =>
-          (a.sprk_summary ?? "").localeCompare(b.sprk_summary ?? ""),
-        renderHeaderCell: () => "AI Summary",
-        renderCell: (item) => {
+        columnId: 'aiSummary',
+        compare: (a, b) => (a.sprk_summary ?? '').localeCompare(b.sprk_summary ?? ''),
+        renderHeaderCell: () => 'AI Summary',
+        renderCell: item => {
           if (!item.sprk_summary) {
             return (
               <Text className={styles.noSummaryText} size={200}>
@@ -708,15 +668,13 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           return (
             <AiSummaryPopover
               trigger={
-                <Button appearance="subtle" size="small" style={{ maxWidth: "300px" }}>
+                <Button appearance="subtle" size="small" style={{ maxWidth: '300px' }}>
                   <Text className={styles.summaryText} size={200}>
                     {item.sprk_summary}
                   </Text>
                 </Button>
               }
-              onFetchSummary={() =>
-                Promise.resolve({ summary: item.sprk_summary ?? null, tldr: null })
-              }
+              onFetchSummary={() => Promise.resolve({ summary: item.sprk_summary ?? null, tldr: null })}
               positioning="before"
             />
           );
@@ -727,21 +685,15 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       ...(canActOnDocuments
         ? [
             createTableColumn<ODataDocument>({
-              columnId: "actions",
-              renderHeaderCell: () => "",
-              renderCell: (item) => (
+              columnId: 'actions',
+              renderHeaderCell: () => '',
+              renderCell: item => (
                 <div className={styles.actionButtons}>
                   <Tooltip content="Download" relationship="label">
                     <Button
                       appearance="subtle"
                       size="small"
-                      icon={
-                        downloadingId === item.sprk_documentid ? (
-                          <Spinner size="tiny" />
-                        ) : (
-                          <ArrowDownloadRegular />
-                        )
-                      }
+                      icon={downloadingId === item.sprk_documentid ? <Spinner size="tiny" /> : <ArrowDownloadRegular />}
                       disabled={downloadingId === item.sprk_documentid}
                       onClick={() => void handleDownload(item)}
                       aria-label={`Download ${item.sprk_name}`}
@@ -815,11 +767,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               </Text>
             </div>
             <div className={styles.toolbarRight}>
-              <Button
-                appearance="primary"
-                icon={<ArrowUploadRegular />}
-                onClick={() => setUploadDialogOpen(true)}
-              >
+              <Button appearance="primary" icon={<ArrowUploadRegular />} onClick={() => setUploadDialogOpen(true)}>
                 Upload Document
               </Button>
             </div>
@@ -833,8 +781,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           </Text>
           <Text size={300} className={styles.emptyStateText}>
             {canActOnDocuments
-              ? "No documents have been uploaded to this project yet. Use the Upload button to add your first document."
-              : "No documents have been uploaded to this project yet."}
+              ? 'No documents have been uploaded to this project yet. Use the Upload button to add your first document.'
+              : 'No documents have been uploaded to this project yet.'}
           </Text>
         </div>
 
@@ -859,16 +807,12 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       <div className={styles.toolbar}>
         <div className={styles.toolbarLeft}>
           <Text size={300} className={styles.versionLabel}>
-            {documents.length} document{documents.length !== 1 ? "s" : ""}
+            {documents.length} document{documents.length !== 1 ? 's' : ''}
           </Text>
         </div>
         <div className={styles.toolbarRight}>
           {canActOnDocuments && (
-            <Button
-              appearance="primary"
-              icon={<ArrowUploadRegular />}
-              onClick={() => setUploadDialogOpen(true)}
-            >
+            <Button appearance="primary" icon={<ArrowUploadRegular />} onClick={() => setUploadDialogOpen(true)}>
               Upload Document
             </Button>
           )}
@@ -881,22 +825,18 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           items={documents}
           columns={columns}
           sortable
-          getRowId={(item) => item.sprk_documentid}
+          getRowId={item => item.sprk_documentid}
           focusMode="composite"
         >
           <DataGridHeader>
             <DataGridRow>
-              {({ renderHeaderCell }) => (
-                <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
-              )}
+              {({ renderHeaderCell }) => <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>}
             </DataGridRow>
           </DataGridHeader>
           <DataGridBody<ODataDocument>>
             {({ item, rowId }) => (
               <DataGridRow<ODataDocument> key={rowId}>
-                {({ renderCell }) => (
-                  <DataGridCell>{renderCell(item)}</DataGridCell>
-                )}
+                {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
               </DataGridRow>
             )}
           </DataGridBody>

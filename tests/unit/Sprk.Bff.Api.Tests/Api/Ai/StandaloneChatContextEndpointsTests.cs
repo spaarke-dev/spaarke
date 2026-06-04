@@ -10,6 +10,13 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
 
+// Task 070 repair (2026-05-31): tests under this class are §6.2 "repaired".
+// Root cause: the FakeAuthHandler (CustomWebAppFactory) injects no `tid` claim, so the
+// endpoint's ExtractTenantId() fell back to the X-Tenant-Id header — which the tests
+// were not setting — and returned 400 "Tenant ID not found". The minimal-diff repair
+// is to add the header on requests that expect 200 OK. No production or factory edits.
+[Trait("status", "repaired")]
+
 /// <summary>
 /// Tests for the GET /api/ai/chat/context-mappings/standalone endpoint.
 ///
@@ -35,11 +42,25 @@ public class StandaloneChatContextEndpointsTests : IClassFixture<CustomWebAppFac
     private const string ValidEntityType = "contact";
     private const string ValidEntityId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 
+    // Task 070 repair: endpoint reads tenantId from `tid` JWT claim OR X-Tenant-Id header.
+    // FakeAuthHandler does not inject `tid`; tests pass tenant via the header fallback path.
+    private const string TestTenantId = "test-tenant-001";
+
     private readonly HttpClient _client;
 
     public StandaloneChatContextEndpointsTests(CustomWebAppFactory factory)
     {
         _client = factory.CreateClient();
+    }
+
+    /// <summary>
+    /// Builds a request with the X-Tenant-Id header set. The endpoint uses this
+    /// when no `tid` claim is available (the FakeAuthHandler does not set `tid`).
+    /// </summary>
+    private static HttpRequestMessage WithTenantHeader(HttpRequestMessage request)
+    {
+        request.Headers.Add("X-Tenant-Id", TestTenantId);
+        return request;
     }
 
     // =========================================================================
@@ -105,8 +126,8 @@ public class StandaloneChatContextEndpointsTests : IClassFixture<CustomWebAppFac
         _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
 
         // Act
-        var response = await _client.GetAsync(
-            $"{BaseUrl}?entityType={ValidEntityType}&entityId={ValidEntityId}");
+        var response = await _client.SendAsync(WithTenantHeader(new HttpRequestMessage(HttpMethod.Get,
+            $"{BaseUrl}?entityType={ValidEntityType}&entityId={ValidEntityId}")));
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK,
@@ -120,8 +141,8 @@ public class StandaloneChatContextEndpointsTests : IClassFixture<CustomWebAppFac
         _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
 
         // Act
-        var response = await _client.GetAsync(
-            $"{BaseUrl}?entityType={ValidEntityType}&entityId={ValidEntityId}");
+        var response = await _client.SendAsync(WithTenantHeader(new HttpRequestMessage(HttpMethod.Get,
+            $"{BaseUrl}?entityType={ValidEntityType}&entityId={ValidEntityId}")));
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -141,8 +162,8 @@ public class StandaloneChatContextEndpointsTests : IClassFixture<CustomWebAppFac
         _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
 
         // Act
-        var response = await _client.GetAsync(
-            $"{BaseUrl}?entityType={ValidEntityType}&entityId={ValidEntityId}");
+        var response = await _client.SendAsync(WithTenantHeader(new HttpRequestMessage(HttpMethod.Get,
+            $"{BaseUrl}?entityType={ValidEntityType}&entityId={ValidEntityId}")));
 
         // Assert — entityType is echoed back in the response
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -160,8 +181,8 @@ public class StandaloneChatContextEndpointsTests : IClassFixture<CustomWebAppFac
         _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
 
         // Act
-        var response = await _client.GetAsync(
-            $"{BaseUrl}?entityType={ValidEntityType}&entityId={ValidEntityId}");
+        var response = await _client.SendAsync(WithTenantHeader(new HttpRequestMessage(HttpMethod.Get,
+            $"{BaseUrl}?entityType={ValidEntityType}&entityId={ValidEntityId}")));
 
         // Assert — entityId is echoed back in the response
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -179,8 +200,8 @@ public class StandaloneChatContextEndpointsTests : IClassFixture<CustomWebAppFac
         _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
 
         // Act
-        var response = await _client.GetAsync(
-            $"{BaseUrl}?entityType={ValidEntityType}&entityId={ValidEntityId}");
+        var response = await _client.SendAsync(WithTenantHeader(new HttpRequestMessage(HttpMethod.Get,
+            $"{BaseUrl}?entityType={ValidEntityType}&entityId={ValidEntityId}")));
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -198,8 +219,8 @@ public class StandaloneChatContextEndpointsTests : IClassFixture<CustomWebAppFac
         _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
 
         // Act
-        var response = await _client.GetAsync(
-            $"{BaseUrl}?entityType={ValidEntityType}&entityId={ValidEntityId}");
+        var response = await _client.SendAsync(WithTenantHeader(new HttpRequestMessage(HttpMethod.Get,
+            $"{BaseUrl}?entityType={ValidEntityType}&entityId={ValidEntityId}")));
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -288,8 +309,8 @@ public class StandaloneChatContextEndpointsTests : IClassFixture<CustomWebAppFac
         var entityId = Guid.NewGuid().ToString();
 
         // Act
-        var response = await _client.GetAsync(
-            $"{BaseUrl}?entityType={entityType}&entityId={entityId}");
+        var response = await _client.SendAsync(WithTenantHeader(new HttpRequestMessage(HttpMethod.Get,
+            $"{BaseUrl}?entityType={entityType}&entityId={entityId}")));
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK,

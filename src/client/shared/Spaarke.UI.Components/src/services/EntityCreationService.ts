@@ -309,7 +309,7 @@ export class EntityCreationService {
    * Calls POST /api/documents/{id}/analyze which queues a Service Bus job
    * for each document. Failures are non-fatal (added as warnings).
    */
-  private async _triggerDocumentAnalysis(documentIds: string[], warnings: string[]): Promise<void> {
+  private async _triggerDocumentAnalysis(documentIds: string[], _warnings: string[]): Promise<void> {
     for (const docId of documentIds) {
       try {
         const response = await this._authenticatedFetch(`${this._bffBaseUrl}/api/documents/${docId}/analyze`, {

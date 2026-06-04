@@ -23,9 +23,9 @@ public class SpeContainerMembershipService
     /// </summary>
     private static readonly Dictionary<ExternalAccessLevel, string[]> AccessLevelRoleMap = new()
     {
-        [ExternalAccessLevel.ViewOnly]    = ["reader"],
+        [ExternalAccessLevel.ViewOnly] = ["reader"],
         [ExternalAccessLevel.Collaborate] = ["writer"],
-        [ExternalAccessLevel.FullAccess]  = ["writer"],
+        [ExternalAccessLevel.FullAccess] = ["writer"],
     };
 
     public SpeContainerMembershipService(

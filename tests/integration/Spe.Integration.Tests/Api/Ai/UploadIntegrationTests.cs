@@ -67,6 +67,7 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// Upload a .pdf file. Assert HTTP 202 and documentId returned.
     /// </summary>
     [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_AcceptsPdf()
     {
         // Arrange
@@ -92,6 +93,7 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// Upload a .docx file. Assert HTTP 202 and documentId returned.
     /// </summary>
     [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_AcceptsDocx()
     {
         // Arrange
@@ -119,6 +121,7 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// Upload a .txt file. Assert HTTP 202 and documentId returned.
     /// </summary>
     [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_AcceptsTxt()
     {
         // Arrange
@@ -143,6 +146,7 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// Upload a .md file. Assert HTTP 202 and documentId returned.
     /// </summary>
     [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_AcceptsMd()
     {
         // Arrange
@@ -171,6 +175,7 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// Upload a .jpg file. Assert HTTP 422 with error message about unsupported type.
     /// </summary>
     [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_RejectsJpg()
     {
         // Arrange
@@ -190,6 +195,7 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// Upload a .exe file. Assert HTTP 422 rejection.
     /// </summary>
     [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_RejectsExe()
     {
         // Arrange
@@ -209,6 +215,7 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// Upload a .zip file. Assert HTTP 422 rejection.
     /// </summary>
     [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_RejectsZip()
     {
         // Arrange
@@ -235,6 +242,7 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// with a stream just over the limit check. The endpoint checks file.Length directly.
     /// </summary>
     [Fact]
+    [Trait("status", "repaired")]
     public async Task Upload_RejectsOversized()
     {
         // Arrange — create content that tricks the endpoint into seeing > 50 MB
@@ -329,6 +337,7 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     /// because the session no longer exists.
     /// </summary>
     [Fact]
+    [Trait("status", "repaired")]
     public async Task SessionCleanup_DeletesUploadedDoc()
     {
         // Arrange — use a unique session for cleanup test

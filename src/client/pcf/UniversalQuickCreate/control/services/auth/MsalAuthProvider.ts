@@ -6,12 +6,7 @@ import {
   InteractionRequiredAuthError,
   PopupRequest,
 } from '@azure/msal-browser';
-import {
-  RuntimeMsalConfig,
-  createMsalConfig,
-  createLoginRequest,
-  validateRuntimeMsalConfig,
-} from './msalConfig';
+import { RuntimeMsalConfig, createMsalConfig, createLoginRequest, validateRuntimeMsalConfig } from './msalConfig';
 import { IAuthProvider, TokenCacheEntry } from '../../types/auth';
 
 /**
@@ -491,9 +486,14 @@ export class MsalAuthProvider implements IAuthProvider {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
       loginHint = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userName;
-    } catch { /* cross-origin */ }
+    } catch {
+      /* cross-origin */
+    }
 
-    console.debug('[MsalAuthProvider] Using ssoSilent to discover account from browser session', loginHint ? `hint=${loginHint}` : '(no hint)');
+    console.debug(
+      '[MsalAuthProvider] Using ssoSilent to discover account from browser session',
+      loginHint ? `hint=${loginHint}` : '(no hint)'
+    );
 
     const ssoRequest = {
       scopes,

@@ -1,0 +1,75 @@
+<task id="013" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>A4 — Prompt-variant + versioning + per-tenant-override design (within sprk_analysisaction)</title>
+    <status>completed</status>
+    <completed-on>2026-06-02</completed-on>
+    <wave>A</wave>
+    <estimated-effort>1d</estimated-effort>
+    <tags>design, prompts, sprk_analysisaction, versioning, tenant-override, jps</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>A4</wave-item>
+  </metadata>
+
+  <prompt>
+    Author the prompt-variant + versioning + per-tenant-override design (within sprk_analysisaction.sprk_systemprompt). Per spec.md PR-1, NO new sprk_prompt entity is introduced — the existing JPS primitive serves this role. Wave A4 picks: (a) per-practice-area variant pattern (variant rows vs parametric injection), (b) versioning model (new row per version vs version field), (c) per-tenant override mechanism. The design output feeds Wave C2 (prompt content migration) and Wave D2 (per-practice-area prompts).
+  </prompt>
+
+  <role>Information architect + JPS contract specialist.</role>
+
+  <goal>
+    Design doc projects/ai-spaarke-insights-engine-r2/design-a4-prompt-variants.md authored with explicit reasoning for each of the three decisions (variants, versioning, tenant override). The design includes a worked example showing how a Layer 1 Classification prompt for CTRNS is structured/stored under each option, and rollback / A-B test stories.
+  </prompt>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r2/spec.md (Q-A4-1, PR-1)</file>
+    <file purpose="design">projects/ai-spaarke-insights-engine-r2/design.md (D-P15-05)</file>
+    <file purpose="reference">Existing "Classify Document" sprk_analysisaction row in Spaarke Dev (query via MCP)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md PR-1">No new sprk_prompt entity</constraint>
+    <constraint source="spec.md">All prompts live in sprk_analysisaction.sprk_systemprompt (or per-playbook sprk_configjson for playbook-specific inline templates)</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Query "Classify Document" prompt">Read sprk_systemprompt JSON to understand the JPS structure in use</step>
+    <step order="2" name="Variant analysis">Pros/cons of (a) variant action rows per practice area (e.g., INSIGHTS.LAYER1_CLASSIFY.CTRNS); (b) parametric injection via JPS parameters.categories + parameters.practiceAreaContext; pick one with reasoning</step>
+    <step order="3" name="Versioning analysis">Pros/cons of (a) new row per version (immutable rows); (b) version field on row + soft-versioning; pick one (initial leaning: new row per version, matching "Classify Document" immutable-row pattern)</step>
+    <step order="4" name="Per-tenant override analysis">Pros/cons of (a) tenant-scoped variant rows with fallthrough query (tenant-specific → global); (b) override mapping table; (c) tenant blocks within the JPS schema; pick one</step>
+    <step order="5" name="Worked example">Show CTRNS Layer 1 prompt under chosen options end-to-end</step>
+    <step order="6" name="Rollback + A/B test story">How to revert a bad prompt change; how to A/B test two variants</step>
+    <step order="7" name="Publish design-a4-prompt-variants.md">In project root; feeds C2 + D2</step>
+  </steps>
+
+  <outputs>
+    <output type="design-doc">projects/ai-spaarke-insights-engine-r2/design-a4-prompt-variants.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">design-a4-prompt-variants.md picks one variant pattern, one versioning model, one tenant-override mechanism — each with reasoning</criterion>
+    <criterion testable="true">Worked example shows CTRNS Layer 1 prompt structure under chosen options</criterion>
+    <criterion testable="true">Rollback + A/B test stories included</criterion>
+    <criterion testable="true">No introduction of a new sprk_prompt entity (PR-1 invariant holds)</criterion>
+  </acceptance-criteria>
+
+  <notes completed-on="2026-06-02">
+    <output-doc>projects/ai-spaarke-insights-engine-r2/design-a4-prompt-variants.md (~530 lines, 11 sections)</output-doc>
+    <decisions>
+      <decision id="1-variant">Hybrid: parametric injection (single row) by default; promote to variant action rows (Option B) only when instruction-level (not just data) divergence is needed. Resolution rule binding for Wave D4.</decision>
+      <decision id="2-versioning">New row per version with @vN suffix on sprk_actioncode (e.g., INS-L1-CLASS@v1, @v2). Immutable rows. Matches the "Classify Document" (ACT-021) precedent. Wave C2 renames existing Wave B2 rows to @v1 as part of migration.</decision>
+      <decision id="3-tenant-override">Tenant-scoped variant rows with fallthrough: &lt;base&gt;[.&lt;area&gt;]@v&lt;n&gt;.tenant-&lt;tenantId&gt;. Up-to-4-row fallthrough resolver order documented in §4.2.</decision>
+    </decisions>
+    <reference-row-verified>Queried sprk_analysisaction WHERE sprk_name='Classify Document' (sprk_actioncode=ACT-021, id ba356968-ebe9-f011-8406-7ced8d1dc988) via Dataverse MCP — confirmed JPS shape ($schema, $version, instruction{role,task,constraints,context}, input{document,parameters}, output{fields,structuredOutput}, scopes, examples, metadata) used in design.</reference-row-verified>
+    <pr-1-invariant>HOLDS — all three decisions use sprk_analysisaction rows only. No new sprk_prompt entity; no schema additions to sprk_analysisaction (existing sprk_actioncode + sprk_systemprompt + statecode sufficient). JPS shape preserved (additions confined to metadata.* extensions).</pr-1-invariant>
+    <downstream-impact>
+      <wave id="C1">Universal-ingest playbook JSON references @vN suffixed action codes; Deploy-Playbook.ps1 lint must accept @vN syntax</wave>
+      <wave id="C2">Migrate .txt prompts + RENAME 8 existing Wave B2 rows to @v1 + create new INS-L1-CLASS@v1 row for classification.v1.txt content</wave>
+      <wave id="D2">3 practice areas use parametric base by default; escape-hatch variant rows at &lt;base&gt;.&lt;areaCode&gt;@v1 only when needed</wave>
+      <wave id="D3">Layer 2 schemas follow same pattern (INS-L2-EXTRACT@v1 + optional variants)</wave>
+      <wave id="D4">Universal-ingest implements Decision 1 + Decision 3 resolver rules</wave>
+    </downstream-impact>
+    <deferred-to-phase-2-or-later-waves>SME variant authoring UI (Phase 2+); cross-invocation cache (Phase 2+); tenant-ID-format convention (Wave D2/D5); "current version" pointer mechanism (Phase 2+); partial-row override merge semantics (Phase 2+).</deferred-to-phase-2-or-later-waves>
+  </notes>
+</task>

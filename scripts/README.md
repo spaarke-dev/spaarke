@@ -32,7 +32,9 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 **Lifecycle:** ✅ Maintained
 **Dependencies:** Azure CLI (`az login`), Dataverse connection
 **Owner:** AI Team
-**Last Used:** March 2026
+**Last Used:** June 2026 (Insights Engine r2 Wave B)
+
+**Lint behavior (Wave B B3 — Insights Engine r2 D-01 path-b)**: Every node in the playbook definition MUST have an `actionCode` field referencing a `sprk_analysisaction` row. The script lints this immediately after JSON load (before any Dataverse writes) and FAILS the deploy with an explicit error listing nodes that lack action-code wiring. This prevents the regression mode described in `projects/ai-spaarke-insights-engine-r2/decisions/D-01-wave-b-root-cause-corrected.md` §2.4 (deployed nodes with no `sprk_actionid` FK → orchestrator falls into the canvas-Designer-clobbered configjson path → dispatch defaults to AiAnalysis(0) → "Node X in batch 1 failed" → defensive scaffold decline).
 
 **When to Use:**
 - After designing a playbook with `/jps-playbook-design` skill
@@ -55,6 +57,37 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 - `scripts/seed-data/` bootstraps base primitives (actions, skills, knowledge, tools) — run once per environment
 - `Deploy-Playbook.ps1` creates NEW playbooks from definition files using those existing primitives
 - Both use the same Dataverse entities (`sprk_analysisplaybooks`, `sprk_playbooknodes`, etc.)
+
+---
+
+### `Setup-InsightsEngineSchema.ps1`
+**Purpose:** Idempotent setup for Insights Engine Dataverse schema + lookup-target dispatch rows. Creates `sprk_executoractiontype` (Whole Number) on `sprk_analysisactiontype` if missing, backfills existing rows to 0 (AiAnalysis), and seeds the 7 Insights ActionType lookup rows (60 - Agent Service, 70 - Grounding Verify, 80 - Live Fact Resolver, 90 - Index Retrieve, 100 - Evidence Sufficiency, 110 - Decline to Find, 120 - Return Insight Artifact).
+**Usage:** 🟢 Active - Run on a new Dataverse environment after `git pull` to bring it up to Wave B baseline
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Dataverse connection
+**Owner:** AI Team / Insights Engine
+**Last Used:** June 2026 (Insights Engine r2 Wave B post-merge protection)
+
+**When to Use:**
+- New developer's first-time Dataverse env setup
+- After merging an Insights Engine PR that depends on the lookup-target dispatch architecture
+- Spinning up a new Spaarke environment (test, demo, customer-prod)
+- Re-running after a Dataverse env reset / restore
+
+**Why this exists** (per amended ADR-027 2026-06-02): Spaarke uses unmanaged solutions everywhere — there is no managed-solution promotion path. Schema changes that need to travel between environments use either (a) unmanaged solution export, or (b) idempotent setup scripts like this one. This script implements (b) for the Insights Engine schema dependencies introduced by r2 Wave B.
+
+**Command:**
+```powershell
+# Preview without modifying (recommended first)
+.\scripts\Setup-InsightsEngineSchema.ps1 -DataverseUrl "https://spaarkedev1.crm.dynamics.com" -DryRun
+
+# Apply
+.\scripts\Setup-InsightsEngineSchema.ps1 -DataverseUrl "https://spaarkedev1.crm.dynamics.com"
+```
+
+**What is NOT included:**
+- The 7 INS-* `sprk_analysisaction` rows (with JPS prompt content) — see `projects/ai-spaarke-insights-engine-r2/notes/drafts/wave-b-action-codes.md`
+- The predict-matter-cost@v1 playbook deploy — use `Deploy-Playbook.ps1 -Force`
 
 ---
 
@@ -536,10 +569,10 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 **Deployment Sequence:**
 | # | Script Called | Web Resource |
 |---|-------------|--------------|
-| 1 | `Deploy-CorporateWorkspace.ps1` | `sprk_corporateworkspace` (HTML) |
+| 1 | ~~`Deploy-CorporateWorkspace.ps1`~~ | ~~`sprk_corporateworkspace` (HTML)~~ — **RETIRED 2026-05-26** (R4 task 041 / OC-R4-05; see [`docs/architecture/LEGALWORKSPACE-RETIREMENT.md`](../docs/architecture/LEGALWORKSPACE-RETIREMENT.md)) |
 | 2 | `Deploy-ExternalWorkspaceSpa.ps1` | `sprk_externalworkspace` (HTML + inline JS) |
 | 3 | `Deploy-SpeAdminApp.ps1` | `sprk_speadmin` (HTML) |
-| 4 | `Deploy-WizardCodePages.ps1` | 12 wizard/code page web resources |
+| 4 | `Deploy-WizardCodePages.ps1` | 12 wizard/code page web resources (note: `sprk_corporateworkspace` entry retired — see above) |
 | 5 | `Deploy-EventsPage.ps1` | `sprk_eventspage.html` |
 | 6 | `Deploy-PCFWebResources.ps1` | PCF bundle.js + CSS |
 | 7 | `Deploy-RibbonIcons.ps1` | 3 SVG ribbon icons |

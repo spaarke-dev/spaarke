@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Workspace.Models;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Workspace;
@@ -243,6 +244,17 @@ public static class WorkspaceMatterEndpoints
             logger.LogInformation(
                 "Matter AI summary complete. CharCount={CharCount}, CorrelationId={CorrelationId}",
                 summaryText.Length, httpContext.TraceIdentifier);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 L1): kill switch engaged — surface as SSE error
+            // since the response is already committed as text/event-stream. Use stable errorCode
+            // for client-side discrimination.
+            logger.LogDebug(
+                "Matter AI summary called while AI feature disabled. ErrorCode={ErrorCode}, CorrelationId={CorrelationId}",
+                ex.ErrorCode, httpContext.TraceIdentifier);
+            await WriteSSEAsync(response, AnalysisStreamChunk.FromError($"[{ex.ErrorCode}] {ex.Message}"), CancellationToken.None);
+            await response.WriteAsync("data: [DONE]\n\n", CancellationToken.None);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {

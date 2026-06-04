@@ -1,0 +1,74 @@
+<task id="042" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>Facade scaffold — IInsightsAi interface + InsightsOrchestrator (Zone A)</title>
+    <status>completed</status>
+    <wave>5</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, facade, zone-a, public-contracts, dotnet, dep-7</tags>
+    <dependencies>022, 023</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>facade-scaffold</d-p>
+  </metadata>
+
+  <prompt>
+    Create the `IInsightsAi` facade at `Services/Ai/PublicContracts/IInsightsAi.cs` (Phase 1 contract surface with two methods: `AnswerQuestionAsync` for D-P15 endpoint, `RunIngestAsync` for D-P8 consumer). Implementation in `Services/Ai/Insights/InsightsOrchestrator.cs` (Zone A) wires PlaybookExecutionEngine + D-P13 cache + invocation surfaces. Coordinates with DEP-7 (sdap-bff-api-remediation-fix Outcome E task 046 facade scaffold).
+  </prompt>
+
+  <role>Senior .NET developer with facade-pattern + DI familiarity; understands §3.5 facade boundary discipline.</role>
+
+  <goal>
+    `IInsightsAi` interface lives in `Services/Ai/PublicContracts/` (Zone A by convention — but this is the only Zone-A path Zone B is permitted to import). `InsightsOrchestrator` impl in `Services/Ai/Insights/` wraps PlaybookExecutionEngine with D-P13 cache for AnswerQuestionAsync, and invokes the universal ingest playbook for RunIngestAsync. Registered in DI. Zone B callers (D-P8, D-P15) inject `IInsightsAi` only — verified by §3.5.4 grep.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.5 facade boundary, §3.5.3 IInsightsAi contract)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md (forbidden imports in Zone B)</file>
+    <file purpose="dep">projects/sdap-bff-api-remediation-fix/ — Outcome E task 046 facade scaffold (coordinate placement)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="§3.5">IInsightsAi is the ONLY AI-internal type Zone B may import; no widening (no IChatClient / PlaybookExecutionEngine in this interface)</constraint>
+    <constraint source="ADR-010">DI minimalism — single registration via existing AI module pattern</constraint>
+    <constraint source="DEP-7">Coordinate with Outcome E task 046 scaffold; if PublicContracts/ doesn't exist yet, create it; if it does, add IInsightsAi.cs to it</constraint>
+    <constraint source="naming">Interface methods named after domain need (AnswerQuestionAsync, RunIngestAsync), NOT after AI mechanism</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>facade-pattern, zone-boundary, di-registration</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Check PublicContracts/ existence">If sdap-bff-api-remediation-fix task 046 has landed, reuse the folder; else create</step>
+    <step order="2" name="Author IInsightsAi interface">Two methods per SPEC §3.5.3: AnswerQuestionAsync(InsightsAgentRequest, ct) → InsightsAgentResult; RunIngestAsync(InsightsIngestRequest, ct) → InsightsIngestResult</step>
+    <step order="3" name="Author request/response DTOs">In Models/Ai/PublicContracts/ — InsightsAgentRequest {Question, Subject, Parameters, TenantId, AccessibleScopeHash}; InsightsAgentResult {Artifact, Decline, CacheHit, ProcessingTimeMs}; InsightsIngestRequest {DocumentId, MatterId, TenantId}; InsightsIngestResult {ObservationsEmitted, Layer1Classification, Layer2Triggered}</step>
+    <step order="4" name="Author InsightsOrchestrator impl">In Services/Ai/Insights/; wraps PlaybookExecutionEngine + D-P13 cache for AnswerQuestionAsync; invokes universal ingest playbook for RunIngestAsync</step>
+    <step order="5" name="DI registration">Register IInsightsAi → InsightsOrchestrator in AiModule (Singleton)</step>
+    <step order="6" name="Grep verification">Run §3.5.4 grep against Zone B paths — expect zero hits</step>
+    <step order="7" name="Quality gates">code-review + adr-check; verify naming follows domain-not-mechanism convention</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInsightsAi.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/PublicContracts/InsightsAgentRequest.cs + InsightsAgentResult.cs + InsightsIngestRequest.cs + InsightsIngestResult.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs</output>
+    <output type="test">tests/integration/Services/Ai/Insights/InsightsOrchestratorTests.cs (smoke tests for both methods)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">IInsightsAi interface compiled at Services/Ai/PublicContracts/</criterion>
+    <criterion testable="true">InsightsOrchestrator registered via DI; resolves successfully</criterion>
+    <criterion testable="true">AnswerQuestionAsync invokes PlaybookExecutionEngine (mockable in test) with D-P13 cache wrapping</criterion>
+    <criterion testable="true">RunIngestAsync invokes universal ingest playbook with caller-supplied context</criterion>
+    <criterion testable="true">§3.5.4 grep passes: Zone B paths import IInsightsAi only, no other AI-internal types</criterion>
+    <criterion testable="true">Interface naming follows domain convention (AnswerQuestionAsync, NOT InvokePlaybookAsync)</criterion>
+  </acceptance-criteria>
+</task>

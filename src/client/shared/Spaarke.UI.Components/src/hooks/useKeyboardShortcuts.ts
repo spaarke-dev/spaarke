@@ -12,7 +12,10 @@ export interface UseKeyboardShortcutsOptions {
  * Hook to register keyboard shortcuts for commands
  */
 export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void {
-  const { commands, context, enabled = true } = options;
+  // R4 task 081: default `commands` to [] to prevent runtime TypeError when a
+  // consumer renders before its command list is loaded (e.g., async fetch path).
+  // TypeScript marks the prop as required but cannot enforce runtime arrival.
+  const { commands = [], context, enabled = true } = options;
 
   useEffect(() => {
     if (!enabled) return;

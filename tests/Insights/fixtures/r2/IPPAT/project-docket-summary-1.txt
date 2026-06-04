@@ -1,0 +1,93 @@
+QUARTERLY PATENT DOCKET SUMMARY — Q1 2026
+
+Project Code:        IPPAT-2024-007
+Project Name:        Tessera Photonic Networks — Photonic Routing Patent Family
+Client of Record:    Tessera Photonic Networks, Inc.
+Reporting Period:    January 1, 2026 – March 31, 2026
+Prepared by:         Patrick Devanney, Lead Outside Counsel
+                     Greene Marlow Patent Group LLP
+Distribution:        Aliyah Brennan, Tessera VP-IP; Tessera Board IP Committee
+Issued:              April 7, 2026
+
+1. PORTFOLIO SUMMARY
+
+Active applications at reporting-period end: 11
+   Pending US Non-Provisional applications:                 4
+   Pending PCT International applications:                  2
+   Pending National Phase applications (EP, JP, KR, CN):    4
+   Pending US Continuation applications:                    1
+Issued US Patents (life-of-portfolio):                       7
+Expired/abandoned applications during this period:           0
+
+2. KEY DOCKET ACTIVITY THIS PERIOD
+
+   2.1 Non-Final Office Action received in App. 18/501,772 (March 24, 2026)
+       Subject matter: low-loss photonic routing using asymmetric ring
+       resonators. § 103 rejection over Park + Rajagopalan; response strategy
+       framed in Project Plan PRJ-IPPAT-024 and counter-amendment delivered
+       June 9, 2026 (response window: June 24, 2026).
+
+   2.2 Notice of Allowance received in App. 17/812,209 (February 8, 2026)
+       Subject matter: thermo-optic wavelength stabilization for silicon-
+       nitride microring filters. Issue fee payable by May 8, 2026; Issue Fee
+       Transmittal Form and Issue Notification Worksheet prepared and
+       awaiting client sign-off.
+
+   2.3 European Patent Office (EPO) communication under R. 71(3) EPC received
+       in App. EP24162047.5 (March 2, 2026)
+       Allowance with translation requirements; validation in DE, FR, IT, NL
+       targeted by May 2, 2026. Validation budget: $11,400.
+
+   2.4 PCT National Phase entry deadline ALERT: April 15, 2026
+       PCT/US2024/038772 (priority: October 11, 2023). 30/31-month national
+       phase entry deadline in EP, JP, KR, CN. Client decision required by
+       April 1, 2026 on jurisdictional scope.
+
+   2.5 New Invention Disclosure received from Tessera CTO (February 22, 2026)
+       Subject matter: heterogeneous integration of indium-phosphide on
+       silicon nitride for sub-1.55-µm sources. Patentability assessment
+       underway; provisional filing target: May 30, 2026.
+
+3. UPCOMING DEADLINES — NEXT 90 DAYS
+
+   Apr 1, 2026   PCT/US2024/038772 — Client national-phase scope decision
+   Apr 15, 2026  PCT/US2024/038772 — National phase entry (EP/JP/KR/CN)
+   May 2, 2026   EP24162047.5 — Validation in DE, FR, IT, NL
+   May 8, 2026   App. 17/812,209 — Issue fee due
+   May 30, 2026  Tessera CTO ID #2026-08 — Provisional filing target
+   Jun 24, 2026  App. 18/501,772 — Response to Office Action due
+
+4. BUDGET STATUS — Q1 2026
+
+   YTD Annual Budget (2026):              $620,000
+   Q1 Actuals (Jan 1 – Mar 31, 2026):     $164,300
+   Q1 Forecast:                            $155,000  (over by $9,300)
+   Variance Drivers:
+       - Additional prior-art search work in connection with the App.
+         18/501,772 Office Action response (+$7,800)
+       - EP R. 71(3) validation preparation (+$1,500)
+
+   2026 Full-Year Projection:              $625,000 (versus $620,000 budget,
+                                                     within 1% tolerance)
+
+5. STRATEGIC NOTES
+
+   - The Park + Rajagopalan rejection in App. 18/501,772 will require careful
+     amendment to preserve broad claim scope. Outside counsel recommends a
+     client strategy call before submitting the response.
+   - National-phase scope decision for PCT/US2024/038772 should consider that
+     two of Tessera's strategic OEM partners are headquartered in Japan and
+     Korea respectively.
+
+6. APPENDICES
+
+   A — Per-application status table (11 rows × 8 columns)
+   B — Budget detail by application and timekeeper
+   C — Open invention-disclosure log (3 disclosures under assessment)
+
+Respectfully submitted,
+
+/Patrick Devanney/
+Patrick Devanney, Reg. No. 71,883
+Greene Marlow Patent Group LLP
+Date: April 7, 2026

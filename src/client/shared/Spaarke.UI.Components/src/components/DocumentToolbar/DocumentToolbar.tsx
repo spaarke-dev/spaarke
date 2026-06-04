@@ -15,20 +15,8 @@
  * Constraints: Fluent UI v9 only; ZERO hardcoded colors (uses tokens).
  */
 import * as React from 'react';
-import {
-  Button,
-  Tooltip,
-  Badge,
-  makeStyles,
-  mergeClasses,
-  tokens,
-} from '@fluentui/react-components';
-import {
-  ArrowClockwise20Regular,
-  Add20Regular,
-  MailRegular,
-  Open20Regular,
-} from '@fluentui/react-icons';
+import { Button, Tooltip, Badge, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { ArrowClockwise20Regular, Add20Regular, MailRegular, Open20Regular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -128,13 +116,7 @@ export const DocumentToolbar: React.FC<IDocumentToolbarProps> = ({
   const emailEnabled = !!onEmail && count > 0;
 
   return (
-    <div
-      className={mergeClasses(
-        styles.toolbar,
-        compact ? styles.toolbarCompact : undefined,
-        className
-      )}
-    >
+    <div className={mergeClasses(styles.toolbar, compact ? styles.toolbarCompact : undefined, className)}>
       {onReload && (
         <Tooltip content="Reload" relationship="label">
           <Button
@@ -177,13 +159,7 @@ export const DocumentToolbar: React.FC<IDocumentToolbarProps> = ({
               disabled={!emailEnabled}
             />
             {count > 0 && (
-              <Badge
-                className={styles.emailBadge}
-                appearance="filled"
-                color="brand"
-                size="small"
-                aria-hidden="true"
-              >
+              <Badge className={styles.emailBadge} appearance="filled" color="brand" size="small" aria-hidden="true">
                 {count}
               </Badge>
             )}

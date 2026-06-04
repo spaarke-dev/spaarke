@@ -5,6 +5,7 @@ using System.Threading.Channels;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai.Insights.Routing;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Ai.Schemas;
 
@@ -42,6 +43,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     private readonly INodeExecutorRegistry _executorRegistry;
     private readonly IScopeResolverService _scopeResolver;
     private readonly IAnalysisOrchestrationService _legacyOrchestrator;
+    private readonly IInsightsActionRouter _insightsRouter;
     private readonly ILogger<PlaybookOrchestrationService> _logger;
 
     // In-memory run tracking (Phase 1) - replaced with Dataverse in Phase 2
@@ -52,12 +54,14 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         INodeExecutorRegistry executorRegistry,
         IScopeResolverService scopeResolver,
         IAnalysisOrchestrationService legacyOrchestrator,
+        IInsightsActionRouter insightsRouter,
         ILogger<PlaybookOrchestrationService> logger)
     {
         _nodeService = nodeService;
         _executorRegistry = executorRegistry;
         _scopeResolver = scopeResolver;
         _legacyOrchestrator = legacyOrchestrator;
+        _insightsRouter = insightsRouter ?? throw new ArgumentNullException(nameof(insightsRouter));
         _logger = logger;
     }
 
@@ -790,6 +794,45 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     }
 
     /// <summary>
+    /// Wave C1 task 020 — Gap #2 helper per design-a5 §7.2. Extracts the <c>selectedBranch</c>
+    /// from a branching gate's <see cref="NodeOutput"/> structured data. Returns the downstream
+    /// node name on the selected branch, or null when the upstream is not a branching gate
+    /// (no <c>selectedBranch</c> property in its structured data).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Branching gates today:
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Nodes.EvidenceSufficiencyResult.SelectedBranch"/> and
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Nodes.ConditionResult.SelectedBranch"/>. Both expose
+    /// the property under the JSON name <c>"selectedBranch"</c> via default record serialization.
+    /// </para>
+    /// <para>
+    /// Reads from <see cref="NodeOutput.StructuredData"/> via case-insensitive property lookup
+    /// (the JSON serializer uses PascalCase or camelCase depending on options; we accept both).
+    /// </para>
+    /// </remarks>
+    private static string? TryExtractSelectedBranch(NodeOutput depOutput)
+    {
+        if (depOutput.StructuredData is null) return null;
+        var data = depOutput.StructuredData.Value;
+        if (data.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+
+        // Try common casings: "selectedBranch" (camelCase JSON output) and "SelectedBranch" (record name).
+        if (data.TryGetProperty("selectedBranch", out var camelCase) &&
+            camelCase.ValueKind == System.Text.Json.JsonValueKind.String)
+        {
+            return camelCase.GetString();
+        }
+        if (data.TryGetProperty("SelectedBranch", out var pascalCase) &&
+            pascalCase.ValueKind == System.Text.Json.JsonValueKind.String)
+        {
+            return pascalCase.GetString();
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Extracts the __actionType value from a node's ConfigJson.
     /// Returns null if ConfigJson is missing or doesn't contain the field.
     /// </summary>
@@ -834,6 +877,63 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
         try
         {
+            // Wave C1 task 020 — Gap #2 patch: branch-aware dependency resolution per design-a5 §7.2.
+            // When an upstream EvidenceSufficiencyNode (or ConditionNode) emits a selectedBranch,
+            // downstream nodes NOT on the selected branch are skipped — even if all their upstream
+            // dependencies succeeded. Without this patch, a "gated-off" node (e.g., layer2Extract
+            // in universal-ingest@v1 when checkLayer2Gate=insufficient) would execute because
+            // the existing AND-only dependency check treats EvidenceSufficiencyNode's "success-with-
+            // insufficient-verdict" as a successful upstream.
+            //
+            // Semantics: an upstream's selectedBranch is the NAME of the downstream node on the
+            // selected branch (see EvidenceSufficiencyNode line 158-160:
+            //   selectedBranch = sufficient ? config.SufficientBranch : config.InsufficientBranch
+            //   where SufficientBranch / InsufficientBranch hold downstream node names).
+            // We skip the current node when ALL of:
+            //   1) The upstream returned a selectedBranch (i.e., upstream is a branching gate);
+            //   2) The current node's name != selectedBranch.
+            // If a node has MULTIPLE upstreams and at least ONE branching gate selected it, run it
+            // (handles emitObservations which has groundingVerify [sufficient path] + checkLayer2Gate
+            // [insufficient path] as upstreams). Implementation: track whether at least one branching
+            // upstream selected this node; only skip if every branching upstream rejected it.
+            //
+            // Backward compatibility: nodes whose upstreams have no selectedBranch (most existing
+            // playbooks) behave unchanged — branchingDepCount stays 0 and the skip branch is bypassed.
+            int branchingDepCount = 0;
+            int branchingDepsSelectingThisNode = 0;
+            foreach (var depId in node.DependsOn)
+            {
+                var depNode = graph.GetNode(depId);
+                if (depNode == null) continue;
+
+                var depOutput = runContext.GetOutput(depNode.OutputVariable);
+                if (depOutput == null || !depOutput.Success) continue;  // existing failure path handles below
+
+                var selectedBranch = TryExtractSelectedBranch(depOutput);
+                if (selectedBranch is null) continue;
+
+                branchingDepCount++;
+                if (string.Equals(selectedBranch, node.Name, StringComparison.OrdinalIgnoreCase))
+                    branchingDepsSelectingThisNode++;
+            }
+
+            if (branchingDepCount > 0 && branchingDepsSelectingThisNode == 0)
+            {
+                var skipReason = $"Branch not selected: {branchingDepCount} upstream branching gate(s) routed to a different branch";
+                runContext.RecordNodeSkipped();
+
+                _logger.LogDebug(
+                    "Skipping node {NodeName}: {Reason}",
+                    node.Name, skipReason);
+
+                await writer.WriteAsync(PlaybookStreamEvent.NodeSkipped(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipReason), cancellationToken);
+
+                // Return a skip output (treated as success for flow control — matches existing
+                // dependency-failure-skip semantics; downstream nodes see this as "Ok(null)").
+                return NodeOutput.Ok(node.Id, node.OutputVariable, null, skipReason);
+            }
+
             // Check if dependencies failed
             foreach (var depId in node.DependsOn)
             {
@@ -892,23 +992,23 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             ActionType actionType;
             ResolvedScopes scopes;
 
-            if (node.NodeType == NodeType.AIAnalysis)
+            // Per Insights Engine r2 Wave B (2026-06-02): when sprk_actionid is set,
+            // the action's ActionType is the canonical dispatch source REGARDLESS of
+            // nodeType. Insights nodes like checkSufficiency (Control), groundCitations
+            // (Control), ReturnInsightArtifactNode (Output), and declineInsufficient
+            // (Output) all need their specific executor (EvidenceSufficiency, GroundingVerify,
+            // ReturnInsightArtifact, DeclineToFind) — not the nodeType-based default
+            // (Condition / DeliverOutput) that the original logic fell back to.
+            //
+            // The legacy structural-node path is preserved for backward compat: when no
+            // action FK is set, fall back to ConfigJson __actionType (canvas-Designer
+            // convention) or nodeType-based default.
+            if (node.ActionId != Guid.Empty)
             {
-                // AI nodes: resolve scopes and load action from Dataverse
-                scopes = await _scopeResolver.ResolveNodeScopesAsync(
-                    node.Id, runContext.CancellationToken);
-
-                if (node.ActionId == Guid.Empty)
-                {
-                    var errorMsg = $"AI node '{node.Name}' requires an Action but has no ActionId";
-                    var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
-                    runContext.StoreNodeOutput(errorOutput);
-
-                    await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
-                        runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
-
-                    return errorOutput;
-                }
+                // Resolve scopes only for AI nodes (Control/Output/Workflow have none)
+                scopes = node.NodeType == NodeType.AIAnalysis
+                    ? await _scopeResolver.ResolveNodeScopesAsync(node.Id, runContext.CancellationToken)
+                    : new ResolvedScopes([], [], []);
 
                 var resolved = await _scopeResolver.GetActionAsync(
                     node.ActionId, runContext.CancellationToken);
@@ -928,13 +1028,23 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 action = resolved;
                 actionType = action.ActionType;
             }
+            else if (node.NodeType == NodeType.AIAnalysis)
+            {
+                var errorMsg = $"AI node '{node.Name}' requires an Action but has no ActionId";
+                var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
+                runContext.StoreNodeOutput(errorOutput);
+
+                await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
+
+                return errorOutput;
+            }
             else
             {
-                // Structural nodes (Output, Control, Workflow): no Action record, no scopes
+                // Structural nodes (Output, Control, Workflow) WITHOUT an action FK:
+                // legacy path — uses ConfigJson __actionType or nodeType-based default.
                 scopes = new ResolvedScopes([], [], []);
 
-                // Read specific ActionType from ConfigJson (written during canvas sync)
-                // Falls back to NodeType-based default if not present
                 actionType = ExtractActionTypeFromConfig(node.ConfigJson) ?? node.NodeType switch
                 {
                     NodeType.Output => ActionType.DeliverOutput,
@@ -973,8 +1083,59 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             // and collect UpdateRecord-type nodes with their ConfigJson (which contains fieldMappings).
             var downstreamNodes = CollectDownstreamNodeInfo(node, graph);
 
+            // Insights Engine r2 Wave D4 (task 033) — per-(area, type) routing for universal-ingest@v1.
+            // Layer 1 (layer1Classify): if parameters.practiceAreaHint is set AND a per-area action row
+            // INS-L1C-<AREA>@v1 exists, swap the resolved action for the per-area variant. Fall back to
+            // the generic action row otherwise — preserves the "every matter classifies" invariant per
+            // design-a3 §2.5.
+            //
+            // Layer 2 (layer2Extract): consult the sprk_practicearea_documenttype matrix for
+            // (practiceAreaHint, layer1.documentTypeCode). Outcomes:
+            //   - per-pair action: swap action, run executor against per-pair prompt
+            //   - NULL sprk_layer2actioncode (gate-fail by design, e.g., CTRNS × NDA): skip the node,
+            //     emit Layer-1-only Observation (handled by setting branchSkipped flag below)
+            //   - no matrix row (unmapped pair): fall back to generic INS-L2X@v1
+            //   - missing inputs: PassThrough (no change)
+            //
+            // Routing decisions are cached in-process (15-min sliding TTL) per InsightsActionRouter.
+            // The routing happens BEFORE template substitution so the substituted prompt + parameters
+            // reach the executor as a single coherent payload.
+            (action, var insightsL2GateFail) = await ApplyInsightsRoutingAsync(
+                node, action, runContext, cancellationToken).ConfigureAwait(false);
+
+            if (insightsL2GateFail)
+            {
+                // Structured Layer 2 gate-fail per design-a3 §2.5 step 4 (CTRNS × NDA pattern).
+                // Surface as a successful skip so emitObservations downstream still runs with
+                // Layer-1-only output. Mirrors the dependency-failure-skip semantics already
+                // used by the branch-aware skip path.
+                var skipReason = "Insights Layer 2 routing: matrix row carries NULL sprk_layer2actioncode (intentional per-pair gate-fail)";
+                _logger.LogInformation(
+                    "Insights Layer 2 gate-fail for node '{NodeName}' (runId={RunId}, playbookId={PlaybookId}) — {SkipReason}. Universal-ingest will emit Layer-1-only Observation downstream.",
+                    node.Name, runContext.RunId, runContext.PlaybookId, skipReason);
+
+                var skipOutput = NodeOutput.Ok(node.Id, node.OutputVariable, null, skipReason);
+                runContext.RecordNodeSkipped();
+                runContext.StoreNodeOutput(skipOutput);
+
+                await writer.WriteAsync(PlaybookStreamEvent.NodeSkipped(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipReason), cancellationToken);
+
+                return skipOutput;
+            }
+
+            // Apply {{paramName}} template substitution to ConfigJson before the executor
+            // runs. Variables come from runContext.Parameters (populated by the caller +
+            // enriched by InsightsOrchestrator with matterId/projectId/invoiceId derived from
+            // Subject). Per Insights Engine r2 Wave B (2026-06-02 smoke trace): without this
+            // substitution, playbook nodes like resolveLiveFacts received the literal
+            // "matter:{{matterId}}" and failed at LiveFactResolver. Centralizing the fix here
+            // applies it to every node executor uniformly (LiveFact / IndexRetrieve /
+            // ReturnInsightArtifact all use {{matterId}} in synthesis playbooks).
+            var substitutedNode = ApplyConfigJsonTemplates(node, runContext.Parameters);
+
             // Create node execution context with streaming callback for per-token SSE events
-            var nodeContext = runContext.CreateNodeContext(node, action, scopes, actionType) with
+            var nodeContext = runContext.CreateNodeContext(substitutedNode, action, scopes, actionType) with
             {
                 DownstreamNodes = downstreamNodes,
                 OnTokenReceived = async text =>
@@ -1236,6 +1397,199 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Universal-ingest@v1 Layer 1 node name (per <c>universal-ingest.playbook.json</c>).
+    /// Detection point for per-area Layer 1 routing.
+    /// </summary>
+    private const string UniversalIngestLayer1NodeName = "layer1Classify";
+
+    /// <summary>
+    /// Universal-ingest@v1 Layer 2 node name (per <c>universal-ingest.playbook.json</c>).
+    /// Detection point for per-(area, type) Layer 2 routing.
+    /// </summary>
+    private const string UniversalIngestLayer2NodeName = "layer2Extract";
+
+    /// <summary>
+    /// Universal-ingest@v1 Layer 1 output variable name (consumed by Layer 2 routing
+    /// to read the <c>document_type_code</c> classification result).
+    /// </summary>
+    private const string UniversalIngestLayer1OutputVariable = "layer1";
+
+    /// <summary>
+    /// Apply Insights Engine r2 Wave D4 (task 033) per-(area, type) routing to the
+    /// universal-ingest@v1 playbook's Layer 1 and Layer 2 nodes. Returns the (possibly
+    /// swapped) action plus a flag indicating whether the node should be skipped
+    /// with a structured Layer 2 gate-fail.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Routing is identified by <see cref="PlaybookNodeDto.Name"/> matching the canonical
+    /// universal-ingest node names. Other playbooks (including future Insights variants
+    /// that don't follow this naming) flow through unchanged — routing is OPT-IN by
+    /// node name, never silently applied.
+    /// </para>
+    /// <para>
+    /// <b>Layer 1 routing</b>: reads <c>parameters.practiceAreaHint</c>, asks the router
+    /// for the per-area action; on miss, returns the orchestrator's default action.
+    /// </para>
+    /// <para>
+    /// <b>Layer 2 routing</b>: reads <c>parameters.practiceAreaHint</c> + extracts the
+    /// <c>document_type_code</c> from the upstream <c>layer1</c> node output, asks the
+    /// router for the matrix lookup. Returns one of:
+    /// <list type="bullet">
+    ///   <item>PassThrough — inputs missing, action unchanged</item>
+    ///   <item>UsePerPairAction — swap action to per-pair variant</item>
+    ///   <item>GateFailNullActionCode — gate-fail flag set; caller emits Skip output</item>
+    ///   <item>FallbackToGeneric — unmapped pair, action unchanged</item>
+    /// </list>
+    /// </para>
+    /// </remarks>
+    private async Task<(AnalysisAction Action, bool GateFailLayer2)> ApplyInsightsRoutingAsync(
+        PlaybookNodeDto node,
+        AnalysisAction action,
+        PlaybookRunContext runContext,
+        CancellationToken cancellationToken)
+    {
+        // Identify the universal-ingest L1/L2 nodes by name. Other playbooks (and
+        // synthesis playbooks like predict-matter-cost@v1) pass through unchanged.
+        if (string.IsNullOrEmpty(node.Name))
+        {
+            return (action, false);
+        }
+
+        var practiceAreaHint = TryGetParameter(runContext.Parameters, "practiceAreaHint");
+
+        if (string.Equals(node.Name, UniversalIngestLayer1NodeName, StringComparison.Ordinal))
+        {
+            var routed = await _insightsRouter.ResolveLayer1ActionAsync(
+                practiceAreaHint, action, cancellationToken).ConfigureAwait(false);
+            return (routed, false);
+        }
+
+        if (string.Equals(node.Name, UniversalIngestLayer2NodeName, StringComparison.Ordinal))
+        {
+            // Read the Layer 1 output to extract the document_type_code. When unavailable
+            // (sanitize short-circuited OR a prior node failed before Layer 1 ran), fall
+            // through to the default action — the orchestrator's branch-aware skip handles
+            // the rest.
+            var documentTypeHint = TryGetParameter(runContext.Parameters, "documentTypeHint")
+                ?? ExtractDocumentTypeFromLayer1Output(runContext);
+
+            var routing = await _insightsRouter.ResolveLayer2ActionAsync(
+                practiceAreaHint, documentTypeHint, action, cancellationToken).ConfigureAwait(false);
+
+            return routing.Decision switch
+            {
+                InsightsLayer2RoutingDecision.GateFailNullActionCode => (action, true),
+                InsightsLayer2RoutingDecision.UsePerPairAction => (routing.Action, false),
+                _ => (action, false)
+            };
+        }
+
+        return (action, false);
+    }
+
+    /// <summary>
+    /// Safe lookup of a string parameter from the run context's parameter dictionary.
+    /// Returns null when missing or empty; never throws.
+    /// </summary>
+    private static string? TryGetParameter(IReadOnlyDictionary<string, string>? parameters, string key)
+    {
+        if (parameters is null) return null;
+        return parameters.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : null;
+    }
+
+    /// <summary>
+    /// Extract <c>document_type_code</c> from the upstream <c>layer1</c> node's structured
+    /// output. The Layer 1 prompt emits a JSON object shape
+    /// <c>{ document_type_code, signals { ... }, confidence, rationale }</c> per
+    /// design-a3 §5.1. Returns null when the layer1 output is absent or malformed —
+    /// caller falls back to the default action.
+    /// </summary>
+    private string? ExtractDocumentTypeFromLayer1Output(PlaybookRunContext runContext)
+    {
+        var layer1Output = runContext.GetOutput(UniversalIngestLayer1OutputVariable);
+        if (layer1Output is null || !layer1Output.Success || layer1Output.StructuredData is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var root = layer1Output.StructuredData.Value;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            // Try canonical key first (design-a3 §5.1), then a couple of common
+            // case variants in case prompt authors emit camelCase.
+            if (TryReadStringProperty(root, "document_type_code", out var v1)) return v1;
+            if (TryReadStringProperty(root, "documentTypeCode", out var v2)) return v2;
+            if (TryReadStringProperty(root, "classification", out var v3)) return v3;
+
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex,
+                "PlaybookOrchestrationService.ExtractDocumentTypeFromLayer1Output: malformed layer1 output; falling back to default Layer 2 action.");
+            return null;
+        }
+    }
+
+    private static bool TryReadStringProperty(JsonElement root, string propertyName, out string? value)
+    {
+        if (root.TryGetProperty(propertyName, out var element)
+            && element.ValueKind == JsonValueKind.String)
+        {
+            value = element.GetString();
+            return !string.IsNullOrWhiteSpace(value);
+        }
+        value = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Substitute <c>{{paramName}}</c> placeholders in the node's ConfigJson with values
+    /// from the run parameters. Returns a NEW PlaybookNodeDto record with the substituted
+    /// ConfigJson; never mutates the input. Idempotent — placeholders without matching
+    /// parameters are left intact (the executor surfaces the original string for clear
+    /// authoring feedback).
+    /// </summary>
+    /// <remarks>
+    /// Per Insights Engine r2 Wave B (2026-06-02): adds centralized template substitution
+    /// previously missing from the orchestration pipeline. Without it, playbook nodes like
+    /// <c>resolveLiveFacts</c> received literal <c>"matter:{{matterId}}"</c> from ConfigJson
+    /// and failed at <c>LiveFactResolver.ParseMatterSubject</c> with
+    /// <c>LiveFactNotSupportedException</c>, returning a scaffold "no-artifact-produced"
+    /// decline to the caller. Centralized fix applies uniformly to all executor types.
+    /// </remarks>
+    private static PlaybookNodeDto ApplyConfigJsonTemplates(
+        PlaybookNodeDto node,
+        IReadOnlyDictionary<string, string>? parameters)
+    {
+        if (parameters is null || parameters.Count == 0)
+            return node;
+        if (string.IsNullOrEmpty(node.ConfigJson) || !node.ConfigJson.Contains("{{", StringComparison.Ordinal))
+            return node;
+
+        var rendered = node.ConfigJson;
+        foreach (var kvp in parameters)
+        {
+            if (string.IsNullOrEmpty(kvp.Key)) continue;
+            var placeholder = "{{" + kvp.Key + "}}";
+            if (rendered.Contains(placeholder, StringComparison.Ordinal))
+            {
+                rendered = rendered.Replace(placeholder, kvp.Value ?? string.Empty, StringComparison.Ordinal);
+            }
+        }
+
+        return node with { ConfigJson = rendered };
     }
 
     #endregion

@@ -213,7 +213,12 @@ export const DocumentGraph: React.FC<DocumentGraphProps> = ({
         attributionPosition="bottom-left"
         style={{ width: '100%', height: '100%' }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color={isDarkMode ? tokens.colorNeutralStroke2 : tokens.colorNeutralStroke2} />
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={20}
+          size={1}
+          color={isDarkMode ? tokens.colorNeutralStroke2 : tokens.colorNeutralStroke2}
+        />
         <Controls showZoom showFitView showInteractive={false} />
         {showMinimap && (
           <MiniMap

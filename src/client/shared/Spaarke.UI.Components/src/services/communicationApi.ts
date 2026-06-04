@@ -227,9 +227,7 @@ export async function sendCommunication(
     throw new Error('sendCommunication: response body was not valid JSON.');
   }
 
-  const id =
-    (payload['communicationId'] as string | undefined) ??
-    (payload['CommunicationId'] as string | undefined);
+  const id = (payload['communicationId'] as string | undefined) ?? (payload['CommunicationId'] as string | undefined);
 
   if (!id) {
     throw new Error('sendCommunication: response did not include communicationId.');

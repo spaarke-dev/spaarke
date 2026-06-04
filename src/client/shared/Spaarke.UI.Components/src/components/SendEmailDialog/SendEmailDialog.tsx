@@ -5,9 +5,13 @@
  * Fully callback-based — consumer provides search and send implementations.
  * No service dependencies; works in both PCF controls and Code Page solutions.
  *
+ * Domain-agnostic: title, subject, and body are all consumer-supplied props,
+ * so the same dialog can compose document emails, matter updates, invoice
+ * notifications, or any other recipient-lookup-plus-message scenario.
+ *
  * Layout:
  *   ┌──────────────────────────────────────────────────────────────────────┐
- *   │  Email Document                                              [X]    │
+ *   │  {title}                                                            │
  *   │                                                                     │
  *   │  To *      [Search users...                             ]           │
  *   │                                                                     │
@@ -16,7 +20,7 @@
  *   │  Message * [Dear Colleague,                              ]          │
  *   │            [Please find the following document...]                  │
  *   │                                                                     │
- *   │                                     [Cancel]  [Send]               │
+ *   │ ─────────────────────────────────────────────[Cancel]  [Send]──── │
  *   └──────────────────────────────────────────────────────────────────────┘
  *
  * Constraints:
@@ -39,9 +43,11 @@ import {
   Spinner,
   Text,
   makeStyles,
+  shorthands,
   tokens,
 } from '@fluentui/react-components';
-import { Dismiss24Regular } from '@fluentui/react-icons';
+// v1.1.59 — Dismiss24Regular import removed alongside the title-bar
+// X close button (per UAT request for cross-modal consistency).
 import { LookupField } from '../LookupField/LookupField';
 import type { ILookupItem } from '../../types/LookupTypes';
 
@@ -73,6 +79,43 @@ export interface ISendEmailDialogProps {
   onSearchUsers: (query: string) => Promise<ILookupItem[]>;
   /** Called when user clicks Send. Consumer handles the BFF call. */
   onSend: (payload: ISendEmailPayload) => Promise<void>;
+  /**
+   * Override the dialog surface maxWidth. Defaults to `'520px'`.
+   *
+   * Pass a larger value (e.g. `'720px'`) when launching from inside a
+   * wide host dialog so the email composer has visual presence over the
+   * host. Backward-compatible: omitting the prop preserves the original
+   * 520px sizing used by existing consumers.
+   *
+   * @since v1.1.52 (SemanticSearchControl UAT polish round 7)
+   */
+  maxWidth?: string;
+
+  /**
+   * Override the dialog surface height. Defaults to `'auto'` (content-sized,
+   * preserves original consumer behavior). Pass a viewport-relative value
+   * like `'85vh'` to give the composer a tall presence matching a sibling
+   * host dialog (FilePreviewDialog uses `85vh`). When set, the Message
+   * textarea grows to fill the available vertical space.
+   *
+   * @since v1.1.56 (SemanticSearchControl UAT polish round 11)
+   */
+  height?: string;
+
+  /**
+   * Dialog title text shown in the DialogTitle slot. Defaults to
+   * `'Email Document'` for backward compatibility with the three
+   * original consumers (SemanticSearchControl, SpeDocumentViewer,
+   * LegalWorkspace FilePreview) which all email a single document.
+   *
+   * Override for other domains — e.g. `'Email Matter'`,
+   * `'Email Selected Records'`, `'Send Update'` — so the same
+   * dialog can be reused anywhere an email-with-recipient-lookup
+   * composer is needed.
+   *
+   * @since v1.1.60 (SemanticSearchControl UAT polish round 15)
+   */
+  title?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,13 +125,85 @@ export interface ISendEmailDialogProps {
 const useStyles = makeStyles({
   surface: {
     maxWidth: '520px',
-    width: '90vw',
+    width: '100%',
+    // v1.1.58 — when the consumer passes an explicit `height` (e.g. '85vh'),
+    // the surface needs to be a flex column so DialogBody can flex-grow
+    // to fill it. Fluent v9 DialogSurface is already display: flex by
+    // default; we just ensure the direction is column.
+    display: 'flex',
+    flexDirection: 'column',
   },
+  // v1.1.58 — DialogBody is the inner region that holds Title +
+  // Content + Actions. To make Content grow and Actions pin to the
+  // bottom, DialogBody must flex-grow within the surface AND lay out
+  // its own children as a flex column.
+  dialogBody: {
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  // v1.1.58 — DialogContent now flex-grows within DialogBody and
+  // scrolls internally when content overflows (so the form stays
+  // visible and the footer stays anchored).
+  dialogContent: {
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    overflowY: 'auto',
+  },
+  // v1.1.58 — DialogActions becomes a real footer: visible top
+  // border, right-aligned button cluster, anchored to the bottom of
+  // the DialogBody by being the last grid/flex row after the
+  // grow-to-fill DialogContent.
+  dialogActions: {
+    flexShrink: 0,
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalS,
+    ...shorthands.borderTop(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
+  },
+  // v1.1.58 — `form` fills the DialogContent so the Message Field can
+  // flex-grow to take all remaining vertical space.
   form: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     paddingTop: tokens.spacingVerticalS,
+    flex: 1,
+    minHeight: 0,
+  },
+  messageField: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: 1,
+    minHeight: 0,
+  },
+  // v1.1.59 — the descendant selector `& > textarea` (v1.1.58) didn't
+  // override Fluent v9 Textarea's inner-element height — UAT confirmed
+  // the inner <textarea> stayed at its `rows` natural height (~260px
+  // on rows=10). Switched to the SLOT-PROP approach:
+  // `<Textarea textarea={{ className: styles.messageTextareaInner }}>`
+  // applies the className directly to the inner element via Fluent's
+  // slot rendering, which bypasses Fluent's internal styling entirely.
+  messageTextarea: {
+    flex: 1,
+    minHeight: '180px',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  // v1.1.59 — applied to the inner `<textarea>` via slot prop.
+  // `height: 100%` + `flex: 1` makes it fill the messageTextarea
+  // wrapper (which itself fills the form via flex:1). minHeight:0
+  // lets it shrink without forcing overflow.
+  messageTextareaInner: {
+    flex: 1,
+    minHeight: 0,
+    height: '100%',
+    boxSizing: 'border-box',
   },
   labelRow: {
     display: 'inline-flex',
@@ -120,6 +235,9 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
   defaultBody,
   onSearchUsers,
   onSend,
+  maxWidth = '520px',
+  height = 'auto',
+  title = 'Email Document',
 }) => {
   const styles = useStyles();
 
@@ -181,15 +299,31 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
         if (!data.open) onClose();
       }}
     >
-      <DialogSurface className={styles.surface}>
-        <DialogTitle
-          action={<Button appearance="subtle" icon={<Dismiss24Regular />} aria-label="Close" onClick={onClose} />}
-        >
-          Email Document
-        </DialogTitle>
+      {/* v1.1.57 — Inline style now sets BOTH `height` and `minHeight`.
+          Fluent v9 DialogSurface internally applies `block-size:
+          fit-content` (or equivalent) at a specificity that overrides
+          our inline `height` alone — empirically observed in v1.1.56
+          UAT: surface remained content-sized (540px) even with
+          `style={{ height: '85vh' }}`. Adding `minHeight` forces the
+          surface to grow to at least the requested height regardless
+          of Fluent's content-sizing rule, because `min-height`
+          semantics override `block-size: fit-content`.
+          Default of 'auto' produces { height: 'auto', minHeight: 'auto' }
+          which is a no-op for back-compat consumers (LegalWorkspace +
+          SpeDocumentViewer). */}
+      <DialogSurface className={styles.surface} style={{ maxWidth, height, minHeight: height }}>
+        {/* v1.1.59 — title-bar X close icon removed per UAT.
+            The Cancel button in the footer is the single close
+            affordance, matching FilePreviewDialog's pattern
+            (v1.1.46) for consistency across our shared modals.
+            v1.1.60 — title text is now consumer-configurable via
+            the `title` prop (default 'Email Document' for back-
+            compat) so the dialog can be reused for non-document
+            email scenarios. */}
+        <DialogTitle>{title}</DialogTitle>
 
-        <DialogBody>
-          <DialogContent>
+        <DialogBody className={styles.dialogBody}>
+          <DialogContent className={styles.dialogContent}>
             <div className={styles.form}>
               {/* To — user lookup */}
               <LookupField
@@ -213,9 +347,16 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
                 />
               </Field>
 
-              {/* Body */}
-              <Field label={renderLabel('Message')}>
+              {/* Body — v1.1.59: the inner <textarea> is styled via the
+                  `textarea` slot prop (NOT a descendant selector on the
+                  wrapper className) so Fluent v9's slot rendering
+                  applies our class directly to the inner element. This
+                  is the only reliable way to override Fluent's
+                  rows-based natural height on the inner textarea. */}
+              <Field label={renderLabel('Message')} className={styles.messageField}>
                 <Textarea
+                  className={styles.messageTextarea}
+                  textarea={{ className: styles.messageTextareaInner }}
                   value={body}
                   onChange={e => setBody(e.target.value)}
                   placeholder="Compose your message..."
@@ -236,7 +377,7 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
           </DialogContent>
         </DialogBody>
 
-        <DialogActions>
+        <DialogActions className={styles.dialogActions}>
           <Button appearance="secondary" onClick={onClose} disabled={sending}>
             Cancel
           </Button>

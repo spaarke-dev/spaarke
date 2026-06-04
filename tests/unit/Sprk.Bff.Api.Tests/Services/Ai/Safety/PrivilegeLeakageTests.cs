@@ -32,6 +32,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Safety;
 ///   E. Forced document ID injection — marker injection in user messages ignored
 /// </summary>
 [Trait("Category", "PrivilegeLeakage")]
+[Trait("status", "repaired")]
 public class PrivilegeLeakageTests
 {
     private readonly MatterContextDetector _detector;
@@ -50,6 +51,7 @@ public class PrivilegeLeakageTests
     #region Scenario A — Matter Pivot Content Stripping
 
     [Fact]
+    [Trait("status", "repaired")]
     public void MatterPivot_StripsRetrievalContent_PreservesUserAndAssistantMessages()
     {
         // Arrange: conversation in Matter A with a retrieval result
@@ -85,6 +87,7 @@ public class PrivilegeLeakageTests
     }
 
     [Fact]
+    [Trait("status", "repaired")]
     public void MatterPivot_NoPrivilegedTextInSanitizedOutput()
     {
         // Arrange: multiple sensitive phrases across retrieval messages
@@ -118,6 +121,95 @@ public class PrivilegeLeakageTests
         result.RemovedDocumentCount.Should().Be(3);
     }
 
+    // RB-T044-01 regression test (added by r2 task 010, 2026-06-01):
+    // Exercises a 3-matter-pivot scenario beyond the 5 originally Skipped tests.
+    // Validates that the sanitizer correctly identifies the OLD-matter window when multiple
+    // prior matter markers exist in history, and that only the IMMEDIATELY-previous matter's
+    // retrieval content is stripped while still-earlier matter content is left alone — the
+    // matter-pivot semantics only protect against leakage from the matter directly preceding
+    // the pivot, since earlier zones were already sanitized at their respective pivots.
+    // Satisfies bff-extensions.md § F test-update obligation for the RB-T044-01 production fix.
+    [Fact]
+    [Trait("status", "repaired")]
+    public void MatterPivot_ThreeMatters_StripsOnlyImmediatelyPreviousMatterContent()
+    {
+        // Arrange: history spans THREE distinct matters with a fresh pivot just-detected at MATTER-B.
+        // The sanitizer is invoked with the MATTER-B marker as fromTurnIndex (anchored at the
+        // most-recently-detected OLD matter relative to the incoming MATTER-C call).
+        //
+        // The earlier MATTER-A content was sanitized at the A→B pivot in a prior turn; only the
+        // MATTER-B retrieval content needs stripping here.
+        const string matterARetrieval = "MATTER-A legacy: previously-stripped content (placeholder shape only)";
+        const string matterBRetrieval = "MATTER-B privileged: settlement terms confidential";
+        const string matterBSecondRetrieval = "MATTER-B privileged: opposing counsel correspondence";
+        const string matterCRetrieval = "MATTER-C: active matter, must remain visible";
+
+        var history = BuildHistory(
+            SystemMarker("MATTER-A"),                                          // 0
+            UserMessage("Initial question about Matter A"),                    // 1
+            RetrievalMessage(matterARetrieval),                                // 2 (already-historical)
+            AssistantMessage("Discussion of Matter A facts."),                 // 3
+            SystemMarker("MATTER-B"),                                          // 4 ← fromTurnIndex anchors here
+            UserMessage("Switched to Matter B; what does it say?"),            // 4? — recheck
+            RetrievalMessage(matterBRetrieval),                                // 6
+            AssistantMessage("Matter B summary."),                             // 7
+            UserMessage("Tell me more about Matter B."),                       // 8
+            RetrievalMessage(matterBSecondRetrieval),                          // 9
+            AssistantMessage("Additional Matter B detail."),                   // 10
+            SystemMarker("MATTER-C"),                                          // 11 ← new-matter boundary
+            UserMessage("Now switching to Matter C."),                         // 12
+            RetrievalMessage(matterCRetrieval),                                // 13
+            AssistantMessage("Matter C answer.")                               // 14
+        );
+
+        // Compute the actual MATTER-B marker index dynamically (don't hardcode — index counting
+        // above is illustrative and can drift).
+        var matterBIndex = -1;
+        for (var i = 0; i < history.Count; i++)
+        {
+            if (history[i].Role == ChatMessageRole.System
+                && history[i].Content == MatterContextDetector.BuildMatterMarker("MATTER-B"))
+            {
+                matterBIndex = i;
+                break;
+            }
+        }
+        matterBIndex.Should().BeGreaterThan(-1, "test setup must include a MATTER-B marker");
+
+        // Act: sanitize with fromTurnIndex anchored at the MATTER-B (immediately-previous) marker,
+        // simulating the C-pivot's call after the detector identified MATTER-B as the most recent.
+        var result = _sanitizer.StripRetrievedContent(history, matterBIndex);
+
+        // Assert: MATTER-B retrieval content stripped (immediately-previous matter)
+        var matterBStripped = result.Messages.Count(
+            m => m.Content == ConversationHistorySanitizer.PrivacyPlaceholder);
+        matterBStripped.Should().Be(2,
+            "both MATTER-B retrieval messages must be stripped at the B→C pivot");
+
+        // Assert: MATTER-A historical retrieval was BEFORE fromTurnIndex — it passes through
+        // unchanged (already sanitized at its own pivot in a prior turn; not the sanitizer's
+        // job to re-process retroactively).
+        var allContent = string.Join("\n", result.Messages.Select(m => m.Content));
+        allContent.Should().Contain(matterARetrieval,
+            "earlier matter content before the fromTurnIndex anchor is not re-processed; " +
+            "it was already sanitized at its respective prior pivot");
+
+        // Assert: MATTER-C retrieval (new-matter zone) preserved verbatim — must not be stripped.
+        allContent.Should().Contain(matterCRetrieval,
+            "new-matter content beyond the MATTER-C marker must remain visible to the LLM");
+
+        // Assert: no MATTER-B privileged text appears anywhere in the sanitized output.
+        allContent.Should().NotContain(matterBRetrieval,
+            "MATTER-B privileged settlement content must be replaced with the privacy placeholder");
+        allContent.Should().NotContain(matterBSecondRetrieval,
+            "MATTER-B privileged correspondence must be replaced with the privacy placeholder");
+
+        // Sanity: notification message is always present per FR-408
+        result.NotificationMessage.Should().Be(ConversationHistorySanitizer.UserNotificationMessage);
+        result.WasModified.Should().BeTrue();
+        result.RemovedDocumentCount.Should().Be(2);
+    }
+
     [Fact]
     public void MatterPivot_SameMatter_NoStripping()
     {
@@ -145,6 +237,7 @@ public class PrivilegeLeakageTests
     #region Scenario B — History Preservation with Source Stripping
 
     [Fact]
+    [Trait("status", "repaired")]
     public void MatterPivot_StripsOnlyWithinWindow_PreservesNewMatterContent()
     {
         // Arrange: history spans two matter contexts
@@ -200,6 +293,7 @@ public class PrivilegeLeakageTests
     }
 
     [Fact]
+    [Trait("status", "repaired")]
     public void MatterPivot_PreservesNonRetrievalSystemMessages()
     {
         // Arrange: system messages that are NOT retrieval results should survive stripping
@@ -332,9 +426,11 @@ public class PrivilegeLeakageTests
     {
         var filter = PrivilegeFilterBuilder.BuildFilter(new List<string>());
 
-        // The public-only filter should be a simple clause, not wrapped in OR parentheses
+        // The public-only filter should be a simple clause, not wrapped in OR-disjunction parentheses.
+        // (The "any()" function suffix legitimately ends in ")"; we assert the OR-wrapping is absent.)
         filter.Should().NotStartWith("(");
-        filter.Should().NotEndWith(")");
+        filter.Should().NotContain(" or ",
+            because: "an empty-groups filter is a single clause with no OR disjunction");
     }
 
     [Fact]
@@ -438,11 +534,16 @@ public class PrivilegeLeakageTests
         // Act
         var filter = PrivilegeFilterBuilder.BuildFilter(maliciousGroups);
 
-        // Assert: single quotes are escaped, preventing OData injection
-        filter.Should().NotContain("or 1 eq 1",
-            because: "OData injection must be prevented by escaping single quotes");
+        // Assert: single quotes are escaped, preventing OData injection.
+        // The literal substring "or 1 eq 1" remains present inside the escaped string literal
+        // (between doubled-quote delimiters), but it is contained INSIDE a quoted OData string —
+        // not as syntactically-active OData. The defense is: every embedded ' is doubled to ''.
         filter.Should().Contain("''",
             because: "single quotes in group IDs must be doubled for OData safety");
+        // The escaped value must appear inside a string literal — verify both doubled quotes are present
+        // and the value is wrapped in the OData `g eq '...'` predicate.
+        filter.Should().Contain("g eq 'group-a'' or 1 eq 1 or ''x'",
+            because: "the doubled-quote escaping produces a syntactically inert OData string literal");
     }
 
     [Fact]
@@ -606,6 +707,7 @@ public class PrivilegeLeakageTests
     }
 
     [Fact]
+    [Trait("status", "repaired")]
     public void Sanitizer_OnlyReturnsDocs_FromActiveMatter()
     {
         // This test validates the combined detector + sanitizer flow:

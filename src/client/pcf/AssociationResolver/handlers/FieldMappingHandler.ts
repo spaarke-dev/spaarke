@@ -268,9 +268,16 @@ class FieldMappingService {
           result.mappedValues[rule.targetField] = valueToSet;
           result.appliedRules++;
 
-          logger.logDebug('FieldMappingService', `Mapped ${rule.sourceField || '(constant)'} -> ${rule.targetField}: ${valueToSet}`);
+          logger.logDebug(
+            'FieldMappingService',
+            `Mapped ${rule.sourceField || '(constant)'} -> ${rule.targetField}: ${valueToSet}`
+          );
         } catch (ruleError) {
-          logger.logError('FieldMappingService', `Error applying rule ${rule.sourceField} -> ${rule.targetField}`, ruleError);
+          logger.logError(
+            'FieldMappingService',
+            `Error applying rule ${rule.sourceField} -> ${rule.targetField}`,
+            ruleError
+          );
           result.errors.push({
             message: `Failed to apply mapping: ${rule.sourceField} -> ${rule.targetField}`,
           });
@@ -416,7 +423,10 @@ export class FieldMappingHandler {
         result.errors = mappingResult.errors.map((e: { message: string }) => e.message);
       }
 
-      logger.logInfo('FieldMappingHandler', `Applied mappings: ${result.fieldsMapped} applied, ${result.rulesSkipped} skipped, ${result.errors.length} errors`);
+      logger.logInfo(
+        'FieldMappingHandler',
+        `Applied mappings: ${result.fieldsMapped} applied, ${result.rulesSkipped} skipped, ${result.errors.length} errors`
+      );
 
       return result;
     } catch (error) {

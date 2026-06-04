@@ -426,12 +426,21 @@ public class ChatEndpointsAttachmentsTests
     {
         // These constants are part of the FR-07 / NFR-04 contract. Changing them is a
         // breaking change for clients and contract tests; this assertion locks the values.
+        //
+        // R4 task 050 (A-4) policy decision: when the CLIENT binary cap was raised
+        // from 10 MB → 25 MB, these server-side text-char caps were INTENTIONALLY NOT
+        // scaled. They operate on extracted text, not raw binary — a 25 MB PDF still
+        // typically extracts to <1M chars. See docs/standards/CHAT-ATTACHMENT-POLICY.md
+        // §"Server-side total-text cap" for rationale. Locking values here ensures
+        // a future cap change is deliberate + policy-doc-coupled.
         ChatEndpoints.MaxAttachmentsPerMessage.Should().Be(5,
             "FR-07 caps attachments at 5 per message");
         ChatEndpoints.MaxAttachmentTextCharsPerFile.Should().Be(2_500_000,
-            "NFR-04 per-file cap is 2.5M chars (~10 MB UTF-16)");
+            "NFR-04 per-file char cap is 2.5M chars (LLM prompt envelope; NOT the binary cap). " +
+            "Bumping requires updating CHAT-ATTACHMENT-POLICY.md.");
         ChatEndpoints.MaxAttachmentTextCharsTotal.Should().Be(5_000_000,
-            "NFR-04 sum-of-all cap is 5M chars to bound the LLM prompt");
+            "NFR-04 sum-of-all char cap is 5M chars (LLM prompt envelope; NOT the binary cap). " +
+            "Bumping requires updating CHAT-ATTACHMENT-POLICY.md.");
     }
 
     [Fact]

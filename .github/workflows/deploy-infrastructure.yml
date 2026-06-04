@@ -61,14 +61,14 @@ jobs:
   validate:
     name: Validate Bicep
     runs-on: ubuntu-latest
-    env:
-      AZURE_CONFIG_DIR: ${{ runner.temp }}/.azure
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
       - name: Setup Azure CLI config
+        env:
+          AZURE_CONFIG_DIR: ${{ runner.temp }}/.azure
         run: |
           mkdir -p $AZURE_CONFIG_DIR
           echo '{}' > $AZURE_CONFIG_DIR/azureProfile.json

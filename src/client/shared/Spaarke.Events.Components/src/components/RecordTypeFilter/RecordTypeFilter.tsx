@@ -17,17 +17,9 @@
  * @see .claude/adr/ADR-021-fluent-design-system.md
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  shorthands,
-  Combobox,
-  Option,
-  Spinner,
-  Text,
-} from "@fluentui/react-components";
-import { Tag20Regular } from "@fluentui/react-icons";
+import * as React from 'react';
+import { makeStyles, tokens, shorthands, Combobox, Option, Spinner, Text } from '@fluentui/react-components';
+import { Tag20Regular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Xrm Type Declaration
@@ -73,9 +65,9 @@ export interface RecordTypeFilterProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.gap("4px"),
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap('4px'),
   },
   label: {
     fontSize: tokens.fontSizeBase200,
@@ -83,23 +75,23 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
   },
   combobox: {
-    minWidth: "180px",
-    maxWidth: "280px",
+    minWidth: '180px',
+    maxWidth: '280px',
   },
   loadingContainer: {
-    display: "flex",
-    alignItems: "center",
-    ...shorthands.gap("8px"),
-    ...shorthands.padding("8px"),
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('8px'),
+    ...shorthands.padding('8px'),
   },
   errorText: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorPaletteRedForeground1,
   },
   optionContent: {
-    display: "flex",
-    alignItems: "center",
-    ...shorthands.gap("8px"),
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('8px'),
   },
   optionIcon: {
     color: tokens.colorBrandForeground1,
@@ -110,7 +102,7 @@ const useStyles = makeStyles({
   optionDescription: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground3,
-    marginLeft: "auto",
+    marginLeft: 'auto',
   },
 });
 
@@ -122,7 +114,7 @@ const useStyles = makeStyles({
  * Check if Xrm WebApi is available
  */
 function isXrmAvailable(): boolean {
-  return !!(typeof Xrm !== "undefined" && Xrm.WebApi);
+  return !!(typeof Xrm !== 'undefined' && Xrm.WebApi);
 }
 
 // ---------------------------------------------------------------------------
@@ -132,7 +124,7 @@ function isXrmAvailable(): boolean {
 export const RecordTypeFilter: React.FC<RecordTypeFilterProps> = ({
   selectedTypeIds,
   onSelectionChange,
-  placeholder = "Event type...",
+  placeholder = 'Event type...',
   disabled = false,
 }) => {
   const styles = useStyles();
@@ -141,7 +133,7 @@ export const RecordTypeFilter: React.FC<RecordTypeFilterProps> = ({
   const [eventTypes, setEventTypes] = React.useState<IEventTypeOption[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const [searchText, setSearchText] = React.useState("");
+  const [searchText, setSearchText] = React.useState('');
 
   /**
    * Fetch event types from Dataverse or return mock data
@@ -153,9 +145,7 @@ export const RecordTypeFilter: React.FC<RecordTypeFilterProps> = ({
     try {
       if (!isXrmAvailable()) {
         // Mock data for development/testing outside Dataverse
-        console.warn(
-          "[RecordTypeFilter] Xrm.WebApi not available. Using mock data."
-        );
+        console.warn('[RecordTypeFilter] Xrm.WebApi not available. Using mock data.');
         const mockTypes = getMockEventTypes();
         setEventTypes(mockTypes);
         setLoading(false);
@@ -165,27 +155,23 @@ export const RecordTypeFilter: React.FC<RecordTypeFilterProps> = ({
       // Fetch active event types from sprk_eventtype
       // Order by name for consistent display
       const result = await Xrm.WebApi.retrieveMultipleRecords(
-        "sprk_eventtype",
-        "?$select=sprk_eventtypeid,sprk_name,sprk_description" +
-          "&$filter=statecode eq 0" + // Active only
-          "&$orderby=sprk_name asc" +
-          "&$top=100"
+        'sprk_eventtype',
+        '?$select=sprk_eventtypeid,sprk_name,sprk_description' +
+          '&$filter=statecode eq 0' + // Active only
+          '&$orderby=sprk_name asc' +
+          '&$top=100'
       );
 
-      const fetchedTypes: IEventTypeOption[] = (result.entities || []).map(
-        (type: any) => ({
-          id: type.sprk_eventtypeid,
-          name: type.sprk_name || "Unnamed Type",
-          description: type.sprk_description,
-        })
-      );
+      const fetchedTypes: IEventTypeOption[] = (result.entities || []).map((type: any) => ({
+        id: type.sprk_eventtypeid,
+        name: type.sprk_name || 'Unnamed Type',
+        description: type.sprk_description,
+      }));
 
       setEventTypes(fetchedTypes);
     } catch (err) {
-      console.error("[RecordTypeFilter] Error fetching event types:", err);
-      setError(
-        err instanceof Error ? err.message : "Failed to load event types"
-      );
+      console.error('[RecordTypeFilter] Error fetching event types:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load event types');
     } finally {
       setLoading(false);
     }
@@ -200,42 +186,37 @@ export const RecordTypeFilter: React.FC<RecordTypeFilterProps> = ({
    * Handle combobox selection change
    */
   const handleOptionSelect = React.useCallback(
-    (
-      _event: any,
-      data: { optionValue?: string; selectedOptions: string[] }
-    ) => {
+    (_event: any, data: { optionValue?: string; selectedOptions: string[] }) => {
       onSelectionChange(data.selectedOptions);
     },
     [onSelectionChange]
   );
 
   /**
-   * Handle search text change
+   * Handle search text change.
+   *
+   * Fluent v9 Combobox uses the standard `onInput` event (typed as
+   * React.FormEventHandler<HTMLInputElement>) — the input's current value
+   * is read from `event.currentTarget.value`. Earlier ad-hoc `(event, data)`
+   * handler shape was a v8 holdover; aligned with v9 in B-11 (task 067).
    */
-  const handleSearchChange = React.useCallback(
-    (_event: any, data: { value: string }) => {
-      setSearchText(data.value);
-    },
-    []
-  );
+  const handleSearchChange = React.useCallback<React.FormEventHandler<HTMLInputElement>>(event => {
+    setSearchText(event.currentTarget.value);
+  }, []);
 
   // Filter event types based on search text
   const filteredTypes = React.useMemo(() => {
     if (!searchText) return eventTypes;
     const search = searchText.toLowerCase();
     return eventTypes.filter(
-      (type) =>
-        type.name.toLowerCase().includes(search) ||
-        (type.description?.toLowerCase().includes(search) ?? false)
+      type => type.name.toLowerCase().includes(search) || (type.description?.toLowerCase().includes(search) ?? false)
     );
   }, [eventTypes, searchText]);
 
   // Get display value for selected types
   const selectedValue = React.useMemo(() => {
-    if (selectedTypeIds.length === 0) return "";
-    const selectedTypes = eventTypes.filter((t) =>
-      selectedTypeIds.includes(t.id)
-    );
+    if (selectedTypeIds.length === 0) return '';
+    const selectedTypes = eventTypes.filter(t => selectedTypeIds.includes(t.id));
     if (selectedTypes.length === 1) {
       return selectedTypes[0].name;
     }
@@ -272,23 +253,16 @@ export const RecordTypeFilter: React.FC<RecordTypeFilterProps> = ({
         selectedOptions={selectedTypeIds}
         onOptionSelect={handleOptionSelect}
         value={selectedValue}
-        // Task 114 note: handler signature (event, data) pre-dates Fluent v9
-        // InputEventHandler API change to single-arg. Cast is a pre-existing
-        // type-drift bridge — flagged for follow-up.
-        onInput={handleSearchChange as unknown as React.FormEventHandler<HTMLInputElement>}
+        onInput={handleSearchChange}
         disabled={disabled}
         aria-label="Filter by event type"
       >
-        {filteredTypes.map((type) => (
+        {filteredTypes.map(type => (
           <Option key={type.id} value={type.id} text={type.name}>
             <div className={styles.optionContent}>
               <Tag20Regular className={styles.optionIcon} />
               <Text className={styles.optionText}>{type.name}</Text>
-              {type.description && (
-                <Text className={styles.optionDescription}>
-                  {type.description}
-                </Text>
-              )}
+              {type.description && <Text className={styles.optionDescription}>{type.description}</Text>}
             </div>
           </Option>
         ))}
@@ -310,34 +284,34 @@ function getMockEventTypes(): IEventTypeOption[] {
   // Mock event type GUIDs for development/testing (valid GUID format)
   return [
     {
-      id: "00000000-0000-0000-0000-000000000101",
-      name: "Filing Deadline",
-      description: "Court filing deadlines",
+      id: '00000000-0000-0000-0000-000000000101',
+      name: 'Filing Deadline',
+      description: 'Court filing deadlines',
     },
     {
-      id: "00000000-0000-0000-0000-000000000102",
-      name: "Meeting",
-      description: "Client and internal meetings",
+      id: '00000000-0000-0000-0000-000000000102',
+      name: 'Meeting',
+      description: 'Client and internal meetings',
     },
     {
-      id: "00000000-0000-0000-0000-000000000103",
-      name: "Task",
-      description: "General tasks and to-dos",
+      id: '00000000-0000-0000-0000-000000000103',
+      name: 'Task',
+      description: 'General tasks and to-dos',
     },
     {
-      id: "00000000-0000-0000-0000-000000000104",
-      name: "Hearing",
-      description: "Court hearings and appearances",
+      id: '00000000-0000-0000-0000-000000000104',
+      name: 'Hearing',
+      description: 'Court hearings and appearances',
     },
     {
-      id: "00000000-0000-0000-0000-000000000105",
-      name: "Regulatory",
-      description: "Regulatory compliance events",
+      id: '00000000-0000-0000-0000-000000000105',
+      name: 'Regulatory',
+      description: 'Regulatory compliance events',
     },
     {
-      id: "00000000-0000-0000-0000-000000000106",
-      name: "Reminder",
-      description: "General reminders",
+      id: '00000000-0000-0000-0000-000000000106',
+      name: 'Reminder',
+      description: 'General reminders',
     },
   ];
 }

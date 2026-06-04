@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -302,13 +304,16 @@ public sealed class CapabilityRouter : ICapabilityRouter
     ///   descScore  = matchedDescWords / max(totalDescWords, 1) — weak secondary signal
     ///   rawScore   = hintScore + (descScore * DescriptionScoreWeight)
     ///
-    /// "Matched" means the lowercased hint/word appears as a substring inside
-    /// <paramref name="lowerMessage"/>. Short-circuit exits once a match is confirmed.
+    /// "Matched" means the lowercased hint/word appears in <paramref name="lowerMessage"/>
+    /// as a whole token bounded by word boundaries (regex <c>\b</c>). This eliminates
+    /// the bigram-superstring false-positive class — e.g., hint <c>"case law"</c> no
+    /// longer matches the message <c>"henderson case to urgent"</c> via substring
+    /// equality, and the description word <c>"case"</c> still matches but only when
+    /// it appears as a standalone token rather than being embedded in another word
+    /// (e.g., <c>"cases"</c>, <c>"casework"</c>).
     ///
-    /// Rationale for substring matching:
-    ///   "case law" matches "I need case law on negligence" but not "cases".
-    ///   Padding each hint with a leading/trailing space is not done to keep the
-    ///   implementation simple — callers should write specific multi-word hints.
+    /// RB-T053-01 fix (2026-06-01): swapped <c>String.Contains</c> for word-boundary
+    /// regex matching to honour the documented zero-false-positive Layer-1 contract.
     /// </summary>
     private static double ScoreCapability(string lowerMessage, CapabilityManifestEntry entry)
     {
@@ -326,8 +331,7 @@ public sealed class CapabilityRouter : ICapabilityRouter
         foreach (var hint in hints)
         {
             if (string.IsNullOrEmpty(hint)) continue;
-            var lowerHint = hint.ToLowerInvariant();
-            if (lowerMessage.Contains(lowerHint, StringComparison.Ordinal))
+            if (TokenMatches(lowerMessage, hint))
             {
                 matchedHints++;
             }
@@ -335,11 +339,19 @@ public sealed class CapabilityRouter : ICapabilityRouter
 
         var hintScore = (double)matchedHints / totalHints;
 
-        // Secondary: check description words as weak signals.
-        var descScore = ScoreDescription(lowerMessage, entry.Description);
-
-        // Weight the description score so hints always dominate.
-        const double descriptionScoreWeight = 0.2;
+        // RB-T053-01 Option B (2026-06-01): description-word scoring is DISABLED
+        // (weight = 0.0) because the prior 0.2 weight produced confident false-positives
+        // on the 105-message corpus. Empirically, common single description words like
+        // `case` (in legal_research's description) matched messages such as "Henderson
+        // case" — saturating confidence to ~1.0 even though the message intent was
+        // unrelated to the capability. The ScoreDescription helper is preserved for
+        // potential future re-enabling with a finer scoring rule (e.g., uniqueness-
+        // weighted or co-occurrence-weighted), but the additive contribution is zero
+        // for now. Per D-11 §B (owner decision 2026-06-01).
+        const double descriptionScoreWeight = 0.0;
+        var descScore = descriptionScoreWeight > 0.0
+            ? ScoreDescription(lowerMessage, entry.Description)
+            : 0.0;
         return hintScore + (descScore * descriptionScoreWeight);
     }
 
@@ -347,6 +359,9 @@ public sealed class CapabilityRouter : ICapabilityRouter
     /// Scores a capability's description against the user message by splitting the
     /// description into individual words (whitespace-split) and counting matches.
     /// Words shorter than 4 characters are skipped to ignore stop-words.
+    ///
+    /// Uses word-boundary matching so embedded substrings (<c>"casework"</c> ⊅
+    /// <c>"case"</c>) do not produce false hits.
     /// </summary>
     private static double ScoreDescription(string lowerMessage, string description)
     {
@@ -362,13 +377,40 @@ public sealed class CapabilityRouter : ICapabilityRouter
             // Skip short stop-words (is, in, a, the, of, ...).
             if (word.Length < 4) continue;
             scored++;
-            if (lowerMessage.Contains(word, StringComparison.Ordinal))
+            if (TokenMatches(lowerMessage, word))
             {
                 matched++;
             }
         }
 
         return scored == 0 ? 0.0 : (double)matched / scored;
+    }
+
+    // ── Word-boundary token matching (RB-T053-01 Option 1) ────────────────────
+
+    /// <summary>
+    /// Compiled regex cache keyed by the lowercased token. The Layer-1 hot path
+    /// scores every capability hint and description word per turn — caching the
+    /// compiled <see cref="Regex"/> keeps NFR-03 (<50ms classification) intact
+    /// across the corpus of ~50 manifest entries × ~6 hints × 105 messages.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, Regex> TokenRegexCache = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="token"/> appears in <paramref name="lowerMessage"/>
+    /// as a whole token (bounded by word boundaries). Matching is case-insensitive
+    /// because <paramref name="lowerMessage"/> is already lower-cased by the caller
+    /// (<see cref="ClassifyLayer1"/>); the token is lower-cased here for symmetry.
+    /// </summary>
+    private static bool TokenMatches(string lowerMessage, string token)
+    {
+        if (string.IsNullOrEmpty(token)) return false;
+
+        var lowerToken = token.ToLowerInvariant();
+        var regex = TokenRegexCache.GetOrAdd(lowerToken, static t =>
+            new Regex($@"\b{Regex.Escape(t)}\b", RegexOptions.Compiled | RegexOptions.CultureInvariant));
+
+        return regex.IsMatch(lowerMessage);
     }
 
     /// <summary>

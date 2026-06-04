@@ -38,21 +38,14 @@ import {
 import { CheckmarkCircleFilled, DismissRegular } from '@fluentui/react-icons';
 
 import { WizardShell } from '../Wizard/WizardShell';
-import type {
-  IWizardShellHandle,
-  IWizardStepConfig,
-  IWizardSuccessConfig,
-} from '../Wizard/wizardShellTypes';
+import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
 import { SendEmailStep } from '../EmailStep/SendEmailStep';
 import { extractEmailFromUserName } from '../EmailStep/emailHelpers';
 
 import { searchUsersAndContacts } from '../../services/userLookup';
 import { sendCommunication } from '../../services/communicationApi';
-import type {
-  ICommunicationAssociation,
-  SendCommunicationOptions,
-} from '../../services/communicationApi';
+import type { ICommunicationAssociation, SendCommunicationOptions } from '../../services/communicationApi';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IDataService } from '../../types/serviceInterfaces';
 
@@ -121,6 +114,30 @@ export interface IDocumentEmailWizardProps {
    * when available; otherwise links use a relative path.
    */
   clientUrl?: string;
+  /**
+   * Optional dialog surface `max-width` override. Threaded through to
+   * {@link WizardShell}'s `maxWidth` prop. Defaults to `'95vw'`
+   * (WizardShell default) when omitted — back-compat for existing
+   * consumers (SemanticSearchControl pre-v1.1.63, code pages).
+   *
+   * Pass `'1280px'` to mirror the SemanticSearchControl FilePreviewDialog
+   * footprint so the wizard sits at the same width when launched as a
+   * modal-over-modal on top of the preview.
+   *
+   * @since v1.1.63 (SemanticSearchControl UAT polish round — match
+   *   preview footprint)
+   */
+  maxWidth?: string;
+  /**
+   * Optional dialog surface `height` override. Threaded through to
+   * {@link WizardShell}'s `height` prop. Defaults to `'70vh'`
+   * (WizardShell default) when omitted.
+   *
+   * Pass `'85vh'` to mirror the FilePreviewDialog vertical footprint.
+   *
+   * @since v1.1.63
+   */
+  height?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,7 +148,7 @@ export interface IDocumentEmailWizardProps {
 const ATTACHMENT_WARNING_BYTES = 25 * 1024 * 1024;
 
 /** Soft cap for inline summary preview rendering. */
-const SUMMARY_PREVIEW_CHAR_CAP = 600;
+const _SUMMARY_PREVIEW_CHAR_CAP = 600;
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -293,11 +310,7 @@ export function buildDefaultSubject(kept: IDocumentEmailWizardItem[]): string {
  *
  * Exported for unit-testing.
  */
-export function buildDefaultBody(
-  kept: IDocumentEmailWizardItem[],
-  includeLinks: boolean,
-  clientUrl: string
-): string {
+export function buildDefaultBody(kept: IDocumentEmailWizardItem[], includeLinks: boolean, clientUrl: string): string {
   if (kept.length === 0) return '';
   const intro =
     kept.length === 1
@@ -306,9 +319,7 @@ export function buildDefaultBody(
   const nameLines = kept.map(d => `  • ${d.name}`).join('\n');
   let body = `${intro}\n\n${nameLines}\n`;
   if (includeLinks) {
-    const linkLines = kept
-      .map(d => `  ${d.name}: ${buildDocumentRecordLink(clientUrl, d.documentId)}`)
-      .join('\n');
+    const linkLines = kept.map(d => `  ${d.name}: ${buildDocumentRecordLink(clientUrl, d.documentId)}`).join('\n');
     body += `\nLinks:\n${linkLines}\n`;
   }
   body += `\nThank you,\n`;
@@ -350,14 +361,16 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
   bffBaseUrl,
   dataService,
   clientUrl,
+  // v1.1.63 — sizing pass-through (defaults left undefined so WizardShell's
+  // own defaults — 95vw / 70vh — apply when consumers don't override).
+  maxWidth,
+  height,
 }) => {
   const styles = useStyles();
   const shellRef = React.useRef<IWizardShellHandle>(null);
 
   // -- Kept (in-wizard) document state -----------------------------------
-  const [kept, setKept] = React.useState<IDocumentEmailWizardItem[]>(() => [
-    ...selectedDocuments,
-  ]);
+  const [kept, setKept] = React.useState<IDocumentEmailWizardItem[]>(() => [...selectedDocuments]);
 
   // -- Toggles ------------------------------------------------------------
   const [sendLinks, setSendLinks] = React.useState<boolean>(true);
@@ -478,9 +491,7 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
       subject,
       body: finalBody,
       bodyFormat: 'text',
-      attachmentDocumentIds: currentAttach
-        ? currentKept.map(d => d.documentId)
-        : undefined,
+      attachmentDocumentIds: currentAttach ? currentKept.map(d => d.documentId) : undefined,
       associations: associations.length > 0 ? associations : undefined,
       sendMode: 'sharedMailbox',
     };
@@ -489,12 +500,7 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
     onSent?.(result.communicationId);
 
     return {
-      icon: (
-        <CheckmarkCircleFilled
-          fontSize={64}
-          style={{ color: tokens.colorPaletteGreenForeground1 }}
-        />
-      ),
+      icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
       title: 'Email sent',
       body: (
         <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
@@ -534,18 +540,13 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
             onChange={(_, data) => setSendLinks(!!data.checked)}
             label="Send document links"
           />
-          <Checkbox
-            checked={attachFiles}
-            onChange={(_, data) => setAttachFiles(!!data.checked)}
-            label="Attach files"
-          />
+          <Checkbox checked={attachFiles} onChange={(_, data) => setAttachFiles(!!data.checked)} label="Attach files" />
         </div>
 
         {oversized && (
           <MessageBar intent="warning">
             <MessageBarBody>
-              Attachments exceed 25 MB ({formatBytes(total)}) — recipients may reject. Consider
-              links-only.
+              Attachments exceed 25 MB ({formatBytes(total)}) — recipients may reject. Consider links-only.
             </MessageBarBody>
           </MessageBar>
         )}
@@ -600,7 +601,10 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
 
   const runCombinedSummary = React.useCallback(async () => {
     if (kept.length === 0) return;
-    const key = kept.map(d => d.documentId).sort().join(',');
+    const key = kept
+      .map(d => d.documentId)
+      .sort()
+      .join(',');
     if (summaryRanForRef.current === key) return; // already ran for this selection
     summaryRanForRef.current = key;
 
@@ -722,9 +726,8 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
             Combined Summary
           </Text>
           <Text size={200} className={styles.stepSubtitle}>
-            One combined AI analysis of {kept.length} document{kept.length === 1 ? '' : 's'}
-            {' '}via the "Summarize New File(s)" playbook. This is informational only — you
-            can compose the email body on the next step.
+            One combined AI analysis of {kept.length} document{kept.length === 1 ? '' : 's'} via the "Summarize New
+            File(s)" playbook. This is informational only — you can compose the email body on the next step.
           </Text>
         </div>
 
@@ -732,7 +735,14 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
           <Text className={styles.emptyState}>No documents selected.</Text>
         ) : (
           <Card className={styles.summaryCard}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, marginBottom: tokens.spacingVerticalXS }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: tokens.spacingHorizontalS,
+                marginBottom: tokens.spacingVerticalXS,
+              }}
+            >
               <Text size={300} weight="semibold" className={styles.summaryHeader}>
                 Documents: {kept.map(d => d.name).join(', ')}
               </Text>
@@ -747,10 +757,13 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
               <Text size={200} className={styles.summaryBody}>
                 {combinedSummary}
               </Text>
-            ) : !hasError && !isStreaming && (
-              <Text size={200} className={styles.summaryEmpty}>
-                (no summary available)
-              </Text>
+            ) : (
+              !hasError &&
+              !isStreaming && (
+                <Text size={200} className={styles.summaryEmpty}>
+                  (no summary available)
+                </Text>
+              )
             )}
             {!hasError && !combinedSummary && isStreaming && (
               <Text size={200} className={styles.summaryEmpty}>
@@ -826,23 +839,11 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
         renderContent: renderComposeStep,
         canAdvance: () => {
           // Require recipient + subject + non-empty body.
-          return (
-            emailTo.trim() !== '' &&
-            emailSubject.trim() !== '' &&
-            emailBody.trim() !== ''
-          );
+          return emailTo.trim() !== '' && emailSubject.trim() !== '' && emailBody.trim() !== '';
         },
       },
     ],
-    [
-      emailBody,
-      emailSubject,
-      emailTo,
-      kept.length,
-      renderComposeStep,
-      renderConfirmStep,
-      renderSummaryStep,
-    ]
+    [emailBody, emailSubject, emailTo, kept.length, renderComposeStep, renderConfirmStep, renderSummaryStep]
   );
 
   return (
@@ -858,6 +859,11 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
       finishLabel="Send"
       embedded={embedded}
       hideTitle={embedded}
+      // v1.1.63 — when omitted, WizardShell falls back to its 95vw/70vh
+      // defaults; when set (e.g. SemanticSearchControl passes 1280px/85vh
+      // to match the FilePreviewDialog footprint) the values pass through.
+      maxWidth={maxWidth}
+      height={height}
     />
   );
 };

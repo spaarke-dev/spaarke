@@ -12,7 +12,7 @@
  * });
  * ```
  */
-import type { IUploadService } from "../types/serviceInterfaces";
+import type { IUploadService } from '../types/serviceInterfaces';
 
 /**
  * Creates a mock IUploadService with jest.fn() stubs and sensible defaults.
@@ -26,11 +26,11 @@ import type { IUploadService } from "../types/serviceInterfaces";
 export function createMockUploadService(): jest.Mocked<IUploadService> {
   return {
     uploadFile: jest.fn().mockResolvedValue({
-      id: "file-001",
-      name: "test.pdf",
+      id: 'file-001',
+      name: 'test.pdf',
       size: 1024,
-      url: "https://example.com/test.pdf",
+      url: 'https://example.com/test.pdf',
     }),
-    getContainerIdForEntity: jest.fn().mockResolvedValue("container-001"),
+    getContainerIdForEntity: jest.fn().mockResolvedValue('container-001'),
   };
 }

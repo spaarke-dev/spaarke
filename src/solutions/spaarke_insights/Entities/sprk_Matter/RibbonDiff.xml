@@ -1,0 +1,454 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <CustomAction Id="sprk.Matter.NewWizard.Grid.Button.CustomAction" Location="Mscrm.HomepageGrid.sprk_matter.MainTab.Management.Controls._children" Sequence="5">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Matter.NewWizard.Grid.Button.Alt" Command="sprk.Matter.NewWizard.Grid.Command" Id="sprk.Matter.NewWizard.Grid.Button" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png" LabelText="$LocLabels:sprk.Matter.NewWizard.Grid.Button.LabelText" Sequence="5" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Matter.NewWizard.Grid.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Matter.NewWizard.Grid.Button.ToolTipDescription" ModernImage="CommandBarNewIcon" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_matter.Activate.Hide" Location="Mscrm.Form.sprk_matter.Activate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_matter.SaveAsComplete.Hide" Location="Mscrm.Form.sprk_matter.SaveAsComplete" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_matter.Activate.Hide" Location="Mscrm.HomepageGrid.sprk_matter.Activate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_matter.CustomizePreviewPane.Hide" Location="Mscrm.HomepageGrid.sprk_matter.CustomizePreviewPane" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_matter.Deactivate.Hide" Location="Mscrm.HomepageGrid.sprk_matter.Deactivate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_matter.Detect.Hide" Location="Mscrm.HomepageGrid.sprk_matter.Detect" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_matter.NewRecord.Hide" Location="Mscrm.HomepageGrid.sprk_matter.NewRecord" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_matter.OpenRecordInSidePane.Hide" Location="Mscrm.HomepageGrid.sprk_matter.OpenRecordInSidePane" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_matter.Activate.Hide" Location="Mscrm.SubGrid.sprk_matter.Activate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_matter.Deactivate.Hide" Location="Mscrm.SubGrid.sprk_matter.Deactivate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_matter.Flows.RefreshCommandBar.Hide" Location="Mscrm.SubGrid.sprk_matter.Flows.RefreshCommandBar" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_matter.OpenAssociatedGridViewStandard.Hide" Location="Mscrm.SubGrid.sprk_matter.OpenAssociatedGridViewStandard" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_matter.RunReport.Hide" Location="Mscrm.SubGrid.sprk_matter.RunReport" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_matter.RunWorkflow.Hide" Location="Mscrm.SubGrid.sprk_matter.RunWorkflow" />
+    <CustomAction Id="sprk.ThemeMenu.Matter.FlyoutAnchor.CustomAction" Location="Mscrm.HomepageGrid.sprk_matter.MainTab.Actions.Controls._children" Sequence="0">
+      <CommandUIDefinition>
+        <FlyoutAnchor Command="sprk.ThemeMenu.Matter.FlyoutCommand" Id="sprk.ThemeMenu.Matter.FlyoutAnchor" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" LabelText="$LocLabels:sprk.ThemeMenu.Matter.FlyoutAnchor.LabelText" Sequence="0" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.ThemeMenu.Matter.FlyoutAnchor.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.Matter.FlyoutAnchor.ToolTipDescription" ModernImage="$webresource:sprk_/icons/cmd/theme-dark.svg">
+          <Menu Id="sprk.ThemeMenu.Matter.FlyoutAnchor.Menu">
+            <MenuSection Id="sprk.ThemeMenu.Matter.MenuSection" Title="$LocLabels:sprk.ThemeMenu.Matter.MenuSection.Title" Sequence="10" DisplayMode="Menu16">
+              <Controls Id="sprk.ThemeMenu.Matter.MenuSection.Controls">
+                <Button Command="sprk.ThemeMenu.Matter.SetAuto" Id="sprk.ThemeMenu.Matter.Auto" Image16by16="$webresource:sprk_ThemeAuto16.svg" LabelText="$LocLabels:sprk.ThemeMenu.Matter.Auto.LabelText" Sequence="10" ToolTipTitle="$LocLabels:sprk.ThemeMenu.Matter.Auto.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.Matter.Auto.ToolTipDescription" />
+                <Button Command="sprk.ThemeMenu.Matter.SetLight" Id="sprk.ThemeMenu.Matter.Light" Image16by16="$webresource:sprk_ThemeLight16.svg" LabelText="$LocLabels:sprk.ThemeMenu.Matter.Light.LabelText" Sequence="20" ToolTipTitle="$LocLabels:sprk.ThemeMenu.Matter.Light.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.Matter.Light.ToolTipDescription" />
+                <Button Command="sprk.ThemeMenu.Matter.SetDark" Id="sprk.ThemeMenu.Matter.Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" LabelText="$LocLabels:sprk.ThemeMenu.Matter.Dark.LabelText" Sequence="30" ToolTipTitle="$LocLabels:sprk.ThemeMenu.Matter.Dark.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.Matter.Dark.ToolTipDescription" />
+              </Controls>
+            </MenuSection>
+          </Menu>
+        </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Wizard.Matter.CreateEvent.Button.CustomAction" Location="Mscrm.Form.sprk_matter.MainTab.Actions.Controls._children" Sequence="0">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Wizard.Matter.CreateEvent.Button.Alt" Command="sprk.Wizard.Matter.CreateEvent.Command" Id="sprk.Wizard.Matter.CreateEvent.Button" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png" LabelText="$LocLabels:sprk.Wizard.Matter.CreateEvent.Button.LabelText" Sequence="0" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Wizard.Matter.CreateEvent.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Wizard.Matter.CreateEvent.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Wizard.Matter.CreateProject.Button.CustomAction" Location="Mscrm.Form.sprk_matter.MainTab.Actions.Controls._children" Sequence="0">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Wizard.Matter.CreateProject.Button.Alt" Command="sprk.Wizard.Matter.CreateProject.Command" Id="sprk.Wizard.Matter.CreateProject.Button" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png" LabelText="$LocLabels:sprk.Wizard.Matter.CreateProject.Button.LabelText" Sequence="0" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Wizard.Matter.CreateProject.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Wizard.Matter.CreateProject.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Wizard.Matter.CreateTodo.Button.CustomAction" Location="Mscrm.Form.sprk_matter.MainTab.Actions.Controls._children" Sequence="0">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Wizard.Matter.CreateTodo.Button.Alt" Command="sprk.Wizard.Matter.CreateTodo.Command" Id="sprk.Wizard.Matter.CreateTodo.Button" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png" LabelText="$LocLabels:sprk.Wizard.Matter.CreateTodo.Button.LabelText" Sequence="0" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Wizard.Matter.CreateTodo.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Wizard.Matter.CreateTodo.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Wizard.Matter.FindSimilar.Button.CustomAction" Location="Mscrm.Form.sprk_matter.MainTab.Actions.Controls._children" Sequence="0">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Wizard.Matter.FindSimilar.Button.Alt" Command="sprk.Wizard.Matter.FindSimilar.Command" Id="sprk.Wizard.Matter.FindSimilar.Button" Image32by32="/_imgs/ribbon/Search_32.png" Image16by16="/_imgs/ribbon/Search_16.png" LabelText="$LocLabels:sprk.Wizard.Matter.FindSimilar.Button.LabelText" Sequence="0" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Wizard.Matter.FindSimilar.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Wizard.Matter.FindSimilar.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Wizard.Matter.PlaybookLibrary.Button.CustomAction" Location="Mscrm.Form.sprk_matter.MainTab.Actions.Controls._children" Sequence="0">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Wizard.Matter.PlaybookLibrary.Button.Alt" Command="sprk.Wizard.Matter.PlaybookLibrary.Command" Id="sprk.Wizard.Matter.PlaybookLibrary.Button" Image32by32="/_imgs/ribbon/BookOpen_32.png" Image16by16="/_imgs/ribbon/BookOpen_16.png" LabelText="$LocLabels:sprk.Wizard.Matter.PlaybookLibrary.Button.LabelText" Sequence="0" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Wizard.Matter.PlaybookLibrary.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Wizard.Matter.PlaybookLibrary.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Wizard.Matter.SummarizeFiles.Button.CustomAction" Location="Mscrm.Form.sprk_matter.MainTab.Actions.Controls._children" Sequence="0">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Wizard.Matter.SummarizeFiles.Button.Alt" Command="sprk.Wizard.Matter.SummarizeFiles.Command" Id="sprk.Wizard.Matter.SummarizeFiles.Button" Image32by32="/_imgs/ribbon/Document_32.png" Image16by16="/_imgs/ribbon/Document_16.png" LabelText="$LocLabels:sprk.Wizard.Matter.SummarizeFiles.Button.LabelText" Sequence="0" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Wizard.Matter.SummarizeFiles.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Wizard.Matter.SummarizeFiles.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Wizard.Matter.UploadDocuments.Button.CustomAction" Location="Mscrm.Form.sprk_matter.MainTab.Actions.Controls._children" Sequence="0">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Wizard.Matter.UploadDocuments.Button.Alt" Command="sprk.Wizard.Matter.UploadDocuments.Command" Id="sprk.Wizard.Matter.UploadDocuments.Button" Image32by32="/_imgs/ribbon/DocumentAdd_32.png" Image16by16="/_imgs/ribbon/DocumentAdd_16.png" LabelText="$LocLabels:sprk.Wizard.Matter.UploadDocuments.Button.LabelText" Sequence="0" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Wizard.Matter.UploadDocuments.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Wizard.Matter.UploadDocuments.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+  <CommandDefinitions>
+    <CommandDefinition Id="sprk.Matter.NewWizard.Grid.Command">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateMatterStandalone" Library="$webresource:sprk_wizard_commands" />
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Matter.FlyoutCommand">
+      <EnableRules>
+        <EnableRule Id="sprk.ThemeMenu.Matter.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions />
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Matter.SetAuto">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Theme.setTheme" Library="$webresource:sprk_ThemeMenu.js">
+          <StringParameter Value="auto" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Matter.SetDark">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Theme.setTheme" Library="$webresource:sprk_ThemeMenu.js">
+          <StringParameter Value="dark" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Matter.SetLight">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Theme.setTheme" Library="$webresource:sprk_ThemeMenu.js">
+          <StringParameter Value="light" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Wizard.Matter.CreateEvent.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Wizard.Matter.Form.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateEventWizard" Library="$webresource:sprk_wizard_commands.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Wizard.Matter.CreateProject.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Wizard.Matter.Form.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateProjectWizard" Library="$webresource:sprk_wizard_commands.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Wizard.Matter.CreateTodo.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Wizard.Matter.Form.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateTodoWizard" Library="$webresource:sprk_wizard_commands.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Wizard.Matter.FindSimilar.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Wizard.Matter.Form.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openFindSimilarDialog" Library="$webresource:sprk_wizard_commands.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Wizard.Matter.PlaybookLibrary.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Wizard.Matter.Form.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openPlaybookLibrary" Library="$webresource:sprk_wizard_commands.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Wizard.Matter.SummarizeFiles.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Wizard.Matter.Form.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openSummarizeFilesWizard" Library="$webresource:sprk_wizard_commands.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Wizard.Matter.UploadDocuments.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Wizard.Matter.Form.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openDocumentUploadWizard" Library="$webresource:sprk_wizard_commands.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules>
+      <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule">
+        <FormStateRule State="Existing" />
+      </DisplayRule>
+    </DisplayRules>
+    <EnableRules>
+      <EnableRule Id="sprk.ThemeMenu.Matter.EnableRule">
+        <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
+      </EnableRule>
+      <EnableRule Id="sprk.Wizard.Matter.Form.EnableRule">
+        <FormStateRule State="Existing" Default="true" />
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+  <LocLabels>
+    <LocLabel Id="sprk.Matter.NewWizard.Grid.Button.Alt">
+      <Titles>
+        <Title description="+New Matter" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Matter.NewWizard.Grid.Button.LabelText">
+      <Titles>
+        <Title description="+New Matter" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Matter.NewWizard.Grid.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Open Create New Matter wizard" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Matter.NewWizard.Grid.Button.ToolTipTitle">
+      <Titles>
+        <Title description="New Matter" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Matter.Auto.LabelText">
+      <Titles>
+        <Title description="Auto (follows system)" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Matter.Auto.ToolTipDescription">
+      <Titles>
+        <Title description="Uses your operating system's theme preference" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Matter.Auto.ToolTipTitle">
+      <Titles>
+        <Title description="Auto" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Matter.Dark.LabelText">
+      <Titles>
+        <Title description="Dark" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Matter.Dark.ToolTipDescription">
+      <Titles>
+        <Title description="Dark background with light text" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Matter.Dark.ToolTipTitle">
+      <Titles>
+        <Title description="Dark" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Matter.FlyoutAnchor.LabelText">
+      <Titles>
+        <Title description="Dark Mode" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Matter.FlyoutAnchor.ToolTipDescription">
+      <Titles>
+        <Title description="Choose your preferred color theme" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Matter.FlyoutAnchor.ToolTipTitle">
+      <Titles>
+        <Title description="Dark Mode" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Matter.Light.LabelText">
+      <Titles>
+        <Title description="Light" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Matter.Light.ToolTipDescription">
+      <Titles>
+        <Title description="Light background with dark text" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Matter.Light.ToolTipTitle">
+      <Titles>
+        <Title description="Light" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Matter.MenuSection.Title">
+      <Titles>
+        <Title description="Color Theme" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.CreateEvent.Button.Alt">
+      <Titles>
+        <Title description="Create Event" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.CreateEvent.Button.LabelText">
+      <Titles>
+        <Title description="Create Event" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.CreateEvent.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Create a new event linked to this matter" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.CreateEvent.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Create Event" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.CreateProject.Button.Alt">
+      <Titles>
+        <Title description="Create Project" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.CreateProject.Button.LabelText">
+      <Titles>
+        <Title description="Create Project" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.CreateProject.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Create a new project linked to this matter" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.CreateProject.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Create Project" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.CreateTodo.Button.Alt">
+      <Titles>
+        <Title description="Create To Do" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.CreateTodo.Button.LabelText">
+      <Titles>
+        <Title description="Create To Do" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.CreateTodo.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Create a new to-do item linked to this matter" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.CreateTodo.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Create To Do" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.FindSimilar.Button.Alt">
+      <Titles>
+        <Title description="Find Similar" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.FindSimilar.Button.LabelText">
+      <Titles>
+        <Title description="Find Similar" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.FindSimilar.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Search for similar documents using AI-powered semantic search" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.FindSimilar.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Find Similar" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.PlaybookLibrary.Button.Alt">
+      <Titles>
+        <Title description="Playbook Library" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.PlaybookLibrary.Button.LabelText">
+      <Titles>
+        <Title description="Playbook Library" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.PlaybookLibrary.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Browse and run AI playbooks for this matter" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.PlaybookLibrary.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Playbook Library" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.SummarizeFiles.Button.Alt">
+      <Titles>
+        <Title description="Summarize Files" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.SummarizeFiles.Button.LabelText">
+      <Titles>
+        <Title description="Summarize Files" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.SummarizeFiles.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Generate AI summaries of documents attached to this record" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.SummarizeFiles.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Summarize Files" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.UploadDocuments.Button.Alt">
+      <Titles>
+        <Title description="Upload Documents" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.UploadDocuments.Button.LabelText">
+      <Titles>
+        <Title description="Upload Documents" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.UploadDocuments.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Upload documents to SharePoint Embedded storage" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Wizard.Matter.UploadDocuments.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Upload Documents" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

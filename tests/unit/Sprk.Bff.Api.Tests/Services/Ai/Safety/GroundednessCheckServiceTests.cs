@@ -227,7 +227,7 @@ public class GroundednessCheckServiceTests : IDisposable
         var httpClient = new HttpClient(handlerMock.Object)
         {
             BaseAddress = new Uri("https://fake-contentsafety.cognitiveservices.azure.com/"),
-            Timeout     = TimeSpan.FromMilliseconds(50),
+            Timeout = TimeSpan.FromMilliseconds(50),
         };
 
         var service = BuildService(httpClient);
@@ -406,7 +406,7 @@ public class GroundednessCheckServiceTests : IDisposable
         var httpClient = new HttpClient(handlerMock.Object)
         {
             BaseAddress = new Uri("https://fake-contentsafety.cognitiveservices.azure.com/"),
-            Timeout     = TimeSpan.FromSeconds(10),
+            Timeout = TimeSpan.FromSeconds(10),
         };
         return BuildService(httpClient);
     }

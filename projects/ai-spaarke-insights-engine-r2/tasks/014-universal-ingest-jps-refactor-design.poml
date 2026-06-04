@@ -1,0 +1,84 @@
+<task id="014" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>A5 — Universal-ingest JPS refactor design (node breakdown + parameterization)</title>
+    <status>completed</status>
+    <wave>A</wave>
+    <estimated-effort>6h</estimated-effort>
+    <tags>design, jps-playbook, universal-ingest, node-breakdown, parameterization</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>A5</wave-item>
+  </metadata>
+
+  <prompt>
+    Author the universal-ingest JPS refactor design. The current IngestOrchestrator.cs has 8 logical steps (Sanitize, Layer1Classify, Layer1Emit, Layer2Trigger, Layer2Extract, Layer2Validate, GroundingVerify, ObservationEmit + Index Upsert + Mirror). The JPS refactor decides: (a) how many JPS playbook nodes (1:1 = 8 nodes, or coalesced to 5-6), (b) parameterization model for runtime config (tenant override, per-practice-area routing hints, cost-cap override), (c) which conditional branches must be supported by PlaybookExecutionEngine (and flag any engine gaps).
+  </prompt>
+
+  <role>Playbook architect + INodeExecutor specialist.</role>
+
+  <goal>
+    Design doc projects/ai-spaarke-insights-engine-r2/design-a5-universal-ingest-jps.md authored with: (1) Node count + breakdown decision; (2) Per-node responsibilities, inputs, outputs, action-code mapping; (3) Conditional branching shape (e.g., Layer 1 confidence ≥ 0.7 → Layer 2; else skip); (4) Parameterization schema (parameters.tenantId, parameters.practiceAreaHint, parameters.costCapOverride, parameters.layer2Threshold); (5) Engine-gap flagging (any PlaybookExecutionEngine patch needed to support Insights conditional semantics).
+  </prompt>
+
+  <inputs>
+    <file purpose="r1-orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/IngestOrchestrator.cs (current code-defined version)</file>
+    <file purpose="r1-playbook-template">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json (JPS playbook example)</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r2/spec.md (Wave C scope; Q-A5-1)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md D-P15-02">One canonical universal-ingest playbook, parameterized — not many variants</constraint>
+    <constraint source="design.md D-P15-01">All Insights workflows execute through PlaybookExecutionEngine — no parallel orchestrators</constraint>
+    <constraint source="spec.md Risk-1">If engine gaps surface for conditional branching, patches stay in PlaybookExecutionEngine (don't fork)</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read IngestOrchestrator.cs in r1">Map current 8 logical steps to candidate node decomposition</step>
+    <step order="2" name="Decision: node count">Pick 1:1 (8 nodes) for max observability OR coalesce some steps (e.g., Layer1Classify+Layer1Emit) for fewer nodes; document rationale</step>
+    <step order="3" name="Per-node design">Action code (mapping to sprk_analysisaction rows), inputs, outputs, side-effects</step>
+    <step order="4" name="Conditional branch shape">Layer 1 → Layer 2 conditional via existing JPS ConditionNodeExecutor or similar pattern; verify engine support</step>
+    <step order="5" name="Parameterization schema">parameters.tenantId, parameters.practiceAreaHint, parameters.costCapOverride, parameters.layer2Threshold — define types + defaults</step>
+    <step order="6" name="Engine-gap analysis">If any conditional / loop / parameter pattern isn't supported by current PlaybookExecutionEngine, file as a gap (with proposed engine patch outline)</step>
+    <step order="7" name="Publish design-a5-universal-ingest-jps.md">In project root; feeds C1</step>
+  </steps>
+
+  <outputs>
+    <output type="design-doc">projects/ai-spaarke-insights-engine-r2/design-a5-universal-ingest-jps.md</output>
+    <output type="notes" ephemeral="true">notes/spikes/engine-gap-analysis.md (if any gaps surface)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Node count + breakdown decided with rationale</criterion>
+    <criterion testable="true">Per-node design (inputs, outputs, action codes) documented</criterion>
+    <criterion testable="true">Parameterization schema defined</criterion>
+    <criterion testable="true">PlaybookExecutionEngine gaps (if any) flagged with proposed patches</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completed-by>task-execute (Wave A, 2026-06-02)</completed-by>
+    <rigor-level>STANDARD (design doc task; no code changes; quality gates skipped per task-execute Step 0.5)</rigor-level>
+    <deliverables>
+      <deliverable type="design-doc" status="published">projects/ai-spaarke-insights-engine-r2/design-a5-universal-ingest-jps.md (10 sections, ~470 lines)</deliverable>
+      <deliverable type="spike-note" status="published" ephemeral="true">projects/ai-spaarke-insights-engine-r2/notes/spikes/engine-gap-analysis.md (engine-patch backlog for Wave C1)</deliverable>
+    </deliverables>
+    <key-decisions>
+      <decision id="D-A5-1">Node count = 6 (coalesced), NOT 1:1 with the orchestrator's 10 logical steps. Rationale in §3.1 — reuses existing INodeExecutor implementations, aligns with predict-matter-cost@v1 precedent (8 nodes there), satisfies D-P15-02 (one playbook, parameterized).</decision>
+      <decision id="D-A5-2">Layer 1 classification + L1 observation emission stay FUSED in one node (Node 2 layer1Classify). Splitting would force shared output shape across two nodes for no observability gain.</decision>
+      <decision id="D-A5-3">Layer 2 gate uses existing EvidenceSufficiencyNode + selectedBranch pattern (proven in predict-matter-cost@v1). No new ConditionNode usage required.</decision>
+      <decision id="D-A5-4">Parameterization schema: 9 properties (3 required: documentId/matterId/tenantId; 6 optional with defaults). Per-practice-area routing achieved via parameters.practiceAreaHint + parameters.outcomeBearingClassifications, NOT via variant playbooks.</decision>
+    </key-decisions>
+    <engine-gaps-surfaced>
+      <gap id="ENGINE-GAP-1" severity="low" file="EvidenceSufficiencyNode.cs">Missing predicate: "in" (membership) rule shape. Patch ~15-20 LOC. Filed for Wave C1.</gap>
+      <gap id="ENGINE-GAP-2" severity="medium" file="PlaybookOrchestrationService.cs">Missing branch-aware dependency resolution (dependsOn is AND-only; selectedBranch not consulted). Patch ~25-40 LOC + ~5-10 LOC in ExecutionGraph for edge-branch storage. Filed for Wave C1. Spec Risk-1 compliant — patch stays in the engine.</gap>
+    </engine-gaps-surfaced>
+    <handoffs>
+      <handoff to="Wave C1 (020)">Author universal-ingest@v1 playbook JSON per §4 + §5 + §8; implement both engine patches per §7; create 4 new action rows (INS-SANI, INS-L1C, INS-L2X, INS-OBSE) via /jps-action-create; create 2 new executors (SanitizerNodeExecutor, ObservationEmitterNodeExecutor).</handoff>
+      <handoff to="Wave C2 (021)">Wire prompt content from .txt files into INS-L1C.sprk_systemprompt + INS-L2X.sprk_systemprompt; depends on Wave A4 versioning model.</handoff>
+      <handoff to="Wave C4 (023)">IInsightsAi.RunIngestAsync interface change to accept InsightsIngestParameters record + invoke the JPS playbook (replacing direct IngestOrchestrator call).</handoff>
+      <handoff to="Wave C5 (024)">Per-invocation parameter override mechanism for layer2Threshold, practiceAreaHint, costCapOverride.</handoff>
+      <handoff to="Wave D2 (031)">Per-practice-area outcomeBearingClassifications source (sprk_practicearea_ref.sprk_outcomebearingjson?) — confirm during D2/A3.</handoff>
+    </handoffs>
+    <claude-write-boundary-hits>none</claude-write-boundary-hits>
+  </notes>
+</task>

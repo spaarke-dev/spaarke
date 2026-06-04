@@ -21,6 +21,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Safety;
 ///   8. Extract() delegates to CitationExtractor
 ///   9. Verified / Unverified / Errors partitioned correctly in report
 /// </summary>
+[Trait("status", "repaired")]
 public class CitationVerificationServiceTests
 {
     private readonly ILogger<CitationVerificationService> _logger =
@@ -101,7 +102,7 @@ public class CitationVerificationServiceTests
     public async Task VerifyAllAsync_MultipleTypes_EachRoutedToCorrectProvider()
     {
         var caseLawProvider = BuildProvider("CourtListener", [CitationType.CaseLaw]);
-        var statuteProvider = BuildProvider("LexisStatute",  [CitationType.Statute]);
+        var statuteProvider = BuildProvider("LexisStatute", [CitationType.Statute]);
 
         var sut = new CitationVerificationService(
             [caseLawProvider.Object, statuteProvider.Object], _logger);
@@ -266,9 +267,16 @@ public class CitationVerificationServiceTests
 
         var report = await sut.VerifyAllAsync(text, CancellationToken.None);
 
+        // `report.All` must be the union of Verified + Unverified + Errors.
+        // Per-bucket assertions guard each non-empty bucket separately; the empty bucket
+        // (Errors, in this scenario — no provider throws) is asserted to be empty rather than
+        // via `Contain([])`, which FluentAssertions rejects with ArgumentException.
         report.All.Should().HaveCount(report.TotalCitations);
+        report.Verified.Should().NotBeEmpty();
         report.All.Should().Contain(report.Verified);
+        report.Unverified.Should().NotBeEmpty();
         report.All.Should().Contain(report.Unverified);
-        report.All.Should().Contain(report.Errors);
+        report.Errors.Should().BeEmpty(
+            because: "no provider throws in this scenario");
     }
 }

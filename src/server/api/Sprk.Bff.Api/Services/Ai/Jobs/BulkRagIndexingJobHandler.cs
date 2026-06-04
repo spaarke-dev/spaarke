@@ -4,9 +4,8 @@ using Azure.Core;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Email;
 using Sprk.Bff.Api.Services.Ai;
-using Sprk.Bff.Api.Telemetry;
-
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Jobs;
 

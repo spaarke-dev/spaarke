@@ -14,23 +14,10 @@
  * @see ADR-012 - Shared Component Library conventions
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  ProgressBar,
-  Button,
-} from "@fluentui/react-components";
-import {
-  CheckmarkCircle16Filled,
-  ErrorCircle16Filled,
-  Dismiss20Regular,
-} from "@fluentui/react-icons";
-import type {
-  AiProgressStepperProps,
-  AiProgressStepStatus,
-} from "./AiProgressStepper.types";
+import * as React from 'react';
+import { makeStyles, tokens, Text, ProgressBar, Button } from '@fluentui/react-components';
+import { CheckmarkCircle16Filled, ErrorCircle16Filled, Dismiss20Regular } from '@fluentui/react-icons';
+import type { AiProgressStepperProps, AiProgressStepStatus } from './AiProgressStepper.types';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -39,19 +26,19 @@ import type {
 const useStyles = makeStyles({
   // Card variant — absolute overlay
   backdrop: {
-    position: "absolute",
+    position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: tokens.colorNeutralBackgroundAlpha2,
     zIndex: 10,
   },
   card: {
-    width: "560px",
+    width: '560px',
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusLarge,
     boxShadow: tokens.shadow16,
@@ -59,25 +46,25 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalXL,
     paddingLeft: tokens.spacingHorizontalXL,
     paddingRight: tokens.spacingHorizontalXL,
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
 
   // Inline variant — flat layout
   inline: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
-    width: "100%",
+    width: '100%',
   },
 
   // Header row (title + optional cancel button)
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    minHeight: "28px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: '28px',
   },
   title: {
     fontWeight: tokens.fontWeightSemibold,
@@ -86,28 +73,28 @@ const useStyles = makeStyles({
 
   // ── Horizontal step track ─────────────────────────────────────────────
   stepTrack: {
-    display: "flex",
-    alignItems: "flex-start",
-    justifyContent: "center", // Center chips regardless of step count
-    width: "100%",
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'center', // Center chips regardless of step count
+    width: '100%',
   },
 
   // Each step chip: indicator circle + label below, centered
   stepChip: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
     gap: tokens.spacingVerticalXS,
     flexShrink: 0,
-    minWidth: "64px",
+    minWidth: '64px',
   },
 
   // Connector line between chips — fixed width so 2-step looks same as 5-step
   connector: {
-    width: "48px",
-    height: "1px",
+    width: '48px',
+    height: '1px',
     backgroundColor: tokens.colorNeutralStroke2,
-    marginTop: "9px", // vertically centers with the 20px indicator (20/2 - 1/2)
+    marginTop: '9px', // vertically centers with the 20px indicator (20/2 - 1/2)
     flexShrink: 0,
   },
   connectorCompleted: {
@@ -116,83 +103,83 @@ const useStyles = makeStyles({
 
   // Step indicators (circles)
   indicatorPending: {
-    width: "20px",
-    height: "20px",
-    borderRadius: "50%",
-    borderTopWidth: "2px",
-    borderRightWidth: "2px",
-    borderBottomWidth: "2px",
-    borderLeftWidth: "2px",
-    borderTopStyle: "solid",
-    borderRightStyle: "solid",
-    borderBottomStyle: "solid",
-    borderLeftStyle: "solid",
+    width: '20px',
+    height: '20px',
+    borderRadius: '50%',
+    borderTopWidth: '2px',
+    borderRightWidth: '2px',
+    borderBottomWidth: '2px',
+    borderLeftWidth: '2px',
+    borderTopStyle: 'solid',
+    borderRightStyle: 'solid',
+    borderBottomStyle: 'solid',
+    borderLeftStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke1,
     borderRightColor: tokens.colorNeutralStroke1,
     borderBottomColor: tokens.colorNeutralStroke1,
     borderLeftColor: tokens.colorNeutralStroke1,
-    backgroundColor: "transparent",
+    backgroundColor: 'transparent',
     flexShrink: 0,
-    boxSizing: "border-box",
+    boxSizing: 'border-box',
   },
   indicatorActive: {
-    width: "20px",
-    height: "20px",
-    borderRadius: "50%",
+    width: '20px',
+    height: '20px',
+    borderRadius: '50%',
     backgroundColor: tokens.colorBrandBackground,
     flexShrink: 0,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   activeInnerDot: {
-    width: "8px",
-    height: "8px",
-    borderRadius: "50%",
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   indicatorCompleted: {
-    width: "20px",
-    height: "20px",
+    width: '20px',
+    height: '20px',
     flexShrink: 0,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     color: tokens.colorPaletteGreenForeground1,
   },
   indicatorError: {
-    width: "20px",
-    height: "20px",
+    width: '20px',
+    height: '20px',
     flexShrink: 0,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     color: tokens.colorPaletteRedForeground1,
   },
 
   // Step label text (centered below indicator)
   labelPending: {
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
+    textAlign: 'center',
   },
   labelActive: {
     color: tokens.colorBrandForeground1,
     fontWeight: tokens.fontWeightSemibold,
-    textAlign: "center",
+    textAlign: 'center',
   },
   labelCompleted: {
     color: tokens.colorNeutralForeground2,
-    textAlign: "center",
+    textAlign: 'center',
   },
   labelError: {
     color: tokens.colorPaletteRedForeground1,
-    textAlign: "center",
+    textAlign: 'center',
   },
 
   // ── Active step detail (description + short progress bar) ─────────────
   activeDetail: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     paddingTop: tokens.spacingVerticalXS,
   },
@@ -202,7 +189,7 @@ const useStyles = makeStyles({
     lineHeight: tokens.lineHeightBase200,
   },
   progressBarWrap: {
-    maxWidth: "240px",
+    maxWidth: '240px',
   },
 });
 
@@ -214,12 +201,12 @@ function getStepStatus(
   stepId: string,
   activeStepId: string | null,
   completedStepIds: string[],
-  errorStepId?: string | null,
+  errorStepId?: string | null
 ): AiProgressStepStatus {
-  if (errorStepId === stepId) return "error";
-  if (completedStepIds.includes(stepId)) return "completed";
-  if (activeStepId === stepId) return "active";
-  return "pending";
+  if (errorStepId === stepId) return 'error';
+  if (completedStepIds.includes(stepId)) return 'completed';
+  if (activeStepId === stepId) return 'active';
+  return 'pending';
 }
 
 // ---------------------------------------------------------------------------
@@ -233,21 +220,21 @@ interface StepIndicatorProps {
 const StepIndicator: React.FC<StepIndicatorProps> = ({ status }) => {
   const styles = useStyles();
 
-  if (status === "completed") {
+  if (status === 'completed') {
     return (
       <span className={styles.indicatorCompleted} aria-hidden="true">
         <CheckmarkCircle16Filled />
       </span>
     );
   }
-  if (status === "error") {
+  if (status === 'error') {
     return (
       <span className={styles.indicatorError} aria-hidden="true">
         <ErrorCircle16Filled />
       </span>
     );
   }
-  if (status === "active") {
+  if (status === 'active') {
     return (
       <span className={styles.indicatorActive} aria-hidden="true">
         <span className={styles.activeInnerDot} />
@@ -268,18 +255,18 @@ export function AiProgressStepper({
   errorStepId,
   title,
   onCancel,
-  variant = "card",
-}: AiProgressStepperProps): JSX.Element {
+  variant = 'card',
+}: AiProgressStepperProps): React.JSX.Element {
   const styles = useStyles();
 
-  const activeStep = steps.find((s) => s.id === activeStepId) ?? null;
+  const activeStep = steps.find(s => s.id === activeStepId) ?? null;
 
   const header = (
     <div className={styles.header}>
       <Text size={400} className={styles.title}>
-        {title ?? "Analyzing..."}
+        {title ?? 'Analyzing...'}
       </Text>
-      {onCancel && variant === "card" && (
+      {onCancel && variant === 'card' && (
         <Button
           appearance="subtle"
           icon={<Dismiss20Regular />}
@@ -293,32 +280,22 @@ export function AiProgressStepper({
 
   // Horizontal step track: chip → connector → chip → connector → ...
   const stepTrack = (
-    <div
-      className={styles.stepTrack}
-      role="list"
-      aria-label="Analysis progress steps"
-    >
+    <div className={styles.stepTrack} role="list" aria-label="Analysis progress steps">
       {steps.map((step, index) => {
-        const status = getStepStatus(
-          step.id,
-          activeStepId,
-          completedStepIds,
-          errorStepId,
-        );
+        const status = getStepStatus(step.id, activeStepId, completedStepIds, errorStepId);
         const isLast = index === steps.length - 1;
         // Connector is "completed" color when the step after it is complete or active
         const nextStatus = !isLast
           ? getStepStatus(steps[index + 1].id, activeStepId, completedStepIds, errorStepId)
           : null;
-        const connectorCompleted =
-          nextStatus === "completed" || nextStatus === "active";
+        const connectorCompleted = nextStatus === 'completed' || nextStatus === 'active';
 
         const labelClass =
-          status === "active"
+          status === 'active'
             ? styles.labelActive
-            : status === "completed"
+            : status === 'completed'
               ? styles.labelCompleted
-              : status === "error"
+              : status === 'error'
                 ? styles.labelError
                 : styles.labelPending;
 
@@ -327,7 +304,7 @@ export function AiProgressStepper({
             <div
               className={styles.stepChip}
               role="listitem"
-              aria-current={status === "active" ? "step" : undefined}
+              aria-current={status === 'active' ? 'step' : undefined}
               aria-label={`${step.label}, ${status}`}
             >
               <StepIndicator status={status} />
@@ -338,11 +315,7 @@ export function AiProgressStepper({
 
             {!isLast && (
               <div
-                className={
-                  connectorCompleted
-                    ? `${styles.connector} ${styles.connectorCompleted}`
-                    : styles.connector
-                }
+                className={connectorCompleted ? `${styles.connector} ${styles.connectorCompleted}` : styles.connector}
                 aria-hidden="true"
               />
             )}
@@ -355,14 +328,9 @@ export function AiProgressStepper({
   // Description + short progress bar for the active step
   const activeDetail = activeStep ? (
     <div className={styles.activeDetail}>
-      {activeStep.description && (
-        <Text className={styles.description}>{activeStep.description}</Text>
-      )}
+      {activeStep.description && <Text className={styles.description}>{activeStep.description}</Text>}
       <div className={styles.progressBarWrap}>
-        <ProgressBar
-          thickness="medium"
-          aria-label={`${activeStep.label} in progress`}
-        />
+        <ProgressBar thickness="medium" aria-label={`${activeStep.label} in progress`} />
       </div>
     </div>
   ) : null;
@@ -375,26 +343,16 @@ export function AiProgressStepper({
     </>
   );
 
-  if (variant === "card") {
+  if (variant === 'card') {
     return (
-      <div
-        className={styles.backdrop}
-        role="status"
-        aria-live="polite"
-        aria-label="Analysis in progress"
-      >
+      <div className={styles.backdrop} role="status" aria-live="polite" aria-label="Analysis in progress">
         <div className={styles.card}>{content}</div>
       </div>
     );
   }
 
   return (
-    <div
-      className={styles.inline}
-      role="status"
-      aria-live="polite"
-      aria-label="Analysis in progress"
-    >
+    <div className={styles.inline} role="status" aria-live="polite" aria-label="Analysis in progress">
       {content}
     </div>
   );

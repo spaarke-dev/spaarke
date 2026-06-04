@@ -77,11 +77,7 @@
  */
 
 import React, { useCallback, useMemo, useRef } from 'react';
-import {
-  makeStyles,
-  mergeClasses,
-  tokens,
-} from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import {
   DocumentAddRegular,
   FolderAddRegular,
@@ -301,11 +297,7 @@ function getColumnsPerRow(container: HTMLDivElement): number {
   return Math.max(count, 1);
 }
 
-function moveFocus(
-  container: HTMLDivElement,
-  fromIndex: number,
-  direction: 'left' | 'right' | 'up' | 'down'
-): void {
+function moveFocus(container: HTMLDivElement, fromIndex: number, direction: 'left' | 'right' | 'up' | 'down'): void {
   const total = CARDS.length;
   const columnsPerRow = getColumnsPerRow(container);
   let next: number;
@@ -326,9 +318,7 @@ function moveFocus(
   if (next < 0 || next >= total) {
     return; // Clamp — no wrap.
   }
-  const wrapper = container.querySelector<HTMLElement>(
-    `[data-card-index="${next}"]`
-  );
+  const wrapper = container.querySelector<HTMLElement>(`[data-card-index="${next}"]`);
   if (!wrapper) return;
   // Focus the inner ActionCard (role="button", tabIndex=0), NOT the wrapper.
   // ActionCard is the element that handles Enter/Space activation; focusing
@@ -367,10 +357,7 @@ function moveFocus(
  * />
  * ```
  */
-export const GetStartedCardsWidget: React.FC<GetStartedCardsWidgetProps> = ({
-  onCardClick,
-  className,
-}) => {
+export const GetStartedCardsWidget: React.FC<GetStartedCardsWidgetProps> = ({ onCardClick, className }) => {
   const styles = useStyles();
   const gridRef = useRef<HTMLDivElement>(null);
 
@@ -383,7 +370,7 @@ export const GetStartedCardsWidget: React.FC<GetStartedCardsWidgetProps> = ({
    */
   const cardHandlers = useMemo(
     () =>
-      CARDS.map((card) => () => {
+      CARDS.map(card => () => {
         onCardClick?.(card.id);
       }),
     [onCardClick]
@@ -397,47 +384,44 @@ export const GetStartedCardsWidget: React.FC<GetStartedCardsWidgetProps> = ({
    * on those keys, and intercepting them at the container level would risk
    * double-firing.
    */
-  const handleGridKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>) => {
-      const container = gridRef.current;
-      if (!container) return;
+  const handleGridKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const container = gridRef.current;
+    if (!container) return;
 
-      // Identify which card currently has focus by walking up to the nearest
-      // [data-card-index] element. We can't rely on event.target being the
-      // card root because ActionCard renders a div containing icon + label.
-      const target = event.target as HTMLElement | null;
-      const cardEl = target?.closest<HTMLElement>('[data-card-index]');
-      if (!cardEl) return;
-      const indexAttr = cardEl.getAttribute('data-card-index');
-      if (indexAttr === null) return;
-      const fromIndex = Number.parseInt(indexAttr, 10);
-      if (Number.isNaN(fromIndex)) return;
+    // Identify which card currently has focus by walking up to the nearest
+    // [data-card-index] element. We can't rely on event.target being the
+    // card root because ActionCard renders a div containing icon + label.
+    const target = event.target as HTMLElement | null;
+    const cardEl = target?.closest<HTMLElement>('[data-card-index]');
+    if (!cardEl) return;
+    const indexAttr = cardEl.getAttribute('data-card-index');
+    if (indexAttr === null) return;
+    const fromIndex = Number.parseInt(indexAttr, 10);
+    if (Number.isNaN(fromIndex)) return;
 
-      switch (event.key) {
-        case 'ArrowLeft':
-          event.preventDefault();
-          moveFocus(container, fromIndex, 'left');
-          break;
-        case 'ArrowRight':
-          event.preventDefault();
-          moveFocus(container, fromIndex, 'right');
-          break;
-        case 'ArrowUp':
-          event.preventDefault();
-          moveFocus(container, fromIndex, 'up');
-          break;
-        case 'ArrowDown':
-          event.preventDefault();
-          moveFocus(container, fromIndex, 'down');
-          break;
-        default:
-          // Other keys (Tab, Enter, Space, etc.) — defer to default behavior /
-          // ActionCard's own keydown handler. Do NOT preventDefault.
-          break;
-      }
-    },
-    []
-  );
+    switch (event.key) {
+      case 'ArrowLeft':
+        event.preventDefault();
+        moveFocus(container, fromIndex, 'left');
+        break;
+      case 'ArrowRight':
+        event.preventDefault();
+        moveFocus(container, fromIndex, 'right');
+        break;
+      case 'ArrowUp':
+        event.preventDefault();
+        moveFocus(container, fromIndex, 'up');
+        break;
+      case 'ArrowDown':
+        event.preventDefault();
+        moveFocus(container, fromIndex, 'down');
+        break;
+      default:
+        // Other keys (Tab, Enter, Space, etc.) — defer to default behavior /
+        // ActionCard's own keydown handler. Do NOT preventDefault.
+        break;
+    }
+  }, []);
 
   return (
     <div

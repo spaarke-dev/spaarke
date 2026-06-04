@@ -213,6 +213,7 @@ public class AnalysisContextBuilderTests
     }
 
     [Fact]
+    [Trait("status", "repaired")]
     public void BuildContinuationPrompt_ExceedsMaxHistory_TruncatesToLimit()
     {
         // Arrange - options has MaxChatHistoryMessages = 10

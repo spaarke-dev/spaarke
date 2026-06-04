@@ -1,0 +1,127 @@
+<task id="021" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P2.W2 — Fix RB-T044-04: CitationExtractor.NormalizePatent EP/WO branches double-prefix country code</title>
+    <phase>Phase 2</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>013,020</dependencies>
+    <blocks>029</blocks>
+    <tags>phase-2, bff-api, real-bug-ledger, medium-severity, production-fix, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production code change in `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs`; Step 9.5 code-review + adr-check mandatory per CLAUDE.md §8 FULL rigor decision tree</rigor-reason>
+    <parallel-group>P2-W2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>File-overlap with task 020 (both touch `CitationExtractor.cs`). Must run sequentially AFTER 020 commits to avoid merge race. Parallel-safe with any non-CitationExtractor peer in the same sub-wave.</parallel-reason>
+    <production-fix-per-ledger>true</production-fix-per-ledger>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Close real-bug-ledger entry **RB-T044-04** by fixing the production bug in `CitationExtractor.NormalizePatent`. The EP and WO branches of the normalizer PREPEND the literal `"EP"` / `"WO"` even though the regex capture groups ALREADY include the country-code prefix in the captured value. Result: `EP3456789` → `EPEP3456789`. The US branch is correct (its `(?<us>[\d,]{5,15})` captures digits-only).
+
+    The ledger's recommended fix (lines 378-388): **drop the literal prefix** in the EP and WO branches; rely on the captured-value already containing the country code:
+
+    ```csharp
+    if (m.Groups["ep"].Success)
+        return Regex.Replace(m.Groups["ep"].Value, @"[^\dA-Za-z]", "");
+
+    if (m.Groups["wo"].Success)
+        return Regex.Replace(m.Groups["wo"].Value, @"[^\dA-Za-z/]", "");
+    ```
+
+    Per D-02, this single production fix closes ONE ledger entry. Per NFR-04, the commit message MUST cite `RB-T044-04` + resolution mode `repaired`. Per NFR-02, line replacement <50%.
+  </prompt>
+
+  <role>Backend AI agent fixing production code in `Services/Ai/Safety/Citations/` to close a MEDIUM-severity real-bug ledger entry.</role>
+
+  <goal>
+    `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs` `NormalizePatent` EP and WO branches no longer double-prefix the country code. The 2 InlineData cases in `ExtractCitations_Patent_NonUS_MatchedAndNormalized` (EP, WO) flip Skip → Pass. US Patent Theory cases remain green. RB-T044-04 transitions to `repaired`.
+  </goal>
+
+  <inputs>
+    <file purpose="target-production-file">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs</file>
+    <file purpose="target-test-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs</file>
+    <file purpose="ledger-entry">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (RB-T044-04 section, lines 360-393)</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">AI/Safety services extend BFF in-process per refined ADR-013 (2026-05-20); no extraction</constraint>
+    <constraint source="ADR-010">DI minimalism — no new DI registrations; pure-method edit</constraint>
+    <constraint source="NFR-01">Production code IS in scope (r2 inverts r1); tests modified ONLY for Skip→Pass</constraint>
+    <constraint source="NFR-02"><50% line replacement per file; else file escalation</constraint>
+    <constraint source="NFR-04">Commit message cites ledger entry ID `RB-T044-04` + resolution mode `repaired`</constraint>
+    <constraint source="D-02">One production fix = one ledger entry closed</constraint>
+    <constraint source="design.md §5.3">RB-T044-04 fix path: drop literal `"EP"`/`"WO"` prefix in `NormalizePatent` EP/WO branches</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Same file as task 020 (`CitationExtractor.cs`). Task 020 fixes the US/Case Law branch (`NormalizeCaseLaw`); this task fixes the non-US/Patent branches (`NormalizePatent` EP + WO). The two fixes are independent within the file (different methods); however running them in parallel would create a `git` merge race on the same file. This task runs in Wave 2 AFTER task 020 lands.
+
+      Per the ledger: the EP and WO capture groups in the patent regex include the country-code prefix in the matched value. The current normalizer code prepends the literal `"EP"` (or `"WO"`) again, producing the documented `EPEP3456789` corruption pattern. The US branch is correct because its capture group is digits-only and the normalizer correctly prepends `"US"`.
+    </background>
+    <dependencies>
+      <dependency task="013" status="required">Phase 1 exit triple-run validated</dependency>
+      <dependency task="020" status="required">RB-T044-02 fix lands first (same file)</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Load RB-T044-04 ledger entry (lines 360-393 in real-bug-ledger.md). Confirm Status not yet `repaired`.</step>
+    <step order="2">Verify task 020 (RB-T044-02) is committed (Status: `repaired`). If not, abort and wait for sub-wave gating.</step>
+    <step order="3">Read `CitationExtractor.cs` `NormalizePatent` method (line 180 per ledger). Identify the EP and WO branches; confirm the double-prefix pattern by hand-tracing the regex.</step>
+    <step order="4">Apply the production fix per the ledger §378-388: replace the EP branch return with `Regex.Replace(m.Groups["ep"].Value, @"[^\dA-Za-z]", "")` (no literal prefix); apply equivalent fix to the WO branch using `@"[^\dA-Za-z/]"`. Verify the US branch is unchanged.</step>
+    <step order="5">Remove `Skip = "..."` + per-Theory `[Trait("status","real-bug-pending-fix")]` on `ExtractCitations_Patent_NonUS_MatchedAndNormalized` (2 InlineData: EP, WO).</step>
+    <step order="6">Build: `dotnet build src/server/api/Sprk.Bff.Api/`. Verify 0 errors.</step>
+    <step order="7">Run targeted tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~CitationExtractorTests"`. Confirm EP + WO InlineData pass + US Patent + CaseLaw + Statute + Regulation cases still pass.</step>
+    <step order="8">Step 9.5 quality gates: `code-review` + `adr-check`. Verify <50% line replacement; no DI changes (ADR-010); AI/Safety stays in-process (ADR-013).</step>
+    <step order="9">Update RB-T044-04 ledger entry: Status → `repaired`; fix-commit SHA + date.</step>
+    <step order="10">Commit: `fix(ai/safety): remove double country-code prefix in CitationExtractor.NormalizePatent EP/WO (RB-T044-04; repaired)`. Update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">CitationExtractor.cs + test file + ledger entry</tool>
+    <tool name="Edit">Production fix on EP/WO branches + test Skip removal</tool>
+    <tool name="Bash">`dotnet build` + targeted `dotnet test`</tool>
+    <tool name="Skill">Step 9.5 quality gate via `code-review` + `adr-check` skills (ADR-010 / ADR-013)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs (NormalizePatent EP/WO branches: drop literal prefix)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/CitationExtractorTests.cs (EP + WO InlineData Skip→Pass)</output>
+    <output type="ledger">RB-T044-04 status: `assigned-to-r2` → `repaired`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`NormalizePatent` EP branch no longer prepends literal `"EP"` (verified via `git diff`)</criterion>
+    <criterion testable="true">`NormalizePatent` WO branch no longer prepends literal `"WO"` (verified via `git diff`)</criterion>
+    <criterion testable="true">Both EP and WO InlineData cases of `ExtractCitations_Patent_NonUS_MatchedAndNormalized` pass (verified via `dotnet test` filter)</criterion>
+    <criterion testable="true">US Patent + CaseLaw + Statute + Regulation Theory cases remain green</criterion>
+    <criterion testable="true">RB-T044-04 ledger Status transitions to `repaired`</criterion>
+    <criterion testable="true">Commit message includes the literal string `RB-T044-04` and resolution mode `repaired`</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <approach>Sequential after 020 lands. Two-branch normalizer rewrite to match the documented capture-group contract. Standard FULL-rigor flow.</approach>
+  </execution>
+</task>

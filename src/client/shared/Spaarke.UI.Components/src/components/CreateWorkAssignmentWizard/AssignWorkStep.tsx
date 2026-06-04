@@ -10,18 +10,10 @@
  * Dependencies are injected via props -- no solution-specific imports.
  */
 import * as React from 'react';
-import {
-  Text,
-  Checkbox,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Text, Checkbox, makeStyles, tokens } from '@fluentui/react-components';
 import { LookupField } from '../LookupField/LookupField';
 import type { ILookupItem } from '../../types/LookupTypes';
-import {
-  searchContactsAsLookup,
-  searchOrganizationsAsLookup,
-} from './workAssignmentService';
+import { searchContactsAsLookup, searchOrganizationsAsLookup } from './workAssignmentService';
 import { WorkAssignmentService } from './workAssignmentService';
 import type { IAssignWorkState } from './formTypes';
 import { EMPTY_ASSIGN_WORK_STATE } from './formTypes';
@@ -96,9 +88,7 @@ export const AssignWorkStep: React.FC<IAssignWorkStepProps> = ({
 }) => {
   const styles = useStyles();
 
-  const [formValues, setFormValues] = React.useState<IAssignWorkState>(
-    initialValues ?? EMPTY_ASSIGN_WORK_STATE
-  );
+  const [formValues, setFormValues] = React.useState<IAssignWorkState>(initialValues ?? EMPTY_ASSIGN_WORK_STATE);
 
   const serviceRef = React.useRef<WorkAssignmentService | null>(null);
   if (!serviceRef.current) {
@@ -111,32 +101,26 @@ export const AssignWorkStep: React.FC<IAssignWorkStepProps> = ({
 
   // -- Internal Resources ----------------------------------------------------
 
-  const handleAttorneyChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setFormValues((prev) => ({
-        ...prev,
-        assignedAttorneyId: item?.id ?? '',
-        assignedAttorneyName: item?.name ?? '',
-      }));
-    },
-    []
-  );
+  const handleAttorneyChange = React.useCallback((item: ILookupItem | null) => {
+    setFormValues(prev => ({
+      ...prev,
+      assignedAttorneyId: item?.id ?? '',
+      assignedAttorneyName: item?.name ?? '',
+    }));
+  }, []);
 
   const handleSearchAttorneys = React.useCallback(
     (query: string) => searchContactsAsLookup(dataService, query),
     [dataService]
   );
 
-  const handleParalegalChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setFormValues((prev) => ({
-        ...prev,
-        assignedParalegalId: item?.id ?? '',
-        assignedParalegalName: item?.name ?? '',
-      }));
-    },
-    []
-  );
+  const handleParalegalChange = React.useCallback((item: ILookupItem | null) => {
+    setFormValues(prev => ({
+      ...prev,
+      assignedParalegalId: item?.id ?? '',
+      assignedParalegalName: item?.name ?? '',
+    }));
+  }, []);
 
   const handleSearchParalegals = React.useCallback(
     (query: string) => searchContactsAsLookup(dataService, query),
@@ -145,35 +129,29 @@ export const AssignWorkStep: React.FC<IAssignWorkStepProps> = ({
 
   // -- Law Firm --------------------------------------------------------------
 
-  const handleLawFirmChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setFormValues((prev) => ({
-        ...prev,
-        assignedLawFirmId: item?.id ?? '',
-        assignedLawFirmName: item?.name ?? '',
-        // Clear attorney when firm changes
-        assignedLawFirmAttorneyId: '',
-        assignedLawFirmAttorneyName: '',
-      }));
-    },
-    []
-  );
+  const handleLawFirmChange = React.useCallback((item: ILookupItem | null) => {
+    setFormValues(prev => ({
+      ...prev,
+      assignedLawFirmId: item?.id ?? '',
+      assignedLawFirmName: item?.name ?? '',
+      // Clear attorney when firm changes
+      assignedLawFirmAttorneyId: '',
+      assignedLawFirmAttorneyName: '',
+    }));
+  }, []);
 
   const handleSearchLawFirms = React.useCallback(
     (query: string) => searchOrganizationsAsLookup(dataService, query),
     [dataService]
   );
 
-  const handleLawFirmAttorneyChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setFormValues((prev) => ({
-        ...prev,
-        assignedLawFirmAttorneyId: item?.id ?? '',
-        assignedLawFirmAttorneyName: item?.name ?? '',
-      }));
-    },
-    []
-  );
+  const handleLawFirmAttorneyChange = React.useCallback((item: ILookupItem | null) => {
+    setFormValues(prev => ({
+      ...prev,
+      assignedLawFirmAttorneyId: item?.id ?? '',
+      assignedLawFirmAttorneyName: item?.name ?? '',
+    }));
+  }, []);
 
   const handleSearchLawFirmAttorneys = React.useCallback(
     (query: string) => {
@@ -185,12 +163,9 @@ export const AssignWorkStep: React.FC<IAssignWorkStepProps> = ({
 
   // -- Notify ----------------------------------------------------------------
 
-  const handleNotifyChange = React.useCallback(
-    (_e: unknown, data: { checked: boolean | 'mixed' }) => {
-      setFormValues((prev) => ({ ...prev, notifyResources: data.checked === true }));
-    },
-    []
-  );
+  const handleNotifyChange = React.useCallback((_e: unknown, data: { checked: boolean | 'mixed' }) => {
+    setFormValues(prev => ({ ...prev, notifyResources: data.checked === true }));
+  }, []);
 
   // -- Render ----------------------------------------------------------------
 
@@ -262,11 +237,7 @@ export const AssignWorkStep: React.FC<IAssignWorkStepProps> = ({
         />
       </div>
 
-      <Checkbox
-        checked={formValues.notifyResources}
-        onChange={handleNotifyChange}
-        label="Notify assigned resources"
-      />
+      <Checkbox checked={formValues.notifyResources} onChange={handleNotifyChange} label="Notify assigned resources" />
     </div>
   );
 };

@@ -18,7 +18,8 @@
  *  - safety_annotation → 'safety' channel routing
  *  - Streaming state transitions (isStreaming flag, token batching)
  *  - useAiSession throws outside AiSessionProvider
- *  - sessionStorage persistence for chatSessionId and playbookId
+ *  - localStorage persistence for chatSessionId and playbookId (R4 task 031 / FR-05)
+ *  - One-shot sessionStorage → localStorage migration on first localStorage-aware load
  */
 
 import '@testing-library/jest-dom';
@@ -79,11 +80,7 @@ function makeWrapper(bus: PaneEventBus, overrides?: Partial<React.ComponentProps
   return function Wrapper({ children }: { children: React.ReactNode }): React.JSX.Element {
     return (
       <PaneEventBusProvider bus={bus}>
-        <AiSessionProvider
-          bffBaseUrl="https://spe-api-dev.example.com"
-          entityContext={null}
-          {...overrides}
-        >
+        <AiSessionProvider bffBaseUrl="https://spe-api-dev.example.com" entityContext={null} {...overrides}>
           {children}
         </AiSessionProvider>
       </PaneEventBusProvider>
@@ -110,9 +107,9 @@ describe('AiSessionProvider — SSE routing to PaneEventBus', () => {
     const contextEvents: ContextPaneEvent[] = [];
     const safetyEvents: SafetyPaneEvent[] = [];
 
-    bus.subscribe('workspace', (e) => workspaceEvents.push(e));
-    bus.subscribe('context', (e) => contextEvents.push(e));
-    bus.subscribe('safety', (e) => safetyEvents.push(e));
+    bus.subscribe('workspace', e => workspaceEvents.push(e));
+    bus.subscribe('context', e => contextEvents.push(e));
+    bus.subscribe('safety', e => safetyEvents.push(e));
 
     const { result } = renderSession(bus);
 
@@ -141,8 +138,8 @@ describe('AiSessionProvider — SSE routing to PaneEventBus', () => {
     const contextEvents: ContextPaneEvent[] = [];
     const workspaceEvents: WorkspacePaneEvent[] = [];
 
-    bus.subscribe('context', (e) => contextEvents.push(e));
-    bus.subscribe('workspace', (e) => workspaceEvents.push(e));
+    bus.subscribe('context', e => contextEvents.push(e));
+    bus.subscribe('workspace', e => workspaceEvents.push(e));
 
     const { result } = renderSession(bus);
 
@@ -168,7 +165,7 @@ describe('AiSessionProvider — SSE routing to PaneEventBus', () => {
     const bus = new PaneEventBus();
     const contextEvents: ContextPaneEvent[] = [];
 
-    bus.subscribe('context', (e) => contextEvents.push(e));
+    bus.subscribe('context', e => contextEvents.push(e));
 
     const { result } = renderSession(bus);
 
@@ -192,7 +189,7 @@ describe('AiSessionProvider — SSE routing to PaneEventBus', () => {
     const bus = new PaneEventBus();
     const safetyEvents: SafetyPaneEvent[] = [];
 
-    bus.subscribe('safety', (e) => safetyEvents.push(e));
+    bus.subscribe('safety', e => safetyEvents.push(e));
 
     const { result } = renderSession(bus);
 
@@ -243,8 +240,8 @@ describe('AiSessionProvider — multi-subscriber independence', () => {
     const paneBEvents: WorkspacePaneEvent[] = [];
 
     // Two independent pane subscribers — simulates WorkspacePane + a secondary widget
-    bus.subscribe('workspace', (e) => paneAEvents.push(e));
-    bus.subscribe('workspace', (e) => paneBEvents.push(e));
+    bus.subscribe('workspace', e => paneAEvents.push(e));
+    bus.subscribe('workspace', e => paneBEvents.push(e));
 
     const { result } = renderSession(bus);
 
@@ -280,8 +277,8 @@ describe('AiSessionProvider — multi-subscriber independence', () => {
     const contextAEvents: ContextPaneEvent[] = [];
     const contextBEvents: ContextPaneEvent[] = [];
 
-    bus.subscribe('context', (e) => contextAEvents.push(e));
-    bus.subscribe('context', (e) => contextBEvents.push(e));
+    bus.subscribe('context', e => contextAEvents.push(e));
+    bus.subscribe('context', e => contextBEvents.push(e));
 
     const { result } = renderSession(bus);
 
@@ -304,8 +301,8 @@ describe('AiSessionProvider — multi-subscriber independence', () => {
     const paneAEvents: WorkspacePaneEvent[] = [];
     const paneBEvents: WorkspacePaneEvent[] = [];
 
-    const unsubscribeA = bus.subscribe('workspace', (e) => paneAEvents.push(e));
-    bus.subscribe('workspace', (e) => paneBEvents.push(e));
+    const unsubscribeA = bus.subscribe('workspace', e => paneAEvents.push(e));
+    bus.subscribe('workspace', e => paneBEvents.push(e));
 
     const { result } = renderSession(bus);
 
@@ -338,18 +335,21 @@ describe('AiSessionProvider — multi-subscriber independence', () => {
 
 describe('AiSessionProvider — session state', () => {
   beforeEach(() => {
-    // Clear sessionStorage between tests to avoid cross-test contamination
+    // Clear BOTH storages between tests to avoid cross-test contamination.
+    // R4 task 031: localStorage is the durable store; sessionStorage may still
+    // hold legacy entries from the migration path.
     sessionStorage.clear();
+    localStorage.clear();
   });
 
-  it('(c) chatSessionId initialises to null when sessionStorage is empty', () => {
+  it('(c) chatSessionId initialises to null when both storages are empty', () => {
     const bus = new PaneEventBus();
     const { result } = renderSession(bus);
 
     expect(result.current.chatSessionId).toBeNull();
   });
 
-  it('setChatSessionId updates chatSessionId in context and persists to sessionStorage', () => {
+  it('setChatSessionId updates chatSessionId in context and persists to localStorage (R4 task 031)', () => {
     const bus = new PaneEventBus();
     const { result } = renderSession(bus);
 
@@ -358,10 +358,13 @@ describe('AiSessionProvider — session state', () => {
     });
 
     expect(result.current.chatSessionId).toBe('session-abc-123');
-    expect(sessionStorage.getItem('sprk_ai2_chatSessionId')).toBe('session-abc-123');
+    // R4 task 031: writes go to localStorage so the session survives browser
+    // close/reopen — sessionStorage was window-scoped and lost the key on close.
+    expect(localStorage.getItem('sprk_ai2_chatSessionId')).toBe('session-abc-123');
+    expect(sessionStorage.getItem('sprk_ai2_chatSessionId')).toBeNull();
   });
 
-  it('setPlaybookId updates playbookId in context and persists to sessionStorage', () => {
+  it('setPlaybookId updates playbookId in context and persists to localStorage (R4 task 031)', () => {
     const bus = new PaneEventBus();
     const { result } = renderSession(bus);
 
@@ -370,18 +373,90 @@ describe('AiSessionProvider — session state', () => {
     });
 
     expect(result.current.playbookId).toBe('playbook-matter-analysis');
-    expect(sessionStorage.getItem('sprk_ai2_playbookId')).toBe('playbook-matter-analysis');
+    expect(localStorage.getItem('sprk_ai2_playbookId')).toBe('playbook-matter-analysis');
+    expect(sessionStorage.getItem('sprk_ai2_playbookId')).toBeNull();
   });
 
-  it('chatSessionId and playbookId are restored from sessionStorage on mount', () => {
-    sessionStorage.setItem('sprk_ai2_chatSessionId', 'restored-session');
-    sessionStorage.setItem('sprk_ai2_playbookId', 'restored-playbook');
+  it('chatSessionId and playbookId are restored from localStorage on mount (R4 task 031)', () => {
+    localStorage.setItem('sprk_ai2_chatSessionId', 'restored-session');
+    localStorage.setItem('sprk_ai2_playbookId', 'restored-playbook');
 
     const bus = new PaneEventBus();
     const { result } = renderSession(bus);
 
     expect(result.current.chatSessionId).toBe('restored-session');
     expect(result.current.playbookId).toBe('restored-playbook');
+  });
+
+  // -------------------------------------------------------------------------
+  // R4 task 031 (A-5b / FR-05) — one-shot sessionStorage → localStorage
+  // migration. Tests cover the upgrade path for users who had an active
+  // session in sessionStorage at the time the localStorage-aware build deploys.
+  // -------------------------------------------------------------------------
+
+  it('R4 task 031: migrates legacy sessionStorage chatSessionId to localStorage on first read', () => {
+    // Simulate a user mid-session at the time of deploy: sessionStorage has
+    // the legacy entry, localStorage is empty.
+    sessionStorage.setItem('sprk_ai2_chatSessionId', 'legacy-session-from-pre-r4');
+    expect(localStorage.getItem('sprk_ai2_chatSessionId')).toBeNull();
+
+    const bus = new PaneEventBus();
+    const { result } = renderSession(bus);
+
+    // Provider's initial-state read returns the sessionStorage value...
+    expect(result.current.chatSessionId).toBe('legacy-session-from-pre-r4');
+    // ...AND the migration copied it to localStorage so subsequent reopens
+    // (when sessionStorage is gone) will still find it.
+    expect(localStorage.getItem('sprk_ai2_chatSessionId')).toBe('legacy-session-from-pre-r4');
+    // sessionStorage is left in place (don't clear; let it expire naturally
+    // with the window per task 031 spec).
+    expect(sessionStorage.getItem('sprk_ai2_chatSessionId')).toBe('legacy-session-from-pre-r4');
+  });
+
+  it('R4 task 031: migrates legacy sessionStorage playbookId to localStorage on first read', () => {
+    sessionStorage.setItem('sprk_ai2_playbookId', 'legacy-playbook-from-pre-r4');
+    expect(localStorage.getItem('sprk_ai2_playbookId')).toBeNull();
+
+    const bus = new PaneEventBus();
+    const { result } = renderSession(bus);
+
+    expect(result.current.playbookId).toBe('legacy-playbook-from-pre-r4');
+    expect(localStorage.getItem('sprk_ai2_playbookId')).toBe('legacy-playbook-from-pre-r4');
+    expect(sessionStorage.getItem('sprk_ai2_playbookId')).toBe('legacy-playbook-from-pre-r4');
+  });
+
+  it('R4 task 031: localStorage value wins over sessionStorage when both are present', () => {
+    // Edge case: localStorage already migrated; sessionStorage still has a
+    // (stale) value because the window has been open across the deploy +
+    // a new session was created. localStorage MUST be the source of truth.
+    localStorage.setItem('sprk_ai2_chatSessionId', 'current-localStorage-session');
+    sessionStorage.setItem('sprk_ai2_chatSessionId', 'stale-sessionStorage-session');
+
+    const bus = new PaneEventBus();
+    const { result } = renderSession(bus);
+
+    expect(result.current.chatSessionId).toBe('current-localStorage-session');
+    // sessionStorage left untouched (the migration only fires when localStorage
+    // is empty — confirms readSession's short-circuit).
+    expect(sessionStorage.getItem('sprk_ai2_chatSessionId')).toBe('stale-sessionStorage-session');
+  });
+
+  it('R4 task 031: subsequent reads after migration use localStorage only (sessionStorage independence)', () => {
+    // First mount: migration copies sessionStorage → localStorage.
+    sessionStorage.setItem('sprk_ai2_chatSessionId', 'migrated-session');
+
+    const bus1 = new PaneEventBus();
+    const { result: result1 } = renderSession(bus1);
+    expect(result1.current.chatSessionId).toBe('migrated-session');
+    expect(localStorage.getItem('sprk_ai2_chatSessionId')).toBe('migrated-session');
+
+    // Simulate browser close/reopen: sessionStorage gone, localStorage survives.
+    sessionStorage.clear();
+
+    // Second mount (new window/process): localStorage carries the session.
+    const bus2 = new PaneEventBus();
+    const { result: result2 } = renderSession(bus2);
+    expect(result2.current.chatSessionId).toBe('migrated-session');
   });
 
   it('turnCount starts at 0 and increments by 1 on each onStreamEnd call', () => {
@@ -493,24 +568,16 @@ describe('useAiSession — outside provider', () => {
   });
 
   it('throws a descriptive error when used outside AiSessionProvider', () => {
-    expect(() => renderHook(() => useAiSession())).toThrow(
-      /AiSessionProvider/
-    );
+    expect(() => renderHook(() => useAiSession())).toThrow(/AiSessionProvider/);
   });
 
   it('throws a descriptive error when used outside PaneEventBusProvider', () => {
     // AiSessionProvider without PaneEventBusProvider — dispatch hook will throw
     function BadWrapper({ children }: { children: React.ReactNode }) {
-      return (
-        <AiSessionProvider bffBaseUrl="https://example.com">
-          {children}
-        </AiSessionProvider>
-      );
+      return <AiSessionProvider bffBaseUrl="https://example.com">{children}</AiSessionProvider>;
     }
 
-    expect(() => renderHook(() => useAiSession(), { wrapper: BadWrapper })).toThrow(
-      /PaneEventBusProvider/
-    );
+    expect(() => renderHook(() => useAiSession(), { wrapper: BadWrapper })).toThrow(/PaneEventBusProvider/);
   });
 });
 

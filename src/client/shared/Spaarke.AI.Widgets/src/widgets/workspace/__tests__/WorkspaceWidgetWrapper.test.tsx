@@ -57,9 +57,7 @@ const MockBudgetWidget: React.FC<{ data: BudgetData; isLoading?: boolean; error?
   return <div data-testid="budget-dashboard">{data.title}</div>;
 };
 
-const budgetLoader = jest.fn(() =>
-  Promise.resolve({ default: MockBudgetWidget as React.ComponentType<any> })
-);
+const budgetLoader = jest.fn(() => Promise.resolve({ default: MockBudgetWidget as React.ComponentType<any> }));
 
 // ---------------------------------------------------------------------------
 // Mock R1 SearchResults widget
@@ -80,25 +78,15 @@ const MockSearchWidget: React.FC<{ data: SearchData; isLoading?: boolean; error?
   return <div data-testid="search-results">{data.query}</div>;
 };
 
-const searchLoader = jest.fn(() =>
-  Promise.resolve({ default: MockSearchWidget as React.ComponentType<any> })
-);
+const searchLoader = jest.fn(() => Promise.resolve({ default: MockSearchWidget as React.ComponentType<any> }));
 
 // ---------------------------------------------------------------------------
 // Widget wrapper instances under test
 // ---------------------------------------------------------------------------
 
-const BudgetWrapper = createWorkspaceWrapper<BudgetData>(
-  budgetLoader,
-  'BudgetDashboard',
-  1
-);
+const BudgetWrapper = createWorkspaceWrapper<BudgetData>(budgetLoader, 'BudgetDashboard', 1);
 
-const SearchWrapper = createWorkspaceWrapper<SearchData>(
-  searchLoader,
-  'SearchResults',
-  1
-);
+const SearchWrapper = createWorkspaceWrapper<SearchData>(searchLoader, 'SearchResults', 1);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -119,32 +107,32 @@ const defaultQueryParams = {
   turnId: '3',
 };
 
-function renderBudgetWrapper(
-  props: Partial<WorkspaceWidgetWrapperProps<BudgetData>> = {}
-) {
+function renderBudgetWrapper(props: Partial<WorkspaceWidgetWrapperProps<BudgetData>> = {}) {
   const handle: { current: WorkspaceWidgetHandle | null } = { current: null };
   const result = render(
     <BudgetWrapper
       data={defaultBudgetData}
       widgetType="BudgetDashboard"
       queryParams={defaultQueryParams}
-      onRegisterHandle={h => { handle.current = h; }}
+      onRegisterHandle={h => {
+        handle.current = h;
+      }}
       {...props}
     />
   );
   return { ...result, handle };
 }
 
-function renderSearchWrapper(
-  props: Partial<WorkspaceWidgetWrapperProps<SearchData>> = {}
-) {
+function renderSearchWrapper(props: Partial<WorkspaceWidgetWrapperProps<SearchData>> = {}) {
   const handle: { current: WorkspaceWidgetHandle | null } = { current: null };
   const result = render(
     <SearchWrapper
       data={defaultSearchData}
       widgetType="SearchResults"
       queryParams={defaultQueryParams}
-      onRegisterHandle={h => { handle.current = h; }}
+      onRegisterHandle={h => {
+        handle.current = h;
+      }}
       {...props}
     />
   );
@@ -207,13 +195,7 @@ describe('WorkspaceWidgetWrapper — renders from data prop', () => {
     const pendingLoader = jest.fn(() => new Promise<{ default: React.ComponentType<any> }>(() => {}));
     const FrozenWrapper = createWorkspaceWrapper<BudgetData>(pendingLoader, 'BudgetDashboard');
 
-    render(
-      <FrozenWrapper
-        data={defaultBudgetData}
-        widgetType="BudgetDashboard"
-        queryParams={defaultQueryParams}
-      />
-    );
+    render(<FrozenWrapper data={defaultBudgetData} widgetType="BudgetDashboard" queryParams={defaultQueryParams} />);
 
     // While the module promise is pending, the wrapper shows its own Spinner
     expect(screen.getByTestId('spinner')).toBeInTheDocument();
@@ -298,7 +280,9 @@ describe('WorkspaceWidgetWrapper — serializeState()', () => {
         data={defaultBudgetData}
         widgetType="BudgetDashboard"
         queryParams={{ sessionId: 'sess-initial', turnId: '5' }}
-        onRegisterHandle={h => { handle.current = h; }}
+        onRegisterHandle={h => {
+          handle.current = h;
+        }}
       />
     );
 
@@ -413,7 +397,9 @@ describe('WorkspaceWidgetWrapper — restoreState()', () => {
         widgetType="BudgetDashboard"
         queryParams={{ sessionId: 'sess-x', turnId: '0' }}
         isLoading={false}
-        onRegisterHandle={h => { handle.current = h; }}
+        onRegisterHandle={h => {
+          handle.current = h;
+        }}
       />
     );
 
@@ -431,17 +417,11 @@ describe('WorkspaceWidgetWrapper — restoreState()', () => {
 
 describe('WorkspaceWidgetWrapper — loader called once', () => {
   it('BudgetDashboard: R1 module loader is called exactly once on mount', async () => {
-    const trackedLoader = jest.fn(() =>
-      Promise.resolve({ default: MockBudgetWidget as React.ComponentType<any> })
-    );
+    const trackedLoader = jest.fn(() => Promise.resolve({ default: MockBudgetWidget as React.ComponentType<any> }));
     const TrackedWrapper = createWorkspaceWrapper<BudgetData>(trackedLoader, 'BudgetDashboard');
 
     const { rerender } = render(
-      <TrackedWrapper
-        data={defaultBudgetData}
-        widgetType="BudgetDashboard"
-        queryParams={defaultQueryParams}
-      />
+      <TrackedWrapper data={defaultBudgetData} widgetType="BudgetDashboard" queryParams={defaultQueryParams} />
     );
 
     await waitFor(() => expect(screen.getByTestId('budget-dashboard')).toBeInTheDocument());

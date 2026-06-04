@@ -14,14 +14,7 @@
  * Deselecting removes that step from the sidebar.
  */
 import * as React from 'react';
-import {
-  Card,
-  Checkbox,
-  Text,
-  makeStyles,
-  tokens,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { Card, Checkbox, Text, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
 import {
   MailRegular,
   FolderAddRegular,
@@ -266,27 +259,11 @@ const CheckboxCard: React.FC<ICheckboxCardProps> = ({ def, selected, onToggle })
       aria-label={`${def.label}: ${def.description}${selected ? ' — selected' : ''}`}
     >
       <div className={styles.cardTopRow}>
-        <span
-          className={mergeClasses(
-            styles.cardIcon,
-            !selected && styles.cardIconNeutral
-          )}
-          aria-hidden="true"
-        >
+        <span className={mergeClasses(styles.cardIcon, !selected && styles.cardIconNeutral)} aria-hidden="true">
           {def.icon}
         </span>
-        <span
-          className={mergeClasses(
-            styles.checkboxIcon,
-            !selected && styles.checkboxIconNeutral
-          )}
-          aria-hidden="true"
-        >
-          {selected ? (
-            <CheckboxCheckedRegular fontSize={22} />
-          ) : (
-            <CheckboxUncheckedRegular fontSize={22} />
-          )}
+        <span className={mergeClasses(styles.checkboxIcon, !selected && styles.checkboxIconNeutral)} aria-hidden="true">
+          {selected ? <CheckboxCheckedRegular fontSize={22} /> : <CheckboxUncheckedRegular fontSize={22} />}
         </span>
       </div>
 
@@ -316,13 +293,11 @@ export const SummaryNextStepsStep: React.FC<ISummaryNextStepsStepProps> = ({
   const handleToggle = React.useCallback(
     (id: SummaryActionId) => {
       if (selectedActions.includes(id)) {
-        onSelectionChange(selectedActions.filter((a) => a !== id));
+        onSelectionChange(selectedActions.filter(a => a !== id));
       } else {
         // Maintain canonical order
-        const orderedIds = CARD_DEFS.map((d) => d.id);
-        const next = orderedIds.filter(
-          (orderedId) => selectedActions.includes(orderedId) || orderedId === id
-        );
+        const orderedIds = CARD_DEFS.map(d => d.id);
+        const next = orderedIds.filter(orderedId => selectedActions.includes(orderedId) || orderedId === id);
         onSelectionChange(next);
       }
     },
@@ -336,19 +311,14 @@ export const SummaryNextStepsStep: React.FC<ISummaryNextStepsStepProps> = ({
           Next Steps
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Choose what you&apos;d like to do with the summary results. Select one or more actions,
-          or click Finish to close.
+          Choose what you&apos;d like to do with the summary results. Select one or more actions, or click Finish to
+          close.
         </Text>
       </div>
 
       <div className={styles.cardRow} role="group" aria-label="Follow-on actions">
-        {CARD_DEFS.map((def) => (
-          <CheckboxCard
-            key={def.id}
-            def={def}
-            selected={selectedActions.includes(def.id)}
-            onToggle={handleToggle}
-          />
+        {CARD_DEFS.map(def => (
+          <CheckboxCard key={def.id} def={def} selected={selectedActions.includes(def.id)} onToggle={handleToggle} />
         ))}
       </div>
 

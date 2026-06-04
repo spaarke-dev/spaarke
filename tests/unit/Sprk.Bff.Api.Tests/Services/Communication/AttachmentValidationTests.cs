@@ -20,6 +20,12 @@ namespace Sprk.Bff.Api.Tests.Services.Communication;
 /// Uses the same constructor pattern as CommunicationServiceTests
 /// with null! for EmlGenerationService and SpeFileStore when not testing those features.
 /// </summary>
+/// <remarks>
+/// 2026-05-31 (task 011 / P1.A2 verify+repair): trait-tagged per §6.2 taxonomy. Tests pass
+/// at runtime under the migrated IGenericEntityService writer (these tests do not capture the
+/// created Entity; null-attachment paths short-circuit before the Dataverse write).
+/// </remarks>
+[Trait("status", "repaired")]
 public class AttachmentValidationTests
 {
     #region Test Infrastructure
@@ -69,8 +75,9 @@ public class AttachmentValidationTests
         return new CommunicationService(
             _graphClientFactoryMock.Object,
             senderValidator,
-            Mock.Of<IDataverseService>(),
-            Mock.Of<IDataverseService>(),
+            Mock.Of<ICommunicationDataverseService>(),
+            Mock.Of<IGenericEntityService>(),
+            Mock.Of<IDocumentDataverseService>(),
             null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here
             null!, // CommunicationAccountService — not tested here

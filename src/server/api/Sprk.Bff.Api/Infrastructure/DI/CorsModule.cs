@@ -112,6 +112,7 @@ public static class CorsModule
                           "X-Requested-With",
                           "X-Correlation-Id",
                           "X-Idempotency-Key",
+                          "X-Tenant-Id",
                           "request-id",
                           "client-request-id",
                           "traceparent",

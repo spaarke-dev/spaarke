@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>W-1: Write SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md (authoritative two-wrapper architecture)</title>
+    <phase>Phase 1 — Documentation round</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>011, 015</blocks>
+    <tags>documentation, architecture</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New documentation file creation with explicit project constraints (DR-01); not code-modifying, but downstream tasks (011 W-2, 015 C-2) depend on its terminology and conceptual frame. STANDARD per Step 3.5.5 — creates a new file with constraints, no .cs/.ts/.tsx modification.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author a new authoritative architecture document `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`
+    that frames SpaarkeAi's mental model: three surfaces (Assistant / Workspace / Context), the two-wrapper
+    model (Dashboard wrapper via `LegalWorkspaceApp` + Direct widget wrapper via `WorkspaceWidgetRegistry`),
+    four mount sources (user picker / Assistant / Context / workspace dropdown), the dual-use pattern
+    (Calendar / Daily Briefing), and the LegalWorkspace-as-engine framing. This doc becomes the canonical
+    reference cross-linked from CLAUDE.md §16 and from `SPAARKEAI-WORKSPACE-ARCHITECTURE.md`. Subsequent
+    R4 tasks (011 W-2 rewrite, 015 C-2 contract) consume its terminology.
+  </prompt>
+
+  <role>
+    Technical writer with SpaarkeAi platform architecture expertise. Bias toward concise, terminology-precise
+    prose that future widget authors can read once and pick the right wrapper. Reuse existing diagrams /
+    sections from `SPAARKEAI-WORKSPACE-ARCHITECTURE.md` where they apply; do not duplicate or contradict.
+  </role>
+
+  <goal>
+    A new file `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` exists with the following sections:
+    (1) Three surfaces (Assistant / Workspace / Context); (2) Two wrappers (Dashboard via `LegalWorkspaceApp`,
+    Direct widget via `WorkspaceWidgetRegistry`) with intentional retention rationale; (3) Mount sources
+    (user picker / Assistant / Context / workspace dropdown); (4) Dual-use pattern (Calendar + Daily Briefing
+    worked examples); (5) LegalWorkspace-as-dashboard-engine framing (LW components retained as library);
+    (6) Cross-links to and from `SPAARKEAI-WORKSPACE-ARCHITECTURE.md`, `SPAARKEAI-COMPONENT-MODEL.md`,
+    `BUILD-A-NEW-WORKSPACE-WIDGET.md`, and CLAUDE.md §16.
+  </goal>
+
+  <context>
+    <background>
+      Per spec DR-01 + plan §4 Phase 1 W-1: R4 introduces the two-wrapper model as an architectural framing
+      formalized during 2026-05-25 scoping (per OC-R4-06: both wrappers retained intentionally). With the
+      LegalWorkspace standalone code page retiring (W-6 / OC-R4-05), the LegalWorkspace components become
+      a library — and `LegalWorkspaceApp` is the dashboard engine. This doc establishes the conceptual frame
+      that subsequent Phase 1 docs (W-2, C-2) and Phase 4 mount-source wiring (W-4, W-5) reference.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Doc MUST cover all five sub-items in DR-01: surfaces, two wrappers, mount sources, dual-use pattern, LegalWorkspace-as-engine framing.</constraint>
+    <constraint source="project">Doc MUST cross-link from CLAUDE.md §16 and from `SPAARKEAI-WORKSPACE-ARCHITECTURE.md` (add the cross-link in this task; do not orphan the new doc).</constraint>
+    <constraint source="project">Doc MUST reflect OC-R4-05 (LegalWorkspace standalone retired; components retained) and OC-R4-06 (two wrappers retained intentionally — do not propose unification).</constraint>
+    <constraint source="project">Calendar widget (R3 task 115) MUST be used as the canonical dual-use worked example, consistent with `SPAARKEAI-COMPONENTIZATION-AUDIT.md` §2A.</constraint>
+    <constraint source="project">Future widget authors MUST be able to determine which wrapper to use by reading this doc alone — verify by walking through 2-3 hypothetical widget types in the doc.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read source docs">Read all four input architecture docs + existing widget guide. Catalog the terminology already in use (Surface, Wrapper, Widget, Section, Mount Source, Channel) so the new doc reuses — not invents — names.</step>
+    <step order="2" name="Outline">Draft an outline matching the six section headings in &lt;goal&gt;. Confirm the outline covers all five DR-01 sub-items before writing prose.</step>
+    <step order="3" name="Draft sections 1-3">Write Surfaces, Wrappers (with intentional-retention rationale per OC-R4-06), and Mount Sources. Reference existing diagrams in `SPAARKEAI-WORKSPACE-ARCHITECTURE.md` rather than redrawing.</step>
+    <step order="4" name="Draft sections 4-5">Write the dual-use pattern (Calendar + Daily Briefing worked examples) and the LegalWorkspace-as-engine framing. Cite OC-R4-05 LW retirement context.</step>
+    <step order="5" name="Walk-through validation">Inside the doc (or in an internal review section), walk through 2-3 hypothetical widget types and demonstrate which wrapper a reader would pick. This validates the doc is useful, not just descriptive.</step>
+    <step order="6" name="Add cross-links">Update `docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md` and root CLAUDE.md §16 to reference the new doc. Add reciprocal links inside the new doc.</step>
+    <step order="7" name="Verify">Re-read the doc end-to-end. Confirm: zero contradictions with existing architecture docs; terminology consistent; cross-links resolve.</step>
+    <step order="8" name="Update TASK-INDEX">Change task 010 status to ✅ completed in `tasks/TASK-INDEX.md`.</step>
+    <step order="9" name="Document deviations">If any deviation from spec DR-01 or plan §4, write to `projects/spaarke-ai-platform-unification-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read all input architecture docs and existing guide</tool>
+    <tool name="Write">Create the new doc</tool>
+    <tool name="Edit">Add cross-links to existing docs + CLAUDE.md §16</tool>
+    <tool name="Grep">Verify terminology consistency across architecture docs</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md (new)</output>
+    <output type="docs">docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md (cross-link added)</output>
+    <output type="docs">CLAUDE.md (§16 pointer added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` exists with the six required sections from &lt;goal&gt;.</criterion>
+    <criterion testable="true">Doc covers all five DR-01 sub-items: surfaces, two wrappers, mount sources, dual-use pattern, LegalWorkspace-as-engine framing.</criterion>
+    <criterion testable="true">Cross-links present in both directions: CLAUDE.md §16 → new doc; `SPAARKEAI-WORKSPACE-ARCHITECTURE.md` → new doc; new doc → both.</criterion>
+    <criterion testable="true">Future-widget-author walk-through (2-3 hypothetical widget types) demonstrates how to pick a wrapper from this doc alone.</criterion>
+    <criterion testable="true">Terminology consistent with `SPAARKEAI-WORKSPACE-ARCHITECTURE.md` and `SPAARKEAI-COMPONENT-MODEL.md` — no contradictory definitions of Surface, Wrapper, Mount Source, or Channel.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    STANDARD rigor — new file creation with project constraints, no code modification. Quality gates
+    (code-review + adr-check) are SKIPPED per Step 0.5 decision tree.
+  </execution>
+</task>

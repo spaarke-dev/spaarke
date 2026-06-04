@@ -1,0 +1,120 @@
+<task id="005" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>Create priority-order.md with sibling-project owner sign-offs — FR-04</title>
+    <status>completed</status>
+    <estimated-effort>1-2 hours (incl. async sibling-owner outreach)</estimated-effort>
+    <assigned>AI agent (drafts) + owner (sibling outreach)</assigned>
+    <tags>phase-0, coordination, priority-order, sibling-projects</tags>
+    <parallel-group>0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes only to projects/.../priority-order.md; disjoint from task 004 (CLAUDE.md). Outreach is async but file write is local.</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Create `projects/sdap-bff.api-test-suite-repair/priority-order.md` with HIGH → MEDIUM →
+    INTEGRATION → LOW tier ordering for Phase 2+3 repair work. Per FR-04, the file MUST annotate
+    each tier with sibling-project owner sign-offs (or "no in-flight overlap" if no sibling work
+    touches the area).
+
+    The 3 sibling projects with in-flight BFF surface area (per project CLAUDE.md):
+    - `ai-spaarke-action-engine-r1` — HIGH risk; adds new BFF endpoints/services
+    - `ai-spaarke-insights-engine-r1` — MEDIUM risk; tests under `Services/Ai/`
+    - `x-email-communication-solution-r2` — MEDIUM risk; Communications test files in compile-broken set
+
+    Use task 001 baseline to inform per-tier file counts. NO source-code changes.
+  </prompt>
+
+  <role>AI agent drafting priority-order; coordinates with owner for sibling-owner sign-off capture.</role>
+
+  <goal>
+    `projects/sdap-bff.api-test-suite-repair/priority-order.md` exists with:
+    - HIGH tier list (~35 files per design.md §3): per-area annotation including sibling-project owner name OR "no in-flight overlap"
+    - MEDIUM tier list (~70 files): same annotation; `Services/Communication/*` flagged for x-email-communication-solution-r2 owner sign-off
+    - INTEGRATION tier (~25 files in `Sprk.Bff.Api.Tests/Integration/` + Spe.Integration.Tests failures from FR-13)
+    - LOW tier (~88 files) with start-gate note "begins after HIGH + MEDIUM 50% complete" per FR-20
+    - Per-tier total file counts derived from task 001 baseline (or noted as TBD-from-baseline if cited counts come from design.md §3)
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline-trx">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-04">priority-order.md exists with HIGH→MEDIUM→INTEGRATION→LOW ordering AND sibling-owner annotations</constraint>
+    <constraint source="FR-20">LOW tier note: "begins after HIGH + MEDIUM 50% complete"</constraint>
+    <constraint source="§4.7">Coordinate, don't lock — sibling projects continue work; priority order avoids in-flight areas where possible</constraint>
+    <constraint source="design §2.3">Communications, Action Engine, Insights Phase 2 = in-flight areas (highest coordination risk)</constraint>
+    <constraint source="NFR-01">No production code changes</constraint>
+    <constraint source="NFR-09">`repair-not-rewrite: true` declared in metadata</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §4.7 (locked decision: "coordinate, don't lock"), this project does NOT freeze
+      sibling work. Instead, the priority order sequences in-flight areas LAST so the disruptive
+      portion of repair happens against quieter code. The sign-off mechanism informs sibling
+      owners "we are about to touch test files in your area; flag any conflict." It is NOT a
+      veto — it is awareness.
+
+      Outreach mechanism: owner contacts the 3 sibling-project owners (or confirms "no in-flight
+      overlap" with each). Agent does NOT contact siblings autonomously; agent drafts the
+      annotation slots, owner fills them.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Needs baseline TRX for per-tier file counts</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/priority-order.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read 001 baseline TRX to extract failing-test counts per area (group by namespace prefix: Services/Workspace, Services/Finance, Services/Ai/Chat, Services/Communication, Filters, Infrastructure, Integration). If parsing the TRX is non-trivial, fall back to design.md §3 area-counts and note "counts from design.md §3 baseline; refine post-task-001 if discrepancy".</step>
+    <step order="2">Draft 4 tier sections (HIGH / MEDIUM / INTEGRATION / LOW) per design.md §7 P23.H/P23.M/P23.I/P23.L groupings:
+      - HIGH (~35 files): Services/Workspace/*, Services/Scorecard*, Services/Finance/SignalEvaluation*, Services/Email/EmailAssociation*, Services/Ai/Safety/*, Filters/*, Infrastructure/Json/*, Infrastructure/Resilience/*
+      - MEDIUM (~70 files): Services/Ai/Chat/*, Services/Ai/Capabilities/*, Services/Ai/Nodes/*, Services/Communication/*
+      - INTEGRATION (~25 files): Sprk.Bff.Api.Tests/Integration/* + Spe.Integration.Tests failures (per FR-13)
+      - LOW (~88 files): synthetic-smoke + remaining triage candidates; START-GATE note per FR-20</step>
+    <step order="3">For each area, add a sibling-owner annotation slot using a table row format: `| {area} | {file-count} | Sibling: {project} | Owner: {TBD-or-name} | Sign-off date: {TBD-or-date} |`. Mark "no in-flight overlap" where no sibling project is touching the area.</step>
+    <step order="4">Pre-fill known sibling mappings from CLAUDE.md:
+      - `Services/Communication/*` (MEDIUM) → `x-email-communication-solution-r2` owner
+      - `Services/Ai/*` (MEDIUM) → `ai-spaarke-insights-engine-r1` owner
+      - New BFF endpoints/services → `ai-spaarke-action-engine-r1` owner (flagged on HIGH tier if Action Engine work touches workspace/finance)
+    </step>
+    <step order="5">Write `projects/sdap-bff.api-test-suite-repair/priority-order.md` with the 4 tier sections + tables + a header explaining the FR-20 start gate + the §4.7 "coordinate, don't lock" principle + an "Owner Outreach Status" section listing the 3 sibling projects with current status (TBD / contacted / signed-off / no in-flight overlap).</step>
+    <step order="6">Add explicit prompt to owner at file top: "Owner action required: contact 3 sibling-project owners (Action Engine, Insights Phase 2, Communications) and fill in the sign-off cells. If sibling-project owner does not respond within 1 business day per spec.md Assumptions, default priority-order to 'active areas last' without sign-off."</step>
+    <step order="7">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with completion + file path + the 3 sibling-owner sign-off slots awaiting owner action.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">baseline TRX, design.md, project CLAUDE.md</tool>
+    <tool name="Write">priority-order.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/priority-order.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">priority-order.md exists at `projects/sdap-bff.api-test-suite-repair/priority-order.md`</criterion>
+    <criterion testable="true">File contains 4 tier sections (HIGH, MEDIUM, INTEGRATION, LOW) with per-area annotations</criterion>
+    <criterion testable="true">File includes FR-20 LOW-tier start-gate note ("after HIGH + MEDIUM 50% complete")</criterion>
+    <criterion testable="true">3 sibling projects explicitly named in "Owner Outreach Status" section (Action Engine, Insights Phase 2, Communications)</criterion>
+    <criterion testable="true">Each in-scope area row has Owner+Sign-off-date cells (TBD acceptable; will be filled by owner outreach)</criterion>
+    <criterion testable="true">Owner prompt at file top calls out the outreach action item</criterion>
+  </acceptance-criteria>
+</task>

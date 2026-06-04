@@ -19,28 +19,37 @@ namespace Sprk.Bff.Api.Tests.Services.Communication;
 /// <summary>
 /// Tests that MapAssociationFields correctly maps all 8 entity types
 /// to their corresponding Dataverse regarding lookup fields and denormalized fields.
-/// Tests are exercised through SendAsync by capturing the Entity passed to IDataverseService.CreateAsync.
+/// Tests are exercised through SendAsync by capturing the Entity passed to IGenericEntityService.CreateAsync.
 /// </summary>
+/// <remarks>
+/// 2026-05-31 (task 011 / P1.A2 verify+repair): production now writes the sprk_communication
+/// record via IGenericEntityService.CreateAsync (not IDataverseService.CreateAsync — the writer
+/// was migrated as part of the ISP segregation of IDataverseService into IGenericEntityService +
+/// ICommunicationDataverseService + IDocumentDataverseService). Test infra now captures on
+/// IGenericEntityService to match. Sibling-coordination note: this change is test-level only;
+/// production signature in `Services/Communication/CommunicationService.cs` is unchanged by this task.
+/// </remarks>
+[Trait("status", "repaired")]
 public class AssociationMappingTests
 {
     #region Test Infrastructure
 
     private readonly Mock<IGraphClientFactory> _graphClientFactoryMock;
-    private readonly Mock<IDataverseService> _dataverseServiceMock;
+    private readonly Mock<IGenericEntityService> _genericEntityServiceMock;
     private readonly Mock<ILogger<CommunicationService>> _loggerMock;
     private DataverseEntity? _capturedEntity;
 
     public AssociationMappingTests()
     {
         _graphClientFactoryMock = new Mock<IGraphClientFactory>();
-        _dataverseServiceMock = new Mock<IDataverseService>();
+        _genericEntityServiceMock = new Mock<IGenericEntityService>();
         _loggerMock = new Mock<ILogger<CommunicationService>>();
 
         _graphClientFactoryMock
             .Setup(f => f.ForApp())
             .Returns(CreateMockGraphClient());
 
-        _dataverseServiceMock
+        _genericEntityServiceMock
             .Setup(ds => ds.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
             .Callback<DataverseEntity, CancellationToken>((entity, _) => _capturedEntity = entity)
             .ReturnsAsync(Guid.NewGuid());
@@ -86,8 +95,9 @@ public class AssociationMappingTests
         return new CommunicationService(
             _graphClientFactoryMock.Object,
             senderValidator,
-            _dataverseServiceMock.Object,
-            _dataverseServiceMock.Object,
+            Mock.Of<ICommunicationDataverseService>(),
+            _genericEntityServiceMock.Object,
+            Mock.Of<IDocumentDataverseService>(),
             emlGenerationService,
             speFileStore,
             null!, // CommunicationAccountService — not tested here

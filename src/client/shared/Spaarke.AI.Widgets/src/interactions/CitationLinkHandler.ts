@@ -96,10 +96,7 @@ export interface CitationClickPayload {
  *   selectionRef: 'char:1024-1200',
  * });
  */
-export function handleCitationClick(
-  dispatch: DispatchPaneEvent,
-  payload: CitationClickPayload,
-): void {
+export function handleCitationClick(dispatch: DispatchPaneEvent, payload: CitationClickPayload): void {
   dispatch('context', {
     type: 'context_highlight',
     citationId: payload.citationId,

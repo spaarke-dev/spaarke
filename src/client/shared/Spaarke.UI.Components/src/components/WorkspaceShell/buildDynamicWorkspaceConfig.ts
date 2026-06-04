@@ -19,7 +19,7 @@ import type {
   SectionConfig,
   SectionRegistration,
   SectionFactoryContext,
-} from "./types";
+} from './types';
 
 // ---------------------------------------------------------------------------
 // Layout JSON shape (stored in sprk_sectionsjson Dataverse column)
@@ -38,7 +38,7 @@ export interface LayoutJsonRow {
 }
 
 /** Record ownership scope for workspace queries. */
-export type WorkspaceScope = "my" | "all";
+export type WorkspaceScope = 'my' | 'all';
 
 /** Top-level layout JSON persisted in Dataverse. */
 export interface LayoutJson {
@@ -75,19 +75,19 @@ export const SYSTEM_DEFAULT_LAYOUT_JSON: LayoutJson = {
   schemaVersion: 1,
   rows: [
     {
-      id: "row-1",
-      columns: "1fr 1fr",
-      sections: ["get-started", "quick-summary"],
+      id: 'row-1',
+      columns: '1fr 1fr',
+      sections: ['get-started', 'quick-summary'],
     },
     {
-      id: "row-2",
-      columns: "1fr",
-      sections: ["latest-updates"],
+      id: 'row-2',
+      columns: '1fr',
+      sections: ['latest-updates'],
     },
     {
-      id: "row-3",
-      columns: "1fr 1fr",
-      sections: ["todo", "documents"],
+      id: 'row-3',
+      columns: '1fr 1fr',
+      sections: ['todo', 'documents'],
     },
   ],
 };
@@ -96,11 +96,8 @@ export const SYSTEM_DEFAULT_LAYOUT_JSON: LayoutJson = {
 // Helper: look up a registration by ID
 // ---------------------------------------------------------------------------
 
-function findRegistration(
-  id: string,
-  registry: readonly SectionRegistration[],
-): SectionRegistration | undefined {
-  return registry.find((r) => r.id === id);
+function findRegistration(id: string, registry: readonly SectionRegistration[]): SectionRegistration | undefined {
+  return registry.find(r => r.id === id);
 }
 
 // ---------------------------------------------------------------------------
@@ -118,14 +115,14 @@ function findRegistration(
 export function buildDynamicWorkspaceConfig(
   layoutJson: LayoutJson,
   registry: readonly SectionRegistration[],
-  context: SectionFactoryContext,
+  context: SectionFactoryContext
 ): WorkspaceConfig {
   // -------------------------------------------------------------------------
   // Step 0: Inject scope from layout JSON into the factory context
   // -------------------------------------------------------------------------
   const effectiveContext: SectionFactoryContext = {
     ...context,
-    scope: layoutJson.scope ?? "my",
+    scope: layoutJson.scope ?? 'my',
   };
 
   // -------------------------------------------------------------------------
@@ -134,13 +131,9 @@ export function buildDynamicWorkspaceConfig(
   if (layoutJson.schemaVersion !== SUPPORTED_SCHEMA_VERSION) {
     console.warn(
       `[buildDynamicWorkspaceConfig] Unsupported schemaVersion ${layoutJson.schemaVersion} ` +
-        `(expected ${SUPPORTED_SCHEMA_VERSION}). Falling back to system default layout.`,
+        `(expected ${SUPPORTED_SCHEMA_VERSION}). Falling back to system default layout.`
     );
-    return buildDynamicWorkspaceConfig(
-      SYSTEM_DEFAULT_LAYOUT_JSON,
-      registry,
-      context,
-    );
+    return buildDynamicWorkspaceConfig(SYSTEM_DEFAULT_LAYOUT_JSON, registry, context);
   }
 
   // -------------------------------------------------------------------------
@@ -164,9 +157,7 @@ export function buildDynamicWorkspaceConfig(
       const registration = findRegistration(sectionId, registry);
 
       if (!registration) {
-        console.warn(
-          `Unknown section ID: ${sectionId}, skipping`,
-        );
+        console.warn(`Unknown section ID: ${sectionId}, skipping`);
         continue;
       }
 
@@ -219,7 +210,7 @@ export function buildDynamicWorkspaceConfig(
         rows.push({
           id: `${jsonRow.id}-overflow-${i + 1}`,
           sectionIds: [overflow[i]],
-          gridTemplateColumns: "1fr",
+          gridTemplateColumns: '1fr',
         });
       }
     }
@@ -229,7 +220,7 @@ export function buildDynamicWorkspaceConfig(
   // Step 3: Return the complete WorkspaceConfig
   // -------------------------------------------------------------------------
   return {
-    layout: "rows",
+    layout: 'rows',
     rows,
     sections: allSections,
   };

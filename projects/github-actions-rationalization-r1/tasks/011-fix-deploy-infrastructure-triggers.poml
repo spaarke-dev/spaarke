@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Fix deploy-infrastructure.yml ghost triggers (P3)</title>
+    <phase>1: Fix Broken Workflows</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>none</blocks>
+    <tags>ci-cd, github-actions, devops, workflow-fix</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Workflow YAML edit + investigation; FR-04 acceptance criterion; no .cs/.ts modified</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Investigate and fix `deploy-infrastructure.yml` so it does NOT trigger runs on non-matching branches. Per design §2.1 P3: workflow declares triggers limited to `pull_request` + `push to master` + `workflow_dispatch` with path filters, but ghost runs appear on every non-master push with `event: "push"` and `jobs:[]` — same loader-failure pattern as P1. Hypothesis: a YAML loader bug (similar to PR #314's duplicate-key); needs strict review.
+  </prompt>
+
+  <role>
+    SPAARKE platform DevOps engineer. Comfortable with strict YAML review, GitHub Actions trigger semantics, and loader-failure patterns (P1 fix in PR #314).
+  </role>
+
+  <goal>
+    `deploy-infrastructure.yml` is fixed so that pushing a commit to a feature branch with no `infrastructure/bicep/**` changes produces zero `deploy-infrastructure.yml` runs. Fix is &lt;50% replacement OR delete-with-rationale.
+  </goal>
+
+  <context>
+    <background>
+      Per design §2.1 P3: ghost-trigger pattern — workflow appears in run history on non-matching pushes with empty `jobs:[]`. Severity HIGH; mechanism unclear; needs investigation. Likely a loader-failure (silently malformed YAML that fails to parse triggers) similar to PR #314's duplicate-key bug.
+    </background>
+    <relevant-files>
+      <file>.github/workflows/deploy-infrastructure.yml</file>
+      <file>projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-04: Feature-branch push with no `infrastructure/bicep/**` changes produces zero runs</constraint>
+    <constraint source="spec">NFR-02: &lt;50% line replacement OR delete-with-rationale</constraint>
+    <constraint source="spec">NFR-04: Deletion via `git rm`, not comment-out</constraint>
+    <constraint source="spec">NFR-07: `<repair-not-rewrite>true</repair-not-rewrite>`</constraint>
+    <constraint source="project">MUST run `actionlint` locally BEFORE pushing</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+      <file>projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `deploy-infrastructure.yml` end-to-end. Pay strict attention to YAML structure (indentation, duplicate keys, list vs map ambiguity). Check the `on:` clause for `pull_request`, `push`, `workflow_dispatch`.</step>
+    <step order="2">Run `actionlint .github/workflows/deploy-infrastructure.yml`. Note any warnings even if not errors. Run a strict YAML linter: `yamllint -d "{rules: {key-duplicates: enable}}" .github/workflows/deploy-infrastructure.yml`.</step>
+    <step order="3">Inspect run history: `gh run list --workflow=deploy-infrastructure.yml --limit 30 --json conclusion,event,headBranch,jobs`. Identify ghost-trigger runs (event=push, headBranch≠master, jobs=[]).</step>
+    <step order="4">Identify root cause:
+      - **Loader-failure pattern**: malformed YAML → GitHub still creates a run but jobs don't load. Look for duplicate keys, bad indentation, missing `paths:` under correct trigger.
+      - **Trigger misconfiguration**: missing branch filter on `push:`, or path filter on `push:` rather than `pull_request:`.
+    </step>
+    <step order="5">Apply minimal fix using Edit tool (&lt;50% replacement). Verify with `actionlint`. Document the root cause in commit message.</step>
+    <step order="6">Push to a test branch with no `infrastructure/bicep/**` changes. Confirm `gh run list --workflow=deploy-infrastructure.yml` shows zero new runs for the test push.</step>
+    <step order="7">Merge fix commit. Commit message: `fix(ci): eliminate deploy-infrastructure ghost triggers (FR-04)`.</step>
+    <step order="8">Update TASK-INDEX.md: change task 011 status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="actionlint">Validate workflow YAML</tool>
+    <tool name="yamllint">Strict YAML duplicate-key check</tool>
+    <tool name="gh">Inspect run history</tool>
+    <tool name="Read">Read workflow file</tool>
+    <tool name="Edit">Apply minimal fix</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.github/workflows/deploy-infrastructure.yml (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">After fix, pushing to a feature branch with no `infrastructure/bicep/**` changes produces 0 `deploy-infrastructure.yml` runs (FR-04).</criterion>
+    <criterion testable="true">`actionlint` returns 0 errors on the fixed file.</criterion>
+    <criterion testable="true">Root cause documented in commit message.</criterion>
+    <criterion testable="true">TASK-INDEX.md task 011 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The "0s loader-failure with empty jobs" pattern is the diagnostic signature of a YAML parse problem. If yamllint shows no duplicate keys but ghost triggers persist, check whether `paths:` is correctly nested under `pull_request:` (not `push:`) — push filters paths differently from pull_request and the spec wants only matching-path triggers to fire.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: STANDARD. Parallel-safe with 010 and 012.</protocol>
+  </execution>
+</task>

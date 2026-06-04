@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B-2: Fix @spaarke/ai-widgets tsc cross-rootDir error; CI gates tsc --noEmit</title>
+    <phase>Phase 6 — Build hygiene cluster</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, typescript, refactoring, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Config fix in tsconfig.json (no .ts/.tsx code modification) plus CI gate addition; need tests/verification. STANDARD per Step 3.5.5 (creates/modifies config files; no .cs/.ts/.tsx code).</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec NFR-05 / plan B-2: fix the `@spaarke/ai-widgets` tsc cross-rootDir error
+    surfaced by the current `rootDir: "./src"` + path-mapped imports from sibling packages
+    (`@spaarke/ai-outputs`, `@spaarke/ui-components`, `@spaarke/legal-workspace`). Choose
+    between (a) `composite: true` TypeScript project references against the sibling packages,
+    OR (b) widening `rootDir` to encompass the sibling sources. Document the choice + tradeoff
+    in the task notes. CI MUST gate `tsc --noEmit` on the package going forward.
+  </prompt>
+
+  <role>
+    SPAARKE TypeScript build engineer. Familiar with TS project references, path mappings,
+    rootDir semantics. Bias toward the smallest-change-that-works that scales to future
+    shared packages (composite refs preferred for true monorepo hygiene, but assess current
+    build-tool compatibility — the libs are bundled via Vite/tsc per package, not a unified
+    workspace build).
+  </role>
+
+  <goal>
+    `tsc --noEmit` runs clean on `src/client/shared/Spaarke.AI.Widgets/` with no cross-rootDir
+    errors. The fix is documented (which option chosen, why) in
+    `projects/spaarke-ai-platform-unification-r4/notes/b2-tsc-rootdir-decision.md`. CI workflow
+    (`.github/workflows/sdap-ci.yml` or wherever the TS check lives) gates the package's
+    `tsc --noEmit` so future drift fails fast. NFR-05 acceptance satisfied.
+  </goal>
+
+  <context>
+    <background>
+      Per backlog B-2: `Spaarke.AI.Widgets/tsconfig.json` declares `rootDir: "./src"` plus
+      `paths` that map to sibling packages' source files (e.g. `@spaarke/ai-outputs`
+      → `../Spaarke.AI.Outputs/src/index.ts`). TS errors with "File is outside of project's
+      rootDir" when a path-mapped import resolves to a sibling. The fix must be holistic
+      against the package family (Spaarke.AI.Outputs, Spaarke.UI.Components, LegalWorkspace,
+      Spaarke.AI.Context, Spaarke.Events.Components, Spaarke.Auth, Spaarke.SdapClient). R-5
+      in the risk register flags this may surface previously-hidden type errors across
+      multiple packages — budget may stretch from ~3h to ~6h. Allocate buffer; fix discovered
+      type errors in dedicated commits.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/tsconfig.json</file>
+      <file>src/client/shared/Spaarke.AI.Outputs/tsconfig.json</file>
+      <file>src/client/shared/Spaarke.UI.Components/tsconfig.json</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/package.json</file>
+      <file>.github/workflows/sdap-ci.yml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Fix MUST NOT change runtime behavior of `@spaarke/ai-widgets` consumers (SpaarkeAi, LegalWorkspace). This is a typecheck-config fix only.</constraint>
+    <constraint source="project">No silent `// @ts-ignore` / `// @ts-nocheck` to mask the cross-rootDir errors. Address them via tsconfig topology, not type-suppression.</constraint>
+    <constraint source="project">If `composite: true` is chosen, sibling packages MUST be re-evaluated for declaration emission compatibility (some may emit declarations to `dist/`; references require consistent emit settings).</constraint>
+    <constraint source="ADR-022">React 19 only for Code Pages; no React 16 fallbacks. (Inherited — typecheck fix MUST NOT introduce conditional React compat layers.)</constraint>
+    <constraint source="project">CI gate addition MUST be a separate step from existing build steps so a tsc-only failure is distinguishable in CI logs.</constraint>
+    <constraint source="project">If type errors surface beyond cross-rootDir (e.g., previously-hidden import-shape mismatches), fix each in its own commit — do NOT bundle with the rootDir fix commit.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.AI.Widgets/tsconfig.json</file>
+      <file>src/client/shared/Spaarke.AI.Outputs/tsconfig.json</file>
+      <file>src/client/shared/Spaarke.UI.Components/tsconfig.json</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/package.json</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Reproduce error">Run `npx tsc --noEmit -p src/client/shared/Spaarke.AI.Widgets/tsconfig.json`. Capture the exact error message(s) — file paths + rootDir violations. This is your baseline.</step>
+    <step order="2" name="Survey sibling tsconfigs">Read tsconfig.json for each path-mapped sibling (Spaarke.AI.Outputs, Spaarke.UI.Components, LegalWorkspace). Note declaration emit settings, composite flag presence, outDir. This determines whether `composite: true` references are viable.</step>
+    <step order="3" name="Decide approach">Choose Option A (composite refs) or Option B (widen rootDir + multi-package include). Write rationale to `projects/spaarke-ai-platform-unification-r4/notes/b2-tsc-rootdir-decision.md`: tradeoffs, downstream impact, scaling property. Operator-visible decision record.</step>
+    <step order="4" name="Apply fix">Modify `Spaarke.AI.Widgets/tsconfig.json` per chosen approach. If Option A: add `references: [{ "path": "../Spaarke.AI.Outputs" }, ...]` and ensure sibling tsconfigs declare `composite: true` + emit consistent declarations. If Option B: widen `rootDir` (or remove it) and ensure `include` covers only what's needed.</step>
+    <step order="5" name="Iterate on emergent errors">Re-run `tsc --noEmit`. If the fix surfaces previously-hidden type errors (per R-5), fix each in a separate commit. Do NOT mask via @ts-ignore.</step>
+    <step order="6" name="Add CI gate">Edit `.github/workflows/sdap-ci.yml` (or applicable workflow): add a job step `npm --prefix src/client/shared/Spaarke.AI.Widgets run typecheck` (or equivalent `npx tsc --noEmit`). Name the step "Spaarke.AI.Widgets — tsc --noEmit".</step>
+    <step order="7" name="Verify build downstream">Run `npm run build` on Spaarke.AI.Widgets. Run a Vite build on a consumer (`src/solutions/SpaarkeAi/` or any sibling that imports `@spaarke/ai-widgets`). Confirm no behavioral regression at build time.</step>
+    <step order="8" name="Update TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 061 from 🔲 → ✅ completed.</step>
+    <step order="9" name="Document deviations">If actual effort exceeded the ~3h estimate (per R-5), document why in `projects/spaarke-ai-platform-unification-r4/notes/` for R4 lessons-learned. Note any carry-over type errors discovered but deferred to B-11.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">npx tsc, npm run build</tool>
+    <tool name="Read">Inspect tsconfig.json siblings + package.json + CI workflow</tool>
+    <tool name="Edit">Modify tsconfig + CI workflow</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/client/shared/Spaarke.AI.Widgets/tsconfig.json (modified)</output>
+    <output type="config">.github/workflows/sdap-ci.yml (CI gate added)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/b2-tsc-rootdir-decision.md (decision record)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md (status flip)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the tsconfig fix, When `npx tsc --noEmit -p src/client/shared/Spaarke.AI.Widgets/tsconfig.json` runs, Then it exits 0 with no cross-rootDir errors.</criterion>
+    <criterion testable="true">Given the CI gate addition, When CI runs on a PR that introduces a type error in `Spaarke.AI.Widgets`, Then the workflow step "Spaarke.AI.Widgets — tsc --noEmit" fails.</criterion>
+    <criterion testable="true">Given the decision record, When `notes/b2-tsc-rootdir-decision.md` is read, Then it states which option (A composite refs or B widened rootDir) was chosen and the tradeoff rationale.</criterion>
+    <criterion testable="true">Given a fresh build, When `npm run build` runs on consumers of `@spaarke/ai-widgets`, Then no behavioral regression appears.</criterion>
+    <criterion testable="true">Given task 061 is being executed, When this task completes, Then TASK-INDEX.md shows task 061 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Risk R-5 (plan.original.md §8): fix may surface previously-hidden type errors across packages. Budget may stretch from ~3h → ~6h. Cluster discovered type errors as separate commits within this task — but if scope balloons (e.g., 10+ new errors), record carry-overs to B-11 (task 067) and complete the rootDir fix in isolation. The CI gate is non-negotiable per NFR-05 acceptance — without it, drift will reappear.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply STANDARD rigor protocol (no Step 9.5 quality gates; checkpointing every 3 steps; current-task.md tracking). R-5 buffer: if effort blows past 3h, checkpoint and document scope decisions.</protocol>
+  </execution>
+</task>
