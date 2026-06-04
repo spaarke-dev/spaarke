@@ -74,6 +74,8 @@ public class InsightsOrchestratorTests
         => new(
             _classifierMock.Object,
             _playbookNameMap,
+            new TestOptionsMonitor<Sprk.Bff.Api.Configuration.AssistantCitationHrefOptions>(
+                new Sprk.Bff.Api.Configuration.AssistantCitationHrefOptions()),
             new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
             NullLogger<AssistantToolCallHandler>.Instance);
 

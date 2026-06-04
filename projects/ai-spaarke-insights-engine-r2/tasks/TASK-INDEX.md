@@ -100,10 +100,10 @@
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [050](050-streaming-and-citation-spike.poml) | F1 | Spike: streaming surface + citation ID flow validation | 🔲 | 0.5d | ❌ | 090 |
-| [051](051-sse-streaming-endpoint.poml) | F2 | SSE streaming on POST /api/insights/assistant/query | 🔲 | 3d | ✅ | 050 |
-| [052](052-citations-href-projection.poml) | F3 | citations[].href projection + URL resolution | 🔲 | 1d | ✅ | 050 |
-| [053](053-contract-v1.1-docs.poml) | F4 | Contract v1.1 docs + R5 coordination update | 🔲 | 0.5d | ❌ | 051, 052 |
+| [050](050-streaming-and-citation-spike.poml) | F1 | Spike: streaming surface + citation ID flow validation | ✅ | 0.5d | ❌ | — (090 dep dropped 2026-06-04 by owner) |
+| [051](051-sse-streaming-endpoint.poml) | F2 | SSE streaming on POST /api/insights/assistant/query | ✅ | 3d | ✅ | 050 |
+| [052](052-citations-href-projection.poml) | F3 | citations[].href projection + URL resolution | ✅ | 1d | ✅ | 050 |
+| [053](053-contract-v1.1-docs.poml) | F4 | Contract v1.1 docs + R5 coordination update | ✅ | 0.5d | ❌ | 051, 052 |
 
 **Wave F total**: 4 tasks, ~4.5 days, ~4 days end-to-end with parallel 051 + 052.
 

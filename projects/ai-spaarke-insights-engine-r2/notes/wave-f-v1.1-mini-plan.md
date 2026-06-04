@@ -48,7 +48,7 @@ Task 052 acceptance criteria branches based on F1 output. F1's recommendation is
 
 **Recommendation**: ACCEPT R5's v1.1 request with minor scoping adjustments. Effort estimate aligned at ~4.5 days vs R5's 3–4 day estimate (extra 0.5d for spike + 1d realistic SSE effort).
 
-**Sequencing**: Wave F runs AFTER task 090 (Phase 1.5 wrap-up). The 090 task captures Phase 1.5 lessons-learned cleanly; Wave F is an additive follow-on, not a replacement.
+**Sequencing**: ~~Wave F runs AFTER task 090~~ **REVERSED 2026-06-04 late by owner**: Wave F runs IMMEDIATELY; task 090 (Phase 1.5 wrap-up) is paused and will run after Wave F completes. Rationale: task 090 is a documentation wrap-up that doesn't gate any code work; Wave F has timeline pressure (R5 consumption); 090 can capture v1.0 + v1.1 lessons together when both ship.
 
 **Bundling decision**: Wave F does NOT bundle the pre-existing `NullInsightsAi` asymmetric-registration warning (flagged by Wave E adr-check). That's a separate concern; keep Wave F scope tight to honor R5's "minor version, additive" framing.
 

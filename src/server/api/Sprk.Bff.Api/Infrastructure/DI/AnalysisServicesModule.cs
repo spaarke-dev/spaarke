@@ -80,6 +80,12 @@ public static class AnalysisServicesModule
             services.AddScoped<Sprk.Bff.Api.Services.Ai.Insights.AssistantToolCallHandler>();
             Console.WriteLine("\u2713 Spaarke Assistant tool-call handler enabled (Wave E3 task 042, FR-05)");
 
+            // Wave F task 052 \u2014 citation Href projection options for the Assistant
+            // tool-call handler. BffBaseUrl is optional (unconfigured \u2192 Href = null).
+            services.AddOptions<Sprk.Bff.Api.Configuration.AssistantCitationHrefOptions>()
+                .BindConfiguration(Sprk.Bff.Api.Configuration.AssistantCitationHrefOptions.SectionName);
+            Console.WriteLine("\u2713 Spaarke Assistant citation Href options bound (Wave F task 052, contract v1.1)");
+
             Console.WriteLine("\u2713 Analysis services enabled");
         }
         else if (!documentIntelligenceEnabled)

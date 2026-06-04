@@ -1,11 +1,11 @@
 ---
 title: Insights Engine — Assistant Integration Brief
 audience: spaarke-ai-platform-unification-r5 (consuming side)
-authoring-project: ai-spaarke-insights-engine-r2 (BFF-side; Wave E3 task 042 sub-task C)
-status: AUTHORED — pending Assistant team contract review (sub-task A.5)
-contract-version: 1.0 (Phase 1.5 read-only)
+authoring-project: ai-spaarke-insights-engine-r2 (BFF-side; Wave E3 task 042 sub-task C; v1.1 amendment via Wave F task 053)
+status: AUTHORED — pending Assistant team contract review (sub-task A.5); v1.1 updates applied 2026-06-03
+contract-version: 1.1 (Phase 1.5 read-only + SSE streaming + clickable citations)
 created: 2026-06-03
-last-updated: 2026-06-03
+last-updated: 2026-06-03 (Wave F v1.1 amendment — SSE + citations[].href)
 related-docs:
   - notes/insights-r2-coordination.md (R5↔r2 coordination snapshot)
   - notes/ground-truth-spaarkeai-state.md (SpaarkeAI state baseline)
@@ -23,7 +23,7 @@ trigger-phrases:
 
 ## 0. TL;DR (one-paragraph)
 
-The Spaarke Insights Engine (project `ai-spaarke-insights-engine-r2`, Phase 1.5) shipped a single BFF endpoint built specifically for the Assistant to call as a tool: `POST /api/insights/assistant/query`. The endpoint accepts a natural-language `query` + entity `subject` (matter/project/invoice) and returns a uniform response carrying either a structured playbook result OR RAG-style cited prose. The BFF makes the playbook-vs-RAG routing decision internally via an LLM intent classifier (or honors an optional `forceMode` override from the Assistant). The R5 project's job is everything Assistant-side: tool registration, subject resolution from chat context, HTTP client, two-path response renderer, error handling per the contract's stable `errorCode` matrix, and telemetry/correlation propagation. **Phase 1.5 is read-only and single-shot — no streaming, no bidirectional clarification, no multi-turn state on the BFF.**
+The Spaarke Insights Engine (project `ai-spaarke-insights-engine-r2`, Phase 1.5) shipped a single BFF endpoint built specifically for the Assistant to call as a tool: `POST /api/insights/assistant/query`. The endpoint accepts a natural-language `query` + entity `subject` (matter/project/invoice) and returns a uniform response carrying either a structured playbook result OR RAG-style cited prose. The BFF makes the playbook-vs-RAG routing decision internally via an LLM intent classifier (or honors an optional `forceMode` override from the Assistant). The R5 project's job is everything Assistant-side: tool registration, subject resolution from chat context, HTTP client, two-path response renderer, error handling per the contract's stable `errorCode` matrix, and telemetry/correlation propagation. **Phase 1.5 read-only contract v1.1**: the endpoint now (as of 2026-06-03 / Wave F) supports **opt-in SSE streaming** via `Accept: text/event-stream` (single-shot JSON remains the default — fully back-compatible) and emits **clickable citation `href` URLs** pointing to existing `/api/documents/{id}/preview`. No bidirectional clarification and no multi-turn state on the BFF — those remain Phase 2 deferrals.
 
 ---
 
@@ -108,7 +108,21 @@ The Assistant SHOULD send `forceMode` when it has high-confidence intent signal 
 
 Same catalog as `/api/insights/search`. Unknown schemes or malformed Guids → 400 with `errorCode: subject.invalid`. The Assistant MUST resolve the current entity from chat context (e.g., active matter ID from HostContext) and format it as `matter:<guid>` / `project:<guid>` / `invoice:<guid>` before calling.
 
-### 3.4 Sample request
+### 3.4 Accept-header negotiation (NEW in v1.1)
+
+The Assistant opts in to Server-Sent Events streaming by setting `Accept: text/event-stream` on the request. Omitting the header (or sending `Accept: application/json` / `Accept: */*`) returns the v1.0 single-shot JSON response unchanged.
+
+| Request `Accept` | BFF response shape |
+|---|---|
+| `application/json` OR absent OR `*/*` | 200 OK, `Content-Type: application/json`, single-shot `AssistantQueryFacadeResult` (§4) |
+| `text/event-stream` | 200 OK, `Content-Type: text/event-stream; charset=utf-8`, stream of `AssistantQueryChunk` events ending with `data: [DONE]\n\n` |
+| `text/event-stream` + kill-switch off | 503 `application/problem+json` (BEFORE the stream body opens; no SSE bytes written) |
+
+R5 uses the streaming variant for chat-pane experiences where progressive rendering matters (RAG synthesis token streaming + playbook node-progress indicators). R5 uses single-shot for any tool-call context that doesn't need progressive UI.
+
+See §4 below for the SSE event schema. Full canonical schema lives in `design-e3-tool-call-contract.md` §3.5.
+
+### 3.5 Sample request
 
 ```json
 {
@@ -136,7 +150,8 @@ Same catalog as `/api/insights/search`. Unknown schemes or malformed Guids → 4
       "source": "string (document/observation display name)",
       "excerpt": "string (snippet, ≤280 chars)",
       "observationId": "string (optional GUID)",
-      "chunkId": "string (chunk identifier)"
+      "chunkId": "string (chunk identifier)",
+      "href": "string (optional, v1.1+) — preview URL or null"
     }
   ],
   "confidence": 0.0,
@@ -221,14 +236,111 @@ The Assistant SHOULD surface `SuggestedActions` to the user. Phase 1.5 they're p
   "path": "rag",
   "answer": "The closing conditions include [1] regulatory approval, [2] a tail-policy update, and [3] employee retention agreements.",
   "citations": [
-    { "n": 1, "source": "Closing Memo v3.docx", "excerpt": "Closing subject to regulatory approval...", "observationId": "doc-B", "chunkId": "chunk-2" },
-    { "n": 2, "source": "Closing Memo v3.docx", "excerpt": "Seller to update tail policy...", "observationId": "doc-B", "chunkId": "chunk-5" },
-    { "n": 3, "source": "Acme APA.pdf", "excerpt": "Key employees to sign retention agreements...", "observationId": "doc-A", "chunkId": "chunk-9" }
+    { "n": 1, "source": "Closing Memo v3.docx", "excerpt": "Closing subject to regulatory approval...", "observationId": "doc-B", "chunkId": "chunk-2", "href": "https://spaarke-bff-dev.azurewebsites.net/api/documents/<doc-B>/preview" },
+    { "n": 2, "source": "Closing Memo v3.docx", "excerpt": "Seller to update tail policy...", "observationId": "doc-B", "chunkId": "chunk-5", "href": "https://spaarke-bff-dev.azurewebsites.net/api/documents/<doc-B>/preview" },
+    { "n": 3, "source": "Acme APA.pdf", "excerpt": "Key employees to sign retention agreements...", "observationId": "doc-A", "chunkId": "chunk-9", "href": "https://spaarke-bff-dev.azurewebsites.net/api/documents/<doc-A>/preview" }
   ],
   "confidence": 0.81,
   "playbookId": null,
   "structuredResult": { "kind": "observation", "envelope": { "results": [/* ... */], "summary": "..." } },
   "diagnostics": { "intentSource": "forceMode", "classifierBelowThreshold": false, "elapsedMs": 943, "cacheHit": true }
+}
+```
+
+### 4.7 SSE event schema (NEW in v1.1)
+
+When the request includes `Accept: text/event-stream`, the BFF emits a stream of `AssistantQueryChunk` events terminated by `data: [DONE]\n\n`. Event types mirror R5's existing `AnalysisChunk` shape so the R5 chat agent's SSE parser handles both without protocol divergence.
+
+**Chunk payload shape**:
+
+```json
+{
+  "type": "progress | delta | result | error",
+  "step":     "<string?, set on progress>",
+  "path":     "<string?, set on delta or progress.path>",
+  "content":  "<string?, set on delta token or progress detail>",
+  "sequence": <int?, set on delta>,
+  "result":   { /* AssistantQueryFacadeResult — set on result chunk */ },
+  "error":    { "errorCode": "<string>", "detail": "<string>" }
+}
+```
+
+**RAG path event sequence** (illustrative):
+
+```
+event: progress    data: {"type":"progress","step":"classifier_started"}
+event: progress    data: {"type":"progress","step":"classifier_complete","path":"rag"}
+event: progress    data: {"type":"progress","step":"rag_search_started"}
+event: progress    data: {"type":"progress","step":"rag_search_complete","content":"5"}
+event: progress    data: {"type":"progress","step":"llm_synthesis_started"}
+event: delta       data: {"type":"delta","path":"answer","content":"Three ","sequence":1}
+event: delta       data: {"type":"delta","path":"answer","content":"risk ","sequence":2}
+event: delta       data: {"type":"delta","path":"answer","content":"themes...","sequence":3}
+event: result      data: {"type":"result","result":{ /* full single-shot AssistantQueryFacadeResult */ }}
+data: [DONE]
+```
+
+**Playbook path event sequence** (coarse-grained — one `progress` per major node):
+
+```
+event: progress    data: {"type":"progress","step":"classifier_complete","path":"playbook"}
+event: progress    data: {"type":"progress","step":"playbook_started","content":"predict-matter-cost@v1"}
+event: progress    data: {"type":"progress","step":"node_complete","content":"resolveLiveFacts"}
+event: progress    data: {"type":"progress","step":"node_complete","content":"retrieveCohortObservations"}
+event: progress    data: {"type":"progress","step":"node_complete","content":"retrievePrecedents"}
+event: progress    data: {"type":"progress","step":"node_complete","content":"checkSufficiency"}
+event: progress    data: {"type":"progress","step":"node_complete","content":"synthesize"}
+event: progress    data: {"type":"progress","step":"node_complete","content":"groundCitations"}
+event: result      data: {"type":"result","result":{ /* full AssistantQueryFacadeResult */ }}
+data: [DONE]
+```
+
+**Cache-hit short-circuit** (D-P13 playbook cache):
+
+```
+event: progress    data: {"type":"progress","step":"cache_hit"}
+event: result      data: {"type":"result","result":{ /* cached AssistantQueryFacadeResult */ }}
+data: [DONE]
+```
+
+**Telemetry headers** (`X-Insights-Path`, `X-Insights-Intent-Source`, `X-Insights-Elapsed-Ms`, `X-Insights-Cache`, `X-Insights-Hit-Count`) are written BEFORE the SSE body opens — readable by R5 after `HEADERS_RECEIVED` regardless of streaming or single-shot mode.
+
+### 4.8 `citations[].href` semantics (NEW in v1.1)
+
+Each citation MAY carry an `href` URL string pointing to a preview of the source document. R5 renders it as an iframe-target / clickable link when non-null, falling back to display-name-only when `null`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `citations[].href` | `string?` | Absolute URL OR explicit `null`. JSON key is lowercase `href`. |
+
+**URL pattern**:
+
+```
+{Insights:CitationHref:BffBaseUrl}/api/documents/{sprk_document-guid}/preview
+```
+
+**Per-path sourcing**:
+
+| Path | `sprk_document-guid` source | Notes |
+|---|---|---|
+| **RAG** | `citations[].observationId` (which is the sprk_document Guid per the existing v1.0 contract) | Zero plumbing — Guid was already on the wire in v1.0 |
+| **Playbook** | Parsed from `EvidenceRef.Ref` when `EvidenceRef.RefType == "document"` AND `Ref` is a bare Guid | `spe://drive/X/item/Y` form deferred to v1.2 (emits `href: null` for that subset) |
+| **Other evidence types / orphan chunks** | n/a | `href: null` |
+
+**Authorization** (AIPU2-027): the `/api/documents/{id}/preview` endpoint enforces ACL via the existing OBO flow — when R5 renders the citation as an iframe, the browser sends the user's BFF session cookie, and Graph+Dataverse enforce access naturally. Inaccessible documents return 403/404 at click-time (handled by R5 as an opaque error). **No URL signing, no token embedding.**
+
+**Configuration**: the BFF requires `Insights:CitationHref:BffBaseUrl` to be set per environment (Dev / Staging / Production). When unset, the projection emits `href: null` for ALL citations — safe fallback, no broken URLs.
+
+**Sample with href**:
+
+```json
+{
+  "n": 1,
+  "source": "Acme APA.pdf",
+  "excerpt": "Indemnity capped at $5M...",
+  "observationId": "abc12345-1234-5678-9abc-123456789abc",
+  "chunkId": "chunk-A-7",
+  "href": "https://spaarke-bff-dev.azurewebsites.net/api/documents/abc12345-1234-5678-9abc-123456789abc/preview"
 }
 ```
 
@@ -274,6 +386,26 @@ All errors return `application/problem+json`:
 - Stack traces
 
 Stripped per [ADR-018](#a-references) (no information leakage) + [ADR-019](#a-references) (ProblemDetails). The `correlationId` field is the ops/support log-lookup key.
+
+### 5.3 Mid-stream error semantics (NEW in v1.1)
+
+When R5 requests SSE (`Accept: text/event-stream`), there are two distinct error timings:
+
+| Timing | Response shape | When |
+|---|---|---|
+| **Pre-stream** (kill-switch / auth / validation) | Standard `application/problem+json` per §5.1; HTTP status 4xx/5xx; **no SSE body bytes written** | The error is detected before the BFF flushes its first SSE chunk (kill-switch evaluated synchronously, JWT validated synchronously, query/subject validation runs synchronously) |
+| **Mid-stream** (downstream AOAI failure after partial streaming) | HTTP 200 OK; SSE body opened normally; an `event: error` chunk emitted, followed by `data: [DONE]\n\n` | The error arises after `progress` or `delta` chunks have already been flushed (e.g., AOAI synthesis aborts mid-token) |
+
+**Mid-stream error chunk shape**:
+
+```
+event: error    data: {"type":"error","error":{"errorCode":"INSIGHTS_ASSISTANT_INTERNAL_ERROR","detail":"<sanitized>"}}
+data: [DONE]
+```
+
+The connection is NOT abruptly closed — the `[DONE]` sentinel still flushes so R5's parser can finalize cleanly. R5 should treat a mid-stream `error` chunk as a terminal failure of the turn (same UX as a non-streaming 500), preserving any partially-rendered `delta` content for inspection if useful.
+
+Per-spec, BFF preserves the §5.1 stable `errorCode` matrix in mid-stream error envelopes — R5's error-code handling remains the same regardless of timing.
 
 ---
 
@@ -455,7 +587,11 @@ If something doesn't work, check these first:
 5. **Empty `citations` + empty `answer` on RAG path** → working as designed (no hits found). R5 SHOULD render a "couldn't find anything" hint, NOT show the empty answer.
 6. **Empty `citations` on playbook path** → playbook doesn't expose `EvidenceRefs`. Render `structuredResult.envelope` directly + show a "no inline citations; see details" hint.
 7. **`structuredResult.kind = "decline"` with 200 OK** → playbook returned a structured no. Render `answer` (the explanation) + surface `envelope.SuggestedActions`.
+8. **SSE not streaming?** → Check the `Accept` header is set to `text/event-stream` (not `application/json` or absent). The BFF returns single-shot JSON for any non-SSE Accept value. Also verify `Content-Type` on the response is `text/event-stream; charset=utf-8` and not `application/json`.
+9. **Citations not clickable / `href` is null on RAG hits?** → Check the `Insights:CitationHref:BffBaseUrl` config is set per environment (e.g., `https://spaarke-bff-dev.azurewebsites.net` on Dev). When unset, the projection emits `href: null` for ALL citations as a safe fallback. On Spaarke Dev verify via a smoke `curl` + inspect the citation JSON.
+10. **Citations clickable on RAG but always null on playbook?** → Playbook-path `href` requires `EvidenceRef.Ref` to be a bare sprk_document Guid. The dominant production emit pattern is `spe://drive/X/item/Y` URIs, which are explicitly deferred to v1.2 (currently emits `href: null` for that subset). Working as designed for v1.1 — see `design-e3-tool-call-contract.md` §11 v1.2 deferral row.
+11. **SSE mid-stream cuts off without `[DONE]`?** → Likely a network/proxy buffering issue or a true infrastructure error. The BFF always writes `[DONE]` after the final chunk (even error). Inspect with `curl -N` to bypass any client-side buffering.
 
 ---
 
-*Authored 2026-06-03 by Insights Engine r2 Wave E task 042 (sub-task C). Mirror of `e3-assistant-team-handoff.md` with R5-project-specific framing + full inline contract for self-contained reading. Future updates: as the Insights Engine team minor-versions the contract, this brief MUST be updated to reflect schema changes.*
+*Authored 2026-06-03 by Insights Engine r2 Wave E task 042 (sub-task C). v1.1 amendment 2026-06-03 by Wave F task 053 (F4) — added §3.4 Accept-header negotiation, §4.7 SSE event schema, §4.8 citations[].href semantics, §5.3 mid-stream error semantics, four new sanity-check entries (§B.8–§B.11). Mirror of `e3-assistant-team-handoff.md` with R5-project-specific framing + full inline contract for self-contained reading. Future updates: as the Insights Engine team minor-versions the contract, this brief MUST be updated to reflect schema changes.*

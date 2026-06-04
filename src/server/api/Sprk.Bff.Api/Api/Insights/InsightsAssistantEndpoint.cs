@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
@@ -106,7 +107,24 @@ public static class InsightsAssistantEndpoint
     }
 
     /// <summary>
-    /// <c>POST /api/insights/assistant/query</c> handler.
+    /// MIME-type identifier for Server-Sent Events negotiation (Wave F task 051 v1.1).
+    /// </summary>
+    private const string SseMediaType = "text/event-stream";
+
+    /// <summary>SSE terminator sentinel per R5 §2.2 contract.</summary>
+    private const string SseDoneFrame = "data: [DONE]\n\n";
+
+    /// <summary>JSON options for SSE frame serialization (camelCase, omit nulls).</summary>
+    private static readonly JsonSerializerOptions SseJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
+
+    /// <summary>
+    /// <c>POST /api/insights/assistant/query</c> handler. Negotiates SSE vs single-shot via
+    /// <c>Accept</c> header per R5 §2.1: <c>text/event-stream</c> → SSE; absent or
+    /// <c>application/json</c> → existing v1.0 single-shot response. v1.0 clients are
+    /// unaffected.
     /// </summary>
     private static async Task<IResult> AssistantQuery(
         [FromBody] InsightsAssistantQueryRequest? request,
@@ -195,6 +213,19 @@ public static class InsightsAssistantEndpoint
             TenantId: tenantId,
             CallerOid: callerOid,
             CallerPrincipal: httpContext.User);
+
+        // ─── Wave F task 051 — Accept-header negotiation (v1.1 streaming) ─────────────
+        // Per R5 §2.1: clients request streaming via `Accept: text/event-stream`. Otherwise
+        // the v1.0 single-shot JSON path is preserved unchanged. Detect via the Accept header
+        // values collection rather than a substring match so multipart values like
+        // `text/event-stream, application/json;q=0.5` are honored.
+        if (ClientAcceptsServerSentEvents(httpContext.Request))
+        {
+            // Streaming branch — returns IResult that writes SSE frames directly.
+            return await StreamAssistantQuery(
+                httpContext, insightsAi, facadeRequest, tenantId, request.Subject!, callerOid, logger, ct)
+                .ConfigureAwait(false);
+        }
 
         AssistantQueryFacadeResult facadeResult;
         try
@@ -291,7 +322,8 @@ public static class InsightsAssistantEndpoint
                     Source: c.Source,
                     Excerpt: c.Excerpt,
                     ObservationId: c.ObservationId,
-                    ChunkId: c.ChunkId))
+                    ChunkId: c.ChunkId,
+                    Href: c.Href))
                 .ToList(),
             Confidence: facadeResult.Confidence,
             PlaybookId: facadeResult.PlaybookId,
@@ -309,6 +341,262 @@ public static class InsightsAssistantEndpoint
             tenantId, request.Subject, facadeResult.Path, facadeResult.IntentSource, facadeResult.HitCount, facadeResult.DurationMs);
 
         return Results.Ok(responseBody);
+    }
+
+    /// <summary>
+    /// True when the request's <c>Accept</c> header includes <c>text/event-stream</c>.
+    /// Honors comma-separated multi-value Accept and ignores q-parameters. Returns false
+    /// when the header is absent (defaults to v1.0 single-shot JSON per R5 §2.6 back-compat).
+    /// </summary>
+    /// <remarks>
+    /// We deliberately do NOT short-circuit on a wildcard (<c>*/*</c>) — only explicit
+    /// <c>text/event-stream</c> opts the client into the streaming response. This matches
+    /// R5's contract §2.6 invariant: v1.0 clients that send <c>Accept: */*</c> (the default
+    /// for many HTTP libraries) MUST continue to receive single-shot JSON.
+    /// </remarks>
+    private static bool ClientAcceptsServerSentEvents(HttpRequest request)
+    {
+        var accept = request.Headers.Accept;
+        if (accept.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var value in accept)
+        {
+            if (string.IsNullOrWhiteSpace(value)) continue;
+
+            // Header value can be multi-typed: "text/event-stream, application/json;q=0.5"
+            // — split on comma; check each segment for a media-type prefix match.
+            foreach (var segment in value.Split(','))
+            {
+                var trimmed = segment.Trim();
+                // Strip any q-parameter (";q=0.x") before comparing.
+                var semicolon = trimmed.IndexOf(';');
+                var mediaType = semicolon >= 0 ? trimmed[..semicolon].Trim() : trimmed;
+                if (string.Equals(mediaType, SseMediaType, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// SSE branch of <see cref="AssistantQuery"/> (Wave F task 051 / FR-05 v1.1). Negotiated
+    /// via <c>Accept: text/event-stream</c>. Writes the response directly to
+    /// <see cref="HttpContext.Response"/> as a sequence of SSE frames, terminating with
+    /// the <c>data: [DONE]\n\n</c> sentinel per R5 §2.2.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Kill-switch ordering</b> (per ADR-032 + spike Section A): pre-stream errors
+    /// (<see cref="FeatureDisabledException"/>, default-playbook-unconfigured,
+    /// <see cref="ArgumentException"/>) MUST return 503/400 ProblemDetails with NO SSE body.
+    /// To enforce this invariant we drain the FIRST chunk of the async enumerable in a
+    /// try/catch BEFORE flipping the response to SSE mode. Once the first chunk is consumed
+    /// without exception, we set SSE headers + write the body; subsequent exceptions become
+    /// mid-stream <c>error</c> frames per mini-plan §6 decision 4.
+    /// </para>
+    /// <para>
+    /// <b>Header invariant (R5 §2.5)</b>: per-request observability headers
+    /// (<c>X-Insights-Path</c>, etc.) are NOT carried on SSE responses — they reflect
+    /// post-completion state that's only known after the stream finishes. Clients SHOULD
+    /// inspect the terminal <c>result</c> chunk's facade-result payload for these values
+    /// (path / intentSource / durationMs / cacheHit / hitCount are all in
+    /// <see cref="AssistantQueryFacadeResult"/>). This matches the R5 §2.5 simplification
+    /// for the v1.1 streaming surface.
+    /// </para>
+    /// </remarks>
+    private static async Task<IResult> StreamAssistantQuery(
+        HttpContext httpContext,
+        IInsightsAi insightsAi,
+        AssistantQueryFacadeRequest facadeRequest,
+        string tenantId,
+        string subject,
+        string callerOid,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        // Drain the first chunk eagerly so pre-stream errors surface as ProblemDetails
+        // BEFORE we set SSE headers. This preserves the R5 §2.5 + ADR-032 invariant:
+        // 503 + 400 + 500 responses never carry an SSE body.
+        var enumerator = insightsAi.AssistantQueryStreamAsync(facadeRequest, ct).GetAsyncEnumerator(ct);
+        try
+        {
+            bool hasFirst;
+            try
+            {
+                hasFirst = await enumerator.MoveNextAsync().ConfigureAwait(false);
+            }
+            catch (FeatureDisabledException ex)
+            {
+                logger.LogDebug(
+                    "[INSIGHTS-ASSISTANT-STREAM] AI feature disabled pre-stream. ErrorCode={ErrorCode} TenantId={TenantId} Subject={Subject}",
+                    ex.ErrorCode, tenantId, subject);
+                return ex.AsFeatureDisabled503();
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("Default playbook", StringComparison.Ordinal))
+            {
+                logger.LogError(ex,
+                    "[INSIGHTS-ASSISTANT-STREAM] Default playbook unconfigured. TenantId={TenantId}", tenantId);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "Service Unavailable",
+                    detail: ex.Message,
+                    type: "https://errors.spaarke.com/feature-disabled",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = DefaultPlaybookUnconfiguredErrorCode,
+                        ["correlationId"] = httpContext.TraceIdentifier
+                    });
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(ex.Message, "INSIGHTS_ASSISTANT_VALIDATION");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex,
+                    "[INSIGHTS-ASSISTANT-STREAM] Pre-stream failure for tenant {TenantId} subject {Subject} caller {CallerOid}",
+                    tenantId, subject, callerOid);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status500InternalServerError,
+                    title: "Internal Server Error",
+                    detail: "Failed to initialize Insights Assistant stream. See server logs for details.",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.6.1",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = "INSIGHTS_ASSISTANT_INTERNAL_ERROR",
+                        ["correlationId"] = httpContext.TraceIdentifier
+                    });
+            }
+
+            // ─── Begin SSE body ──────────────────────────────────────────────────────
+            // Set SSE headers + disable response buffering. After this point, mid-stream
+            // errors emit `error` chunks rather than ProblemDetails.
+            var response = httpContext.Response;
+            response.ContentType = SseMediaType + "; charset=utf-8";
+            response.Headers.CacheControl = "no-cache";
+            response.Headers[HeaderNames.Connection] = "keep-alive";
+            response.Headers["X-Accel-Buffering"] = "no"; // disable proxy buffering
+
+            try
+            {
+                // Write the first chunk we already drained.
+                if (hasFirst)
+                {
+                    await WriteSseChunkAsync(response, enumerator.Current, ct).ConfigureAwait(false);
+                }
+
+                // Drain the rest.
+                while (await enumerator.MoveNextAsync().ConfigureAwait(false))
+                {
+                    await WriteSseChunkAsync(response, enumerator.Current, ct).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Client disconnected mid-stream. No error frame — the connection is gone.
+                logger.LogInformation(
+                    "[INSIGHTS-ASSISTANT-STREAM] Client cancelled mid-stream. TenantId={TenantId} Subject={Subject}",
+                    tenantId, subject);
+            }
+            catch (FeatureDisabledException ex)
+            {
+                // Kill-switch tripped mid-stream — emit `error` frame per mini-plan §6 decision 4.
+                logger.LogDebug(
+                    "[INSIGHTS-ASSISTANT-STREAM] Feature disabled mid-stream. ErrorCode={ErrorCode} TenantId={TenantId}",
+                    ex.ErrorCode, tenantId);
+                await WriteSseErrorAsync(response, ex.ErrorCode, ex.Message, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Mid-stream failure — emit `error` frame, do NOT throw further (response is
+                // already started; throwing would corrupt the wire). Per ADR-019: never leak
+                // internal exception details to the wire — surface a stable error code.
+                logger.LogError(ex,
+                    "[INSIGHTS-ASSISTANT-STREAM] Mid-stream failure for tenant {TenantId} subject {Subject}",
+                    tenantId, subject);
+                await WriteSseErrorAsync(
+                    response,
+                    "INSIGHTS_ASSISTANT_STREAM_ERROR",
+                    "An error occurred while streaming the response. See server logs for details.",
+                    ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                // Always terminate with [DONE] sentinel per R5 §2.2.
+                try
+                {
+                    await response.WriteAsync(SseDoneFrame, ct).ConfigureAwait(false);
+                    await response.Body.FlushAsync(ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) { /* client gone — ignore */ }
+                catch (Exception ex)
+                {
+                    logger.LogDebug(ex,
+                        "[INSIGHTS-ASSISTANT-STREAM] Failed to write DONE sentinel; client likely disconnected. TenantId={TenantId}",
+                        tenantId);
+                }
+            }
+
+            logger.LogInformation(
+                "[INSIGHTS-ASSISTANT-STREAM] Completed streaming response. TenantId={TenantId} Subject={Subject}",
+                tenantId, subject);
+        }
+        finally
+        {
+            await enumerator.DisposeAsync().ConfigureAwait(false);
+        }
+
+        // Return Empty — we've already written the response body directly.
+        return Results.Empty;
+    }
+
+    /// <summary>
+    /// Write a single SSE frame: <c>event: {type}\ndata: {json}\n\n</c>. Flushes the
+    /// response after each frame so the client sees streaming behavior immediately
+    /// (not buffered).
+    /// </summary>
+    private static async Task WriteSseChunkAsync(
+        HttpResponse response,
+        AssistantQueryChunk chunk,
+        CancellationToken ct)
+    {
+        var json = JsonSerializer.Serialize(chunk, SseJsonOptions);
+        var frame = $"event: {chunk.Type}\ndata: {json}\n\n";
+        await response.WriteAsync(frame, ct).ConfigureAwait(false);
+        await response.Body.FlushAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Write a mid-stream <c>error</c> SSE frame. The frame uses the same format as
+    /// <see cref="WriteSseChunkAsync"/> with a synthetic <see cref="AssistantQueryChunk"/>
+    /// carrying the error envelope.
+    /// </summary>
+    private static async Task WriteSseErrorAsync(
+        HttpResponse response,
+        string errorCode,
+        string detail,
+        CancellationToken ct)
+    {
+        var errorChunk = new AssistantQueryChunk
+        {
+            Type = "error",
+            Error = new AssistantQueryError(errorCode, detail)
+        };
+        try
+        {
+            await WriteSseChunkAsync(response, errorChunk, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { /* client gone — ignore */ }
     }
 
     /// <summary>

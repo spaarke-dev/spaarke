@@ -1,7 +1,7 @@
 <task id="052" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>F3 — citations[].href projection + URL resolution</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>F</wave>
     <estimated-effort>1d</estimated-effort>
     <tags>citations, href, url-resolution, bff-api, contract-v1.1, authorization</tags>

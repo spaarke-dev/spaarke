@@ -1,11 +1,12 @@
 # Design — E3 Tool-Call Contract (Spaarke Assistant ↔ Insights Engine)
 
 > **Status**: AUTHORED. **PENDING Assistant team review** (Sub-task A.5 — owner-mediated).
-> **Version**: 1.0 (Phase 1.5 read-only)
-> **Author**: Wave E task 042 (E3) — 2026-06-03
-> **Phase**: Phase 1.5 read-only tool-call. Phase 2 bidirectional (clarification + streaming) explicitly deferred.
-> **Source POML**: `projects/ai-spaarke-insights-engine-r2/tasks/042-spaarke-assistant-integration.poml`
+> **Version**: 1.1 (Phase 1.5 read-only + SSE streaming + clickable citations)
+> **Author**: Wave E task 042 (E3) — 2026-06-03; v1.1 amended Wave F task 053 (F4) — 2026-06-03
+> **Phase**: Phase 1.5 read-only tool-call. v1.1 adds SSE streaming + `citations[].href`. Phase 2 bidirectional clarification + multi-turn state explicitly deferred.
+> **Source POML**: `projects/ai-spaarke-insights-engine-r2/tasks/042-spaarke-assistant-integration.poml` (v1.0); `tasks/050-streaming-and-citation-spike.poml` + `tasks/051-sse-streaming-endpoint.poml` + `tasks/052-citations-href-projection.poml` + `tasks/053-contract-v1.1-docs.poml` (v1.1)
 > **Source spec**: `projects/ai-spaarke-insights-engine-r2/spec.md` FR-05 + AC-1 + Risk-6
+> **v1.1 spike**: `projects/ai-spaarke-insights-engine-r2/notes/spikes/wave-f-streaming-citation-spike.md` (binding for §3.5 + §4.6)
 
 ---
 
@@ -108,6 +109,108 @@ The Assistant does NOT supply playbook ids in Phase 1.5. (If we later allow Assi
 
 Same catalog as `/api/insights/search` (the Wave D5 `ISubjectParser`). Unknown schemes → 400 with `errorCode: subject.invalid`. Malformed Guid → 400 with `errorCode: subject.invalid`.
 
+### 3.5 SSE streaming option (NEW in v1.1)
+
+**Added 2026-06-03 (Wave F task 051)**. Client opts in to Server-Sent Events streaming via the HTTP `Accept` header. Single-shot JSON remains the default — back-compatible with v1.0 callers.
+
+#### 3.5.1 Accept-header negotiation
+
+| Request `Accept` | BFF response | Body shape |
+|---|---|---|
+| `application/json` OR absent OR `*/*` | 200 OK with `Content-Type: application/json` | Single-shot `AssistantQueryFacadeResult` per §4 (v1.0 shape — unchanged) |
+| `text/event-stream` | 200 OK with `Content-Type: text/event-stream; charset=utf-8` | SSE stream of `AssistantQueryChunk` events terminated by `data: [DONE]\n\n` |
+| `text/event-stream` + classifier OR compound-AI kill-switch OFF | 503 ProblemDetails (BEFORE the stream body opens) | `application/problem+json` per §5 |
+
+Header-negotiation reference: F1 spike §A (`notes/spikes/wave-f-streaming-citation-spike.md`).
+
+#### 3.5.2 Event types
+
+Mirrors R5's `AnalysisChunk` shape so the R5 chat agent's existing SSE parser consumes the stream with no protocol divergence.
+
+| `Type` | When emitted | Other fields |
+|---|---|---|
+| `progress` | Pipeline milestone (e.g., classifier completed, RAG search complete, playbook node completed, cache hit) | `Step?` (label), `Path?` (e.g., `"playbook"` after routing), `Content?` (count or short detail) |
+| `delta` | RAG path only: incremental LLM synthesis token | `Path` (always `"answer"` in v1.1), `Content` (token chunk), `Sequence` (1-based ordering) |
+| `result` | Final canonical v1.0 `AssistantQueryFacadeResult` (same shape as single-shot response) | `Result` (the full envelope) |
+| `error` | Mid-stream error after stream body opened (kill-switch errors return 503 BEFORE the stream) | `Error` = `{ ErrorCode, Detail }` (ProblemDetails shape) |
+
+#### 3.5.3 `AssistantQueryChunk` payload shape
+
+```json
+{
+  "type": "progress | delta | result | error",
+  "step":     "<string?, set on progress>",
+  "path":     "<string?, set on delta or progress.path>",
+  "content":  "<string?, set on delta token or progress detail>",
+  "sequence": <int?, set on delta>,
+  "result":   { /* AssistantQueryFacadeResult — set on result chunk */ },
+  "error":    { "errorCode": "<string>", "detail": "<string>" }
+}
+```
+
+Wire JSON keys are lowercase camelCase per the existing `JsonSerializerOptions` (`PropertyNamingPolicy.CamelCase`). The terminating sentinel is `data: [DONE]\n\n` (no JSON wrapper — string literal).
+
+#### 3.5.4 Response headers (telemetry)
+
+The same telemetry headers documented in §6.2 (`X-Insights-Path`, `X-Insights-Intent-Source`, `X-Insights-Elapsed-Ms`, `X-Insights-Cache`, `X-Insights-Hit-Count`) are written **BEFORE** the SSE body opens. Clients can read them after `HEADERS_RECEIVED` regardless of whether they consume the stream or abort.
+
+#### 3.5.5 Path-specific event sequences
+
+**RAG path** (`forceMode: "rag"` or classifier picks RAG):
+
+```
+event: progress    data: {"type":"progress","step":"classifier_started"}
+event: progress    data: {"type":"progress","step":"classifier_complete","path":"rag"}
+event: progress    data: {"type":"progress","step":"rag_search_started"}
+event: progress    data: {"type":"progress","step":"rag_search_complete","content":"5"}
+event: progress    data: {"type":"progress","step":"llm_synthesis_started"}
+event: delta       data: {"type":"delta","path":"answer","content":"Three ","sequence":1}
+event: delta       data: {"type":"delta","path":"answer","content":"risk ","sequence":2}
+event: delta       data: {"type":"delta","path":"answer","content":"themes...","sequence":3}
+event: result      data: {"type":"result","result":{ /* full AssistantQueryFacadeResult */ }}
+data: [DONE]
+```
+
+**Playbook path** (`forceMode: "playbook"` or classifier picks playbook):
+
+Coarse-grained `progress` events only (one per major node phase). No `delta` token streaming — playbook synthesis uses structured output that must be fully assembled. Rationale: F1 spike §D.
+
+```
+event: progress    data: {"type":"progress","step":"classifier_complete","path":"playbook"}
+event: progress    data: {"type":"progress","step":"playbook_started","content":"predict-matter-cost@v1"}
+event: progress    data: {"type":"progress","step":"node_complete","content":"resolveLiveFacts"}
+event: progress    data: {"type":"progress","step":"node_complete","content":"retrieveCohortObservations"}
+event: progress    data: {"type":"progress","step":"node_complete","content":"retrievePrecedents"}
+event: progress    data: {"type":"progress","step":"node_complete","content":"checkSufficiency"}
+event: progress    data: {"type":"progress","step":"node_complete","content":"synthesize"}
+event: progress    data: {"type":"progress","step":"node_complete","content":"groundCitations"}
+event: result      data: {"type":"result","result":{ /* full AssistantQueryFacadeResult */ }}
+data: [DONE]
+```
+
+**Cache-hit short-circuit** (D-P13 cache `GetOrExecuteAsync` hit on playbook path):
+
+```
+event: progress    data: {"type":"progress","step":"cache_hit"}
+event: result      data: {"type":"result","result":{ /* cached AssistantQueryFacadeResult */ }}
+data: [DONE]
+```
+
+#### 3.5.6 Mid-stream errors
+
+If the stream body has opened (headers + first chunk written) and a downstream error occurs (e.g., AOAI synthesis fails after partial token streaming):
+
+```
+event: error    data: {"type":"error","error":{"errorCode":"INSIGHTS_ASSISTANT_INTERNAL_ERROR","detail":"<sanitized>"}}
+data: [DONE]
+```
+
+The connection is NOT abruptly closed — the `[DONE]` sentinel still flushes for clean client-side handling. Errors that arise BEFORE the stream body opens (kill-switch / auth / validation) return standard `application/problem+json` per §5 (no SSE body emitted).
+
+#### 3.5.7 Kill-switch interaction
+
+The kill-switch matrix in §7 applies to the streaming endpoint identically. When a kill-switch returns 503, the response is `application/problem+json` (NOT a `text/event-stream` body), regardless of the `Accept` header. The `FeatureDisabledException` is raised before any SSE body bytes are written.
+
 ---
 
 ## 4. Response schema (success — 200 OK)
@@ -122,7 +225,8 @@ Same catalog as `/api/insights/search` (the Wave D5 `ISubjectParser`). Unknown s
       "source": "string (document/observation display name)",
       "excerpt": "string (snippet, ≤280 chars)",
       "observationId": "string (optional GUID)",
-      "chunkId": "string (chunk identifier)"
+      "chunkId": "string (chunk identifier)",
+      "href": "string (optional, v1.1+) — preview URL or null"
     }
   ],
   "confidence": 0.0,
@@ -174,6 +278,58 @@ The playbook path returns 200 OK with:
 - `structuredResult.envelope` = the full `DeclineResponse` JSON (Reason, MinimumEvidenceNeeded, SuggestedActions, ConfidenceInDecline)
 
 The Assistant SHOULD surface the SuggestedActions to the user (Phase 1.5 the SuggestedActions are pre-templated strings; Phase 2 they become actionable buttons).
+
+### 4.5 Telemetry response headers
+
+See §6.2 (unchanged from v1.0).
+
+### 4.6 `citations[].href` optional field (NEW in v1.1)
+
+**Added 2026-06-03 (Wave F task 052)**. Each citation MAY carry an `href` URL string pointing to a preview of the source document. Strictly additive — v1.0 clients ignore the field; v1.1 clients render it as a clickable iframe-target.
+
+#### 4.6.1 Schema
+
+| Field | Type | Required | Format |
+|---|---|---|---|
+| `citations[].href` | `string?` | No | Absolute URL OR `null`. JSON key is lowercase `href`. |
+
+The field is `null` (or absent if the serializer is configured to drop nulls — for `Sprk.Bff.Api` it serializes as explicit `null`) when no resolvable preview target exists.
+
+#### 4.6.2 URL pattern
+
+```
+{Insights:CitationHref:BffBaseUrl}/api/documents/{sprk_document-guid}/preview
+```
+
+Where:
+
+- `{Insights:CitationHref:BffBaseUrl}` — per-environment BFF base URL configured via the `Insights:CitationHref` config section (e.g., `https://spaarke-bff-dev.azurewebsites.net`). Bound in `AnalysisServicesModule` via `IOptions<AssistantCitationHrefOptions>`.
+- `{sprk_document-guid}` — Dataverse `sprk_document` row Guid.
+- The endpoint is the existing `GET /api/documents/{documentId}/preview` (see `Api/FileAccessEndpoints.cs`).
+
+#### 4.6.3 Per-path sourcing
+
+| Path | Source of `sprk_document-guid` | Notes |
+|---|---|---|
+| **RAG** | `InsightsSearchHit.ObservationId` (which IS the sprk_document Guid per `RagSearchResult.DocumentId` contract — F1 spike §B) | Zero plumbing — Guid already in the v1.0 projection |
+| **Playbook** | `EvidenceRef.Ref` when `EvidenceRef.RefType == "document"` AND `Ref` parses as a Guid (bare-Guid form) | `TryExtractDocumentIdFromEvidenceRef` helper in `AssistantToolCallHandler`; the `spe://drive/X/item/Y` form is deferred to v1.2 (see §11) |
+| **Playbook** (non-document evidence: comparable-matter, fact-source, etc.) | n/a | `href = null` |
+| **Orphan RAG chunks** (no `RagSearchResult.DocumentId`) | n/a | `href = null` |
+
+#### 4.6.4 Authorization (AIPU2-027)
+
+The `/api/documents/{id}/preview` endpoint enforces AIPU2-027 via the existing OBO flow: the user's bearer token is exchanged for a Graph+Dataverse OBO token; if the user lacks ACL on the underlying document, the endpoint returns 403/404 naturally. **No URL signing, no token embedding** — the citation href is opaque-from-client and authorization-checked at click-time on the `/preview` endpoint. This is the path-of-least-resistance privilege model recommended by the F1 spike §C.
+
+Citations that are filtered out of search results by AIPU2-027 never reach the projection, so `href` is never constructed for them. The filter pass that gates the citation also gates the href — safe by construction.
+
+#### 4.6.5 Required configuration
+
+`Insights:CitationHref:BffBaseUrl` MUST be set per environment. When unset (or empty), the projection emits `href: null` for ALL citations (safe-fallback behavior — no broken URLs). Operators verify in the `/swagger` smoke check (see §A in the integration brief).
+
+#### 4.6.6 Back-compat semantics
+
+- v1.0 clients ignore the unknown field — no behavioral change.
+- v1.1 clients render `href` when non-null (iframe target / clickable link) and fall back to display-name only when `null`.
 
 ---
 
@@ -455,31 +611,44 @@ The Assistant SHOULD retry with `forceMode: "playbook"` or `forceMode: "rag"` if
 
 ## 11. Phase 2 deferrals (explicit)
 
-The following are EXPLICITLY out of Phase 1.5 scope; documented here so the Assistant team has a forward-roadmap.
+The following are EXPLICITLY out of Phase 1.5 scope; documented here so the Assistant team has a forward-roadmap. Strikethrough indicates items shipped in v1.1.
 
 | Capability | Phase 2 design notes |
 |---|---|
 | **Bidirectional clarification** | Insights asks Assistant for clarification when subject is ambiguous (e.g., "which matter? you have 3 matching"). Likely a 422 ProblemDetails with a `clarification` envelope the Assistant renders. |
-| **Streaming response** | Server-Sent Events on the response body for long-running playbooks (>3s). Today `predict-matter-cost@v1` is fast enough; Phase 2 playbooks (e.g., multi-document drafting) need streaming. |
+| ~~**Streaming response**~~ → **shipped in v1.1** (§3.5) | ~~Server-Sent Events on the response body for long-running playbooks (>3s).~~ **Shipped in v1.1 (Wave F task 051)**: `Accept: text/event-stream` negotiation, `progress`/`delta`/`result`/`error` event types, `[DONE]` terminator. RAG path streams `answer` tokens; playbook path emits coarse `node_complete` progress. |
 | **Multi-turn conversation state** | BFF persists conversation context across calls (not just telemetry pass-through). Today `conversationContext` is logged but not stored. |
 | **Assistant-supplied playbook hint** | `playbookHint: "predict-matter-cost@v1"` field — Assistant scopes to a specific playbook without forcing intent. Phase 2 extension; backwards-compatible (Phase 1.5 ignores unknown fields). |
 | **Cross-tenant federation** | Assistant queries Insights across multiple tenants in a multi-tenant SaaS deployment. Today single-tenant per D-52; Phase 2 + deployment topology change. |
-| **Observation citation as actionable** | `citations[].action: { type: "open-document", documentId: "..." }` — Assistant renders clickable buttons. Phase 1.5 citations are display-only. |
+| ~~**Observation citation as actionable href**~~ → **shipped in v1.1 (Full scope)** (§4.6) | ~~`citations[].action: { type: "open-document", documentId: "..." }` — Assistant renders clickable buttons.~~ **Shipped in v1.1 (Wave F task 052)**: `citations[].href` carries the preview-URL form (`{bffBaseUrl}/api/documents/{sprk_document-guid}/preview`). Full scope (both observation + document citations) per F1 spike §F binding decision (escape hatch NOT triggered — plumbing cost was Small). |
+| **Playbook-path `spe://drive/X/item/Y` evidence-ref href resolution** (v1.2) | When `EvidenceRef.RefType == "document"` AND `Ref` is a `spe://drive/<driveId>/item/<itemId>` URI (not a bare sprk_document Guid), v1.1 emits `href: null`. v1.2 will add an async `driveId+itemId → sprk_document` lookup via `IGenericEntityService` (the `DataverseObservationMirror.ResolveDocumentIdAsync` pattern), making citation projection async. F1 spike empirically confirmed the `spe://` form is the dominant production emit pattern from `FilesIndexIngestDocumentSource.cs:166` BUT the playbook citations through `predict-matter-cost@v1` predominantly hit the bare-Guid path or non-document evidence — so the v1.1 `null` fallback covers the minority case. Promoting this to v1.2 was the explicit per-spike trade-off to keep v1.1 synchronous. |
 
 ---
 
-## 12. Cross-references
+## 12. Changelog
+
+| Date | Version | Change | Source |
+|---|---|---|---|
+| 2026-06-03 | 1.0 | Initial contract authored as Wave E task 042 sub-task A. Single-shot `POST /api/insights/assistant/query` with playbook/RAG routing via classifier or `forceMode`; 12 error codes; AIPU2-027 privilege filtering on RAG path. | task 042 (E3) |
+| 2026-06-03 | 1.1 | **v1.0 → v1.1: SSE streaming added** (§3.5 — `Accept: text/event-stream` negotiation + `progress`/`delta`/`result`/`error`/`[DONE]` event schema, mirroring R5's `AnalysisChunk` shape). **`citations[].href` added** (§4.6 — optional lowercase-`href` field; URL pattern `{Insights:CitationHref:BffBaseUrl}/api/documents/{sprk_document-guid}/preview`; AIPU2-027 enforced via OBO at the `/preview` endpoint). Phase 2 deferrals (§11) updated: SSE streaming + actionable citations href both marked shipped; **NEW v1.2 deferral**: playbook-path `spe://drive/X/item/Y` evidence-ref href resolution (currently emits `href: null` for that subset; requires async sprk_document lookup). **No breaking changes** — v1.0 clients see identical single-shot JSON behavior; unknown `href` field is silently ignored by v1.0 clients. | tasks 050 (F1 spike), 051 (F2 SSE), 052 (F3 href), 053 (F4 docs) |
+
+---
+
+## 13. Cross-references
 
 - Wave E1 (RAG endpoint): `src/server/api/Sprk.Bff.Api/Api/Insights/InsightsSearchEndpoint.cs` + `IInsightsAi.SearchAsync`
 - Wave E2 (classifier): `Services/Ai/Insights/Routing/IInsightsIntentClassifier.cs`
 - Wave E4 (decision tree doc): `docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md` — uses the same path terminology as this contract
+- Wave F1 (streaming + citation ID flow spike): `projects/ai-spaarke-insights-engine-r2/notes/spikes/wave-f-streaming-citation-spike.md` — binding source for §3.5 + §4.6
+- Wave F2 (SSE): `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInsightsAi.cs` (`AssistantQueryStreamAsync`); `Models/Ai/PublicContracts/AssistantQueryChunk.cs`
+- Wave F3 (citation href): `Models/Ai/PublicContracts/AssistantQueryFacadeResult.cs` (`AssistantQueryCitation.Href`); `Configuration/AssistantCitationHrefOptions.cs`
 - ADR-013-refined (AI architecture / facade boundary): `.claude/adr/ADR-013-ai-architecture.md`
 - ADR-019 (ProblemDetails): `.claude/adr/ADR-019-problem-details.md`
 - ADR-028 (Auth v2): `.claude/adr/ADR-028-spaarke-auth-architecture.md`
 - ADR-032 (Null-Object kill-switch): `.claude/adr/ADR-032-bff-nullobject-kill-switch.md`
 - spec.md FR-05 + AC-1 + Risk-6
-- POML: `projects/ai-spaarke-insights-engine-r2/tasks/042-spaarke-assistant-integration.poml`
+- POML: `projects/ai-spaarke-insights-engine-r2/tasks/042-spaarke-assistant-integration.poml` (v1.0); `tasks/050-streaming-and-citation-spike.poml` + `tasks/051-sse-streaming-endpoint.poml` + `tasks/052-citations-href-projection.poml` + `tasks/053-contract-v1.1-docs.poml` (v1.1)
 
 ---
 
-*Authored 2026-06-03 as Wave E task 042 sub-task A deliverable.*
+*Authored 2026-06-03 as Wave E task 042 sub-task A deliverable. v1.1 amendment 2026-06-03 as Wave F task 053 (F4) deliverable.*

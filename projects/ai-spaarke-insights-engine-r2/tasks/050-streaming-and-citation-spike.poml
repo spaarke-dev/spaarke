@@ -1,11 +1,11 @@
 <task id="050" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>F1 — Spike: streaming surface + citation ID flow validation</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>F</wave>
     <estimated-effort>0.5d</estimated-effort>
     <tags>spike, research, streaming, sse, citations, contract-v1.1</tags>
-    <dependencies>090</dependencies>
+    <dependencies></dependencies>
     <parallel-safe>false</parallel-safe>
     <rigor>MINIMAL</rigor>
     <wave-item>F1</wave-item>

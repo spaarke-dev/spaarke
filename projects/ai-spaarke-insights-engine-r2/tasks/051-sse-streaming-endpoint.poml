@@ -1,7 +1,7 @@
 <task id="051" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>F2 — SSE streaming on POST /api/insights/assistant/query</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>F</wave>
     <estimated-effort>3d</estimated-effort>
     <tags>sse, streaming, bff-api, zone-a, contract-v1.1, async-enumerable</tags>

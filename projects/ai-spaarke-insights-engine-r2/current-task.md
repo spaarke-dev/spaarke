@@ -1,78 +1,62 @@
 # Current Task — Spaarke Insights Engine Phase 1.5 (r2)
 
 > **Purpose**: Active task state tracker. Managed by `task-execute` skill.
-> **Lifecycle**: Wave E task 042 in progress 2026-06-03; 040 + 041 + 043 ✅; 042 is final Wave E impl.
+> **Lifecycle**: Wave F implementation complete (tasks 050, 051, 052, 053 all ✅). Pending main-session batch commit + PR open + auto-merge.
 
 ---
 
-## 🎯 Active task — 042 (E3) — Spaarke Assistant integration (🔄 IN PROGRESS 2026-06-03)
+## 🎯 Active task — none
 
-**Rigor**: FULL
-**Status**: in-progress
-**Wave**: E
-**Effort**: 1w (estimated)
-**Parallel-safe**: No (depends on 040 + 041)
+Wave F (contract v1.1) is **implementation-complete**. All 4 Wave F tasks shipped — no active sub-agent work remaining.
 
-### Rigor declaration
-
-🔒 RIGOR LEVEL: FULL
-📋 REASON: Tags `bff-api`, `integration`, `tool-call-contract`, `spaarke-assistant`, `cross-team`; modifies `.cs` files in `Sprk.Bff.Api` Zones A + B; adds new endpoint + service + facade method + integration tests; cross-team contract.
-
-### Sub-task scoping (per task POML + owner direction)
-
-| Sub-task | Automatable | Approach |
-|---|---|---|
-| A — Author tool-call contract | ✅ | `projects/.../design-e3-tool-call-contract.md` (canonical) |
-| A.5 — Review with Assistant team | ❌ | Deferred — owner-mediated; marked PENDING in design doc |
-| B — Implement contract in BFF | ✅ | `Services/Ai/Insights/AssistantToolCallHandler.cs` + `Api/Insights/InsightsAssistantEndpoint.cs` + `IInsightsAi.AssistantQueryAsync` |
-| B.5 — Integration tests | ✅ | `tests/.../InsightsAssistantEndpointTests.cs` (12 cases) |
-| C — Assistant-side integration | ❌ | Out of r2 scope per POML — author hand-off doc `notes/e3-assistant-team-handoff.md` |
-| 6 — Quality gates | ✅ | code-review + adr-check + §3.5 grep + publish-size + format |
-
-### Foundation already in place (040 + 041)
-
-- `IInsightsAi.SearchAsync` + `AnswerQuestionAsync` — both already wired
-- `IInsightsIntentClassifier` + `NullInsightsIntentClassifier` (ADR-032 P3) — registered in DI
-- `forceMode` wire field plumbed on `/ask` + `/search` (cross-endpoint mismatch returns 400)
-- `InsightsPlaybookNameMapOptions` — canonical name → per-env Guid resolution
-- `ISubjectParser` (Wave D5) — multi-scheme subject parsing (matter/project/invoice)
-- `FeatureDisabledException` + `AsFeatureDisabled503()` — uniform 503 ProblemDetails
-
-### Steps tracker (POML)
-
-| # | POML Step | Status |
-|---|---|---|
-| A | Author canonical tool-call contract (design-e3-tool-call-contract.md) | 🔄 |
-| A.5 | Owner-mediated Assistant team review | ⏭️ deferred |
-| B | Implement contract in BFF (handler + endpoint + facade method + DI) | 🔲 |
-| B.5 | Integration tests (12 cases) | 🔲 |
-| C | Assistant-side integration handoff doc | 🔲 |
-| 6 | Quality gates | 🔲 |
-
-### Active key files
-
-- POML: `projects/ai-spaarke-insights-engine-r2/tasks/042-spaarke-assistant-integration.poml`
-- Design output: `projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md` (NEW)
-- Handler: `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/AssistantToolCallHandler.cs` (NEW)
-- Endpoint: `src/server/api/Sprk.Bff.Api/Api/Insights/InsightsAssistantEndpoint.cs` (NEW)
-- Facade: `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInsightsAi.cs` (extend with `AssistantQueryAsync`)
-- Facade DTOs: `Models/Ai/PublicContracts/AssistantQueryFacadeRequest.cs` + `AssistantQueryFacadeResult.cs` (NEW)
-- Wire DTOs: `Models/Insights/InsightsAssistantQueryRequest.cs` + `InsightsAssistantQueryResponse.cs` (NEW)
-- DI: `Infrastructure/DI/AnalysisServicesModule.cs` (add `AssistantToolCallHandler` registration)
-- Endpoint mapping: `Infrastructure/DI/EndpointMappingExtensions.cs` (add `MapInsightsAssistantEndpoint`)
-- Tests: `tests/unit/Sprk.Bff.Api.Tests/Api/Insights/InsightsAssistantEndpointTests.cs` (NEW — 12 cases)
-- Handoff: `projects/ai-spaarke-insights-engine-r2/notes/e3-assistant-team-handoff.md` (NEW)
-
-### ADRs in scope
-
-ADR-001, ADR-008, ADR-010, ADR-013-refined, ADR-016, ADR-019, ADR-028, ADR-029, ADR-032 (P3 for handler)
+**Next action (owner / main session)**: batch-commit Wave F changes (sources + tests + docs) on branch `work/ai-spaarke-insights-engine-r2-wave-f`, push, open PR with auto-merge enabled (consistent with Wave D + E precedent), monitor CI, redeploy BFF to `spaarke-bff-dev` post-merge.
 
 ---
 
-## 🎯 Previous task — 043 (E4) — Playbook-vs-RAG decision-tree doc (✅ 2026-06-03)
+## Wave F status (post-task-053 ✅)
 
-(History condensed — see TASK-INDEX.md for the full log.)
+| Task | Wave-item | Title | Status | Effort | Output |
+|---|---|---|---|---|---|
+| 050 | F1 | Streaming + citation ID flow spike | ✅ | 0.5d | `notes/spikes/wave-f-streaming-citation-spike.md` (6 sections A–F; binding scope decision: **SHIP FULL** both observation + document citation href; R5 escape hatch NOT triggered — plumbing cost Small) |
+| 051 | F2 | SSE streaming on `POST /api/insights/assistant/query` | ✅ | 3d | `IInsightsAi.AssistantQueryStreamAsync` + `AssistantQueryChunk` Zone-B DTO + endpoint `Accept`-header negotiation + 8 new tests |
+| 052 | F3 | `citations[].href` projection + URL resolution | ✅ | 1d | `AssistantQueryCitation.Href` optional field (JSON key lowercase `href`) + `AssistantCitationHrefOptions` config (section `Insights:CitationHref`, key `BffBaseUrl`) + URL pattern `{bffBaseUrl}/api/documents/{sprk_document-guid}/preview` + 17 new tests |
+| **053** | **F4** | **Contract v1.1 docs + R5 coordination update** | **✅** | **0.5d** | **`design-e3-tool-call-contract.md` bumped v1.0 → v1.1 (+ §3.5 SSE schema + §4.6 href schema + §12 changelog + §11 Phase 2 deferrals updates); `notes/insights-engine-assistant-integration-brief.md` v1.1 amendment (§3.4 Accept negotiation + §4.7 SSE event schema + §4.8 citations.href + §5.3 mid-stream errors + 4 new §B sanity checks); R5 coord doc `insights-r2-coordination.md` §8 changelog new entry (`2026-06-04 (late) — Wave F v1.1 shipped`) resolving §4.4 + §4.6 touchpoints; TASK-INDEX + this file updated** |
+
+**Effort total**: ~5d (matches mini-plan estimate). **Wall clock**: ~4 days end-to-end (051 + 052 parallel sub-agent dispatch per mini-plan §4.1).
+
+## Quality-gate verification @ Wave F close
+
+- Build: 0 errors, 15 pre-existing warnings (no new warnings introduced)
+- Test suite: all green; 25 new tests added (8 SSE + 17 citation-href)
+- Publish size: 44.13 MB compressed (vs Wave E baseline 44.10 MB; +0.03 MB delta, well under +5 MB per-task escalation threshold; well under 60 MB hard ceiling)
+- §3.5 facade-boundary grep: clean (no Zone A leaks into Zone B endpoints/models)
+- `dotnet format whitespace Spaarke.sln --verify-no-changes`: clean
 
 ---
 
-*Active 2026-06-03 — Wave E task 042 in flight.*
+## Project status (post-Wave F)
+
+**Phase 1.5 acceptance bar**: hit. Wave F is a strictly-additive minor-version bump (v1.0 → v1.1) on top of Phase 1.5; the FR-04 / FR-05 / SC-04 / SC-05 acceptance criteria from spec.md were already met by Wave E.
+
+**Pending operator-mediated follow-ups** (unchanged from Wave E close):
+- Assistant team review of `design-e3-tool-call-contract.md` (now v1.1 — sub-task A.5 of task 042 still owner-mediated)
+- Assistant-side implementation of the v1.1 contract additions
+
+**Wave 090 (wrap-up)**: still 🔲 not-started (per TASK-INDEX). Owner directs whether to execute now (post-Wave-F lessons-learned) or batch later. The Wave F lessons (parallel dispatch held; 0 stuck-agent incidents; spike binding decision drove F2/F3 scope clarity) should be captured in the 090 lessons-learned when it runs.
+
+---
+
+## Previous active task — 052 (F3) — citations[].href projection + URL resolution (✅ COMPLETE 2026-06-03)
+
+See Wave F task 052 POML output section + commits on `work/ai-spaarke-insights-engine-r2-wave-f` for the source diff. Tests: 17/17 passing. Quality gates clean.
+
+---
+
+## Wave F closure note
+
+Per mini-plan §4.1 dispatch plan:
+- Round 1 (done): 050 serial — spike ✅
+- Round 2 (done): 051 + 052 parallel — both ✅
+- Round 3 (done): 053 serial — docs ✅
+
+**No further Wave F sub-agent work remains.** Wave F is implementation-complete; awaiting main-session batch commit + PR open + auto-merge per owner direction.
