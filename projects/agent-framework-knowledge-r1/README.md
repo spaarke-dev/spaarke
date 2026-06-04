@@ -1,11 +1,13 @@
 # Agent Framework Knowledge Base — R1
 
-> **Status**: ⏸️ **PARKED** — blocked on outcome of [`agent-framework-fit-assessment-r1`](../agent-framework-fit-assessment-r1/). Do not execute task 001 until the assessment lands at `docs/assessments/agent-framework-fit-assessment-YYYY-MM-DD.md` and its recommendations are reviewed.
-> **Why parked**: building skills + patterns first would encode a commitment to Agent Framework before Spaarke has decided whether (and where) to adopt `Microsoft.Agents.AI` proper on top of its existing `Microsoft.Extensions.AI` usage. The assessment answers fit-for-purpose per Spaarke surface; this project's SPEC will be refined based on those conclusions (e.g., surfaces excluded from adoption do NOT get patterns; surfaces added in scope may need additional curation).
+> **Status**: ⏸️ **PARKED — assessment landed; SPEC re-scoping pending** (2026-06-03). The blocking assessment has landed at [`docs/assessments/agent-framework-fit-assessment-2026-06-03.md`](../../docs/assessments/agent-framework-fit-assessment-2026-06-03.md). Before executing task 001, the SPEC should be re-scoped per [`UNBLOCK-RECOMMENDATION.md`](./UNBLOCK-RECOMMENDATION.md) — this file recommends which curation tasks to prioritize, de-prioritize, or rescope based on the per-surface verdicts (1 ADOPT · 5 PARTIAL · 4 DON'T ADOPT).
+> **Why parked**: building skills + patterns first would encode a commitment to Agent Framework before Spaarke has decided whether (and where) to adopt `Microsoft.Agents.AI` proper on top of its existing `Microsoft.Extensions.AI` usage. The assessment answered fit-for-purpose per Spaarke surface; this project's SPEC needs refinement to match the assessment's adoption boundaries (de-prioritize curation for DON'T ADOPT surfaces; deepen curation for S5B + the shared middleware lift).
+> **How to resume**: see [`UNBLOCK-RECOMMENDATION.md`](./UNBLOCK-RECOMMENDATION.md) §"How to resume knowledge-r1."
 > **Owner**: Ralph Schroeder
 > **Branch**: `work/coding-knowledge-base-setup-r1` (or split to a dedicated `work/agent-framework-knowledge-r1` worktree if executing in parallel with other work)
 > **Created**: 2026-06-03
 > **Parked**: 2026-06-03
+> **Assessment landed**: 2026-06-03 — see [`docs/assessments/agent-framework-fit-assessment-2026-06-03.md`](../../docs/assessments/agent-framework-fit-assessment-2026-06-03.md) + [`UNBLOCK-RECOMMENDATION.md`](./UNBLOCK-RECOMMENDATION.md)
 
 ---
 
