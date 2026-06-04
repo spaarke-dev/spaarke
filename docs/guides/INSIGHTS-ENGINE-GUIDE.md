@@ -97,7 +97,7 @@ The dividing line: **Insights = cross-matter comparative reasoning grounded in a
 
 ### When to use a pre-authored JPS playbook vs. generic RAG (Phase 1.5+)
 
-> **🚧 Placeholder — final decision tree owned by [task 043 (Wave E4)](../../projects/ai-spaarke-insights-engine-r2/tasks/043-playbook-vs-rag-decision-tree.poml).** The table below is the working heuristic until E4 lands.
+The table below is the **quick heuristic**. For the full decision tree (criteria, ≥15 worked examples across CTRNS/IPPAT/BNKF, and the RAG-to-playbook promotion path), see the dedicated guide: [**INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md**](./INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md) (Wave E4, task 043).
 
 | Indicator | → Playbook | → Generic RAG |
 |---|---|---|

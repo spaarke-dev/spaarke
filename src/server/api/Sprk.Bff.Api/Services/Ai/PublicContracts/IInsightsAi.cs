@@ -133,4 +133,122 @@ public interface IInsightsAi
     Task<ReadOnlyMemory<float>> EmbedTextAsync(
         string text,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Hybrid RAG retrieval + LLM synthesis path through the Insights Engine (D-P15-06 /
+    /// FR-04, Wave E task 040). Runs semantic + vector search over
+    /// <c>spaarke-insights-index</c> filtered by subject scope (and optional artifact
+    /// type / predicate), then LLM-synthesizes a grounded summary citing the top
+    /// retrievals.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>How this differs from <see cref="AnswerQuestionAsync"/></b>: <c>AnswerQuestion</c>
+    /// invokes a <em>pre-authored</em> JPS playbook (structured output, evidence-sufficiency
+    /// gates, structured Decline). <c>Search</c> answers <em>open-ended</em> natural-language
+    /// queries via generic RAG over the same substrate. The Spaarke Assistant intent
+    /// classifier (Wave E2 task 041) routes between the two paths.
+    /// </para>
+    /// <para>
+    /// <b>Zone B → Zone A boundary</b>: the endpoint
+    /// (<c>POST /api/insights/search</c>) lives in <c>Api/Insights/</c> (Zone B per
+    /// SPEC §3.5.4). It MUST NOT import <c>IRagService</c> directly because
+    /// <c>Services/Ai/*</c> is forbidden in Zone B. This facade method is the bridge:
+    /// the orchestrator (Zone A) holds <c>IRagService</c> + <c>IOpenAiClient</c> and
+    /// performs both retrieval and synthesis.
+    /// </para>
+    /// <para>
+    /// <b>Kill-switch behavior</b>: when the AI kill-switch is OFF, <c>NullRagService</c>
+    /// (ADR-032 P3) throws <see cref="Configuration.FeatureDisabledException"/> with
+    /// <c>ErrorCode = "ai.rag.disabled"</c>. The orchestrator does NOT catch this — it
+    /// propagates to the endpoint which converts to 503 ProblemDetails via the shared
+    /// <c>AsFeatureDisabled503()</c> helper. See <c>NullRagService</c> + <c>ADR-032</c>.
+    /// </para>
+    /// <para>
+    /// <b>Empty-result behavior</b>: when retrieval returns zero hits (after privilege
+    /// + subject filtering), the result's <c>Results</c> list is empty and
+    /// <c>Summary</c> is the empty string — the orchestrator does NOT fabricate a
+    /// summary without grounding. The endpoint surfaces this as a 200 OK with an empty
+    /// envelope so the caller can render a "no results found" message client-side.
+    /// </para>
+    /// </remarks>
+    /// <param name="request">Search request — query + subject + optional filters +
+    /// caller principal. See <see cref="InsightsSearchFacadeRequest"/> for field
+    /// semantics.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>An <see cref="InsightsSearchFacadeResult"/> carrying the ranked hits,
+    /// the LLM-synthesized summary with grounded <c>[n]</c> citations, and total
+    /// wall-clock duration.</returns>
+    /// <exception cref="ArgumentNullException">When <paramref name="request"/> is null.</exception>
+    /// <exception cref="ArgumentException">When required string fields on
+    /// <paramref name="request"/> are null/whitespace.</exception>
+    /// <exception cref="Configuration.FeatureDisabledException">When the AI kill-switch
+    /// is OFF (propagated unchanged from <c>NullRagService</c> per ADR-032 P3); the
+    /// endpoint converts this to 503 ProblemDetails.</exception>
+    /// <exception cref="OperationCanceledException">When <paramref name="cancellationToken"/>
+    /// is signalled before the result is produced.</exception>
+    Task<InsightsSearchFacadeResult> SearchAsync(
+        InsightsSearchFacadeRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Unified Spaarke Assistant tool-call entry point (Wave E3 task 042 / FR-05). Takes a
+    /// natural-language query + subject + optional forceMode override and routes through
+    /// the Wave E2 intent classifier OR directly to the playbook / RAG path depending on
+    /// caller-declared intent. Returns a uniform <see cref="AssistantQueryFacadeResult"/>
+    /// the Assistant can render without knowing which underlying path executed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Contract anchor</b>: <c>projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md</c>
+    /// — the canonical Spaarke Assistant ↔ Insights tool-call contract. This facade method
+    /// is the binding BFF-side implementation surface for that contract; the wire-level
+    /// endpoint (<c>POST /api/insights/assistant/query</c>) is a thin shell over this call.
+    /// </para>
+    /// <para>
+    /// <b>Why this is on the facade (not the endpoint directly)</b>: the Assistant tool-call
+    /// orchestration is Zone A logic — it consumes the intent classifier
+    /// (<c>IInsightsIntentClassifier</c>), the playbook path (<c>AnswerQuestionAsync</c>),
+    /// and the RAG path (<c>SearchAsync</c>), all of which are AI internals. The Zone B
+    /// endpoint sees ONLY this facade method per SPEC §3.5.4.
+    /// </para>
+    /// <para>
+    /// <b>Routing decision</b> (per contract §3.2):
+    /// <list type="bullet">
+    ///   <item><c>ForceMode == null</c>: invoke classifier; if BelowThreshold → RAG fallback;
+    ///   else dispatch per classifier's <c>Path</c>.</item>
+    ///   <item><c>ForceMode == "playbook"</c>: skip classifier; resolve playbook id via
+    ///   classifier hint OR <c>Insights:Playbooks:DefaultName</c>; invoke playbook path.</item>
+    ///   <item><c>ForceMode == "rag"</c>: skip classifier; invoke RAG path directly.</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// <b>Kill-switch behavior</b> (per contract §7 matrix): the implementation does NOT
+    /// catch <see cref="Configuration.FeatureDisabledException"/> — it propagates unchanged
+    /// from the underlying classifier / playbook / RAG service. The endpoint converts to
+    /// 503 ProblemDetails via <c>AsFeatureDisabled503()</c> with the correct <c>errorCode</c>
+    /// (<c>ai.insights.disabled</c>, <c>ai.rag.disabled</c>, or <c>ai.intent-classification.disabled</c>).
+    /// </para>
+    /// </remarks>
+    /// <param name="request">Assistant tool-call request — query + subject + optional
+    /// forceMode override + tenant + caller principal. See
+    /// <see cref="AssistantQueryFacadeRequest"/> for field semantics.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A <see cref="AssistantQueryFacadeResult"/> carrying the chosen path,
+    /// uniform answer + citations, the rich structured envelope (JSON), and routing
+    /// diagnostics.</returns>
+    /// <exception cref="ArgumentNullException">When <paramref name="request"/> is null.</exception>
+    /// <exception cref="ArgumentException">When required string fields on
+    /// <paramref name="request"/> are null/whitespace.</exception>
+    /// <exception cref="Configuration.FeatureDisabledException">When a required kill-switch
+    /// is OFF (propagated from underlying services per ADR-032 P3); the endpoint converts
+    /// this to 503 ProblemDetails.</exception>
+    /// <exception cref="InvalidOperationException">When <c>ForceMode == "playbook"</c> AND
+    /// no default playbook is configured (deployment misconfiguration). Endpoint converts
+    /// to 503 with <c>errorCode = "ai.assistant-default-playbook.unconfigured"</c>.</exception>
+    /// <exception cref="OperationCanceledException">When <paramref name="cancellationToken"/>
+    /// is signalled.</exception>
+    Task<AssistantQueryFacadeResult> AssistantQueryAsync(
+        AssistantQueryFacadeRequest request,
+        CancellationToken cancellationToken = default);
 }

@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Insights;
 using Sprk.Bff.Api.Services.Ai.Insights.Ingest;
 using Sprk.Bff.Api.Services.Ai.Insights.Nodes;
+using Sprk.Bff.Api.Services.Ai.Insights.Routing;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Insights;
@@ -51,6 +52,13 @@ public class InsightsOrchestratorTests
     private readonly Mock<IOpenAiClient> _openAiMock = new(MockBehavior.Strict);
     private readonly Mock<IPlaybookOrchestrationService> _playbookOrchestrationMock = new();
     private readonly Mock<IIngestDocumentSource> _ingestDocumentSourceMock = new();
+    // IRagService dependency added in Wave E task 040 for SearchAsync. Loose by default
+    // so existing AnswerQuestionAsync / RunIngestAsync tests don't need to wire the mock.
+    private readonly Mock<IRagService> _ragServiceMock = new();
+    // Wave E3 task 042 — AssistantToolCallHandler dependency added for AssistantQueryAsync.
+    // Loose because none of the existing orchestrator tests cover AssistantQueryAsync (those
+    // live in dedicated AssistantToolCallHandlerTests / InsightsAssistantEndpointTests).
+    private readonly Mock<IInsightsIntentClassifier> _classifierMock = new();
     // Default name-map registers universal-ingest@v1 → UniversalIngestPlaybookId.
     // Tests can substitute an empty map to exercise the "unconfigured" failure path.
     private readonly TestOptionsMonitor<InsightsPlaybookNameMapOptions> _playbookNameMap =
@@ -62,6 +70,13 @@ public class InsightsOrchestratorTests
             }
         });
 
+    private AssistantToolCallHandler BuildAssistantHandler()
+        => new(
+            _classifierMock.Object,
+            _playbookNameMap,
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            NullLogger<AssistantToolCallHandler>.Instance);
+
     private InsightsOrchestrator CreateSut()
         => new(
             _engineMock.Object,
@@ -70,6 +85,8 @@ public class InsightsOrchestratorTests
             _playbookOrchestrationMock.Object,
             _ingestDocumentSourceMock.Object,
             _playbookNameMap,
+            _ragServiceMock.Object,
+            BuildAssistantHandler(),
             NullLogger<InsightsOrchestrator>.Instance);
 
     private static InsightsAgentRequest MakeAgentRequest(
@@ -110,7 +127,7 @@ public class InsightsOrchestratorTests
         Action act = () => new InsightsOrchestrator(
             null!, _cacheMock.Object, _openAiMock.Object,
             _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _playbookNameMap, NullLogger<InsightsOrchestrator>.Instance);
+            _playbookNameMap, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
         act.Should().Throw<ArgumentNullException>().WithParameterName("engine");
     }
 
@@ -120,7 +137,7 @@ public class InsightsOrchestratorTests
         Action act = () => new InsightsOrchestrator(
             _engineMock.Object, null!, _openAiMock.Object,
             _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _playbookNameMap, NullLogger<InsightsOrchestrator>.Instance);
+            _playbookNameMap, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
         act.Should().Throw<ArgumentNullException>().WithParameterName("cache");
     }
 
@@ -130,7 +147,7 @@ public class InsightsOrchestratorTests
         Action act = () => new InsightsOrchestrator(
             _engineMock.Object, _cacheMock.Object, null!,
             _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _playbookNameMap, NullLogger<InsightsOrchestrator>.Instance);
+            _playbookNameMap, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
         act.Should().Throw<ArgumentNullException>().WithParameterName("openAi");
     }
 
@@ -140,7 +157,7 @@ public class InsightsOrchestratorTests
         Action act = () => new InsightsOrchestrator(
             _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
             null!, _ingestDocumentSourceMock.Object,
-            _playbookNameMap, NullLogger<InsightsOrchestrator>.Instance);
+            _playbookNameMap, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
         act.Should().Throw<ArgumentNullException>().WithParameterName("playbookOrchestration");
     }
 
@@ -150,7 +167,7 @@ public class InsightsOrchestratorTests
         Action act = () => new InsightsOrchestrator(
             _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
             _playbookOrchestrationMock.Object, null!,
-            _playbookNameMap, NullLogger<InsightsOrchestrator>.Instance);
+            _playbookNameMap, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
         act.Should().Throw<ArgumentNullException>().WithParameterName("ingestDocumentSource");
     }
 
@@ -160,8 +177,28 @@ public class InsightsOrchestratorTests
         Action act = () => new InsightsOrchestrator(
             _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
             _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            null!, NullLogger<InsightsOrchestrator>.Instance);
+            null!, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
         act.Should().Throw<ArgumentNullException>().WithParameterName("playbookNameMap");
+    }
+
+    [Fact]
+    public void Constructor_NullRagService_Throws()
+    {
+        Action act = () => new InsightsOrchestrator(
+            _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
+            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
+            _playbookNameMap, null!, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
+        act.Should().Throw<ArgumentNullException>().WithParameterName("ragService");
+    }
+
+    [Fact]
+    public void Constructor_NullAssistantHandler_Throws()
+    {
+        Action act = () => new InsightsOrchestrator(
+            _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
+            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
+            _playbookNameMap, _ragServiceMock.Object, null!, NullLogger<InsightsOrchestrator>.Instance);
+        act.Should().Throw<ArgumentNullException>().WithParameterName("assistantHandler");
     }
 
     [Fact]
@@ -170,7 +207,7 @@ public class InsightsOrchestratorTests
         Action act = () => new InsightsOrchestrator(
             _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
             _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _playbookNameMap, null!);
+            _playbookNameMap, _ragServiceMock.Object, BuildAssistantHandler(), null!);
         act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
     }
 
@@ -869,7 +906,7 @@ public class InsightsOrchestratorTests
         var sut = new InsightsOrchestrator(
             _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
             _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            emptyNameMap, NullLogger<InsightsOrchestrator>.Instance);
+            emptyNameMap, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
 
         _ingestDocumentSourceMock
             .Setup(s => s.FetchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))

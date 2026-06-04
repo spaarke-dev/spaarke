@@ -131,6 +131,28 @@ public static class InsightEndpoints
             return BadRequest("'subject' is required and cannot be empty.");
         }
 
+        // Wave E2 (FR-05) forceMode plumbing. The /ask endpoint IS the canonical playbook
+        // dispatcher — caller-declared "playbook" intent is consistent; "rag" intent is a
+        // wrong-endpoint mismatch and gets rejected with 400 ProblemDetails so the caller
+        // (or the future E3 Assistant) can re-dispatch to /api/insights/search. Null = no
+        // override = normal playbook behavior. The classifier itself is not invoked from
+        // this endpoint in E2; the field exists for forward-compat with E3 Spaarke Assistant.
+        if (!string.IsNullOrWhiteSpace(request.ForceMode))
+        {
+            if (string.Equals(request.ForceMode, "rag", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(
+                    "'forceMode' is 'rag' but this endpoint serves the playbook path. " +
+                    "Use POST /api/insights/search for RAG dispatch.");
+            }
+            if (!string.Equals(request.ForceMode, "playbook", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(
+                    $"'forceMode' must be either 'playbook' or 'rag' (received: '{request.ForceMode}'). " +
+                    "Omit the field to use the default intent-classifier dispatch (Wave E3+).");
+            }
+        }
+
         // Resolve Question → Guid. Two acceptable inputs (in priority order):
         //   1. A raw Guid (advanced/direct path — original Phase 1 contract; still works).
         //   2. A canonical playbook name (e.g., "predict-matter-cost@v1") registered in

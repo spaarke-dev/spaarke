@@ -1,7 +1,7 @@
 <task id="041" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>E2 — Intent classifier (LLM-based; routes playbook vs RAG; forceMode override)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>E</wave>
     <estimated-effort>2d</estimated-effort>
     <tags>intent-classification, llm, routing, hybrid-consumption, zone-a, bff-api</tags>

@@ -1,7 +1,7 @@
 <task id="042" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>E3 — Spaarke Assistant integration (authors tool-call contract first, then implements)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>E</wave>
     <estimated-effort>1w</estimated-effort>
     <tags>spaarke-assistant, tool-call-contract, integration, cross-team, hybrid-consumption</tags>

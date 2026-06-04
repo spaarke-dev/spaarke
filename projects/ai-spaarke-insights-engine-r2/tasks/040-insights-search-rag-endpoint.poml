@@ -1,7 +1,7 @@
 <task id="040" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>E1 — POST /api/insights/search endpoint (wraps existing IRagService)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>E</wave>
     <estimated-effort>1.5d</estimated-effort>
     <tags>endpoint, rag, irag-service-facade, bff-api, zone-a, adr-030</tags>

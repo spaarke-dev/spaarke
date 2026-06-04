@@ -65,9 +65,23 @@ public class PredictMatterCostPlaybookTests
     // is a synthesis playbook, not ingest), so loose mocks suffice — they're never invoked.
     private readonly Mock<Sprk.Bff.Api.Services.Ai.IPlaybookOrchestrationService> _playbookOrchestrationMock = new();
     private readonly Mock<Sprk.Bff.Api.Services.Ai.Insights.Ingest.IIngestDocumentSource> _ingestDocumentSourceMock = new();
+    // Wave E task 040 — IRagService dependency added for SearchAsync. Loose mock here
+    // because predict-matter-cost playbook tests cover the AnswerQuestion path only.
+    private readonly Mock<Sprk.Bff.Api.Services.Ai.IRagService> _ragServiceMock = new();
+    // Wave E3 task 042 — AssistantToolCallHandler dependency added for AssistantQueryAsync.
+    // Loose mock for the classifier; handler is real with no-op deps; never invoked from this
+    // test class (covers AnswerQuestion path only).
+    private readonly Mock<Sprk.Bff.Api.Services.Ai.Insights.Routing.IInsightsIntentClassifier> _classifierMock = new();
     private readonly Microsoft.Extensions.Options.IOptionsMonitor<Sprk.Bff.Api.Api.Insights.InsightsPlaybookNameMapOptions> _playbookNameMap =
         new TestOptionsMonitor<Sprk.Bff.Api.Api.Insights.InsightsPlaybookNameMapOptions>(
             new Sprk.Bff.Api.Api.Insights.InsightsPlaybookNameMapOptions());
+
+    private Sprk.Bff.Api.Services.Ai.Insights.AssistantToolCallHandler BuildAssistantHandler()
+        => new(
+            _classifierMock.Object,
+            _playbookNameMap,
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            NullLogger<Sprk.Bff.Api.Services.Ai.Insights.AssistantToolCallHandler>.Instance);
 
     private InsightsOrchestrator CreateSut() => new(
         _engineMock.Object,
@@ -76,6 +90,8 @@ public class PredictMatterCostPlaybookTests
         _playbookOrchestrationMock.Object,
         _ingestDocumentSourceMock.Object,
         _playbookNameMap,
+        _ragServiceMock.Object,
+        BuildAssistantHandler(),
         NullLogger<InsightsOrchestrator>.Instance);
 
     private sealed class TestOptionsMonitor<T> : Microsoft.Extensions.Options.IOptionsMonitor<T>

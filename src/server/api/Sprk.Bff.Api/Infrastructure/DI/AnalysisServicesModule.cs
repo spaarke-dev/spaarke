@@ -2,6 +2,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Insights;
+using Sprk.Bff.Api.Services.Ai.Insights.Routing;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
@@ -65,6 +66,19 @@ public static class AnalysisServicesModule
 
             AddInsightsCache(services);
             Console.WriteLine("\u2713 Insights playbook execution cache enabled (D-P13, ADR-009)");
+
+            AddInsightsIntentClassifier(services, configuration);
+            Console.WriteLine("\u2713 Insights intent classifier enabled (Wave E2 task 041, FR-05)");
+
+            // Wave E3 task 042 \u2014 Spaarke Assistant tool-call handler. Scoped because it is
+            // consumed by InsightsOrchestrator (Scoped) and uses scoped delegate captures.
+            // ADR-032 \u00a7F.1 inspection: the handler is consumed ONLY by InsightsOrchestrator
+            // (an IInsightsAi impl registered behind the compound-AI-ON gate via
+            // AddPublicContractsFacade). When AI is OFF, IInsightsAi falls back to the Null
+            // facade in AddNullObjectsForCompoundOff and the handler is never resolved.
+            // No Null-Object mirror needed at this layer per the compound-gate isolation.
+            services.AddScoped<Sprk.Bff.Api.Services.Ai.Insights.AssistantToolCallHandler>();
+            Console.WriteLine("\u2713 Spaarke Assistant tool-call handler enabled (Wave E3 task 042, FR-05)");
 
             Console.WriteLine("\u2713 Analysis services enabled");
         }
@@ -233,6 +247,21 @@ public static class AnalysisServicesModule
         // SendMessageAsync + ApprovePlanAsync catch and emit SSE error chunks per ADR-018.
         services.AddScoped<PendingPlanManager>(sp =>
             new NullPendingPlanManager(sp.GetRequiredService<ILogger<PendingPlanManager>>()));
+
+        // Insights intent classifier (Wave E2 task 041 / FR-05) — P3 Fail-fast Null-Object
+        // per ADR-032 + task 041 POML constraint. The classifier is a query/computation
+        // service (returns a routing decision); a P2 Quiet no-op would silently mis-route
+        // every query to the RAG path under disabled state and mislead observability.
+        // Mirrors the IRagService P3 pattern shipped 2026-06-01.
+        //
+        // ADR-032 §F.1 inspection: registered here in the compound-OFF else-branch alongside
+        // the real registration in AddInsightsIntentClassifier (compound-ON only). Forward-
+        // compat with Wave E3 Spaarke Assistant integration which will inject IInsightsIntentClassifier
+        // into a (potentially unconditionally-mapped) Assistant endpoint. Pre-registering the
+        // Null-Object now prevents the asymmetric-registration anti-pattern from being introduced
+        // when E3 lands.
+        services.AddSingleton<IInsightsIntentClassifier>(sp =>
+            new NullInsightsIntentClassifier(sp.GetRequiredService<ILogger<InsightsIntentClassifier>>()));
     }
 
     private static void AddAnalysisOrchestrationServices(IServiceCollection services, IConfiguration configuration)
@@ -438,6 +467,64 @@ public static class AnalysisServicesModule
     {
         services.AddSingleton<InsightsCacheMetrics>();
         services.AddSingleton<IInsightsPlaybookExecutionCache, InsightsPlaybookExecutionCache>();
+    }
+
+    /// <summary>
+    /// Registers the Wave E2 Insights intent classifier (FR-05). Cheap LLM-based routing
+    /// between the playbook synthesis path (<c>/api/insights/ask</c>) and the open-ended
+    /// RAG retrieval path (<c>/api/insights/search</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Lifetime</b>: Singleton — the classifier holds no per-request state. Its
+    /// dependencies are <see cref="IOpenAiClient"/> (Singleton),
+    /// <see cref="Microsoft.Extensions.Caching.Memory.IMemoryCache"/> (Singleton), and
+    /// <see cref="Microsoft.Extensions.Options.IOptionsMonitor{T}"/> for
+    /// <see cref="InsightsIntentClassifierOptions"/> (Singleton). No captive-dependency
+    /// concerns.
+    /// </para>
+    /// <para>
+    /// <b>Fine-grained kill-switch</b>: when <see cref="InsightsIntentClassifierOptions.Enabled"/>
+    /// is false, the Null-Object is registered instead — same P3 Fail-fast semantics as the
+    /// compound-AI-OFF path. This lets operators ship classifier code without enabling it.
+    /// </para>
+    /// <para>
+    /// <b>ADR-032 §F.1</b>: the real classifier is registered here in the compound-AI-ON
+    /// path; the Null-Object is registered in <see cref="AddNullObjectsForCompoundOff"/>.
+    /// Wave E2 does NOT yet have an unconditionally-mapped consumer (the
+    /// <c>/api/insights/ask</c> and <c>/api/insights/search</c> endpoints accept
+    /// <c>forceMode</c> on their wire DTO for E3 forward-compat but do not invoke the
+    /// classifier in E2). The asymmetric-registration anti-pattern is forward-mitigated by
+    /// pre-registering the Null-Object so Wave E3 (Assistant integration) doesn't have to
+    /// retrofit the DI layer.
+    /// </para>
+    /// </remarks>
+    private static void AddInsightsIntentClassifier(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<InsightsIntentClassifierOptions>()
+            .BindConfiguration(InsightsIntentClassifierOptions.SectionName);
+
+        // Fine-grained opt-out independent of the compound AI gate. Bound directly from
+        // configuration here (rather than via IOptions) because the registration choice is
+        // made at startup — IOptions reload binding wouldn't switch the registered type.
+        var classifierEnabled = configuration.GetValue<bool>(
+            $"{InsightsIntentClassifierOptions.SectionName}:Enabled", defaultValue: true);
+
+        if (classifierEnabled)
+        {
+            // Real classifier — LLM-backed, memory-cached. Singleton (matches IMemoryCache +
+            // IOpenAiClient lifetimes; no per-request state).
+            services.AddSingleton<IInsightsIntentClassifier, InsightsIntentClassifier>();
+            Console.WriteLine("✓ Insights intent classifier: real LLM-backed impl");
+        }
+        else
+        {
+            // Operator opted out at fine grain. Register the same P3 Fail-fast Null-Object
+            // used by the compound-AI-OFF branch so consumers see consistent behavior.
+            services.AddSingleton<IInsightsIntentClassifier>(sp =>
+                new NullInsightsIntentClassifier(sp.GetRequiredService<ILogger<InsightsIntentClassifier>>()));
+            Console.WriteLine("⚠ Insights intent classifier: disabled at fine-grain (Insights:IntentClassifier:Enabled=false) — NullInsightsIntentClassifier registered");
+        }
     }
 
     private static void AddRagServices(IServiceCollection services, IConfiguration configuration)
