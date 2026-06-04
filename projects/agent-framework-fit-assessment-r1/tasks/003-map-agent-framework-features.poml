@@ -4,7 +4,8 @@
     <phase>2</phase>
     <tags>assessment, feature-mapping, agent-framework, extensions-ai</tags>
     <estimate>1.5h</estimate>
-    <status>pending</status>
+    <status>completed</status>
+    <completion-summary>Completed 2026-06-03 via parallel sub-agent (commit 68d35c73). Output: notes/03-agent-framework-feature-map.md (537 lines, 12 features F1-F12). Citations: 19 distinct primary sources (12 Microsoft Learn pages + 1 Devblog + 4 upstream sample-tree at SHA afa7834e + 2 GitHub Issues including #6268 streaming caveat + #6308 hosting question). Recency audit: 18/19 = 94.7% within 2026-04-01 floor (exceeds 80% target); one citation (Workflow HITL page, 2026-03-31) flagged stable-content. No researcher subagent invocations needed — Learn coverage sufficient. Top 5 findings affecting task 004: (1) S1 lift is structural fit but gated on #6268; (2) S2 lift to Workflows is binary, not incremental; (3) Tool Approval (F11) unifies framework + workflow HITL via ApprovalRequiredAIFunction + FunctionApprovalRequestContent; (4) S5 Foundry overlap clarified — workflow HITL is in agent-framework itself, not Foundry-exclusive; Foundry adds hosting surface; (5) S6/S7 (A2A + hosted MCP) are forward-compat additive options, not swap-ins. Two evidence-thin areas flagged for downstream tasks: F3 Context providers (no standalone Learn page) and F12 Durable hosting (no dedicated /hosting/ Learn page).</completion-summary>
     <parallel-group>B</parallel-group>
     <parallel-safe>true</parallel-safe>
     <dependencies>000</dependencies>
