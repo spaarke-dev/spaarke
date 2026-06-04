@@ -34,10 +34,10 @@ R5 ships in 3 sequential phases + 1 wrap-up task, with parallel-execution opport
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
 | 001 | P1-G1 | D1-01 Provision `spaarke-session-files` AI Search index (Bicep + schema) | ✅ | 4h (actual ~1h) | ❌ | — |
-| 002 | P1-G2 | D1-02 Extend `RagSearchOptions` with `sessionId` filter (additive parameter) | 🔲 | 2h | ✅ | 001 |
-| 003 | P1-G2 | D1-03 Parameterize `RagIndexingPipeline` for session-files writes | 🔲 | 3h | ✅ | 001 |
-| 004 | P1-G3 | D1-04 Extend `ChatSession` model with `UploadedFiles[]` manifest | 🔲 | 2h | ✅ | — |
-| 005 | P1-G3 | D1-05 Add `FieldDelta` variant to `AnalysisChunk` (additive SSE event type) | 🔲 | 2h | ✅ | — |
+| 002 | P1-G2 | D1-02 Extend `RagSearchOptions` with `sessionId` filter (additive parameter) | ✅ | 2h (actual 1.5h) | ✅ | 001 |
+| 003 | P1-G2 | D1-03 Parameterize `RagIndexingPipeline` for session-files writes | ✅ | 3h (actual 3h) | ✅ | 001 |
+| 004 | P1-G3 | D1-04 Extend `ChatSession` model with `UploadedFiles[]` manifest | ✅ | 2h (actual 2h) | ✅ | — |
+| 005 | P1-G3 | D1-05 Add `FieldDelta` variant to `AnalysisChunk` (additive SSE event type) | ✅ | 2h (actual 2h) | ✅ | — |
 | 006 | P1-G4 | D1-06 Switch Summarize playbook to Azure OpenAI Structured Outputs + incremental JSON parser | 🔲 | 1d | ❌ | 005 |
 | 007 | P1-G5 | D1-07 Session-files cleanup `IHostedService` (background job) | 🔲 | 4h | ✅ | 001, 003 |
 | 008 | P1-G5 | D1-08 Telemetry events + cost observability instrumentation | 🔲 | 3h | ✅ | — |

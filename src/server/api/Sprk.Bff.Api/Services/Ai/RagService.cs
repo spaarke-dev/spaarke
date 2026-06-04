@@ -185,11 +185,31 @@ public partial class RagService : IRagService
                     embeddingStopwatch.ElapsedMilliseconds, embeddingCacheHit);
             }
 
-            // Step 2: Get SearchClient for tenant's deployment
+            // Step 2: Get SearchClient — session-scoped routing wins when SessionId is set
+            // (R5 task 002 / FR-09); else preserve pre-R5 deployment-routing behavior.
+            // Branch order is most-specific-first: SessionId > DeploymentId > default tenant.
+            // The session-files index is a SHARED session-scoped index (not per-tenant), so
+            // we resolve the SearchClient directly via the injected SearchIndexClient rather
+            // than via IKnowledgeDeploymentService (which routes per-tenant for the knowledge
+            // index family). Tenant isolation is preserved via the unconditional
+            // `tenantId eq '...'` filter in BuildSearchOptions (ADR-014 invariant).
             searchStopwatch.Start();
-            var searchClient = options.DeploymentId.HasValue
-                ? await _deploymentService.GetSearchClientByDeploymentAsync(options.DeploymentId.Value, cancellationToken)
-                : await _deploymentService.GetSearchClientAsync(options.TenantId, cancellationToken);
+            SearchClient searchClient;
+            if (!string.IsNullOrEmpty(options.SessionId))
+            {
+                searchClient = _searchIndexClient.GetSearchClient(_aiSearchOptions.SessionFilesIndexName);
+                _logger.LogDebug(
+                    "RAG search routing to session-files index {IndexName} for tenant {TenantId} session {SessionId}",
+                    _aiSearchOptions.SessionFilesIndexName, options.TenantId, options.SessionId);
+            }
+            else if (options.DeploymentId.HasValue)
+            {
+                searchClient = await _deploymentService.GetSearchClientByDeploymentAsync(options.DeploymentId.Value, cancellationToken);
+            }
+            else
+            {
+                searchClient = await _deploymentService.GetSearchClientAsync(options.TenantId, cancellationToken);
+            }
 
             // Step 3: Build hybrid search options with privilege filter applied
             var searchOptions = BuildSearchOptions(options, queryEmbedding, userGroupIds);
@@ -937,6 +957,15 @@ public partial class RagService : IRagService
         ReadOnlyMemory<float> queryEmbedding,
         IReadOnlyList<string>? userGroupIds = null)
     {
+        // R5 task 002 / FR-09 — under session-scoped routing, use the session-files
+        // semantic configuration (the knowledge index's `knowledge-semantic-config` does
+        // not exist on the session-files index). The session-files schema has its own
+        // titleField=fileName + prioritizedContentFields=content per task 001 schema.
+        var isSessionScoped = !string.IsNullOrEmpty(options.SessionId);
+        var semanticConfigName = isSessionScoped
+            ? _aiSearchOptions.SessionFilesSemanticConfigName
+            : SemanticConfigurationName;
+
         var searchOptions = new SearchOptions
         {
             Size = options.TopK,
@@ -944,13 +973,14 @@ public partial class RagService : IRagService
             QueryType = SearchQueryType.Semantic,
             SemanticSearch = new SemanticSearchOptions
             {
-                SemanticConfigurationName = SemanticConfigurationName,
+                SemanticConfigurationName = semanticConfigName,
                 QueryCaption = new QueryCaption(QueryCaptionType.Extractive),
                 QueryAnswer = new QueryAnswer(QueryAnswerType.None)
             }
         };
 
-        // Add vector search if enabled
+        // Add vector search if enabled — both indexes use the same `contentVector3072`
+        // field name (3072-dim text-embedding-3-large) per task 001 schema.
         if (options.UseVectorSearch && queryEmbedding.Length > 0)
         {
             searchOptions.VectorSearch = new VectorSearchOptions
@@ -969,97 +999,171 @@ public partial class RagService : IRagService
         // Build filter expression
         var filters = new List<string>();
 
-        // Always filter by tenant for security (ADR-014)
+        // Always filter by tenant for security (ADR-014) — applied for BOTH the
+        // knowledge-index and session-files-index code paths.
         filters.Add($"tenantId eq '{EscapeFilterValue(options.TenantId)}'");
 
-        // Include knowledge sources — KnowledgeSourceIds (plural) takes precedence over singular.
-        // Use search.in() for lists > 10 items to avoid OData clause limits; OR chain below 10 for log readability.
-        if (options.KnowledgeSourceIds is { Count: > 0 })
+        if (isSessionScoped)
         {
-            if (options.KnowledgeSourceIds.Count > 10)
+            // R5 task 002 / FR-09 — session isolation invariant per ADR-014: when
+            // SessionId is set, both `tenantId` AND `sessionId` MUST match (ANDed
+            // with the unconditional tenant filter above). Never OR — cross-tenant
+            // session leaks would otherwise be possible.
+            filters.Add($"sessionId eq '{EscapeFilterValue(options.SessionId!)}'");
+
+            // The session-files schema (task 001) carries only `tenantId` + `sessionId`
+            // + chunk + tags + timestamps columns. It does NOT carry
+            // `knowledgeSourceId` / `parentEntityType` / `parentEntityId` /
+            // `privilege_group_ids` / `documentType` filterable fields. Apply tags only;
+            // skip the rest with a debug log so a misuse is visible in diagnostics.
+            if (options.KnowledgeSourceId is not null
+                || options.KnowledgeSourceIds is { Count: > 0 }
+                || options.ExcludeKnowledgeSourceIds is { Count: > 0 }
+                || !string.IsNullOrEmpty(options.DocumentType)
+                || !string.IsNullOrEmpty(options.ParentEntityType)
+                || !string.IsNullOrEmpty(options.ParentEntityId))
             {
-                var escaped = string.Join(",", options.KnowledgeSourceIds.Select(EscapeFilterValue));
-                filters.Add($"search.in(knowledgeSourceId, '{escaped}', ',')");
+                _logger.LogDebug(
+                    "RAG search session-scoped routing for tenant {TenantId} session {SessionId} — " +
+                    "knowledge-source / document-type / parent-entity filters are ignored " +
+                    "(session-files schema does not carry those columns; see R5 task 002 + task 001 schema).",
+                    options.TenantId, options.SessionId);
             }
-            else
+
+            // Tags ARE supported on the session-files schema (Collection(Edm.String),
+            // filterable). Preserve the same OR / AND / NOT semantics as the knowledge path.
+            if (options.Tags?.Count > 0)
             {
-                var sourceFilters = options.KnowledgeSourceIds
-                    .Select(id => $"knowledgeSourceId eq '{EscapeFilterValue(id)}'");
-                filters.Add($"({string.Join(" or ", sourceFilters)})");
+                var tagFilters = options.Tags.Select(t => $"tags/any(tag: tag eq '{EscapeFilterValue(t)}')");
+                filters.Add($"({string.Join(" or ", tagFilters)})");
             }
-        }
-        else if (!string.IsNullOrEmpty(options.KnowledgeSourceId))
-        {
-            filters.Add($"knowledgeSourceId eq '{EscapeFilterValue(options.KnowledgeSourceId)}'");
-        }
-
-        // Exclude knowledge sources (NOT filter)
-        if (options.ExcludeKnowledgeSourceIds is { Count: > 0 })
-        {
-            if (options.ExcludeKnowledgeSourceIds.Count > 10)
+            if (options.RequiredTags is { Count: > 0 })
             {
-                var escaped = string.Join(",", options.ExcludeKnowledgeSourceIds.Select(EscapeFilterValue));
-                filters.Add($"not search.in(knowledgeSourceId, '{escaped}', ',')");
+                foreach (var tag in options.RequiredTags)
+                {
+                    filters.Add($"tags/any(tag: tag eq '{EscapeFilterValue(tag)}')");
+                }
             }
-            else
+            if (options.ExcludeTags is { Count: > 0 })
             {
-                var excludeFilters = options.ExcludeKnowledgeSourceIds
-                    .Select(id => $"knowledgeSourceId eq '{EscapeFilterValue(id)}'");
-                filters.Add($"not ({string.Join(" or ", excludeFilters)})");
+                foreach (var tag in options.ExcludeTags)
+                {
+                    filters.Add($"not tags/any(tag: tag eq '{EscapeFilterValue(tag)}')");
+                }
             }
-        }
 
-        if (!string.IsNullOrEmpty(options.DocumentType))
-        {
-            filters.Add($"documentType eq '{EscapeFilterValue(options.DocumentType)}'");
+            // Privilege filter is SKIPPED under session-scoped routing — the session-files
+            // schema does not carry the `privilege_group_ids` column, and session isolation
+            // is enforced by the `sessionId eq '...'` clause itself (the chat session owner
+            // already passed authorization to upload the file). See R5 design.md §2.11 +
+            // task 002 POML constraint "privilege-group filter (AIPU2-027)".
         }
-
-        // Tags — OR semantics (existing): documents matching ANY of the specified tags
-        if (options.Tags?.Count > 0)
+        else
         {
-            var tagFilters = options.Tags.Select(t => $"tags/any(tag: tag eq '{EscapeFilterValue(t)}')");
-            filters.Add($"({string.Join(" or ", tagFilters)})");
-        }
+            // Knowledge-index path — preserved byte-for-byte from pre-R5 (NFR-10
+            // back-compat). All filter logic below this point is identical to the
+            // historical implementation; only the indentation changes.
 
-        // Required tags — AND semantics: documents must have ALL of the specified tags
-        if (options.RequiredTags is { Count: > 0 })
-        {
-            foreach (var tag in options.RequiredTags)
+            // Include knowledge sources — KnowledgeSourceIds (plural) takes precedence over singular.
+            // Use search.in() for lists > 10 items to avoid OData clause limits; OR chain below 10 for log readability.
+            if (options.KnowledgeSourceIds is { Count: > 0 })
             {
-                filters.Add($"tags/any(tag: tag eq '{EscapeFilterValue(tag)}')");
+                if (options.KnowledgeSourceIds.Count > 10)
+                {
+                    var escaped = string.Join(",", options.KnowledgeSourceIds.Select(EscapeFilterValue));
+                    filters.Add($"search.in(knowledgeSourceId, '{escaped}', ',')");
+                }
+                else
+                {
+                    var sourceFilters = options.KnowledgeSourceIds
+                        .Select(id => $"knowledgeSourceId eq '{EscapeFilterValue(id)}'");
+                    filters.Add($"({string.Join(" or ", sourceFilters)})");
+                }
             }
-        }
-
-        // Exclude tags — NOT semantics: exclude documents with any of the specified tags
-        if (options.ExcludeTags is { Count: > 0 })
-        {
-            foreach (var tag in options.ExcludeTags)
+            else if (!string.IsNullOrEmpty(options.KnowledgeSourceId))
             {
-                filters.Add($"not tags/any(tag: tag eq '{EscapeFilterValue(tag)}')");
+                filters.Add($"knowledgeSourceId eq '{EscapeFilterValue(options.KnowledgeSourceId)}'");
             }
-        }
 
-        // Entity scope — filter by parent entity type and ID (both required)
-        if (!string.IsNullOrEmpty(options.ParentEntityType) && !string.IsNullOrEmpty(options.ParentEntityId))
-        {
-            filters.Add($"parentEntityType eq '{EscapeFilterValue(options.ParentEntityType)}'");
-            filters.Add($"parentEntityId eq '{EscapeFilterValue(options.ParentEntityId)}'");
-        }
+            // Exclude knowledge sources (NOT filter)
+            if (options.ExcludeKnowledgeSourceIds is { Count: > 0 })
+            {
+                if (options.ExcludeKnowledgeSourceIds.Count > 10)
+                {
+                    var escaped = string.Join(",", options.ExcludeKnowledgeSourceIds.Select(EscapeFilterValue));
+                    filters.Add($"not search.in(knowledgeSourceId, '{escaped}', ',')");
+                }
+                else
+                {
+                    var excludeFilters = options.ExcludeKnowledgeSourceIds
+                        .Select(id => $"knowledgeSourceId eq '{EscapeFilterValue(id)}'");
+                    filters.Add($"not ({string.Join(" or ", excludeFilters)})");
+                }
+            }
 
-        // Privilege filter — ALWAYS applied (AIPU2-027 security requirement).
-        // Ensures only documents the user's groups are authorised to view are returned.
-        // Null userGroupIds means system/background call: treat as public-only.
-        var privilegeFilter = PrivilegeFilterBuilder.BuildFilter(userGroupIds ?? Array.Empty<string>());
-        filters.Add(privilegeFilter);
+            if (!string.IsNullOrEmpty(options.DocumentType))
+            {
+                filters.Add($"documentType eq '{EscapeFilterValue(options.DocumentType)}'");
+            }
+
+            // Tags — OR semantics (existing): documents matching ANY of the specified tags
+            if (options.Tags?.Count > 0)
+            {
+                var tagFilters = options.Tags.Select(t => $"tags/any(tag: tag eq '{EscapeFilterValue(t)}')");
+                filters.Add($"({string.Join(" or ", tagFilters)})");
+            }
+
+            // Required tags — AND semantics: documents must have ALL of the specified tags
+            if (options.RequiredTags is { Count: > 0 })
+            {
+                foreach (var tag in options.RequiredTags)
+                {
+                    filters.Add($"tags/any(tag: tag eq '{EscapeFilterValue(tag)}')");
+                }
+            }
+
+            // Exclude tags — NOT semantics: exclude documents with any of the specified tags
+            if (options.ExcludeTags is { Count: > 0 })
+            {
+                foreach (var tag in options.ExcludeTags)
+                {
+                    filters.Add($"not tags/any(tag: tag eq '{EscapeFilterValue(tag)}')");
+                }
+            }
+
+            // Entity scope — filter by parent entity type and ID (both required)
+            if (!string.IsNullOrEmpty(options.ParentEntityType) && !string.IsNullOrEmpty(options.ParentEntityId))
+            {
+                filters.Add($"parentEntityType eq '{EscapeFilterValue(options.ParentEntityType)}'");
+                filters.Add($"parentEntityId eq '{EscapeFilterValue(options.ParentEntityId)}'");
+            }
+
+            // Privilege filter — ALWAYS applied (AIPU2-027 security requirement).
+            // Ensures only documents the user's groups are authorised to view are returned.
+            // Null userGroupIds means system/background call: treat as public-only.
+            var privilegeFilter = PrivilegeFilterBuilder.BuildFilter(userGroupIds ?? Array.Empty<string>());
+            filters.Add(privilegeFilter);
+        }
 
         searchOptions.Filter = string.Join(" and ", filters);
 
-        // Set search fields for keyword search
+        // Set search fields for keyword search — both schemas expose `content` + `fileName`
+        // as searchable text fields. `knowledgeSourceName` is knowledge-only; safe to add
+        // because Azure AI Search ignores unknown searchFields rather than erroring, but
+        // we trim under session-routing to keep the query plan tight.
         if (options.UseKeywordSearch)
         {
-            foreach (var field in SearchFields)
+            if (isSessionScoped)
             {
-                searchOptions.SearchFields.Add(field);
+                searchOptions.SearchFields.Add("content");
+                searchOptions.SearchFields.Add("fileName");
+            }
+            else
+            {
+                foreach (var field in SearchFields)
+                {
+                    searchOptions.SearchFields.Add(field);
+                }
             }
         }
 

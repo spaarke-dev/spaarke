@@ -10,12 +10,12 @@
 
 | Field | Value |
 |---|---|
-| **Active flow** | Phase 1 implementation in progress — task 001 ✅ complete; Wave P1-G2/G3 ready for parallel dispatch |
-| **Pipeline status** | ✅ POML generation complete; ✅ Task 001 (D1-01 index provision) deployed to Spaarke Dev + smoke-tested + idempotent |
-| **Last task completed** | 001 D1-01 — `spaarke-session-files` index created on Spaarke Dev (18 fields, 3072-dim HNSW, ADR-014 invariant verified). Evidence: `notes/task-001-deployment-evidence.md` |
+| **Active flow** | Phase 1 implementation — Waves P1-G1, P1-G2, P1-G3 ✅ complete (5 of 9 P1 tasks done) |
+| **Pipeline status** | ✅ POML generation; ✅ Task 001 deploy; ✅ Wave P1-G2/G3 (tasks 002-005) code + tests authored + verified |
+| **Last wave verified** | P1-G2/G3 (tasks 002+003+004+005): dotnet build clean, 6101/6101 tests pass (0 failures, 111 pre-existing skips), publish-size 45 MB (delta negligible; well under 60 MB ceiling), no NEW HIGH CVE (Kiota Abstractions HIGH pre-exists on master per `dotnet list package --vulnerable`) |
 | **Branch** | `work/spaarke-ai-platform-unification-r5` on top of `origin/master` `7e20dc82` |
-| **Next action** | Dispatch Wave P1-G2 (tasks 002 + 003) + P1-G3 (tasks 004 + 005) — 4 parallel sub-agents authoring code per the agreed model (sub-agents author; main session builds + commits) |
-| **Status** | ready-to-execute (Phase 1 implementation; next wave: 4 parallel sub-agents) |
+| **Next action** | Task 006 (P1-G4) — Azure OpenAI Structured Outputs + incremental JSON parser. SERIAL (depends on 005); HIGH RISK (spike + impl). |
+| **Status** | ready-to-execute (P1-G4 task 006 next; then P1-G5 wave 007+008+009) |
 
 ### Files Modified This Session (committed)
 - `projects/spaarke-ai-platform-unification-r5/design.md` — initial draft + Insights coordination + v1.1 negotiation integration (commits `8ae4e59c`, `6a6c7a29`, `1ecf41a6`)
