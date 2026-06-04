@@ -87,9 +87,14 @@ export interface SearchCommandBarProps {
 // =============================================
 
 const useStyles = makeStyles({
-  // Toolbar (right-aligned by parent commandBar row). Holds all primary
-  // actions inline: Refresh + Columns + Delete + overflow.
+  // Toolbar — `width: fit-content` overrides Fluent v9's default that makes
+  // Toolbar stretch when it's a flex child. Without this the Toolbar fills
+  // the row and pushes its items left (visible after operator UAT, screenshot
+  // 2026-06-04). The parent `commandBar` row uses `justifyContent: flex-end`;
+  // for that to push the Toolbar right, the Toolbar must take its natural
+  // (content-sized) width.
   toolbar: {
+    width: 'fit-content',
     columnGap: tokens.spacingHorizontalXS,
   },
 });

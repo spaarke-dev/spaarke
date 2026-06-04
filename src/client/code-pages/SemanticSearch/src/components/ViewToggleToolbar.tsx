@@ -79,10 +79,12 @@ const VIEW_BUTTONS: ViewButtonConfig[] = [
 // =============================================
 
 const useStyles = makeStyles({
-  // TabList without wrapper / spacer — the parent (SearchCommandBar) handles
-  // layout. Task 035 UI alignment: ToggleButtons -> TabList for Power Apps
-  // OOB visual parity (bottom-border underline on active tab).
+  // TabList — `width: fit-content` so the parent `commandBar` row's
+  // `justifyContent: flex-end` can push the tabs to the right. Without it
+  // Fluent's TabList stretches when used as a flex child.
+  // Task 035 UI alignment v3 (operator screenshot 2026-06-04).
   tabList: {
+    width: 'fit-content',
     display: 'flex',
     alignItems: 'center',
     columnGap: tokens.spacingHorizontalXXS,

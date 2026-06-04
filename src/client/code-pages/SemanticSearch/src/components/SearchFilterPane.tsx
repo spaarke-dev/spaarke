@@ -158,11 +158,14 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalM,
   },
-  // Button row — replaces the prior full-width primary button. Standard-sized
-  // Search + Cancel side-by-side, matching the other Spaarke filter panes
-  // (EventsPage Calendar widget Apply/Clear). Task 035 UI alignment.
+  // Button row — Spaarke standard pattern: small Search (primary) + Cancel
+  // (subtle), no icons, right-aligned. Matches the EventsPage Calendar widget
+  // Apply/Clear (top-right of its filter row) and Power Apps dialog Save/Cancel
+  // convention. Task 035 UI alignment v3 (operator 2026-06-04 — "the search
+  // and cancel should be on the right side").
   actionRow: {
     display: 'flex',
+    justifyContent: 'flex-end',
     columnGap: tokens.spacingHorizontalS,
     marginTop: tokens.spacingVerticalM,
   },
