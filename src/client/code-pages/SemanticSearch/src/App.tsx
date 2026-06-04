@@ -103,6 +103,9 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
     overflow: 'hidden',
   },
+  // Unified command bar row (task 035 UI alignment, 2026-06-04). Holds the
+  // SearchCommandBar (primary + overflow + column picker), the view tabs, and
+  // the visualization settings — replaces the prior two-row split.
   commandBar: {
     display: 'flex',
     alignItems: 'center',
@@ -110,19 +113,9 @@ const useStyles = makeStyles({
     minHeight: '48px',
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
+    columnGap: tokens.spacingHorizontalS,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground1,
-  },
-  toolbar: {
-    display: 'flex',
-    alignItems: 'center',
-    height: '36px',
-    minHeight: '36px',
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    gap: tokens.spacingHorizontalS,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground2,
   },
   contentRow: {
     display: 'flex',
@@ -186,6 +179,14 @@ export const App: React.FC<AppProps> = ({
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [currentSearchName, setCurrentSearchName] = useState<string | null>(null);
+  // Column-picker state lifted out of SearchResultsGrid so the unified
+  // SearchCommandBar can host the picker UI alongside the other actions.
+  // Task 035 UI alignment (2026-06-04). Reset when domain changes via the
+  // useEffect below — different domains expose different column sets.
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setHiddenColumns(new Set());
+  }, [activeDomain]);
 
   // --- Map view settings ---
   const [mapColorBy, setMapColorBy] = useState<VisualizationColorBy>('DocumentType');
@@ -393,6 +394,16 @@ export const App: React.FC<AppProps> = ({
     [executeSearch]
   );
 
+  // Cancel handler — clear AI Search query + filters + saved-search selection.
+  // Wired to SearchFilterPane.onCancel (task 035 UI alignment, 2026-06-04).
+  // Matches the EventsPage Calendar widget "Clear" semantics: returns the
+  // panel to its initial state without executing a search.
+  const handleCancelSearch = useCallback(() => {
+    setQuery('');
+    setFilters(DEFAULT_FILTERS);
+    setCurrentSearchName(null);
+  }, []);
+
   const handleSaveCurrentSearch = useCallback(() => {
     const name = window.prompt('Enter a name for this saved search:');
     if (!name) return;
@@ -452,7 +463,10 @@ export const App: React.FC<AppProps> = ({
 
   return (
     <div className={styles.root} role="main" aria-label="Semantic Search">
-      {/* Top row: SearchCommandBar */}
+      {/* Unified command bar — single Power Apps OOB-style row:
+            [Refresh] [Delete] [...] | [Columns] | [Grid/Network/Treemap/Timeline] | [Settings]
+          Task 035 UI alignment (2026-06-04). Replaces the prior two-row layout
+          (SearchCommandBar + separate ViewToggleToolbar). */}
       <div className={styles.commandBar}>
         <SearchCommandBar
           selectedIds={selectedIds}
@@ -465,11 +479,11 @@ export const App: React.FC<AppProps> = ({
           onDownload={id => download(id)}
           onSendToIndex={ids => sendToIndex(ids)}
           onSaveSearch={handleSaveCurrentSearch}
+          columns={viewColumns}
+          hiddenColumns={hiddenColumns}
+          onHiddenColumnsChange={setHiddenColumns}
         />
-      </div>
-
-      {/* Toolbar row: view toggle + settings dropdown */}
-      <div className={styles.toolbar}>
+        <Divider vertical style={{ height: '20px' }} />
         <ViewToggleToolbar viewMode={viewMode} onViewModeChange={setViewMode} />
         <Divider vertical style={{ height: '20px' }} />
         <VisualizationSettings
@@ -516,6 +530,7 @@ export const App: React.FC<AppProps> = ({
           onSelectSavedSearch={handleSelectSavedSearch}
           onSaveCurrentSearch={handleSaveCurrentSearch}
           isSavedSearchesLoading={isSavedSearchesLoading}
+          onCancel={handleCancelSearch}
         />
 
         {/* Main area: grid or graph results */}
@@ -553,6 +568,7 @@ export const App: React.FC<AppProps> = ({
                   hasMore={activeHasMore}
                   activeDomain={activeDomain}
                   columns={viewColumns}
+                  hiddenColumns={hiddenColumns}
                   onLoadMore={handleLoadMore}
                   onSelectionChange={handleSelectionChange}
                   onSort={handleSort}

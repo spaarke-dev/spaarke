@@ -18,7 +18,12 @@
 
 import { useState, useCallback } from 'react';
 import { makeStyles, tokens, mergeClasses, Textarea, Button, Label, Text } from '@fluentui/react-components';
-import { ChevronDoubleLeft20Regular, ChevronDoubleRight20Regular, Search20Regular } from '@fluentui/react-icons';
+import {
+  ChevronDoubleLeft20Regular,
+  ChevronDoubleRight20Regular,
+  Search20Regular,
+  Dismiss20Regular,
+} from '@fluentui/react-icons';
 import type { SearchDomain, SearchFilters, FilterOption, SavedSearch } from '../types';
 import { SearchDomainTabs } from './SearchDomainTabs';
 import { FilterDropdown } from './FilterDropdown';
@@ -64,6 +69,13 @@ export interface SearchFilterPaneProps {
   onSaveCurrentSearch: () => void;
   /** Whether saved searches are loading */
   isSavedSearchesLoading: boolean;
+  /**
+   * Cancel handler — clears AI Search query + all filters + active saved-search
+   * selection, returning the pane to its initial state. Added in task 035 UI
+   * alignment (operator directive 2026-06-04). Matches the EventsPage Calendar
+   * widget's "Clear" semantics.
+   */
+  onCancel: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +160,12 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalM,
   },
-  searchButton: {
+  // Button row — replaces the prior full-width primary button. Standard-sized
+  // Search + Cancel side-by-side, matching the other Spaarke filter panes
+  // (EventsPage Calendar widget Apply/Clear). Task 035 UI alignment.
+  actionRow: {
+    display: 'flex',
+    columnGap: tokens.spacingHorizontalS,
     marginTop: tokens.spacingVerticalM,
   },
 });
@@ -173,6 +190,7 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
   onSelectSavedSearch,
   onSaveCurrentSearch,
   isSavedSearchesLoading,
+  onCancel,
 }) => {
   const styles = useStyles();
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -353,16 +371,25 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
         <DateRangeFilter value={filters.dateRange} onChange={handleDateRangeChange} />
       </div>
 
-      {/* Search Button */}
-      <Button
-        className={styles.searchButton}
-        appearance="primary"
-        icon={<Search20Regular />}
-        onClick={handleSearch}
-        disabled={isLoading}
-      >
-        Search
-      </Button>
+      {/* Action row — standard-sized Search + Cancel (task 035 UI alignment) */}
+      <div className={styles.actionRow}>
+        <Button
+          appearance="primary"
+          icon={<Search20Regular />}
+          onClick={handleSearch}
+          disabled={isLoading}
+        >
+          Search
+        </Button>
+        <Button
+          appearance="subtle"
+          icon={<Dismiss20Regular />}
+          onClick={onCancel}
+          aria-label="Clear search criteria"
+        >
+          Cancel
+        </Button>
+      </div>
     </div>
   );
 };

@@ -8,7 +8,14 @@
  */
 
 import React, { useCallback } from 'react';
-import { makeStyles, tokens, ToggleButton } from '@fluentui/react-components';
+import {
+  makeStyles,
+  tokens,
+  TabList,
+  Tab,
+  type SelectTabData,
+  type SelectTabEvent,
+} from '@fluentui/react-components';
 import {
   TextBulletListSquareRegular,
   DataScatterRegular,
@@ -71,19 +78,13 @@ const VIEW_BUTTONS: ViewButtonConfig[] = [
 // =============================================
 
 const useStyles = makeStyles({
-  toolbar: {
+  // TabList without wrapper / spacer — the parent (SearchCommandBar) handles
+  // layout. Task 035 UI alignment: ToggleButtons -> TabList for Power Apps
+  // OOB visual parity (bottom-border underline on active tab).
+  tabList: {
     display: 'flex',
     alignItems: 'center',
-    width: '100%',
-    gap: tokens.spacingHorizontalS,
-  },
-  spacer: {
-    flex: 1,
-  },
-  toggleGroup: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXXS,
+    columnGap: tokens.spacingHorizontalXXS,
   },
 });
 
@@ -94,33 +95,27 @@ const useStyles = makeStyles({
 export const ViewToggleToolbar: React.FC<ViewToggleToolbarProps> = ({ viewMode, onViewModeChange }) => {
   const styles = useStyles();
 
-  const handleClick = useCallback(
-    (mode: ViewMode) => () => {
-      onViewModeChange(mode);
+  const handleSelect = useCallback(
+    (_ev: SelectTabEvent, data: SelectTabData) => {
+      onViewModeChange(data.value as ViewMode);
     },
     [onViewModeChange]
   );
 
   return (
-    <div className={styles.toolbar}>
-      <div className={styles.spacer} />
-
-      <div className={styles.toggleGroup}>
-        {VIEW_BUTTONS.map(btn => (
-          <ToggleButton
-            key={btn.mode}
-            checked={viewMode === btn.mode}
-            onClick={handleClick(btn.mode)}
-            icon={btn.icon}
-            size="small"
-            appearance={viewMode === btn.mode ? 'primary' : 'subtle'}
-            aria-label={btn.ariaLabel}
-          >
-            {btn.label}
-          </ToggleButton>
-        ))}
-      </div>
-    </div>
+    <TabList
+      className={styles.tabList}
+      selectedValue={viewMode}
+      onTabSelect={handleSelect}
+      size="small"
+      appearance="transparent"
+    >
+      {VIEW_BUTTONS.map(btn => (
+        <Tab key={btn.mode} value={btn.mode} icon={btn.icon} aria-label={btn.ariaLabel}>
+          {btn.label}
+        </Tab>
+      ))}
+    </TabList>
   );
 };
 
