@@ -81,11 +81,7 @@ import {
   Divider,
   Button,
 } from '@fluentui/react-components';
-import {
-  SparkleRegular,
-  WarningRegular,
-  CheckmarkCircleRegular,
-} from '@fluentui/react-icons';
+import { SparkleRegular, WarningRegular, CheckmarkCircleRegular } from '@fluentui/react-icons';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import { usePaneEvent } from '../../events/usePaneEvent';
 import type { WorkspacePaneEvent } from '../../events/PaneEventTypes';
@@ -112,12 +108,7 @@ import type { WorkspacePaneEvent } from '../../events/PaneEventTypes';
  *   - `'callout'`   — bordered `Card` block with neutral background; use for
  *                     emphasized one-liners (e.g. cost-prediction summary).
  */
-export type StructuredOutputDisplayHint =
-  | 'heading'
-  | 'paragraph'
-  | 'list'
-  | 'badge'
-  | 'callout';
+export type StructuredOutputDisplayHint = 'heading' | 'paragraph' | 'list' | 'badge' | 'callout';
 
 /**
  * Schema-driven field descriptor — the contract this widget renders against.
@@ -716,21 +707,33 @@ interface FieldRendererProps {
 const HeadingRenderer: React.FC<FieldRendererProps> = ({ content, showCursor, styles }) => (
   <h2 className={styles.fieldHeading} data-display-hint="heading">
     {content}
-    {showCursor && <span className={styles.cursor} aria-hidden="true">▋</span>}
+    {showCursor && (
+      <span className={styles.cursor} aria-hidden="true">
+        ▋
+      </span>
+    )}
   </h2>
 );
 
 const ParagraphRenderer: React.FC<FieldRendererProps> = ({ content, showCursor, styles }) => (
   <p className={styles.fieldParagraph} data-display-hint="paragraph">
     {content}
-    {showCursor && <span className={styles.cursor} aria-hidden="true">▋</span>}
+    {showCursor && (
+      <span className={styles.cursor} aria-hidden="true">
+        ▋
+      </span>
+    )}
   </p>
 );
 
 const CalloutRenderer: React.FC<FieldRendererProps> = ({ content, showCursor, styles }) => (
   <div className={styles.fieldCallout} data-display-hint="callout">
     {content}
-    {showCursor && <span className={styles.cursor} aria-hidden="true">▋</span>}
+    {showCursor && (
+      <span className={styles.cursor} aria-hidden="true">
+        ▋
+      </span>
+    )}
   </div>
 );
 
@@ -743,7 +746,11 @@ const BadgeRenderer: React.FC<FieldRendererProps> = ({ content, showCursor, styl
           {tok}
         </Badge>
       ))}
-      {showCursor && <span className={styles.cursor} aria-hidden="true">▋</span>}
+      {showCursor && (
+        <span className={styles.cursor} aria-hidden="true">
+          ▋
+        </span>
+      )}
     </div>
   );
 };
@@ -756,11 +763,17 @@ const ListRenderer: React.FC<FieldRendererProps> = ({ content, showCursor, style
         <li key={`${item}-${i}`} className={styles.listItem}>
           {item}
           {showCursor && i === items.length - 1 && (
-            <span className={styles.cursor} aria-hidden="true">▋</span>
+            <span className={styles.cursor} aria-hidden="true">
+              ▋
+            </span>
           )}
         </li>
       ))}
-      {items.length === 0 && showCursor && <span className={styles.cursor} aria-hidden="true">▋</span>}
+      {items.length === 0 && showCursor && (
+        <span className={styles.cursor} aria-hidden="true">
+          ▋
+        </span>
+      )}
     </ul>
   );
 };
@@ -927,10 +940,7 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
   //   5. streaming/static — normal field rendering
   // ────────────────────────────────────────────────────────────────────────
 
-  const sortedFields = React.useMemo(
-    () => [...schema.fields].sort((a, b) => a.order - b.order),
-    [schema.fields]
-  );
+  const sortedFields = React.useMemo(() => [...schema.fields].sort((a, b) => a.order - b.order), [schema.fields]);
 
   // Header state badge — derived from current phase + override states.
   const headerBadge = (() => {
@@ -1016,12 +1026,8 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
       <Card className={styles.card}>
         <CardHeader
           image={<SparkleRegular className={styles.headerIcon} />}
-          header={
-            <Text className={styles.headerTitle}>{title ?? 'AI Output'}</Text>
-          }
-          description={
-            <div className={styles.headerBadgeRow}>{headerBadge}</div>
-          }
+          header={<Text className={styles.headerTitle}>{title ?? 'AI Output'}</Text>}
+          description={<div className={styles.headerBadgeRow}>{headerBadge}</div>}
         />
 
         {/* Error state — top-level host error takes precedence over everything. */}
@@ -1077,9 +1083,7 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
         {/* (a) Streaming + (b) Streaming-complete + static rendering — schema fields. */}
         {!error && !declineState && !emptyResultState && !isLoading && (
           <div className={styles.fieldsContainer}>
-            {sortedFields.length === 0 && (
-              <Text className={styles.emptyResultText}>(No schema fields declared.)</Text>
-            )}
+            {sortedFields.length === 0 && <Text className={styles.emptyResultText}>(No schema fields declared.)</Text>}
             {sortedFields.map((field, idx) => {
               const content = contentForPath(field.path);
               const hasContent = typeof content === 'string' && content.length > 0;

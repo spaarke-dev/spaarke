@@ -56,12 +56,7 @@ jest.mock('@spaarke/ui-components', () => ({
       </div>
     );
   },
-  DEFAULT_RICH_FILE_PREVIEW_DISABLED_ACTIONS: Object.freeze([
-    'preview',
-    'aiSummary',
-    'toggleWorkspace',
-    'rename',
-  ]),
+  DEFAULT_RICH_FILE_PREVIEW_DISABLED_ACTIONS: Object.freeze(['preview', 'aiSummary', 'toggleWorkspace', 'rename']),
 }));
 
 // Import widget AFTER mock so the mock is wired before module evaluation.
@@ -137,15 +132,11 @@ describe('DocumentViewerWidget — RichFilePreview composition (R5 task 022)', (
   it('forwards widgetType to the data-widget-type attribute', () => {
     renderWidget({
       filename: 'memo.docx',
-      contentType:
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       textContent: 'x',
     });
 
-    expect(screen.getByTestId('document-viewer-widget')).toHaveAttribute(
-      'data-widget-type',
-      'document-viewer'
-    );
+    expect(screen.getByTestId('document-viewer-widget')).toHaveAttribute('data-widget-type', 'document-viewer');
   });
 });
 
@@ -223,9 +214,7 @@ describe('DocumentViewerWidget — R5 payload with preview URL source', () => {
 
     const props = lastRendererProps();
     expect(props.fetchPreviewUrl).toBe(fetcher);
-    await expect(props.fetchPreviewUrl()).resolves.toBe(
-      'https://example.test/from-closure-priority'
-    );
+    await expect(props.fetchPreviewUrl()).resolves.toBe('https://example.test/from-closure-priority');
   });
 
   it('propagates documentType / createdBy / createdAt / sizeBytes to renderer props', () => {

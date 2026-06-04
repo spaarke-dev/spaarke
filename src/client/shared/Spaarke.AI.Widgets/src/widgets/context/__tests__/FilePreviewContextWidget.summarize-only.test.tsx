@@ -93,8 +93,7 @@ function renderWidget(
 ) {
   const bus = options.bus ?? new PaneEventBus();
   const theme = options.theme ?? webLightTheme;
-  const onFetchPreviewUrl =
-    options.onFetchPreviewUrl ?? (() => Promise.resolve('https://example.com/preview'));
+  const onFetchPreviewUrl = options.onFetchPreviewUrl ?? (() => Promise.resolve('https://example.com/preview'));
 
   const result = render(
     <FluentProvider theme={theme}>
@@ -423,11 +422,7 @@ describe('FilePreviewContextWidget — Summarize button accessibility', () => {
 
     const compactButtons = screen.getAllByTestId('summarize-only-button-compact');
     const labels = compactButtons.map(b => b.getAttribute('aria-label'));
-    expect(labels).toEqual([
-      'Summarize Contract.pdf only',
-      'Summarize NDA.pdf only',
-      'Summarize Notes.txt only',
-    ]);
+    expect(labels).toEqual(['Summarize Contract.pdf only', 'Summarize NDA.pdf only', 'Summarize Notes.txt only']);
   });
 
   it('prominent button has a file-name-bearing aria-label', () => {
@@ -566,9 +561,7 @@ describe('dispatchSummarizeOnly — pure dispatch helper', () => {
     expect(workspaceEvents).toHaveLength(2);
     expect(workspaceEvents[0].type).toBe('widget_load');
     expect(workspaceEvents[1].type).toBe('streaming_started');
-    expect((workspaceEvents[0].widgetData as { correlationId: string }).correlationId).toBe(
-      result.correlationId,
-    );
+    expect((workspaceEvents[0].widgetData as { correlationId: string }).correlationId).toBe(result.correlationId);
     expect(workspaceEvents[1].streamId).toBe(result.correlationId);
   });
 });

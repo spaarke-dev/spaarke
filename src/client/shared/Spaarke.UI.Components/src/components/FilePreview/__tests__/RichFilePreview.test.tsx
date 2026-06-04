@@ -96,10 +96,7 @@ describe('RichFilePreview', () => {
 
     it('Retry re-invokes fetchPreviewUrl', async () => {
       const user = userEvent.setup();
-      const fetcher = jest
-        .fn()
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce('https://example.com/preview/retry');
+      const fetcher = jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce('https://example.com/preview/retry');
       const props = defaultProps({ fetchPreviewUrl: fetcher });
       const { container } = renderWithProviders(<RichFilePreview {...props} />);
       await waitFor(() => {

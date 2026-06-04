@@ -376,12 +376,7 @@ export interface ContextPaneEvent {
    *                         Subscribed by FilePreviewContextWidget to switch its preview
    *                         to the chosen file (R5 D2-06 / spec NFR-09).
    */
-  type:
-    | 'context_update'
-    | 'context_highlight'
-    | 'stage_change'
-    | 'files_staged'
-    | 'file_selected';
+  type: 'context_update' | 'context_highlight' | 'stage_change' | 'files_staged' | 'file_selected';
 
   /** Classifies the context payload (e.g. `"document"`, `"email"`, `"clause"`). */
   contextType?: string;

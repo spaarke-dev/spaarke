@@ -70,12 +70,18 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// path is exposed.
 /// </para>
 /// <para>
-/// <b>ADR-010 compliance</b>: concrete <c>sealed</c> class; NO interface authored by R5
-/// (unit tests target the concrete type per ADR-010 — interface-for-testability-alone is
-/// explicitly forbidden). Registration lives inside
-/// <see cref="Sprk.Bff.Api.Infrastructure.DI.AnalysisServicesModule"/> via the existing
-/// <c>AddAnalysisOrchestrationServices</c> helper — ZERO new <c>Program.cs</c> lines, ZERO new
-/// feature flags (R5 CLAUDE.md §3.2 + §3.3).
+/// <b>ADR-010 compliance</b>: concrete class with NO interface authored by R5 (unit tests
+/// target the concrete type per ADR-010 — interface-for-testability-alone is explicitly
+/// forbidden). Non-sealed to permit the <see cref="NullSessionSummarizeOrchestrator"/>
+/// kill-switch subclass (ADR-030 P3 Fail-Fast, registered in
+/// <c>AnalysisServicesModule.AddNullObjectsForCompoundOff</c> alongside the canonical
+/// <see cref="NullSprkChatAgentFactory"/> + <see cref="NullPendingPlanManager"/> pattern).
+/// The real registration lives inside the compound AI gate via
+/// <c>AddAnalysisOrchestrationServices</c>; the Null subclass is registered on the
+/// compound-OFF branch so the unconditionally-mapped
+/// <c>POST /api/ai/chat/sessions/{sessionId}/summarize</c> endpoint's parameter
+/// inference succeeds regardless of feature-flag state. ZERO new <c>Program.cs</c> lines,
+/// ZERO new feature flags (R5 CLAUDE.md §3.2 + §3.3).
 /// </para>
 /// <para>
 /// <b>ADR-014 tenant + session isolation</b>: all <see cref="IRagService.SearchAsync(string, RagSearchOptions, CancellationToken)"/>
@@ -89,7 +95,7 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// upstream (task 004); this is defense in depth at the orchestrator boundary.
 /// </para>
 /// </remarks>
-public sealed class SessionSummarizeOrchestrator
+public class SessionSummarizeOrchestrator
 {
     /// <summary>Action code alternate key for the R5 chat-Summarize action seed (task 010 / D2-01).</summary>
     internal const string SummarizeActionCode = "SUM-CHAT@v1";
@@ -131,6 +137,25 @@ public sealed class SessionSummarizeOrchestrator
     }
 
     /// <summary>
+    /// Protected ctor used only by <see cref="NullSessionSummarizeOrchestrator"/> so the
+    /// kill-switch subclass can be constructed when the compound AI gate is OFF and
+    /// AI dependencies (<see cref="IRagService"/>, <see cref="IOpenAiClient"/>,
+    /// <see cref="IGenericEntityService"/>) are absent or not yet resolvable. The Null
+    /// override never reads the nulled fields — it throws
+    /// <see cref="FeatureDisabledException"/> before they are dereferenced. Matches the
+    /// canonical pattern in <see cref="SprkChatAgentFactory"/> / <see cref="PendingPlanManager"/>.
+    /// </summary>
+    protected SessionSummarizeOrchestrator(ILogger<SessionSummarizeOrchestrator> logger)
+    {
+        _sessionManager = null!;
+        _ragService = null!;
+        _openAiClient = null!;
+        _entityService = null!;
+        _telemetry = null!;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
     /// THE convergence method (per spec FR-01 + FR-08 + SC-08). Both task 014's direct endpoint AND
     /// task 015's agent-tool handler delegate to THIS method — no other entry point is exposed.
     /// </summary>
@@ -151,7 +176,7 @@ public sealed class SessionSummarizeOrchestrator
     /// On mid-stream exceptions an <see cref="AnalysisChunk.FromError"/> chunk is yielded and the
     /// enumerable terminates gracefully (no re-throw out of the iterator).
     /// </returns>
-    public async IAsyncEnumerable<AnalysisChunk> SummarizeSessionFilesAsync(
+    public virtual async IAsyncEnumerable<AnalysisChunk> SummarizeSessionFilesAsync(
         SummarizeSessionFilesRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {

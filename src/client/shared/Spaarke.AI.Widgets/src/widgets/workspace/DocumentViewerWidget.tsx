@@ -151,11 +151,7 @@ const useStyles = makeStyles({
 function isDocumentViewerData(value: unknown): value is DocumentViewerWidgetData {
   if (value === null || typeof value !== 'object') return false;
   const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.filename === 'string' &&
-    typeof obj.contentType === 'string' &&
-    typeof obj.textContent === 'string'
-  );
+  return typeof obj.filename === 'string' && typeof obj.contentType === 'string' && typeof obj.textContent === 'string';
 }
 
 /**

@@ -154,10 +154,7 @@ export type {
   StructuredOutputField,
   StructuredOutputDisplayHint,
 } from './widgets/workspace/StructuredOutputStreamWidget';
-export {
-  SUMMARIZE_SCHEMA,
-  INSIGHTS_PLAYBOOK_SCHEMA,
-} from './widgets/workspace/StructuredOutputStreamWidget';
+export { SUMMARIZE_SCHEMA, INSIGHTS_PLAYBOOK_SCHEMA } from './widgets/workspace/StructuredOutputStreamWidget';
 export { STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE } from './widgets/workspace/register-structured-output-stream-widget';
 
 // ---------------------------------------------------------------------------

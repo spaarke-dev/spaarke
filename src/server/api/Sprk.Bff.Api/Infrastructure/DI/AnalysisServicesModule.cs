@@ -284,6 +284,21 @@ public static class AnalysisServicesModule
         // when E3 lands.
         services.AddSingleton<IInsightsIntentClassifier>(sp =>
             new NullInsightsIntentClassifier(sp.GetRequiredService<ILogger<InsightsIntentClassifier>>()));
+
+        // R5 task 014 / D2-04 — SessionSummarizeOrchestrator (P3 Fail-Fast subclass).
+        // The R5 Summarize endpoint (POST /api/ai/chat/sessions/{sessionId}/summarize) is
+        // mapped UNCONDITIONALLY in EndpointMappingExtensions and injects the concrete
+        // SessionSummarizeOrchestrator. Real impl is registered scoped inside
+        // AddAnalysisOrchestrationServices (compound-ON only). Without this Null mirror,
+        // minimal-API parameter inference fails at host startup ("Failure to infer one
+        // or more parameters") because IRagService + IOpenAiClient + IGenericEntityService
+        // are unavailable when compound AI is OFF. The Null subclass throws
+        // FeatureDisabledException at first MoveNextAsync(); SummarizeSessionEndpoint
+        // catches it and emits a canonical 503 ProblemDetails per ADR-018 + ADR-019.
+        // Canonical pattern siblings: NullSprkChatAgentFactory (B2), NullPendingPlanManager (B3).
+        services.AddScoped<SessionSummarizeOrchestrator>(sp =>
+            new NullSessionSummarizeOrchestrator(
+                sp.GetRequiredService<ILogger<SessionSummarizeOrchestrator>>()));
     }
 
     private static void AddAnalysisOrchestrationServices(IServiceCollection services, IConfiguration configuration)

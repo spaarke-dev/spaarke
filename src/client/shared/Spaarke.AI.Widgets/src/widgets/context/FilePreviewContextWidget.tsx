@@ -96,19 +96,12 @@ import {
   SparkleRegular,
 } from '@fluentui/react-icons';
 
-import {
-  RichFilePreview,
-  DocumentRowMenu,
-  type DocumentRowAction,
-} from '@spaarke/ui-components';
+import { RichFilePreview, DocumentRowMenu, type DocumentRowAction } from '@spaarke/ui-components';
 import type { ContextWidgetProps } from '../../types/widget-types';
 import { useDispatchPaneEvent, type DispatchPaneEvent } from '../../events/useDispatchPaneEvent';
 import { usePaneEvent } from '../../events/usePaneEvent';
 import type { WorkspacePaneEvent } from '../../events/PaneEventTypes';
-import {
-  SUMMARIZE_SCHEMA,
-  type StructuredOutputStreamWidgetData,
-} from '../workspace/StructuredOutputStreamWidget';
+import { SUMMARIZE_SCHEMA, type StructuredOutputStreamWidgetData } from '../workspace/StructuredOutputStreamWidget';
 import { STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE } from '../workspace/register-structured-output-stream-widget';
 
 // ---------------------------------------------------------------------------
@@ -604,7 +597,7 @@ export function dispatchSummarizeOnly(
   fileId: string,
   sessionId: string,
   fileName: string,
-  dispatch: DispatchPaneEvent,
+  dispatch: DispatchPaneEvent
 ): DispatchSummarizeOnlyResult {
   // `crypto.randomUUID()` is available in modern browsers (Chromium 92+,
   // Firefox 95+, Safari 15.4+) and Node 14+; React 19's targets cover this
@@ -711,7 +704,7 @@ export function useSummarizeOnly(
   fileId: string,
   sessionId: string,
   fileName: string,
-  dispatch: DispatchPaneEvent,
+  dispatch: DispatchPaneEvent
 ): UseSummarizeOnlyResult {
   const [isInFlight, setInFlight] = React.useState(false);
   const [lastRequestId, setLastRequestId] = React.useState<string | null>(null);
@@ -1044,9 +1037,7 @@ const FilePreviewContextWidget: React.FC<FilePreviewContextWidgetProps> = ({
   const effectiveDisabledActions = useMemo<DocumentRowAction[]>(() => {
     if (disabledActionsProp) {
       // Ensure 'preview' is always hidden — defensive.
-      return disabledActionsProp.includes('preview')
-        ? [...disabledActionsProp]
-        : [...disabledActionsProp, 'preview'];
+      return disabledActionsProp.includes('preview') ? [...disabledActionsProp] : [...disabledActionsProp, 'preview'];
     }
     const defaults: DocumentRowAction[] = ['preview'];
     // `aiSummary` is now handled IN-WIDGET (task 021 / D2-12) via
@@ -1269,9 +1260,7 @@ const FilePreviewContextWidget: React.FC<FilePreviewContextWidgetProps> = ({
         <>
           <div className={styles.header}>
             <Text className={styles.headerTitle}>Session Files</Text>
-            <Text className={styles.headerSubtitle}>
-              {files.length} files attached. Click a file to preview it.
-            </Text>
+            <Text className={styles.headerSubtitle}>{files.length} files attached. Click a file to preview it.</Text>
           </div>
           <div className={styles.cardList} role="list" aria-label="Session files">
             {files.map(file => (
