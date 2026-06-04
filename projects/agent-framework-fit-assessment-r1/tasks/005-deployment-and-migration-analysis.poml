@@ -4,7 +4,8 @@
     <phase>4</phase>
     <tags>assessment, deployment, migration, adr-013, bff-extensions</tags>
     <estimate>1.5h</estimate>
-    <status>pending</status>
+    <status>completed</status>
+    <completion-summary>Completed 2026-06-03 via sub-agent (commit 45b93668). Output: notes/05-deployment-and-migration.md (476 lines). Deployment models per ADOPT/PARTIAL: S1/S3/S5A/S8a/S8b in-process BFF (ADR-013 criteria 1+2 fail decisively for S1, criterion 4 fails for S3, S5A is wrapper-only); S5B all four ADR-013 §"Exceptions" criteria pass but three deployment candidates (Workflows-in-BFF · Workflows-in-Function · Foundry-hosted) cannot be ranked from current sources — **prototyping required before SPEC commitment, LOW confidence due to F12 evidence gap**; S7 deferred to D-A20 contract authoring. Publish-size: BASELINE 45.65 MB → worst-case 47-54 MB (well under 80 MB tolerance). Key finding: `Microsoft.Agents.AI 1.0.0-rc1` is already referenced in Sprk.Bff.Api.csproj lines 29-33, so S1/S3/S5A/S8a/S8b lifts have **net-zero publish-size impact**. Only S5B adds new packages (+1.5-6 MB cumulative, UNCERTAIN). 10 risks; 3 HIGH-severity: R1 (#6268 unresolved on S1 canonical workload), R2 (F12 durable-hosting evidence thin — pre-commitment is design-by-assumption), R9 (S5B mis-scoping as "framework adoption" rather than "build multi-day legal workflows from scratch"). Migration cost: 8-17 person-weeks for Phase 1+2+3 (Builder pre-work + shared infra middleware lift + per-surface S1-family lifts), excluding S5B (greenfield, person-quarters) and S7 (deferred). Confidence LOW-MED. F12 evidence gap forced explicit prototyping recommendation for S5B — "uncomfortable conclusions land better than premature confident ones."</completion-summary>
     <parallel-group>—</parallel-group>
     <parallel-safe>false</parallel-safe>
     <dependencies>004</dependencies>

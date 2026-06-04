@@ -4,71 +4,96 @@
 
 ---
 
-**Active task**: none — Phase 3 complete (tasks 000, 001, 002, 003, 004 all ✅). Ready for Phase 4.
-**Next task**: task 005 (sequential — depends on 004) — deployment model + aggregated migration cost / risks.
+**Active task**: none — Phase 4 complete (tasks 000, 001, 002, 003, 004, 005 all ✅). Ready for Phase 5 (synthesis).
+**Next task**: task 006 — **synthesis = the canonical assessment document**. This is the project's primary deliverable.
 
-**How to start**: from a fresh session, type `work on task 005` and the harness will invoke `task-execute` with the POML.
+**How to start**: from a fresh session, type `work on task 006` and the harness will invoke `task-execute` with the POML.
 
 ---
 
 ## Last completed task
 
-### Task 004 — Per-surface decision matrix
-- **Output**: `projects/agent-framework-fit-assessment-r1/notes/04-per-surface-decision-matrix.md` (708 lines)
-- **Commit**: `d473c023`
-- **Surfaces evaluated**: 10 (S1, S2, S3, S4, **S5A shipped wrapper**, **S5B canonical durable**, S6, S7, S8a, S8b)
-- **Distribution**: 1 ADOPT / 5 PARTIAL / 4 DON'T ADOPT (anti-bias guard rail passes decisively)
+### Task 005 — Deployment + migration analysis
+- **Output**: `projects/agent-framework-fit-assessment-r1/notes/05-deployment-and-migration.md` (476 lines)
+- **Commit**: `45b93668`
 
 ---
 
-## Per-surface verdicts (carry forward to tasks 005/006)
+## Key findings for task 006 synthesis (carry forward — these drive §6, §7, §8 of the doc)
 
-| Surface | Verdict | One-line reason |
-|---|---|---|
-| **S1** SprkChat | **PARTIAL** | Highest structural fit but gated on Issue #6268 (multi-tool streaming bug affects canonical workload) |
-| **S2** AnalysisOrchestration + JPS | **DON'T ADOPT** | Workflows is conceptually competitive but non-incremental; rewrite touches 30+ files + Dataverse schema |
-| **S3** Builder | **PARTIAL** | Manual agentic loop benefits from AIAgent base + Tool Approval, but uses OpenAI.Chat SDK directly today |
-| **S4** Background AI jobs | **DON'T ADOPT** | Pure server-side LLM via Service Bus; AIAgent base adds little over direct LLM calls |
-| **S5A** Foundry wrapper (shipped) | **PARTIAL** | Already in production, default-OFF per ADR-018; lift to `Microsoft.Agents.AI` only if S5B path is taken |
-| **S5B** Foundry canonical durable HITL (planned) | **ADOPT** ⭐ | The only ADOPT. F7 Workflows + F11 RequestPort + F12 Foundry hosting purpose-built for multi-day legal HITL |
-| **S6** M365 Copilot | **DON'T ADOPT** | Uses M365 Agents SDK (`Microsoft.Agents.Builder`), distinct from Agent Framework — don't conflate |
-| **S7** Insights Engine MCP | **PARTIAL** | When Phase 2 implementation lands, may host Agent Framework agents — contract D-A20 decides |
-| **S8a** SessionSummarizationService | **PARTIAL** | Already on `IChatClient` — folds into S1 perimeter once #6268 unblocks |
-| **S8b** CapabilityRouter | **PARTIAL** | Same as S8a; raw IChatClient classifier — fold into S1 |
+### Deployment-model recommendations (drives synthesis §6)
+
+| Surface | Verdict (task 004) | Deployment model (task 005) | Confidence |
+|---|---|---|---|
+| **S1 SprkChat** | PARTIAL (gated on #6268) | **In-process BFF** — ADR-013 criteria (1)+(2) fail decisively (latency + transactional coupling) | HIGH |
+| **S3 Builder** | PARTIAL | **In-process BFF** — criterion (4) fails (duplication cost > value for small surface) | HIGH |
+| **S5A Foundry wrapper (shipped)** | PARTIAL | **In-process BFF unchanged** — wrapper-only code simplification | HIGH |
+| **S5B canonical durable HITL** | **ADOPT** ⭐ | **Mixed — prototyping required before commitment** | **LOW** (F12 gap) |
+| **S7 Insights MCP** | PARTIAL | Deferred to D-A20 contract; preliminary read: ADR-013 criteria likely pass | MED |
+| **S8a SessionSummarizationService** | PARTIAL | Fold into S1 perimeter (in-process BFF) | HIGH |
+| **S8b CapabilityRouter** | PARTIAL | Fold into S1 perimeter (in-process BFF) | HIGH |
+| **S2 JPS** | DON'T ADOPT | no migration; no deployment change | — |
+| **S4 Background jobs** | DON'T ADOPT | no migration; no deployment change | — |
+| **S6 M365 Copilot** | DON'T ADOPT | no migration; no deployment change | — |
+
+### S5B is the central undecided question
+
+All four ADR-013 §"Exceptions" criteria PASS for S5B — non-BFF deployable is legitimately permitted. But three candidates (**Workflows-in-BFF · Workflows-in-Function · Foundry-hosted**) cannot be ranked with current sources. Drivers of uncertainty:
+- **F12 evidence gap** (task 003): no `/hosting/` Learn page; GitHub Issue #6308 in active triage
+- **Foundry SKU costs** UNKNOWN
+- **VM-isolation requirement** UNKNOWN (this is also task-004 open question #1)
+
+**Recommendation for synthesis §6**: present S5B's deployment model as "ADR-013 criteria PASS — but choose between three models requires prototyping; do not pre-commit." Frame as honest evidence-thin conclusion, not adversarial fence-sitting.
+
+### Publish-size impact (drives synthesis §7)
+
+- **Baseline**: 45.65 MB (post-Outcome-A from `bff-extensions.md`/BFF extraction assessment baseline)
+- **`Microsoft.Agents.AI 1.0.0-rc1` is already referenced** in `Sprk.Bff.Api.csproj:29-33` (zero source usage per task 001) — so S1/S3/S5A/S8a/S8b lifts to actual use have **net-zero publish-size impact**
+- **S5B only**: adds `Microsoft.Agents.AI.Workflows` + possibly `Hosting.A2A.AspNetCore` + `Foundry` glue (+1.5-6 MB cumulative, UNCERTAIN)
+- **Worst case projection**: ~47-54 MB (well under 80 MB tolerance from `.claude/constraints/bff-extensions.md`)
+
+### Shared infrastructure changes (one cost amortized across surfaces)
+
+S1 + S3 + S8a + S8b all benefit from **one shared change**: lift middleware from per-instance decoration of `ISprkChatAgent` to canonical `chatClient.AsBuilder().Use*().Build()` composition. Task 001 flagged this as "the biggest single migration vector for S1." Frame this as **one cross-cutting change** in the migration cost summary, not four independent migrations.
+
+### Risk register (10 risks; drives synthesis §7) — top 3 HIGH-severity
+
+1. **R1 (HIGH)** — Issue #6268 unresolved; affects S1's canonical multi-tool streaming workload
+2. **R2 (HIGH)** — F12 durable-hosting evidence is thin; pre-commitment on S5B's hosting model is design-by-assumption
+3. **R9 (HIGH)** — S5B mis-scoping risk: framing as "small framework adoption" instead of "build multi-day legal workflows from scratch"
+
+### Migration cost (drives synthesis §7)
+
+**8-17 person-weeks for Phase 1+2+3** (Builder pre-work + shared infra middleware lift + per-surface S1-family lifts).
+- **Excludes S5B** — greenfield, person-quarters not person-weeks
+- **Excludes S7** — deferred to D-A20 contract
+- **Confidence: LOW-MED**
+
+### Open questions for synthesis §8 (carry from tasks 004 + 005)
+
+1. **S5B VM-isolation requirement** (task 004) — determines Foundry-hosted vs Workflows-in-BFF/Function for the sole ADOPT verdict
+2. **S5B prototyping scope** (task 005) — what does a 1-2 week S5B prototype need to validate before SPEC commitment? F12 hosting + Foundry SKU costs + workflow checkpointing under Spaarke load
+3. **S1 wait-or-pilot timing for Issue #6268** (task 004) — wait for shipped 1.x fix, or pilot with feature flag + fallback now?
+4. **S7 D-A20 contract authoring** (task 004) — must address host library + deployment model + BFF seam (three UNKNOWNs)
 
 ---
 
-## Top 3 conclusions feeding task 006 synthesis (§executive summary)
+## Prior phase findings (preserved for synthesis grounding)
 
-1. **S2 JPS is DON'T ADOPT** — Workflows is conceptually competitive but no incremental migration path exists; wholesale rewrite touches 30+ files + Dataverse schema + plugin pipeline. Cost grossly disproportionate to benefit on a working production system.
-2. **S5B (canonical durable legal HITL) is the only ADOPT** — F7 Workflows + F11 `RequestPort` + F12 Foundry hosting purpose-built for multi-day legal workflows. **Important**: Workflow HITL is in the framework itself (not Foundry-exclusive), narrowing the Foundry-vs-framework choice to deployment-only (where Foundry adds VM isolation, per-agent Entra identity, A2A endpoint).
-3. **S1 PARTIAL gated on Issue #6268** — Structural fit is the highest in the assessment but the bug affects SprkChat's canonical multi-tool streaming workload; adopting before #6268 lands in a shipped 1.x release would ship a regression.
-
----
-
-## Top open questions for synthesis §8 (human-decision)
-
-1. **S5B VM-isolation requirement**: Do Spaarke legal workflows actually require per-session VM isolation + per-agent Entra identity + A2A exposure? Determines Foundry-hosted vs Workflows-in-BFF/Function deployment for the sole ADOPT verdict.
-2. **S1 wait-or-pilot timing**: Wait for Issue #6268 to land in a shipped 1.x release, or pilot with a feature flag + fallback now? Depends on % of SprkChat traffic that is multi-tool.
-3. **S7 D-A20 contract authoring**: When the deferred MCP server contract is written, MUST address (a) host library, (b) deployment model, (c) BFF seam — three concrete UNKNOWNs that cannot be pre-committed.
+- **Task 000** baseline: SHA `afa7834e` (2026-06-03 "1.9 release"); 34 primary sources, 100% within recency floor; AF 1.0 GA April 2026; #6268 RED FLAG for S1; Tool Approval is framework feature; Workflow HITL is framework-internal not Foundry-exclusive
+- **Task 001** inventory: `Microsoft.Agents.AI` package referenced with ZERO source usage (the "half-adopted" framing has a literal evidence base); S1 only Extensions.AI user; middleware wraps `ISprkChatAgent` not `IChatClient`; 2 S8 surfaces discovered
+- **Task 002** inventory: S5 BIMODAL — SPEC was wrong, corrected to A/B split; S6 uses M365 Agents SDK (distinct from Agent Framework); S7 Phase-2-deferred
+- **Task 003** feature map: 12 features F1-F12; 19 distinct primary-source citations; 94.7% recency; F3 + F12 evidence-thin (F12 came due in task 005, forced LOW confidence on S5B hosting)
+- **Task 004** decision matrix: 10 surfaces; 1 ADOPT / 5 PARTIAL / 4 DON'T ADOPT distribution passes anti-bias check decisively
 
 ---
 
-## Inputs for task 005 (deployment + migration analysis)
+## Citation discipline for task 006
 
-Task 005 consumes the matrix and produces:
-- **Deployment model recommendation per ADOPT/PARTIAL surface**: in-process BFF (default per ADR-013) / MCP server / Azure Function / Hosted Foundry. The S5B Foundry-hosted vs Workflows-in-BFF question is the central deployment-model decision.
-- **Aggregated migration cost** across S1+S3+S5A+S7+S8a+S8b (PARTIAL surfaces): publish-size impact (per `.claude/constraints/bff-extensions.md`), CVE risk, test impact, OTel/AppInsights preservation.
-- **Phasing recommendation**: which surface adopts first? S5B is greenfield (no migration cost); S1 is gated on #6268; S8a/S8b are folded into S1's wave.
-- **Address the evidence-thin gaps from task 003**: F3 Context providers + F12 Durable hosting (especially F12 because S5B depends on durable hosting decisions).
-
----
-
-## Citation discipline (still binding)
-
-- Every claim cites notes/01, notes/02, notes/03, or notes/04 with section reference
+- §10 Sources appendix is **mandatory** — table every primary URL + fetched date + referencing section
 - ≥80% of primary-source citations dated 2026-04-01 onwards
-- §10 Sources appendix in the final assessment document is mandatory
+- Every claim cites: notes/00 (live URLs) for feature facts; notes/01-05 (project-local) for analysis; ADRs/constraints for binding rules
+- No claims citing ONLY the curated `knowledge/agent-framework/` snapshot — orientation only
 
 ---
 
@@ -78,6 +103,6 @@ Task 005 consumes the matrix and produces:
 - Phase 1 ✅ (tasks 001, 002 — inventory)
 - Phase 2 ✅ (task 003 — feature map)
 - Phase 3 ✅ (task 004 — decision matrix)
-- Phase 4 🔲 (task 005 — deployment + migration)
-- Phase 5 🔲 (task 006 — synthesis = the canonical assessment document)
+- Phase 4 ✅ (task 005 — deployment + migration)
+- Phase 5 🔲 (task 006 — **synthesis = canonical assessment document**)
 - Phase 6 🔲 (tasks 007, 008 — adversarial review + sign-off)
