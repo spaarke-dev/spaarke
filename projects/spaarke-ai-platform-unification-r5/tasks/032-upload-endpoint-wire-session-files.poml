@@ -1,13 +1,13 @@
 <task id="032" project="spaarke-ai-platform-unification-r5">
   <metadata>
     <title>P2-CLOSEOUT-01 Wire ChatDocumentEndpoints.UploadDocumentAsync into R5 session-files pipeline</title>
-    <status>🔲</status>
-    <status-note>Closeout task added 2026-06-04 after SC-18 walkthrough on Spaarke Dev surfaced Sev-1 integration gap: R5 backend pieces all deployed but upload endpoint never calls IndexSessionFileAsync nor populates ChatSession.UploadedFiles[]. See notes/summarize-vertical-remediation-plan.md §3.1 for full root-cause analysis.</status-note>
+    <status>✅</status>
+    <status-note>Closeout task added 2026-06-04 after SC-18 walkthrough on Spaarke Dev surfaced Sev-1 integration gap: R5 backend pieces all deployed but upload endpoint never calls IndexSessionFileAsync nor populates ChatSession.UploadedFiles[]. See notes/summarize-vertical-remediation-plan.md §3.1 for full root-cause analysis. Completed 2026-06-04 — see notes/task-032-evidence.md.</status-note>
     <estimated-effort>1.5 hours</estimated-effort>
-    <actual-effort></actual-effort>
+    <actual-effort>~1.5 hours</actual-effort>
     <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
     <phase>Phase 2 — Vertical Slice + Insights Tool Integration (CLOSEOUT)</phase>
     <wave>P2-G9-CLOSEOUT (parallel-safe with 033; both must complete + deploy before 034)</wave>
     <parallel-safe>true</parallel-safe>

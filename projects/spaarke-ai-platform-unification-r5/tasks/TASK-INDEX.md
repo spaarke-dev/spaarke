@@ -94,8 +94,8 @@ R5 ships in 3 sequential phases + 1 wrap-up task, with parallel-execution opport
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| 032 | P2-G9-CLOSEOUT | P2-CLOSEOUT-01 Wire ChatDocumentEndpoints upload into R5 session-files pipeline (IndexSessionFileAsync + ChatSession.UploadedFiles[] + UpdateSessionCacheAsync) | 🔲 | 1.5h | ✅ (with 033) | 003, 004, 011, 012 |
-| 033 | P2-G9-CLOSEOUT | P2-CLOSEOUT-02 Surface ChatSession.UploadedFiles[] in PlaybookChatContextProvider so chat agent sees them | ✅ | 1h | ✅ (with 032) | 004, 011, 015 |
+| 032 | P2-G9-CLOSEOUT | P2-CLOSEOUT-01 Wire ChatDocumentEndpoints upload into R5 session-files pipeline (IndexSessionFileAsync + ChatSession.UploadedFiles[] + UpdateSessionCacheAsync) | ✅ 2026-06-04 | 1.5h | ✅ (with 033) | 003, 004, 011, 012 |
+| 033 | P2-G9-CLOSEOUT | P2-CLOSEOUT-02 Surface ChatSession.UploadedFiles[] in PlaybookChatContextProvider so chat agent sees them | ✅ 2026-06-04 | 1h | ✅ (with 032) | 004, 011, 015 |
 | 034 | P2-G10-CLOSEOUT | P2-CLOSEOUT-03 Frontend auto-trigger: when upload completes after summarize intent, auto-invoke summary (pattern B) | 🔲 | 1h | ❌ | 032 + 033 deployed |
 | 035 | P2-G11-CLOSEOUT | P2-CLOSEOUT-04 Re-run SC-18 SME walkthrough end-to-end; capture solo-SME signoff; close 030 + 031 | 🔲 | 30m operator + 5m agent | ❌ | 032 + 033 + 034 deployed |
 
