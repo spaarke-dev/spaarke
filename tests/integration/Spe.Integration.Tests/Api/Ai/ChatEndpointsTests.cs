@@ -656,6 +656,7 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
                 It.IsAny<Guid>(),
                 It.IsAny<ChatHostContext?>(),
                 It.IsAny<IReadOnlyList<string>?>(),
+                It.IsAny<IReadOnlyList<Sprk.Bff.Api.Models.Ai.Chat.ChatSessionFile>?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(testContext);
     }

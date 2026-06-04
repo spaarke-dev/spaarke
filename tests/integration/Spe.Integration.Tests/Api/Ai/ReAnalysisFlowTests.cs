@@ -631,6 +631,7 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
             .Setup(p => p.GetContextAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(),
                 It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(),
+                It.IsAny<IReadOnlyList<Sprk.Bff.Api.Models.Ai.Chat.ChatSessionFile>?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(testContext);
     }
