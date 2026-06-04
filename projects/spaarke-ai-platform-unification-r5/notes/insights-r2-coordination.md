@@ -2,7 +2,7 @@
 
 > **Purpose**: Document alignment, overlap, and required coordination between R5 (Spaarke AI Platform Unification — chat-pane Summarize a Document + platform foundations) and the parallel in-flight project Insights Engine R2 (Phase 1.5).
 > **Created**: 2026-06-03 (during R5 design)
-> **Last updated**: 2026-06-03 (late — post-Wave-E PR #337 push) by Claude (Anthropic AI agent) on behalf of the Insights Engine r2 project. See §8 changelog entry dated 2026-06-03 (late) for the Wave D + E status update + cross-reference to the new integration brief.
+> **Last updated**: 2026-06-04 (late — post-Wave-F contract v1.1 ship) by Claude (Anthropic AI agent) on behalf of the Insights Engine r2 project. See §8 changelog entries dated 2026-06-03 (late) for Wave D + E status + integration brief; 2026-06-04 (late) for Wave F v1.1 (SSE streaming + citations[].href) + touchpoint §4.4 + §4.6 resolutions.
 > **Maintenance**: Living document. Updated as Insights r2 progresses. Subject to the final-refinement gate (see §6 below) once Insights r2 completes.
 > **Provenance**: Original synthesis from a comprehensive read-through of Insights r2 artifacts on 2026-06-03 (early). Subsequent updates per §8 changelog.
 
@@ -324,6 +324,7 @@ This document is updated:
 |---|---|
 | 2026-06-03 (early) | Initial authoring during R5 design phase. Insights r2 at ~62% by task count (Wave C complete, D-G1 just landed, D-G2 next). All 5 coordination touchpoints + 7 non-conflicts documented. Refinement gate plan locked. |
 | 2026-06-03 (late) | **Wave D + E ship update + integration-brief cross-reference.** Updated by Claude (Anthropic AI agent) on behalf of the Insights Engine r2 project — see details below. |
+| 2026-06-04 (late) | **Wave F v1.1 shipped (SSE streaming + citations.href).** Touchpoints §4.4 (FieldDelta SSE reuse) + §4.6 (citations clickable) both RESOLVED. Contract bumped 1.0 → 1.1, additive + back-compat. Updated by Claude (Anthropic AI agent) on behalf of the Insights Engine r2 project — see §8.7 below. |
 
 ---
 
@@ -409,3 +410,61 @@ Both docs are required reading for R5 implementers touching Insights consumption
 - This changelog entry author: same agent (this turn)
 - Operator approval: Ralph Schroeder (project owner)
 - Verifiable via: PR #337 commits `7411a9c5` (Wave E impl) + `015445ea` (test tolerance fix); BFF source diff in `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/`
+
+---
+
+### 2026-06-04 (late) — Wave F v1.1 shipped (SSE streaming + citations.href)
+
+**Updated by**: Claude (Anthropic AI agent) on behalf of the Insights Engine r2 project (operator: Ralph Schroeder).
+**Trigger**: Wave F (contract v1.1) implementation complete; tasks 050 (F1 spike) + 051 (F2 SSE) + 052 (F3 citations href) + 053 (F4 docs) all ✅. Pending main-session batch commit + PR open + auto-merge.
+
+#### 8.7 Wave F status summary
+
+| Wave F task | Wave-item | Deliverable | Status |
+|---|---|---|---|
+| 050 | F1 | Streaming surface + citation ID flow spike → `notes/spikes/wave-f-streaming-citation-spike.md` (6 sections A–F); binding scope decision: **SHIP FULL** (both observation + document citation href; R5 escape hatch NOT triggered — plumbing cost Small) | ✅ |
+| 051 | F2 | `IInsightsAi.AssistantQueryStreamAsync` + `AssistantQueryChunk` Zone-B DTO + endpoint `Accept`-header negotiation (`application/json` → single-shot; `text/event-stream` → SSE) + 8 new tests | ✅ |
+| 052 | F3 | `AssistantQueryCitation.Href` optional field (JSON key lowercase `href`) + `AssistantCitationHrefOptions` config (`Insights:CitationHref:BffBaseUrl`) + URL pattern `{bffBaseUrl}/api/documents/{sprk_document-guid}/preview` + 17 new tests | ✅ |
+| 053 | F4 | Contract v1.1 docs (`design-e3-tool-call-contract.md` bumped + §3.5 SSE + §4.6 href + §12 changelog; integration brief amended; this changelog entry) | ✅ |
+
+**Effort**: ~4.5d total (matches mini-plan estimate). **Wall clock**: ~4 days end-to-end with 051+052 parallel sub-agent dispatch (per mini-plan §4.1 Round 2 parallelism). 0 stuck-agent incidents (`feedback-detect-stuck-subagents` lesson held). Tests across both new features: 25 added (17 citation-href + 8 SSE) — all passing. Publish size 44.13 MB compressed (Wave E baseline was 44.10 MB; +0.03 MB delta, well under +5 MB per-task threshold). `dotnet format whitespace Spaarke.sln --verify-no-changes` clean. §3.5 facade-boundary grep clean.
+
+#### 8.8 §4.4 touchpoint (FieldDelta SSE reuse) — **RESOLVED**
+
+| Open question @ 2026-06-03 late | Resolution @ 2026-06-04 late |
+|---|---|
+| "Did Insights E3 reuse `FieldDelta`?" — answered NO at 2026-06-03 late (Insights E3 single-shot only) | **ANSWERED YES (with intentional protocol parity)** in v1.1. Insights chose the `AssistantQueryChunk` variant — same shape family as R5's `AnalysisChunk` (Type / Step / Path / Content / Sequence / Result / Error). R5's chat agent's existing `AnalysisChunk`-aware SSE parser CAN consume `insights.query` streams with no protocol divergence — Type discriminates (`progress` | `delta` | `result` | `error`), Path tags the streaming field (`"answer"` on RAG deltas), Sequence orders deltas 1-based, terminator is `data: [DONE]\n\n`. Naming differs by tool (`AssistantQueryChunk` vs `AnalysisChunk`) but the wire-shape is intentionally aligned so a single R5 parser handles both. |
+
+**Decision summary**: protocol parity NOT a literal `FieldDelta` import. R5's `FieldDelta` design and Insights' `AssistantQueryChunk` design are siblings in the same shape family, not a single shared type. This preserves Zone A/B facade boundaries (each tool owns its DTO) while delivering R5-side parser reuse. If a future cleanup phase chooses to factor the shape into a shared `Spaarke.Core.Streaming.SseChunk<TResult>` generic, both projects can adopt it back-compatibly. **No protocol fragmentation. No R5 design rework required.**
+
+#### 8.9 §4.6 touchpoint (citations clickable) — **RESOLVED**
+
+| Open question @ original | Resolution @ 2026-06-04 late |
+|---|---|
+| "Citation display — display names enough? Or clickable URLs needed?" (R5-side §6 question 4 in the integration brief) | **ANSWERED with citations[].href shipped in v1.1 (Full scope)**. `href` is an optional lowercase JSON key on each citation. Present on both observation (RAG) and document (playbook) citations per F1 spike §F binding decision — R5 escape hatch NOT triggered because plumbing cost was Small (≤0.5d, ~3.5h actual). |
+
+**URL pattern**:
+
+```
+{Insights:CitationHref:BffBaseUrl}/api/documents/{sprk_document-guid}/preview
+```
+
+**Required configuration** (R5 ops): the BFF needs `Insights:CitationHref:BffBaseUrl` set per environment. Dev: `https://spaarke-bff-dev.azurewebsites.net`. Staging/Production: matching environment URLs. When unset (or empty), the BFF emits `href: null` for ALL citations as a safe fallback — no broken URLs ever emitted. R5 deployment checklist: verify the config is set on the BFF App Service Configuration BEFORE smoke-testing the v1.1 contract end-to-end.
+
+**AIPU2-027 enforcement**: the `/api/documents/{id}/preview` endpoint enforces ACL via existing OBO; if the user lacks access, the endpoint returns 403/404 naturally — R5's chat agent handles as an opaque error per the existing R5 §1 response (iframe-render fails gracefully). **No URL signing, no token embedding** — the citation href is opaque-from-client and authorization-checked at click-time on the BFF preview endpoint.
+
+**v1.2 deferred subset**: when the playbook `EvidenceRef.Ref` is a `spe://drive/X/item/Y` URI (instead of a bare sprk_document Guid), v1.1 emits `href: null` for that citation. F1 spike empirically confirmed `spe://` is the dominant production emit pattern from `FilesIndexIngestDocumentSource.cs:166` — but the playbook citations through `predict-matter-cost@v1` predominantly hit the bare-Guid path OR non-document evidence types, so the v1.1 `null` fallback covers the minority case. v1.2 will add an async `driveId+itemId → sprk_document` lookup (the existing `DataverseObservationMirror.ResolveDocumentIdAsync` pattern), making citation projection async. Empirically a minority case — explicit per-spike trade-off to keep v1.1 synchronous.
+
+#### 8.10 R5 next actions (post-v1.1)
+
+1. **Optionally consume `Accept: text/event-stream`** when invoking `POST /api/insights/assistant/query` from R5 chat-pane code paths where progressive rendering matters (RAG synthesis token streaming + playbook node-progress UX). Single-shot remains the default for tool-call contexts that don't benefit from streaming. R5's existing `AnalysisChunk` SSE parser handles `AssistantQueryChunk` events with no code changes (same shape family).
+2. **Render `citations[].href` as iframe-target / clickable link** when non-null; fall back to display-name-only when null. The `/preview` URL is iframe-loadable (same surface as R5's `FilePreviewContextWidget` already uses).
+3. **Verify `Insights:CitationHref:BffBaseUrl` is set** on the target BFF environment before R5 smoke-tests v1.1 features. Ops coordination with Insights team. Documented in §8.9 above.
+4. **No R5 design rework** for the §4.4 touchpoint — Insights' `AssistantQueryChunk` is shape-compatible with R5's `AnalysisChunk`. R5's existing SSE parser reuse path holds.
+
+#### 8.11 Provenance of this update
+
+- Wave F task 053 (F4) author: Claude (Anthropic AI agent) running task-execute skill at MINIMAL rigor (docs-only update), dispatched as sub-agent by main session
+- This changelog entry author: same agent (this turn)
+- Operator approval: Ralph Schroeder (project owner)
+- Verifiable via: Wave F branch `work/ai-spaarke-insights-engine-r2-wave-f`; tasks 050 + 051 + 052 + 053 in `projects/ai-spaarke-insights-engine-r2/tasks/`; spike + mini-plan in `projects/ai-spaarke-insights-engine-r2/notes/spikes/` + `projects/ai-spaarke-insights-engine-r2/notes/`; design contract diff in `projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md` (v1.0 → v1.1)
