@@ -220,11 +220,22 @@ export const App: React.FC = () => {
 
   const parentContext = React.useMemo<DataGridParentContext | undefined>(() => {
     if (!DRILL_THROUGH_PARAMS.recordId) return undefined;
-    return {
+    const cleanId = DRILL_THROUGH_PARAMS.recordId.replace(/[{}]/g, '');
+    const ctx: DataGridParentContext = {
       entityType: DRILL_THROUGH_PARAMS.entityName ?? '',
-      id: DRILL_THROUGH_PARAMS.recordId,
+      id: cleanId,
       name: '',
     };
+    // When the parent is a Matter, ALSO expose the id under the configjson's
+    // parentContextKey ('matterId'). The framework reads
+    // `parentContext[parentContextFilter.parentContextKey]` to overlay the
+    // FetchXML — without this line, the configjson's
+    // `behavior.parentContextFilter` (added 2026-06-04) would never find a value.
+    // Same pattern as sprk_invoicespage / sprk_kpiassessmentspage.
+    if (DRILL_THROUGH_PARAMS.entityName === 'sprk_matter') {
+      ctx.matterId = cleanId;
+    }
+    return ctx;
   }, []);
 
   return (

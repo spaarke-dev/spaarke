@@ -1,9 +1,30 @@
 # Phase D UAT Report — task 035
 
 > **Environment**: `https://spaarkedev1.crm.dynamics.com` (Spaarke Development Environment)
-> **Deploy commits**: `905a2f10` (initial Phase D deploy) + this commit (035 fixes 1+2+3 redeploy)
-> **Status**: 🔄 **UAT iteration 2 — awaiting operator re-verification of the 5 regressions found in iteration 1**
+> **Deploy commits**: `905a2f10` (initial Phase D deploy) → `f1365111` (full framework hardening, iteration 6 / final)
+> **Status**: ✅ **PASSED — operator confirmed 2026-06-04 "seems to be working correctly"**
 > **Operator**: Ralph Schroeder
+
+---
+
+## Final outcome (2026-06-04)
+
+After 6 UAT iterations and a structural framework hardening (host contract doc
++ `<DataGridPageShell>` + generalized side-pane infra + atomic deploy script),
+all critical acceptance gates pass:
+
+| Gate | Status |
+|---|---|
+| Record-link bug closed in dialog mode (Mode 2.5/2.6) | ✅ Verified |
+| 4 EventsPage modes render correctly | ✅ Verified |
+| Calendar pane side-pane filter actually filters the grid | ✅ Verified (after iter 4 payload-shape fix + iter 6 framework migration) |
+| Column filter chevron does NOT trigger sort | ✅ Verified (after iter 5 aggressive event blocking on shared HeaderCellContent) |
+| Calendar pane lifecycle on form-tab switch | ✅ Verified (DataGridSidePaneOrchestrator IntersectionObserver) |
+| Calendar widget layout (no 6th row spillover) | ✅ Verified (Math.ceil weeksNeeded fix in both calendars) |
+| Outer-page scroll containment | ✅ Verified (box-sizing reset + minHeight: 0 chain + max-height 100vh) |
+| Bundled framework copy uniform across all consumers | ✅ Verified (Deploy-AllDataGridConsumers.ps1 atomic redeploy) |
+
+Phase D officially closes here. Phase E (SemanticSearch migration) is unblocked.
 
 ---
 

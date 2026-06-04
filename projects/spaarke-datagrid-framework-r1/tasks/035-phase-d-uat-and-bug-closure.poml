@@ -3,7 +3,7 @@
   <metadata>
     <title>Phase D UAT: EventsPage all 4 modes + record-link bug closure verification</title>
     <phase>4: Phase D — EventsPage Migration</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>034</dependencies>
     <blocks>none</blocks>
