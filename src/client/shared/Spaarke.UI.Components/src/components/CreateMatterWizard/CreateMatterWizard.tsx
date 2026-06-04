@@ -45,10 +45,7 @@ import {
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import { EventService } from '../CreateEventWizard/eventService';
 import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
-import type {
-  ICreateWorkAssignmentFormState,
-  IAssignWorkState,
-} from '../CreateWorkAssignmentWizard/formTypes';
+import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { AssociationResult } from '../AssociateToStep/types';
 
@@ -66,8 +63,7 @@ import type { AssociationResult } from '../AssociateToStep/types';
 function getDataverseClientUrl(): string {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any =
-      (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+    const xrm: any = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
     const clientUrl: string | undefined = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.();
     if (clientUrl) return clientUrl.replace(/\/+$/, '');
   } catch {
@@ -135,7 +131,10 @@ async function associateToRecord(
       await dataService.updateRecord('sprk_matter', cleanMatterId, {
         'sprk_Account@odata.bind': `/accounts(${recordId})`,
       });
-      console.info('[CreateMatterWizard] Account association set:', `account(${recordId}) -> sprk_matter(${cleanMatterId})`);
+      console.info(
+        '[CreateMatterWizard] Account association set:',
+        `account(${recordId}) -> sprk_matter(${cleanMatterId})`
+      );
       return { success: true };
     }
 

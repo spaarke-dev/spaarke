@@ -42,10 +42,7 @@ import type { ILookupItem } from '../../types/LookupTypes';
 import { provisionSecureProject } from './provisioningService';
 import { EventService } from '../CreateEventWizard/eventService';
 import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
-import type {
-  ICreateWorkAssignmentFormState,
-  IAssignWorkState,
-} from '../CreateWorkAssignmentWizard/formTypes';
+import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
 
 // ---------------------------------------------------------------------------
 // Association wiring helpers
@@ -427,11 +424,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
             // authFetch / bffBaseUrl are only consumed for SPE file upload, which
             // we never trigger here (empty uploadedFiles array). Provide safe
             // fallbacks so optional props don't break the call.
-            const waService = new WorkAssignmentService(
-              dataService,
-              authFetch ?? fetch.bind(window),
-              bffBaseUrl ?? ''
-            );
+            const waService = new WorkAssignmentService(dataService, authFetch ?? fetch.bind(window), bffBaseUrl ?? '');
             const waResult = await waService.createWorkAssignment(waForm, [], [], waAssignWork);
             if (waResult.status === 'error') {
               warnings.push(
