@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -102,17 +103,20 @@ public sealed class AssistantToolCallHandler
 
     private readonly IInsightsIntentClassifier _classifier;
     private readonly IOptionsMonitor<InsightsPlaybookNameMapOptions> _playbookNameMap;
+    private readonly IOptionsMonitor<AssistantCitationHrefOptions> _citationHrefOptions;
     private readonly IConfiguration _configuration;
     private readonly ILogger<AssistantToolCallHandler> _logger;
 
     public AssistantToolCallHandler(
         IInsightsIntentClassifier classifier,
         IOptionsMonitor<InsightsPlaybookNameMapOptions> playbookNameMap,
+        IOptionsMonitor<AssistantCitationHrefOptions> citationHrefOptions,
         IConfiguration configuration,
         ILogger<AssistantToolCallHandler> logger)
     {
         _classifier = classifier ?? throw new ArgumentNullException(nameof(classifier));
         _playbookNameMap = playbookNameMap ?? throw new ArgumentNullException(nameof(playbookNameMap));
+        _citationHrefOptions = citationHrefOptions ?? throw new ArgumentNullException(nameof(citationHrefOptions));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -150,62 +154,24 @@ public sealed class AssistantToolCallHandler
 
         // ─── Step 1: Routing decision ──────────────────────────────────────────────────
         // Per contract §3.2 + §7: forceMode dominates; null forceMode triggers classifier.
-        (string path, string? classifierPlaybookHint, string intentSource, bool belowThreshold) routing;
-
-        if (string.Equals(request.ForceMode, "playbook", StringComparison.OrdinalIgnoreCase))
-        {
-            routing = ("playbook", classifierPlaybookHint: null, IntentSourceForceMode, belowThreshold: false);
-            _logger.LogDebug(
-                "AssistantToolCallHandler: forceMode=playbook bypassing classifier. tenant={TenantId} subject={Scheme}:{Id}",
-                request.TenantId, request.ParentEntityType, request.ParentEntityId);
-        }
-        else if (string.Equals(request.ForceMode, "rag", StringComparison.OrdinalIgnoreCase))
-        {
-            routing = ("rag", classifierPlaybookHint: null, IntentSourceForceMode, belowThreshold: false);
-            _logger.LogDebug(
-                "AssistantToolCallHandler: forceMode=rag bypassing classifier. tenant={TenantId} subject={Scheme}:{Id}",
-                request.TenantId, request.ParentEntityType, request.ParentEntityId);
-        }
-        else
-        {
-            // No forceMode → invoke classifier. May throw FeatureDisabledException; propagates.
-            var classification = await _classifier.ClassifyAsync(
-                request.Query,
-                new IntentClassificationContext(
-                    SubjectScheme: request.ParentEntityType,
-                    TenantId: request.TenantId),
-                cancellationToken).ConfigureAwait(false);
-
-            // FR-05 safety: BelowThreshold MUST fall back to RAG regardless of classifier hint.
-            if (classification.BelowThreshold)
-            {
-                routing = ("rag", classifierPlaybookHint: null, IntentSourceClassifierFallback, belowThreshold: true);
-                _logger.LogInformation(
-                    "AssistantToolCallHandler: classifier below-threshold (confidence={Confidence:0.00}) — falling back to RAG. tenant={TenantId} subject={Scheme}:{Id}",
-                    classification.Confidence, request.TenantId, request.ParentEntityType, request.ParentEntityId);
-            }
-            else
-            {
-                var pathStr = classification.Path == IntentPath.Playbook ? "playbook" : "rag";
-                routing = (pathStr, classification.PlaybookId, IntentSourceClassifier, belowThreshold: false);
-                _logger.LogDebug(
-                    "AssistantToolCallHandler: classifier dispatched path={Path} playbookHint={PlaybookHint} confidence={Confidence:0.00}. tenant={TenantId} subject={Scheme}:{Id}",
-                    pathStr, classification.PlaybookId, classification.Confidence, request.TenantId, request.ParentEntityType, request.ParentEntityId);
-            }
-        }
+        // Factored to DecideRouteAsync so streaming + single-shot share the same routing
+        // logic (Wave F task 051 / FR-05 v1.1 — avoid divergence between modes).
+        var routing = await DecideRouteAsync(request, cancellationToken).ConfigureAwait(false);
 
         // ─── Step 2: Execute the chosen path ───────────────────────────────────────────
+        // Task 051 refactored routing into RoutingDecision (PascalCase members) for the
+        // streaming-path code share — adapt the dispatch to the new shape here.
         AssistantQueryFacadeResult result;
-        if (routing.path == "playbook")
+        if (routing.Path == "playbook")
         {
             result = await ExecutePlaybookPathAsync(
-                request, routing.classifierPlaybookHint, routing.intentSource, routing.belowThreshold,
+                request, routing.ClassifierPlaybookHint, routing.IntentSource, routing.BelowThreshold,
                 playbookInvoker, cancellationToken).ConfigureAwait(false);
         }
         else
         {
             result = await ExecuteRagPathAsync(
-                request, routing.intentSource, routing.belowThreshold,
+                request, routing.IntentSource, routing.BelowThreshold,
                 ragInvoker, cancellationToken).ConfigureAwait(false);
         }
 
@@ -299,13 +265,21 @@ public sealed class AssistantToolCallHandler
 
         // Citations: project evidence refs that look document-like into the uniform shape.
         // Evidence with empty Quote becomes a citation without an excerpt (Source-only).
+        // Wave F task 052 / contract v1.1: project Href when EvidenceRef carries a
+        // sprk_document Guid (bare-Guid emission form). EvidenceRef.Ref in spe://drive/X/item/Y
+        // form is the dominant production emission (per FilesIndexIngestDocumentSource +
+        // ObservationEmitter empirical grep 2026-06-03) but requires async sprk_document
+        // lookup — deferred to v1.2 to keep this synchronous projection path. Such citations
+        // get Href = null and the client falls back to display-name-only rendering per §3.5.
+        var bffBaseUrl = GetBffBaseUrl();
         var citations = artifact.Evidence
             .Select((e, idx) => new AssistantQueryCitation(
                 N: idx + 1,
                 Source: e.Ref,
                 Excerpt: e.Quote ?? string.Empty,
                 ObservationId: null,
-                ChunkId: null))
+                ChunkId: null,
+                Href: BuildHrefForEvidence(e, bffBaseUrl)))
             .ToList();
 
         // Answer: plain-text rendering. For Inference artifacts we surface the Reasoning when
@@ -400,13 +374,21 @@ public sealed class AssistantToolCallHandler
 
         // Step R3: shape into uniform response. Each hit projects to AssistantQueryCitation
         // with the 1-based n matching the [n] tokens in ragResult.Summary.
+        // Wave F task 052 / contract v1.1: RAG-path Href uses ObservationId (which IS the
+        // sprk_document Guid per IRagService.RagSearchResult.DocumentId XML doc) routed
+        // through the existing GET /api/documents/{id}/preview endpoint. AIPU2-027 privilege
+        // filtering is enforced naturally — the preview endpoint runs OBO so Graph + Dataverse
+        // ACL gate access. When ObservationId is null (orphan chunk without sprk_document
+        // parent), Href is null and consumer falls back to display-name-only per §3.5.
+        var bffBaseUrl = GetBffBaseUrl();
         var citations = ragResult.Results
             .Select((h, idx) => new AssistantQueryCitation(
                 N: idx + 1,
                 Source: h.DocumentName,
                 Excerpt: h.Snippet,
                 ObservationId: h.ObservationId,
-                ChunkId: h.ChunkId))
+                ChunkId: h.ChunkId,
+                Href: BuildHrefForObservationId(h.ObservationId, bffBaseUrl)))
             .ToList();
 
         // Confidence per contract §4.1: top hit's relevance score, or 0.0 when no hits.
@@ -443,6 +425,176 @@ public sealed class AssistantToolCallHandler
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
+    /// Routing decision tuple returned from <see cref="DecideRouteAsync"/>. Captures the
+    /// dispatch decision so streaming + single-shot share identical routing logic.
+    /// </summary>
+    /// <param name="Path">Dispatch target: <c>"playbook"</c> | <c>"rag"</c>.</param>
+    /// <param name="ClassifierPlaybookHint">Playbook canonical name suggested by the
+    /// classifier; null on forceMode or fallback paths.</param>
+    /// <param name="IntentSource">Telemetry value: <c>classifier</c> | <c>forceMode</c>
+    /// | <c>classifier-fallback</c>.</param>
+    /// <param name="BelowThreshold">True when classifier was invoked and returned
+    /// below-threshold (handler fell back to RAG per FR-05 safety).</param>
+    public sealed record RoutingDecision(
+        string Path,
+        string? ClassifierPlaybookHint,
+        string IntentSource,
+        bool BelowThreshold);
+
+    /// <summary>
+    /// Make the routing decision per contract §3.2 + §7. Extracted as a public method so
+    /// the streaming path (<see cref="HandleStreamingAsync"/>) and the single-shot path
+    /// (<see cref="ExecuteAsync"/>) share identical routing logic without duplication
+    /// (Wave F task 051 / FR-05 v1.1).
+    /// </summary>
+    /// <remarks>
+    /// <b>FeatureDisabledException</b>: when <c>ForceMode == null</c>, the classifier is
+    /// invoked and may throw <see cref="FeatureDisabledException"/> with
+    /// <c>ErrorCode = "ai.intent-classification.disabled"</c>. This propagates unchanged —
+    /// the streaming caller MUST catch it BEFORE yielding the first chunk so the endpoint
+    /// can return 503 ProblemDetails with no SSE body (ADR-032 kill-switch ordering).
+    /// </remarks>
+    public async Task<RoutingDecision> DecideRouteAsync(
+        AssistantQueryFacadeRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.Equals(request.ForceMode, "playbook", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogDebug(
+                "AssistantToolCallHandler: forceMode=playbook bypassing classifier. tenant={TenantId} subject={Scheme}:{Id}",
+                request.TenantId, request.ParentEntityType, request.ParentEntityId);
+            return new RoutingDecision("playbook", ClassifierPlaybookHint: null, IntentSourceForceMode, BelowThreshold: false);
+        }
+
+        if (string.Equals(request.ForceMode, "rag", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogDebug(
+                "AssistantToolCallHandler: forceMode=rag bypassing classifier. tenant={TenantId} subject={Scheme}:{Id}",
+                request.TenantId, request.ParentEntityType, request.ParentEntityId);
+            return new RoutingDecision("rag", ClassifierPlaybookHint: null, IntentSourceForceMode, BelowThreshold: false);
+        }
+
+        // No forceMode → invoke classifier. May throw FeatureDisabledException; propagates.
+        var classification = await _classifier.ClassifyAsync(
+            request.Query,
+            new IntentClassificationContext(
+                SubjectScheme: request.ParentEntityType,
+                TenantId: request.TenantId),
+            cancellationToken).ConfigureAwait(false);
+
+        // FR-05 safety: BelowThreshold MUST fall back to RAG regardless of classifier hint.
+        if (classification.BelowThreshold)
+        {
+            _logger.LogInformation(
+                "AssistantToolCallHandler: classifier below-threshold (confidence={Confidence:0.00}) — falling back to RAG. tenant={TenantId} subject={Scheme}:{Id}",
+                classification.Confidence, request.TenantId, request.ParentEntityType, request.ParentEntityId);
+            return new RoutingDecision("rag", ClassifierPlaybookHint: null, IntentSourceClassifierFallback, BelowThreshold: true);
+        }
+
+        var pathStr = classification.Path == IntentPath.Playbook ? "playbook" : "rag";
+        _logger.LogDebug(
+            "AssistantToolCallHandler: classifier dispatched path={Path} playbookHint={PlaybookHint} confidence={Confidence:0.00}. tenant={TenantId} subject={Scheme}:{Id}",
+            pathStr, classification.PlaybookId, classification.Confidence, request.TenantId, request.ParentEntityType, request.ParentEntityId);
+        return new RoutingDecision(pathStr, classification.PlaybookId, IntentSourceClassifier, BelowThreshold: false);
+    }
+
+    /// <summary>
+    /// Build the artifact-path <see cref="AssistantQueryFacadeResult"/> from an
+    /// <see cref="InsightsAgentResult"/>. Public-internal so <see cref="InsightsOrchestrator"/>
+    /// streaming code can reuse projection logic without duplication.
+    /// </summary>
+    internal AssistantQueryFacadeResult BuildPlaybookResult(
+        InsightsAgentResult agentResult,
+        string canonicalName,
+        string intentSource,
+        bool belowThreshold)
+    {
+        if (agentResult.Artifact is not null)
+        {
+            return BuildArtifactResponse(agentResult, canonicalName, intentSource, belowThreshold);
+        }
+        if (agentResult.Decline is not null)
+        {
+            return BuildDeclineResponse(agentResult, canonicalName, intentSource, belowThreshold);
+        }
+
+        return new AssistantQueryFacadeResult
+        {
+            Path = "playbook",
+            Answer = "The Insights service returned an empty response. Please retry or contact support.",
+            Citations = [],
+            Confidence = 0.0,
+            PlaybookId = canonicalName,
+            StructuredKind = StructuredKindDecline,
+            StructuredEnvelopeJson = "{}",
+            IntentSource = intentSource,
+            ClassifierBelowThreshold = belowThreshold,
+            CacheHit = false,
+            HitCount = 0
+        };
+    }
+
+    /// <summary>
+    /// Build the RAG-path <see cref="AssistantQueryFacadeResult"/> from an
+    /// <see cref="InsightsSearchFacadeResult"/>. Public-internal so
+    /// <see cref="InsightsOrchestrator"/> streaming code can assemble the terminal
+    /// <c>result</c> chunk without duplicating projection logic.
+    /// </summary>
+    /// <param name="ragResult">The completed RAG search facade result.</param>
+    /// <param name="streamedAnswer">The accumulated synthesis text from streamed tokens.
+    /// When non-null, REPLACES <see cref="InsightsSearchFacadeResult.Summary"/> in the
+    /// terminal chunk so the streaming path's final result matches what the client saw via
+    /// delta chunks. When null (e.g., zero-hit path with no synthesis), the result uses the
+    /// RAG facade's empty Summary.</param>
+    /// <param name="intentSource">Routing telemetry per <see cref="DecideRouteAsync"/>.</param>
+    /// <param name="belowThreshold">Classifier below-threshold flag per
+    /// <see cref="DecideRouteAsync"/>.</param>
+    internal AssistantQueryFacadeResult BuildRagResult(
+        InsightsSearchFacadeResult ragResult,
+        string? streamedAnswer,
+        string intentSource,
+        bool belowThreshold)
+    {
+        // Wave F task 052 / contract v1.1: same Href projection as the single-shot RAG
+        // path — streaming and single-shot must produce identical terminal `result` chunks.
+        var bffBaseUrl = GetBffBaseUrl();
+        var citations = ragResult.Results
+            .Select((h, idx) => new AssistantQueryCitation(
+                N: idx + 1,
+                Source: h.DocumentName,
+                Excerpt: h.Snippet,
+                ObservationId: h.ObservationId,
+                ChunkId: h.ChunkId,
+                Href: BuildHrefForObservationId(h.ObservationId, bffBaseUrl)))
+            .ToList();
+
+        double confidence = ragResult.Results.Count > 0
+            ? ragResult.Results[0].Confidence
+            : 0.0;
+
+        var envelopeJson = JsonSerializer.Serialize(new
+        {
+            results = ragResult.Results,
+            summary = streamedAnswer ?? ragResult.Summary
+        }, EnvelopeJsonOptions);
+
+        return new AssistantQueryFacadeResult
+        {
+            Path = "rag",
+            Answer = streamedAnswer ?? ragResult.Summary,
+            Citations = citations,
+            Confidence = confidence,
+            PlaybookId = null,
+            StructuredKind = StructuredKindObservation,
+            StructuredEnvelopeJson = envelopeJson,
+            IntentSource = intentSource,
+            ClassifierBelowThreshold = belowThreshold,
+            CacheHit = false,
+            HitCount = citations.Count
+        };
+    }
+
+    /// <summary>
     /// Resolve the canonical playbook name to use for the playbook path. Priority order
     /// per contract §3.3:
     /// 1. Classifier-supplied hint (when classifier was invoked).
@@ -476,5 +628,95 @@ public sealed class AssistantToolCallHandler
         var input = $"tid:{tenantId}|oid:{callerOid}";
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));
         return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // CITATION HREF PROJECTION (Wave F task 052 / contract v1.1)
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Read the configured BFF base URL used to construct citation <c>href</c> values.
+    /// Returns null when unconfigured — projection emits <c>Href = null</c> for all
+    /// citations in that case (consumer falls back to display-name-only per §3.5).
+    /// </summary>
+    private string? GetBffBaseUrl()
+    {
+        var raw = _citationHrefOptions.CurrentValue.BffBaseUrl;
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        // Strip trailing slash to guarantee canonical {origin}/api/documents/{id}/preview shape.
+        return raw.TrimEnd('/');
+    }
+
+    /// <summary>
+    /// Build the citation <c>href</c> URL from a RAG path's <c>ObservationId</c> (which
+    /// IS the <c>sprk_document</c> Guid per <c>RagSearchResult.DocumentId</c> XML doc —
+    /// see <c>IRagService.cs</c>). Returns null when <paramref name="observationId"/> is
+    /// null (orphan chunk), unparseable as a Guid (defense), or <paramref name="bffBaseUrl"/>
+    /// is null (unconfigured environment). AIPU2-027 privilege filtering is enforced
+    /// by the downstream <c>/api/documents/{id}/preview</c> endpoint via OBO — no URL
+    /// signing or token embedding is required.
+    /// </summary>
+    /// <param name="observationId">The sprk_document Guid as a string, or null.</param>
+    /// <param name="bffBaseUrl">Pre-normalized BFF origin (no trailing slash), or null.</param>
+    /// <returns>The absolute preview URL, or null if the citation cannot be addressed.</returns>
+    internal static string? BuildHrefForObservationId(string? observationId, string? bffBaseUrl)
+    {
+        if (bffBaseUrl is null) return null;
+        if (string.IsNullOrWhiteSpace(observationId)) return null;
+        // Defensive Guid validation — the preview endpoint will 400 on non-Guid input.
+        // Surface null here rather than emitting a URL that's guaranteed to 400.
+        if (!Guid.TryParse(observationId, out _)) return null;
+        return $"{bffBaseUrl}/api/documents/{observationId}/preview";
+    }
+
+    /// <summary>
+    /// Build the citation <c>href</c> URL from a playbook-path <see cref="EvidenceRef"/>.
+    /// Only <c>document</c>-type evidence in bare-Guid form is addressable in v1.1; the
+    /// dominant production emission (<c>spe://drive/{driveId}/item/{itemId}</c>) requires
+    /// an async <c>sprk_document</c> lookup via <c>sprk_driveitemid</c> (see
+    /// <see cref="Services.Insights.Observations.DataverseObservationMirror"/>) — deferred
+    /// to v1.2 to keep this synchronous projection path. All non-document evidence
+    /// (fact-source, comparable-matter, supporting-matter, playbook-run) returns null
+    /// per spike F1 §B.
+    /// </summary>
+    internal static string? BuildHrefForEvidence(EvidenceRef evidence, string? bffBaseUrl)
+    {
+        if (bffBaseUrl is null) return null;
+        var documentId = TryExtractDocumentIdFromEvidenceRef(evidence);
+        if (documentId is null) return null;
+        return $"{bffBaseUrl}/api/documents/{documentId.Value}/preview";
+    }
+
+    /// <summary>
+    /// Extract a <c>sprk_document</c> Guid from an <see cref="EvidenceRef"/> when possible.
+    /// Returns null for non-document evidence types, empty <c>Ref</c>, or evidence in
+    /// <c>spe://drive/{driveId}/item/{itemId}</c> form (which requires async lookup,
+    /// deferred to v1.2). Empirical grep (2026-06-03) confirmed bare-Guid form is NOT
+    /// the dominant production emission for the predict-matter-cost@v1 playbook, but
+    /// remains a valid emission shape (e.g., when callers pre-resolve the sprk_document
+    /// Guid). This helper supports the bare-Guid form so future upstream changes can
+    /// shift emission without requiring an additional contract revision.
+    /// </summary>
+    /// <param name="evidence">The evidence ref from a playbook artifact.</param>
+    /// <returns>The sprk_document Guid, or null if not extractable synchronously.</returns>
+    internal static Guid? TryExtractDocumentIdFromEvidenceRef(EvidenceRef evidence)
+    {
+        if (evidence is null) return null;
+        if (!string.Equals(evidence.RefType, "document", StringComparison.Ordinal)) return null;
+        if (string.IsNullOrWhiteSpace(evidence.Ref)) return null;
+
+        // Form 1: bare Guid (cleanest emission shape).
+        if (Guid.TryParse(evidence.Ref, out var bareGuid)) return bareGuid;
+
+        // Form 2: spe://drive/{driveId}/item/{itemId} URI — DOMINANT production shape
+        // per FilesIndexIngestDocumentSource.cs:166 + ObservationEmitter.cs:107 +
+        // Layer1ClassificationEmitter.cs:118 empirical grep (2026-06-03).
+        // Resolving driveItemId → sprk_document.sprk_documentid requires an async
+        // Dataverse query (DataverseObservationMirror.ResolveDocumentIdAsync at :214
+        // is the existing pattern). Deferred to v1.2 — this synchronous helper returns
+        // null so the citation gets Href = null per §3.5 back-compat. Roadmap option
+        // is either (a) upstream emitter change to pre-resolve sprk_document Guid OR
+        // (b) make citation projection async with bounded fan-out batch lookup.
+        return null;
     }
 }

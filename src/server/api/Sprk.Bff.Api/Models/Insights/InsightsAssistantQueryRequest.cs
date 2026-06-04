@@ -77,12 +77,29 @@ public sealed record InsightsAssistantQueryResponse(
 /// <summary>
 /// A single citation entry in <see cref="InsightsAssistantQueryResponse.Citations"/>.
 /// </summary>
+/// <param name="N">1-based citation index — matches the <c>[n]</c> token in
+/// <see cref="InsightsAssistantQueryResponse.Answer"/>.</param>
+/// <param name="Source">Display name of the source document/observation.</param>
+/// <param name="Excerpt">Content snippet suitable for citation display (≤280 chars).</param>
+/// <param name="ObservationId">Source document/observation id when linked to a
+/// Dataverse record; null for orphan chunks or playbook citations without record link.</param>
+/// <param name="ChunkId">Chunk identifier from the underlying index when available;
+/// null on the playbook path when the citation source is a playbook-internal evidence ref.</param>
+/// <param name="Href">Optional clickable URL for citation source preview (Wave F task 052
+/// / contract v1.1 §3). When non-null, points to the existing BFF preview endpoint
+/// (<c>GET /api/documents/{sprk_document-guid}/preview</c>) — auth enforced via OBO so
+/// the URL itself returns 403 for users lacking ACL access (AIPU2-027 privilege filtering).
+/// Null when the citation source cannot be addressed (orphan chunk; playbook evidence in
+/// <c>spe://drive/X/item/Y</c> form not yet resolvable to sprk_document Guid in v1.1 —
+/// deferred to v1.2; or BffBaseUrl unconfigured for the environment).
+/// v1.0 clients ignore unknown fields per contract §3.5 back-compat.</param>
 public sealed record InsightsAssistantCitation(
     int N,
     string Source,
     string Excerpt,
     string? ObservationId,
-    string? ChunkId);
+    string? ChunkId,
+    [property: JsonPropertyName("href")] string? Href = null);
 
 /// <summary>
 /// Rich structured envelope wrapper carried in

@@ -80,6 +80,8 @@ public class PredictMatterCostPlaybookTests
         => new(
             _classifierMock.Object,
             _playbookNameMap,
+            new TestOptionsMonitor<Sprk.Bff.Api.Configuration.AssistantCitationHrefOptions>(
+                new Sprk.Bff.Api.Configuration.AssistantCitationHrefOptions()),
             new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
             NullLogger<Sprk.Bff.Api.Services.Ai.Insights.AssistantToolCallHandler>.Instance);
 

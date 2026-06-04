@@ -1,7 +1,7 @@
 # Insights Engine Guide
 
 > **Audience**: developers + technical SMEs extending the Spaarke Insights Engine
-> **Last Updated**: 2026-06-02 (Phase 1.5 r2 framing — Wave A2 task 011)
+> **Last Updated**: 2026-06-04 (Phase 1.5 r2 shipped — Waves A/B/C/D/E via PRs #330, #334, #336, #337 + Wave F contract v1.1 via PR #339; §7/§7A/§7B/§7C updated to reflect shipped state + new `Insights:CitationHref:BffBaseUrl` config requirement)
 > **Companion documents**:
 > - [`docs/architecture/INSIGHTS-ENGINE-ARCHITECTURE.md`](../architecture/INSIGHTS-ENGINE-ARCHITECTURE.md) §0a — Phase 1 completion + Phase 1.5 framing
 > - [`projects/ai-spaarke-insights-engine-r2/design.md`](../../projects/ai-spaarke-insights-engine-r2/design.md) — Phase 1.5 design (corrections + 9 architectural decisions)
@@ -76,7 +76,8 @@ Three patterns by which content is consumed:
 |---|---|---|
 | **Pre-authored JPS playbook** | Question becomes a Dataverse-stored multi-step graph | High-value/high-stakes/structured-output (cost prediction, success likelihood, field auto-populations) |
 | **Generic RAG** (Phase 1.5+) | Natural-language question → semantic search → LLM synthesis | Open-ended chat questions; ad-hoc exploration |
-| **Direct retrieval API** (future) | `POST /api/insights/search` returns ranked Observations/Precedents | Power Apps + PCF surfaces that want raw retrieved evidence |
+| **Direct retrieval API** (Wave E1 shipped 2026-06-03) | `POST /api/insights/search` returns ranked Observations/Precedents | Power Apps + PCF surfaces that want raw retrieved evidence |
+| **Unified Assistant tool endpoint** (Wave E3 v1.0 shipped 2026-06-03; v1.1 minor-version shipped 2026-06-04) | `POST /api/insights/assistant/query` — single tool surface; BFF routes to playbook or RAG internally via intent classifier (or honors `forceMode` override). v1.1 adds optional SSE streaming + clickable citation `href`. Canonical contract: [`design-e3-tool-call-contract.md`](../../projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md) | Spaarke Assistant chat surface (R5 consumer); future tool-callers |
 
 ---
 
@@ -326,9 +327,9 @@ For prompts that exist in exactly one playbook (e.g., the synthesis template own
 
 ---
 
-## 7. Querying the Insights index directly — `POST /api/insights/search` (Phase 1.5 NEW)
+## 7. Querying the Insights index directly — `POST /api/insights/search` (Wave E1, shipped 2026-06-03 via PR #337)
 
-Phase 1.5 Wave E1 ([task 040](../../projects/ai-spaarke-insights-engine-r2/tasks/040-insights-search-rag-endpoint.poml)) ships the generic RAG retrieval endpoint. Per the 2026-06-02 re-scope: the endpoint **wraps the existing `IRagService`** (in `src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs`) — no parallel implementation. If Insights-specific subject filtering needs extension, extend the existing service.
+Phase 1.5 Wave E1 ([task 040](../../projects/ai-spaarke-insights-engine-r2/tasks/040-insights-search-rag-endpoint.poml)) shipped the generic RAG retrieval endpoint. Per the 2026-06-02 re-scope: the endpoint **wraps the existing `IRagService`** (in `src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs`) — no parallel implementation. If Insights-specific subject filtering needs extension, extend the existing service.
 
 ### 7.1 Request shape
 
@@ -356,15 +357,15 @@ Top-N ranked Observations/Precedents with full envelopes + an LLM-synthesized su
 - **Kill-switch**: if `IRagService` is feature-disabled per ADR-032, the endpoint returns 503 ProblemDetails via `FeatureDisabledException` → `FeatureDisabledResults.AsFeatureDisabled503()`.
 - **BFF placement**: endpoint lives in `Sprk.Bff.Api/Endpoints/` following the existing `/ask` pattern (per spec.md BFF Placement Review).
 
-### 7.4 Until E1 ships
+### 7.4 Operator note (post-deploy)
 
-Ad-hoc index queries can use the Azure AI Search REST API directly with the per-environment admin key (operator runbook).
+E1 is shipped. Ad-hoc index queries via the Azure AI Search REST API directly (with the per-environment admin key) are still permitted for operator debugging, but the canonical caller path is `POST /api/insights/search` (or `POST /api/insights/assistant/query` for the unified Assistant tool surface — see §7B).
 
 ---
 
-## 7A. Intent classifier (Phase 1.5 Wave E2)
+## 7A. Intent classifier (Wave E2, shipped 2026-06-03 via PR #337)
 
-[Task 041](../../projects/ai-spaarke-insights-engine-r2/tasks/041-intent-classifier.poml) ships an **LLM-based** intent classifier (gpt-4o-mini per spec.md assumption) that routes Insights-shaped natural-language questions to the correct path:
+[Task 041](../../projects/ai-spaarke-insights-engine-r2/tasks/041-intent-classifier.poml) shipped an **LLM-based** intent classifier (gpt-4o-mini per spec.md assumption) that routes Insights-shaped natural-language questions to the correct path:
 
 ```
 caller question ──▶ IntentClassifier ──▶ { path: "playbook" | "rag",
@@ -382,19 +383,28 @@ caller question ──▶ IntentClassifier ──▶ { path: "playbook" | "rag",
 
 ---
 
-## 7B. Spaarke Assistant integration (Phase 1.5 Wave E3)
+## 7B. Spaarke Assistant tool-call endpoint — `POST /api/insights/assistant/query` (Wave E3 v1.0 shipped 2026-06-03 via PR #337; Wave F v1.1 shipped 2026-06-04 via PR #339)
 
-[Task 042](../../projects/ai-spaarke-insights-engine-r2/tasks/042-spaarke-assistant-integration.poml) integrates Insights as a callable tool in the existing Spaarke Assistant chat surface.
+[Task 042](../../projects/ai-spaarke-insights-engine-r2/tasks/042-spaarke-assistant-integration.poml) shipped the unified Spaarke Assistant tool-call endpoint. The Assistant invokes Insights as a single tool; the BFF makes the playbook-vs-RAG routing decision internally via the Wave E2 intent classifier (or honors an Assistant-supplied `forceMode` override). One uniform response shape across both paths — `path: "playbook" | "rag"` discriminates rendering.
 
-### Sub-task A: Tool-call contract authoring (contract-first per AC-1)
+### Canonical contract
 
-**No pre-existing contract** — Wave E3 owns authoring the schema. Phase 1.5 scope is **read-only tool-call semantics**; bidirectional integration is deferred to Phase 2.
+[`projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md`](../../projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md) is the binding contract. Current version: **v1.1** (Phase 1.5 read-only + SSE streaming + clickable citations).
 
-When the Assistant detects an Insights-shaped question, it calls into the BFF facade. The intent classifier routes to playbook OR RAG; the caller (Assistant) can pass `forceMode` to override.
+- **v1.0** (Wave E3 baseline) — Single-shot JSON; supports playbook + RAG + decline + empty-results semantics; `citations[]` carries `source` + `excerpt` + `observationId` + `chunkId`. Auth: OBO bearer per ADR-028.
+- **v1.1** (Wave F additive, back-compat per R5 request) — Adds optional SSE streaming via `Accept: text/event-stream` (mid-stream `delta` events for RAG synthesis; coarse `progress` events for playbook nodes; final `result` event; `[DONE]` sentinel) AND optional `citations[].href` field for clickable navigation.
 
-### Coordination
+### Phase 1.5 → Phase 2 boundary
 
-Cross-team work with the Spaarke Assistant team is required. Coordinate early per spec.md Dependencies — E3 is the longest Wave E task (~1 week including coordination).
+Read-only tool-call. Phase 2 deferrals: bidirectional clarification (HTTP 422 with `clarification` envelope), multi-turn conversation state on the BFF, `playbookHint`, actionable citation buttons (`citations[].action`), cross-tenant federation.
+
+### Operator config requirement (Wave F)
+
+For `citations[].href` to render as clickable in v1.1 consumers, `Insights:CitationHref:BffBaseUrl` MUST be set per environment in BFF App Service config — see §8.5.
+
+### Coordination with the Spaarke Assistant project (R5)
+
+The Insights side is shipped. Assistant-side consumption (R5) is a separate workstream tracked in [`spaarke-ai-platform-unification-r5`](../../projects/spaarke-ai-platform-unification-r5/). R5's integration brief is mirrored at [`projects/ai-spaarke-insights-engine-r2/notes/insights-engine-assistant-integration-brief.md`](../../projects/ai-spaarke-insights-engine-r2/notes/insights-engine-assistant-integration-brief.md); R5↔r2 coordination doc tracks open touchpoints + resolved items.
 
 ---
 
@@ -441,6 +451,20 @@ Cache key includes `playbookId + subject + parameters + accessibleScopeHash` so 
 
 Phase 1 per-document hard cap: $0.10 (observability-only Phase 1; per-tenant monthly cap deferred to Phase 1.5). Logged via App Insights metric `insights.ingest.cost.cap_exceeded`.
 
+### 8.5 Citation href base URL (Wave F v1.1 — required for clickable citations)
+
+The Wave F v1.1 contract adds optional `citations[].href` field for clickable navigation from Assistant chat to the source document preview. The BFF constructs href URLs as `{Insights:CitationHref:BffBaseUrl}/api/documents/{sprk_document-guid}/preview` and consumers (R5 Spaarke Assistant) render them as clickable links. AIPU2-027 privilege filtering is enforced naturally at the `/api/documents/{id}/preview` endpoint via OBO — no URL signing.
+
+Per-environment App Service config:
+
+| Setting | Location | Value | Description |
+|---------|----------|-------|-------------|
+| `Insights:CitationHref:BffBaseUrl` | App Service `Application settings` | Dev: `https://spaarke-bff-dev.azurewebsites.net`; Prod: `{prod-bff-base-url}` | Base URL the BFF prepends when constructing citation `href` values. **If unset or empty, `Href` is `null` for all citations** (graceful fallback to display-name-only rendering — v1.0 behavior). |
+
+Set via: `az webapp config appsettings set -g <rg> -n <app-service> --settings "Insights__CitationHref__BffBaseUrl=https://..."` then restart App Service.
+
+Validation: after v1.1 BFF redeploy, call `POST /api/insights/assistant/query` with a `subject:` that returns RAG citations; verify response `citations[]` entries carry non-null `href` matching the configured `BffBaseUrl`.
+
 ---
 
 ## 9. Testing patterns
@@ -481,6 +505,11 @@ Phase 1 per-document hard cap: $0.10 (observability-only Phase 1; per-tenant mon
 | Insights tests pass locally but live smoke shows different behavior | Tests mock `IInsightsAi`; real DI graph never exercised | Phase 1.5: add a DI-resolution test that resolves `IInsightsAi` from real container without mocks |
 | `/api/insights/search` returns 503 ProblemDetails with `featureDisabled: true` | `IRagService` is `NullRagService` (kill-switch active per ADR-032) | Enable the RAG feature flag in App Service config; restart |
 | Intent classifier confidence is consistently low for in-domain questions | Threshold too high OR classifier prompt drift | Tune `Insights:IntentClassifier:ConfidenceThreshold`; consider caller `forceMode` override; re-calibrate against eval harness |
+| `/api/insights/assistant/query` returns 503 ProblemDetails with `errorCode: ai.intent-classification.disabled` AND no `forceMode` was sent | Classifier feature-gated OFF AND caller did not supply `forceMode` | Either enable classifier in App Service config OR caller-side: send `forceMode: "playbook"` or `forceMode: "rag"` based on caller-side intent signal (per design-e3 §3.2) |
+| v1.1 client sets `Accept: text/event-stream` but response is single-shot JSON | Caller's BFF deploy predates Wave F | Verify BFF version: `dotnet --info` on App Service should show post-2026-06-04 deploy; redeploy from `work/ai-spaarke-insights-engine-r2-wave-f` or master tip post-PR-#339 |
+| v1.1 SSE stream is open but ends without `data: [DONE]` sentinel | Upstream Azure OpenAI cancellation OR network reset mid-stream | Check App Insights for `INSIGHTS_ASSISTANT_STREAM_ERROR` correlation; verify Azure OpenAI deployment quota; consumer should treat absent `[DONE]` as error per design-e3 §3.5 |
+| `citations[].href` is `null` for all citations in v1.1 response | `Insights:CitationHref:BffBaseUrl` unset in App Service config | Set per §8.5 (Wave F config requirement); restart App Service |
+| `citations[].href` is non-null but clicking returns 403 from `/api/documents/{id}/preview` | AIPU2-027 enforcement at the preview endpoint (working as intended) — caller user lacks privilege on the underlying document; OR document was deleted between response time and click | Expected behavior. R5 chat agent should surface a generic "you don't have access to this source" UX rather than the raw 403. |
 
 ---
 

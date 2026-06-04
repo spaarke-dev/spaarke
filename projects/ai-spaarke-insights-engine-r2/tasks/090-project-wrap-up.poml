@@ -1,7 +1,7 @@
 <task id="090" project="ai-spaarke-insights-engine-r2">
   <metadata>
     <title>Wrap-up — Lessons learned + Phase 2 priority outline + archive</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>wrap-up</wave>
     <estimated-effort>4h</estimated-effort>
     <tags>wrap-up, lessons-learned, archive, phase-2-handoff</tags>
