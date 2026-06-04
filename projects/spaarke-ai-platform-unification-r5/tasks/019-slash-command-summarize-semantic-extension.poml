@@ -1,0 +1,429 @@
+<task id="019" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-10 Slash command `/summarize` semantic extension (tri-mode intent routing)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G5 (parallel-safe; no deps; siblings 020, 021, 022)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none (UI-only; consumes ChatSession.UploadedFiles surfaced by task 004 + InvokeSummarizePlaybookTool from task 015 OR endpoint from task 014 at runtime)</dependencies>
+    <tags>frontend, slash-command, intent-router</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Extend the EXISTING `/summarize` slash command in `DEFAULT_SLASH_COMMANDS` (in
+    `src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts`)
+    so that it semantically supports both modes that R5 now ships: session-uploaded
+    files AND the active analysis document (back-compat wizard flow). The change is
+    two-fold:
+
+    (1) Update the `/summarize` entry's `description` text to "Summarize uploaded
+        files or the active document" — the menu subtitle is the user's primary
+        signal that both modes exist, so the wording MUST signal both clearly.
+
+    (2) Wire the SpaarkeAi shell's intent-handler (the `onSend` handoff in
+        `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` —
+        the file that consumes `SprkChat` from `@spaarke/ui-components` and is the
+        single dispatch site for `/summarize`-prefixed messages) to apply tri-mode
+        routing per FR-03 of `projects/spaarke-ai-platform-unification-r5/spec.md`:
+
+          a) IF the active `ChatSession.UploadedFiles.length > 0` (manifest extension
+             from task 004) → route to the session-files Summarize path. The agent-
+             tool path is preferred (LLM calls `InvokeSummarizePlaybookTool` from task
+             015); fallback / explicit-slash dispatch is the direct endpoint from
+             task 014 (`POST /api/ai/chat/sessions/{sessionId}/summarize`). Both
+             converge on the shared `SessionSummarizeOrchestrator` (task 012) so the
+             routing decision in this file is just a path selector — no orchestration
+             logic.
+
+          b) ELSE IF an active workspace document is present (existing
+             `WorkspaceTabManager` selection or `documentId` propagated through
+             `SprkChat` props per the R3/R4 wizard contract) → fall through to the
+             EXISTING Summarize wizard flow (`SummarizeFilesDialog` / `streamSummarize`
+             pattern shipped in R3, used by LegalWorkspace + SummarizeFilesWizard
+             today). This MUST remain functional unchanged — the wizard is a
+             back-compat consumer + the wider Summarize entry point for non-chat
+             surfaces.
+
+          c) ELSE (neither uploaded files nor active document — the FR-03 prompt-
+             first path) → emit a deterministic chat-layer interjection "Upload the
+             file(s) you'd like me to summarize" in the ConversationPane. The
+             interjection is rendered as an Assistant message (per the existing
+             `addMessage` pattern that `SprkChat`'s `handleSend` already uses for
+             user messages); the playbook is NOT invoked.
+
+    R5 is configuration-first and reuse-first: this task adds ZERO BFF code, ZERO
+    new slash-command frameworks, ZERO new event channels (ADR-030 closed at 4),
+    and ZERO new feature flags (ADR-018 Flag Scope Discipline). It EXTENDS the
+    existing `DEFAULT_SLASH_COMMANDS` constant — does NOT introduce a parallel
+    slash-command system. BFF publish-size delta = 0 MB by construction (frontend
+    only).
+  </prompt>
+
+  <role>
+    Senior React 19 + TypeScript developer with deep familiarity with the SpaarkeAi
+    three-pane shell, the `@spaarke/ui-components` SprkChat surface, the existing
+    `useSlashCommands` / `SlashCommandMenu` machinery, and the LegalWorkspace
+    SummarizeFilesDialog back-compat wizard path. Comfortable with intent-routing
+    UI logic, Fluent UI v9 conventions (ADR-021), and ChatSession.UploadedFiles
+    semantics from task 004.
+  </role>
+
+  <goal>
+    `/summarize` shows "Summarize uploaded files or the active document" in the
+    SlashCommandMenu subtitle on Spaarke Dev. The ConversationPane intent-handler
+    applies tri-mode routing per FR-03: uploaded-files-present → session-files
+    Summarize path (agent-tool or direct endpoint); no uploaded files but active
+    workspace document → existing wizard flow (back-compat verified working);
+    neither → deterministic "Upload the file(s) you'd like me to summarize"
+    interjection in the chat thread. Existing wizard consumers
+    (`SummarizeFilesWizard` solution; `LegalWorkspace`'s `SummarizeFilesDialog`)
+    behave unchanged. Frontend tests cover all three branches plus the back-compat
+    case. `code-review` + `adr-check` quality gates pass at Step 9.5. BFF
+    publish-size delta = 0 MB (confirmed in task notes; no BFF code changed).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="slash-command-source">src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts</file>
+    <file purpose="slash-command-menu">src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/SlashCommandMenu.tsx</file>
+    <file purpose="slash-command-hook">src/client/shared/Spaarke.UI.Components/src/hooks/useSlashCommands.ts</file>
+    <file purpose="chat-input-host">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</file>
+    <file purpose="chat-handler">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file purpose="intent-handler-host">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+    <file purpose="back-compat-wizard">src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeFilesDialog.tsx</file>
+    <file purpose="legacy-wizard">src/solutions/LegalWorkspace/src/components/SummarizeFiles/SummarizeFilesDialog.tsx</file>
+    <file purpose="related-task-014">projects/spaarke-ai-platform-unification-r5/tasks/014-summarize-session-endpoint.poml</file>
+    <file purpose="related-task-015">projects/spaarke-ai-platform-unification-r5/tasks/015-invoke-summarize-playbook-tool.poml</file>
+    <file purpose="related-task-004">projects/spaarke-ai-platform-unification-r5/tasks/004-extend-chatsession-uploaded-files.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-03">Two valid file upload orderings — both must reach the same Summarize playbook invocation. The prompt-first path interjects "Upload the file(s) you'd like me to summarize" via chat-layer logic (NOT playbook-emitted). This task implements the chat-layer interjection branch.</constraint>
+    <constraint source="spec FR-01">`/summarize` resolves to the Summarize playbook (GUID `4a72f99c-a119-f111-8343-7ced8d1dc988` for the existing wizard playbook; session-files Summarize uses the new `sprk_analysisaction` seed from task 010 — both share the playbook entrypoint contract).</constraint>
+    <constraint source="spec NFR-12">Tool description quality — slash command description text is part of the user-facing scope signal that prevents misrouting between `summarize` and `insights.query`. "Summarize uploaded files or the active document" deliberately keeps the scope file-centric (not entity-centric, which is the `insights.query` lane).</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 reuse mandate">MUST extend the EXISTING `DEFAULT_SLASH_COMMANDS` entry. MUST NOT introduce a parallel slash-command system, a new menu component, or a new dispatch framework. Routing logic lives in the existing ConversationPane `onSend` handler.</constraint>
+    <constraint source="R5 CLAUDE.md §3.4 + ADR-030">PaneEventBus channels are closed at 4. This task MUST NOT add a new channel. If the interjection uses PaneEventBus at all, it MUST be an additive event type within an existing channel (likely none — interjection is local chat-state addMessage, no cross-pane dispatch needed).</constraint>
+    <constraint source="R5 CLAUDE.md §3.2 + ADR-018">R5 introduces ZERO new feature flags. Tri-mode routing is unconditional behavior, not flag-gated.</constraint>
+    <constraint source="ADR-012">SlashCommandMenu type definitions live in `@spaarke/ui-components` and MUST remain context-agnostic — no `Xrm` or `ComponentFramework` imports. The intent-handler in ConversationPane is allowed to consume the host context (`SpaarkeAi` shell context, `AiSessionProvider`).</constraint>
+    <constraint source="ADR-021">Any UI text (description, interjection message) MUST work in dark mode and use Fluent v9 semantic tokens if any visual styling is introduced. The interjection rendering reuses existing assistant-message styling — no new styling expected.</constraint>
+    <constraint source="ADR-022">React 19 throughout — new logic in ConversationPane uses existing React 19 hooks and the existing SprkChat `addMessage` / `handleSend` patterns.</constraint>
+    <constraint source="R5 CLAUDE.md §3.6 + ADR-029">BFF publish-size delta = 0 MB (frontend-only change). MUST confirm in task notes; no `dotnet publish` measurement required for this task.</constraint>
+    <constraint source="project">Back-compat MUST be preserved: existing `SummarizeFilesDialog` consumers (LegalWorkspace, SummarizeFilesWizard solution) MUST continue to function unchanged. The wizard flow is the "no uploaded files but active workspace document" branch; verify by smoke test against an existing LegalWorkspace surface.</constraint>
+    <constraint source="project">The `description` text MUST be exactly "Summarize uploaded files or the active document" per plan.md D2-10 + spec FR-03 acceptance criteria. Wording is deliberate (file-centric, dual-mode, not too long for the menu subtitle column).</constraint>
+    <constraint source="project">Interjection text MUST be "Upload the file(s) you'd like me to summarize" (sentence case; mirrors the playful-but-precise tone of existing SprkChat assistant interjections). Rendered as a single Assistant message; no avatar variation; no PaneEventBus broadcast.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/slash-command-extension-and-intent-routing</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/design.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/plan.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/useSlashCommands.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/SummarizeFiles/SummarizeFilesDialog.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/SummarizeFiles/summarizeService.ts</file>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+      <file>docs/adr/ADR-018-feature-flag-scope-discipline.md</file>
+      <file>docs/adr/ADR-021-fluent-v9.md</file>
+      <file>docs/adr/ADR-022-react-19.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-030-paneeventbus.md</file>
+    </files>
+    <patterns>
+      <pattern name="DEFAULT_SLASH_COMMANDS edit-in-place" location="src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts">
+        The `/summarize` entry sits at the top of the `DEFAULT_SLASH_COMMANDS`
+        array (id: 'summarize', label: 'Summarize', trigger: '/summarize',
+        icon: SparkleRegular, category: 'system', source: 'system'). The
+        `description` field is the ONLY field that changes — current value
+        "Summarize the current analysis document" → "Summarize uploaded files
+        or the active document". Do NOT change id/label/trigger/icon/category/
+        source — those are public API surface consumed by `useSlashCommands`
+        + `useDynamicSlashCommands` and any test snapshots.
+      </pattern>
+      <pattern name="SprkChat onSend handoff to host" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx">
+        `SprkChat`'s internal `handleSend(messageText)` (line ~913) is the
+        single funnel for all user messages — including slash-command messages
+        like "/summarize ..." that arrive as plain text after the
+        `useSlashCommands` hook writes the trigger into the textarea and the
+        user presses Enter / clicks Send. The host (`ConversationPane`)
+        observes this flow via SprkChat's existing prop contract; tri-mode
+        routing logic belongs at the ConversationPane layer (host-side intent
+        recognition), NOT inside the shared `SprkChat` component (which would
+        violate ADR-012 context-agnosticism). Mechanism: inspect the message
+        prefix in ConversationPane's wrapping logic OR via a new optional
+        callback prop, choosing whichever path produces the smallest surface
+        delta with the existing component contract. Document the chosen
+        approach in task notes.
+      </pattern>
+      <pattern name="Back-compat wizard flow entry point" location="src/solutions/LegalWorkspace/src/components/SummarizeFiles/SummarizeFilesDialog.tsx">
+        The existing wizard flow is consumed via `SummarizeFilesDialog` in
+        LegalWorkspace (and re-exported through `@spaarke/ui-components`'s
+        `SummarizeFilesWizard` module). It opens as a modal dialog with its
+        own SSE stream from `POST /api/workspace/files/summarize` per
+        `summarizeService.ts`. The "active document" branch of tri-mode
+        routing dispatches to this existing path; do NOT modify the wizard
+        itself.
+      </pattern>
+      <pattern name="ChatSession.UploadedFiles read site" location="src/server/api/Sprk.Bff.Api/Models/Ai/ChatSession.cs (per task 004)">
+        Task 004 adds `UploadedFiles[]` to `ChatSession`. The frontend reads
+        this via the existing AiSessionProvider / chat-session manifest API
+        (whichever surface task 004 + task 020 expose). The tri-mode check is
+        a simple length check at the dispatch site. If task 004 has not yet
+        surfaced this property to the frontend at the time this task runs,
+        coordinate via the parallel-task notes and use a temporary
+        `(chatAttachments?.length ?? 0) > 0` check on the existing
+        `chatAttachments` array as the closest analog — document the
+        decision in task notes.
+      </pattern>
+      <pattern name="Deterministic chat interjection (assistant addMessage)" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx">
+        SprkChat already supports adding assistant messages programmatically
+        via the `addMessage` helper used inside `handleSend` (and elsewhere
+        for action chips). For the "neither" branch, surface a programmatic
+        interjection via the existing host-callable mechanism (the simplest
+        approach is to push an assistant message before delegating to
+        SprkChat OR via the predefined-prompt suggestion surface — design
+        decision documented in task notes). The interjection is a single
+        message; no streaming, no playbook invocation.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships chat-driven Summarize as its vertical-slice proof point. The slash
+      command `/summarize` already exists from R3 and dispatches into the legacy
+      LegalWorkspace wizard. R5 needs the slash command to serve a new, distinct
+      mode (session-uploaded files) WITHOUT breaking the wizard mode. Per spec
+      FR-03, the prompt-first ordering is one of the two valid upload flows: the
+      user can type `/summarize` first, get told "Upload the file(s) you'd like
+      me to summarize", upload files via the existing chip / attachment surface,
+      and then receive a streaming summary in the Workspace pane. This task is
+      the small but load-bearing glue that turns the slash command from a
+      single-mode entry point into the tri-mode dispatcher the new UX requires.
+      It's pure frontend, no BFF code changes, and the publish-size delta is
+      exactly zero by construction.
+    </background>
+    <dependencies>
+      <dependency task="004" status="parallel-or-prior">
+        Provides `ChatSession.UploadedFiles[]` manifest on the model; the
+        frontend reads `.length > 0` to make the tri-mode decision. If task 004
+        has not yet surfaced the property to the frontend AiSessionProvider at
+        runtime, task 019 falls back to the closest existing analog
+        (`chatAttachments.length` on the SprkChat-managed in-memory attachments)
+        and notes the bridge for task 020 (chat-pane orchestration UX) to align.
+      </dependency>
+      <dependency task="014" status="parallel">
+        Provides `POST /api/ai/chat/sessions/{sessionId}/summarize` endpoint —
+        the fallback path for explicit slash-command dispatch when LLM tool-
+        calling is not invoked. Task 019 wires the routing decision to either
+        the agent-tool path (LLM-mediated) or this endpoint (explicit slash).
+      </dependency>
+      <dependency task="015" status="parallel">
+        Provides `InvokeSummarizePlaybookTool` agent-tool function — the
+        natural-language path for Summarize. Task 019's slash-command dispatch
+        and task 015's tool registration must produce identical output via the
+        shared `SessionSummarizeOrchestrator` (task 012) — task 019 only needs
+        to know that BOTH paths exist and dispatch correctly.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>R3 shipped the original `DEFAULT_SLASH_COMMANDS` + `/summarize`
+        wizard binding. R5 extends; does not replace.</item>
+      <item>Plan.md D2-10 and spec FR-03 are the authoritative requirement
+        sources for this task; the description text and interjection text are
+        spec-driven, not implementer-chosen.</item>
+      <item>Task 020 (D2-11 chat-pane orchestration UX — file chips, persistent
+        indicator, per-file remove) is a sibling in P2-G5 and may run in
+        parallel. Coordination point: if task 020 lands first, this task reads
+        `ChatSession.UploadedFiles` via the surface task 020 exposed; if this
+        task lands first, task 020 inherits the routing decisions intact.</item>
+      <item>Task 021 (D2-12 "Summarize this only" per-file affordance) is also
+        a P2-G5 sibling and provides the UI-button equivalent of tri-mode
+        branch (a) — both must converge on the same orchestrator dispatch.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request `/compact`.
+      Declare RIGOR LEVEL: FULL per R5 CLAUDE.md §4 (frontend modifications +
+      chat surface intent routing — qualifies for FULL per task-execute Step 0.5).
+      Output the mandatory RIGOR LEVEL declaration block.
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm task 019 status is 🔲, parallel-safe
+      = ✅, wave P2-G5. Read `current-task.md` to confirm no conflicting task is
+      in flight. Verify Phase 1 ✅ AND P2-G2 (012 + 013) ✅ AND ideally P2-G3
+      (014 + 015 + 016) are progressing so the tri-mode dispatch targets exist;
+      if 014/015 are still in flight, document the runtime-coordination note in
+      task notes (this task is UI-only and can ship its routing logic ahead of
+      the endpoint/tool landing, but smoke testing requires both).
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file listed in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically
+      confirm: (a) the current `description` value in `DEFAULT_SLASH_COMMANDS`
+      for the `summarize` entry; (b) the host dispatch site in `ConversationPane`
+      that consumes SprkChat's `onSend`; (c) the `useSlashCommands` hook contract
+      (does the menu close + write the trigger to the textarea, then user sends?
+      yes — confirm); (d) the existing `SummarizeFilesDialog` invocation surface
+      so the back-compat branch dispatches correctly.
+    </step>
+    <step order="3" name="Plan Implementation">
+      Confirm three discrete edits + their test counterparts:
+      (1) `slashCommandMenu.types.ts` — change one string literal in the
+          `DEFAULT_SLASH_COMMANDS` `summarize` entry's `description`.
+      (2) `ConversationPane.tsx` — add tri-mode intent-routing logic in the
+          message dispatch path. Surface the routing as a small, named helper
+          function (e.g., `routeSummarizeIntent(messageText, session, hostContext)`)
+          to keep dispatch logic testable.
+      (3) Tests — add or update component tests covering all four cases:
+          (a) uploaded-files-present → session-files path dispatched;
+          (b) no uploaded files + active document → wizard dispatched;
+          (c) neither → interjection rendered;
+          (d) back-compat — existing wizard consumers (LegalWorkspace) work
+          unchanged when invoked outside ConversationPane.
+      Decide on the routing-helper signature + interjection-rendering mechanism
+      (programmatic `addMessage` via SprkChat callback vs `predefinedPrompts`
+      injection vs new optional callback prop on SprkChat); document the
+      decision in task notes.
+    </step>
+    <step order="4" name="Update Slash Command Description">
+      Edit `src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts`:
+      change the `description` field on the `summarize` entry of
+      `DEFAULT_SLASH_COMMANDS` from `'Summarize the current analysis document'`
+      to `'Summarize uploaded files or the active document'`. Preserve every
+      other field on that entry verbatim (id, label, trigger, icon, category,
+      source).
+    </step>
+    <step order="5" name="Implement Tri-Mode Intent Handler">
+      In `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx`,
+      add tri-mode routing for `/summarize`-prefixed messages (or for any
+      message routed via a slash-command path the host can identify). The
+      routing helper inspects:
+        - `chatSession.uploadedFiles?.length ?? 0` (or the bridge analog if
+          task 004 has not yet landed; document the choice)
+        - active workspace document context (existing `documentId` /
+          `WorkspaceTabManager` state)
+      and dispatches as follows:
+        - branch (a) uploaded-files: dispatch the session-files Summarize via
+          the agent-tool path (preferred — LLM tool-call) OR the direct
+          endpoint path. For explicit slash, prefer direct endpoint (no LLM
+          round-trip needed); for natural-language flows, prefer agent-tool.
+        - branch (b) active-document-only: dispatch the EXISTING
+          `SummarizeFilesDialog` wizard flow. This must use the same mechanism
+          R3 uses today — do not invent a new dispatch.
+        - branch (c) neither: render the interjection "Upload the file(s)
+          you'd like me to summarize" as a single Assistant message in the
+          chat thread. Do NOT invoke any playbook.
+      Keep the helper pure (input → routing decision); the dispatch side-
+      effects live alongside the existing ConversationPane dispatch wiring.
+    </step>
+    <step order="6" name="Verify Back-Compat (Wizard Flow Unchanged)">
+      Smoke test the existing `SummarizeFilesDialog` wizard flow on a
+      LegalWorkspace surface (NOT via the SpaarkeAi chat shell): confirm the
+      modal opens, the SSE stream completes, and the result renders. The wizard
+      is consumed in places OUTSIDE the ConversationPane dispatcher (e.g.,
+      LegalWorkspace, SummarizeFilesWizard solution); those consumers MUST be
+      unaffected by the change. Capture the smoke-test evidence in task notes.
+    </step>
+    <step order="7" name="Add Frontend Tests">
+      Add or update component tests covering: (a) the description string in
+      `DEFAULT_SLASH_COMMANDS` (snapshot or direct assertion); (b) tri-mode
+      routing — three test cases for branches (a)/(b)/(c) with appropriate
+      mocked `chatSession` + `documentId` inputs; (c) back-compat — wizard
+      consumer outside ConversationPane is unaffected (regression guard).
+      Test files live under
+      `src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/__tests__/`
+      and `src/solutions/SpaarkeAi/src/components/conversation/__tests__/`
+      following existing test patterns.
+    </step>
+    <step order="8" name="Spaarke Dev Smoke Test (Tri-Mode End-to-End)">
+      Deploy the SpaarkeAi shell to Spaarke Dev (via `code-page-deploy` if a
+      solution rebuild is needed, or rely on local dev server if the deployment
+      surface allows). Manually exercise all three branches:
+        (a) Upload a small file → invoke `/summarize` → confirm session-files
+            path dispatches (Workspace tab opens with streaming output per FR-02
+            once 014/015/017 land — for this task confirm dispatch, not full
+            streaming UX).
+        (b) Without uploaded files, with an active workspace document → invoke
+            `/summarize` → confirm wizard opens.
+        (c) Without uploaded files, without active document → invoke
+            `/summarize` → confirm the "Upload the file(s) you'd like me to
+            summarize" interjection appears in the chat thread; no playbook
+            invocation; no error.
+      Capture screenshots / DevTools network capture in task notes.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is
+      testable + passing. Record evidence per criterion in task notes.
+      Confirm publish-size delta = 0 MB (frontend-only; no BFF changed).
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the modified files
+      (`slashCommandMenu.types.ts` + `ConversationPane.tsx` + new test files).
+      Run `adr-check` skill; verify ADR-012 (shared component library context-
+      agnosticism — no Xrm/CF imports in shared lib), ADR-018 (no new feature
+      flag), ADR-021 (Fluent v9 + dark mode — N/A no visual change but confirm),
+      ADR-022 (React 19), ADR-029 (BFF publish hygiene — confirmed delta = 0
+      MB), ADR-030 (no new PaneEventBus channel — confirmed). Both gates MUST
+      pass before marking the task complete.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`:
+      019 🔲 → ✅. Reset `current-task.md` to the next pending task per
+      R5 CLAUDE.md §7. Note in task notes: BFF publish-size delta = 0 MB
+      (frontend-only); routing-helper signature chosen; interjection-rendering
+      mechanism chosen; task 004 bridge decision (if task 004 had not yet
+      surfaced UploadedFiles to the frontend). Record any cross-task surface
+      sharpening for tasks 020 / 021 to consume. Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + lint + test the `@spaarke/ui-components` library and the SpaarkeAi solution (Vite). Use `npm install --legacy-peer-deps --no-audit --no-fund` for Vite solutions per root CLAUDE.md §11.</tool>
+    <tool name="dotnet">Not used (no BFF code change). Available if a verification build is requested.</tool>
+    <tool name="git">Stage + commit the frontend changes on the R5 branch.</tool>
+    <tool name="code-page-deploy">Skill to redeploy SpaarkeAi shell to Spaarke Dev for tri-mode smoke testing.</tool>
+    <tool name="code-review">Quality gate skill at Step 9.5.</tool>
+    <tool name="adr-check">Quality gate skill at Step 9.5.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts (DEFAULT_SLASH_COMMANDS `summarize` description updated)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (tri-mode intent-routing helper + dispatch wiring)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/__tests__/slashCommandMenu.types.test.ts (description assertion — new or updated)</output>
+    <output type="test">src/solutions/SpaarkeAi/src/components/conversation/__tests__/ConversationPane.summarize-routing.test.tsx (tri-mode routing branches — new)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 019 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-019-routing-evidence.md (helper signature decision, interjection-rendering mechanism decision, task-004 bridge decision if applicable, Spaarke Dev tri-mode smoke evidence, back-compat wizard smoke evidence, publish-size delta = 0 MB confirmation)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The `summarize` entry in `DEFAULT_SLASH_COMMANDS` (in `slashCommandMenu.types.ts`) has its `description` field set to exactly "Summarize uploaded files or the active document". All other fields on the entry (id, label, trigger, icon, category, source) are unchanged.</criterion>
+    <criterion testable="true">Tri-mode routing in ConversationPane dispatches correctly for branch (a): when `ChatSession.UploadedFiles.length > 0` (or the agreed bridge analog), `/summarize` routes to the session-files Summarize path (agent-tool path OR direct endpoint from task 014) — verified via unit test mock + Spaarke Dev smoke.</criterion>
+    <criterion testable="true">Tri-mode routing in ConversationPane dispatches correctly for branch (b): when no uploaded files but an active workspace document exists, `/summarize` falls through to the EXISTING `SummarizeFilesDialog` wizard flow unchanged — verified via unit test + Spaarke Dev smoke.</criterion>
+    <criterion testable="true">Tri-mode routing in ConversationPane dispatches correctly for branch (c) — the FR-03 prompt-first path: when neither uploaded files nor active document, `/summarize` produces a deterministic Assistant interjection "Upload the file(s) you'd like me to summarize" in the chat thread; no playbook invocation occurs — verified via unit test + Spaarke Dev smoke.</criterion>
+    <criterion testable="true">Back-compat: existing wizard consumers (`LegalWorkspace`'s SummarizeFilesDialog, `SummarizeFilesWizard` solution) function unchanged outside ConversationPane — verified via smoke test on a LegalWorkspace surface.</criterion>
+    <criterion testable="true">Frontend tests cover all three tri-mode branches + the description-string assertion + the back-compat regression guard. All tests pass; coverage meets project standards.</criterion>
+    <criterion testable="true">SlashCommandMenu menu surface on Spaarke Dev SpaarkeAi shell shows the updated description in the menu subtitle for the `/summarize` entry — verified by visual smoke (screenshot in task notes).</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (confirmed in task notes; no BFF code changed by this task — frontend-only).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5. ADR-012, ADR-018, ADR-021, ADR-022, ADR-029, ADR-030 all verified as compliant (no new flags, no new channels, no Xrm/CF imports in shared lib, no BFF impact).</criterion>
+    <criterion testable="true">Task notes record: (a) the routing-helper signature chosen; (b) the interjection-rendering mechanism chosen; (c) the task-004 bridge decision (if task 004's `UploadedFiles` property had not yet reached the frontend AiSessionProvider when this task ran); (d) any sharpening for downstream tasks 020 / 021.</criterion>
+  </acceptance-criteria>
+</task>

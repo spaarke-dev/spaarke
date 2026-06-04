@@ -1,0 +1,416 @@
+<task id="020" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-11 Chat-pane orchestration UX (file chips, "N files attached" indicator, per-file remove, inline confirmations, multi-file interjection)</title>
+    <status>not-started</status>
+    <estimated-effort>1 day</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G5 (parallel — UI orchestration alongside 019 + 021 + 022)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>017</dependencies>
+    <tags>frontend, chat, ux, react-19</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Extend the existing R3 `ConversationPane.tsx` chat surface with the R5 session-files
+    orchestration UX. The R5 vertical slice ("Summarize a Document") requires that the
+    Assistant input area surface uploaded files as chips, expose a persistent "N files
+    attached" indicator, support per-file removal that cascades to BOTH the
+    `ChatSession.UploadedFiles[]` server manifest AND the `spaarke-session-files` AI
+    Search index, render inline confirmations in the chat thread when files become
+    ready, and inject a deterministic (NOT LLM-generated) interjection when the user
+    requests a combined summary of multiple files — appearing once per multi-file
+    summary turn, clarifying that all files will be combined.
+
+    This task is purely frontend orchestration: the `useChatFileAttachment` hook
+    (`@spaarke/ui-components/SprkChat/hooks`) already produces validated chip state
+    and the R4 `handleAttachmentReady` callback already dispatches a Workspace
+    widget_load event for the first attachment. R5 builds on top of these by wiring
+    the chip lifecycle to the new R5 server manifest + index cleanup path and adding
+    the chat-side affordances (indicator, confirmations, interjection,
+    `context.files_staged` dispatch). NO new component is introduced — `SprkChat` +
+    `ConversationPane` are extended in-place per the R5 reuse mandate.
+
+    Critical-path member: task 020 sits between 017 (StructuredOutputStreamWidget) and
+    031 (Phase 2 verification) on the project critical path. Slow or buggy chat-pane
+    file UX blocks the entire vertical-slice verification.
+  </prompt>
+
+  <role>
+    Senior frontend engineer with deep Fluent UI v9 + React 19 experience and a
+    working understanding of the Spaarke `@spaarke/ui-components` SprkChat surface
+    (especially `useChatFileAttachment` chip semantics), the SpaarkeAi shell
+    `PaneEventBus` typing, and the R5 server contracts (`ChatSession.UploadedFiles[]`
+    manifest, session-files index document IDs in `SearchDocumentIdsCsv`).
+  </role>
+
+  <goal>
+    `ConversationPane.tsx` (+ SprkChat-side chip helpers if delta is minimal) renders
+    the following R5-only behaviour on the SpaarkeAi shell:
+
+    1. File chips visible in the Assistant input area on upload (existing
+       `useChatFileAttachment` chip strip — confirm dark-mode + accessibility intact).
+    2. A persistent "N files attached" indicator rendered NEAR the input area
+       (visible whenever `ChatSession.UploadedFiles.length &gt; 0`, not just while
+       chips are extracting). Updates reactively as files are added / removed.
+    3. A per-file remove affordance on each chip that, when clicked:
+       (a) calls `useChatFileAttachment.removeFile(index)` (existing in-memory
+           splice — preserved behaviour);
+       (b) dispatches a chat-session manifest removal to the BFF (per task 004's
+           manifest contract);
+       (c) triggers session-files index document removal via the cleanup pathway
+           established by task 007 (call the cleanup endpoint or BFF-side service
+           the cleanup job exposes — confirm pathway in Step 3 below).
+    4. Inline file-confirmation messages appear in the chat thread when files become
+       `status === 'ready'` — e.g., "I have your 3 files: a.pdf, b.docx, c.md".
+       These are LOCAL (client-rendered) messages, NOT model-generated; one
+       confirmation per upload turn (debounced across simultaneous arrivals).
+    5. When the user requests a combined-summary turn over multiple files (slash
+       command `/summarize` with `UploadedFiles.length &gt; 1`, OR a free-text
+       summarize request with multiple files in manifest), a deterministic
+       interjection is injected ONCE per turn before the model response begins —
+       e.g., "I'll combine all 3 files into a single summary."
+    6. PaneEventBus dispatches `context.files_staged` (new ADR-030 event type added
+       by task 016) when files transition to ready. Existing
+       `handleAttachmentReady` Workspace dispatch is preserved (R4 task 042 / W-4
+       behaviour MUST NOT regress).
+    7. Dark mode + Fluent v9 semantic tokens enforced — no hardcoded colors.
+
+    Acceptance criteria below codify each behaviour as a testable contract.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="current-task">projects/spaarke-ai-platform-unification-r5/current-task.md</file>
+    <file purpose="dep-task-017">projects/spaarke-ai-platform-unification-r5/tasks/017-structured-output-stream-widget.poml</file>
+    <file purpose="related-task-004">projects/spaarke-ai-platform-unification-r5/tasks/004-extend-chatsession-uploaded-files.poml</file>
+    <file purpose="related-task-007">projects/spaarke-ai-platform-unification-r5/tasks/007-session-files-cleanup-hostedservice.poml</file>
+    <file purpose="related-task-016">projects/spaarke-ai-platform-unification-r5/tasks/016-pane-event-bus-event-types.poml</file>
+    <file purpose="related-task-019">projects/spaarke-ai-platform-unification-r5/tasks/019-slash-command-summarize-extension.poml</file>
+    <file purpose="primary-frontend-file">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+    <file purpose="chip-hook">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatFileAttachment.ts</file>
+    <file purpose="sprkchat-host">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 reuse mandate (project CLAUDE.md §3.1)">MUST extend existing `ConversationPane` + `SprkChat`. MUST NOT introduce a parallel chat pane or duplicate the existing `useChatFileAttachment` chip lifecycle. Cite the existing component reuse in task notes.</constraint>
+    <constraint source="ADR-022">React 19 — hooks + functional components only; no class components; no React 18-only APIs; no module-level side effects.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 — semantic tokens (`tokens.*`) only; no hardcoded colors; dark mode MUST work without visual regression. Use `makeStyles` + `mergeClasses` per existing `ConversationPane` style block.</constraint>
+    <constraint source="ADR-012">Shared component boundary — `useChatFileAttachment` lives in `@spaarke/ui-components`; SpaarkeAi shell MUST NOT import any SpaarkeAi-specific telemetry / auth back INTO the shared lib. The R5 cleanup wiring (manifest + index DELETE) lives in the SpaarkeAi shell layer (or in a SpaarkeAi-side service consumed by `ConversationPane`), NOT inside `useChatFileAttachment`.</constraint>
+    <constraint source="ADR-030">PaneEventBus channels closed at 4 — task adds NO new channels. R5 dispatches additive event types only: `context.files_staged` (this task wires the dispatch; the event type definition lands via task 016).</constraint>
+    <constraint source="ADR-028">Auth v2 — chat-session manifest DELETE + index cleanup invocations MUST use the existing `@spaarke/auth` token acquisition path (fresh token per request; never snapshot tokens in closures). No new auth boundary surfaces in this task.</constraint>
+    <constraint source="ADR-018">R5 introduces NO new feature flags (per project CLAUDE.md §3.2). Chip-render behaviour is unconditional; do NOT gate this UI behind a new flag.</constraint>
+    <constraint source="spec FR-03 (prompt-first path)">Multi-file combined-summary interjection MUST be deterministic — generated client-side by the R5 chat-pane code, NOT by the model. Appears exactly once per multi-file summary turn (no duplicate emission on resubmission, retry, or stream resumption).</constraint>
+    <constraint source="spec NFR-02">Hard cap of 20 uploaded files per session is enforced upstream by `useChatFileAttachment` (which enforces MAX_ATTACHMENTS = 5 per turn) + server-side manifest. This task respects the cap and reports "N files attached" accurately for `N &lt;= 20`.</constraint>
+    <constraint source="project CLAUDE.md §3.7">Frontend test obligation — task MUST add Jest/RTL tests for the new affordances (indicator render, per-file remove dispatch, interjection emission, PaneEventBus dispatch). Tests colocated with `ConversationPane.tsx` per existing pattern.</constraint>
+    <constraint source="project">BFF publish-size: this is a frontend-only task. BFF publish-size delta = 0 MB (confirm in task notes; no BFF code modified).</constraint>
+    <constraint source="project">No regression of R4 `handleAttachmentReady` Workspace dispatch (the existing `workspace.widget_load` for the first file MUST continue firing; this task only ADDS a parallel `context.files_staged` dispatch).</constraint>
+    <constraint source="project">Inline file-confirmation messages MUST be tagged as local/client-rendered (e.g., via the existing `SprkChat` message metadata field if available, or a R5-only local-message convention). They MUST NOT be persisted as model-generated turns in `ChatSession.Messages` server-side.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/conversation-pane-orchestration</topic>
+    <files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatFileAttachment.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/SprkChat.attachments.test.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/useChatFileAttachment.test.ts</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/design.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-tokens.md</file>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="useChatFileAttachment chip lifecycle" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatFileAttachment.ts">
+        Hook produces `files: AttachmentChip[]` with `status: 'extracting' | 'ready' | 'error'`, plus a derived `attachments: ChatAttachment[]` of ready chips for the outbound payload, plus `removeFile(index)` + `clearAll()`. R5 extends the CONSUMER (ConversationPane) — does NOT modify the hook signature or add new state inside the hook.
+      </pattern>
+      <pattern name="handleAttachmentReady Workspace dispatch (R4 task 042 / W-4)" location="src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (~L611)">
+        Existing callback fires once per ready file, dispatches `widget_load` on the `workspace` channel with a typed `DocumentViewerWidgetData` payload. R5 PARALLELS this with a new `context.files_staged` dispatch — does NOT replace it. The existing R4 behaviour MUST be regression-tested.
+      </pattern>
+      <pattern name="PaneEventBus dispatch with typed payload" location="src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (~L618)">
+        Use the `dispatch` callback from `usePaneEventBus()` (already imported in ConversationPane). Pass a typed payload object discriminated by `type`. Per ADR-030: no `any` at the dispatch boundary; cast to the typed shape from `PaneEventTypes.ts`. The `context.files_staged` event type is defined in task 016's deliverable.
+      </pattern>
+      <pattern name="Fluent v9 semantic-token styling + dark mode" location="src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (makeStyles block)">
+        Follow the existing `makeStyles({...})` block. Use `tokens.colorNeutralForeground2` (or equivalent) for the indicator text; never raw hex. Test dark mode by toggling the host theme (the SpaarkeAi shell wraps in `FluentProvider` with light/dark theme switching — verify the indicator + chip strip still meet contrast requirements).
+      </pattern>
+      <pattern name="Inline local message convention (client-rendered, non-model)" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts">
+        Locate the existing SprkChat message type. If it exposes a `role: 'system' | 'assistant' | 'user'` or `kind: 'local' | 'streamed'` discriminator suitable for a client-rendered confirmation, reuse it. Otherwise, extend the existing message-injection helper (e.g., a `predefinedPrompts`-style injection or a sibling helper) to allow R5 to push a one-shot local message. Document the choice in task notes; do NOT introduce a parallel message store.
+      </pattern>
+      <pattern name="Deterministic interjection emission (once per turn)" location="src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (new)">
+        Track interjection emission via a `useRef&lt;Set&lt;string&gt;&gt;` keyed by the chat turn id (or by a stable hash of file IDs + send-attempt counter). On each summarize-turn boundary, check the ref before emitting; mark emitted after first emission. Reset on session change. This guarantees "exactly once per multi-file summary turn" semantics across stream resumption / retry.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships a chat-driven "Summarize a Document" vertical slice. The user uploads
+      up to 5 files per turn (`useChatFileAttachment` cap) and up to 20 files per
+      session (`ChatSession.UploadedFiles[]` server cap per NFR-02). The chat pane
+      MUST surface that file state without forcing the user to leave the chat thread
+      to inspect or manage attached files. R3 already shipped the chip strip via
+      `useChatFileAttachment`; R4 task 042 (W-4) wired the first-file Workspace
+      dispatch via `handleAttachmentReady`. R5 closes the loop:
+
+      - the user sees a persistent "N files attached" indicator (no more wondering
+        what the server thinks is in scope);
+      - the user can remove a file directly from chat, with cascade to the server
+        manifest AND the `spaarke-session-files` index (no orphaned index docs);
+      - the user gets in-thread confirmation when files become ready ("I have your
+        3 files: ...");
+      - multi-file summarize requests get a clarifying interjection BEFORE the
+        model response begins ("I'll combine all 3 files into a single summary"),
+        so the user understands that "Summarize this" means a COMBINED summary,
+        not per-file summaries (per FR-08 single-file affordance lives separately
+        via the per-file "Summarize this only" button — task 021).
+    </background>
+    <dependencies>
+      <dependency task="017" status="not-started">D2-07 StructuredOutputStreamWidget — chat-pane interjections may reference structured-output rendering for the model response that follows. Soft dependency: this task wires the interjection emission point; 017 owns the model response surface. The interjection itself does NOT depend on 017's widget being present (it's pure local chat text).</dependency>
+      <dependency task="016" status="not-started">D2-06 PaneEventBus event types — the `context.files_staged` event type definition lands in task 016. This task DISPATCHES the event; 016 defines the type. Sequencing: 016 should land first (parallel-safe within P2-G3); if 016 is incomplete when this task starts, coordinate via a temporary local type cast and surface a follow-up to consolidate.</dependency>
+      <dependency task="004" status="phase-1">D1-04 ChatSession.UploadedFiles[] manifest — server manifest contract; this task calls the manifest-remove path. Phase 1 must be complete.</dependency>
+      <dependency task="007" status="phase-1">D1-07 SessionFilesCleanupJob — provides the session-files index document removal path; this task INVOKES that path (either via cleanup endpoint or BFF-side facade). Phase 1 must be complete.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 019 (D2-10) — Slash command `/summarize` semantic extension. Parallel wave-mate (P2-G5); shares the multi-file-routing logic. Coordinate on the interjection emission point so both code paths (slash command + free-text) route through the same emission helper.</item>
+      <item>Task 021 (D2-12) — Per-file "Summarize this only" affordance. Parallel wave-mate; lives in `FilePreviewContextWidget` (Context pane), NOT the chat pane. The chat-pane interjection in this task addresses the COMBINED-summary case; 021 owns the single-file case.</item>
+      <item>Task 022 (D2-08 follow-up) — DocumentViewerWidget upgrade. Parallel wave-mate; uses the extracted `RichFilePreview` renderer. No direct coupling, but both tasks touch ConversationPane indirectly via shared file lifecycle.</item>
+      <item>R4 task 042 (W-4) `handleAttachmentReady` — existing R4 Workspace dispatch; this task EXTENDS without regressing.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL Declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request `/compact`.
+      Output mandatory rigor-level declaration per CLAUDE.md §8:
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Frontend (.tsx) on critical path; PaneEventBus dispatch (ADR-030);
+         dark-mode + Fluent v9 token compliance (ADR-021); React 19 (ADR-022); shared
+         component boundary discipline (ADR-012); cross-task coordination with 016 +
+         019; new test coverage required (project CLAUDE.md §3.7).
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 1–10 below with code-review + adr-check at 9.5.
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm: task 020 status is 🔲, wave P2-G5,
+      parallel-safe = ✅, dependencies = 017. Confirm Phase 1 tasks (004, 007) are ✅
+      and task 016 (PaneEventBus event types) status — if 016 is still 🔲, decide
+      whether to wait or coordinate via temporary type cast (document in notes).
+      Read `current-task.md` to confirm scope. Read project README for status.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; + &lt;knowledge&gt;. Specifically:
+      (a) Read `ConversationPane.tsx` end-to-end so you understand the existing
+          callback wiring (`handleAttachmentReady`, `dispatch`, `setChatSessionId`,
+          etc.) and the existing makeStyles block.
+      (b) Read `useChatFileAttachment.ts` to confirm the chip/attachments/removeFile
+          API surface — do NOT modify this hook.
+      (c) Read `SprkChat.tsx` to identify the chip strip render location (~L2076) and
+          the in-flight attachment send wiring (~L942).
+      (d) Read the spec.md sections on FR-03 (prompt-first path), FR-07 (chip lifecycle),
+          NFR-02 (20-file cap), and ADR-030 event-type discipline.
+      (e) Read related-task POMLs 004, 007, 016, 017, 019, 021 to understand contract
+          boundaries.
+    </step>
+    <step order="3" name="Confirm Cleanup Pathway (manifest + index)">
+      Decide the cascade path for per-file remove:
+      - **Manifest remove**: identify the BFF endpoint or `@spaarke/auth`-authenticated
+        client call established by task 004 (D1-04) for removing one file from
+        `ChatSession.UploadedFiles[]`. If task 004 ships only the model + read path,
+        document the gap and propose either: (a) a small DELETE endpoint
+        `DELETE /api/ai/chat/sessions/{sessionId}/files/{fileId}` (preferred — minimal
+        BFF surface, idempotent, returns updated manifest), OR (b) a manifest-update
+        PATCH variant. Decide and record in task notes; coordinate with task 004
+        owner if scope shift required (escalate per CLAUDE.md §6 if endpoint must be
+        added).
+      - **Index cleanup**: identify the path task 007 (D1-07) exposes for removing
+        a specific session-files index document by `SearchDocumentIdsCsv` entry.
+        Per task 007, the cleanup service runs as `IHostedService` for session-end
+        sweeps but exposes a method (likely `RemoveDocumentsAsync(sessionId, docIds)`
+        or equivalent) reachable via a small DELETE endpoint or by piggy-backing on
+        the manifest-remove endpoint (preferred: have the manifest-remove endpoint
+        invoke the index removal internally as a single transactional call so the
+        frontend issues ONE HTTP call per user action).
+      Document the chosen pathway in task notes. Confirm BFF publish-size = 0 MB IF
+      the path is purely frontend-consumable (manifest-remove endpoint already exists);
+      flag delta if a new tiny endpoint is added.
+    </step>
+    <step order="4" name="Plan Implementation">
+      Break into subtasks (silent checkpoint after each):
+      4.1 Add "N files attached" indicator render to ConversationPane (or pass through
+          to SprkChat — choose location based on SprkChat surface inspection).
+      4.2 Wire per-file remove cascade: chip remove → BFF manifest+index call →
+          local `removeFile(index)` after server confirms (or optimistic update with
+          rollback on failure).
+      4.3 Wire inline confirmation message emission on `attachment.status === 'ready'`
+          transitions; ensure single-emission-per-upload-turn via debounce / ref.
+      4.4 Wire deterministic multi-file interjection emission on summarize-turn
+          boundary (coordinate with task 019's slash-command intent handler if it
+          owns the turn-entry point).
+      4.5 Add `context.files_staged` PaneEventBus dispatch on ready transitions
+          (parallel to existing `workspace.widget_load` dispatch — keep R4 behaviour).
+      4.6 Dark mode + a11y verification.
+      4.7 Tests (RTL + Jest) per project CLAUDE.md §3.7.
+    </step>
+    <step order="5" name="Implement Indicator + Chip Wiring">
+      Implement subtasks 4.1 + 4.2:
+      - Render the "N files attached" indicator using Fluent `Text` or a small
+        `Tag` with `tokens.colorNeutralForeground2` semantic token. Bind to the
+        active `ChatSession.UploadedFiles.length` (preferred) OR
+        `attachments.length` from the hook if the session-manifest read is not yet
+        available client-side (document the choice). Hide when count = 0.
+      - Wire `removeFile(index)` to ALSO call the cleanup pathway from Step 3.
+        Use an optimistic-update pattern: call `removeFile(index)` immediately for
+        snappy UX, then make the HTTP call; on failure, surface a Fluent toast +
+        re-add the chip (the hook does not expose `addFiles(...)` for a single
+        already-extracted chip, so a small `addBackChip(chip)` helper may be needed
+        — keep it inside ConversationPane, NOT in `@spaarke/ui-components`).
+      Run silent checkpoint after this step.
+    </step>
+    <step order="6" name="Implement Inline Confirmations + Interjection + PaneEventBus Dispatch">
+      Implement subtasks 4.3 + 4.4 + 4.5:
+      - Track ready-transition events using a `useRef&lt;Set&lt;string&gt;&gt;` keyed by
+        chip `id`. When a chip transitions from `extracting` → `ready`, check the
+        ref; if not seen, emit a local inline confirmation message via the SprkChat
+        message-injection helper. Debounce simultaneous arrivals into a single
+        "I have your N files: a, b, c" message (e.g., a 250ms tail-end debounce).
+      - On summarize-turn entry where `UploadedFiles.length &gt; 1`: emit the
+        deterministic interjection BEFORE the model response begins. Coordinate
+        the emission point with task 019's intent handler; the helper itself should
+        live in a shared `SpaarkeAi/src/components/conversation/` helper so both
+        the slash-command path and the free-text path call it.
+      - Dispatch `context.files_staged` on the ready transition:
+        ```ts
+        dispatch("context", {
+          type: "files_staged",
+          fileIds: readyChipIds,
+          sessionId: chatSessionId,
+        });
+        ```
+        Use the typed payload from `PaneEventTypes.ts` (task 016). Do NOT use `any`.
+        Preserve the existing `handleAttachmentReady` Workspace dispatch — both
+        events fire on the same trigger but on DIFFERENT channels.
+      Run silent checkpoint after this step.
+    </step>
+    <step order="7" name="Dark Mode + A11y Verification">
+      Toggle the SpaarkeAi shell theme (light → dark → light). Verify:
+      - "N files attached" indicator readable in both themes (contrast ratio &gt;= 4.5:1
+        per WCAG AA).
+      - Chip remove button keyboard-accessible (Tab + Enter / Space).
+      - Inline confirmation message has appropriate `role` / `aria-live` attribute
+        (use the existing SprkChat message rendering — no new ARIA primitive).
+      - Multi-file interjection rendered with the same a11y treatment as other
+        local chat messages.
+      Capture before/after screenshots for task notes (light + dark).
+    </step>
+    <step order="8" name="Tests">
+      Add Jest + RTL tests colocated with `ConversationPane.tsx` (or under
+      `src/solutions/SpaarkeAi/src/components/conversation/__tests__/`). Cover:
+      - Indicator renders + reactively updates on add/remove.
+      - Per-file remove dispatches manifest + index cleanup call (mock HTTP);
+        on success removes chip; on failure restores chip + shows toast.
+      - Inline confirmation message emits once per ready batch (debounced).
+      - Multi-file interjection emits exactly once per turn (verify via repeated
+        retry / stream-resumption scenarios).
+      - PaneEventBus `context.files_staged` dispatch fires with correct typed payload.
+      - R4 regression: `workspace.widget_load` for first ready file STILL fires.
+      Aim for ≥ 90% line coverage on the new code paths. Run `npm test --workspace
+      SpaarkeAi` (or the project's equivalent) and confirm green.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below; record evidence per
+      criterion in task notes. Run a full build of SpaarkeAi
+      (`npm run build --workspace SpaarkeAi`) and confirm no TypeScript errors and
+      no Fluent / React 19 warnings. Confirm BFF publish-size delta = 0 MB
+      (frontend-only task; no BFF code modified — unless Step 3 surfaced a tiny new
+      endpoint, in which case measure delta and confirm &lt; +0.5 MB).
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the modified files (ConversationPane.tsx +
+      any helper + tests). Run `adr-check` skill; verify: ADR-012 (shared lib
+      boundary — no SpaarkeAi imports leaked into @spaarke/ui-components), ADR-021
+      (no hardcoded colors), ADR-022 (React 19 hooks-only), ADR-028 (no token
+      snapshots), ADR-030 (no new PaneEventBus channels, additive event types
+      only), project CLAUDE.md §3.7 (tests added). Both gates MUST pass before
+      marking the task complete.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 020 🔲 → ✅.
+      Reset `current-task.md` to the next pending task per root CLAUDE.md §7.
+      Record in task notes: (a) chosen cleanup pathway (Step 3 outcome); (b)
+      indicator binding source (UploadedFiles.length vs attachments.length); (c)
+      interjection emission helper location; (d) dark-mode screenshots; (e) test
+      coverage report; (f) BFF publish-size delta. Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test the SpaarkeAi shell + @spaarke/ui-components (`npm run build`, `npm test`)</tool>
+    <tool name="dotnet">Only if Step 3 surfaces a new BFF endpoint addition — measure publish-size delta</tool>
+    <tool name="git">Stage + commit on the R5 branch</tool>
+    <tool name="context-handoff">Mandatory at &gt; 60% context usage per project CLAUDE.md §5</tool>
+    <tool name="code-review">Quality gate at Step 9.5</tool>
+    <tool name="adr-check">Quality gate at Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (modified — indicator + remove cascade + inline confirmations + interjection + context.files_staged dispatch)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ (potentially a small helper file for the interjection emission shared with task 019's slash-command handler — keep helper inside SpaarkeAi shell, NOT in @spaarke/ui-components)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/ (modified ONLY if delta is minimal — e.g., a small `kind: 'local'` discriminator on the message type, if extracting that helps both R5 + future consumers; DO NOT introduce R5-specific logic into the shared lib)</output>
+    <output type="test">src/solutions/SpaarkeAi/src/components/conversation/__tests__/ConversationPane.r5.test.tsx (or sibling) — covers indicator, remove cascade, inline confirmation, interjection, PaneEventBus dispatch, R4 regression</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 020 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-020-evidence.md (cleanup pathway decision, indicator binding source, interjection helper location, dark-mode screenshots, test coverage report, BFF publish-size delta)</output>
+    <output type="report">Task completion report (per task-execute Step 6)</output>
+  </outputs>
+
+  <examples>
+    <example name="R4 handleAttachmentReady Workspace dispatch" location="src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (~L611)">
+      The existing R4 callback shows the typed PaneEventBus dispatch pattern with a
+      cast to `DocumentViewerWidgetData`. R5 mirrors this pattern for the new
+      `context.files_staged` dispatch — same `dispatch` callback, different channel,
+      different typed payload. Both fire on the same trigger; one does not replace
+      the other.
+    </example>
+    <example name="useChatFileAttachment chip strip render in SprkChat" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx (~L2076)">
+      The chip strip is already rendered by SprkChat. R5 does NOT add a new strip;
+      the new affordances (indicator, confirmations, interjection) sit ADJACENT to
+      the strip, in the ConversationPane wrapper layer.
+    </example>
+    <example name="Existing makeStyles block in ConversationPane" location="src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (top of file)">
+      Add new style entries for the indicator alongside the existing entries. Use
+      `tokens.colorNeutralForeground2`, `tokens.spacingHorizontalS`, etc. — no
+      hardcoded values. Follow the existing pattern (no inline `style={{}}` props).
+    </example>
+  </examples>
+
+  <acceptance-criteria>
+    <criterion testable="true">File chips appear in the Assistant input area when the user uploads files (existing `useChatFileAttachment` behaviour preserved; dark-mode + a11y verified).</criterion>
+    <criterion testable="true">A persistent "N files attached" indicator renders near the input area whenever `UploadedFiles.length &gt; 0` (or `attachments.length &gt; 0` per Step 3 decision); reactively updates on add/remove; hidden when N = 0.</criterion>
+    <criterion testable="true">Per-file remove action on a chip cascades to: (a) `useChatFileAttachment.removeFile(index)`; (b) `ChatSession.UploadedFiles[]` manifest removal via the BFF; (c) `spaarke-session-files` index document removal via the cleanup pathway from task 007. All three legs verified end-to-end in an integration scenario (or mocked-HTTP unit test for legs (b) + (c)).</criterion>
+    <criterion testable="true">Inline file-confirmation messages appear in the chat thread as local (client-rendered) messages when files transition to `status === 'ready'` — one consolidated message per upload batch (debounced); NOT persisted server-side as model-generated turns.</criterion>
+    <criterion testable="true">Multi-file combined-summary deterministic interjection (e.g., "I'll combine all N files into a single summary") emits exactly ONCE per multi-file summarize turn — verified across normal, retry, and stream-resumption scenarios. Single-file summarize turns do NOT emit the interjection.</criterion>
+    <criterion testable="true">PaneEventBus dispatches `context.files_staged` with a correctly-typed payload (per task 016's `PaneEventTypes.ts`) on ready transitions. R4 `workspace.widget_load` dispatch for the first ready file STILL fires (regression-tested).</criterion>
+    <criterion testable="true">Dark mode + a11y verified — indicator contrast ≥ 4.5:1 in both themes; chip remove keyboard-accessible; before/after screenshots captured in task notes.</criterion>
+    <criterion testable="true">Jest + RTL tests added covering indicator render, remove cascade (with mock HTTP), inline confirmation debounce, interjection single-emission, PaneEventBus dispatch, R4 regression. Tests green; ≥ 90% line coverage on new paths.</criterion>
+    <criterion testable="true">`npm run build --workspace SpaarkeAi` succeeds without new TypeScript errors or React 19 / Fluent v9 warnings.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (frontend-only task) OR if Step 3 surfaced a tiny new endpoint: delta &lt; +0.5 MB and recorded in task notes per project CLAUDE.md §3.6.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5. ADR-012 / ADR-021 / ADR-022 / ADR-028 / ADR-030 + project CLAUDE.md §3.7 compliance verified.</criterion>
+  </acceptance-criteria>
+</task>

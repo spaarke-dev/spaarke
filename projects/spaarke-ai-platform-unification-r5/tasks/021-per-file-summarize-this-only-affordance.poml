@@ -1,0 +1,566 @@
+<task id="021" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-12 "Summarize this only" per-file affordance + UI multi-turn refinement</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G5 (parallel-safe; deps 018; siblings 019, 020, 022)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>018 (FilePreviewContextWidget exists to extend); implicitly 014 (direct endpoint) or 015 (agent-tool) for dispatch target; 016 (PaneEventBus event types)</dependencies>
+    <tags>frontend, widget, ux, react-19</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Extend the `FilePreviewContextWidget` (task 018) with a per-file "Summarize this only"
+    button affordance — this is the FR-08 UI path counterpart to the FR-08 LLM tool-call
+    path (where the agent calls `InvokeSummarizePlaybookTool` from task 015 with a single
+    `fileIds: [singleFile]`). Each file card in the widget's multi-file list (and the
+    single-file inline preview header) renders a button. Click dispatches directly to the
+    `SessionSummarizeOrchestrator` via either the direct endpoint (task 014
+    `POST /api/ai/chat/sessions/{sessionId}/summarize` with `fileIds: [singleFileId]`) OR
+    the agent-tool path (task 015) — pick ONE dispatch route explicitly per spec FR-08;
+    the direct endpoint is the simpler choice and matches the slash-command parity story.
+    The invocation MUST produce a NEW Workspace tab (additive); the PRIOR tab containing
+    any previous Summarize result MUST remain untouched (FR-06 tab additivity + FR-08
+    multi-turn refinement). PaneEventBus dispatch emits `workspace.streaming_started`
+    (R5 additive event type from task 016) to signal new-tab creation to the
+    `StructuredOutputStreamWidget` (task 017).
+
+    Multi-turn refinement: each "Summarize this only" click is its own conversation turn
+    and produces a fresh, isolated Workspace tab. The user can continue chatting in the
+    Assistant pane to refine the single-file output (e.g., "make that more concise",
+    "translate to Spanish") — the chat conversation continues against the newly-opened
+    tab as its anchor.
+
+    R5 is configuration-first and reuse-first: this task EXTENDS task 018's
+    `FilePreviewContextWidget` (does NOT fork a parallel widget per R5 CLAUDE.md §3.1
+    reuse mandate), reuses the existing dispatch path established by tasks 014 + 016 + 017
+    (does NOT introduce a new orchestrator path), and adds ZERO new PaneEventBus channels
+    (per ADR-030 — only emits the additive event types already added by task 016). Fluent
+    UI v9 semantic tokens; dark-mode tested; React 19.
+  </prompt>
+
+  <role>
+    Senior React + Fluent UI v9 developer with deep familiarity of:
+    - `FilePreviewContextWidget` (task 018) and the extracted `RichFilePreview` renderer
+      (task 013)
+    - `@spaarke/ai-widgets` PaneEventBus dispatch via `useDispatchPaneEvent` hook
+    - SSE consumption from BFF AI endpoints (`POST /api/ai/chat/sessions/{id}/summarize`,
+      task 014) via the existing `authenticatedFetch` + EventSource pattern
+    - Workspace tab lifecycle: `workspace.widget_load` dispatch produces additive tabs
+      consumed by `WorkspacePane` per ADR-030 + R4/R5 Workspace architecture
+    - Fluent UI v9 component patterns (`Button`, `Tooltip`, `MenuItem`, semantic tokens,
+      dark-mode parity)
+    Familiar with R5 CLAUDE.md §3.1 reuse mandate, §3.4 PaneEventBus additive event-type
+    discipline, and the FULL-rigor task-execute protocol per CLAUDE.md §4.
+  </role>
+
+  <goal>
+    `FilePreviewContextWidget` (task 018) is extended with a "Summarize this only" button
+    affordance rendered on EVERY file card in the multi-file list AND on the single-file
+    inline preview header. Click handler dispatches a single-file Summarize invocation via
+    the chosen path (default: direct endpoint `POST /api/ai/chat/sessions/{sessionId}/summarize`
+    with body `{ fileIds: [singleFileId] }`) AND emits a `workspace.streaming_started`
+    PaneEventBus event (task 016 additive event type within the existing `workspace`
+    channel) that signals to `StructuredOutputStreamWidget` (task 017) to mount as a NEW
+    Workspace tab. Prior Workspace tabs (any earlier multi-file or single-file Summarize
+    output) are preserved unchanged — additive-only per FR-06.
+
+    Multi-turn refinement works: user clicks "Summarize this only" on file A → new tab
+    mounts → streaming completes → user types "make that more concise" in Assistant pane
+    → chat continues against that new tab; user clicks "Summarize this only" on file B
+    → ANOTHER new tab mounts; file A's tab remains. Tab count is bounded by the existing
+    `MAX_WORKSPACE_TABS` ≈ 8 FIFO eviction policy (FR-06).
+
+    The button is keyboard accessible (Enter / Space activates), screen-reader labeled
+    (`aria-label="Summarize this file only"`), dark-mode tested (Fluent v9 semantic
+    tokens — never raw hex/rgb), and rendered using `Button` (icon + label OR icon-only
+    with `Tooltip` for compact mode — choose explicitly per Step 3 design decision).
+
+    All quality gates pass at Step 9.5. Acceptance criteria below all green.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="dependency-task-018">projects/spaarke-ai-platform-unification-r5/tasks/018-filepreview-context-widget.poml</file>
+    <file purpose="upstream-endpoint-task">projects/spaarke-ai-platform-unification-r5/tasks/014-summarize-session-endpoint.poml</file>
+    <file purpose="upstream-tool-task">projects/spaarke-ai-platform-unification-r5/tasks/015-invoke-summarize-playbook-tool.poml</file>
+    <file purpose="upstream-event-task">projects/spaarke-ai-platform-unification-r5/tasks/016-pane-event-bus-event-types.poml</file>
+    <file purpose="upstream-widget-task">projects/spaarke-ai-platform-unification-r5/tasks/017-structured-output-stream-widget.poml</file>
+    <file purpose="renderer-extraction">projects/spaarke-ai-platform-unification-r5/tasks/013-extract-richfilepreview-renderer.poml</file>
+    <file purpose="pane-event-types">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+    <file purpose="pane-event-bus">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts</file>
+    <file purpose="dispatch-hook">src/client/shared/Spaarke.AI.Widgets/src/events/useDispatchPaneEvent.ts</file>
+    <file purpose="document-row-menu">src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx</file>
+    <file purpose="rich-file-preview-dialog">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+    <file purpose="context-registry">src/client/shared/Spaarke.AI.Widgets/src/widgets/context</file>
+    <file purpose="conversation-pane">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 CLAUDE.md §3.1 reuse mandate">MUST EXTEND `FilePreviewContextWidget` from task 018; MUST NOT create a parallel widget. Reuse the extracted `RichFilePreview` renderer (task 013) and the existing file card layout from task 018. If the click handler's HTTP-call boilerplate already exists in a shared helper (e.g., `summarizeService.ts` in SpaarkeAi or LegalWorkspace), reuse it — otherwise add the helper to `@spaarke/ai-widgets` services and reuse from task 020's chat-pane dispatch site.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 prohibited list">MUST NOT introduce a parallel SSE envelope to `AnalysisChunk` (rendering inherits from task 017's `StructuredOutputStreamWidget`). MUST NOT introduce a parallel chat agent (this task is UI-only; the LLM tool-call path remains task 015's responsibility).</constraint>
+    <constraint source="ADR-022">React 19 — use modern React patterns (no legacy class components, no `useEffect`-for-everything anti-pattern). Click handler is a `useCallback` memoized closure. State (e.g., per-file "summarizing in progress" indicator) is local component state.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 components only — `Button`, `Tooltip`, `MenuItem`, `Spinner`. Semantic tokens only (e.g., `tokens.colorBrandBackground`, `tokens.colorNeutralForeground1`) — NEVER raw hex / rgb. Dark-mode parity verified (use `useTheme` if differentiation is needed).</constraint>
+    <constraint source="ADR-030 + R5 CLAUDE.md §3.4">PaneEventBus is closed at 4 channels — MUST NOT add a 5th. The dispatch from this task emits `workspace.streaming_started` (additive event type within the existing `workspace` channel, added by task 016). Subscribers (`StructuredOutputStreamWidget` task 017) consume the event and mount a new tab. Use the existing `useDispatchPaneEvent` hook.</constraint>
+    <constraint source="ADR-012">New code lives in `@spaarke/ai-widgets` (the FilePreviewContextWidget package). If a shared single-file Summarize service helper is introduced, it lives in `@spaarke/ai-widgets/services/` (preferred) or a colocated module — NOT in a new top-level shared library.</constraint>
+    <constraint source="spec FR-08 (UI path)">"Summarize this only" button per file card; click dispatches single-file Summarize and produces a NEW Workspace tab. PRIOR tabs MUST remain unaffected. The UI-path counterpart of the same FR-08 LLM tool-call path (task 015) — both produce additive tabs.</constraint>
+    <constraint source="spec FR-06 (additive tabs)">New tab opens via dispatch on `workspace.widget_load` (existing channel) OR via the `workspace.streaming_started` additive event type from task 016 that the `StructuredOutputStreamWidget` (task 017) subscribes to. EXISTING tabs are NOT modified or replaced. FIFO eviction at `MAX_WORKSPACE_TABS` cap applies; brief toast notifies on eviction. Verify the streaming-tab and any prior tabs co-exist in the Workspace tab strip via integration smoke test.</constraint>
+    <constraint source="spec FR-08 (multi-turn refinement)">Each "Summarize this only" click is a NEW conversation turn anchored to the new tab. User can continue chatting in the Assistant pane against this new tab. This task wires the button + dispatch; the conversation-anchoring logic is owned by the `StructuredOutputStreamWidget` (task 017) + chat-pane (task 020). This task MUST NOT mutate any existing tab's state when invoked.</constraint>
+    <constraint source="spec FR-05 (DocumentRowMenu reuse)">The per-file card already exposes a 3-dot menu reusing the existing `DocumentRowMenu` from `@spaarke/ui-components` (per task 018 acceptance) with 12 actions including `aiSummary`. The "Summarize this only" button is a PROMINENT primary affordance distinct from the menu — it does NOT replace the `aiSummary` menu item. Decision: keep both surfaces (button = single-file Summarize on this card; menu item = same action, alternative discovery). Document this overlap in implementation notes.</constraint>
+    <constraint source="ADR-028 / R5 CLAUDE.md §9">No token snapshots. HTTP call to the direct endpoint uses the existing `@spaarke/auth` `useAuth()` + `authenticatedFetch` pattern; never capture the bearer token into a closure or React ref.</constraint>
+    <constraint source="ADR-019">If the HTTP dispatch fails, surface a Fluent v9 `MessageBar` (or equivalent transient notification) reading the `errorCode` + `detail` from the ProblemDetails response (returned by task 014's endpoint). NEVER leak raw stack traces or document content.</constraint>
+    <constraint source="CLAUDE.md §10 / bff-extensions §F test obligation">PRs touching `src/client/shared/Spaarke.AI.Widgets/src/widgets/context/FilePreviewContextWidget.tsx` MUST add/update component tests. Add `FilePreviewContextWidget.summarize-only.test.tsx` (or extend the test file added in task 018) covering: button renders per file card, click dispatches the expected HTTP call + PaneEventBus event, prior-tab state unchanged, dark-mode rendering.</constraint>
+    <constraint source="spec NFR-07 / R5 CLAUDE.md §3.6">This task is frontend-only. BFF publish-size delta = 0 MB (no BFF code change). Confirm in task notes.</constraint>
+    <constraint source="spec NFR-02">File count enforced at Assistant-pane upload (≤ 20 per session). This task does not need additional file-count validation — it operates on already-staged files from `ChatSession.UploadedFiles[]`.</constraint>
+    <constraint source="project">Path-drift correction: spec.md/plan.md reference `infra/ai-search/`; ACTUAL repo path is `infrastructure/ai-search/`. This task is frontend-only and does not touch ai-search paths, but observe the correction when referencing infra in implementation notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/context-widget-extension + ai-widgets/pane-event-bus-dispatch</topic>
+    <files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/useDispatchPaneEvent.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/usePaneEvent.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/context/CitationContextWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/context/DocumentViewerContextWidget.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>.claude/adr/ADR-022-react-19.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    </files>
+    <patterns>
+      <pattern name="`useDispatchPaneEvent` for cross-pane dispatch (canonical)" location="src/client/shared/Spaarke.AI.Widgets/src/events/useDispatchPaneEvent.ts">
+        Per ADR-030 the standard dispatch hook. Example usage:
+        ```tsx
+        const dispatch = useDispatchPaneEvent();
+        const onSummarizeOnly = useCallback(() => {
+          dispatch('workspace', {
+            type: 'streaming_started',
+            sessionId,
+            requestId: crypto.randomUUID(),
+            widgetType: 'structured-output-stream',
+            inputs: { fileIds: [fileId], style: 'default' },
+          });
+        }, [dispatch, sessionId, fileId]);
+        ```
+        Verify the EXACT shape of the `workspace.streaming_started` payload by reading
+        task 016's POML output before writing this code — the discriminant fields are
+        defined there.
+      </pattern>
+      <pattern name="Direct endpoint POST with `authenticatedFetch` + SSE consumption" location="src/solutions/LegalWorkspace/src/components/SummarizeFiles/summarizeService.ts">
+        Canonical SSE consumption pattern: `authenticatedFetch` (from `@spaarke/auth`)
+        opens a POST request, the body iterates via `getReader()` on the response stream,
+        each chunk is split on `\n\n` and parsed as a `data: {json}` SSE event, and the
+        events are forwarded to a callback. R5 task 017's `StructuredOutputStreamWidget`
+        owns the actual SSE-consumption rendering; this task's click handler may either
+        (a) directly call this service helper, OR (b) just emit the
+        `workspace.streaming_started` event and let the widget handle SSE opening itself
+        (cleaner separation). Pick (b) for clean separation of concerns; the
+        StructuredOutputStreamWidget already subscribes to streaming_started per task 017.
+      </pattern>
+      <pattern name="File card layout from FilePreviewContextWidget (task 018)" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/context/FilePreviewContextWidget.tsx">
+        Task 018 ships the file card layout for multi-file mode + the inline single-file
+        preview. Extension surface: add a `Button` (or `MenuButton` if reusing
+        `DocumentRowMenu`'s aiSummary path) PER file card. Position: top-right of the
+        card adjacent to the existing 3-dot menu trigger. Single-file mode: button
+        appears in the preview header next to the 3-dot menu and prev/next controls.
+        Confirm task 018's exact JSX entry points before editing — task 018 lands first
+        per P2-G4 → P2-G5 wave ordering.
+      </pattern>
+      <pattern name="Fluent v9 Button with Tooltip + semantic tokens" location="src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx">
+        Canonical Button + Tooltip composition pattern. Mirror for the "Summarize this only"
+        button:
+        ```tsx
+        &lt;Tooltip content="Summarize this file only" relationship="label"&gt;
+          &lt;Button
+            icon={&lt;DocumentTextRegular /&gt;}
+            appearance="subtle"
+            aria-label="Summarize this file only"
+            onClick={onSummarizeOnly}
+          /&gt;
+        &lt;/Tooltip&gt;
+        ```
+        Semantic tokens only — never raw color literals. If a "summarizing in progress"
+        state needs visual feedback, swap icon to `&lt;Spinner size="extra-tiny" /&gt;`
+        until streaming_complete arrives back from the workspace pane (optional —
+        coordinate with task 017's widget which is the single source of truth for the
+        in-flight indicator).
+      </pattern>
+      <pattern name="DocumentRowMenu aiSummary action (existing parallel surface)" location="src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx">
+        DocumentRowMenu already exposes 12 actions including `aiSummary`. If task 018
+        wires `aiSummary` to dispatch the SAME event this button emits, the button + menu
+        share a single click handler. Recommended: extract a shared
+        `useSummarizeOnly(fileId, sessionId)` hook in the widget file scope; both the
+        button and the menu item invoke it.
+      </pattern>
+      <pattern name="Workspace tab additivity (FR-06 + R4 OC-R4-05)" location="docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md">
+        Workspace pane subscribes to `workspace.widget_load` (and additively, the R5 new
+        `streaming_started` discriminant) and PUSHES a new tab onto its tab strip;
+        existing tabs are not mutated. FIFO eviction at `MAX_WORKSPACE_TABS` ≈ 8 with a
+        brief toast. This task does not implement tab management — it dispatches the
+        event and relies on the existing workspace tab subscriber.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships a chat-driven "Summarize a Document" vertical slice. After multi-file
+      Summarize completes (initial flow), users frequently want to re-focus on a single
+      file ("just summarize file 2", "give me a TL;DR of contract A only"). Spec FR-08
+      mandates BOTH a natural-language path (LLM tool-call via `InvokeSummarizePlaybookTool`
+      from task 015 — "summarize just file 2") AND an explicit UI affordance ("Summarize
+      this only" button per file card in the Context pane). Both paths converge on the
+      same `SessionSummarizeOrchestrator` (task 012) and both produce additive Workspace
+      tabs (FR-06). This task wires the UI affordance.
+
+      The button is small in scope (3 hours estimated) but high in user-perceived value
+      — single-file refinement is a primary multi-turn use case during legal review.
+      The implementation is straightforward because tasks 018 (widget structure), 016
+      (event types), and 017 (target widget) have done the supporting work.
+
+      Two parallel-surface decisions exist (documented in implementation notes per Step 3):
+      (1) explicit "Summarize this only" Button vs. menu-only via DocumentRowMenu
+      `aiSummary`. We keep BOTH per spec FR-05 (DocumentRowMenu reuse mandate); the
+      button is the prominent primary affordance, the menu item is alternative discovery.
+      (2) dispatch path: direct HTTP call OR PaneEventBus emit. We prefer PaneEventBus
+      emit (`workspace.streaming_started` from task 016) for cleaner separation — the
+      `StructuredOutputStreamWidget` (task 017) is the single SSE consumer and owns
+      tab-mounting + streaming render. The click handler emits the event and is done.
+    </background>
+    <dependencies>
+      <dependency task="018" status="must-be-complete">
+        D2-09 — `FilePreviewContextWidget` exists with multi-file card list + single-file
+        inline preview + per-file 3-dot DocumentRowMenu. This task EXTENDS that widget's
+        JSX. HARD DEPENDENCY — task 021 cannot begin until task 018 is ✅.
+      </dependency>
+      <dependency task="016" status="required-implicitly">
+        D2-06 — additive PaneEventBus event types including `workspace.streaming_started`.
+        This task dispatches this event type; the type definition MUST be present.
+      </dependency>
+      <dependency task="017" status="required-implicitly">
+        D2-07 — `StructuredOutputStreamWidget` is the subscriber consuming
+        `workspace.streaming_started` and mounting the new tab. End-to-end flow requires
+        017 to be in place for visual verification; the button + dispatch can be unit-tested
+        independently.
+      </dependency>
+      <dependency task="014" status="required-implicitly-OR-alternative-015">
+        D2-04 — direct endpoint `POST /api/ai/chat/sessions/{id}/summarize`. If Step 3
+        decides on the direct-HTTP-call dispatch route instead of pure-PaneEventBus emit,
+        this endpoint is the call target.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 015 (D2-05) — `InvokeSummarizePlaybookTool` LLM tool-call path with
+        `fileIds: [singleFile]`. FR-08 LLM-path counterpart to this task's UI-path
+        affordance. Both produce additive tabs.</item>
+      <item>Task 020 (D2-11) — chat-pane orchestration UX (file chips, indicator,
+        multi-file combined-summary interjection). Parallel-safe sibling in P2-G5.
+        The Assistant-pane file chips may also expose a "Summarize this only" affordance
+        (per-chip context menu) — coordinate with task 020 to share the same
+        `useSummarizeOnly(fileId, sessionId)` hook if they overlap.</item>
+      <item>Task 022 (D2-08 second part) — upgrade `DocumentViewerWidget` (R4 stub) to
+        use extracted renderer. Parallel-safe sibling in P2-G5. Doesn't conflict.</item>
+      <item>Task 019 (D2-10) — slash command `/summarize` semantic extension. Parallel
+        sibling. The slash command dispatches multi-file Summarize for ALL session files;
+        this task's button dispatches single-file Summarize. No overlap.</item>
+      <item>Task 013 (D2-08 first part) — extracted `RichFilePreview` renderer used by
+        the Context-pane widget. The button is added to the wrapper layout around this
+        renderer; the renderer itself is not modified.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request `/compact`.
+      Declare RIGOR LEVEL explicitly per R5 CLAUDE.md §4.1:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Frontend code change extending Context-pane widget + PaneEventBus
+                 dispatch + new user-facing affordance on the FR-08 critical path.
+                 Tags: frontend + widget + ux + react-19. Qualifies for FULL per
+                 task-execute decision tree (tag react-19 + 6+ steps + modifying .tsx).
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0–10 with Step 9.5 quality gates.
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress + Verify Dependencies">
+      Read `tasks/TASK-INDEX.md`. Confirm: task 021 status is 🔲; dependency 018 status is
+      ✅ (FilePreviewContextWidget shipped); 016 ✅ (PaneEventBus event types present);
+      017 in flight or ✅ (StructuredOutputStreamWidget subscriber present — required for
+      end-to-end verification but not for code compilation). Read `current-task.md` to
+      verify no other R5 task is mid-flight conflicting with this file. If 018 is not ✅,
+      STOP and report blocker.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically:
+      (a) Read task 018's POML output to internalize the EXACT file card layout +
+          single-file preview header structure where the button will mount.
+      (b) Read task 016's POML output to confirm the EXACT discriminant + payload shape
+          of `workspace.streaming_started`. If task 016's shape differs from this POML's
+          knowledge pattern example, conform to task 016 (it is the source of truth).
+      (c) Read task 017's POML output to confirm the StructuredOutputStreamWidget
+          subscribes to `workspace.streaming_started` and mounts a new tab — confirm the
+          subscription contract.
+      (d) Read `DocumentRowMenu.tsx` to confirm the `aiSummary` menu action and decide
+          whether to share a hook between the button and the menu item.
+      (e) Read `PaneEventBus.ts` + `useDispatchPaneEvent.ts` for the EXACT dispatch hook
+          signature.
+      (f) Read ADR-021, ADR-022, ADR-030 in full.
+    </step>
+    <step order="3" name="Implementation Plan + Two Open Decisions">
+      Make TWO explicit decisions and document them in task notes:
+
+      Decision A (dispatch path):
+      Option A1 — PaneEventBus-only: button click emits `workspace.streaming_started`
+                   and is done; `StructuredOutputStreamWidget` (task 017) opens the
+                   tab AND opens the SSE connection itself. Cleaner separation;
+                   recommended.
+      Option A2 — Direct HTTP + event: button click both calls
+                   `POST /api/ai/chat/sessions/{sessionId}/summarize` directly AND emits
+                   the PaneEventBus event with a sessionId/requestId binding. Avoid
+                   unless task 017's subscriber design requires it.
+
+      Decision B (button vs menu vs both):
+      Option B1 — Both (RECOMMENDED): prominent `Button` per file card + existing
+                   `DocumentRowMenu` `aiSummary` action. Share a
+                   `useSummarizeOnly(fileId, sessionId)` hook.
+      Option B2 — Button-only.
+      Option B3 — Menu-only.
+
+      Recommended: A1 + B1. Record the chosen options in task notes and proceed.
+
+      Identify the EXACT JSX insertion points in task 018's `FilePreviewContextWidget`:
+      - Multi-file mode: file card top-right action area (adjacent to 3-dot menu)
+      - Single-file mode: preview header action area (adjacent to 3-dot menu +
+        prev/next controls)
+    </step>
+    <step order="4" name="Implement `useSummarizeOnly` Hook + Button">
+      Create or extend
+      `src/client/shared/Spaarke.AI.Widgets/src/widgets/context/FilePreviewContextWidget.tsx`
+      to add:
+
+      (a) A local hook `useSummarizeOnly(fileId, sessionId, fileName)` that returns
+          `{ onClick, isInFlight }`. Implementation per Decision A1:
+          ```tsx
+          const useSummarizeOnly = (fileId: string, sessionId: string, fileName: string) =&gt; {
+            const dispatch = useDispatchPaneEvent();
+            const [isInFlight, setInFlight] = useState(false);
+            const onClick = useCallback(() =&gt; {
+              setInFlight(true);
+              dispatch('workspace', {
+                type: 'streaming_started',
+                sessionId,
+                requestId: crypto.randomUUID(),
+                widgetType: 'structured-output-stream',
+                inputs: {
+                  fileIds: [fileId],
+                  style: 'default',
+                  displayName: `Summary: ${fileName}`,
+                },
+              });
+              // isInFlight resets on workspace.streaming_complete from task 017
+              // (subscribed via usePaneEvent in this widget — see Step 4(c))
+            }, [dispatch, sessionId, fileId, fileName]);
+            return { onClick, isInFlight };
+          };
+          ```
+          Conform the event payload to the EXACT shape established by task 016.
+
+      (b) Subscribe to `workspace.streaming_complete` in the widget to reset the
+          per-file `isInFlight` state when the matching `requestId` completes (optional
+          polish; recommended for clarity).
+
+      (c) Render a `Button` (Fluent v9; semantic tokens; `aria-label`) per file card:
+          ```tsx
+          &lt;Tooltip content="Summarize this file only" relationship="label"&gt;
+            &lt;Button
+              icon={isInFlight ? &lt;Spinner size="extra-tiny" /&gt; : &lt;DocumentTextRegular /&gt;}
+              appearance="subtle"
+              aria-label={`Summarize ${file.name} only`}
+              disabled={isInFlight}
+              onClick={onSummarizeOnly}
+            /&gt;
+          &lt;/Tooltip&gt;
+          ```
+          Render this button in BOTH the multi-file card layout AND the single-file
+          preview header.
+
+      (d) Wire the same `useSummarizeOnly` hook into the existing `DocumentRowMenu`
+          `aiSummary` menu item callback if task 018 left it as a TODO / placeholder —
+          this satisfies the FR-05 alternative-discovery path and matches Decision B1.
+
+      Verify dark-mode parity by inspecting in Fluent v9 dark theme (no hex colors,
+      tokens only).
+    </step>
+    <step order="5" name="Author Component Tests">
+      Add or extend
+      `src/client/shared/Spaarke.AI.Widgets/src/widgets/context/__tests__/FilePreviewContextWidget.summarize-only.test.tsx`
+      (or extend task 018's existing test file) covering:
+      - Test 1 (render): button renders on EVERY file card in multi-file mode and on
+        the inline preview header in single-file mode.
+      - Test 2 (dispatch): clicking the button calls `useDispatchPaneEvent`'s dispatch
+        function with channel `'workspace'`, type `'streaming_started'`, payload
+        carrying `fileIds: [singleFileId]`, the correct `sessionId`, and a unique
+        `requestId`. Use `vi.mock` / Vitest mock to capture the dispatch call.
+      - Test 3 (additivity): a second click on a DIFFERENT file emits ANOTHER
+        `streaming_started` event with a DIFFERENT `requestId` and a different
+        `fileIds` array. The prior dispatch is NOT cancelled or replaced.
+      - Test 4 (DocumentRowMenu parity): clicking the menu's `aiSummary` action invokes
+        the SAME hook (same dispatch shape as the button). Only present if Decision B1.
+      - Test 5 (accessibility): button is keyboard-activatable (Enter key triggers
+        click); `aria-label` is set per file (includes file name).
+      - Test 6 (in-flight state): after click, button renders Spinner + is disabled;
+        on receipt of `workspace.streaming_complete` with the matching requestId,
+        button returns to interactive state.
+      - Test 7 (dark mode): widget renders without raw color literals in dark theme
+        (snapshot or visual-token assertion).
+    </step>
+    <step order="6" name="Verify No PaneEventBus Channel Drift">
+      Confirm: the only PaneEventBus channels touched are the existing four (`workspace`,
+      `context`, `conversation`, `safety`). The only NEW event-type discriminant emitted
+      is `workspace.streaming_started` (added by task 016). NO new channel introduced.
+      Run a grep / static scan in the widget file for `dispatch(` calls and confirm
+      every call's first argument is one of the four channels. ADR-030 compliance.
+    </step>
+    <step order="7" name="Build + Lint + Type-Check">
+      Run from the `@spaarke/ai-widgets` package root (or repo root if monorepo-wide):
+      `npm run build` (or equivalent — verify the package's build script). Type errors
+      MUST resolve to zero. Run `npm run lint` — zero new lint errors. If a UI-component
+      build script `npm run build:prod` exists for production build verification, run
+      that as well (per CLAUDE.md §11 AP-1 note that `build:prod` is the correct PCF
+      build command — this is a shared library, not a PCF, but match the project's
+      established build convention).
+    </step>
+    <step order="8" name="Run Component Tests + End-to-End Smoke">
+      Run the new test file: `npm test --workspace=@spaarke/ai-widgets -- --run
+      FilePreviewContextWidget.summarize-only`. All tests pass.
+
+      End-to-end smoke test on Spaarke Dev (operator-assisted if needed):
+      (a) Open SpaarkeAi chat session; upload 3 files.
+      (b) Invoke `/summarize` → confirm initial multi-file tab opens in Workspace.
+      (c) In Context pane, click "Summarize this only" on file 1.
+      (d) Verify: a NEW Workspace tab opens (tab count goes from 1 → 2); the original
+          multi-file tab is STILL present and content unchanged.
+      (e) Click "Summarize this only" on file 2.
+      (f) Verify: tab count 2 → 3; all prior tabs remain.
+      (g) In Assistant pane, type "make that more concise" — verify the chat continues
+          (this is task 017 + task 020 behavior; just confirm no regression).
+
+      Document screenshots / tab-strip evidence in `notes/task-021-evidence.md`.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk every &lt;acceptance-criterion&gt; below; record evidence per criterion in task
+      notes (`notes/task-021-evidence.md`): button rendered on every file card +
+      single-file header (test 1); click dispatches the expected PaneEventBus event
+      (test 2); additive tab behavior verified (test 3 + end-to-end step d/e/f);
+      DocumentRowMenu parity (test 4 if Decision B1); keyboard accessibility (test 5);
+      in-flight state (test 6); dark-mode parity (test 7); no new PaneEventBus channel
+      (Step 6); build + lint clean (Step 7); component tests green (Step 8); end-to-end
+      smoke complete (Step 8). Confirm BFF publish-size delta = 0 MB (frontend-only).
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the modified `FilePreviewContextWidget.tsx` + the
+      new test file. Run `adr-check` skill verifying: ADR-021 (Fluent v9 + semantic
+      tokens — no raw hex), ADR-022 (React 19 patterns — `useCallback` memoization;
+      no legacy class components), ADR-028 (no token snapshot — verify the dispatch
+      path does NOT capture tokens; if Decision A2 was chosen and a direct HTTP call
+      is made, verify the call uses `authenticatedFetch` from `@spaarke/auth`),
+      ADR-030 (additive event types only — no new PaneEventBus channel; only the
+      `workspace.streaming_started` discriminant added by task 016 is emitted). Both
+      gates MUST pass before marking task complete.
+
+      Confirm BFF publish-size delta = 0 MB (no BFF code change) in task notes — per
+      R5 CLAUDE.md §3.6, frontend-only tasks declare delta 0 explicitly.
+
+      Run `dotnet list package --vulnerable --include-transitive` — N/A for this task
+      (no .NET package change); document N/A.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 021 🔲 → ✅. Reset
+      `current-task.md` to next pending P2-G5 task per CLAUDE.md §7 (or to next pending
+      P2-Gn task if all of P2-G5 is in flight). Record in task notes
+      (`notes/task-021-evidence.md`):
+      - Decision A choice (PaneEventBus-only vs direct-HTTP-plus-event) with rationale
+      - Decision B choice (button + menu vs button-only vs menu-only) with rationale
+      - Final event payload shape used for `workspace.streaming_started` (the
+        load-bearing contract with task 017's subscriber)
+      - End-to-end smoke screenshots / tab-strip evidence
+      - Test count + result
+      - BFF publish-size delta = 0 MB (confirmed)
+      - Any deviation from task 016's payload shape (must be zero)
+
+      Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + lint + test the `@spaarke/ai-widgets` package</tool>
+    <tool name="git">Stage + commit the widget extension + test file on the R5 branch</tool>
+    <tool name="code-review">Quality gate at Step 9.5 (FULL rigor)</tool>
+    <tool name="adr-check">Quality gate at Step 9.5 — verify ADR-021, ADR-022, ADR-028, ADR-030</tool>
+    <tool name="context-handoff">Checkpointing per R5 CLAUDE.md §5 (after Step 3, Step 5, Step 8; verbose at &gt;60%)</tool>
+    <tool name="conflict-check">Per R5 §3.1 reuse mandate — run before merge</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/context/FilePreviewContextWidget.tsx (EXTEND — add `useSummarizeOnly` hook + "Summarize this only" Button rendered per file card AND on single-file preview header; share hook with DocumentRowMenu `aiSummary` action if Decision B1)</output>
+    <output type="test">src/client/shared/Spaarke.AI.Widgets/src/widgets/context/__tests__/FilePreviewContextWidget.summarize-only.test.tsx (NEW — 7 tests covering render, dispatch, additivity, menu parity, accessibility, in-flight state, dark mode) OR extend task 018's existing test file</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 021 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending task per CLAUDE.md §7)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-021-evidence.md (Decision A + B rationale, final event payload shape, end-to-end smoke screenshots, test results, BFF publish-size delta = 0 confirmation, ADR compliance evidence)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <examples>
+    <example name="useDispatchPaneEvent — canonical dispatch hook" location="src/client/shared/Spaarke.AI.Widgets/src/events/useDispatchPaneEvent.ts">
+      The dispatch hook every R5 widget uses to emit cross-pane events. Per ADR-030,
+      this is the ONLY allowed dispatch surface. Do not bypass via direct
+      `PaneEventBus.emit` calls from React component bodies.
+    </example>
+    <example name="DocumentRowMenu aiSummary action" location="src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx">
+      Existing 12-action menu including aiSummary. Reference for sharing the
+      `useSummarizeOnly` hook between this task's button and the menu item (Decision B1
+      requires both surfaces to dispatch the same event).
+    </example>
+    <example name="Fluent v9 Button + Tooltip + Spinner composition" location="src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx">
+      Reference for the Button + Tooltip pattern with semantic tokens and dark-mode
+      parity. Reuse the same composition idiom for the "Summarize this only" button.
+    </example>
+  </examples>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Summarize this only" Button renders on EVERY file card in `FilePreviewContextWidget`'s multi-file mode AND on the inline preview header in single-file mode. Confirmed by Step 5 Test 1.</criterion>
+    <criterion testable="true">Clicking the button dispatches a `workspace.streaming_started` PaneEventBus event with `fileIds: [singleFileId]`, the active `sessionId`, and a unique `requestId`. Payload shape matches task 016's event-type definition exactly. Confirmed by Step 5 Test 2.</criterion>
+    <criterion testable="true">Click produces a NEW Workspace tab (additive). PRIOR Workspace tabs (e.g., a previous multi-file Summarize tab) remain present and unchanged in content. Confirmed by Step 5 Test 3 + end-to-end smoke Step 8(d–f).</criterion>
+    <criterion testable="true">Multi-turn refinement works: each click of "Summarize this only" on a different file produces another additive tab; user can continue chatting in the Assistant pane to refine each tab's output (verified via end-to-end smoke Step 8(g) — this task is responsible for ensuring its dispatch does NOT prevent that downstream behavior).</criterion>
+    <criterion testable="true">`DocumentRowMenu` `aiSummary` menu item (existing per task 018) dispatches the SAME event as the new button via the shared `useSummarizeOnly` hook (Decision B1). Confirmed by Step 5 Test 4.</criterion>
+    <criterion testable="true">PaneEventBus integrity: zero new channels added (still 4: `workspace`, `context`, `conversation`, `safety`); zero new event-type discriminants added by this task (only emits the `workspace.streaming_started` type already added by task 016). ADR-030 compliance confirmed by Step 6 static-scan.</criterion>
+    <criterion testable="true">Button is keyboard accessible (Enter / Space triggers click); `aria-label` includes the file name; in-flight state renders a `Spinner` and disables the button; on receipt of matching `workspace.streaming_complete`, button returns to interactive state. Confirmed by Step 5 Tests 5 + 6.</criterion>
+    <criterion testable="true">Fluent UI v9 + semantic tokens only (no raw hex / rgb literals); dark-mode parity verified. ADR-021 compliance confirmed by Step 5 Test 7.</criterion>
+    <criterion testable="true">React 19 patterns: handlers memoized via `useCallback`; in-flight state via local component state; no legacy class components; no unnecessary `useEffect`. ADR-022 compliance confirmed at Step 9.5 `adr-check`.</criterion>
+    <criterion testable="true">No token snapshot per ADR-028: if Decision A2 was chosen, HTTP call uses `authenticatedFetch` from `@spaarke/auth`; tokens are not captured into a closure or ref. Confirmed at Step 9.5 `adr-check`. (If Decision A1 — PaneEventBus-only — no HTTP call is made by this widget; ADR-028 N/A but documented.)</criterion>
+    <criterion testable="true">Build clean: `npm run build` zero errors; `npm run lint` zero new errors; all 7 component tests pass. Confirmed at Steps 7 + 8.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (frontend-only task; no BFF code changed). Confirmed in task notes per R5 CLAUDE.md §3.6.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5 (ADR-021, ADR-022, ADR-028, ADR-030 confirmed).</criterion>
+    <criterion testable="true">Implementation notes (`notes/task-021-evidence.md`) record: Decision A + B choices with rationale; final event payload shape (must match task 016 exactly); end-to-end smoke evidence; deviation from task 016's payload shape = none.</criterion>
+  </acceptance-criteria>
+</task>
