@@ -55,7 +55,7 @@ R5 ships in 3 sequential phases + 1 wrap-up task, with parallel-execution opport
 |---|---|---|---|---|---|---|
 | 010 | P2-G1 | D2-01 New `sprk_analysisaction` seed "Summarize Document for Chat" (Dataverse deploy) | ✅ | 2h (actual ~1.5h incl deploy) | ✅ | Phase 1 ✅ |
 | 011 | P2-G1 | D2-02 New `sprk_analysisplaybook` configuration | ✅ | 2h (actual ~1h incl deploy) | ✅ | Phase 1 ✅ |
-| 012 | P2-G2 | D2-03 New `SessionSummarizeOrchestrator` concrete class | 🔲 | 4h | ✅ | 010, 011 |
+| 012 | P2-G2 | D2-03 New `SessionSummarizeOrchestrator` concrete class | ✅ | 4h (actual ~3h) | ✅ | 010, 011 |
 | 013 | P2-G2 | D2-08 Extract `RichFilePreview` renderer core from `RichFilePreviewDialog` | ✅ | 4h (actual 2h) | ✅ | Phase 1 ✅ |
 | 014 | P2-G3 | D2-04 New `POST /api/ai/chat/sessions/{id}/summarize` endpoint | 🔲 | 3h | ✅ | 012 |
 | 015 | P2-G3 | D2-05 Register `InvokeSummarizePlaybookTool` on `SprkChatAgent` | 🔲 | 3h | ✅ | 012 |

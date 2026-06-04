@@ -1,11 +1,11 @@
 <task id="022" project="spaarke-ai-platform-unification-r5">
   <metadata>
     <title>D2-08 Upgrade `DocumentViewerWidget` (R4 stub) to use extracted `RichFilePreview` renderer</title>
-    <status>not-started</status>
+    <status>code-authoring-complete</status>
     <estimated-effort>2 hours</estimated-effort>
-    <actual-effort></actual-effort>
-    <assigned>AI Agent</assigned>
-    <started></started>
+    <actual-effort>~1h (sub-agent code-authoring scope; build/test/quality-gates deferred to main session)</actual-effort>
+    <assigned>AI Agent (parallel wave sub-agent)</assigned>
+    <started>2026-06-04</started>
     <completed></completed>
     <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
     <wave>P2-G5 (parallel-safe; depends on 013; siblings 019, 020, 021)</wave>

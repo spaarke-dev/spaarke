@@ -1,12 +1,12 @@
 <task id="017" project="spaarke-ai-platform-unification-r5">
   <metadata>
     <title>D2-07 Build `StructuredOutputStreamWidget` (Workspace; schema-driven; dual-purpose Summarize streaming + Insights static rendering)</title>
-    <status>not-started</status>
+    <status>code-authoring-complete</status>
     <estimated-effort>1 day</estimated-effort>
-    <actual-effort></actual-effort>
-    <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <actual-effort>~1h (sub-agent, code-authoring scope only — main session owns build + quality gates + commit)</actual-effort>
+    <assigned>AI Agent (parallel sub-agent in P2-G4 wave)</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04 (code authoring; main session to mark ✅ after build + gates pass)</completed>
     <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
     <wave>P2-G4 (parallel; runs alongside 018 once 013 + 016 are ✅)</wave>
     <parallel-safe>true</parallel-safe>

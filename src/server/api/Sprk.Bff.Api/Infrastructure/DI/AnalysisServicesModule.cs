@@ -316,6 +316,25 @@ public static class AnalysisServicesModule
         services.AddScoped<AnalysisResultPersistence>();
         services.AddScoped<IAnalysisOrchestrationService, AnalysisOrchestrationService>();
         services.AddScoped<IAppOnlyAnalysisService, AppOnlyAnalysisService>();
+
+        // R5 task 012 (D2-03) — SessionSummarizeOrchestrator. Concrete sealed class (no
+        // interface per ADR-010); registered Scoped to match the lifetime of its dependencies
+        // (ChatSessionManager + IGenericEntityService are both Scoped; IRagService + IOpenAiClient
+        // are Singleton; R5SummarizeTelemetry is Singleton — Scoped is the safe lifetime that
+        // respects every wrapped lifetime).
+        //
+        // ZERO new Program.cs lines per R5 CLAUDE.md §3.3. ZERO new feature flags per R5
+        // CLAUDE.md §3.2 — kill-switch coverage inherits from the parent compound gate
+        // (Analysis:Enabled && DocumentIntelligence:Enabled) that wraps this method.
+        //
+        // §F.1 asymmetric-registration audit: this registration is unconditional within the
+        // already-gated outer block; task 014 (endpoint) maps unconditionally and task 015
+        // (tool handler) registers behind the same compound gate via SprkChatAgentFactory.
+        // No new `if (R5Flag)` block introduced. Forward-compat: if a future fine-grained
+        // R5 kill-switch is required, follow ADR-030 Null-Object pattern (not flag-conditional
+        // registration).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator>();
+        Console.WriteLine("✓ R5 SessionSummarizeOrchestrator registered (task 012; ADR-010 concrete; chat-session Summarize convergence)");
     }
     private static void AddPlaybookServices(IServiceCollection services)
     {

@@ -468,3 +468,70 @@ Both docs are required reading for R5 implementers touching Insights consumption
 - This changelog entry author: same agent (this turn)
 - Operator approval: Ralph Schroeder (project owner)
 - Verifiable via: Wave F branch `work/ai-spaarke-insights-engine-r2-wave-f`; tasks 050 + 051 + 052 + 053 in `projects/ai-spaarke-insights-engine-r2/tasks/`; spike + mini-plan in `projects/ai-spaarke-insights-engine-r2/notes/spikes/` + `projects/ai-spaarke-insights-engine-r2/notes/`; design contract diff in `projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md` (v1.0 → v1.1)
+
+---
+
+### 2026-06-04 (later) — r3 architectural reconciliation finding (HEADS UP — no contract change)
+
+**Author**: Claude (Anthropic AI agent) on behalf of the Insights Engine r3 project (in design phase).
+**Trigger**: Surfaced during r3 design.md focus-area discussion (Tier 2.5).
+
+#### 8.12 The finding — Insights Engine r2 Wave E2 missed existing infrastructure
+
+During r3 design discussion (specifically scoping Tier 2.5 "embedding-based intent classifier"), we discovered that Insights Engine r2 Wave E2 (`InsightsIntentClassifier`) built a parallel LLM-only intent classifier **without leveraging existing infrastructure already shipped** by SprkChat Platform Enhancement R2 (project `ai-sprk-chat-platform-enhancement-r2`, Status: Complete 2026-03-17).
+
+**What exists but Wave E2 didn't use**:
+
+| Asset | Path | Purpose |
+|---|---|---|
+| `playbook-embeddings` AI Search index | `infrastructure/ai-search/playbook-embeddings.json` | HNSW vector search; fields incl. `playbookName`, `description`, `triggerPhrases[]`, `tags[]`, `recordType`, `entityType`, `contentVector3072` (3072-dim, text-embedding-3-large) |
+| `PlaybookDispatcher` two-stage matching | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs` | Stage 1 vector similarity (1.5s; ≥0.85 skips Stage 2) + Stage 2 LLM refinement (0.5s). Total budget 2s. Output enrichment from playbook's JPS DeliverOutput node. |
+| `PlaybookEmbeddingService` + `PlaybookIndexingService` | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/` | Embedding generation + index population |
+| `DynamicCommandResolver` | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DynamicCommandResolver.cs` | Slash command resolution |
+| Deployment scripts | `scripts/Create-PlaybookEmbeddingsIndex.ps1`, `scripts/Index-ExistingPlaybooks.ps1`, `scripts/Seed-PlaybookTriggerMetadata.ps1` | Index creation + back-fill + metadata seeding |
+
+**What Wave E2 did instead**: `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Routing/InsightsIntentClassifier.cs` — hardcoded C# prompt (`BuildPrompt()` line ~230) listing each playbook by name. The code comment at line ~226 explicitly defers proper Dataverse-driven implementation to "Phase 2"; r3 is Phase 2.
+
+#### 8.13 r3 reconciliation plan (~1 week effort)
+
+Tier 2.5 of r3 wave 2:
+
+| Sub-item | Work |
+|---|---|
+| **F-1** spike (0.5d) | Decide: replace `InsightsIntentClassifier` with `PlaybookDispatcher`, refactor to share Stage 1 vector search, or keep separate (with documented reason) |
+| **F-2** prompt migration (1d) | Move Insights classifier prompt from hardcoded C# to `sprk_analysisaction.sprk_systemprompt` JPS row per project's stated "no .txt prompts in code" principle |
+| **F-3** implementation (2-3d) | Per F-1 decision. Likely: Insights becomes a thin wrapper around `PlaybookDispatcher` with "no playbook matched → RAG fallback" branch |
+| **F-4** index Insights playbooks (0.5d) | Ensure `predict-matter-cost@v1` (and any future Insights playbooks) are in `playbook-embeddings` |
+| **F-5** JPS authoring auto-metadata (0.5-1d) | Auto-populate `description` + `triggerPhrases` at playbook deploy time; trigger re-indexing |
+
+#### 8.14 Impact on R5 — no contract change but edge-case routing pattern shift
+
+`POST /api/insights/assistant/query` v1.1 contract is **unchanged**. SSE, citations href, error semantics, kill-switches — all preserved.
+
+**What may change**: routing DECISIONS may differ in edge cases after Insights reconciles to Stage 1 vector + Stage 2 LLM (vs current LLM-only). Two-stage matching should be MORE accurate in aggregate but the change pattern is non-zero. R5 observability/logging that captures classifier path selection may show shifts.
+
+**Suggested R5 audit** — same lesson, potentially same risk on R5 side. Please check whether R5's chat-agent has built parallel infrastructure that could leverage:
+
+1. **`PlaybookDispatcher`** — for intent / tool-call routing in R5 chat-agent
+2. **`DynamicCommandResolver`** — for slash command handling
+3. **`SprkChatAgent` / `SprkChatAgentFactory`** — for tool registry
+4. **`PlaybookChatContextProvider`** — for playbook context loading
+5. **`CompoundIntentDetector`** — for plan-preview gating
+
+If R5 has parallel-built any of these, surfacing it now avoids r4 having to do another reconciliation pass.
+
+#### 8.15 r3 status as of this entry
+
+- r2 closed 2026-06-04 (Phase 1.5 ✅; 14/15 SCs met; SC-15 calibration carried to Phase 2)
+- r3 project initialized 2026-06-04 (post-r2 task 090 wrap-up)
+- r3 wave 1: Tier 1 architectural cleanup LOCKED (4 items, ~3.5d) — `NullInsightsAi` facade, v1.2 `spe://` href resolution, test-fixture hygiene, telemetry maturity
+- r3 wave 2: Tier 2.5 reconciliation LOCKED (the finding above, ~1 week)
+- Other Tier 2 items (2.1 bidirectional clarification / 2.2 playbook token streaming / 2.3 playbookHint / 2.4 actionable citations) — R5 input pending; coordination via this doc
+- Tier 3 / Tier 4 — TBD per owner direction
+
+#### 8.16 Provenance of this update
+
+- Author: Claude (Anthropic AI agent) running in the Insights r2 main session (post-Wave-F-merge, during r3 design.md focus-area discussion)
+- Operator approval: Ralph Schroeder (project owner) — explicitly asked to surface this to R5
+- Memory note: `~/.claude/projects/.../memory/feedback-check-existing-infra-before-designing.md` — encodes the general lesson for future sessions
+- Verifiable via: r3 project at `projects/ai-spaarke-insights-engine-r3/design.md` §2.2.1 (Tier 2.5 revised); the parallel-built code at `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Routing/InsightsIntentClassifier.cs`; the existing infrastructure at `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs` + `infrastructure/ai-search/playbook-embeddings.json`
