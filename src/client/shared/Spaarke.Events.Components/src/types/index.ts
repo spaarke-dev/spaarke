@@ -15,14 +15,13 @@ export type {
   IEventDateInfo,
 } from '../components/CalendarSection/CalendarSection';
 
-// IEventRecord retained pending task 033 (Calendar widget migration) —
-// last consumer is `widgets/CalendarWorkspaceWidget`. See
-// projects/spaarke-datagrid-framework-r1/notes/drafts/032-consumer-audit.md.
-export type { IEventRecord } from '../components/GridSection/GridSection';
-
 // IUserOption, IEventTypeOption, IStatusOption — RETIRED in task 032
 // (2026-06-03) along with their component directories. No external
 // consumers; CalendarWorkspaceWidget has its own inline IStatusOption.
+//
+// IEventRecord — RETIRED in task 033b (2026-06-03) with the GridSection
+// directory deletion. The DataGrid framework uses `Record<string, unknown>`
+// for record rows; consumers that need typed event fields define them inline.
 
 export type { SavedView } from '../components/ViewSelectorDropdown/ViewSelectorDropdown';
 

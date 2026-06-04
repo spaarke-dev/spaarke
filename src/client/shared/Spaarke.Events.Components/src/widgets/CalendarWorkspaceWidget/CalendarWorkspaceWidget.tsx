@@ -1,37 +1,55 @@
 /**
  * CalendarWorkspaceWidget — the 5th SpaarkeAi system workspace widget.
  *
- * Task 130 (Round 13 follow-up #9, 2026-05-23) — operator design directive:
+ * Task 033b (spaarke-datagrid-framework-r1, 2026-06-03) — DataGrid framework migration:
+ *
+ *   Per the task 033 sign-off (notes/drafts/033-widget-owner-signoff.md):
+ *     Q1 — drop widget toolbar; rely on DataGrid command bar.
+ *     Q2 — preserve filter row AS-IS; build hostFilters framework extension
+ *          (task 033a) so its state pipes through <DataGrid hostFilters={…}/>
+ *          instead of dispatching through EventsPageContext.
+ *     Q3 — calendar event-date counting unchanged (handleRecordsLoaded plugs
+ *          into the new <DataGrid onRecordsLoaded={…}/> callback).
+ *     Q4 — keep EventsPageProvider so eventDates flow continues to drive the
+ *          calendar strip's dot indicators through context.
+ *
+ * What changed vs. task 130:
+ *  - <GridSection .../> swap → <DataGrid configId="e15c2b93-…" hostFilters
+ *    onRecordsLoaded onRecordOpen dataverseClient/>. Same sprk_event Dataverse
+ *    grid configuration record as the standalone EventsPage (task 030).
+ *  - Filter row + calendar strip + EventsPageProvider preserved unchanged.
+ *  - Toolbar removed (Q1). The DataGrid's own command bar (configjson
+ *    commandBar.primary = +New / Delete / Refresh) handles those actions
+ *    natively. Complete/Close/Cancel/OnHold/Archive are NOT registered for
+ *    this widget surface (matches Q1 acceptance); when the configjson is
+ *    extended in a follow-up, they will appear automatically without code
+ *    changes here.
+ *  - Bulk-status callbacks + helpers (bulkStatusUpdate, bulkArchive,
+ *    confirmDialog, selectedIds state, hasSelection) removed — dead code
+ *    after toolbar removal.
+ *  - applied/pending → HostFilterCondition[] via overlayHostFilters
+ *    (task 033a). selectedDate (day-click) and the filter row's
+ *    dateField/from/to/eventTypeId/eventStatusValue all map to flat
+ *    HostFilterCondition entries.
+ *  - The original "filter-divergence" effect against context.filters.calendarFilter
+ *    is removed: with the dispatch loop gone, selectedDate is the only source
+ *    of truth for day-click filtering.
+ *
+ * Task 130 baseline behavior preserved (operator directive):
  *
  *   "If the grid has a filter applied by virtue of the drop down, then
  *    the Events shown will be different. This is confusing to the users."
  *
- * Refactor consequences:
- *
- *  1. The view-selector dropdown is REMOVED from the widget. The grid now
- *     queries via GridSection's OData fallback path (no view-based
- *     FetchXML). The standalone EventsPage code page keeps its own view
- *     selector — that flow is untouched.
- *  2. Two NEW filter dropdowns on the filter row: Event Type (lookup-
- *     based, fetched from `sprk_eventtype` records) and Event Status
- *     (numeric choice, values 0-7 enumerated below).
- *  3. The "Filter by Date Field" dropdown gains a "(none)" option →
- *     dateField = null means no date filter is applied. Default is null
- *     so the widget initially loads ALL events with no date narrowing.
- *  4. Pending-vs-applied state pattern. Filter-row changes update
- *     `pending`. An Apply button copies pending → applied; the grid +
- *     calendar consume `applied`. Apply button visibility: only when
- *     pending differs from applied. Clear button visibility: whenever
- *     any applied filter is non-default OR a calendar day is selected.
- *  5. Calendar day click BYPASSES the pending mechanism (operator:
- *     "day click applies immediately") — directly dispatches the
- *     calendar filter through context. Clear still resets it.
- *  6. Calendar highlights derive from `filteredEvents` (task 127) — the
- *     applied Type/Status/date filters narrow what the grid shows, and
- *     the calendar mirrors that visualization. When dateField is null,
- *     buildDateFilter is a no-op so the grid returns the full set, and
- *     CalendarSection highlights all of them via the task-121 fallback
- *     chain (sprk_duedate || createdon).
+ * Filter UX (unchanged from task 130):
+ *  - No view-selector dropdown. Grid drives off the sprk_gridconfiguration
+ *    record's `source.savedquery-set { entityLogicalName: "sprk_event" }`.
+ *  - Filter row: Event Type / Event Status / Filter by Date Field / From / To.
+ *  - "Filter by Date Field" has a "(none)" sentinel; null dateField = no
+ *    date filter applied.
+ *  - Pending-vs-applied pattern. Apply button when pending != applied. Clear
+ *    button when any filter or selectedDate is active.
+ *  - Calendar day click bypasses the pending mechanism (day-click applies
+ *    immediately via the hostFilters useMemo).
  *
  * Prior task history (kept for archaeological context):
  *  - Task 115 — initial 5th workspace widget (vertical 3-month strip)
@@ -44,27 +62,31 @@
  *  - Task 125/126/127 — event-day hover lock + filteredEvents → calendar pipeline
  *  - Task 128 — Clear visible on selectedDate; selected vs event-day visual distinction
  *  - Task 129 — grid buildDateFilter applies sprk_duedate→createdon fallback OR clause
- *  - Task 130 — THIS TASK
+ *  - Task 130 — view-selector removed; pending/applied filter pattern; Type+Status filters
+ *  - Task 033b — DataGrid framework migration (THIS REWRITE)
  *
- * Integration seam (operator decision, Round 9 Q&A 2026-05-22):
- *   Event detail opens as a MODAL via `Xrm.Navigation.navigateTo(
- *     { pageType: "entityrecord", entityName, entityId },
- *     { target: 2, width/height: 80% }
- *   )` — NOT via `Xrm.App.sidePanes`. Mirrors the Documents Expand
- *   affordance from task 111 (consistent SpaarkeAi modal-detail UX).
+ * Integration seam (preserved): Event detail opens as a MODAL via
+ * `Xrm.Navigation.navigateTo({pageType: "entityrecord", entityName, entityId},
+ * { target: 2, width/height: 80% })`. Mirrors the Documents Expand affordance
+ * from task 111.
  *
- * CLAUDE.md §10 (BFF Hygiene): ZERO new BFF endpoints. All Dataverse
- * access flows through `Xrm.WebApi.retrieveMultipleRecords` (ADR-028)
- * and GridSection's existing OData fallback path.
+ * CLAUDE.md §10 (BFF Hygiene): ZERO new BFF endpoints. All Dataverse access
+ * flows through the DataGrid's XrmDataverseClient (which uses Xrm.WebApi per
+ * ADR-028). Event-type options still fetched via Xrm.WebApi.retrieveMultipleRecords
+ * for the filter row dropdown.
  *
- * ADR-021 (Fluent v9 tokens), ADR-022 (React 19), ADR-028 (Xrm.WebApi
- * for metadata).
+ * ADR-021 (Fluent v9 tokens), ADR-022 (React-16-safe consumption — the widget
+ * runs in React 18 via the legal-workspace shell but uses no React-18-only APIs),
+ * ADR-028 (Xrm.WebApi for metadata).
  *
+ * @see src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx
+ * @see src/client/shared/Spaarke.UI.Components/src/components/DataGrid/fetchXmlOverlay.ts (overlayHostFilters)
  * @see src/client/shared/Spaarke.Events.Components/src/context/EventsPageContext.tsx
  * @see src/client/shared/Spaarke.Events.Components/src/components/CalendarSection/CalendarSection.tsx
- * @see src/client/shared/Spaarke.Events.Components/src/components/GridSection/GridSection.tsx
- * @see src/client/shared/Spaarke.Events.Components/src/components/RecordTypeFilter/RecordTypeFilter.tsx (sprk_eventtype fetch pattern)
- * @see src/solutions/EventsPage/src/App.tsx (the standalone composition this widget mirrors — keeps its own view dropdown)
+ * @see src/solutions/EventsPage/src/App.tsx (the standalone EventsPage rewrite — task 031)
+ * @see projects/spaarke-datagrid-framework-r1/notes/drafts/033-widget-owner-signoff.md
+ * @see projects/spaarke-datagrid-framework-r1/notes/drafts/033a-deviations.md
+ * @see projects/spaarke-datagrid-framework-r1/notes/drafts/033b-deviations.md
  */
 
 import * as React from 'react';
@@ -76,45 +98,45 @@ import {
   Option,
   Input,
   Label,
-  Toolbar,
-  ToolbarButton,
-  ToolbarDivider,
   Button,
   Tooltip,
 } from '@fluentui/react-components';
 import {
-  Add24Regular,
-  Delete24Regular,
-  ArrowClockwise24Regular,
-  CalendarLtr24Regular,
-  CheckmarkCircle24Regular,
-  Dismiss24Regular,
-  DismissCircle24Regular,
-  Pause24Regular,
-  Archive24Regular,
   ChevronLeft20Regular,
   ChevronRight20Regular,
   CaretUp24Regular,
   CaretDown24Regular,
-  Open24Regular,
 } from '@fluentui/react-icons';
 
 import { EventsPageProvider, useEventsPageContext } from '../../context/EventsPageContext';
 import { CalendarSection } from '../../components/CalendarSection/CalendarSection';
 import type { IEventDateInfo } from '../../components/CalendarSection/CalendarSection';
-import { GridSection } from '../../components/GridSection/GridSection';
-import type { IEventRecord } from '../../components/GridSection/GridSection';
 import { addMonths, startOfMonth } from '../../utils/dateMath';
 
+// Cross-package SOURCE imports. Deep paths (not the @spaarke/ui-components
+// package root) so we don't pull the PCF-framework-dependent surface
+// (UniversalDatasetGrid, useDatasetMode, SprkChat, etc.) into events-components's
+// tsc check — events-components has no ComponentFramework types installed.
+// See task 033b deviations doc for rationale.
+import { DataGrid, type HostFilterCondition } from '../../../../Spaarke.UI.Components/src/components/DataGrid';
+import { XrmDataverseClient } from '../../../../Spaarke.UI.Components/src/services/XrmDataverseClient';
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Xrm typing — host-provided global
+// Configuration — the sprk_gridconfiguration record id that drives the grid.
+// Authored in DEV by task 030 (Phase D anchor). Same record drives EventsPage.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const EVENT_CONFIG_ID = 'e15c2b93-a05f-f111-a825-70a8a59455f4';
+const EVENT_ENTITY_NAME = 'sprk_event';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Xrm typing — host-provided global (kept for the event-type options fetch
+// and the event-detail modal navigation in the outer widget).
 // ─────────────────────────────────────────────────────────────────────────────
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 declare const Xrm: any;
 /* eslint-enable @typescript-eslint/no-explicit-any */
-
-const EVENT_ENTITY_NAME = 'sprk_event';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Event status values (mirror sprk_event_ribbon_commands.js — task 115)
@@ -131,16 +153,9 @@ const EventStatus = {
   ARCHIVED: 7,
 } as const;
 
-const StateCode = {
-  ACTIVE: 0,
-  INACTIVE: 1,
-} as const;
-
 // ─────────────────────────────────────────────────────────────────────────────
-// Event Status options (Task 130) — mirrors STATUS_FILTER_OPTIONS in
-// GridSection. Hard-coded because sprk_eventstatus is an integer field with
-// no Dataverse choice metadata attached (the formatted-value labels come
-// from the per-row OData annotation).
+// Event Status options (Task 130) — hard-coded because sprk_eventstatus is an
+// integer field with no Dataverse choice metadata attached.
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface IStatusOption {
@@ -163,7 +178,7 @@ const STATUS_OPTIONS: IStatusOption[] = [
 // Date-range filter options (Task 130 — adds "(none)" sentinel)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const DATE_FIELD_NONE = '' as const; // sentinel for "no date filter"
+const DATE_FIELD_NONE = '' as const;
 
 const DATE_FIELDS = [
   { value: DATE_FIELD_NONE, label: '(none)' },
@@ -212,29 +227,14 @@ function computeMonthsForWidth(widthPx: number): number {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Pending-vs-applied state model (Task 130)
+// Pending-vs-applied state model (Task 130 — preserved as-is per Q2 sign-off)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Filter row state — both the in-flight "pending" set (what the user is
- * editing) and the "applied" set (what the grid + calendar consume).
- *
- * Day-cell clicks BYPASS this state machine and dispatch directly through
- * EventsPageContext.setCalendarFilter (operator: "day click applies
- * immediately"). The selectedDate state in the layout is independent of
- * `applied` so a user can click a day with no filter row activity, and
- * still see the Clear button.
- */
 interface ICalendarFilterSet {
-  /** Date-field selector. Empty string ("(none)") = no date filter applied. */
   dateField: string;
-  /** Lower bound for the date filter (YYYY-MM-DD). Empty = no lower bound. */
   fromDate: string;
-  /** Upper bound for the date filter (YYYY-MM-DD). Empty = no upper bound. */
   toDate: string;
-  /** sprk_eventtype lookup GUID. null = all event types. */
   eventTypeId: string | null;
-  /** sprk_eventstatus numeric value (0-7). null = all statuses. */
   eventStatusValue: number | null;
 }
 
@@ -261,13 +261,11 @@ function filterSetIsEmpty(s: ICalendarFilterSet): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Event-type option fetched from sprk_eventtype records
+// Event-type option fetched from sprk_eventtype_ref records (task 131)
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface IEventTypeOption {
-  /** sprk_eventtypeid GUID (used as OData filter value via _sprk_eventtype_ref_value). */
   id: string;
-  /** sprk_name (display label). */
   name: string;
 }
 
@@ -280,9 +278,6 @@ export interface CalendarWorkspaceWidgetProps {
    * Optional override for the default date field. Default: `""` (no date
    * filter — the operator's task-130 directive: "the Filter by Date Field
    * needs to have a blank value").
-   *
-   * Backward compatibility: callers that passed `"sprk_duedate"` (the
-   * pre-task-130 default) will still get that behavior on initial mount.
    */
   initialDateField?: string;
   /**
@@ -293,7 +288,7 @@ export interface CalendarWorkspaceWidgetProps {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Styles
+// Styles — preserved from task 130; toolbar styles removed (task 033b Q1).
 // ─────────────────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
@@ -313,76 +308,28 @@ const useStyles = makeStyles({
       display: 'none',
     },
   },
-  // Task 138 (R13 follow-up #17, 2026-05-24): operator confirmed via
-  // DevTools that the gap CSS is being emitted but is much narrower
-  // than 28px configured. Griffel's `gap` shorthand isn't emitting the
-  // column-gap value reliably in this stack across tasks 134-137.
-  // Falling back to explicit `marginRight` on each field — old-school
-  // CSS that works regardless of any Griffel atomic-CSS quirks.
-  //
-  // The row gap (row-gap when fields wrap) still uses Griffel's
-  // shorthands.gap single-arg form (vertical-only, which Griffel
-  // handles reliably).
   dateRangeRow: {
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'flex-end',
     flexWrap: 'wrap',
     rowGap: '12px',
-    ...shorthands.padding('8px', '12px'),
+    flexShrink: 0,
+    ...shorthands.padding('4px', '4px', '8px', '4px'),
     ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
-  },
-  // Task 137: action group uses `margin-left: auto` to right-align
-  // without disrupting flex-wrap.
-  filterActions: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    ...shorthands.gap('8px'),
-    flex: '0 0 auto',
-    marginLeft: 'auto',
   },
   dateRangeField: {
     display: 'flex',
     flexDirection: 'column',
-    ...shorthands.gap('4px'),
-    flex: '0 0 140px',
-    minWidth: '0',
-    // Task 140 (R13 follow-up #19, 2026-05-24): operator confirmed via
-    // DOM inspection that style="margin-right:28px" IS on each field
-    // div, but Fluent v9 Dropdown's intrinsic `min-width` (one of its
-    // 47 atomic classes sets it to ~240px) was OVERFLOWING the 140px
-    // field box, painting OVER the 28px margin-right space. The
-    // visible "no gap" was actually the Dropdown of field N occluding
-    // the margin between field N and field N+1.
-    //
-    // Fix: descendant selector overrides Fluent's min-width on both
-    // the .fui-Dropdown wrapper and .fui-Input wrapper inside this
-    // field, forcing them to fit the 140px field box.
-    '> .fui-Dropdown': {
-      minWidth: '0',
-      width: '100%',
-    },
-    '> .fui-Input': {
-      minWidth: '0',
-      width: '100%',
-    },
+    flex: '1 0 140px',
+    minWidth: '140px',
   },
   dateRangeLabel: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
+    marginBottom: '4px',
   },
-  filterRowSpacer: {
-    flex: '1 1 auto',
-  },
-  collapseToggleSlot: {
-    display: 'flex',
-    alignItems: 'flex-end',
-    flexShrink: 0,
-  },
-  // Task 122/130: container for the Apply + Clear buttons. Bottom-aligned
-  // so they sit flush with the filter inputs.
-  filterButtonsSlot: {
+  filterActions: {
     display: 'flex',
     alignItems: 'flex-end',
     flexShrink: 0,
@@ -409,20 +356,6 @@ const useStyles = makeStyles({
     alignSelf: 'center',
     flexShrink: 0,
   },
-  toolbarRow: {
-    flexShrink: 0,
-    display: 'flex',
-    alignItems: 'center',
-    marginTop: tokens.spacingVerticalL,
-    ...shorthands.padding('0', '4px'),
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
-  },
-  toolbarRowSpacer: {
-    flex: '1 1 auto',
-  },
-  // Task 130: view-selector row removed entirely. The widget no longer
-  // hosts a ViewSelectorDropdown — the grid queries via GridSection's
-  // OData fallback path. EventsPage standalone keeps its own dropdown.
   gridContainer: {
     flex: '1 1 auto',
     display: 'flex',
@@ -433,7 +366,8 @@ const useStyles = makeStyles({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Xrm context resolution + bulk-action helpers (mirror EventsPage App.tsx)
+// Xrm context resolution — kept for the event-type options fetch + the
+// event-detail modal navigation in the outer widget shell.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function getXrm(): typeof Xrm | null {
@@ -450,76 +384,17 @@ function getXrm(): typeof Xrm | null {
   return null;
 }
 
-async function bulkStatusUpdate(
-  ids: string[],
-  newStatus: number,
-  label: string,
-  extra?: Record<string, unknown>
-): Promise<boolean> {
-  const xrm = getXrm();
-  if (!xrm?.WebApi) return false;
-  const clean = ids.map(id => id.replace(/[{}]/g, ''));
-  const payload: Record<string, unknown> = { sprk_eventstatus: newStatus, ...extra };
-  try {
-    await Promise.all(clean.map(id => xrm.WebApi.updateRecord(EVENT_ENTITY_NAME, id, payload)));
-    xrm.App?.addGlobalNotification?.({
-      type: 2,
-      level: 1,
-      message: `${ids.length} event(s) set to ${label}`,
-      showCloseButton: true,
-    });
-    return true;
-  } catch (e) {
-    console.error('[CalendarWidget] Bulk status update failed:', e);
-    return false;
-  }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Date helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
-async function bulkArchive(ids: string[]): Promise<boolean> {
-  const xrm = getXrm();
-  if (!xrm?.WebApi) return false;
-  const clean = ids.map(id => id.replace(/[{}]/g, ''));
-  try {
-    await Promise.all(
-      clean.map(async id => {
-        await xrm.WebApi.updateRecord(EVENT_ENTITY_NAME, id, {
-          sprk_eventstatus: EventStatus.ARCHIVED,
-        });
-        await xrm.WebApi.updateRecord(EVENT_ENTITY_NAME, id, {
-          statecode: StateCode.INACTIVE,
-          statuscode: 2,
-        });
-      })
-    );
-    xrm.App?.addGlobalNotification?.({
-      type: 2,
-      level: 1,
-      message: `${ids.length} event(s) archived`,
-      showCloseButton: true,
-    });
-    return true;
-  } catch (e) {
-    console.error('[CalendarWidget] Bulk archive failed:', e);
-    return false;
-  }
-}
-
-async function confirmDialog(title: string, text: string, confirmLabel: string): Promise<boolean> {
-  const xrm = getXrm();
-  if (xrm?.Navigation?.openConfirmDialog) {
-    const result = await xrm.Navigation.openConfirmDialog({
-      title,
-      text,
-      confirmButtonLabel: confirmLabel,
-      cancelButtonLabel: 'Cancel',
-    });
-    return !!result?.confirmed;
-  }
-  return window.confirm(text);
+function toIsoDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Inner layout — consumes EventsPageContext
+// Inner layout — consumes EventsPageContext (Q4 — provider kept so eventDates
+// flow continues to drive the calendar strip's dot indicators).
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface ICalendarWorkspaceLayoutProps {
@@ -528,17 +403,12 @@ interface ICalendarWorkspaceLayoutProps {
 
 const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ initialDateField }) => {
   const styles = useStyles();
-  const {
-    filters,
-    eventDates,
-    refreshTrigger,
-    setCalendarFilter,
-    setStatusFilter,
-    setRecordTypeFilter,
-    setEventDates,
-    openEvent,
-    refreshGrid,
-  } = useEventsPageContext();
+  // eventDates: derived from records via handleRecordsLoaded → setEventDates.
+  // refreshTrigger: bumped externally to remount the grid (manual refresh).
+  // setCalendarFilter/setRecordTypeFilter/setStatusFilter are NO LONGER USED
+  //   by the grid pipeline (task 033b Q2 — hostFilters replaces the dispatch
+  //   loop). The methods remain on context for any external integrations.
+  const { eventDates, refreshTrigger, setEventDates } = useEventsPageContext();
 
   // ── Calendar strip state (task 116) ──────────────────────────────────────
   const [viewDate, setViewDate] = React.useState<Date>(() => startOfMonth(new Date()));
@@ -574,24 +444,23 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
   }, []);
 
   // ── Day-cell selection (task 118) ────────────────────────────────────────
-  // Day-click bypasses the pending/applied state machine (operator
-  // directive in task 130: "day click applies immediately").
+  // Day-click bypasses pending/applied; selectedDate drives a one-day
+  // hostFilter directly in the useMemo below.
   const [selectedDate, setSelectedDate] = React.useState<Date | null>(null);
 
   // ── Event-day derivation (task 120) ──────────────────────────────────────
-  // See task 120/121/124/127 history in the file header. Unchanged in task 130.
   const lastAutoAnchorSignatureRef = React.useRef<string | null>(null);
 
   const handleRecordsLoaded = React.useCallback(
-    (records: IEventRecord[]) => {
+    (records: ReadonlyArray<Record<string, unknown>>) => {
       const counts = new Map<string, number>();
       const eventDateObjects: Date[] = [];
       for (const r of records) {
-        const dateStr = r.sprk_duedate || (r as unknown as { createdon?: string }).createdon;
+        const dateStr = (r.sprk_duedate as string | undefined) || (r.createdon as string | undefined);
         if (!dateStr) continue;
         const d = new Date(dateStr);
         if (Number.isNaN(d.getTime())) continue;
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const key = toIsoDate(d);
         counts.set(key, (counts.get(key) ?? 0) + 1);
         eventDateObjects.push(d);
       }
@@ -620,9 +489,6 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
   );
 
   // ── Event-type options (Task 130) ────────────────────────────────────────
-  // Fetched once at mount from `sprk_eventtype` records. Pattern mirrors
-  // RecordTypeFilter.tsx (lines 149-192). console.warn + empty fallback on
-  // failure — widget still renders with only the "All" option.
   const [eventTypeOptions, setEventTypeOptions] = React.useState<IEventTypeOption[]>([]);
 
   React.useEffect(() => {
@@ -636,12 +502,10 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
       }
       try {
         // Task 131 (R13 follow-up #10, 2026-05-23): operator confirmed the
-        // correct schema names. The Event Type LOOKUP TABLE is
-        // `sprk_eventtype_ref` (NOT `sprk_eventtype`); its GUID column is
-        // `sprk_eventtype_refid`; the lookup FIELD on sprk_event is also
-        // `sprk_eventtype_ref` (resolved via the OData annotated value
-        // `_sprk_eventtype_ref_value` in GridSection's filter). Task 130
-        // used `sprk_eventtype` which produced 0 records → blank dropdown.
+        // correct schema. Event Type LOOKUP TABLE = sprk_eventtype_ref; the
+        // GUID column = sprk_eventtype_refid; the lookup FIELD on sprk_event
+        // is also sprk_eventtype_ref (resolved via the OData annotated value
+        // `_sprk_eventtype_ref_value`).
         const result = await xrm.WebApi.retrieveMultipleRecords(
           'sprk_eventtype_ref',
           '?$select=sprk_eventtype_refid,sprk_name' +
@@ -670,13 +534,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
     };
   }, []);
 
-  // ── Pending vs applied filter state (Task 130) ───────────────────────────
-  // `pending` holds in-flight edits from the filter row controls.
-  // `applied` is what the grid + calendar consume. Apply copies pending →
-  // applied AND dispatches the resulting filters through EventsPageContext.
-  // Clear resets BOTH to EMPTY_FILTER_SET and clears selectedDate, and
-  // dispatches the clear through context. Initial dateField honors the
-  // `initialDateField` prop (default `""` = no date filter per task 130).
+  // ── Pending vs applied filter state (Task 130 — preserved per Q2) ────────
   const initialFilterSet: ICalendarFilterSet = React.useMemo(
     () => ({
       ...EMPTY_FILTER_SET,
@@ -691,56 +549,66 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
   const hasUnapplied = !filterSetsEqual(pending, applied);
   const hasAnyApplied = !filterSetIsEmpty(applied) || selectedDate !== null;
 
-  // Dispatch the applied filter set through EventsPageContext on every
-  // change. GridSection consumes filters.calendarFilter, filters.recordType,
-  // filters.statusCodes — these are the three knobs we need.
-  React.useEffect(() => {
-    // Date filter — only dispatch if dateField is set (not "(none)") AND
-    // at least one bound is provided. Otherwise CLEAR the calendar filter
-    // so the grid returns all events. Day-click via onDaySelect bypasses
-    // this effect by NOT updating `applied` (it dispatches directly).
-    if (applied.dateField && applied.dateField !== DATE_FIELD_NONE) {
-      if (applied.fromDate && applied.toDate) {
-        setCalendarFilter({
-          type: 'range',
-          start: applied.fromDate,
-          end: applied.toDate,
-          dateFields: [applied.dateField],
-        });
-      } else if (applied.fromDate) {
-        setCalendarFilter({
-          type: 'single',
-          date: applied.fromDate,
-          dateFields: [applied.dateField],
-        });
-      } else if (applied.toDate) {
-        // Only `to` provided — treat as single date for symmetry with
-        // the original single-input behavior.
-        setCalendarFilter({
-          type: 'single',
-          date: applied.toDate,
-          dateFields: [applied.dateField],
-        });
-      } else {
-        // dateField set but no bounds → no date filter.
-        // Don't clobber a day-click selection: only clear when there's
-        // no selectedDate either.
-        if (!selectedDate) setCalendarFilter({ type: 'clear' });
-      }
-    } else {
-      // dateField is "(none)" — clear the calendar filter, but don't
-      // clobber an active day-click selection.
-      if (!selectedDate) setCalendarFilter({ type: 'clear' });
+  // ── hostFilters useMemo (Task 033b — the rewire) ─────────────────────────
+  // Map applied + selectedDate to a flat HostFilterCondition[] (task 033a API).
+  // selectedDate (day-click) takes precedence over the filter row's range
+  // when both are present — the original divergence effect handled this by
+  // clearing selectedDate when range fired; here we express the priority
+  // directly so there's only one source of truth.
+  const hostFilters = React.useMemo<HostFilterCondition[]>(() => {
+    const conditions: HostFilterCondition[] = [];
+
+    if (applied.eventTypeId) {
+      conditions.push({
+        attribute: 'sprk_eventtype_ref',
+        operator: 'eq',
+        value: applied.eventTypeId,
+      });
     }
 
-    // Type filter — dispatch through setRecordTypeFilter (single value).
-    setRecordTypeFilter(applied.eventTypeId);
+    if (applied.eventStatusValue !== null) {
+      conditions.push({
+        attribute: 'sprk_eventstatus',
+        operator: 'eq',
+        value: applied.eventStatusValue,
+      });
+    }
 
-    // Status filter — dispatch through setStatusFilter (array of numbers
-    // for shape compatibility; single-select per task-130 spec → length 0
-    // or 1).
-    setStatusFilter(applied.eventStatusValue !== null ? [applied.eventStatusValue] : []);
-  }, [applied, selectedDate, setCalendarFilter, setRecordTypeFilter, setStatusFilter]);
+    // Date filter: selectedDate wins if set; otherwise fall through to the
+    // applied dateField / from / to range. dateField "(none)" → no date filter.
+    if (selectedDate) {
+      const iso = toIsoDate(selectedDate);
+      const effectiveDateField =
+        applied.dateField && applied.dateField !== DATE_FIELD_NONE ? applied.dateField : 'sprk_duedate';
+      conditions.push({
+        attribute: effectiveDateField,
+        operator: 'on',
+        value: iso,
+      });
+    } else if (applied.dateField && applied.dateField !== DATE_FIELD_NONE) {
+      if (applied.fromDate && applied.toDate) {
+        conditions.push({
+          attribute: applied.dateField,
+          operator: 'between',
+          value: [applied.fromDate, applied.toDate],
+        });
+      } else if (applied.fromDate) {
+        conditions.push({
+          attribute: applied.dateField,
+          operator: 'on-or-after',
+          value: applied.fromDate,
+        });
+      } else if (applied.toDate) {
+        conditions.push({
+          attribute: applied.dateField,
+          operator: 'on-or-before',
+          value: applied.toDate,
+        });
+      }
+    }
+
+    return conditions;
+  }, [applied, selectedDate]);
 
   // ── Apply + Clear handlers ───────────────────────────────────────────────
   const onApply = React.useCallback(() => {
@@ -751,161 +619,13 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
     setPending(EMPTY_FILTER_SET);
     setApplied(EMPTY_FILTER_SET);
     setSelectedDate(null);
-    setCalendarFilter({ type: 'clear' });
-  }, [setCalendarFilter]);
-
-  // ── Selection state (driven by GridSection) ──────────────────────────────
-  const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
-
-  // ── Toolbar handlers ─────────────────────────────────────────────────────
-  const hasSelection = selectedIds.length > 0;
-
-  const onNew = React.useCallback(() => {
-    const xrm = getXrm();
-    if (!xrm?.Navigation?.openForm) return;
-    xrm.Navigation.openForm({ entityName: EVENT_ENTITY_NAME });
   }, []);
 
-  const onDelete = React.useCallback(async () => {
-    if (!hasSelection) return;
-    const ok = await confirmDialog('Delete Events', `Delete ${selectedIds.length} event(s)?`, 'Delete');
-    if (!ok) return;
-    const xrm = getXrm();
-    if (!xrm?.WebApi) return;
-    try {
-      await Promise.all(
-        selectedIds.map(id => id.replace(/[{}]/g, '')).map(id => xrm.WebApi.deleteRecord(EVENT_ENTITY_NAME, id))
-      );
-      refreshGrid();
-    } catch (e) {
-      console.error('[CalendarWidget] Delete failed:', e);
-    }
-  }, [hasSelection, selectedIds, refreshGrid]);
-
-  const onComplete = React.useCallback(async () => {
-    if (!hasSelection) return;
-    const ok = await confirmDialog('Complete Events', `Mark ${selectedIds.length} event(s) as complete?`, 'Complete');
-    if (!ok) return;
-    await bulkStatusUpdate(selectedIds, EventStatus.COMPLETED, 'Completed', {
-      sprk_completeddate: new Date().toISOString(),
-    });
-    refreshGrid();
-  }, [hasSelection, selectedIds, refreshGrid]);
-
-  const onClose = React.useCallback(async () => {
-    if (!hasSelection) return;
-    const ok = await confirmDialog('Close Events', `Close ${selectedIds.length} event(s) without action?`, 'Close');
-    if (!ok) return;
-    await bulkStatusUpdate(selectedIds, EventStatus.CLOSED, 'Closed');
-    refreshGrid();
-  }, [hasSelection, selectedIds, refreshGrid]);
-
-  const onCancel = React.useCallback(async () => {
-    if (!hasSelection) return;
-    const ok = await confirmDialog('Cancel Events', `Cancel ${selectedIds.length} event(s)?`, 'Cancel Events');
-    if (!ok) return;
-    await bulkStatusUpdate(selectedIds, EventStatus.CANCELLED, 'Cancelled');
-    refreshGrid();
-  }, [hasSelection, selectedIds, refreshGrid]);
-
-  const onOnHold = React.useCallback(async () => {
-    if (!hasSelection) return;
-    const ok = await confirmDialog('Put Events On Hold', `Put ${selectedIds.length} event(s) on hold?`, 'Put On Hold');
-    if (!ok) return;
-    await bulkStatusUpdate(selectedIds, EventStatus.ON_HOLD, 'On Hold');
-    refreshGrid();
-  }, [hasSelection, selectedIds, refreshGrid]);
-
-  const onArchive = React.useCallback(async () => {
-    if (!hasSelection) return;
-    const ok = await confirmDialog(
-      'Archive Events',
-      `Archive ${selectedIds.length} event(s)? This will hide them from active views.`,
-      'Archive'
-    );
-    if (!ok) return;
-    await bulkArchive(selectedIds);
-    refreshGrid();
-  }, [hasSelection, selectedIds, refreshGrid]);
-
-  const onRefresh = React.useCallback(() => {
-    refreshGrid();
-  }, [refreshGrid]);
-
-  // The toolbar "Calendar" button is now a soft-clear: it deselects the
-  // calendar-day filter only. Filter-row state (Type/Status/dateField) is
-  // unaffected — to clear those, use the filter row's Clear button.
-  const onCalendarToolbarClick = React.useCallback(() => {
-    setSelectedDate(null);
-    setCalendarFilter({ type: 'clear' });
-  }, [setCalendarFilter]);
-
-  // ── Day-cell click handler (task 118 — preserved in task 130) ────────────
-  // Bypasses pending/applied: dispatches the calendar filter IMMEDIATELY.
-  // Uses the applied dateField if set, otherwise sprk_duedate as a sensible
-  // default for the "no filter row date field selected" case.
-  const onDaySelect = React.useCallback(
-    (date: Date | null) => {
-      setSelectedDate(date);
-      if (date === null) {
-        setCalendarFilter({ type: 'clear' });
-        return;
-      }
-      const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-      const effectiveDateField =
-        applied.dateField && applied.dateField !== DATE_FIELD_NONE ? applied.dateField : 'sprk_duedate';
-      setCalendarFilter({
-        type: 'range',
-        start: iso,
-        end: iso,
-        dateFields: [effectiveDateField],
-      });
-    },
-    [setCalendarFilter, applied.dateField]
-  );
-
-  // ── Filter-divergence effect (task 118 — preserved) ──────────────────────
-  // If the calendar filter state in context diverges from the local
-  // selectedDate (e.g. because the applied dispatch overwrote the day-
-  // selection), clear selectedDate so the highlight doesn't lie.
-  React.useEffect(() => {
-    if (!selectedDate) return;
-    const cf = filters.calendarFilter;
-    if (!cf || cf.type === 'clear') {
-      setSelectedDate(null);
-      return;
-    }
-    if (cf.type === 'single') {
-      const iso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-      if (cf.date !== iso) setSelectedDate(null);
-      return;
-    }
-    if (cf.type === 'range') {
-      const iso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-      if (cf.start !== iso || cf.end !== iso) setSelectedDate(null);
-    }
-  }, [filters.calendarFilter, selectedDate]);
-
-  // ── Grid "open in full" (task 118) ───────────────────────────────────────
-  const onOpenEventsList = React.useCallback(() => {
-    const xrm = getXrm();
-    if (!xrm?.Navigation?.navigateTo) {
-      console.warn('[CalendarWidget] Xrm.Navigation.navigateTo unavailable; cannot open entitylist modal.');
-      return;
-    }
-    try {
-      xrm.Navigation.navigateTo(
-        { pageType: 'entitylist', entityName: EVENT_ENTITY_NAME },
-        {
-          target: 2,
-          width: { value: 80, unit: '%' },
-          height: { value: 80, unit: '%' },
-          position: 1,
-        }
-      );
-    } catch (e) {
-      console.error('[CalendarWidget] Failed to open entitylist modal:', e);
-    }
+  // ── Day-cell click handler (task 118 — preserved) ────────────────────────
+  // Updates only selectedDate; hostFilters useMemo recomputes and the
+  // grid re-fetches.
+  const onDaySelect = React.useCallback((date: Date | null) => {
+    setSelectedDate(date);
   }, []);
 
   // ── Month navigation handlers (task 116) ─────────────────────────────────
@@ -940,19 +660,28 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
     return STATUS_OPTIONS.find(s => s.value === pending.eventStatusValue)?.label ?? 'All';
   }, [pending.eventStatusValue]);
 
+  // ── DataGrid wiring ──────────────────────────────────────────────────────
+  // Stable XrmDataverseClient instance for the lifetime of the layout.
+  const dataverseClientRef = React.useRef<XrmDataverseClient | null>(null);
+  if (!dataverseClientRef.current) {
+    dataverseClientRef.current = new XrmDataverseClient();
+  }
+
+  // onRecordOpen — bridges DataGrid row-click to the outer widget's
+  // event-modal navigation. Routed through context for parity with the
+  // existing `openEvent` consumer hook signature (1-arg).
+  const { openEvent } = useEventsPageContext();
+  const onRecordOpen = React.useCallback(
+    (recordId: string) => {
+      openEvent(recordId);
+    },
+    [openEvent]
+  );
+
   return (
     <div className={styles.root}>
-      {/* (1) Filter row — Task 136 (R13 follow-up #15, 2026-05-23):
-              flattened to a single flex row. All 7 items (5 fields +
-              1 action group) wrap together as siblings. Each field
-              uses `flex: 1 0 140px` so when the row narrows below
-              ~770px (5 × 140px + 4 × 24px gap + ~50px actions), the
-              entire group wraps cleanly to multiple lines without
-              the actions floating separately. Order preserved from
-              task 131: Event Type → Event Status → Filter by Date
-              Field → From → To → Apply → Clear → Chevron. */}
+      {/* (1) Filter row — preserved AS-IS from task 130/136 per Q2 sign-off. */}
       <div className={styles.dateRangeRow}>
-        {/* Task 131: Event Type. Fetched from sprk_eventtype_ref records. */}
         <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
           <Label className={styles.dateRangeLabel}>Event Type</Label>
           <Dropdown
@@ -976,7 +705,6 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
             ))}
           </Dropdown>
         </div>
-        {/* Task 131: Event Status — second. Task 134: CSS Grid sizing. */}
         <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
           <Label className={styles.dateRangeLabel}>Event Status</Label>
           <Dropdown
@@ -1000,7 +728,6 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
             ))}
           </Dropdown>
         </div>
-        {/* Task 131: Filter by Date Field — third. Task 134: CSS Grid sizing. */}
         <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
           <Label className={styles.dateRangeLabel}>Filter by Date Field</Label>
           <Dropdown
@@ -1018,7 +745,6 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
             ))}
           </Dropdown>
         </div>
-        {/* Task 131: From — fourth. */}
         <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
           <Label className={styles.dateRangeLabel}>From</Label>
           <Input
@@ -1027,7 +753,6 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
             onChange={(_e, data) => setPending(prev => ({ ...prev, fromDate: data.value }))}
           />
         </div>
-        {/* Task 131: To — fifth. */}
         <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
           <Label className={styles.dateRangeLabel}>To</Label>
           <Input
@@ -1036,10 +761,6 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
             onChange={(_e, data) => setPending(prev => ({ ...prev, toDate: data.value }))}
           />
         </div>
-        {/* Task 136: action group — Apply + Clear + collapse chevron.
-            Now a sibling flex item of the 5 fields. When the parent
-            row's flex-wrap kicks in, this whole group moves to a new
-            line as one block (Apply + Clear + chevron stay together). */}
         <div className={styles.filterActions}>
           {hasUnapplied && (
             <Button appearance="primary" size="small" onClick={onApply} aria-label="Apply filters">
@@ -1063,7 +784,8 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
         </div>
       </div>
 
-      {/* (2) Calendar strip (unchanged in task 130) */}
+      {/* (2) Calendar strip — preserved unchanged. eventDates flow comes from
+              handleRecordsLoaded → setEventDates → context.eventDates. */}
       {!calendarCollapsed && (
         <div className={styles.calendarRow}>
           <Tooltip content="Previous month (Shift+click: jump by window)" relationship="label">
@@ -1078,7 +800,13 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
           <div ref={stripRef} className={styles.calendarStrip}>
             <CalendarSection
               eventDates={eventDates as IEventDateInfo[]}
-              onFilterChange={filter => setCalendarFilter(filter)}
+              onFilterChange={() => {
+                /* No-op: calendar strip's onFilterChange was previously the
+                   day-click dispatch path through context. Day-click now flows
+                   through onSelectDate → setSelectedDate → hostFilters useMemo.
+                   This handler is kept on the CalendarSection prop surface for
+                   API stability but does nothing in the DataGrid-backed widget. */
+              }}
               viewDate={viewDate}
               monthsToShow={monthsToShow}
               layout="horizontal"
@@ -1098,76 +826,18 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
         </div>
       )}
 
-      {/* (3) EventsPage toolbar (unchanged in task 130) */}
-      <div className={styles.toolbarRow}>
-        <Toolbar size="small">
-          <ToolbarButton icon={<Add24Regular />} appearance="subtle" onClick={onNew}>
-            New
-          </ToolbarButton>
-          <ToolbarDivider />
-          <ToolbarButton icon={<Delete24Regular />} appearance="subtle" onClick={onDelete} disabled={!hasSelection}>
-            Delete
-          </ToolbarButton>
-          <ToolbarDivider />
-          <ToolbarButton
-            icon={<CheckmarkCircle24Regular />}
-            appearance="subtle"
-            onClick={onComplete}
-            disabled={!hasSelection}
-          >
-            Complete
-          </ToolbarButton>
-          <ToolbarButton icon={<Dismiss24Regular />} appearance="subtle" onClick={onClose} disabled={!hasSelection}>
-            Close
-          </ToolbarButton>
-          <ToolbarButton
-            icon={<DismissCircle24Regular />}
-            appearance="subtle"
-            onClick={onCancel}
-            disabled={!hasSelection}
-          >
-            Cancel
-          </ToolbarButton>
-          <ToolbarButton icon={<Pause24Regular />} appearance="subtle" onClick={onOnHold} disabled={!hasSelection}>
-            On Hold
-          </ToolbarButton>
-          <ToolbarButton icon={<Archive24Regular />} appearance="subtle" onClick={onArchive} disabled={!hasSelection}>
-            Archive
-          </ToolbarButton>
-          <ToolbarDivider />
-          <ToolbarButton icon={<ArrowClockwise24Regular />} appearance="subtle" onClick={onRefresh}>
-            Refresh
-          </ToolbarButton>
-          <ToolbarDivider />
-          <ToolbarButton icon={<CalendarLtr24Regular />} appearance="subtle" onClick={onCalendarToolbarClick}>
-            Calendar
-          </ToolbarButton>
-        </Toolbar>
-        <div className={styles.toolbarRowSpacer} />
-        <Tooltip content="Open Events list" relationship="label">
-          <Button
-            appearance="subtle"
-            icon={<Open24Regular />}
-            onClick={onOpenEventsList}
-            aria-label="Open Events list view"
-          />
-        </Tooltip>
-      </div>
-
-      {/* (4) Grid — task 130: no viewId prop; GridSection uses OData fallback
-              path. Filters flow via filters.calendarFilter +
-              filters.recordType + filters.statusCodes (dispatched by the
-              applied-state effect above). */}
+      {/* (3) Grid — task 033b: <DataGrid configId hostFilters
+              onRecordsLoaded onRecordOpen/>. The DataGrid's own command bar
+              (configjson commandBar.primary = +New / Delete / Refresh) handles
+              what the old widget toolbar did per Q1 sign-off. */}
       <div className={styles.gridContainer}>
-        <GridSection
-          calendarFilter={filters.calendarFilter}
-          assignedToFilter={filters.assignedToUserIds}
-          eventTypeFilter={filters.recordType ? [filters.recordType] : undefined}
-          statusFilter={filters.statusCodes}
-          onRowClick={openEvent}
-          onSelectionChange={setSelectedIds}
-          onRecordsLoaded={handleRecordsLoaded}
+        <DataGrid
           key={refreshTrigger}
+          configId={EVENT_CONFIG_ID}
+          dataverseClient={dataverseClientRef.current}
+          hostFilters={hostFilters}
+          onRecordsLoaded={handleRecordsLoaded}
+          onRecordOpen={onRecordOpen}
         />
       </div>
     </div>
@@ -1175,13 +845,10 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Top-level widget component — provides the EventsPageProvider
+// Top-level widget component — provides EventsPageProvider (Q4 sign-off)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const CalendarWorkspaceWidget: React.FC<CalendarWorkspaceWidgetProps> = ({
-  // Task 130: default to "" ("(none)") per operator: "the Filter by Date
-  // Field needs to have a blank value". Callers can still opt into a
-  // specific field by passing initialDateField explicitly.
   initialDateField = '',
 }) => {
   const handleOpenEvent = React.useCallback((eventId: string, _eventTypeId?: string) => {
