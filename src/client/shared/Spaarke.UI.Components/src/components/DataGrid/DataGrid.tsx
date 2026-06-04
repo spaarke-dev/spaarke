@@ -57,7 +57,7 @@ import {
 import { dataGridTokens } from './tokens';
 import { resolveConfig, type DataGridOverrides, type ResolvedConfig, type ResolvedColumn } from './configResolution';
 import { useLazyLoad } from './useLazyLoad';
-import { overlayParentContextFilter } from './fetchXmlOverlay';
+import { overlayParentContextFilter, overlayHostFilters, type HostFilterCondition } from './fetchXmlOverlay';
 import { CommandBar as DataGridCommandBar } from './commandBar/CommandBar';
 import {
   discoverChips,
@@ -104,6 +104,34 @@ export interface DataGridProps {
 
   /** OPTIONAL — drill-through context (e.g., current Matter on form embed). */
   parentContext?: DataGridParentContext;
+
+  /**
+   * OPTIONAL — host-injected FetchXML conditions overlaid onto the resolved query.
+   *
+   * Permanent third composition layer (after savedquery base + parent-context overlay,
+   * before chip augmentation). Designed for hosts that own their own filter UI (e.g.
+   * the SpaarkeAi Calendar workspace widget's filter row) and need to translate that
+   * state into FetchXML at runtime without writing it to a savedquery.
+   *
+   * For stability across re-renders, pass a memoized array (e.g. `useMemo`); the
+   * framework re-runs the composition pipeline when this prop's identity changes.
+   *
+   * See {@link HostFilterCondition} for the value shape + supported operators.
+   */
+  hostFilters?: ReadonlyArray<HostFilterCondition>;
+
+  /**
+   * OPTIONAL — fires every time `useLazyLoad` resolves a fresh records page.
+   *
+   * Receives the full accumulated records array (page 1 ∪ page 2 ∪ ...), allowing
+   * the host to derive aggregate state (e.g. the Calendar widget's per-date event
+   * counts for its calendar strip dot indicators). Fires after every page fetch,
+   * including the initial load and any lazy "load more" page.
+   *
+   * Mirrors the legacy `GridSection.onRecordsLoaded` contract — host code that
+   * previously consumed `GridSection` can pass the same handler in.
+   */
+  onRecordsLoaded?: (records: ReadonlyArray<Record<string, unknown>>) => void;
 
   /** OPTIONAL — fires when the user clicks the primary-name link on a row. */
   onRecordOpen?: (recordId: string, record: Record<string, unknown>, ctx: DataGridHostContext) => void;
@@ -540,6 +568,8 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     configId,
     dataverseClient: dataverseClientProp,
     parentContext,
+    hostFilters,
+    onRecordsLoaded,
     onRecordOpen,
     onRecordAction: _onRecordAction,
     onCommandInvoke,
@@ -686,14 +716,18 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   }, [resolved, loadState.entityMetadata]);
 
   // Lazy load — only kicks off once we have entityName + fetchXml.
-  // FetchXML composition order: base savedQuery → parent-context overlay → chip
-  // augmentation. Each step is a pure string transform; identical inputs ⇒
-  // identical output (lazy-load reset detector relies on referential stability).
+  // FetchXML composition order: base savedQuery → parent-context overlay →
+  // host-filters overlay → chip augmentation. Each step is a pure string transform;
+  // identical inputs ⇒ identical output (lazy-load reset detector relies on
+  // referential stability).
   const fetchXml = React.useMemo(() => {
     let xml = loadState.savedQuery?.fetchXml ?? '';
     const parentFilter = resolved?.behavior?.parentContextFilter;
     if (xml && parentFilter) {
       xml = overlayParentContextFilter(xml, parentFilter, parentContext);
+    }
+    if (xml && hostFilters && hostFilters.length > 0) {
+      xml = overlayHostFilters(xml, hostFilters);
     }
     if (xml && chipDescriptors.length > 0) {
       xml = augmentFetchXmlWithChips(xml, chipDescriptors, chipState);
@@ -703,11 +737,12 @@ export const DataGrid: React.FC<DataGridProps> = props => {
       parentContext,
       parentFilter,
       hasParentFilterMatch: Boolean(parentFilter && parentContext?.[parentFilter.parentContextKey]),
+      hostFilterCount: hostFilters?.length ?? 0,
       chipStateKeys: Object.keys(chipState),
       fetchXml: xml,
     });
     return xml;
-  }, [loadState.savedQuery, resolved?.behavior?.parentContextFilter, parentContext, chipDescriptors, chipState]);
+  }, [loadState.savedQuery, resolved?.behavior?.parentContextFilter, parentContext, hostFilters, chipDescriptors, chipState]);
   const entityNameForLoad = resolved?.entityName ?? '';
   const pageSize = resolved?.behavior.pageSize ?? 100;
 
@@ -745,6 +780,20 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [hasMore, isLoadingRows, fetchNextPage]);
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Host hook: notify when the records page resolves (task 033a — used by the
+  // SpaarkeAi Calendar widget to derive per-date event counts for its calendar
+  // strip dot indicators). Fires every time `records` identity changes (initial
+  // load + each subsequent "load more" page). Intentionally does not gate on
+  // `isLoadingRows` — host code typically wants the latest accumulated array
+  // even mid-pagination.
+  // ───────────────────────────────────────────────────────────────────────────
+  React.useEffect(() => {
+    if (typeof onRecordsLoaded === 'function') {
+      onRecordsLoaded(records);
+    }
+  }, [records, onRecordsLoaded]);
 
   // ───────────────────────────────────────────────────────────────────────────
   // Build Fluent v9 table columns + sizing options from ResolvedConfig.columns

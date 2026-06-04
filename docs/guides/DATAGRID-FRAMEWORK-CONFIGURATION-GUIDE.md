@@ -157,6 +157,41 @@ The parent context flows from VisualHost → URL `data=` envelope → Custom Pag
 
 ---
 
+## Step 4b — If the host owns its own filter UI: `hostFilters` prop
+
+When the host (a workspace widget, a Code Page with custom filter chrome, etc.) renders its own filter row/calendar/etc. and needs to translate that state into FetchXML, pass conditions via the **`hostFilters`** prop. This is the imperative companion to `behavior.parentContextFilter` — declarative configjson stays clean; the host-specific logic stays in the host.
+
+```tsx
+<DataGrid
+  configId="…"
+  hostFilters={[
+    { attribute: 'sprk_eventtype_ref', operator: 'eq',      value: applied.eventTypeId },
+    { attribute: 'sprk_eventstatus',   operator: 'in',      value: applied.statusValues },
+    { attribute: applied.dateField,    operator: 'between', value: [applied.from, applied.to] },
+  ]}
+  onRecordsLoaded={records => deriveCalendarDots(records)}
+/>
+```
+
+| Field | Value |
+|---|---|
+| `attribute` | FetchXML attribute logical name on the entity. |
+| `operator` | One of `eq`, `neq`, `in`, `not-in`, `gt`, `lt`, `ge`, `le`, `like`, `not-like`, `null`, `not-null`, `on`, `on-or-after`, `on-or-before`, `between`, `not-between`, `eq-userid`, `eq-userteams`. |
+| `value` | Scalar for single-value operators; array for `in` / `not-in` / `between` / `not-between`; omitted for valueless operators (`null`, `not-null`, `eq-userid`, `eq-userteams`). |
+
+Behavioral notes:
+
+- Empty / undefined `hostFilters` is a no-op (no overlay applied).
+- Invalid entries (missing attribute, missing required value) are silently skipped — the rest of the query still runs.
+- Pass a **memoized** array (`useMemo`) when the array contents change frequently — the framework re-runs the FetchXML composition pipeline when the prop identity changes.
+- Composition order: `base → parentContextFilter → hostFilters → chips`. Mixing all three is supported.
+
+`onRecordsLoaded` is the matched callback: fires every time a records page resolves, with the full accumulated array. Use it to derive aggregate UI state (the canonical example is the Calendar widget's per-date event counts). Mirrors the legacy `GridSection.onRecordsLoaded` contract.
+
+When should I reach for this? See the [decision table in the architecture doc](../architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md#host-filters-imperative-third-composition-layer).
+
+---
+
 ## Step 5 — Customize what makers most often want
 
 ### Empty state message

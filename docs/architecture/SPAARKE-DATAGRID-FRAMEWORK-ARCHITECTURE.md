@@ -50,7 +50,7 @@ That is the entire host-side API. Everything else flows from the `sprk_gridconfi
 | [`components/DataGrid/ViewSelector.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/DataGrid/ViewSelector.tsx) | Back arrow + view-name dropdown (radio menu over available saved queries). |
 | [`components/DataGrid/commandBar/CommandBar.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/CommandBar.tsx) | Right-aligned inline command buttons + `⋯` overflow menu. |
 | [`components/DataGrid/filterChips/`](../../src/client/shared/Spaarke.UI.Components/src/components/DataGrid/filterChips/) | Filter chip primitives, descriptor discovery from layoutXml + entity metadata, and runtime FetchXML augmentation. |
-| [`components/DataGrid/fetchXmlOverlay.ts`](../../src/client/shared/Spaarke.UI.Components/src/components/DataGrid/fetchXmlOverlay.ts) | Injects the parent-context filter into the base FetchXML at runtime (see [parent-context pattern](../../projects/spaarke-datagrid-framework-r1/notes/parent-context-pattern.md)). |
+| [`components/DataGrid/fetchXmlOverlay.ts`](../../src/client/shared/Spaarke.UI.Components/src/components/DataGrid/fetchXmlOverlay.ts) | Injects the parent-context filter AND host-supplied filters into the base FetchXML at runtime. Exposes `overlayParentContextFilter` (declarative, configjson-driven) and `overlayHostFilters` (imperative, `<DataGrid hostFilters={…}/>` prop-driven — see [host filters](#host-filters-imperative-third-composition-layer) below). |
 | [`components/DataGrid/configResolution.ts`](../../src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts) | Resolves layoutXml + entity metadata + configjson `columns` overrides into the final column model. |
 | [`components/DataGrid/useLazyLoad.ts`](../../src/client/shared/Spaarke.UI.Components/src/components/DataGrid/useLazyLoad.ts) | IntersectionObserver-driven infinite scroll (Dataverse paging cookie). |
 | [`components/DataGrid/tokens.ts`](../../src/client/shared/Spaarke.UI.Components/src/components/DataGrid/tokens.ts) | Fluent v9 token aliases tuned for Power Apps OOB visual parity. |
@@ -133,6 +133,12 @@ DataGridConfiguration { _version: '1.0', source, … }
   │     overlayParentContextFilter(fetchXml, parentContext, behavior.parentContextFilter)
   │     ─ injects <condition attribute="…" operator="eq" value="{guid}"/>
   │
+  ├──▶ Overlay host filters (if <DataGrid hostFilters={…}/> prop is supplied)
+  │     overlayHostFilters(fetchXml, hostFilters)
+  │     ─ host (e.g. CalendarWorkspaceWidget) builds a HostFilterCondition[]
+  │       from its own filter UI; each condition becomes a <condition> in the
+  │       top-level <filter type='and'>. Supports eq/neq/in/between/null/etc.
+  │
   ├──▶ Augment with chip filters (if user has applied any column filters)
   │     augmentFetchXmlWithChips(fetchXml, chipState, descriptors)
   │
@@ -143,7 +149,46 @@ dataverseClient.retrieveMultipleRecords(entityName, fetchXml, paging)
 GridItem[] → Fluent v9 <DataGrid> body
 ```
 
-Console diagnostic: search for `[DataGrid] fetchXml composition` in DevTools — the framework logs the composed FetchXML at each render, including `hasParentFilterMatch` and chip-state summary.
+Console diagnostic: search for `[DataGrid] fetchXml composition` in DevTools — the framework logs the composed FetchXML at each render, including `hasParentFilterMatch`, `hostFilterCount`, and chip-state summary.
+
+### Host filters (imperative, third composition layer)
+
+`hostFilters` is the permanent imperative companion to `behavior.parentContextFilter`. It lets a host that owns its own filter UI translate that UI state into FetchXML at runtime, without writing it to a savedquery and without sharing schema with other consumers of the same configjson.
+
+```tsx
+<DataGrid
+  configId="…"
+  hostFilters={[
+    { attribute: 'sprk_eventtype_ref', operator: 'eq', value: eventTypeId },
+    { attribute: 'sprk_eventstatus', operator: 'in', value: [1, 2] },
+    { attribute: 'sprk_duedate', operator: 'between', value: [from, to] },
+  ]}
+  onRecordsLoaded={records => deriveCalendarDots(records)}
+/>
+```
+
+| Property | Type | Purpose |
+|---|---|---|
+| `hostFilters` | `ReadonlyArray<HostFilterCondition>` | Host-supplied FetchXML conditions appended to the top-level `<filter type='and'>`. |
+| `HostFilterCondition.attribute` | `string` | FetchXML attribute logical name. |
+| `HostFilterCondition.operator` | `HostFilterOperator` | Curated FetchXML operator subset (`eq`, `neq`, `in`, `not-in`, `gt`, `lt`, `ge`, `le`, `like`, `not-like`, `null`, `not-null`, `on`, `on-or-after`, `on-or-before`, `between`, `not-between`, `eq-userid`, `eq-userteams`). |
+| `HostFilterCondition.value` | `scalar \| array \| undefined` | Scalar for single-value operators; array for `in` / `not-in` / `between` / `not-between`; ignored for valueless operators. |
+| `onRecordsLoaded` | `(records) => void` | Fires after every records page resolves. Used by hosts to derive aggregate state (e.g. Calendar widget dot indicators). |
+
+Behavioral guarantees:
+
+- Empty/undefined `hostFilters` → composition is identical to no overlay (zero-cost).
+- Invalid conditions (missing attribute, missing required value) are silently SKIPPED — the rest of the query still runs.
+- Composition is memoized on `hostFilters` identity — pass a stable array (e.g. via `useMemo`) to avoid spurious re-fetches.
+- Mixed declarative + imperative is supported: a configjson with `behavior.parentContextFilter` can coexist with a host-supplied `hostFilters` array. Order is `base → parentContext → hostFilters → chips`.
+
+When to choose host filters vs. configjson chips:
+
+| Choice | When |
+|---|---|
+| **Configjson `filterChips`** | The filter UI belongs to the grid itself (per-column chevron menus + the chip strip on top). User-driven, framework-rendered. |
+| **`behavior.parentContextFilter`** | A single declarative parent scope (e.g. drill-through from Matter → KPIs). Stored in the configuration record, not the host. |
+| **`hostFilters` prop** | The filter UI lives outside the grid (e.g. the Calendar widget's filter row + the calendar strip). Host-owned, prop-driven. |
 
 ---
 

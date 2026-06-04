@@ -32,8 +32,13 @@ export { resolveConfig, parseLayoutColumns } from './configResolution';
 export type { DataGridOverrides, ResolvedConfig, ResolvedColumn } from './configResolution';
 
 // ─── Parent-context FetchXML overlay (task 020 D-020-02 follow-up) ───
-export { overlayParentContextFilter } from './fetchXmlOverlay';
-export type { DataGridParentContextLike } from './fetchXmlOverlay';
+// + Host-filters overlay (task 033a — third permanent composition layer)
+export { overlayParentContextFilter, overlayHostFilters } from './fetchXmlOverlay';
+export type {
+  DataGridParentContextLike,
+  HostFilterCondition,
+  HostFilterOperator,
+} from './fetchXmlOverlay';
 
 // ─── Column header primitives (task 004) ───
 export { ColumnHeaderMenu } from './columnHeader/ColumnHeaderMenu';
