@@ -1,8 +1,8 @@
 # Current Task — Spaarke AI Platform Unification R5
 
 > **Purpose**: Active task state tracker. Managed by `task-execute` skill per CLAUDE.md §7.
-> **Status**: READY FOR EXECUTION — `/project-pipeline` complete; all 37 task POMLs generated
-> **Last updated**: 2026-06-04
+> **Status**: ⏸️ CHECKPOINT — awaiting PR #345 merge + CI/CD deploy + SME walkthrough
+> **Last updated**: 2026-06-04 (PR opened)
 
 ---
 
@@ -10,178 +10,110 @@
 
 | Field | Value |
 |---|---|
-| **Active flow** | ✅ PHASE 2 CODE-SIDE COMPLETE — 20 of 22 P2 tasks ✅ + task 030 partial (scaffold done; SME walkthrough pending post-deploy) + task 031 partial (code-side gate green; final ✅ post-deploy) |
-| **Pipeline status** | ✅ Phase 1 (9/9 complete); ✅ Phase 2 Waves A-E5 (code complete); next: PR → master → CI/CD deploy → SME walkthrough → Phase 3 |
-| **P2 gate (code-side)** | GREEN. 6198/6198 BFF tests pass, 45 MB publish, no new CVEs, zero new Program.cs lines, ADR compliance matrix all green (17 ADRs). Evidence: `notes/task-031-phase-2-closeout.md` |
-| **Branch** | `work/spaarke-ai-platform-unification-r5` (~17 commits ahead of `origin/master`) — PR-ready |
-| **Next action** | Open R5 PR against master via `gh pr create`. After merge + CI/CD deploys to Spaarke Dev, run task 030 SME walkthrough (~45 min operator + 1 SME session), then close 030 + 031 final ✅, then start Phase 3 (D3-01 /analyze proof point). |
-| **Status** | PR-ready (Phase 2 code-side complete; awaiting merge + deploy) |
+| **State** | ⏸️ PAUSED — Phase 2 code-complete + PR open. Awaiting external steps (CI + merge + deploy + SME walkthrough). |
+| **PR** | **#345**: https://github.com/spaarke-dev/spaarke/pull/345 — `work/spaarke-ai-platform-unification-r5` → `master` |
+| **Pipeline status** | ✅ Phase 1 (9/9); ✅ Phase 2 code (20/22 ✅ + 2 partial); ⏸️ Phase 3 (waiting on Phase 2 final close) |
+| **P2 gate (code-side)** | GREEN. 6198/6198 BFF tests pass, 45 MB publish (well under 60 MB ceiling), no new CVEs, zero new Program.cs lines, ADR compliance matrix all green (17 ADRs). Evidence: `notes/task-031-phase-2-closeout.md` |
+| **Branch head** | `bffa767c` (31 commits ahead of `origin/master`) |
+| **Status** | ⏸️ checkpoint — operator handles PR review/merge + post-deploy SME walkthrough at convenience |
 
-### Files Modified This Session (committed)
-- `projects/spaarke-ai-platform-unification-r5/design.md` — initial draft + Insights coordination + v1.1 negotiation integration (commits `8ae4e59c`, `6a6c7a29`, `1ecf41a6`)
-- `projects/spaarke-ai-platform-unification-r5/spec.md` — generated via /design-to-spec (commit `baa85b27`)
-- `projects/spaarke-ai-platform-unification-r5/plan.md` — Step 2 artifact (commit `a0615634`)
-- `projects/spaarke-ai-platform-unification-r5/CLAUDE.md` — Step 2 artifact (commit `a0615634`)
-- `projects/spaarke-ai-platform-unification-r5/current-task.md` — Step 2 artifact + this checkpoint (commit `a0615634` + this edit)
-- `projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md` — Step 2 artifact (commit `a0615634`)
-- `projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md` — coordination doc + Insights team's §8 update
-- `projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md` — Insights team's binding contract v1.0
-- `projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md` — R5's v1.1 request + post-negotiation state
-- `projects/spaarke-ai-platform-unification-r5/notes/insights-team-v1.1-response.md` — R5's response to Insights team feedback
-- `.claude/adr/ADR-018-feature-flags.md` — Flag Scope Discipline section added (commit `ee25b49a`)
+### Resume protocol (when ready to continue)
 
-### Critical Context
+When PR #345 has been merged + CI/CD has deployed to Spaarke Dev:
 
-R5 is the chat-driven "Summarize a Document" vertical slice + Insights tool integration. Configuration-first (no new ADRs, no new event channels, no new top-level DI registrations). ~36-44 tasks across 3 phases + wrap-up, ~2.5-3 weeks effort. The R5 chat agent becomes the Spaarke Assistant hosting Summarize + Insights tools.
+1. **Pull master** into a fresh workspace (or rebase this branch — but probably easier to start fresh from master since R5 work is now in master)
+2. **Schedule + run task 030 SME walkthrough** (~45 min operator + 1 SME):
+   - Walkthrough script: [`projects/spaarke-ai-platform-unification-r5/notes/task-030-sme-walkthrough.md`](notes/task-030-sme-walkthrough.md) (template ready; fill in signoff)
+   - 15-question matrix: [`tests/integration/Spe.Integration.Tests/fixtures/insights-smoke-matrix.json`](../../tests/integration/Spe.Integration.Tests/fixtures/insights-smoke-matrix.json)
+   - Synthetic test entities (Wave D7 GUIDs):
+     - Matter: `da116923-d65a-f111-a825-3833c5d9bcb1`
+     - Project: `27845394-8e5f-f111-a825-70a8a59455f4`
+     - Invoice: `05c8ef8d-8e5f-f111-a825-70a8a59455f4`
+3. **Flip task 030 status to ✅** in `tasks/TASK-INDEX.md` once SME signoff captured
+4. **Flip task 031 status to ✅** (final P2 closure)
+5. **Start Phase 3** — Wave 8 from project-pipeline plan:
+   - 040 D3-01 `/analyze` proof point (validates SC-19 platform-extension claim; ≤1 day budget per spec)
+   - 041 D3-02 Get Started welcome card "Summarize a Document"
+   - 042 D3-03 Telemetry dashboards (App Insights / Kusto queries consuming task 008's `r5.summarize.invocation` event schema)
+   - 043 D3-04 Operator-led end-to-end testing (7 surfaces from kickoff doc)
+   - 044 D3-05 Lessons-learned + R6 backlog
+6. **Wrap-up task 090** — README → Complete; coordination doc §8 entry; final R5 merge ceremony
 
-Insights Engine R2 is shipping Wave F in parallel via Claude Code (operator-approved 2026-06-03 late). Wave F branch: `work/ai-spaarke-insights-engine-r2-wave-f`. Wave F adds v1.1 contract additions (SSE + clickable citations). R5 has graceful v1.0 fallback documented in design.md §4.12 + spec.md.
+### Pre-resume verification
 
-Pipeline pre-flight passed; branch is current with master. R5 lead has NOT yet signed off on `design-e3-tool-call-contract.md` v1.0 + 6 D-decisions (per spec.md §8.2) — required gate before Phase 2 §4.12 work begins, but does NOT block task POML generation.
+When resuming, verify Spaarke Dev BFF actually has the R5 endpoints:
 
-### Reference materials for resumption
-- **POML template**: `.claude/templates/task-execution.template.md` (sub-agents MUST follow strictly)
-- **Plan (deliverables)**: `projects/spaarke-ai-platform-unification-r5/plan.md` — each D1-NN / D2-NN / D3-NN deliverable maps to one POML
-- **Task registry**: `projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md` — task IDs, slugs, dependencies, parallel-execution groups, knowledge tags
-- **Project rules**: `projects/spaarke-ai-platform-unification-r5/CLAUDE.md` — R5-specific rules + reuse mandate + file paths
-- **Spec**: `projects/spaarke-ai-platform-unification-r5/spec.md` — formal FRs/NFRs/DRs/PRs (cross-reference per task)
-- **Design**: `projects/spaarke-ai-platform-unification-r5/design.md` — full design rationale
+```bash
+# Should return HTTP 401 (auth required) NOT 404 (not deployed)
+curl -sS -w "HTTP=%{http_code}\n" -X POST "https://spaarke-bff-dev.azurewebsites.net/api/ai/chat/sessions/00000000-0000-0000-0000-000000000000/summarize"
 
-### Wave plan for remaining POML generation (~36 files)
+# Should return HTTP 401 (auth required) NOT 404
+curl -sS -w "HTTP=%{http_code}\n" -X POST "https://spaarke-bff-dev.azurewebsites.net/api/insights/assistant/query"
+```
 
-Per project-pipeline Step 5 max-concurrency rule (6 agents per wave):
-
-| Wave | Tasks | Count | Sequential vs parallel |
-|---|---|---|---|
-| **Wave 1 (in flight)** | 001 | 1 dispatched | Sub-agent ID `afb491f179109d5ff` |
-| Wave 1b | 002, 003, 004, 005, 006 | 5 | All parallel (deps 001 OR independent) |
-| Wave 2 | 007, 008, 009 | 3 | All parallel (deps satisfied by Wave 1) |
-| Wave 3 | 010, 011, 012, 013, 014, 015 | 6 | All parallel within wave |
-| Wave 4 | 016, 017, 018, 019, 020, 021 | 6 | All parallel within wave |
-| Wave 5 | 022, 023, 024 | 3 | Mixed — 023 is operator-led gate; 022 + 024 parallel |
-| Wave 6 | 025, 026, 027, 028, 029 | 5 | All parallel within wave |
-| Wave 7 | 030, 031 | 2 | All parallel |
-| Wave 8 | 040, 041, 042, 043, 044 | 5 | Mixed parallelism per Phase 3 |
-| Wave 9 | 090 | 1 | Final wrap-up |
-
-**Total POML files to generate**: 37. Plus updates to TASK-INDEX.md as POMLs land (status remains 🔲 until task-execute runs them, but file existence verified).
-
-### Resume protocol (post-compaction)
-
-If a fresh session picks up here:
-
-1. Read this Quick Recovery section first
-2. Check `projects/spaarke-ai-platform-unification-r5/tasks/` — verify what POML files exist
-3. Read `.claude/templates/task-execution.template.md` once for structure reference
-4. Read `projects/spaarke-ai-platform-unification-r5/plan.md` for deliverable details
-5. Read `projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md` for per-task IDs/slugs/deps/tags
-6. Dispatch parallel sub-agents per the wave plan above. Each sub-agent brief should match the structure used for the in-flight task 001 agent (see prompt pattern in the previous session — concise but comprehensive: template path, deliverable spec, knowledge files, acceptance criteria)
-7. After each wave: verify all POML files exist; commit the wave; push; proceed to next wave
-8. After all POMLs land: verify with `ls projects/spaarke-ai-platform-unification-r5/tasks/*.poml | wc -l` should show 37; commit any final adjustments; push
+If both return 404, the deploy didn't happen — investigate CI/CD before proceeding to walkthrough.
 
 ---
 
-## 🚦 Active Task
+## Phase 2 final commits (this session)
 
-**Status**: NONE — task POML files in generation (wave 1 in flight)
-
-**Next action**: Per Quick Recovery section above — verify task 001 POML, then dispatch remaining waves.
-
-After task generation, the first task to execute will be **D1-01 Session-scoped AI Search index provision** (per plan.md Phase 1 critical path). Execution via `task-execute` skill at FULL rigor per CLAUDE.md §4.
-
----
-
-## 📋 Project Status
-
-| Artifact | Status |
+| Commit | Description |
 |---|---|
-| README.md | ✅ Exists (kickoff/project overview) |
-| design.md | ✅ Authored + integrated with Insights coordination + v1.1 negotiation (commit `1ecf41a6`) |
-| spec.md | ✅ Generated via `/design-to-spec` (commit `baa85b27`) — 17 FRs + 14 NFRs + 6 DRs + 5 PRs |
-| plan.md | ✅ Authored 2026-06-03 late (this turn) — 3 phases, ~36–44 deliverables, parallel-execution groups, critical path |
-| CLAUDE.md (project-specific) | ✅ Authored 2026-06-03 late (this turn) — R5-specific rules + reuse mandate + key file paths |
-| current-task.md (this file) | ✅ Created (this turn) |
-| tasks/ folder | ✅ 37 POMLs generated (2026-06-04 via parallel sub-agent waves) |
-| tasks/TASK-INDEX.md | ✅ READY — header reflects POML generation complete |
-| notes/ subfolders | ⚠️ Partial — `notes/` exists with coordination docs; debug/drafts/handoffs/spikes/ subdirectories not yet created |
+| `79970ffb` | task 001 — `spaarke-session-files` AI Search index provisioned on Spaarke Dev |
+| `84b26f6f` | Wave P1-G2/G3 — RAG sessionId routing + indexing + manifests + SSE FieldDelta (tasks 002-005) |
+| `da78b081` | Wave P1-G4/G5 — Structured Outputs streaming + cleanup job + telemetry (tasks 006-008) |
+| `4a459381` | task 009 Phase 1 GATE GREEN — closeout verification |
+| `be68e70a` | Phase 2 Wave A — Summarize action+playbook deploy + frontend renderer/events/slash (tasks 010, 011, 013, 016, 019) |
+| `12cdb447` | Phase 2 Wave B — orchestrator + Workspace widget + Context widget + DocumentViewer upgrade (tasks 012, 017, 018, 022) |
+| `0a252355` | docs: chat-agent parallel-build audit (Insights r3 heads-up response) + index rename note |
+| `2f9107f6` | Phase 2 Wave C — direct endpoint + agent-tool registration (tasks 014, 015) |
+| `48625802` | Phase 2 Wave D — chat-pane orchestration UX + per-file affordance (tasks 020, 021) |
+| `477df485` | Phase 2 Wave E1 — Insights tool integration foundation (tasks 023+024+025) |
+| `5d48d586` | Phase 2 Wave E2+E3 — Insights response renderer + citations + confidence badge (tasks 026, 027, 028) |
+| `65e40629` | Phase 2 Wave E4 — Insights 12 error codes + retry policy + correlation propagation (task 029) |
+| `ee620871` | Phase 2 Wave E5 — Insights smoke test scaffold + 15-question matrix (task 030 partial) |
+| `bffa767c` | P2 code-side gate GREEN (task 031 partial) |
 
----
+## Phase 2 by the numbers
 
-## 📊 Phase Progress (per plan.md)
-
-| Phase | Status | Deliverables |
-|---|---|---|
-| Phase 1: Platform Extensions | 🔲 NOT STARTED | 9 deliverables (D1-01 to D1-09); ~5 days |
-| Phase 2: Vertical Slice + Insights Tool Integration | 🔲 NOT STARTED | 22 deliverables (D2-01 to D2-22); ~7–8 days |
-| Phase 3: Polish + Future-Use Validation | 🔲 NOT STARTED | 5 deliverables (D3-01 to D3-05); ~2–3 days |
-| Wrap-up (task 090) | 🔲 NOT STARTED | 1 task; ~0.5 day |
-
----
-
-## 🔗 Pre-Implementation Gates
-
-| Gate | Status | Owner |
-|---|---|---|
-| Branch rebased onto current origin/master | ✅ Done (2026-06-03 late; commit `baa85b27` on top of `7e20dc82`) | R5 (this session) |
-| Master sync (worktree main repo) | ⚠️ Stale at `2252f1c6` — informational only; user-side resolve when convenient | Operator |
-| Insights r2 Wave F approval | ✅ Approved by operator 2026-06-03 late; Insights team executing in parallel via Claude Code | Operator + Insights team |
-| Insights v1.0 contract sign-off (R5 lead reviews `design-e3-tool-call-contract.md` v1.0 + records 6 D-decisions in §10) | 🔲 PENDING — required before Phase 2 §4.12 work begins | R5 lead (operator) |
-| R5 response sent to Insights team | 🔲 PENDING send — file ready at `notes/insights-team-v1.1-response.md` | Operator |
-| BFF baseline build verification | ⏭️ DEFERRED — no R5 code changes yet; will catch via Phase 1 task execution | task-execute |
-
----
-
-## 📝 Last Significant Events
-
-| Date | Event |
+| Metric | Value |
 |---|---|
-| 2026-06-03 (early) | R5 project folder seeded (README + kickoff notes); commit `cc7dd933` |
-| 2026-06-03 (mid-day) | design.md drafted; ADR-018 Flag Scope Discipline section added; commit `8ae4e59c` |
-| 2026-06-03 (mid-day) | Insights r2 v1.0 contract integrated; v1.1 request authored; commit `6a6c7a29` |
-| 2026-06-03 (late) | Insights team v1.1 feedback integrated; design.md + v1.1 request doc updated; Insights response drafted; commit `1ecf41a6` |
-| 2026-06-03 (late) | spec.md generated via `/design-to-spec`; commit `baa85b27` |
-| 2026-06-03 (late) | Rebased onto `origin/master` `7e20dc82` (PR #338 docs); force-with-lease pushed |
-| 2026-06-03 (late) | plan.md + CLAUDE.md + current-task.md authored (this turn) |
-| **NEXT** | Task POML file generation via `task-create` |
+| Tasks complete | 20 of 22 ✅ + 1 partial (030 scaffold) + 1 partial (031 code-side) |
+| Phase 2 commits | 9 (be68e70a → bffa767c) |
+| Total R5 commits | 31 |
+| Files created (R5) | ~50+ (.cs + .tsx + .ts + .json + .ps1 + tests + evidence) |
+| Files modified (R5) | ~25 |
+| Tests added (R5) | +97 BFF unit + ~250+ frontend jest + 15 integration scaffold |
+| Sub-agent waves (implementation) | 6 (Wave A → E5) |
+| Sub-agents dispatched (implementation) | ~25 |
+| Real deploys | 1 AI Search index + 2 Dataverse rows + 1 OpenAI spike call |
+
+## Open / forwarded items
+
+1. **Task 030 SME walkthrough** — operator handles post-deploy (~45 min)
+2. **Task 031 final closure** — auto-flips when 030 closes
+3. **Insights r3 F-4 backfill**: include `summarize-document-for-chat@v1` in `playbook-embeddings` indexing (forwarded via `notes/insights-r2-coordination.md` §8)
+4. **Insights r3 Tier 1.5 wave 1**: `playbook-embeddings` → `spaarke-playbook-index` rename (R5 has zero direct refs)
+5. **Capability manifest update** (data-seed concern): add `invoke_summarize_playbook` + `insights.query` to `summarize` / `insights` capability manifest `ToolNames` allow-list for AIPU2-061 narrow routing. Currently falls back to Layer 3 (full capability set returned). R6.
+6. **Kiota.Abstractions HIGH CVE**: separate ticket per BFF module CLAUDE.md "Package Management" — not introduced by R5; pre-existing on master.
 
 ---
 
-## 🛠️ Workflow Reminders (per root CLAUDE.md)
+## Reference materials
 
-### Task execution
-- ALL R5 tasks invoked via `task-execute` skill (MANDATORY per CLAUDE.md §4)
-- All R5 tasks run at **FULL rigor** (BFF code + AI infrastructure + new widgets)
-- Quality gates run at task-execute Step 9.5 (`code-review` + `adr-check`)
-
-### Trigger phrases
-| User says | Action |
-|---|---|
-| "work on task X" | Invoke `task-execute` with task X POML |
-| "continue" / "next task" | Read `tasks/TASK-INDEX.md`, find first 🔲, invoke `task-execute` |
-| "continue with task X" / "resume task X" | Invoke `task-execute` with task X POML |
-| "pick up where we left off" | Load this file (`current-task.md`), invoke `task-execute` per status |
-
-### Checkpointing
-- After every 3 completed task steps → silent checkpoint ("✅ Checkpoint.")
-- After modifying 5+ files → checkpoint
-- After any deployment → checkpoint
-- Context > 60% → verbose checkpoint report; > 70% → STOP + `/compact`
-
-### Cross-project coordination
-- Update `notes/insights-r2-coordination.md` §8 changelog when Wave F status changes
-- Check Insights team's Wave F branch (`work/ai-spaarke-insights-engine-r2-wave-f`) status before Phase 2 §4.12 work begins
+- **PR**: https://github.com/spaarke-dev/spaarke/pull/345
+- **Spec**: `projects/spaarke-ai-platform-unification-r5/spec.md`
+- **Design**: `projects/spaarke-ai-platform-unification-r5/design.md`
+- **Plan**: `projects/spaarke-ai-platform-unification-r5/plan.md`
+- **CLAUDE**: `projects/spaarke-ai-platform-unification-r5/CLAUDE.md`
+- **TASK-INDEX**: `projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md`
+- **P2 closeout**: `projects/spaarke-ai-platform-unification-r5/notes/task-031-phase-2-closeout.md`
+- **Audit (Insights r3 response)**: `projects/spaarke-ai-platform-unification-r5/notes/r5-chat-agent-parallel-build-audit.md`
+- **Insights coordination**: `projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md`
+- **SME walkthrough template**: `projects/spaarke-ai-platform-unification-r5/notes/task-030-sme-walkthrough.md`
+- **Smoke evidence template**: `projects/spaarke-ai-platform-unification-r5/notes/task-030-smoke-evidence.md`
+- **Integration test matrix**: `tests/integration/Spe.Integration.Tests/fixtures/insights-smoke-matrix.json`
 
 ---
 
-## 🚨 Open Questions / Blockers (none currently blocking)
-
-Per spec.md §8 Unresolved Questions (none block Phase 1):
-
-- UR-01: Tool routing disambiguation when natural language could match both `summarize` AND `insights.query`. Resolution path: tool description refinement during Phase 2.
-- UR-02: `StructuredOutputStreamWidget` rendering of Insights vs Summarize outputs. Resolution path: schema-driven rendering with optional `displayHints` config; designed during Phase 2.
-- UR-03: Wave F SSE event protocol exact alignment with R5's `FieldDelta`. Resolution path: smoke test against Spaarke Dev when Wave F deploys.
-- UR-04: `citations[].href` schema-plumbing spike outcome (Insights Wave F 0.5d spike). Resolution path: Wave F spike output (decision memo).
-- UR-05: Per-task BFF publish-size projection. Resolution path: per-task verification per CLAUDE.md §10.
-
----
-
-*This file is the single-task tracker. Project state (TASK-INDEX.md) tracks per-task status; this file tracks ACTIVE TASK only. When implementation begins, task-execute updates this file at task start + completion.*
+*Checkpoint authored 2026-06-04. Resume when PR #345 merges + CI/CD deploys + SME is scheduled.*
