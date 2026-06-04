@@ -89,6 +89,22 @@
 
   <notes>
     Parallels task 032. UQ-06 is the escalation point — widget owner is the gate. If they want to delay, escalate to Ralph and consider deferring this task to a follow-up project.
+
+    **2026-06-03 — Sign-off received + scope EXPANDED**. Widget owner (Ralph) sign-off documented at `notes/drafts/033-widget-owner-signoff.md`. Per user direction, task 033 now has TWO sub-parts:
+
+    **033a — Framework extension (NEW INFRASTRUCTURE per user)**: Add `hostFilters` prop to `<DataGrid>` so any host can inject FetchXML conditions at runtime. Becomes a permanent framework feature (user quote: "this will be standard feature of the dataset grid"). Touches `DataGrid.tsx`, `fetchXmlOverlay.ts`, possibly `DataGridConfiguration.ts`. Update architecture doc + configuration guide. Add Storybook story + tests.
+
+    **033b — Widget migration**: Preserve CalendarWorkspaceWidget filter row + Apply/Clear + calendar strip + EventsPageProvider AS-IS (Q2 = preserve widget). DROP the widget's internal toolbar (Q1 = rely on DataGrid command bar). Wire the `applied` filter state into the new `<DataGrid hostFilters={...} />` prop. Swap `<GridSection ... />` for `<DataGrid configId="e15c2b93-..." hostFilters={...} onRecordsLoaded={...} />` at L1162. Then complete the deferred GridSection deletion from task 032 D-032-01.
+
+    Sign-off Q&A matrix:
+    - Q1 (toolbar) = A: drop widget toolbar; use DataGrid command bar
+    - Q2 (filter row) = preserve widget AS-IS + build framework extension for reuse
+    - Q3 (calendar event-date counting) = automatic, use DataGrid `onRecordsLoaded` callback
+    - Q4 (EventsPageProvider) = keep (Q2 requires it for filter row internal context)
+
+    Estimated outcome: widget 1220 → ~700-800 lines (toolbar removed, GridSection swapped). Framework gains `hostFilters` as a permanent 3rd composition layer (`base → parentContext → hostFilters → chips`).
+
+    **Resume protocol**: see `current-task.md` for the full handoff. Recommendation: author 033a as a focused sub-task (~1 hour, commit + push), then 033b (~1 hour, commit + push including the GridSection deletion). Do NOT merge into one commit.
   </notes>
 
   <execution>
