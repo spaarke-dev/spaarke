@@ -75,6 +75,7 @@ jobs:
 
       - name: Cache NuGet packages
         uses: actions/cache@v5
+        continue-on-error: true  # Prevents Debug/Release matrix race on shared cache key from failing the job (PR #337 hit this 2026-06-03 — Release lost the cache-save race to concurrent Debug at 00:18:47)
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
