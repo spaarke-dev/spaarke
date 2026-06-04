@@ -1,0 +1,159 @@
+<task id="032" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>P2-CLOSEOUT-01 Wire ChatDocumentEndpoints.UploadDocumentAsync into R5 session-files pipeline</title>
+    <status>🔲</status>
+    <status-note>Closeout task added 2026-06-04 after SC-18 walkthrough on Spaarke Dev surfaced Sev-1 integration gap: R5 backend pieces all deployed but upload endpoint never calls IndexSessionFileAsync nor populates ChatSession.UploadedFiles[]. See notes/summarize-vertical-remediation-plan.md §3.1 for full root-cause analysis.</status-note>
+    <estimated-effort>1.5 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration (CLOSEOUT)</phase>
+    <wave>P2-G9-CLOSEOUT (parallel-safe with 033; both must complete + deploy before 034)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>011 (Summarize playbook deployed), 003 (RagIndexingPipeline.IndexSessionFileAsync), 004 (ChatSession.UploadedFiles model), 012 (SessionSummarizeOrchestrator consumer)</dependencies>
+    <tags>bff-api, chat, session-files, integration, closeout, sev-1-fix</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Wire the existing R3-era chat-document upload endpoint into R5's session-files
+    pipeline so that uploaded files become visible to SessionSummarizeOrchestrator
+    and the chat agent. This is the missing integration that broke end-to-end
+    Summarize on Spaarke Dev (2026-06-04 walkthrough).
+
+    R5 backend pieces ALREADY deployed: IndexSessionFileAsync (task 003),
+    SessionSummarizeOrchestrator (task 012), InvokeSummarizePlaybookTool (task
+    015), MapSummarizeSessionEndpoint (task 014), ChatSession.UploadedFiles model
+    field + ChatSessionFile record (task 004). The deployed playbook
+    `summarize-document-for-chat@v1` (task 011, action SUM-CHAT@v1) is ready.
+    Nothing actually invokes them from user flows because the upload endpoint
+    only writes to Redis (R3 legacy path).
+
+    Modify `ChatDocumentEndpoints.UploadDocumentAsync` (file
+    src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs, lines 124-407)
+    so that after the existing Redis writes (step 10, ~line 386) AND before the
+    202 response (~line 388), it ALSO:
+
+    1. Constructs a `ParsedDocument` from the existing `TextExtractionResult` +
+       `originalBinary` already in scope.
+    2. Calls `IRagIndexingPipeline.IndexSessionFileAsync(parsedDocument,
+       documentId, tenantId, sessionId, speFileId, fileName, ct)` — pass
+       documentId as both documentId and speFileId (the latter is a "best
+       effort" link for future SPE persistence; for session-uploads we use the
+       chat-document GUID as both). Capture the returned chunk IDs.
+    3. Constructs a `new ChatSessionFile(documentId, filename, contentType,
+       file.Length, searchDocumentIdsCsv, DateTimeOffset.UtcNow)` where
+       searchDocumentIdsCsv = `string.Join(",", returnedChunkIds)`.
+    4. Defense-in-depth cap check: if `session.UploadedFiles?.Count >=
+       ChatSession.MaxUploadedFiles (=20)`, return 400 ProblemDetails with
+       errorCode `"summarize.too-many-files"` per NFR-02. (Upstream frontend
+       enforces too, but defense in depth at the endpoint boundary mirrors
+       SummarizeSessionEndpoint's pattern.)
+    5. Builds an updated session record: `session with { UploadedFiles =
+       (session.UploadedFiles ?? Array.Empty&lt;ChatSessionFile&gt;()).Append(newFile).ToList() }`.
+    6. Persists via `sessionManager.UpdateSessionCacheAsync(updatedSession,
+       httpContext.RequestAborted)` — this method already exists at line 267
+       (internal virtual; refreshes Redis hot cache + fires Cosmos
+       write-through per D-06).
+
+    Add `IRagIndexingPipeline` to the endpoint handler's DI parameters
+    (alongside existing IDistributedCache, ITextExtractor, ChatSessionManager,
+    ILoggerFactory). Verify `AnalysisServicesModule` registers
+    `IRagIndexingPipeline` — it does (per task 003 evidence note; bound inside
+    the compound AI gate via `AddRagServices`). The upload endpoint already
+    requires the compound AI gate (text extraction depends on DocumentIntelligence
+    via TextExtractorService); adding IRagIndexingPipeline as a hard dep does
+    NOT introduce a new asymmetric-registration risk per CLAUDE.md §10 F.1
+    because the upload endpoint is itself part of the same compound gate
+    surface (both NullTextExtractor + NullRagService cover the
+    compound-OFF branch).
+
+    Update or add unit tests covering:
+    - On successful upload, IndexSessionFileAsync is called exactly once with
+      the expected (tenantId, sessionId, documentId, fileName) arguments
+    - On successful upload, ChatSessionManager.UpdateSessionCacheAsync is
+      called with a session whose UploadedFiles has exactly one new entry
+      (or N+1 if already had files)
+    - On 21st upload to a session that already has 20 files, returns 400
+      ProblemDetails with errorCode `"summarize.too-many-files"` and the
+      session is NOT mutated (cap-check happens BEFORE indexing)
+    - Pre-existing Redis writes still happen unchanged (back-compat for any
+      consumer that still reads from doc-upload:/doc-binary:/doc-upload-meta:
+      keys directly)
+
+    Acceptance: after this task ships AND deploys to Dev, the SessionSummarizeOrchestrator
+    invoked with the session ID can find files via `session.UploadedFiles` and
+    can retrieve content from spaarke-session-files AI Search index. Per-task
+    publish-size verification per R5 CLAUDE.md §10: report compressed BFF size
+    + delta vs baseline.
+  </prompt>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ChatDocumentEndpointsTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/summarize-vertical-remediation-plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/task-030-summarize-walkthrough.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-014-tenant-isolation.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint>R5 reuse mandate (spec §2.11): use existing IRagIndexingPipeline.IndexSessionFileAsync and ChatSessionManager.UpdateSessionCacheAsync; do NOT create parallel implementations.</constraint>
+    <constraint>ADR-010 DI minimalism: do NOT add new top-level Program.cs registrations; the deps (IRagIndexingPipeline, ChatSessionManager) already exist.</constraint>
+    <constraint>ADR-014 tenant isolation: IndexSessionFileAsync call MUST pass tenantId AND sessionId so the spaarke-session-files index entries carry both partition keys.</constraint>
+    <constraint>NFR-02 cap: defense-in-depth at endpoint boundary; reject 21st upload with 400 ProblemDetails (errorCode `summarize.too-many-files`) BEFORE calling IndexSessionFileAsync or mutating session.</constraint>
+    <constraint>ADR-018 / R5 §3.2: no new feature flag introduced; behavior inherits the existing compound AI gate (Analysis:Enabled + DocumentIntelligence:Enabled).</constraint>
+    <constraint>ADR-019 ProblemDetails: errorCode strings are CONTRACT — `summarize.too-many-files` must match SummarizeSessionEndpoint's existing constant.</constraint>
+    <constraint>ADR-015: do NOT log extracted text content or original binary — metadata only.</constraint>
+    <constraint>D-06 (ChatSessionManager): persistence happens via UpdateSessionCacheAsync (Redis + fire-and-forget Cosmos); do NOT bypass this seam.</constraint>
+    <constraint>Per-task publish-size verification per CLAUDE.md §10: report compressed BFF size + delta in task notes.</constraint>
+  </constraints>
+
+  <steps>
+    <step>Load notes/summarize-vertical-remediation-plan.md fully; confirm scope matches §3.1 and §4 row 032.</step>
+    <step>Read ChatDocumentEndpoints.cs lines 124-407 + ChatSessionManager.cs lines 260-316 + RagIndexingPipeline.IndexSessionFileAsync signature; map exact insertion point and DI surface needed.</step>
+    <step>Read existing unit tests in tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ChatDocumentEndpointsTests.cs (if any) and tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ChatSessionManagerTests.cs for patterns.</step>
+    <step>Implement the wiring per §3.1 of the remediation plan. Inject IRagIndexingPipeline; add cap check; build ChatSessionFile; persist via UpdateSessionCacheAsync.</step>
+    <step>Add 4 unit tests per task acceptance criteria.</step>
+    <step>Run `dotnet build -c Release src/server/api/Sprk.Bff.Api/` — verify 0 errors.</step>
+    <step>Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~ChatDocumentEndpoints"` — verify all pass.</step>
+    <step>Run full unit suite — verify no regressions.</step>
+    <step>Per CLAUDE.md §10: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed size; report delta vs ~45.65 MB baseline.</step>
+    <step>Commit with conventional message; reference remediation plan.</step>
+    <step>Update TASK-INDEX.md status 🔲 → ✅.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>ChatDocumentEndpoints.UploadDocumentAsync injects IRagIndexingPipeline and calls IndexSessionFileAsync after Redis writes.</criterion>
+    <criterion>On 200 response, ChatSession.UploadedFiles[] contains a new ChatSessionFile entry with the uploaded file's metadata + non-empty SearchDocumentIdsCsv.</criterion>
+    <criterion>ChatSessionManager.UpdateSessionCacheAsync invoked once per successful upload; Redis hot path + fire-and-forget Cosmos write-through both execute (verified by mocks).</criterion>
+    <criterion>21st upload returns 400 with errorCode `summarize.too-many-files` and session manifest unchanged.</criterion>
+    <criterion>Pre-existing Redis writes (doc-upload:, doc-binary:, doc-upload-meta:) still happen on successful upload (back-compat).</criterion>
+    <criterion>All existing ChatDocumentEndpoints tests still pass; new tests pass.</criterion>
+    <criterion>Full unit suite (6223+ tests) passes; 0 regressions.</criterion>
+    <criterion>BFF publish size reported; delta vs baseline ≤ +1 MB.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output>Modified file: src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs (handler signature + body)</output>
+    <output>New or extended file: tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ChatDocumentEndpointsTests.cs (4 new tests)</output>
+    <output>Evidence note: projects/spaarke-ai-platform-unification-r5/notes/task-032-evidence.md (size + delta + test counts)</output>
+    <output>TASK-INDEX.md row 032 flipped 🔲 → ✅ with completion date</output>
+  </outputs>
+</task>
