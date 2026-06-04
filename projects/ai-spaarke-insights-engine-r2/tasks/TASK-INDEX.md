@@ -94,6 +94,21 @@
 
 ---
 
+### Wave F — Contract v1.1 (SSE + clickable citations) — POST-WRAP-UP, R5-REQUESTED
+
+> **Added 2026-06-04** in response to R5's contract change request ([`notes/insights-engine-contract-v1.1-request.md`](../notes/insights-engine-contract-v1.1-request.md)). See [`notes/wave-f-v1.1-mini-plan.md`](../notes/wave-f-v1.1-mini-plan.md) for full review + plan. Strictly additive, back-compatible. Sequenced AFTER task 090.
+
+| ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
+|---|---|---|---|---|---|---|
+| [050](050-streaming-and-citation-spike.poml) | F1 | Spike: streaming surface + citation ID flow validation | 🔲 | 0.5d | ❌ | 090 |
+| [051](051-sse-streaming-endpoint.poml) | F2 | SSE streaming on POST /api/insights/assistant/query | 🔲 | 3d | ✅ | 050 |
+| [052](052-citations-href-projection.poml) | F3 | citations[].href projection + URL resolution | 🔲 | 1d | ✅ | 050 |
+| [053](053-contract-v1.1-docs.poml) | F4 | Contract v1.1 docs + R5 coordination update | 🔲 | 0.5d | ❌ | 051, 052 |
+
+**Wave F total**: 4 tasks, ~4.5 days, ~4 days end-to-end with parallel 051 + 052.
+
+---
+
 ## Parallel Execution Groups
 
 Tasks within a group can be dispatched in parallel via Skill tool calls (one per task in a single message). Cross-group dependencies enforce serial execution between groups.
@@ -118,6 +133,9 @@ Tasks within a group can be dispatched in parallel via Skill tool calls (one per
 | E-G2 | E | 041, 043 (parallel after 040) | 040 complete |
 | E-G3 | E | 042 (serial — long-running w/ cross-team coordination) | 040, 041 complete |
 | Wrap | — | 090 | all prior |
+| F-G1 | F | 050 (spike — serial) | 090 complete |
+| F-G2 | F | 051, 052 (parallel after spike) | 050 complete |
+| F-G3 | F | 053 (docs — serial) | 051, 052 complete |
 
 **Max concurrency per wave**: 6 agents (per project-pipeline Step 5 hard limit; A-G1 is the largest at 6 parallel agents).
 

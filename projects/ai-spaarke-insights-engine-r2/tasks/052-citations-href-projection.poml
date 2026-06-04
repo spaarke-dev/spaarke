@@ -1,0 +1,103 @@
+<task id="052" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>F3 — citations[].href projection + URL resolution</title>
+    <status>not-started</status>
+    <wave>F</wave>
+    <estimated-effort>1d</estimated-effort>
+    <tags>citations, href, url-resolution, bff-api, contract-v1.1, authorization</tags>
+    <dependencies>050</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <wave-item>F3</wave-item>
+  </metadata>
+
+  <prompt>
+    Add optional `href` field to each `citations[]` entry in the AssistantQueryResult response. **Scope branches on F1 spike output** (per mini-plan §0.1): if spike classified document-href plumbing as Small or Medium cost → ship BOTH observation + document citation href; if Large → ship observation-href ONLY, defer document-href to v1.2 (R5 has pre-approved this fallback). For observation citations, href follows spike F1's strategy (MDA URL OR new BFF endpoint). URLs respect AIPU2-027 privilege filtering — if calling user can't access source, citation either has href: null OR URL returns 403 (no leakage). Strictly additive; v1.0 clients ignore unknown fields.
+  </prompt>
+
+  <role>Senior .NET developer + URL design + authorization specialist.</role>
+
+  <goal>
+    `AssistantQueryCitation` record gains an optional `Href` field. Citation projection in `AssistantToolCallHandler` (both playbook path at :303 and RAG path at :404) populates Href when the underlying source can be addressed by a privilege-respecting BFF URL.
+
+    **Scope branches per F1 spike recommendation**:
+    - **Full scope (F1 cost = Small or Medium)**: Both observation + document citations carry working Href. SPE document URLs use spike's recommended pattern (likely `/api/v1/documents/{id}/preview` via existing endpoint). Observation URLs use F1-chosen strategy (MDA URL OR new BFF JSON endpoint).
+    - **Partial scope (F1 cost = Large)**: Observation citations carry Href; document citations have Href = null (R5 client falls back to display-name-only rendering for documents). Document-citation href deferred to a future v1.2 minor-version. Effort drops from 1d to ~0.5d.
+
+    AIPU2-027 privilege filtering enforced at URL-resolution time via existing endpoint auth, not by URL signing or token embedding.
+  </goal>
+
+  <inputs>
+    <file purpose="spike-findings">projects/ai-spaarke-insights-engine-r2/notes/spikes/wave-f-streaming-citation-spike.md (F1 — sections B + C + F)</file>
+    <file purpose="r5-request">projects/ai-spaarke-insights-engine-r2/notes/insights-engine-contract-v1.1-request.md (§3 = citations href; §3.6 = acceptance)</file>
+    <file purpose="current-handler">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/AssistantToolCallHandler.cs (citation projection at :303 playbook + :404 RAG)</file>
+    <file purpose="citation-record">src/server/api/Sprk.Bff.Api/Models/Ai/PublicContracts/AssistantQueryFacadeResult.cs (AssistantQueryCitation record — add Href field)</file>
+    <file purpose="evidence-shape">(determined in spike F1 — likely src/server/api/Sprk.Bff.Api/Models/Ai/Artifacts/Evidence.cs)</file>
+    <file purpose="preview-url-service">src/server/api/Sprk.Bff.Api/Services/DocumentCheckoutService.cs (existing GetPreviewUrlAsync at :288 — pattern to mirror)</file>
+    <file purpose="auth-pattern">src/server/api/Sprk.Bff.Api/Services/AuthorizationService.cs (per ADR-008 — apply same pattern for href URL endpoints)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013-refined">Citation projection stays Zone A; href construction logic does NOT leak Zone A internals into Zone B endpoint</constraint>
+    <constraint source="ADR-019">No href-leakage in error paths — empty/null href if source unauthorized OR not found</constraint>
+    <constraint source="AIPU2-027">Privilege filtering already applied to RAG hits + playbook evidence; href URLs MUST point to endpoints that re-check the same privileges (no URL signing / token embedding)</constraint>
+    <constraint source="r5-§3.5 back-compat">v1.0 clients ignore unknown response fields — `Href` is OPTIONAL in the schema (JsonIgnore null option set)</constraint>
+    <constraint source="r5-§3.6">Field name is `href` (lowercase) in JSON; record field is `Href` (PascalCase per C# convention) with [JsonPropertyName("href")]</constraint>
+    <constraint source="bff-extensions.md §F">Run publish-size check; verify no new NuGet adds</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>URL design for AI citations, AIPU2-027 privilege filtering pattern, ADR-008 endpoint filter auth, JSON serialization with optional fields</topic>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filter-authorization.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-format.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read F1 spike sections B+C+F">Adopt spike recommendations: SPE document URL pattern, observation URL strategy, citation ID flow gaps, AND v1.1 scope (full vs partial per §F). The spike's scope recommendation is BINDING — do not re-litigate with owner.</step>
+    <step order="2" name="Extend AssistantQueryCitation record">Add optional Href field with [JsonPropertyName("href")] + serialize-null-as-absent attribute. v1.0 clients ignore.</step>
+    <step order="3" name="Observation citation handling (ALWAYS in scope)">Per F1 decision: emit MDA URL OR call new BFF /api/insights/observations/{id} shim. If new shim added, register endpoint + endpoint filter for auth. This step runs regardless of F1's full-vs-partial verdict.</step>
+    <step order="4" name="Document citation projection — playbook path :303 (CONDITIONAL on F1 = Full scope)">IF F1 recommended Full scope: project Evidence.Ref → Href using spike's URL pattern. If Ref lacks document identifier (per F1 finding under Small/Medium cost — should be addressable), apply the spike's recommended plumbing change. ELSE (F1 = Partial scope): set Href = null for playbook-path document citations + add comment referencing v1.2 deferral.</step>
+    <step order="5" name="Document citation projection — RAG path :404 (CONDITIONAL on F1 = Full scope)">IF F1 recommended Full scope: project RagSearchHit's document identifier → Href using SPE preview URL pattern from spike. ELSE (F1 = Partial scope): set Href = null for RAG-path document citations + add comment referencing v1.2 deferral.</step>
+    <step order="6" name="AIPU2-027 enforcement">Ensure no Href is emitted for filtered-out sources. Re-confirm via search through the filtering pass that drops citations.</step>
+    <step order="7" name="Tests — new (branched by F1 scope)">If F1 = Full scope: add 8 tests (a-h) as originally specified. If F1 = Partial scope: add 6 tests focused on observation citations + back-compat: (a) observation citation with href; (b) observation citation without href (no MDA path); (c) playbook path document citations have href = null (deferred to v1.2); (d) RAG path document citations have href = null (deferred to v1.2); (e) v1.0 client (deserialization w/o Href field) still works; (f) observation href URL returns 403 when called by user lacking privileges.</step>
+    <step order="8" name="Tests — regression">All 15 existing Wave E tests + 19 search endpoint tests pass unchanged</step>
+    <step order="9" name="§3.5 grep">Verify Zone B (Api/Insights/ + Models/Insights/) doesn't import URL-construction internals — those stay in Zone A handler</step>
+    <step order="10" name="Format + build + publish-size">dotnet format whitespace verify; dotnet build; publish size delta vs Wave E baseline</step>
+    <step order="11" name="Quality gates">code-review + adr-check</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build + test</tool>
+    <tool name="grep">§3.5 facade boundary + AIPU2-027 verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Sprk.Bff.Api/Models/Ai/PublicContracts/AssistantQueryFacadeResult.cs (AssistantQueryCitation gains Href field)</output>
+    <output type="code">Sprk.Bff.Api/Services/Ai/Insights/AssistantToolCallHandler.cs (citation projection at :303 + :404 sets Href)</output>
+    <output type="code">(if F1 chose new endpoint shim) Sprk.Bff.Api/Api/Insights/InsightsObservationsEndpoint.cs (NEW — /api/insights/observations/{id} for observation citation href)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/Insights/InsightsAssistantCitationHrefTests.cs (NEW — 8 tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AssistantQueryCitation has optional Href field; v1.0 clients ignore</criterion>
+    <criterion testable="true">Observation citations receive working Href per F1 spike strategy (MDA OR new BFF shim) — ALWAYS required</criterion>
+    <criterion testable="true">SPE document citations receive working Href URL — REQUIRED only if F1 = Full scope; otherwise Href = null with v1.2-deferral comment</criterion>
+    <criterion testable="true">AIPU2-027 privilege filtering applied: no Href emitted for unauthorized sources; href URLs themselves return 403 when called without privilege</criterion>
+    <criterion testable="true">All existing Wave E tests pass unchanged (back-compat)</criterion>
+    <criterion testable="true">Tests pass per F1 scope (8 tests for Full scope, 6 tests for Partial scope)</criterion>
+    <criterion testable="true">§3.5 grep clean; publish size within +0.5 MB of Wave E baseline</criterion>
+    <criterion testable="true">dotnet format whitespace verify clean</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 051 (SSE streaming) — different file regions in AssistantToolCallHandler.cs (051 adds HandleStreamingAsync method; 052 modifies citation projection inside existing AssistantToolCallHandler methods at :303 + :404). Sub-agents run in parallel; main session merges before commit. Conflict risk is low but main session reviews diff at merge to ensure clean integration.
+
+    **Effort branches with F1 scope**: Full scope → 1d (original estimate); Partial scope (observation-href only) → ~0.5d (less plumbing work). The spike F1's scope recommendation is BINDING for this task — do not re-escalate to owner. R5 has pre-approved both scope outcomes (per mini-plan §0.1).
+
+    **If F1 = Partial scope, document the v1.2 deferral**: task 053 (docs) MUST include a v1.2-roadmap note in the contract changelog explaining that document-citation href is deferred due to plumbing-cost classification of Large; observation-citation href ships in v1.1.
+  </notes>
+</task>

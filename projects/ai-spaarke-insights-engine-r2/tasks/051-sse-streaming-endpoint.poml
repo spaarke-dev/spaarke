@@ -1,0 +1,104 @@
+<task id="051" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>F2 — SSE streaming on POST /api/insights/assistant/query</title>
+    <status>not-started</status>
+    <wave>F</wave>
+    <estimated-effort>3d</estimated-effort>
+    <tags>sse, streaming, bff-api, zone-a, contract-v1.1, async-enumerable</tags>
+    <dependencies>050</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <wave-item>F2</wave-item>
+  </metadata>
+
+  <prompt>
+    Add optional SSE streaming response to POST /api/insights/assistant/query. Negotiated via Accept header: `text/event-stream` → SSE; otherwise existing v1.0 single-shot JSON (unchanged). RAG path emits `delta` events for `answer` field tokens streamed from IOpenAiClient.StreamCompletionAsync. Both paths emit `progress` events for major pipeline transitions. Final `result` event carries the full v1.0-shape response for client state finalization; stream terminates with `data: [DONE]`. Existing v1.0 clients are unaffected (regression test required).
+  </prompt>
+
+  <role>Senior .NET developer + Minimal API + Azure OpenAI streaming specialist.</role>
+
+  <goal>
+    `POST /api/insights/assistant/query` accepts `Accept: text/event-stream` and emits SSE per the schema in `notes/insights-engine-contract-v1.1-request.md` §2.2. RAG path streams LLM synthesis token-by-token. Playbook path emits coarse-grained `progress` events (per spike F1 recommendation). All v1.0 single-shot behavior preserved when Accept header is absent or `application/json`. ADR-008 auth filter applied identically to both modes. ADR-019 ProblemDetails for non-stream errors; SSE `error` event for mid-stream errors. ADR-032 kill-switches return 503 ProblemDetails BEFORE stream opens (consistent with v1.0).
+  </goal>
+
+  <inputs>
+    <file purpose="spike-findings">projects/ai-spaarke-insights-engine-r2/notes/spikes/wave-f-streaming-citation-spike.md (F1 output)</file>
+    <file purpose="r5-request">projects/ai-spaarke-insights-engine-r2/notes/insights-engine-contract-v1.1-request.md (§2 = SSE; §2.2 = event schema; §2.7 = acceptance)</file>
+    <file purpose="mini-plan">projects/ai-spaarke-insights-engine-r2/notes/wave-f-v1.1-mini-plan.md (§3.1 = technical analysis)</file>
+    <file purpose="current-endpoint">src/server/api/Sprk.Bff.Api/Api/Insights/InsightsAssistantEndpoint.cs (Wave E3 — single-shot impl to extend)</file>
+    <file purpose="current-handler">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/AssistantToolCallHandler.cs (Wave E3 — wraps Ask + Search facades)</file>
+    <file purpose="current-orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs (SearchAsync uses GetCompletionAsync — single-shot)</file>
+    <file purpose="streaming-aoai">src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs (StreamCompletionAsync at :36)</file>
+    <file purpose="facade-contract">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInsightsAi.cs</file>
+    <file purpose="reference-sse">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceFilesSummarizeEndpoint.cs (existing SSE pattern to mirror — verified in spike F1)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API; no MVC</constraint>
+    <constraint source="ADR-008">Endpoint filter for auth; identical for SSE + single-shot modes</constraint>
+    <constraint source="ADR-013-refined">Endpoint stays Zone B; consumes IInsightsAi facade only. New IInsightsAi.SearchStreamAsync method per F1 spike signature</constraint>
+    <constraint source="ADR-019">ProblemDetails for pre-stream errors (400/401/403/429/503); mid-stream errors emit SSE `error` event then `[DONE]`</constraint>
+    <constraint source="ADR-032">Kill-switches return 503 ProblemDetails BEFORE stream opens (FeatureDisabledException caught FIRST per existing endpoint pattern)</constraint>
+    <constraint source="r5-§2.6 back-compat">v1.0 clients (no Accept header) get IDENTICAL v1.0 single-shot. Existing 15 endpoint tests MUST continue to pass unchanged</constraint>
+    <constraint source="bff-extensions.md §F">Run publish-size check; verify no new NuGet adds</constraint>
+    <constraint source="r5-§5.1 ai-context">Rate limit aggregate budget shared across /ask + /search + /assistant/query unchanged; SSE counts as one request for budget purposes</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SSE response patterns, IAsyncEnumerable surface, Minimal API streaming, ADR-013 Zone A/B facade boundary, AOAI streaming error semantics</topic>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-authorization.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-format.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read F1 spike">Adopt the recommended IInsightsAi.SearchStreamAsync signature from notes/spikes/wave-f-streaming-citation-spike.md</step>
+    <step order="2" name="Extend IInsightsAi facade">Add SearchStreamAsync method returning IAsyncEnumerable&lt;AssistantStreamEvent&gt; (or similar — per spike). NullInsightsAi (if exists) throws FeatureDisabledException. Symmetric registration per ADR-032.</step>
+    <step order="3" name="Extend InsightsOrchestrator">Add SearchStreamAsync impl that mirrors SearchAsync but swaps GetCompletionAsync → StreamCompletionAsync. Reuse RAG retrieval + synthesis prompt logic unchanged.</step>
+    <step order="4" name="Extend AssistantToolCallHandler">Add HandleStreamingAsync that returns IAsyncEnumerable&lt;AssistantStreamEvent&gt;. Reuses Wave E3 classifier-then-dispatch logic; emits `progress` per pipeline transition (classifier_started/complete, then either rag_search_started/complete + llm_synthesis_started → delta events, OR playbook_started → playbook-phase-progress); emits final `result` event with v1.0-shape payload.</step>
+    <step order="5" name="Endpoint Accept-header negotiation">In InsightsAssistantEndpoint, detect `Accept: text/event-stream`; route to streaming handler; otherwise existing single-shot path.</step>
+    <step order="6" name="SSE response writer">Use Minimal API Results.Stream or write to HttpContext.Response directly with `Content-Type: text/event-stream; charset=utf-8`, `Cache-Control: no-cache`, disable buffering. Serialize each event as `data: &lt;json&gt;\n\n`. Terminate with `data: [DONE]\n\n`.</step>
+    <step order="7" name="Mid-stream error handling">If StreamCompletionAsync throws OR cancellation fires, emit `data: {"type":"error","errorCode":"...","detail":"..."}\n\n` then `[DONE]`. Log via correlation id.</step>
+    <step order="8" name="Headers">X-Insights-Path / X-Insights-Intent-Source / X-Insights-Elapsed-Ms / X-Insights-Cache / X-Insights-Hit-Count emitted at response start (before stream body). Same as v1.0.</step>
+    <step order="9" name="Tests">Add new SSE integration tests: (a) Accept negotiation routes correctly; (b) RAG path delta sequence; (c) result event JSON matches single-shot shape; (d) playbook path progress sequence; (e) mid-stream error → error event + DONE; (f) kill-switch 503 BEFORE stream opens; (g) existing 15 single-shot tests still pass (regression).</step>
+    <step order="10" name="§3.5 facade grep">Endpoint stays Zone B; verify no Microsoft.Extensions.AI / IOpenAiClient / etc. leaks into Api/Insights/.</step>
+    <step order="11" name="Format + build + publish-size">dotnet format whitespace verify; dotnet build; publish size baseline check vs 44.10 MB (Wave E).</step>
+    <step order="12" name="Quality gates">code-review + adr-check skills.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build + test</tool>
+    <tool name="grep">§3.5 facade boundary verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Sprk.Bff.Api/Services/Ai/PublicContracts/IInsightsAi.cs (SearchStreamAsync method added)</output>
+    <output type="code">Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs (SearchStreamAsync impl)</output>
+    <output type="code">Sprk.Bff.Api/Services/Ai/Insights/AssistantToolCallHandler.cs (HandleStreamingAsync added)</output>
+    <output type="code">Sprk.Bff.Api/Api/Insights/InsightsAssistantEndpoint.cs (Accept-header negotiation + SSE writer)</output>
+    <output type="code">Sprk.Bff.Api/Models/Insights/AssistantStreamEvent.cs (NEW — Zone B event shape)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/Insights/InsightsAssistantEndpointStreamingTests.cs (NEW — 7 tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Accept: text/event-stream → SSE response; absent/application-json → unchanged v1.0 single-shot</criterion>
+    <criterion testable="true">RAG path emits `delta` events for answer tokens; final `result` event JSON matches v1.0 shape</criterion>
+    <criterion testable="true">Playbook path emits `progress` events for major phases; final `result` event JSON matches v1.0 shape</criterion>
+    <criterion testable="true">Stream terminates with `data: [DONE]\n\n`</criterion>
+    <criterion testable="true">All 15 existing Wave E single-shot tests pass unchanged (back-compat regression)</criterion>
+    <criterion testable="true">7 new SSE tests pass</criterion>
+    <criterion testable="true">Mid-stream error emits `error` event then `[DONE]`</criterion>
+    <criterion testable="true">Kill-switches return 503 ProblemDetails BEFORE stream opens (no SSE body)</criterion>
+    <criterion testable="true">§3.5 grep clean; publish size within +2 MB of Wave E baseline</criterion>
+    <criterion testable="true">dotnet format whitespace verify clean</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 052 (citations href) — they touch different files. 052 touches the citation projection in AssistantToolCallHandler.cs but NOT the streaming flow. Coordinate via separate sub-agents with no file overlap; merge in main session before commit.
+  </notes>
+</task>
