@@ -90,7 +90,7 @@
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| [090](090-project-wrap-up.poml) | — | Lessons-learned + Phase 2 outline + archive | 🔲 | 4h | ❌ | all prior |
+| [090](090-project-wrap-up.poml) | — | Lessons-learned + Phase 2 outline + archive | ✅ | 4h | ❌ | all prior |
 
 ---
 

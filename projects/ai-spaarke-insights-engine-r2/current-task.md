@@ -1,62 +1,75 @@
 # Current Task — Spaarke Insights Engine Phase 1.5 (r2)
 
 > **Purpose**: Active task state tracker. Managed by `task-execute` skill.
-> **Lifecycle**: Wave F implementation complete (tasks 050, 051, 052, 053 all ✅). Pending main-session batch commit + PR open + auto-merge.
+> **Lifecycle**: r2 project **COMPLETE** as of 2026-06-04 task 090. No active task. Pending main-session batch commit + push for the wrap-up deliverables.
 
 ---
 
 ## 🎯 Active task — none
 
-Wave F (contract v1.1) is **implementation-complete**. All 4 Wave F tasks shipped — no active sub-agent work remaining.
+r2 (Phase 1.5) is **complete**. Task 090 closed 2026-06-04 with:
 
-**Next action (owner / main session)**: batch-commit Wave F changes (sources + tests + docs) on branch `work/ai-spaarke-insights-engine-r2-wave-f`, push, open PR with auto-merge enabled (consistent with Wave D + E precedent), monitor CI, redeploy BFF to `spaarke-bff-dev` post-merge.
-
----
-
-## Wave F status (post-task-053 ✅)
-
-| Task | Wave-item | Title | Status | Effort | Output |
-|---|---|---|---|---|---|
-| 050 | F1 | Streaming + citation ID flow spike | ✅ | 0.5d | `notes/spikes/wave-f-streaming-citation-spike.md` (6 sections A–F; binding scope decision: **SHIP FULL** both observation + document citation href; R5 escape hatch NOT triggered — plumbing cost Small) |
-| 051 | F2 | SSE streaming on `POST /api/insights/assistant/query` | ✅ | 3d | `IInsightsAi.AssistantQueryStreamAsync` + `AssistantQueryChunk` Zone-B DTO + endpoint `Accept`-header negotiation + 8 new tests |
-| 052 | F3 | `citations[].href` projection + URL resolution | ✅ | 1d | `AssistantQueryCitation.Href` optional field (JSON key lowercase `href`) + `AssistantCitationHrefOptions` config (section `Insights:CitationHref`, key `BffBaseUrl`) + URL pattern `{bffBaseUrl}/api/documents/{sprk_document-guid}/preview` + 17 new tests |
-| **053** | **F4** | **Contract v1.1 docs + R5 coordination update** | **✅** | **0.5d** | **`design-e3-tool-call-contract.md` bumped v1.0 → v1.1 (+ §3.5 SSE schema + §4.6 href schema + §12 changelog + §11 Phase 2 deferrals updates); `notes/insights-engine-assistant-integration-brief.md` v1.1 amendment (§3.4 Accept negotiation + §4.7 SSE event schema + §4.8 citations.href + §5.3 mid-stream errors + 4 new §B sanity checks); R5 coord doc `insights-r2-coordination.md` §8 changelog new entry (`2026-06-04 (late) — Wave F v1.1 shipped`) resolving §4.4 + §4.6 touchpoints; TASK-INDEX + this file updated** |
-
-**Effort total**: ~5d (matches mini-plan estimate). **Wall clock**: ~4 days end-to-end (051 + 052 parallel sub-agent dispatch per mini-plan §4.1).
-
-## Quality-gate verification @ Wave F close
-
-- Build: 0 errors, 15 pre-existing warnings (no new warnings introduced)
-- Test suite: all green; 25 new tests added (8 SSE + 17 citation-href)
-- Publish size: 44.13 MB compressed (vs Wave E baseline 44.10 MB; +0.03 MB delta, well under +5 MB per-task escalation threshold; well under 60 MB hard ceiling)
-- §3.5 facade-boundary grep: clean (no Zone A leaks into Zone B endpoints/models)
-- `dotnet format whitespace Spaarke.sln --verify-no-changes`: clean
+| Deliverable | Path | Status |
+|---|---|---|
+| Lessons learned | `notes/lessons-learned.md` | ✅ authored |
+| Phase 2 outline | `PHASE-2-OUTLINE.md` | ✅ authored (Tier 1: 4 items / Tier 2: 5 items / Tier 3: 4 items / Tier 4: 9 items) |
+| README status flip | `README.md` | ✅ Status = "✅ Complete (Phase 1.5)" with PR + SC + lessons + Phase 2 refs |
+| Ephemeral notes cleanup | `notes/archive/wave-b-action-codes-draft-2026-06-02.md` | ✅ archived; all canonical handoffs + spikes preserved |
+| TASK-INDEX update | `tasks/TASK-INDEX.md` | ✅ task 090 marked ✅ |
+| current-task.md reset | THIS file | ✅ reset to "complete; next action = open r3" |
 
 ---
 
-## Project status (post-Wave F)
+## Next action (owner / main session)
 
-**Phase 1.5 acceptance bar**: hit. Wave F is a strictly-additive minor-version bump (v1.0 → v1.1) on top of Phase 1.5; the FR-04 / FR-05 / SC-04 / SC-05 acceptance criteria from spec.md were already met by Wave E.
-
-**Pending operator-mediated follow-ups** (unchanged from Wave E close):
-- Assistant team review of `design-e3-tool-call-contract.md` (now v1.1 — sub-task A.5 of task 042 still owner-mediated)
-- Assistant-side implementation of the v1.1 contract additions
-
-**Wave 090 (wrap-up)**: still 🔲 not-started (per TASK-INDEX). Owner directs whether to execute now (post-Wave-F lessons-learned) or batch later. The Wave F lessons (parallel dispatch held; 0 stuck-agent incidents; spike binding decision drove F2/F3 scope clarity) should be captured in the 090 lessons-learned when it runs.
+1. **Batch-commit + push wrap-up changes** on branch `work/ai-spaarke-insights-engine-r2-wave-f` (or a new branch if owner prefers separate PR for wrap-up).
+   - Files: `notes/lessons-learned.md`, `PHASE-2-OUTLINE.md`, `README.md`, `tasks/TASK-INDEX.md`, `current-task.md`, `notes/archive/wave-b-action-codes-draft-2026-06-02.md`, `notes/drafts/` (empty after archive)
+   - Suggested commit message: `docs(insights-engine-r2): task 090 — Phase 1.5 wrap-up + lessons-learned + Phase 2 outline + archive`
+2. **Confirm PR #339 (Wave F) merges cleanly** — CI re-running on master merge commit; auto-merge enabled. Wrap-up commit can ride on the same branch or be PR'd separately per owner direction.
+3. **Per owner direction**: open follow-on project `ai-spaarke-insights-engine-r3` using `PHASE-2-OUTLINE.md` as primary design.md input. Owner picks initial wave scope from Tier 1 (recommended) or other tier per business priority.
 
 ---
 
-## Previous active task — 052 (F3) — citations[].href projection + URL resolution (✅ COMPLETE 2026-06-03)
+## Project final state (post-task-090)
 
-See Wave F task 052 POML output section + commits on `work/ai-spaarke-insights-engine-r2-wave-f` for the source diff. Tests: 17/17 passing. Quality gates clean.
+**Phase 1.5 acceptance bar**: hit. 14/15 spec.md SCs met; SC-15 (SME calibration ≥50 observations) explicitly carried to Phase 2.
+
+**PRs shipped (5)**:
+
+| PR | Wave | Title | Status |
+|---|---|---|---|
+| #330 | B | Wave B — synthesis unblock | ✅ merged |
+| #334 | A + C | Foundations + JPS compliance | ✅ merged |
+| #336 | D | 2D taxonomy + multi-entity | ✅ merged |
+| #337 | E | Hybrid + Assistant integration | ✅ merged |
+| #339 | F | Contract v1.1 — SSE + clickable citations | 🔄 in-flight (auto-merge on CI green) |
+
+**Quality summary** (from `notes/lessons-learned.md` §4):
+- Publish size: 44.13 MB (Wave F close), down 1.52 MB from Phase 5 baseline; well under 60 MB ceiling
+- 0 new NuGet packages; 0 new HIGH-severity CVEs across all 5 waves
+- §3.5 facade-grep gate clean on every wave
+- 1 stuck-agent incident (Wave D task 032 — 12h hang); memory-encoded; 0 incidents in Waves E + F
+- 3 CI flakes addressed (timing test, Post Cache race, FileSystemWatcher dispose NRE) — root-cause = pre-existing test infrastructure latencies, fixes shipped in PR #339
+
+**Open items** (handed forward to r3 or operator):
+- Operator: set `Insights:CitationHref:BffBaseUrl` config on each environment BEFORE smoke-testing v1.1 features (Dev: `https://spaarke-bff-dev.azurewebsites.net`) — per `insights-engine-r2-wave-f-shipped` memory note
+- Operator: Assistant team review of `design-e3-tool-call-contract.md` v1.1 (sub-task A.5 of task 042)
+- Operator: Assistant-side implementation of contract v1.1 (SSE + href)
+- r3 Tier 1.1: `NullInsightsAi` facade — close asymmetric registration on `IInsightsAi`
+- r3 Tier 1.3: Test-fixture hygiene cleanup — eliminate CI flake class via integration-test gate
 
 ---
 
-## Wave F closure note
+## Memory references
 
-Per mini-plan §4.1 dispatch plan:
-- Round 1 (done): 050 serial — spike ✅
-- Round 2 (done): 051 + 052 parallel — both ✅
-- Round 3 (done): 053 serial — docs ✅
+- `insights-engine-r2-wave-b-complete` — Wave B closure (PR #330)
+- `insights-engine-r2-wave-d-shipped` — Wave D ship + 12h hang lesson
+- `insights-engine-r2-wave-e-shipped` — Wave E ship + asymmetric registration finding
+- `insights-engine-r2-wave-f-shipped` — Wave F contract v1.1 ship
+- `feedback-detect-stuck-subagents` — output-file mtime liveness check
+- `feedback-parallel-execution` — dispatch parallel when TASK-INDEX says so
+- `feedback-actual-deps-not-orchestration-groups` — use actual dep graph not wave-group labels
+- `reference-spaarke-ci-format-gate` — `dotnet format whitespace verify` before push
+- `spaarke-unmanaged-solutions` — ADR-027 mismatch with actual practice
 
-**No further Wave F sub-agent work remains.** Wave F is implementation-complete; awaiting main-session batch commit + PR open + auto-merge per owner direction.
+These memories carry the operationally important lessons forward to r3.
