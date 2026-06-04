@@ -356,7 +356,7 @@ public class SprkChatAgentFactory
         // Otherwise fall back to the full playbook capability set (backward compatible).
         var effectiveCapabilities = routedCapabilities ?? capabilities;
         var tools = ResolveTools(
-            scope.ServiceProvider, tenantId, context.KnowledgeScope, effectiveCapabilities,
+            scope.ServiceProvider, tenantId, sessionId, context.KnowledgeScope, effectiveCapabilities,
             playbookId ?? Guid.Empty, documentId, analysisId, httpContext, sseWriter, citationContext,
             routingResult);
 
@@ -604,6 +604,7 @@ public class SprkChatAgentFactory
     private IReadOnlyList<AIFunction> ResolveTools(
         IServiceProvider scopedProvider,
         string tenantId,
+        string sessionId,
         ChatKnowledgeScope? knowledgeScope,
         IReadOnlySet<string> capabilities,
         Guid playbookId,
@@ -830,6 +831,69 @@ public class SprkChatAgentFactory
             {
                 _logger.LogWarning(ex, "Failed to resolve AnalysisExecutionTools — skipping");
                 failedTools.Add(nameof(AnalysisExecutionTools));
+            }
+        }
+
+        // --- InvokeSummarizePlaybookTool (R5 D2-05 / task 015) ---
+        // Gated behind the existing "summarize" capability (PlaybookCapabilities.Summarize).
+        // Reuses the existing capability constant (no new feature flag, no new capability key)
+        // per R5 CLAUDE.md §3.2 + ADR-018. The tool DELEGATES to SessionSummarizeOrchestrator
+        // (task 012 — registered Scoped inside AnalysisServicesModule.AddAnalysisOrchestrationServices)
+        // — both this agent-tool path and task 014's direct endpoint converge on the SAME
+        // SummarizeSessionFilesAsync method (FR-01 + FR-08 + SC-08).
+        //
+        // Tool routing scope (NFR-12 / UR-01): the tool description text is the LOAD-BEARING
+        // artifact for correct LLM routing between this Summarize tool and the upcoming
+        // insights.query tool (task 024). See InvokeSummarizePlaybookTool.ToolDescription.
+        //
+        // ADR-028: no token snapshot — the orchestrator uses its existing scoped DI
+        // resolution; fresh tokens flow through RAG / OpenAI / Dataverse clients per call.
+        // No HttpContext dependency (Summarize operates over pre-indexed session content
+        // — task 003 — not SPE OBO-authenticated file download).
+        //
+        // Factory-instantiated (ADR-010): no new top-level DI registration; orchestrator
+        // already registered via AnalysisServicesModule (task 012 evidence note).
+        if (capabilities.Contains(PlaybookCapabilities.Summarize))
+        {
+            attempted++;
+            try
+            {
+                var sessionSummarizeOrchestrator =
+                    scopedProvider.GetService<SessionSummarizeOrchestrator>();
+                if (sessionSummarizeOrchestrator != null)
+                {
+                    var loggerFactory =
+                        scopedProvider.GetRequiredService<ILoggerFactory>();
+                    var toolLogger =
+                        loggerFactory.CreateLogger<InvokeSummarizePlaybookTool>();
+
+                    var correlationId = httpContext?.TraceIdentifier;
+
+                    var invokeSummarizeTool = new InvokeSummarizePlaybookTool(
+                        sessionSummarizeOrchestrator,
+                        tenantId,
+                        sessionId,
+                        correlationId,
+                        sseWriter,
+                        toolLogger);
+                    tools.AddRange(invokeSummarizeTool.GetTools());
+                    resolved++;
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "SessionSummarizeOrchestrator not available; " +
+                        "InvokeSummarizePlaybookTool will not be registered. Verify " +
+                        "AnalysisServicesModule.AddAnalysisOrchestrationServices is " +
+                        "enabled (Analysis:Enabled and DocumentIntelligence:Enabled).");
+                    failedTools.Add(nameof(InvokeSummarizePlaybookTool));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to resolve InvokeSummarizePlaybookTool — skipping");
+                failedTools.Add(nameof(InvokeSummarizePlaybookTool));
             }
         }
 

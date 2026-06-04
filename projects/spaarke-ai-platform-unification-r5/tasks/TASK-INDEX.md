@@ -57,8 +57,8 @@ R5 ships in 3 sequential phases + 1 wrap-up task, with parallel-execution opport
 | 011 | P2-G1 | D2-02 New `sprk_analysisplaybook` configuration | ✅ | 2h (actual ~1h incl deploy) | ✅ | Phase 1 ✅ |
 | 012 | P2-G2 | D2-03 New `SessionSummarizeOrchestrator` concrete class | ✅ | 4h (actual ~3h) | ✅ | 010, 011 |
 | 013 | P2-G2 | D2-08 Extract `RichFilePreview` renderer core from `RichFilePreviewDialog` | ✅ | 4h (actual 2h) | ✅ | Phase 1 ✅ |
-| 014 | P2-G3 | D2-04 New `POST /api/ai/chat/sessions/{id}/summarize` endpoint | 🔲 | 3h | ✅ | 012 |
-| 015 | P2-G3 | D2-05 Register `InvokeSummarizePlaybookTool` on `SprkChatAgent` | 🔲 | 3h | ✅ | 012 |
+| 014 | P2-G3 | D2-04 New `POST /api/ai/chat/sessions/{id}/summarize` endpoint | ✅ | 3h (actual ~2.5h) | ✅ | 012 |
+| 015 | P2-G3 | D2-05 Register `InvokeSummarizePlaybookTool` on `SprkChatAgent` | ✅ | 3h (actual ~2.5h) | ✅ | 012 |
 | 016 | P2-G3 | D2-06 Add additive PaneEventBus event types (5 new) per ADR-030 | ✅ | 2h (actual 1h) | ✅ | — |
 | 017 | P2-G4 | D2-07 Build `StructuredOutputStreamWidget` (Workspace; schema-driven) | 🔲 | 1d | ✅ | 016 |
 | 018 | P2-G4 | D2-09 Build `FilePreviewContextWidget` (Context pane; non-modal) | 🔲 | 1d | ✅ | 013, 016 |

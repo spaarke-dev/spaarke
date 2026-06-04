@@ -1,13 +1,16 @@
 using FluentAssertions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Capabilities;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
@@ -323,6 +326,112 @@ public class SprkChatAgentFactoryTests
 
         // Assert — agent created normally; no exception thrown
         agent.Should().NotBeNull();
+    }
+
+    // ── R5 task 015 — InvokeSummarizePlaybookTool routing-selection coverage ──
+
+    /// <summary>
+    /// When the playbook capability set contains <see cref="PlaybookCapabilities.Summarize"/>
+    /// AND <see cref="Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator"/> is registered
+    /// in DI, the factory MUST register <c>invoke_summarize_playbook</c> as an AIFunction on
+    /// the resolved agent's tool list. Verified via the <c>capability_change</c> SSE event:
+    /// when the previous turn did NOT have this tool, the factory emits a "capability_change"
+    /// event listing it as a newly-available tool.
+    ///
+    /// This satisfies R5 task 015 acceptance criterion: "tool is visible in the agent's tool
+    /// catalog when the gating capability is present".
+    /// </summary>
+    [Fact]
+    public async Task CreateAgentAsync_WithSummarizeCapability_RegistersInvokeSummarizePlaybookTool()
+    {
+        // Arrange — null playbookId means "use CoreCapabilities" which includes Summarize.
+        // SessionSummarizeOrchestrator is registered in DI alongside its real (mocked) deps.
+        var contextProviderMock = new Mock<IChatContextProvider>();
+        contextProviderMock
+            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateDefaultContext());
+
+        var services = BuildServiceProviderWithSummarizeOrchestrator(contextProviderMock.Object);
+        var factory = services.GetRequiredService<SprkChatAgentFactory>();
+
+        // Capture capability_change events so we can inspect the tool catalog.
+        var capturedEvents = new List<ChatSseEvent>();
+        Func<ChatSseEvent, CancellationToken, Task> sseWriter = (evt, _) =>
+        {
+            capturedEvents.Add(evt);
+            return Task.CompletedTask;
+        };
+
+        // Act — playbookId = null → CoreCapabilities (Search/Analyze/SelectionRevise/Summarize).
+        // previousTurnToolNames empty → every current tool is reported as "available".
+        await factory.CreateAgentAsync(
+            TestSessionId, TestDocumentId,
+            playbookId: null,
+            tenantId: TestTenantId,
+            sseWriter: sseWriter,
+            latestUserMessage: "summarize the attached files",
+            previousTurnToolNames: Array.Empty<string>());
+
+        // Assert — exactly one capability_change event lists `invoke_summarize_playbook`
+        // as a newly-available tool. We assert on the event payload to confirm the LLM
+        // tool name from R5 task 015 appears in the resolved tool catalog.
+        capturedEvents.Should()
+            .Contain(e => e.Type == "capability_change",
+                because: "factory must emit capability_change when the tool set differs from the previous turn");
+
+        // Convert each capability_change event's serialized payload to a string and
+        // search for the tool name. The payload shape is implementation-defined but the
+        // tool name appears verbatim in either the JSON or via the Data property fields.
+        var changeEvents = capturedEvents.Where(e => e.Type == "capability_change").ToList();
+        var allPayloads = string.Join("\n", changeEvents.Select(e =>
+            System.Text.Json.JsonSerializer.Serialize(e.Data)));
+        allPayloads.Should().Contain(InvokeSummarizePlaybookTool.ToolName,
+            because: "the factory MUST emit a capability_change event listing invoke_summarize_playbook as available when Summarize capability is set");
+    }
+
+    /// <summary>
+    /// Build a service provider that includes the dependencies needed to register
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator"/> in DI so the
+    /// tool's gating block in <c>SprkChatAgentFactory.ResolveTools</c> can wire successfully.
+    /// </summary>
+    private static ServiceProvider BuildServiceProviderWithSummarizeOrchestrator(
+        IChatContextProvider contextProvider)
+    {
+        var services = new ServiceCollection();
+
+        var chatClientMock = new Mock<IChatClient>();
+        services.AddSingleton(chatClientMock.Object);
+
+        var rawChatClientMock = new Mock<IChatClient>();
+        services.AddKeyedSingleton<IChatClient>("raw", rawChatClientMock.Object);
+
+        services.AddScoped(_ => contextProvider);
+        services.AddLogging();
+
+        // Register dependencies of SessionSummarizeOrchestrator. ChatSessionManager is a
+        // concrete class (not an interface) so we cannot Moq.Of() it — construct with
+        // mocked I/O deps directly. The tool's registration block ONLY checks "is the
+        // orchestrator resolvable?", it does NOT invoke the orchestrator's methods.
+        var chatSessionManager = new ChatSessionManager(
+            cache: Mock.Of<IDistributedCache>(),
+            dataverseRepository: Mock.Of<IChatDataverseRepository>(),
+            logger: Mock.Of<ILogger<ChatSessionManager>>(),
+            persistence: null,
+            cleanupSignal: null);
+
+        services.AddSingleton(chatSessionManager);
+        services.AddSingleton(Mock.Of<IRagService>());
+        services.AddSingleton(Mock.Of<IOpenAiClient>());
+        services.AddSingleton(Mock.Of<Spaarke.Dataverse.IGenericEntityService>());
+        services.AddSingleton<Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry>();
+
+        // The actual orchestrator class — concrete, scoped, per task 012 + AnalysisServicesModule.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator>();
+
+        services.AddSingleton<SprkChatAgentFactory>();
+
+        return services.BuildServiceProvider();
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
