@@ -1,0 +1,764 @@
+<task id="029" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-19 12 Insights error codes + per-code UX + correlation propagation + retry logic</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G7 (serial; depends on 024 + 025 + 026; blocks 030)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>024 (InsightsQueryToolHandler tool wiring), 025 (subject resolution + HTTP client), 026 (two-path InsightsResponseRenderer)</dependencies>
+    <tags>frontend, error-handling, insights, retry</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Wire complete, contract-binding error handling into the `InsightsResponseRenderer`
+    component shipped by task 026. The Insights Engine R2 binding contract v1.0
+    (`notes/insights-engine-assistant-integration-brief.md` §5.1) defines a stable
+    12-code error matrix. R5 MUST handle every code with the per-code user-facing
+    message in column 4 of that matrix — no raw stack traces, no document content,
+    no prompt text, no LLM raw output leaks to the user (per integration brief §5.2
+    + ADR-018 + ADR-019).
+
+    Two special-case retry policies (per spec FR-16 + plan.md D2-19):
+    - **503 `ai.intent-classification.disabled` + no `forceMode`**: if R5 has an
+      intent signal available client-side (e.g., user invoked via the
+      `/ask-insights playbook ...` or `/ask-insights rag ...` slash command per
+      task 019), retry ONCE with the explicit `forceMode` set. If no intent signal
+      is available (pure natural-language tool-call), do NOT retry — surface the
+      generic "temporarily disabled" UX.
+    - **500 `INSIGHTS_ASSISTANT_INTERNAL_ERROR`**: retry ONCE with 1s backoff. On
+      second 500, surface the error to the user (no further retries — strict
+      no-infinite-loop policy per integration brief §5.1 column 4).
+
+    All other error codes are **non-retryable** by the client:
+    - 400-class (5 codes — `query.required`, `subject.required`, `subject.invalid`,
+      `forceMode.invalid`, `conversationContext.invalid`): client-side bugs or
+      malformed inputs; surfacing the per-code message is the correct response,
+      retry would just fail again.
+    - 401: re-authenticate via existing `@spaarke/auth` `useAuth()` refresh; if
+      persists, surface "Your session expired".
+    - 429: honor `Retry-After` header per ADR-016 — surface "Slow down a moment"
+      with timer; do NOT auto-retry inside the renderer.
+    - 503 `ai.insights.disabled` / `ai.rag.disabled` /
+      `ai.assistant-default-playbook.unconfigured`: kill-switches / config bugs;
+      surfacing the per-code message is correct.
+
+    `x-correlation-id` propagation (spec FR-17 / SC-16): the correlation ID
+    generated per Assistant turn by the tool handler (task 024 Step 4 generates;
+    task 025 HTTP client propagates) MUST be surfaced in the error UI as an
+    OPAQUE operator-debugging key — visible (so support can ask "what's your
+    request ID?"), but NOT used by the user to reason about the error. The
+    correlationId is treated as untrusted display text — render with the same
+    escaping discipline as any other untrusted string.
+
+    This task is PURE FRONTEND. ZERO BFF code change. Publish-size delta = 0 MB
+    (no `dotnet publish` measurement required, but confirm delta = 0 in task
+    notes per R5 CLAUDE.md §3.6).
+  </prompt>
+
+  <role>
+    Senior React / TypeScript developer with deep familiarity of the Spaarke AI
+    widget framework + Fluent UI v9 + `@spaarke/auth` `useAuth()` /
+    `authenticatedFetch` + ADR-019 ProblemDetails parsing. Understands the
+    Insights v1.0 binding contract (integration brief), the
+    `InsightsResponseRenderer` two-path renderer (task 026), and the per-turn
+    correlation-id propagation chain (task 024 generates → task 025 HTTP client
+    propagates → this task surfaces in UI). Familiar with ADR-016 (rate-limit
+    honoring), ADR-018 (no information leakage), ADR-019 (ProblemDetails
+    extension parsing), ADR-028 (Auth v2 reauth flow), R5 CLAUDE.md §3.5
+    (Insights Zone B consumer boundary).
+  </role>
+
+  <goal>
+    The `InsightsResponseRenderer` (and its co-located error-handling utility
+    module — extracted at this task's discretion) handles all 12 error codes from
+    integration brief §5.1 with the column-4 user-facing message. Two retry
+    policies are implemented:
+
+    1. 503 `ai.intent-classification.disabled` + intent signal available → retry
+       once with explicit `forceMode`.
+    2. 500 `INSIGHTS_ASSISTANT_INTERNAL_ERROR` → retry once with 1s backoff.
+
+    No other error code triggers an auto-retry. `Retry-After` (429) is rendered
+    as a countdown / "try again in N seconds" hint — the user clicks "Retry" to
+    re-issue the request manually (no auto-retry).
+
+    `correlationId` is surfaced in the error UI as an opaque ops-debugging key
+    (visible, copyable, but visually de-emphasized — small mono-font under the
+    user-facing message). The full ProblemDetails error envelope (`status`,
+    `title`, `detail`, `errorCode`, `correlationId`) is preserved in
+    component-internal state for telemetry / Console-log diagnostics but is
+    NEVER rendered to the user beyond the column-4 message + correlationId.
+
+    No raw stack traces, no document content, no prompt text, no LLM raw output
+    appears in the rendered error UI. Verified by unit test (Test 6) that
+    intentionally injects a fabricated error response containing
+    document-content-like text and asserts none of it reaches the rendered DOM.
+
+    Unit tests cover all 12 codes + both retry paths + correlation-id surfacing
+    + no-leakage assertion + ADR-016 `Retry-After` honoring. Quality gates pass.
+    BFF publish-size delta = 0 MB confirmed.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="binding-contract">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+    <file purpose="v1.1-contract">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md</file>
+    <file purpose="dependency-task-024">projects/spaarke-ai-platform-unification-r5/tasks/024-insights-query-tool-handler.poml</file>
+    <file purpose="dependency-task-025">projects/spaarke-ai-platform-unification-r5/tasks/025-insights-subject-resolution-http-client.poml</file>
+    <file purpose="dependency-task-026">projects/spaarke-ai-platform-unification-r5/tasks/026-insights-two-path-response-renderer.poml</file>
+    <file purpose="sibling-task-019">projects/spaarke-ai-platform-unification-r5/tasks/019-slash-command-summarize-semantic-extension.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 CLAUDE.md §3.5 / §10 / ADR-013 §3.5 Zone B boundary">R5 is a Zone B consumer of the Insights contract. This task consumes the contract's error envelope (ProblemDetails with `errorCode` extension) — does NOT couple to any Insights internals. No `import` from Insights server-side types; the error envelope is parsed via R5-local TypeScript types matching the contract's wire shape.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 / reuse mandate">MUST integrate with the EXISTING `InsightsResponseRenderer` shipped by task 026 — do NOT create a parallel error-rendering component, do NOT create a parallel HTTP retry framework. If error-handling logic needs extraction for testability, extract into a co-located utility module (e.g., `insights-error-handler.ts`) imported by the renderer — NOT into a new package.</constraint>
+    <constraint source="spec FR-16 (12 error codes — binding)">MUST handle ALL 12 contract error codes from integration brief §5.1 with the column-4 user-facing message. The 12 codes are: 400 `query.required`, 400 `subject.required`, 400 `subject.invalid`, 400 `forceMode.invalid`, 400 `conversationContext.invalid`, 401 (no errorCode — auth challenge), 429 (no errorCode — rate-limit default), 503 `ai.insights.disabled`, 503 `ai.rag.disabled`, 503 `ai.intent-classification.disabled`, 503 `ai.assistant-default-playbook.unconfigured`, 500 `INSIGHTS_ASSISTANT_INTERNAL_ERROR`. Per-code messages from integration brief §5.1 column 4 are the user-facing source of truth.</constraint>
+    <constraint source="spec FR-16 / plan.md D2-19 (special retry — 503 `ai.intent-classification.disabled`)">If response is 503 `ai.intent-classification.disabled` AND `forceMode` was NOT set on the original request AND R5 has an intent signal available client-side (slash command path with explicit mode known), retry ONCE with `forceMode` set to the inferred mode. If `forceMode` was already set on the original request, do NOT retry — the classifier is irrelevant when `forceMode` is set, so receiving this code with `forceMode` set indicates a contract bug or BFF misclassification (surface the error). If no intent signal is available client-side (pure natural-language path), do NOT retry — surface generic "temporarily disabled" UX.</constraint>
+    <constraint source="spec FR-16 / plan.md D2-19 (special retry — 500)">500 `INSIGHTS_ASSISTANT_INTERNAL_ERROR` → retry ONCE with 1s backoff. On second 500, surface the error to the user. NO infinite-loop retries. Retry counter MUST be tracked per-request (not per-component / per-session) so two consecutive user-initiated requests can each get one retry.</constraint>
+    <constraint source="spec FR-17 / SC-16 (correlation-id propagation)">`x-correlation-id` is generated per Assistant turn upstream (task 024). This task SURFACES it in the error UI as an opaque ops-debugging key. The correlationId MUST be visible (copyable for support tickets) but visually de-emphasized — NEVER the primary UX surface. Treated as untrusted display text (the value comes from a server response header; render with the same escaping as any other untrusted string — Fluent `Text` component default escapes; do NOT inject as HTML).</constraint>
+    <constraint source="integration brief §5.2 + ADR-018 (no information leakage)">Errors NEVER include document content, prompt text, LLM raw output, or stack traces. The contract enforces this server-side; this task enforces it client-side by rendering ONLY the column-4 message + correlationId + optional `Retry-After` countdown (on 429). Server-supplied `detail` field MAY contain operator-relevant context per ADR-019 — R5 logs it to Console for diagnostics but does NOT render it to the user.</constraint>
+    <constraint source="ADR-019 (ProblemDetails parsing)">Error responses are `application/problem+json` per integration brief §5. Parse `status`, `title`, `detail`, `errorCode` (stable extension), `correlationId` (stable extension). Use loose parsing — unknown extensions pass through unchanged for forward-compat (v1.1).</constraint>
+    <constraint source="ADR-016 (rate-limit honoring)">429 responses carry `Retry-After` header per ADR-016 + `ai-context` policy (60/min/oid aggregate). Renderer parses `Retry-After` (seconds) and shows a countdown / "try again in N seconds" hint. Renderer does NOT auto-retry on 429 — the user clicks "Retry" manually. Aggregate budget includes `/ask` + `/search` + `/assistant/query` per integration brief §11.</constraint>
+    <constraint source="ADR-028 (Auth v2 reauth flow)">401 responses (no `errorCode` — auth challenge) trigger the existing `@spaarke/auth` `useAuth()` token refresh flow. If token refresh succeeds, single retry. If token refresh fails (e.g., user's session truly expired), surface "Your session expired". MUST use the existing reauth helper — do NOT implement parallel reauth logic.</constraint>
+    <constraint source="ADR-029 / R5 CLAUDE.md §3.6">BFF publish-size delta = 0 MB (no BFF code changed). Confirm in task notes; no `dotnet publish` measurement required for this pure-frontend task.</constraint>
+    <constraint source="R5 CLAUDE.md §3.2 / ADR-018 (no new feature flags)">This task introduces NO new feature flags. The two retry policies are unconditional client-side behavior. Threshold tuning (e.g., 1s backoff value) is hard-coded per integration brief column 4 — does NOT need to be a config knob.</constraint>
+    <constraint source="contract v1.1 forward-compat">Phase 1.5 contract is forward-compatible. The error envelope MAY gain additional extensions in v1.1 (e.g., `suggestedAction`, `helpUrl`). Renderer MUST preserve unknown extensions in component-internal state (Console-logged for diagnostics) but ignore them in the rendered UI in v1.0. v1.1 enhancements are a follow-up task (out of scope here).</constraint>
+    <constraint source="CLAUDE.md §10 / bff-extensions §F test obligation">This task is pure frontend (no `src/server/api/Sprk.Bff.Api/Services/` changes), so the BFF test obligation does not apply. However, the R5 §3.7 frontend-test discipline DOES apply: PRs adding meaningful frontend logic MUST add/update tests in the corresponding `__tests__` directory. This task adds unit tests covering the full 12-code matrix + both retry paths + correlationId surfacing + no-leakage assertion.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/insights-error-handling + frontend/retry-policy + adr-019-problemdetails-parsing</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/024-insights-query-tool-handler.poml</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/025-insights-subject-resolution-http-client.poml</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/026-insights-two-path-response-renderer.poml</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/019-slash-command-summarize-semantic-extension.poml</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-016-rate-limiting.md</file>
+      <file>.claude/adr/ADR-018-information-leakage-prevention.md</file>
+      <file>.claude/adr/ADR-019-error-handling.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/client/shared/Spaarke.Auth/src/hooks/useAuth.ts</file>
+      <file>src/client/shared/Spaarke.Auth/src/authenticatedFetch.ts</file>
+    </files>
+    <patterns>
+      <pattern name="Error code → user message map (binding)" location="projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md §5.1">
+        The integration brief §5.1 column 4 IS the source of truth for per-code
+        user messages. Encode the 12-code matrix as a TypeScript const map
+        (e.g., `ERROR_CODE_MESSAGES: Record&lt;string, string&gt;`) co-located
+        with the renderer. The map keys are the stable `errorCode` extensions
+        (e.g., `query.required`, `ai.intent-classification.disabled`) plus
+        synthetic keys for 401 (`auth.401`) and 429 (`rate-limit.429`) since
+        those don't carry an `errorCode` in the contract.
+      </pattern>
+      <pattern name="ProblemDetails TypeScript type (forward-compat)" location="(R5-local — define in renderer's types.ts)">
+        Define TypeScript shape with required fields + `[key: string]: unknown`
+        index signature so v1.1 extensions pass through unchanged.
+
+        ```typescript
+        export type InsightsProblemDetails = {
+          type?: string;
+          title?: string;
+          status?: number;
+          detail?: string;
+          errorCode?: string;
+          correlationId?: string;
+          [key: string]: unknown;
+        };
+        ```
+      </pattern>
+      <pattern name="Retry policy state machine (binding for FR-16 special cases)" location="(R5-local — embed in renderer or extract to insights-error-handler.ts)">
+        Encode as an explicit state machine:
+
+        ```typescript
+        type RetryDecision =
+          | { kind: 'no-retry' }
+          | { kind: 'retry-with-force-mode'; forceMode: 'playbook' | 'rag' }
+          | { kind: 'retry-after-backoff'; backoffMs: number };
+
+        function decideRetry(
+          response: { status: number; errorCode?: string },
+          originalRequest: { forceMode?: string; intentSignal?: 'playbook' | 'rag' },
+          attemptNumber: number  // 1 = original; 2 = first retry
+        ): RetryDecision { ... }
+        ```
+
+        Rules (binding):
+        - 503 `ai.intent-classification.disabled` + no `forceMode` on original +
+          `intentSignal` available → `retry-with-force-mode`.
+        - 500 `INSIGHTS_ASSISTANT_INTERNAL_ERROR` + attemptNumber === 1 →
+          `retry-after-backoff` with 1000ms.
+        - All other codes + any attemptNumber &gt;= 2 → `no-retry`.
+
+        Test exhaustively — this is the FR-16 binding contract.
+      </pattern>
+      <pattern name="`Retry-After` header parsing (ADR-016)" location="(R5-local utility)">
+        Per ADR-016 + RFC 7231: `Retry-After` MAY be either an integer
+        (delta-seconds) or an HTTP-date. Parse both; show as countdown in UX.
+        Renderer does NOT auto-retry on 429 — user clicks manually.
+      </pattern>
+      <pattern name="No-leakage assertion (ADR-018)" location="(unit test discipline)">
+        Author a test that injects a fabricated error response with `detail`
+        containing strings that simulate document content (e.g., "DRAFT —
+        Acme APA: This agreement is between..."), prompt text (e.g.,
+        "You are a helpful assistant..."), and a fake stack trace
+        ("at System.Threading...."). Assert that the rendered DOM contains
+        NONE of these strings. Assert the rendered DOM DOES contain the
+        column-4 user-facing message for the code.
+      </pattern>
+      <pattern name="Correlation-id surfacing (FR-17 / SC-16)" location="(R5-local rendering convention)">
+        Render correlationId as small mono-font text below the user message,
+        e.g., `&lt;Text size={100} font="monospace"&gt;{correlationId}&lt;/Text&gt;`.
+        Provide a copy-to-clipboard affordance (Fluent v9 `Button appearance="subtle"`
+        with `Copy24Regular` icon). Use the existing Fluent v9 / Spaarke
+        copy-to-clipboard helper from `Spaarke.UI.Components` if one exists;
+        otherwise inline `navigator.clipboard.writeText`. Visual hierarchy:
+        user message PRIMARY, correlationId SECONDARY.
+      </pattern>
+      <pattern name="ADR-028 reauth flow on 401" location="src/client/shared/Spaarke.Auth/">
+        On 401 with no `errorCode`, call the existing `@spaarke/auth`
+        `useAuth()` `refreshToken()` / equivalent helper. If success → single
+        retry. If failure (refresh token expired / revoked) → surface "Your
+        session expired" + "Sign in again" affordance. MUST use existing
+        helper; NO parallel auth logic.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships the `insights.query` tool integration through the SpaarkeAi
+      three-pane shell. The two-path response renderer (`InsightsResponseRenderer`,
+      shipped by task 026) handles success responses (playbook structured
+      envelope + RAG citation-grounded prose). This task completes the picture
+      by wiring contract-binding error handling for all 12 error codes from
+      integration brief §5.1.
+
+      The 12-code matrix is the FR-16 binding contract. Each code has a stable
+      `errorCode` extension (per ADR-019 ProblemDetails) and a per-code
+      user-facing message in integration brief §5.1 column 4. R5 MUST encode
+      this mapping explicitly — the LLM cannot improvise an error message
+      from `detail` text because `detail` MAY contain operator-relevant
+      diagnostics that are NOT user-facing per ADR-018 (no information leakage).
+
+      Two retry policies are special-cased per plan.md D2-19 + spec FR-16:
+      - 503 `ai.intent-classification.disabled` is a kill-switch surfaced by
+        the BFF when the intent classifier is operationally disabled. If R5
+        already knows the intent (slash command path with explicit mode), it
+        can bypass the classifier by retrying with `forceMode` set. This is
+        a real value-recovery: instead of surfacing "temporarily disabled" to
+        a user who just typed `/ask-insights rag ...`, R5 retries the same
+        request with `forceMode: "rag"` and gets a real answer.
+      - 500 `INSIGHTS_ASSISTANT_INTERNAL_ERROR` is the generic internal-error
+        catch-all. Per integration brief column 4: "Retry ONCE with 1s
+        backoff. On second 500: surface error + log." This handles transient
+        BFF failures (e.g., brief Service Bus blip) without forcing user
+        retry; the 1s backoff prevents thundering-herd on a genuinely
+        struggling BFF.
+
+      All other codes are non-retryable. Auto-retrying a 400 would just fail
+      again with the same code. Auto-retrying a 429 violates ADR-016 (honor
+      `Retry-After`; let the user click retry manually after the timer).
+      Auto-retrying a kill-switch-induced 503 (e.g., `ai.insights.disabled`)
+      doesn't change anything — the kill switch is still off.
+
+      `correlationId` propagation is the operator-facing diagnostic surface.
+      The chain: task 024 generates the ID per Assistant turn → task 025
+      HTTP client propagates it as `x-correlation-id` request header → BFF
+      includes it as the `correlationId` ProblemDetails extension on errors
+      (plus the `X-Insights-*` response headers on success) → this task
+      surfaces it in the error UI. End-to-end App Insights / Kusto
+      correlation works because every link in the chain uses the same ID.
+
+      Information-leakage discipline (ADR-018 + integration brief §5.2) is
+      load-bearing. The error UI MUST NOT show: document content (PII / IP
+      risk), prompt text (system-prompt exposure), LLM raw output (could
+      contain hallucinated content presented as authoritative), or stack
+      traces (architecture disclosure). The server contract enforces this on
+      the wire; this task enforces it client-side by rendering ONLY the
+      column-4 message + correlationId. Any server-supplied `detail` field
+      is Console-logged for diagnostics but never rendered.
+
+      This task is the third + final task of the P2-G6/G7 Insights tool
+      integration suite that consumes the binding contract. After this task
+      completes, task 030 runs end-to-end smoke tests on Spaarke Dev (Wave D7
+      synthetic GUIDs + SME walkthrough). After task 030 + task 031 (Phase 2
+      integration verification) complete, Phase 2 closes.
+    </background>
+    <dependencies>
+      <dependency task="024" status="required-blocking">
+        D2-14 — `InsightsQueryToolHandler` chat-agent tool registration. This
+        task surfaces errors thrown by the tool handler's `InsightsToolException`
+        envelope (preserving `errorCode`, `correlationId`, `status`, `title`,
+        `detail`). Task 029 MUST NOT begin until task 024 is ✅.
+      </dependency>
+      <dependency task="025" status="required-blocking">
+        D2-15 — Subject resolution + HTTP client. This task uses the same HTTP
+        client to issue retry requests (e.g., the `forceMode` retry for 503
+        `ai.intent-classification.disabled`). The `x-correlation-id` header
+        wired by task 025's HTTP client is the ID this task surfaces in the
+        error UI. Task 029 MUST NOT begin until task 025 is ✅.
+      </dependency>
+      <dependency task="026" status="required-blocking">
+        D2-16 — Two-path `InsightsResponseRenderer`. This task adds error
+        handling to the EXISTING renderer (or its co-located error-handling
+        utility extracted at this task's discretion). Task 029 MUST NOT begin
+        until task 026 is ✅.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 027 (D2-17) — Clickable citations (v1.1 forward). Parallel to
+        this task in scope but separate concern (success-path citations vs
+        error-path handling). Both build atop task 026's renderer.</item>
+      <item>Task 028 (D2-18) — Confidence floor badge. Parallel to this task;
+        success-path badge rendering. Both build atop task 026.</item>
+      <item>Task 030 (D2-20) — Insights tool smoke tests. Consumes this task's
+        complete error handling — Wave D7 synthetic GUID requests will
+        intentionally trigger several error codes (malformed subject → 400
+        `subject.invalid`; kill-switches if ops disables them → 503 path) to
+        verify end-to-end UX.</item>
+      <item>Task 019 (D2-09) — Slash command `/ask-insights` semantic extension.
+        The slash command path is the source of the `intentSignal` used by
+        the 503 `ai.intent-classification.disabled` retry policy. When the
+        user types `/ask-insights playbook ...`, the original request's
+        `forceMode` is set AND `intentSignal` is also recorded so this
+        renderer can decide retry intent if the BFF returns the 503 code with
+        `forceMode` already set (an edge case — likely a contract/config bug,
+        log + surface error).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request `/compact`.
+      Declare RIGOR LEVEL explicitly per CLAUDE.md §8:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Frontend code change in Insights consumption path (consumer-facing
+                 error UX) + retry policy (state machine) + ADR-018 information-
+                 leakage discipline + ADR-016 rate-limit honoring + correlation-id
+                 surfacing (SC-16). Tags: frontend + error-handling + insights +
+                 retry. Modifies `.tsx` / `.ts` (binding rigor trigger per
+                 task-execute decision tree). Serial dependency on 024+025+026.
+                 Qualifies for FULL.
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0–10 with Step 9.5 quality gates.
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md`. Confirm task 029 status is 🔲, dependencies
+      024 + 025 + 026 are ALL ✅ (BLOCKING — if any is 🔲, STOP and report; do
+      not begin error handling without the full tool + HTTP + renderer chain
+      in place), parallel-safe = false (serial within P2-G7). Read
+      `current-task.md` to verify no R5 task is in flight conflicting with this
+      renderer site. Read project README for project status. Confirm tasks 027
+      + 028 status — if both are in flight, coordinate via PR review (all three
+      modify the same `InsightsResponseRenderer` site; task 029 is the gating
+      task of P2-G7 so it lands last within the suite).
+    </step>
+    <step order="2" name="Gather Resources — focus on the 12-code matrix">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically:
+
+      (a) Read `notes/insights-engine-assistant-integration-brief.md` §5 in
+          FULL — internalize all 12 codes + per-code user messages in column
+          4 + §5.2 (errors NEVER include section). Transcribe the column-4
+          messages verbatim into task notes
+          `notes/task-029-error-message-matrix.md` for cross-reference.
+      (b) Read tasks 024 + 025 + 026 POMLs in full — confirm exactly what
+          envelope shape the tool handler / HTTP client surface to the
+          renderer (the `InsightsToolException` fields from task 024 Step 4 +
+          task 025 Step N — verify alignment).
+      (c) Read task 019 POML — confirm the slash command path records the
+          `intentSignal` (this task's retry policy depends on that signal
+          being available client-side).
+      (d) Read ADR-016 (rate-limit + Retry-After), ADR-018 (no information
+          leakage — read §"Errors NEVER include" enumeration), ADR-019
+          (ProblemDetails wire format), ADR-028 (Auth v2 reauth helper API).
+      (e) Read the existing `@spaarke/auth` `useAuth()` + reauth-flow helper
+          source to confirm the API surface for the 401 retry.
+      (f) Identify the location of the `InsightsResponseRenderer` shipped by
+          task 026 — likely `src/client/shared/Spaarke.AI.Widgets/src/...` or
+          `src/solutions/SpaarkeAi/src/components/conversation/...`. Confirm
+          exact path from task 026's `<outputs>` section.
+    </step>
+    <step order="3" name="Author the 12-code matrix + message constants">
+      Author the canonical TypeScript const map encoding all 12 codes →
+      user-facing messages. Co-locate with the renderer (or in a new
+      `insights-error-messages.ts` module imported by the renderer).
+
+      The 12 entries (verbatim from integration brief §5.1 column 4):
+
+      1. `query.required` (HTTP 400) — "I couldn't understand the question."
+      2. `subject.required` (HTTP 400) — same as `query.required` (likely
+         Assistant wiring bug; same UX).
+      3. `subject.invalid` (HTTP 400) — generic "Couldn't identify the
+         entity — try again from a matter, project, or invoice context."
+      4. `forceMode.invalid` (HTTP 400) — generic Assistant bug; surface
+         "Something went wrong — try again." (Assistant team fixes wiring.)
+      5. `conversationContext.invalid` (HTTP 400) — surface "Conversation
+         context too long — starting a fresh thread." (R5 truncates +
+         retries silently in v1.0; this task surfaces the UX of the
+         truncation hint.)
+      6. 401 (no `errorCode`) — synthesized key `auth.401`: trigger reauth
+         flow (Step 5 below); if reauth fails, "Your session expired —
+         sign in again."
+      7. 429 (no `errorCode`) — synthesized key `rate-limit.429`: "Slow
+         down a moment — you can try again in N seconds." (N from
+         `Retry-After` header.)
+      8. `ai.insights.disabled` (HTTP 503) — "Insights temporarily disabled
+         — please try again later."
+      9. `ai.rag.disabled` (HTTP 503) — "Knowledge search temporarily
+         disabled — please try again later." (If `forceMode: "playbook"`
+         was set on original request and BFF returned this code anyway,
+         log diagnostic — shouldn't happen per contract.)
+     10. `ai.intent-classification.disabled` (HTTP 503) — see Step 4 retry
+         policy. If retry not applicable: "Insights temporarily disabled
+         — please try again later."
+     11. `ai.assistant-default-playbook.unconfigured` (HTTP 503) —
+         "Something's misconfigured — try again later or contact support."
+         (Deployment bug per integration brief; correlationId surfaces for
+         ops.)
+     12. `INSIGHTS_ASSISTANT_INTERNAL_ERROR` (HTTP 500) — see Step 4
+         retry policy. After retry exhausted: "Something went wrong —
+         try again. If this keeps happening, contact support with this
+         ID: &lt;correlationId&gt;."
+
+      Final messages MUST exactly match integration brief §5.1 column 4
+      wording where the brief provides verbatim text; where the brief gives
+      only behavioral guidance (e.g., "Surface 'I couldn't understand the
+      question'") use the quoted text as-is. Cross-reference task notes
+      `notes/task-029-error-message-matrix.md` against the brief at PR review
+      time.
+
+      Optional UX polish (out of scope for this task; capture in R6 backlog):
+      "Try again" affordance below the message for retry-eligible codes;
+      "Sign in again" CTA for 401-after-reauth-fail.
+    </step>
+    <step order="4" name="Author the retry-decision state machine">
+      Create `insights-retry-policy.ts` (or co-locate inside the renderer's
+      module). Implement `decideRetry(response, originalRequest, attemptNumber)`
+      per the knowledge pattern in &lt;knowledge&gt;.
+
+      Pseudo-implementation (binding):
+
+      ```typescript
+      export type RetryDecision =
+        | { kind: 'no-retry' }
+        | { kind: 'retry-with-force-mode'; forceMode: 'playbook' | 'rag' }
+        | { kind: 'retry-after-backoff'; backoffMs: number };
+
+      export function decideRetry(
+        response: { status: number; errorCode?: string },
+        originalRequest: { forceMode?: 'playbook' | 'rag' | null; intentSignal?: 'playbook' | 'rag' | null },
+        attemptNumber: number
+      ): RetryDecision {
+        if (attemptNumber &gt;= 2) return { kind: 'no-retry' };
+
+        // 503 ai.intent-classification.disabled + no forceMode + intent signal known
+        if (
+          response.status === 503 &amp;&amp;
+          response.errorCode === 'ai.intent-classification.disabled' &amp;&amp;
+          !originalRequest.forceMode &amp;&amp;
+          (originalRequest.intentSignal === 'playbook' || originalRequest.intentSignal === 'rag')
+        ) {
+          return { kind: 'retry-with-force-mode', forceMode: originalRequest.intentSignal };
+        }
+
+        // 500 generic internal error
+        if (
+          response.status === 500 &amp;&amp;
+          response.errorCode === 'INSIGHTS_ASSISTANT_INTERNAL_ERROR'
+        ) {
+          return { kind: 'retry-after-backoff', backoffMs: 1000 };
+        }
+
+        return { kind: 'no-retry' };
+      }
+      ```
+
+      The state machine is COMPLETE for v1.0 — no other code triggers
+      auto-retry. Document in module-level JSDoc + a comment block citing
+      integration brief §5.1 + spec FR-16 + plan.md D2-19 as the binding
+      contract.
+
+      Wire the state machine into `InsightsResponseRenderer`'s error path:
+      on receiving an error envelope, call `decideRetry(...)` → if
+      `no-retry`, render the per-code message; if `retry-with-force-mode`,
+      re-issue the request via task 025's HTTP client with `forceMode` set
+      + correlationId carried forward (same correlationId across retry —
+      it's the same logical Assistant turn) + render loading state until
+      retry resolves; if `retry-after-backoff`, `await new Promise(r =&gt; setTimeout(r, backoffMs))`
+      then re-issue via task 025's HTTP client (same correlationId) +
+      render loading state. On the retry's response, run the matrix again
+      with `attemptNumber === 2` (guaranteed no further retry per the
+      state machine).
+    </step>
+    <step order="5" name="Wire 401 reauth via existing `@spaarke/auth`">
+      Identify the existing reauth helper from `@spaarke/auth` (`useAuth()`
+      hook or `authenticatedFetch` wrapper — task 025 already uses one of
+      these). On 401:
+      1. Call the existing reauth helper.
+      2. If success → single retry (counts as attemptNumber === 2 in the
+         retry-decision state machine; no further retries possible).
+      3. If failure → render "Your session expired — sign in again." (column 4 wording, exact).
+
+      MUST use the existing helper; do NOT implement parallel auth refresh
+      logic. Cross-reference task 025's HTTP client implementation to
+      ensure the reauth chain is unified.
+    </step>
+    <step order="6" name="Wire 429 Retry-After parsing + countdown UX">
+      On 429:
+      1. Extract `Retry-After` header from the response (parse as RFC 7231
+         delta-seconds integer OR HTTP-date — handle both per ADR-016).
+      2. Render countdown UX: "Slow down a moment — you can try again in
+         &lt;N&gt; seconds." Countdown decrements every second.
+      3. When countdown reaches 0, show a "Try again" affordance. User
+         clicks manually → re-issue via task 025's HTTP client.
+      4. Do NOT auto-retry — user must click. (ADR-016 + binding contract.)
+
+      Aggregate budget note: 60/min/oid across `/ask` + `/search` +
+      `/assistant/query` per integration brief §11. The renderer treats
+      the 429 the same regardless of which endpoint caused the budget
+      exhaustion — server returns `Retry-After`; client honors.
+    </step>
+    <step order="7" name="Wire correlationId surfacing + opaque-display discipline">
+      On every error rendering path, surface the `correlationId` extension
+      from the ProblemDetails envelope:
+      - Render below the user message in small mono-font.
+      - Provide a copy-to-clipboard affordance.
+      - Treat as untrusted display text (do not inject as HTML; use Fluent
+        `Text` component's default escaping).
+      - If correlationId is absent (shouldn't happen per contract — log
+        diagnostic if it does), omit the section entirely (don't render
+        "Unknown ID" or similar; the absence is itself signal).
+
+      Example JSX shape:
+
+      ```tsx
+      &lt;div&gt;
+        &lt;Text&gt;{userFacingMessage}&lt;/Text&gt;
+        {correlationId &amp;&amp; (
+          &lt;div className={styles.correlationId}&gt;
+            &lt;Text size={100} font="monospace"&gt;{correlationId}&lt;/Text&gt;
+            &lt;Button appearance="subtle" icon={&lt;Copy24Regular /&gt;} onClick={() =&gt; navigator.clipboard.writeText(correlationId)} aria-label="Copy ID" /&gt;
+          &lt;/div&gt;
+        )}
+      &lt;/div&gt;
+      ```
+
+      Use existing copy-to-clipboard utility from `@spaarke/ui-components`
+      if one exists (reuse mandate per R5 CLAUDE.md §3.1); fall back to
+      inline `navigator.clipboard.writeText` otherwise.
+    </step>
+    <step order="8" name="Wire no-leakage discipline (ADR-018)">
+      The rendered UI MUST contain ONLY:
+      - The column-4 user-facing message for the matched error code.
+      - The `correlationId` (opaque ops-debugging key).
+      - For 429: the `Retry-After` countdown + manual "Try again" CTA.
+      - For 401-after-reauth-fail: "Sign in again" CTA.
+
+      The rendered UI MUST NOT contain:
+      - `detail` field text (Console-logged for diagnostics; NOT rendered).
+      - `title` field text (NOT rendered).
+      - Any `[key: string]: unknown` extension values from forward-compat
+        index signature (NOT rendered; Console-logged).
+      - `status` HTTP code (NOT rendered; redundant with the code-mapped
+        message).
+      - Anything resembling stack traces, document content, prompt text,
+        or LLM raw output.
+
+      Author a "leakage canary" unit test (Test 6 in Step 9):
+      - Construct a fabricated error envelope with `detail = "DRAFT —
+        Acme APA: This Agreement is between..."`, `title = "Internal
+        Server Error"`, and a fabricated `_internalContext = "system
+        prompt text..."` extension.
+      - Render with this envelope.
+      - Assert: rendered DOM does NOT contain "DRAFT — Acme APA", "Internal
+        Server Error", or "system prompt text".
+      - Assert: rendered DOM DOES contain the column-4 message for the code.
+      - Assert: Console-log captured the `detail` + extensions for
+        diagnostics.
+
+      This test is the LOAD-BEARING regression guard for ADR-018
+      compliance. NEVER skip / disable.
+    </step>
+    <step order="9" name="Author unit tests (all 12 codes + retry + correlation + no-leakage)">
+      Add a unit test file `insights-response-renderer.error-handling.test.tsx`
+      (or extend task 026's renderer test file with a new `describe` block).
+
+      Required test coverage:
+
+      - **Test 1 (12-code matrix — exhaustive)**: For each of the 12 codes,
+        assert the rendered DOM contains the correct column-4 user-facing
+        message. Use `test.each(...)` table to enumerate the 12 entries —
+        prevents accidental skip of a code in future maintenance.
+      - **Test 2 (retry — 503 `ai.intent-classification.disabled` + intent
+        signal known)**: Mock task 025's HTTP client. First call returns
+        503 with errorCode. Second call (retry) returns 200 success. Assert
+        the retry was issued with `forceMode: <intentSignal>` set + same
+        correlationId carried forward. Assert final rendered DOM shows the
+        success result, not the error message.
+      - **Test 3 (retry — 503 `ai.intent-classification.disabled` + NO
+        intent signal)**: Mock returns 503 with errorCode. Assert NO retry
+        is issued (HTTP client called exactly once). Assert rendered DOM
+        shows the generic "temporarily disabled" message.
+      - **Test 4 (retry — 503 `ai.intent-classification.disabled` +
+        forceMode already on original)**: Mock returns 503 with errorCode.
+        Original request had forceMode set. Assert NO retry (edge case —
+        contract bug; log diagnostic). Assert rendered DOM shows generic
+        message.
+      - **Test 5 (retry — 500 INSIGHTS_ASSISTANT_INTERNAL_ERROR with 1s
+        backoff)**: Mock first call returns 500. Mock second call (after
+        ≥1s) returns 200 success. Use fake timers to assert backoff
+        timing. Assert final rendered DOM shows the success result.
+      - **Test 6 (retry — 500 on BOTH calls)**: First + second call both
+        500. Assert exactly 2 HTTP calls (no third). Assert final
+        rendered DOM shows the column-4 message for `INSIGHTS_ASSISTANT_INTERNAL_ERROR`
+        + correlationId.
+      - **Test 7 (no-leakage canary)**: Per Step 8 specification — assert
+        `detail` / `title` / unknown extensions / fake document content /
+        fake stack traces do NOT reach rendered DOM.
+      - **Test 8 (correlationId surfacing + escaping)**: Assert
+        correlationId renders in DOM, copy-to-clipboard affordance works,
+        XSS-attempt correlationId (e.g., `&lt;script&gt;alert(1)&lt;/script&gt;`)
+        renders as escaped text (Fluent `Text` default escape), NOT
+        injected as HTML.
+      - **Test 9 (429 + Retry-After parsing — delta-seconds)**: Mock
+        returns 429 with `Retry-After: 30`. Assert countdown UX renders
+        "30 seconds". Use fake timers to advance to 0; assert "Try
+        again" CTA appears.
+      - **Test 10 (429 + Retry-After parsing — HTTP-date)**: Mock returns
+        429 with `Retry-After: <future HTTP-date>`. Assert countdown
+        computes correct delta. Assert no auto-retry — user clicks CTA
+        to retry manually.
+      - **Test 11 (401 reauth — success)**: Mock returns 401. Mock
+        `@spaarke/auth` reauth helper returns success. Assert single
+        retry issued post-reauth. Final rendered DOM = success result.
+      - **Test 12 (401 reauth — failure)**: Mock returns 401. Mock reauth
+        helper returns failure. Assert rendered DOM shows "Your session
+        expired — sign in again." with sign-in CTA.
+
+      Co-locate tests in the test directory adjacent to the renderer
+      (matching task 026's `__tests__/` structure).
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the new files (retry policy module +
+      error message map + renderer error-path additions + test file). Run
+      `adr-check` skill against the same; verify:
+
+      - **ADR-018 (no information leakage)**: Test 7 (leakage canary) PASSES;
+        rendered UI contains ONLY column-4 message + correlationId
+        (+ Retry-After UX + reauth CTA where applicable). Confirmed via
+        explicit grep of renderer error-path for any reference to `detail`,
+        `title`, or unknown extensions in JSX.
+      - **ADR-016 (rate-limit honoring)**: Tests 9 + 10 PASS; no auto-retry
+        on 429; `Retry-After` parsed correctly (delta-seconds + HTTP-date).
+      - **ADR-019 (ProblemDetails parsing)**: TypeScript type with
+        forward-compat index signature; all 5 stable fields parsed
+        (`status`, `title`, `detail`, `errorCode`, `correlationId`);
+        unknown extensions Console-logged but not rendered.
+      - **ADR-028 (Auth v2 reauth)**: Test 11 + 12 PASS; uses existing
+        `@spaarke/auth` reauth helper; no parallel auth logic. Verified
+        by grep of renderer file for any `fetch(...)` or auth-related
+        imports outside `@spaarke/auth`.
+      - **ADR-013 §3.5 (Zone B boundary)**: No imports from
+        `src/server/api/Sprk.Bff.Api/...` in the renderer files. Error
+        envelope parsed via R5-local TypeScript types matching the
+        contract wire shape.
+      - **R5 CLAUDE.md §3.1 (reuse mandate)**: Renderer integrates with
+        EXISTING `InsightsResponseRenderer` from task 026; no parallel
+        error-rendering component created. Verified by grep + reviewer
+        inspection.
+      - **R5 CLAUDE.md §3.2 (no new feature flags)**: Two retry policies
+        are unconditional; backoff timing hard-coded per contract; no
+        config knob introduced.
+
+      All gates MUST pass before marking the task complete.
+
+      Confirm BFF publish-size delta = 0 MB (pure frontend; no BFF code
+      changed). Record in task notes.
+
+      No CVE scan required for this task (no new packages added; uses
+      existing `@spaarke/auth`, `@spaarke/ui-components`, Fluent v9).
+      Confirm in task notes that no new dependencies were introduced.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`:
+      029 🔲 → ✅. Reset `current-task.md` to the next pending task per
+      CLAUDE.md §7 (likely 030 — Insights tool smoke tests). Record in
+      task notes (`notes/task-029-evidence.md`):
+      - Final per-code user-message verbatim text (cross-referenced to
+        integration brief §5.1 column 4 — line-by-line match).
+      - Retry-decision state-machine source code excerpt.
+      - 12 test results (one per code) + retry test results + leakage
+        canary result.
+      - Console-log evidence that `detail` + unknown extensions are
+        captured for diagnostics (Test 7 trace).
+      - Correlation-id propagation verification — pick one error code,
+        capture End-to-end trace ID through App Insights / Kusto if
+        accessible (smoke test environment).
+      - BFF publish-size delta = 0 MB (confirmed; no `dotnet publish`
+        run for this task).
+      - Zero new dependencies (verified via package.json diff).
+      - `code-review` + `adr-check` pass results.
+
+      Report task completion + handoff to task 030 (Insights tool smoke
+      tests).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm / pnpm">Frontend build + test runner</tool>
+    <tool name="vitest / jest">Unit test framework per existing R5 test convention</tool>
+    <tool name="git">Stage + commit on the R5 branch (one logical commit for error map + retry policy + renderer wiring + tests)</tool>
+    <tool name="code-review">Quality gate at Step 9.5 (FULL rigor)</tool>
+    <tool name="adr-check">Quality gate at Step 9.5 (FULL rigor) — verify ADR-016, ADR-018, ADR-019, ADR-028, ADR-013 §3.5</tool>
+    <tool name="context-handoff">Checkpointing per R5 CLAUDE.md §5 (after Step 3, Step 6, Step 9; verbose at &gt;60%)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Frontend `InsightsResponseRenderer` error-path additions (EXTEND existing renderer from task 026 — error UI rendering + retry orchestration; exact file path per task 026's `<outputs>` section)</output>
+    <output type="code">Frontend `insights-error-messages.ts` (NEW — 12-code → user-message constant map; co-located with renderer)</output>
+    <output type="code">Frontend `insights-retry-policy.ts` (NEW — `decideRetry(...)` state machine + `RetryDecision` type; co-located with renderer)</output>
+    <output type="code">Frontend `retry-after-parser.ts` (NEW — RFC 7231 delta-seconds + HTTP-date parser; OR inline in renderer if &lt;20 LOC)</output>
+    <output type="test">Frontend `insights-response-renderer.error-handling.test.tsx` (NEW — 12 tests covering full error matrix + retry paths + correlation surfacing + no-leakage canary + 429 Retry-After + 401 reauth)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 029 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending task — likely 030)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-029-error-message-matrix.md (12-code matrix transcribed verbatim from integration brief §5.1 column 4 for PR-review cross-reference)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-029-evidence.md (final per-code message text, retry policy excerpt, test results, leakage canary trace, correlation-id propagation evidence, BFF publish-size delta = 0 MB confirmation, zero-new-dependencies confirmation, quality gate results)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 12 error codes from integration brief §5.1 are handled with the column-4 user-facing message. Confirmed by Test 1 (exhaustive `test.each` matrix — one assertion per code) + cross-reference of `insights-error-messages.ts` against `notes/task-029-error-message-matrix.md`.</criterion>
+    <criterion testable="true">503 `ai.intent-classification.disabled` + no `forceMode` on original + intent signal available → retry issued ONCE with `forceMode` set to intent signal; same correlationId carried forward. Confirmed by Test 2.</criterion>
+    <criterion testable="true">503 `ai.intent-classification.disabled` + no intent signal → NO retry; generic "temporarily disabled" UX. Confirmed by Test 3.</criterion>
+    <criterion testable="true">503 `ai.intent-classification.disabled` + `forceMode` already on original → NO retry (edge case; log diagnostic); generic UX. Confirmed by Test 4.</criterion>
+    <criterion testable="true">500 `INSIGHTS_ASSISTANT_INTERNAL_ERROR` → retry ONCE with 1s backoff; second 500 surfaces error (no further retries). Confirmed by Tests 5 + 6 (success on retry + failure on retry).</criterion>
+    <criterion testable="true">Retry-decision state machine returns `{ kind: 'no-retry' }` for `attemptNumber >= 2` regardless of code (no infinite-loop possible). Confirmed by Test 6 + explicit state-machine unit assertion.</criterion>
+    <criterion testable="true">429 `Retry-After` header parsed (delta-seconds AND HTTP-date); countdown UX renders; NO auto-retry; user must click "Try again" CTA. Confirmed by Tests 9 + 10.</criterion>
+    <criterion testable="true">401 triggers `@spaarke/auth` reauth flow via EXISTING helper; on success single retry; on failure renders "Your session expired — sign in again" + sign-in CTA. Confirmed by Tests 11 + 12 + grep of renderer for absence of parallel auth logic.</criterion>
+    <criterion testable="true">**No information leakage (ADR-018)**: rendered DOM contains ONLY column-4 message + correlationId (+ Retry-After UX + reauth CTA where applicable). `detail`, `title`, unknown extensions, fabricated stack traces, fabricated document content NEVER reach rendered DOM. Confirmed by Test 7 (leakage canary) — load-bearing regression guard.</criterion>
+    <criterion testable="true">`correlationId` surfaced in error UI as opaque ops-debugging key — visible (copyable for support tickets), visually de-emphasized (small mono-font), escaped as untrusted display text (Fluent `Text` default escape — XSS-attempt correlationId renders as escaped text, NOT injected as HTML). Confirmed by Test 8.</criterion>
+    <criterion testable="true">`x-correlation-id` propagated end-to-end (FR-17 / SC-16): same correlationId on original request, retry request, surfaced UI text, and (when verifiable) App Insights / Kusto trace. Confirmed by Test 2 + Test 5 (retry tests assert same correlationId on both calls) + smoke-test trace evidence in task notes (where Spaarke Dev App Insights accessible).</criterion>
+    <criterion testable="true">Renderer integrates with EXISTING `InsightsResponseRenderer` from task 026 — no parallel error-rendering component created (reuse mandate per R5 CLAUDE.md §3.1). Confirmed by grep + reviewer inspection.</criterion>
+    <criterion testable="true">No new feature flags introduced (R5 CLAUDE.md §3.2 / ADR-018); retry policies are unconditional; backoff timing hard-coded per integration brief contract. Confirmed by `adr-check` pass at Step 9.5.</criterion>
+    <criterion testable="true">**Zone B boundary verified**: renderer files import NOTHING from `src/server/api/Sprk.Bff.Api/...`; error envelope parsed via R5-local TypeScript types matching contract wire shape (per R5 CLAUDE.md §3.5 + refined ADR-013 §3.5). Confirmed by grep + reviewer inspection at Step 9.5.</criterion>
+    <criterion testable="true">v1.1 forward-compat: ProblemDetails TypeScript type includes `[key: string]: unknown` index signature; unknown extensions Console-logged but not rendered. Confirmed by Test 7 (leakage canary asserts unknown extensions don't leak).</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (confirmed in task notes; no BFF code changed by this task). No new frontend dependencies introduced (confirmed by package.json diff in task notes).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5 (ADR-016, ADR-018, ADR-019, ADR-028, ADR-013 §3.5, R5 CLAUDE.md §§3.1/3.2/3.5 confirmed).</criterion>
+  </acceptance-criteria>
+</task>

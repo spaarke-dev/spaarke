@@ -1,0 +1,603 @@
+<task id="026" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-16 Build `InsightsResponseRenderer` (two-path: playbook + RAG; decline + empty-result cases)</title>
+    <status>not-started</status>
+    <estimated-effort>1 day</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G6 (parallel; runs alongside 024, 025, 027, 028 after 017 + 023 are ✅)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>017, 024</dependencies>
+    <tags>frontend, widget, insights, renderer, react-19</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Build the new `InsightsResponseRenderer` — the frontend component that consumes
+    the `insights.query` chat-agent tool's response envelope (per Insights v1.0
+    contract + v1.1 SSE/citations enhancements) and renders it correctly across
+    FOUR distinct cases:
+
+    1. **Playbook path** — `response.path === "playbook"` with
+       `structuredResult.kind === "inference"`. Renders via the existing
+       `StructuredOutputStreamWidget` (task 017) in **static mode** for Insights
+       v1.0 single-shot; in **streaming mode** when Wave F v1.1 SSE deltas arrive.
+    2. **RAG path** — `response.path === "rag"` with citation-grounded prose
+       (`answer` containing `[n]` citation tokens) + `citations[]` array. Renders
+       `answer` text with clickable `[n]` tokens; the actual click handler is
+       wired by task 027 (D2-17) — this task renders the tokens as interactive
+       elements (Fluent v9 `Button` appearance="transparent" or equivalent) with
+       a stub `onClick` that task 027 will replace.
+    3. **Decline case** — `response.path === "playbook"` with
+       `structuredResult.kind === "decline"` (200 OK, NOT error). Renders the
+       envelope's `answer` (the `Explanation`) as plain text + `envelope.SuggestedActions`
+       as a plain-text list. Per integration brief §11 quick-check 7. Fluent v9
+       `MessageBar` intent="warning" framing.
+    4. **Empty-result case** — `response.path === "rag"` AND `citations.length === 0`
+       AND `answer === ""`. Renders a "couldn't find anything for that — try
+       rephrasing or attaching files" hint per spec FR-13 acceptance / integration
+       brief §4.4. MUST NOT render the empty `answer` verbatim (anti-hallucination
+       contract).
+
+    Per R5 CLAUDE.md §3.1 reuse mandate: the playbook path MUST consume the
+    existing `StructuredOutputStreamWidget` from task 017 — do NOT build a parallel
+    structured-output renderer. The widget already supports both streaming and
+    static modes via `mode: 'streaming' | 'static'` + `INSIGHTS_PLAYBOOK_SCHEMA`
+    (defined as a module-level export in task 017 per its reusability handshake).
+
+    This task is pure frontend; no BFF code change. Publish-size delta = 0 MB.
+  </prompt>
+
+  <role>
+    Senior React 19 + Fluent UI v9 frontend developer with experience building
+    multi-path conditional renderers for chat-agent tool responses. Familiar with
+    the Spaarke Insights v1.0 contract (response envelope, citation shape,
+    decline shape), the `StructuredOutputStreamWidget` reusable contract (task
+    017), the PaneEventBus dispatch pattern for citation-click routing (task 027
+    consumes), and Fluent v9 semantic-token + dark-mode discipline (ADR-021).
+  </role>
+
+  <goal>
+    `InsightsResponseRenderer.tsx` (plus per-case sub-renderers: `PlaybookResponseRenderer`,
+    `RagResponseRenderer`, `DeclineResponseRenderer`, `EmptyResultHint`) is
+    committed under
+    `src/solutions/SpaarkeAi/src/components/conversation/insights/`. The
+    component: (1) discriminates over `response.path` + `structuredResult.kind`
+    + empty-result heuristic; (2) routes playbook-path responses to
+    `StructuredOutputStreamWidget` in static OR streaming mode (driven by whether
+    Insights v1.1 SSE deltas are available — opt-in via `Accept: text/event-stream`
+    per task 025); (3) renders RAG-path `answer` with clickable `[n]` citation
+    tokens (click handler stubbed; task 027 wires the real dispatch); (4)
+    renders decline case via `MessageBar` intent="warning" + plain-text
+    `SuggestedActions`; (5) renders empty-result case with muted hint copy; (6)
+    passes dark-mode visual check (Fluent v9 semantic tokens only); (7) passes
+    the FULL-rigor quality gates (`code-review` + `adr-check`).
+
+    Reusability acceptance: the playbook path renders via task 017's
+    `StructuredOutputStreamWidget` with `mode: 'static'` + `INSIGHTS_PLAYBOOK_SCHEMA`
+    + `prefilledFields` derived from `structuredResult.envelope` — ZERO widget
+    code change required (UR-02 evidence from task 017's reusability handshake).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="dependency-task">projects/spaarke-ai-platform-unification-r5/tasks/017-structured-output-stream-widget.poml</file>
+    <file purpose="dependency-task">projects/spaarke-ai-platform-unification-r5/tasks/024-insights-query-tool-handler.poml</file>
+    <file purpose="binding-contract">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+    <file purpose="v1.1-negotiation">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md</file>
+    <file purpose="reused-widget">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx</file>
+    <file purpose="reused-widget-registration">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-structured-output-stream-widget.ts</file>
+    <file purpose="conversation-pane-host">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+    <file purpose="event-types">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+    <file purpose="event-bus-runtime">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 semantic tokens ONLY — no hex/rgba/Fluent v8 imports. Dark mode MUST be tested and pass; all four render cases MUST be legible against both `webLightTheme` and `webDarkTheme`.</constraint>
+    <constraint source="ADR-022">React 19 only — functional components + hooks; no class components.</constraint>
+    <constraint source="ADR-012">Lives in `src/solutions/SpaarkeAi/` (chat surface consumer) — NOT in `@spaarke/ai-widgets` (the playbook destination is the widget; this renderer is the chat-pane consumer that DECIDES whether to mount the widget or render prose inline).</constraint>
+    <constraint source="ADR-013">R5 is Zone B consumer of Insights HTTP contract. MUST NOT inject `IInsightsAi` or other Insights-internal types; consume the response envelope only (per refined ADR-013 §3.5 facade boundary; CLAUDE.md §3.5).</constraint>
+    <constraint source="ADR-028">No token snapshots. This renderer does NOT call BFF directly — it consumes the response object delivered by `InsightsQueryToolHandler` (task 024). All HTTP calls happen upstream in the tool handler.</constraint>
+    <constraint source="ADR-019">When error responses surface (12 codes from integration brief §5.1), render `errorCode` + per-code user message; NEVER render raw stack traces or document content. Error rendering is task 029 (D2-19); this task focuses on success-path envelope shapes only. Document the boundary in code.</constraint>
+    <constraint source="ADR-010">DI minimalism — N/A for frontend renderer. Confirm in task notes.</constraint>
+    <constraint source="ADR-029">BFF publish-size — N/A; this task adds frontend code only. Confirm publish-size delta = 0 MB in task notes.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 reuse mandate">Playbook path MUST render via existing `StructuredOutputStreamWidget` (task 017) — do NOT build a parallel structured-output renderer. Cite the widget reuse in code comments. Stub-out call shape from task 017's `INSIGHTS_PLAYBOOK_SCHEMA` module-level export.</constraint>
+    <constraint source="R5 CLAUDE.md §3.5">Insights tool integration governance — Zone B HTTP-contract-only consumption. The 12 binding error codes from integration brief §5.1 MUST be handled (deferred to task 029); v1.1 SSE consumption falls back gracefully to v1.0 single-shot (per NFR-11); v1.1 `citations[].href` falls back to display-name-only (graceful per FR-14).</constraint>
+    <constraint source="spec FR-09">Two-path response: playbook path renders structured envelope; RAG path renders citation-grounded prose with `[n]` clickable tokens.</constraint>
+    <constraint source="spec FR-13">All four cases (playbook / RAG / decline / empty-result) MUST render correctly on Spaarke Dev synthetic test entities. Decline renders `answer` + `envelope.SuggestedActions`. Empty-result renders hint copy (NOT the empty answer verbatim).</constraint>
+    <constraint source="integration brief §4.4">Empty-results: `citations: []` + `answer: ""` MUST render "couldn't find anything" hint per anti-hallucination guarantee. MUST NOT pass empty `answer` to user.</constraint>
+    <constraint source="integration brief §4.5">Decline path: 200 OK (not error). Surface `answer` (= `DeclineResponse.Explanation`) + `envelope.SuggestedActions` as user-facing text per quick-check 7.</constraint>
+    <constraint source="integration brief §4.3">Citations uniform across paths — same `{ n, source, excerpt, observationId, chunkId }` shape. Render `[n]` tokens identically in RAG-path prose regardless of underlying path.</constraint>
+    <constraint source="project">`[n]` citation-token click handler is STUBBED in this task (no-op or `console.debug`). Task 027 (D2-17) wires the real `context.context_update` PaneEventBus dispatch. Document the seam in code comments + task notes for the task 027 implementer.</constraint>
+    <constraint source="project">No `any` types in public exports. Response envelope, citation, and sub-renderer props are fully typed.</constraint>
+    <constraint source="project">Streaming mode for playbook path: subscribe to PaneEventBus `workspace.field_delta` events (task 016 additive types) when v1.1 SSE deltas arrive — but the actual subscription happens inside `StructuredOutputStreamWidget` (task 017); this renderer just passes `mode: 'streaming'` + `correlationId`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>insights-tool/two-path-response-rendering</topic>
+    <topic>structured-output-stream-widget/static-mode-reuse</topic>
+    <topic>fluent-ui-v9/semantic-tokens-dark-mode</topic>
+    <topic>citation-rendering/clickable-tokens</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/017-structured-output-stream-widget.poml</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/024-insights-query-tool-handler.poml</file>
+      <file>docs/architecture/INSIGHTS-ENGINE-ARCHITECTURE.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9-semantic-tokens-dark-mode.md</file>
+      <file>.claude/adr/ADR-022-react-19.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-structured-output-stream-widget.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+    </files>
+    <patterns>
+      <pattern name="Discriminated-union response envelope" location="N/A — new pattern; document inline">
+        Type the Insights response envelope as a discriminated union over `path`
+        and `structuredResult.kind`:
+        ```typescript
+        type InsightsResponse =
+          | { path: 'playbook'; structuredResult: { kind: 'inference'; envelope: PlaybookEnvelope }; answer: string; citations: Citation[]; confidence: number; playbookId: string; diagnostics: Diagnostics }
+          | { path: 'playbook'; structuredResult: { kind: 'decline'; envelope: DeclineResponse }; answer: string; citations: Citation[]; confidence: number; playbookId: string; diagnostics: Diagnostics }
+          | { path: 'rag'; structuredResult: { kind: 'observation'; envelope: RagObservation }; answer: string; citations: Citation[]; confidence: number; playbookId: null; diagnostics: Diagnostics };
+        ```
+        The renderer discriminates via exhaustive `switch` on `path` then `kind`,
+        producing TypeScript exhaustiveness guarantees. Empty-result is a
+        sub-case detected on the RAG branch via runtime guard
+        (`response.citations.length === 0 &amp;&amp; response.answer.trim() === ''`).
+      </pattern>
+      <pattern name="StructuredOutputStreamWidget static-mode invocation" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx (task 017)">
+        Per task 017's reusability handshake, the playbook-path renderer
+        constructs `widgetData` as:
+        ```typescript
+        const widgetData = {
+          mode: streamingEnabled ? 'streaming' : 'static',
+          schema: INSIGHTS_PLAYBOOK_SCHEMA,
+          prefilledFields: streamingEnabled ? undefined : envelopeToFields(envelope),
+          correlationId: response.diagnostics.conversationId ?? generateCorrelationId(),
+        };
+        ```
+        `streamingEnabled` is true iff Insights v1.1 SSE was opted-in by task
+        025 AND the response was delivered as a stream. `envelopeToFields()` is
+        a local helper that flattens `structuredResult.envelope` into the
+        `prefilledFields` shape `INSIGHTS_PLAYBOOK_SCHEMA` expects (one key per
+        schema field `path`).
+      </pattern>
+      <pattern name="Clickable `[n]` citation tokens (click stubbed)" location="N/A — new pattern; document inline">
+        Render `response.answer` by tokenizing on `\[(\d+)\]` regex. Each
+        capture becomes a Fluent v9 `Button` (appearance="transparent",
+        size="small") with the visible label `[n]`; non-citation segments
+        render as `Text`. The button's `onClick` is a STUB function this task
+        leaves as `(citation) =&gt; console.debug('Citation clicked (task 027 wires)', citation)`.
+        Task 027 (D2-17) replaces the stub with the real PaneEventBus
+        `context.context_update` dispatch using `citation.observationId` /
+        `citation.chunkId` to derive the source URL.
+
+        Cite the seam in code comments:
+        ```typescript
+        // TODO(task-027): replace stub with PaneEventBus dispatch to open
+        // citation source in FilePreviewContextWidget. See spec FR-14 + task
+        // 027 (D2-17) for the v1.1 `citations[].href` plumbing.
+        ```
+      </pattern>
+      <pattern name="Decline + empty-result framing via Fluent v9" location="N/A — new pattern; document inline">
+        Decline case: `MessageBar` with `intent="warning"` containing the
+        `answer` text, followed by a list of `SuggestedActions` rendered as
+        plain `Text` items (NOT Fluent `Button` — per integration brief §6 D3
+        decision: plain strings in v1; actionable buttons → R6 backlog).
+        Empty-result case: muted `Text` (using `tokens.colorNeutralForeground3`)
+        with hint copy "I couldn't find anything for that. Try rephrasing or
+        attaching files." per spec FR-13. NO `MessageBar` — visually less
+        alarming than a decline.
+      </pattern>
+      <pattern name="Semantic-token discipline (Fluent v9)" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx (task 017)">
+        `makeStyles` + `tokens.*` references only. NO hex / rgba / `#fff`.
+        Dark-mode parity is automatic when semantic tokens are used correctly.
+        Typography via `tokens.fontSizeBase300` / `tokens.fontWeightSemibold`;
+        spacing via `tokens.spacingHorizontal*` / `tokens.spacingVerticalM`;
+        muted text via `tokens.colorNeutralForeground3`; brand accents via
+        `tokens.colorBrandForeground1`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 026 is the consumer-side bookend for R5's Insights tool integration.
+      Task 024 registers the `insights.query` tool on `SprkChatAgent`; task 025
+      handles subject resolution + HTTP transport; this task renders the
+      response. The four cases — playbook / RAG / decline / empty-result —
+      correspond to the four shapes the Insights v1.0 contract can return on
+      200 OK (per integration brief §4). Error cases (12 codes per §5.1) are
+      handled by task 029.
+
+      The renderer lives in `src/solutions/SpaarkeAi/src/components/conversation/insights/`
+      because it's the chat-pane response renderer — it sits between the
+      Assistant's chat-message stream and the destination surfaces. For
+      playbook responses, the destination IS the Workspace pane via the
+      reusable `StructuredOutputStreamWidget` (task 017); the renderer's job
+      there is to MOUNT the widget with the right `widgetData`. For RAG
+      responses, the destination is the chat-pane message bubble itself; the
+      renderer produces inline prose with clickable citation tokens.
+
+      The reusability claim of R5's platform-extension story (per SC-19) is
+      most-visibly proven here: a different chat-tool tool (Insights) renders
+      structured output via the SAME widget that streams Summarize output (per
+      task 017). The reuse is configured via different `widgetData.schema` —
+      not different widget code. If this task discovers the widget contract is
+      insufficient, task 017 must extend additively (UR-02 escalation per
+      CLAUDE.md §6).
+
+      Task 027 (D2-17) wires the `[n]` citation click handler to PaneEventBus
+      dispatch. Task 028 (D2-18) adds the confidence-floor badge. Both consume
+      this renderer; both add additively. This task SHIPS with stub click
+      handler + no confidence badge — the seam is clearly documented.
+    </background>
+    <dependencies>
+      <dependency task="017" status="not-started">
+        Task 017 (D2-07) builds `StructuredOutputStreamWidget` with a stable
+        `widgetData` contract supporting `mode: 'streaming' | 'static'` +
+        `INSIGHTS_PLAYBOOK_SCHEMA` as a module-level export. This task imports
+        the widget + schema. Task 017 MUST be ✅ before task 026 starts; the
+        dependency is hard. If task 017's contract differs from this task's
+        assumptions, escalate per CLAUDE.md §6 (UR-02 materialized).
+      </dependency>
+      <dependency task="024" status="not-started">
+        Task 024 (D2-14) builds `InsightsQueryToolHandler` that delivers the
+        response envelope to the chat-pane via the chat-agent tool-call
+        mechanism. This task consumes the typed envelope from task 024.
+        Task 024 MUST be ✅ before task 026 starts.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 025 (D2-15 — subject resolution + HTTP client) handles the
+        `Accept: text/event-stream` opt-in for v1.1 SSE; if v1.1 is available,
+        the response shape includes SSE delta events the renderer routes to
+        `StructuredOutputStreamWidget` in streaming mode. If v1.1 is not yet
+        deployed (Wave F), this task ships v1.0-single-shot rendering only;
+        v1.1 streaming is an additive future swap. Per NFR-11.</item>
+      <item>Task 027 (D2-17 — clickable citations) consumes this renderer's
+        `[n]` stub seam and replaces with PaneEventBus dispatch +
+        `FilePreviewContextWidget` integration. v1.1 `citations[].href` is
+        consumed there; v1.0 fallback (display-name-only) is also handled
+        there.</item>
+      <item>Task 028 (D2-18 — confidence floor badge) consumes this renderer's
+        response-confidence field and overlays the low-confidence badge
+        (`confidence &lt; 0.6` → Fluent v9 `Badge` or `MessageBar`). Additive on
+        top of all four render cases.</item>
+      <item>Task 029 (D2-19 — 12 error codes) wraps this renderer with the
+        ProblemDetails error path. This task handles only 200-OK envelope
+        shapes; errors are task 029's surface.</item>
+      <item>Integration brief §6 question 3 (decline rendering): plain strings
+        in v1; actionable buttons → R6. This task ships plain-text
+        `SuggestedActions` accordingly.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context usage. If &gt; 70%, create handoff summary and request `/compact`.
+      Declare RIGOR LEVEL: FULL per CLAUDE.md §8 (frontend renderer on R5
+      critical-path consumer chain; tags include `widget` + `react-19` +
+      `renderer`; 4 distinct render cases with discrimination logic; downstream
+      consumers tasks 027 + 028 + 029 depend on this seam; dark-mode test
+      required; quality gates at Step 9.5).
+
+      Required output (non-negotiable):
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Frontend renderer for R5 Insights tool integration; 4 distinct render cases (playbook + RAG + decline + empty-result); reuses task 017 widget for playbook path; stubs citation-click seam for task 027; downstream consumers tasks 027/028/029 depend on stable contract; dark-mode test required; quality gates at Step 9.5.
+      📖 PROTOCOL STEPS TO EXECUTE: Step 0 → 1 → 2 → 3 (response-shape discrimination types) → 4 (playbook sub-renderer via widget reuse) → 5 (RAG sub-renderer with `[n]` tokens) → 6 (decline sub-renderer) → 7 (empty-result hint) → 8 (top-level renderer + discrimination switch) → 9 (dark-mode visual verification) → 10 (build verification) → 10.5 (acceptance criteria walk-through) → 9.5 (code-review + adr-check) → 11 (document + complete).
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm task 026 status is 🔲, dependencies
+      017 + 024 are ✅, parallel-safe = true (siblings 025, 027, 028 may be in
+      flight). Read `current-task.md` to verify no conflicting R5 task is in
+      flight. Confirm task 017 shipped the reusability handshake +
+      `INSIGHTS_PLAYBOOK_SCHEMA` module-level export per its acceptance
+      criteria. If task 017 is not ✅, STOP and report blocker.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically:
+      (a) read `insights-engine-assistant-integration-brief.md` §4 (response
+      schema), §4.4 (empty-results semantics), §4.5 (decline path), §11
+      (quick-check 5-7) in full; (b) read
+      `insights-engine-contract-v1.1-request.md` for SSE + citations v1.1
+      deltas; (c) read `StructuredOutputStreamWidget.tsx` (task 017's output)
+      to confirm the `widgetData` shape + that `INSIGHTS_PLAYBOOK_SCHEMA` is
+      exported; (d) read ADR-013 §3.5 (Zone B facade boundary) + ADR-019
+      (ProblemDetails — for the task-029 error-path seam) + ADR-021 + ADR-022
+      in full; (e) read `ConversationPane.tsx` to understand the host-component
+      mounting pattern.
+    </step>
+    <step order="3" name="Design Response-Shape Discrimination Types">
+      Define the typed response envelope as a TypeScript discriminated union
+      per the &lt;knowledge&gt; pattern. Place in a new module
+      `src/solutions/SpaarkeAi/src/components/conversation/insights/types.ts`:
+      - `InsightsResponse` — discriminated union (playbook-inference /
+        playbook-decline / rag-observation)
+      - `PlaybookEnvelope` (typed shape of `InsightArtifact` from integration
+        brief §4.1 — keep loose for v1.0; refine when Wave F lands)
+      - `DeclineResponse` — `{ reason: string; minimumEvidenceNeeded?: string;
+        suggestedActions: string[]; confidenceInDecline: number;
+        explanation: string }`
+      - `RagObservation` — `{ results: unknown[]; summary: string }`
+      - `Citation` — `{ n: number; source: string; excerpt: string;
+        observationId?: string; chunkId: string; href?: string | null }` (note:
+        `href` is v1.1 optional per Wave F; v1.0 absent)
+      - `Diagnostics` — `{ intentSource: 'classifier' | 'forceMode' |
+        'classifier-fallback'; classifierBelowThreshold: boolean; elapsedMs:
+        number; cacheHit: boolean; conversationId?: string }`
+
+      Author a runtime guard `isEmptyResult(response: InsightsResponse): boolean`
+      that returns true iff `response.path === 'rag' &amp;&amp; response.citations.length === 0 &amp;&amp; response.answer.trim() === ''`.
+
+      Author a runtime guard `isDecline(response: InsightsResponse): boolean`
+      that returns true iff `response.path === 'playbook' &amp;&amp; response.structuredResult.kind === 'decline'`.
+    </step>
+    <step order="4" name="Implement PlaybookResponseRenderer (reuses task 017 widget)">
+      Create
+      `src/solutions/SpaarkeAi/src/components/conversation/insights/PlaybookResponseRenderer.tsx`.
+      Props: `{ response: InsightsResponse &amp; { path: 'playbook'; structuredResult: { kind: 'inference' } }; streamingEnabled: boolean }`.
+
+      Implementation:
+      (a) Import `StructuredOutputStreamWidget` + `INSIGHTS_PLAYBOOK_SCHEMA`
+      from task 017's `register-structured-output-stream-widget.ts` (or the
+      barrel export of `@spaarke/ai-widgets`).
+      (b) Compute `widgetData`:
+      ```typescript
+      const widgetData = {
+        mode: streamingEnabled ? 'streaming' : 'static',
+        schema: INSIGHTS_PLAYBOOK_SCHEMA,
+        prefilledFields: streamingEnabled
+          ? undefined
+          : envelopeToFields(response.structuredResult.envelope),
+        correlationId: response.diagnostics.conversationId ?? generateCorrelationId(),
+      };
+      ```
+      (c) Local helper `envelopeToFields(envelope)`: flattens the
+      `PlaybookEnvelope` into the `prefilledFields: Record&lt;string, string&gt;`
+      shape `INSIGHTS_PLAYBOOK_SCHEMA` expects. v1 implementation: stringify
+      each top-level envelope key into the matching schema `path`. Document
+      edge cases (nested envelopes; array fields) as TODO comments for
+      follow-up per UR-02.
+      (d) Render `&lt;StructuredOutputStreamWidget widgetData={widgetData} /&gt;`.
+      (e) Comment heavily: "REUSE: this consumes task 017's
+      `StructuredOutputStreamWidget` per R5 CLAUDE.md §3.1 reuse mandate +
+      task 017's reusability handshake. The widget renders the playbook
+      envelope via `INSIGHTS_PLAYBOOK_SCHEMA` — no widget code change required
+      here (UR-02 evidence)."
+    </step>
+    <step order="5" name="Implement RagResponseRenderer with stubbed `[n]` tokens">
+      Create
+      `src/solutions/SpaarkeAi/src/components/conversation/insights/RagResponseRenderer.tsx`.
+      Props: `{ response: InsightsResponse &amp; { path: 'rag' } }`.
+
+      Implementation:
+      (a) Tokenize `response.answer` via regex `\[(\d+)\]`. Use a single-pass
+      tokenizer that produces an array of `{ type: 'text', content: string } |
+      { type: 'citation', n: number }` segments preserving order.
+      (b) Render segments via `&lt;Text&gt;` and Fluent v9 `&lt;Button
+      appearance="transparent" size="small"&gt;` — citation tokens render as
+      inline buttons with label `[${n}]` and `onClick={() =&gt; handleCitationClick(n)}`.
+      (c) `handleCitationClick(n)` is the STUB:
+      ```typescript
+      const handleCitationClick = (n: number) =&gt; {
+        const citation = response.citations.find((c) =&gt; c.n === n);
+        // TODO(task-027): replace stub with PaneEventBus dispatch
+        // (`context.context_update`) to open citation source in
+        // FilePreviewContextWidget. See spec FR-14 + task 027 (D2-17) for
+        // the v1.1 `citations[].href` plumbing + v1.0 display-name fallback.
+        console.debug('Citation clicked (task 027 wires dispatch)', { n, citation });
+      };
+      ```
+      (d) Below the prose, render a citation reference list (Fluent v9
+      `&lt;Card&gt;` with `&lt;Text&gt;` per citation showing `[n] source — excerpt`)
+      so the user can read citations even if click is non-functional
+      pre-task-027.
+      (e) Document the seam clearly in JSDoc for the task-027 implementer.
+    </step>
+    <step order="6" name="Implement DeclineResponseRenderer">
+      Create
+      `src/solutions/SpaarkeAi/src/components/conversation/insights/DeclineResponseRenderer.tsx`.
+      Props: `{ response: InsightsResponse &amp; { path: 'playbook'; structuredResult: { kind: 'decline' } } }`.
+
+      Implementation:
+      (a) Fluent v9 `&lt;MessageBar intent="warning"&gt;` containing `response.answer`
+      (= `DeclineResponse.Explanation`).
+      (b) Below the MessageBar, render `&lt;Text weight="semibold"&gt;Suggested actions:&lt;/Text&gt;`
+      followed by a `&lt;ul&gt;` list of `&lt;li&gt;` items — one per
+      `response.structuredResult.envelope.suggestedActions[]`. Plain text only
+      (NOT Fluent `Button` — per integration brief §6 D3 decision; actionable
+      buttons → R6).
+      (c) If `envelope.minimumEvidenceNeeded` is present, render it as a
+      secondary `&lt;Text&gt;` in muted styling
+      (`tokens.colorNeutralForeground3`).
+      (d) Hide structured envelope rendering entirely — decline UX is a
+      first-class state distinct from "tried but partial result".
+    </step>
+    <step order="7" name="Implement EmptyResultHint">
+      Create
+      `src/solutions/SpaarkeAi/src/components/conversation/insights/EmptyResultHint.tsx`.
+      Props: none (pure component).
+
+      Implementation:
+      (a) Render muted `&lt;Text style={{ color: tokens.colorNeutralForeground3 }}&gt;`
+      with copy: "I couldn't find anything for that. Try rephrasing or
+      attaching files."
+      (b) Optional: subtle Fluent icon (e.g., `SearchInfoRegular`) preceding
+      the text for visual affordance.
+      (c) NO `MessageBar` — visually less alarming than decline.
+      (d) Per spec FR-13 + integration brief §4.4: MUST NOT render the empty
+      `answer` verbatim. Anti-hallucination guarantee preserved.
+    </step>
+    <step order="8" name="Implement Top-Level InsightsResponseRenderer + Discrimination Switch">
+      Create
+      `src/solutions/SpaarkeAi/src/components/conversation/insights/InsightsResponseRenderer.tsx`.
+      Props: `{ response: InsightsResponse; streamingEnabled?: boolean }`.
+
+      Implementation:
+      (a) Empty-result check FIRST via `isEmptyResult(response)` → render
+      `&lt;EmptyResultHint /&gt;`. Return.
+      (b) Decline check via `isDecline(response)` → render
+      `&lt;DeclineResponseRenderer response={response} /&gt;`. Return.
+      (c) Switch on `response.path`:
+        - `'playbook'` → assert `structuredResult.kind === 'inference'` (after
+          decline-check above eliminates `'decline'`); render
+          `&lt;PlaybookResponseRenderer response={response} streamingEnabled={streamingEnabled ?? false} /&gt;`.
+        - `'rag'` → render `&lt;RagResponseRenderer response={response} /&gt;`.
+      (d) TypeScript exhaustiveness: use `assertNever(response.path)` default
+      to force compile error if a new path is added without renderer update.
+      (e) Export a barrel `index.ts` from
+      `src/solutions/SpaarkeAi/src/components/conversation/insights/` re-exporting
+      `InsightsResponseRenderer` + types + sub-renderers (for testability).
+
+      Wire into `ConversationPane.tsx` minimally: when the chat-agent tool-call
+      handler (task 024) yields an `InsightsResponse`, render via this
+      component. Coordinate with task 024 implementer on the exact integration
+      point if unclear.
+    </step>
+    <step order="9" name="Dark Mode + Visual Verification">
+      Verify all four render cases render legibly against both `webLightTheme`
+      and `webDarkTheme`. Use the existing test harness in
+      `src/solutions/SpaarkeAi/src/components/` (or a Storybook story if
+      available) with dark-mode active and capture visual evidence for task
+      notes. Confirm:
+      - No hex/rgba in styles; semantic tokens only
+      - Citation `[n]` buttons legible in both themes (Fluent `Button
+        appearance="transparent"` is theme-aware)
+      - Decline `MessageBar intent="warning"` uses semantic styling
+      - Empty-result muted text uses `tokens.colorNeutralForeground3`
+      - Playbook path delegates to task 017's widget which has its own
+        dark-mode verification (re-verify via integration smoke)
+
+      Document evidence in task notes.
+    </step>
+    <step order="10" name="Build Verification + Acceptance Criteria">
+      Build: `npm run build` in `src/solutions/SpaarkeAi/`. Verify no
+      TypeScript errors, no new lint warnings.
+
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is
+      testable + passing. Record evidence per criterion in task notes.
+      Specifically verify:
+      - Playbook path reuses task 017's widget (cite imports + JSDoc reuse
+        comment)
+      - All four cases render correctly via stubbed test data for each shape
+      - `[n]` tokens render as Fluent buttons; click stub fires `console.debug`
+      - Decline + empty-result are visually distinct (decline = MessageBar
+        warning; empty = muted hint)
+      - No `any` types in public exports
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the new files
+      (`InsightsResponseRenderer.tsx`, `PlaybookResponseRenderer.tsx`,
+      `RagResponseRenderer.tsx`, `DeclineResponseRenderer.tsx`,
+      `EmptyResultHint.tsx`, `types.ts`, barrel `index.ts`).
+
+      Run `adr-check` skill against the same files; verify:
+      - ADR-021 (Fluent v9 semantic tokens + dark mode) PASS
+      - ADR-022 (React 19) PASS
+      - ADR-013 §3.5 (Zone B HTTP-contract-only consumption — no Insights
+        internals imported) PASS
+      - ADR-019 (ProblemDetails — boundary documented for task 029) PASS
+      - ADR-010 (DI minimalism — N/A confirmed; frontend)
+      - ADR-029 (BFF publish hygiene — N/A confirmed; frontend-only)
+      - ADR-028 (no token snapshots — N/A confirmed; renderer doesn't call BFF)
+
+      Both gates MUST pass before marking the task complete. If either fails,
+      fix and re-run.
+    </step>
+    <step order="11" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 026 🔲 → ✅.
+      Reset `current-task.md` to the next pending task per CLAUDE.md §7. Record
+      in task notes:
+      - Confirmation that playbook path consumes task 017's
+        `StructuredOutputStreamWidget` via `INSIGHTS_PLAYBOOK_SCHEMA` import
+        (reusability handshake satisfied; UR-02 evidence)
+      - The `[n]` citation-token click seam for task 027 (one-paragraph
+        handoff note)
+      - Dark-mode evidence reference (screenshots / harness output)
+      - Empty-result vs decline visual distinction confirmed
+      - BFF publish-size delta = 0 MB (frontend-only task)
+      - DI registrations delta = 0 (frontend-only task)
+      - Quality gates pass evidence
+      Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + lint the SpaarkeAi shell; run any component tests</tool>
+    <tool name="git">Stage + commit the new renderer files on the R5 branch</tool>
+    <tool name="code-review">FULL-rigor quality gate at Step 9.5</tool>
+    <tool name="adr-check">FULL-rigor quality gate at Step 9.5</tool>
+    <tool name="context-handoff">Checkpoint per CLAUDE.md §5 (after every 3 steps; verbose at 60%+ context)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/insights/InsightsResponseRenderer.tsx (NEW)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/insights/PlaybookResponseRenderer.tsx (NEW)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/insights/RagResponseRenderer.tsx (NEW)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/insights/DeclineResponseRenderer.tsx (NEW)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/insights/EmptyResultHint.tsx (NEW)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/insights/types.ts (NEW — InsightsResponse discriminated union + Citation + DeclineResponse + helpers)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/insights/index.ts (NEW — barrel export)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (extend — wire `InsightsResponseRenderer` into chat-tool response display path; coordinate with task 024)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 026 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-026-renderer-evidence.md (dark-mode evidence; reusability-handshake-satisfied note; task-027 citation-click seam handoff; four-case render evidence; build output)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <examples>
+    <example name="StructuredOutputStreamWidget reuse contract" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx (task 017)">
+      The widget exposes `widgetData: StructuredOutputStreamWidgetData` with
+      `mode: 'streaming' | 'static'`, `schema`, `prefilledFields`,
+      `correlationId`. Task 017's reusability handshake guarantees that
+      `INSIGHTS_PLAYBOOK_SCHEMA` is exported as a module-level `const`. This
+      task imports it and constructs `widgetData` for the playbook path —
+      ZERO widget code change required (UR-02 evidence).
+    </example>
+    <example name="Fluent v9 MessageBar warning pattern" location="src/client/shared/Spaarke.UI.Components/ (existing usages)">
+      `&lt;MessageBar intent="warning"&gt; ... &lt;/MessageBar&gt;` is the canonical
+      decline-state framing — semantic-token styling, dark-mode-safe,
+      visually distinct from `intent="error"` (reserved for ProblemDetails
+      errors in task 029) and `intent="info"` (reserved for routine
+      informational notes).
+    </example>
+    <example name="Discriminated-union response type" location="src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts">
+      The PaneEventBus event-type discriminated union (`'streaming_started' | 'field_delta' | 'streaming_complete' | ...`) is the canonical pattern for safe exhaustive switch handling. Mirror this for `InsightsResponse.path` + `structuredResult.kind`.
+    </example>
+  </examples>
+
+  <acceptance-criteria>
+    <criterion testable="true">`InsightsResponseRenderer.tsx` exists at `src/solutions/SpaarkeAi/src/components/conversation/insights/InsightsResponseRenderer.tsx` and is a React 19 functional component using Fluent v9 semantic tokens only (no hex / rgba / Fluent v8 imports).</criterion>
+    <criterion testable="true">Response envelope is typed as a TypeScript discriminated union over `path` (`'playbook' | 'rag'`) + `structuredResult.kind` (`'inference' | 'decline' | 'observation'`). Exhaustiveness enforced via `assertNever` default in top-level switch.</criterion>
+    <criterion testable="true">Four sub-renderers exist as separate files: `PlaybookResponseRenderer`, `RagResponseRenderer`, `DeclineResponseRenderer`, `EmptyResultHint`. Each handles one render case.</criterion>
+    <criterion testable="true">Playbook path REUSES `StructuredOutputStreamWidget` (task 017) via `INSIGHTS_PLAYBOOK_SCHEMA` import — no parallel structured-output renderer built. Code comments cite the reuse mandate (CLAUDE.md §3.1) + task 017 reusability handshake.</criterion>
+    <criterion testable="true">Playbook path supports BOTH `mode: 'static'` (v1.0 single-shot — derives `prefilledFields` from `structuredResult.envelope`) AND `mode: 'streaming'` (v1.1 SSE — passes `correlationId` and lets widget subscribe to PaneEventBus deltas). Toggle controlled by `streamingEnabled` prop.</criterion>
+    <criterion testable="true">RAG path renders `response.answer` with `[n]` citation tokens tokenized via `\[(\d+)\]` regex; each token renders as a Fluent v9 `Button appearance="transparent"` with stub `onClick` (logs via `console.debug`). Task-027 seam documented inline via `TODO(task-027)` comment.</criterion>
+    <criterion testable="true">RAG path also renders a citation reference list (Fluent v9 `Card` with per-citation `Text` showing `[n] source — excerpt`) below the prose so users can read citations even before task 027 wires click dispatch.</criterion>
+    <criterion testable="true">Decline case renders `MessageBar intent="warning"` containing `response.answer` (= `DeclineResponse.Explanation`) + plain-text list of `envelope.suggestedActions`. NO Fluent buttons for actions (per integration brief §6 D3 v1 decision).</criterion>
+    <criterion testable="true">Empty-result case (RAG path with `citations.length === 0 &amp;&amp; answer === ''`) renders muted hint copy "I couldn't find anything for that. Try rephrasing or attaching files." per spec FR-13 + integration brief §4.4. Empty `answer` is NOT rendered verbatim (anti-hallucination guarantee).</criterion>
+    <criterion testable="true">Decline and empty-result are visually distinct — decline uses `MessageBar` warning framing; empty-result uses muted `Text` with `tokens.colorNeutralForeground3`. No `MessageBar` on empty-result.</criterion>
+    <criterion testable="true">All four render cases pass dark-mode visual check against `webDarkTheme`; evidence captured in task notes. No hex/rgba/Fluent v8 leaked into styles.</criterion>
+    <criterion testable="true">No `any` types in public exports. Response envelope, citation, decline shape, and sub-renderer props are fully typed.</criterion>
+    <criterion testable="true">Build passes: `npm run build` in `src/solutions/SpaarkeAi/` succeeds with no TypeScript errors and no new lint warnings.</criterion>
+    <criterion testable="true">ADR-013 §3.5 boundary respected — no Insights-internal types imported (no `IInsightsAi`, no Insights service references); only the HTTP response envelope shape is consumed.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (frontend-only task; confirmed in task notes).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+    <criterion testable="true">Task-027 handoff: one-paragraph note in task notes documenting the `[n]` citation-click stub location + the props/data the task-027 implementer needs (Citation object with `observationId` + `chunkId` + optional v1.1 `href`).</criterion>
+  </acceptance-criteria>
+</task>
