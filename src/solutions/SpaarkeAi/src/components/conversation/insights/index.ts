@@ -41,6 +41,30 @@ export {
 } from './LowConfidenceBadge';
 export type { LowConfidenceBadgeProps } from './LowConfidenceBadge';
 
+// Error renderer + supporting modules (R5 task 029 / D2-19). Mounted by
+// `InsightsResponseRenderer` when the response is an `InsightsErrorResponse`
+// envelope (the `isError` discriminated-union branch). Re-exported here for
+// direct test consumption + use by upstream orchestration code (chat-agent
+// host's retry coordinator).
+export { InsightsErrorRenderer } from './InsightsErrorRenderer';
+export type { InsightsErrorRendererProps } from './InsightsErrorRenderer';
+export {
+  INSIGHTS_ERROR_USER_MESSAGES,
+  RETRYABLE_VIA_MANUAL_CLICK,
+  formatRateLimitMessage,
+  getUserMessageForErrorCode,
+} from './insightsErrorMessages';
+export {
+  decideRetry,
+  isReauthCandidate,
+} from './insightsRetryPolicy';
+export type {
+  RetryDecision,
+  RetryDecisionRequestInput,
+  RetryDecisionResponseInput,
+} from './insightsRetryPolicy';
+export { parseRetryAfter } from './retryAfterParser';
+
 // Types + guards + helpers.
 export type {
   Citation,
@@ -49,6 +73,7 @@ export type {
   PlaybookInferenceEnvelope,
   RagObservationEnvelope,
   InsightsResponse,
+  InsightsErrorResponse,
   PlaybookInferenceResponse,
   PlaybookDeclineResponse,
   RagObservationResponse,
@@ -58,6 +83,7 @@ export type {
 export {
   isEmptyResult,
   isDecline,
+  isError,
   isPlaybookInference,
   isRagObservation,
   assertNever,

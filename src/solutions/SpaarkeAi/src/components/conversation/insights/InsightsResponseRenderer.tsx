@@ -37,17 +37,19 @@
 
 import * as React from 'react';
 import type {
+  InsightsErrorResponse,
   InsightsResponse,
   PlaybookDeclineResponse,
   PlaybookInferenceResponse,
   RagObservationResponse,
 } from './types';
-import { isDecline, isEmptyResult, isPlaybookInference, assertNever } from './types';
+import { isDecline, isEmptyResult, isError, isPlaybookInference, assertNever } from './types';
 import { PlaybookResponseRenderer } from './PlaybookResponseRenderer';
 import { RagResponseRenderer } from './RagResponseRenderer';
 import { DeclineResponseRenderer } from './DeclineResponseRenderer';
 import { EmptyResultHint } from './EmptyResultHint';
 import { LowConfidenceBadge } from './LowConfidenceBadge';
+import { InsightsErrorRenderer } from './InsightsErrorRenderer';
 import type { Citation } from './types';
 
 // ---------------------------------------------------------------------------
@@ -57,11 +59,29 @@ import type { Citation } from './types';
 export interface InsightsResponseRendererProps {
   /**
    * Discriminated-union response envelope from `callInsightsQuery`
-   * (task 025) or the BFF-side `InsightsQueryToolHandler` (task 024). The
-   * renderer assumes this is a 200-OK success envelope; non-2xx error
-   * handling is task 029's surface.
+   * (task 025) or the BFF-side `InsightsQueryToolHandler` (task 024).
+   *
+   * The renderer dispatches across FIVE cases:
+   *   - Error (task 029 / D2-19) — surfaces the 12 binding error codes per
+   *     integration brief §5.1. Detected via `isError(response)` FIRST so
+   *     error envelopes never fall through to the success-case discrimination.
+   *   - Empty-result (RAG path; anti-hallucination guard, brief §4.4)
+   *   - Decline (playbook path; structured "no", brief §4.5)
+   *   - Playbook-inference (predictive / structured envelope)
+   *   - RAG observation (citation-grounded prose)
    */
-  readonly response: InsightsResponse;
+  readonly response: InsightsResponse | InsightsErrorResponse;
+  /**
+   * Optional manual-retry handler — passed through to the error renderer
+   * (task 029 / D2-19). Surfaced as a "Try again" CTA for retryable codes
+   * (400-class + 429-after-countdown + 500 + 503 kill-switches).
+   */
+  readonly onErrorRetry?: () => void;
+  /**
+   * Optional sign-in-again handler — passed through to the error renderer.
+   * Surfaced as a CTA when the error code is `auth.401` (post-reauth-fail).
+   */
+  readonly onErrorSignInAgain?: () => void;
   /**
    * Controls the playbook-path rendering mode. When true, the structured-
    * output widget mounts in `streaming` mode and subscribes to PaneEventBus
@@ -104,10 +124,31 @@ export const InsightsResponseRenderer: React.FC<InsightsResponseRendererProps> =
   dispatchPlaybookToWorkspace = false,
   onCitationClick,
   confidenceThreshold,
+  onErrorRetry,
+  onErrorSignInAgain,
 }) => {
+  // (0) Error check FIRST — task 029 / D2-19. The error variant has no
+  //     `confidence` field; surfacing the low-confidence badge would be
+  //     semantically wrong (the error is the failure, not a low-confidence
+  //     answer). The error renderer owns its own visual hierarchy.
+  if (isError(response)) {
+    return (
+      <div
+        data-testid="insights-response-renderer"
+        data-response-case="error"
+      >
+        <InsightsErrorRenderer
+          response={response}
+          onManualRetry={onErrorRetry}
+          onSignInAgain={onErrorSignInAgain}
+        />
+      </div>
+    );
+  }
+
   // Low-confidence advisory badge (task 028 / D2-18). Rendered at the TOP of
-  // every response case wrapper (before the case-specific sub-renderer) so
-  // it gates the entire output. The badge itself returns `null` when the
+  // every SUCCESS response case wrapper (before the case-specific sub-renderer)
+  // so it gates the entire output. The badge itself returns `null` when the
   // response confidence is at or above threshold (or absent / malformed) —
   // no DOM node when the advisory is not warranted.
   //
@@ -165,12 +206,13 @@ export const InsightsResponseRenderer: React.FC<InsightsResponseRendererProps> =
         );
       }
       // Defensive: unknown `structuredResult.kind` on the playbook branch.
-      // Should be unreachable after the union-exhaustive guards above. Log
-      // and fall through to an empty hint so the user is not left blank.
+      // Should be unreachable after the union-exhaustive guards above (TS
+      // narrows `response` to `never` here). Log and fall through to an
+      // empty hint so the user is not left blank.
       // eslint-disable-next-line no-console
       console.warn(
         '[InsightsResponseRenderer] unhandled playbook structuredResult.kind',
-        response.structuredResult,
+        (response as { structuredResult?: unknown }).structuredResult,
       );
       return (
         <div

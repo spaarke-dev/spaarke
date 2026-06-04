@@ -1,12 +1,12 @@
 <task id="029" project="spaarke-ai-platform-unification-r5">
   <metadata>
     <title>D2-19 12 Insights error codes + per-code UX + correlation propagation + retry logic</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>4 hours</estimated-effort>
-    <actual-effort></actual-effort>
+    <actual-effort>~2h sub-agent (main session owns commit + quality gates + test execution)</actual-effort>
     <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
     <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
     <wave>P2-G7 (serial; depends on 024 + 025 + 026; blocks 030)</wave>
     <parallel-safe>false</parallel-safe>

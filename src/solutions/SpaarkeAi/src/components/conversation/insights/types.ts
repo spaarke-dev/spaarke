@@ -234,6 +234,63 @@ export type InsightsResponse =
   | RagObservationResponse;
 
 // ---------------------------------------------------------------------------
+// Error variant — task 029 / D2-19 surfaces the 12 binding error codes
+// ---------------------------------------------------------------------------
+
+/**
+ * Error variant of the response envelope — supplied to the renderer when the
+ * HTTP client (task 025 `callInsightsQuery`) throws an `InsightsQueryError`.
+ * Distinct from the three success variants above (uses `path: 'error'` as
+ * the discriminant).
+ *
+ * Per ADR-018 (no information leakage):
+ *   - The renderer ONLY surfaces `errorCode` (mapped to a user-facing message
+ *     via `insightsErrorMessages.ts`) + `correlationId` (opaque ops-debugging
+ *     key) + optional `retryAfterSeconds` (countdown UX for 429).
+ *   - `detail` is Console-logged for diagnostics but NEVER rendered.
+ *   - `title` is Console-logged but NEVER rendered.
+ *   - Unknown ProblemDetails extensions in `unknownExtensions` are
+ *     Console-logged but NEVER rendered (v1.1+ forward-compat).
+ *
+ * Per ADR-013 §3.5 (Zone B boundary): this shape is R5-local — it mirrors the
+ * `InsightsQueryError` thrown by the HTTP client but is NOT imported FROM the
+ * client (so the renderer module can be tested in isolation without dragging
+ * the HTTP client's transitive dependencies into the test runner).
+ */
+export interface InsightsErrorResponse {
+  readonly path: 'error';
+  /**
+   * The stable `errorCode` extension from the contract's ProblemDetails. One
+   * of the 12 v1.0 codes OR a synthetic key (`auth.401`, `rate-limit.429`).
+   * Unknown codes fall through to the generic
+   * `INSIGHTS_ASSISTANT_INTERNAL_ERROR` message via `getUserMessageForErrorCode`.
+   */
+  readonly errorCode: string;
+  /**
+   * The opaque correlation-id (per-Assistant-turn ops-debugging key). Visible
+   * in the rendered UI (small mono-font, copyable), surfaced for support
+   * ticket lookups. Treated as untrusted display text per ADR-018.
+   */
+  readonly correlationId: string;
+  /** HTTP status code (kept for diagnostics + Test 1 assertions; NOT rendered). */
+  readonly status: number;
+  /** ProblemDetails title (Console-logged for diagnostics; NEVER rendered per ADR-018). */
+  readonly title: string;
+  /** ProblemDetails detail (Console-logged for diagnostics; NEVER rendered per ADR-018). */
+  readonly detail: string;
+  /**
+   * Parsed `Retry-After` header value for 429 responses (delta-seconds).
+   * Drives the countdown UX. Absent for non-429 responses.
+   */
+  readonly retryAfterSeconds?: number;
+  /**
+   * Unknown ProblemDetails extensions (v1.1+ forward-compat). Console-logged
+   * for diagnostics; NEVER rendered. Per ADR-019 + R5 §3.5 Zone B boundary.
+   */
+  readonly unknownExtensions?: Readonly<Record<string, unknown>>;
+}
+
+// ---------------------------------------------------------------------------
 // Runtime guards — empty-result + decline detection
 // ---------------------------------------------------------------------------
 
@@ -281,6 +338,20 @@ export function isRagObservation(
   response: InsightsResponse,
 ): response is RagObservationResponse {
   return response.path === 'rag';
+}
+
+/**
+ * Returns true iff the input is an error variant (task 029 / D2-19). Used by
+ * the top-level renderer to dispatch to `InsightsErrorRenderer` before the
+ * existing success-case discrimination (decline / empty / playbook / RAG).
+ *
+ * Accepts a wider input type (`InsightsResponse | InsightsErrorResponse`) so
+ * the renderer can call this on the union without first narrowing.
+ */
+export function isError(
+  value: InsightsResponse | InsightsErrorResponse,
+): value is InsightsErrorResponse {
+  return (value as { path?: string }).path === 'error';
 }
 
 // ---------------------------------------------------------------------------
