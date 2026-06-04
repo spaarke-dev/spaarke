@@ -349,6 +349,29 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
 
         return client;
     }
+
+    /// <summary>
+    /// Suppresses a known .NET runtime NRE that can fire during host shutdown when the
+    /// <c>FileSystemWatcher</c> used by <c>PhysicalFileProvider</c> (for appsettings.json
+    /// reload-on-change) is disposed while its internal handle has been finalized early.
+    /// See dotnet/runtime#48505. Surfaced in Wave F PR #339 CI on
+    /// <c>ReportingEndpointTests</c> after a new <c>BindConfiguration</c>-based
+    /// <c>IOptionsChangeTokenSource</c> (AssistantCitationHrefOptions) added another
+    /// change-token subscription that increases the dispose race window. Safe to swallow:
+    /// the host is fully shutting down and no test state remains. The base.Dispose call
+    /// has already completed everything it can before the NRE surfaces.
+    /// </summary>
+    protected override void Dispose(bool disposing)
+    {
+        try
+        {
+            base.Dispose(disposing);
+        }
+        catch (NullReferenceException ex) when (ex.StackTrace?.Contains("FileSystemWatcher") == true)
+        {
+            // Intentionally swallowed — see XML doc above.
+        }
+    }
 }
 
 /// <summary>
