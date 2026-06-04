@@ -77,7 +77,7 @@ ADR-001, ADR-006, ADR-007, ADR-008, ADR-009, **ADR-010** (DI minimalism — ≤1
 **Deliverables**:
 
 1. **D1-01 Session-scoped AI Search index** — Provision `spaarke-session-files` index. Bicep + index JSON schema (same shape as `spaarke-knowledge-index-v2`: 3072-dim HNSW + BM25 + semantic config). Required fields: `tenantId`, `sessionId`, plus existing chunk schema. Per-tenant routing decision deferred (Phase 1 spike → assume per-tenant initially).
-   - **Files affected**: `infra/ai-search/spaarke-session-files.index.json` (new); `infrastructure/` Bicep module (extend)
+   - **Files affected**: `infrastructure/ai-search/spaarke-session-files.json` (new); `infrastructure/bicep/` module (extend)
    - **Tasks**: ~1 task
    - **Acceptance**: Index visible in Azure Portal; schema matches knowledge-index-v2; `tenantId` filter works
 

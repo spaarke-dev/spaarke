@@ -216,7 +216,7 @@ R5 ships in parallel with Insights Engine R2 Wave F (operator-approved 2026-06-0
 - Frontend `InsightsResponseRenderer` component (NEW)
 
 **Infrastructure**:
-- `infra/ai-search/spaarke-session-files.index.json` (NEW)
+- `infrastructure/ai-search/spaarke-session-files.json` (NEW)
 - Bicep module extensions for session-files index provisioning
 
 **Dataverse data**:

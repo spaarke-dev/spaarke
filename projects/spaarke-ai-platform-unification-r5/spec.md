@@ -102,8 +102,8 @@ R5 ships a chat-driven "Summarize a Document" vertical slice through the Spaarke
 - `src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts` — `/summarize` description extension
 
 **Infrastructure**:
-- `infra/ai-search/` (or equivalent) — new `spaarke-session-files` index JSON + Bicep provisioning
-- `infrastructure/` Bicep modules — session-files index configuration
+- `infrastructure/ai-search/spaarke-session-files.json` — new index schema (mirrors canonical `spaarke-knowledge-index-v2.json`)
+- `infrastructure/bicep/` modules — session-files index provisioning (idempotent extension)
 
 **Dataverse data**:
 - New `sprk_analysisaction` seed row: "Summarize Document for Chat" (configuration only — no schema changes)

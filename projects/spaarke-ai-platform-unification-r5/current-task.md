@@ -1,8 +1,8 @@
 # Current Task — Spaarke AI Platform Unification R5
 
 > **Purpose**: Active task state tracker. Managed by `task-execute` skill per CLAUDE.md §7.
-> **Status**: PRE-IMPLEMENTATION — task POML generation in flight (wave 1 dispatched)
-> **Last updated**: 2026-06-03 (late, post-checkpoint before /compact)
+> **Status**: READY FOR EXECUTION — `/project-pipeline` complete; all 37 task POMLs generated
+> **Last updated**: 2026-06-04
 
 ---
 
@@ -10,13 +10,12 @@
 
 | Field | Value |
 |---|---|
-| **Active flow** | `/project-pipeline` Step 3 — task POML file generation |
-| **Pipeline status** | Steps 0–2 ✅ committed (commit `a0615634` pushed). Step 3 in progress. |
-| **Last commit** | `a0615634` plan(r5): generate plan.md + CLAUDE.md + current-task.md + tasks/ scaffold |
-| **Branch** | `work/spaarke-ai-platform-unification-r5` (on top of `origin/master` `7e20dc82`) |
-| **In-flight sub-agent** | ID `afb491f179109d5ff` (general-purpose) generating `tasks/001-provision-session-files-index.poml`. Background — will complete independently. Check `projects/spaarke-ai-platform-unification-r5/tasks/` to see if file landed before continuing. |
-| **Next action** | Verify task 001 POML exists on disk. If yes: review structure as reference; dispatch waves 2+. If no: re-dispatch task 001. Then proceed through ~36 more POMLs in waves of 6 parallel sub-agents per TASK-INDEX.md. |
-| **Status** | in-progress (POML generation wave 1) |
+| **Active flow** | `/project-pipeline` complete; ready for `task-execute` invocation on task 001 |
+| **Pipeline status** | ✅ ALL STEPS COMPLETE — Steps 0–3 done; 37 POMLs on disk + pushed |
+| **POML waves shipped** | Wave 1 → 9 (37 POMLs total): Phase 1 (001-009; 9 incl. gate), Phase 2 (010-031; 22 incl. sign-off gate + closure gate), Phase 3 (040-044; 5), wrap-up (090; 1) |
+| **Branch** | `work/spaarke-ai-platform-unification-r5` on top of `origin/master` `7e20dc82` |
+| **Next action** | User invokes `/task-execute` on `tasks/001-provision-session-files-index.poml` (first task; foundation; blocks downstream P1-G2..G5 wave) |
+| **Status** | ready-to-execute (no task in flight) |
 
 ### Files Modified This Session (committed)
 - `projects/spaarke-ai-platform-unification-r5/design.md` — initial draft + Insights coordination + v1.1 negotiation integration (commits `8ae4e59c`, `6a6c7a29`, `1ecf41a6`)
@@ -101,8 +100,8 @@ After task generation, the first task to execute will be **D1-01 Session-scoped 
 | plan.md | ✅ Authored 2026-06-03 late (this turn) — 3 phases, ~36–44 deliverables, parallel-execution groups, critical path |
 | CLAUDE.md (project-specific) | ✅ Authored 2026-06-03 late (this turn) — R5-specific rules + reuse mandate + key file paths |
 | current-task.md (this file) | ✅ Created (this turn) |
-| tasks/ folder | 🔲 Empty — pending task-create |
-| tasks/TASK-INDEX.md | 🔲 Pending |
+| tasks/ folder | ✅ 37 POMLs generated (2026-06-04 via parallel sub-agent waves) |
+| tasks/TASK-INDEX.md | ✅ READY — header reflects POML generation complete |
 | notes/ subfolders | ⚠️ Partial — `notes/` exists with coordination docs; debug/drafts/handoffs/spikes/ subdirectories not yet created |
 
 ---

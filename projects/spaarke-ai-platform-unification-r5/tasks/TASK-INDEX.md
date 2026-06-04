@@ -1,10 +1,10 @@
 # Task Index — Spaarke AI Platform Unification R5
 
-> **Status**: SKELETON — task POML files not yet generated
-> **Created**: 2026-06-03 (late)
+> **Status**: READY — all 37 task POMLs generated; tasks ready for `task-execute` invocation
+> **Created**: 2026-06-03 (late); POMLs generated 2026-06-04
 > **Source**: `plan.md` Phase Breakdown
 > **Universal task driver**: `task-execute` skill (MANDATORY per root CLAUDE.md §4)
-> **Total tasks (estimated)**: ~36–44 across 3 phases + wrap-up
+> **Total tasks**: 37 across 3 phases + wrap-up (Phase 1: 9; Phase 2: 22; Phase 3: 5; wrap-up: 1)
 
 ---
 
@@ -163,7 +163,9 @@ Critical path ≈ 13 sequential dependencies. Slack exists in Phase 2 deliverabl
 
 ## Task POML Generation Status
 
-🔲 **PENDING** — task POML files not yet generated. This index reflects plan.md deliverables; individual POML task files (with `<knowledge>`, `<steps>`, `<acceptance-criteria>` per `task-execute.template.md`) are produced by `task-create` skill (next step in `/project-pipeline` orchestration).
+✅ **COMPLETE** — all 37 task POML files generated 2026-06-04 via parallel sub-agent waves (Wave 1 → 9). Each POML follows `task-execute.template.md` structure with `<knowledge>`, `<steps>`, `<acceptance-criteria>`, Step 0 RIGOR LEVEL declaration, and Step 9.5 quality gates (for FULL-rigor tasks). All R5-specific binding constraints encoded per project CLAUDE.md §3.1-3.8.
+
+**Path-drift correction applied** to plan.md / spec.md / CLAUDE.md (2026-06-04): canonical paths are `infrastructure/ai-search/spaarke-session-files.json` and `infrastructure/bicep/` (not legacy `infra/ai-search/*.index.json`).
 
 ---
 
