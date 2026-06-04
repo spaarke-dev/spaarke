@@ -1,12 +1,12 @@
 <task id="001" project="spaarke-ai-platform-unification-r5">
   <metadata>
     <title>D1-01 Provision `spaarke-session-files` Azure AI Search Index</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>4 hours</estimated-effort>
-    <actual-effort></actual-effort>
-    <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <actual-effort>~1 hour</actual-effort>
+    <assigned>Claude Code (main session) + operator (ralph.schroeder@spaarke.com) for Azure deploy</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
     <phase>Phase 1 — Platform Extensions</phase>
     <wave>P1-G1 (serial; foundation; blocks 002, 003, 007)</wave>
     <parallel-safe>false</parallel-safe>

@@ -10,12 +10,12 @@
 
 | Field | Value |
 |---|---|
-| **Active flow** | `/project-pipeline` complete; ready for `task-execute` invocation on task 001 |
-| **Pipeline status** | ✅ ALL STEPS COMPLETE — Steps 0–3 done; 37 POMLs on disk + pushed |
-| **POML waves shipped** | Wave 1 → 9 (37 POMLs total): Phase 1 (001-009; 9 incl. gate), Phase 2 (010-031; 22 incl. sign-off gate + closure gate), Phase 3 (040-044; 5), wrap-up (090; 1) |
+| **Active flow** | Phase 1 implementation in progress — task 001 ✅ complete; Wave P1-G2/G3 ready for parallel dispatch |
+| **Pipeline status** | ✅ POML generation complete; ✅ Task 001 (D1-01 index provision) deployed to Spaarke Dev + smoke-tested + idempotent |
+| **Last task completed** | 001 D1-01 — `spaarke-session-files` index created on Spaarke Dev (18 fields, 3072-dim HNSW, ADR-014 invariant verified). Evidence: `notes/task-001-deployment-evidence.md` |
 | **Branch** | `work/spaarke-ai-platform-unification-r5` on top of `origin/master` `7e20dc82` |
-| **Next action** | User invokes `/task-execute` on `tasks/001-provision-session-files-index.poml` (first task; foundation; blocks downstream P1-G2..G5 wave) |
-| **Status** | ready-to-execute (no task in flight) |
+| **Next action** | Dispatch Wave P1-G2 (tasks 002 + 003) + P1-G3 (tasks 004 + 005) — 4 parallel sub-agents authoring code per the agreed model (sub-agents author; main session builds + commits) |
+| **Status** | ready-to-execute (Phase 1 implementation; next wave: 4 parallel sub-agents) |
 
 ### Files Modified This Session (committed)
 - `projects/spaarke-ai-platform-unification-r5/design.md` — initial draft + Insights coordination + v1.1 negotiation integration (commits `8ae4e59c`, `6a6c7a29`, `1ecf41a6`)
