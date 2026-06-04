@@ -1,9 +1,10 @@
 # Spaarke Insights Engine — Phase 1.5 (r2)
 
-> **Status**: Pipeline-ready (2026-05-31)
-> **Created**: 2026-05-30 · **Spec aligned**: 2026-05-31
+> **Status**: ✅ **Complete (Phase 1.5)** — closed 2026-06-04 via task 090. 14/15 spec.md SCs met; SC-15 (SME calibration ≥50 observations) explicitly carried to Phase 2. 5 PRs shipped: #330 (Wave B), #334 (Waves A+C), #336 (Wave D), #337 (Wave E), #339 (Wave F contract v1.1). See [`notes/lessons-learned.md`](notes/lessons-learned.md) for the retrospective and [`PHASE-2-OUTLINE.md`](PHASE-2-OUTLINE.md) for r3 input.
+> **Created**: 2026-05-30 · **Spec aligned**: 2026-05-31 · **Closed**: 2026-06-04
 > **Owner**: Spaarke Engineering
 > **Predecessor**: [`ai-spaarke-insights-engine-r1`](../ai-spaarke-insights-engine-r1/) (Phase 1 — shipped + deployed; 17/17 D-P deliverables complete)
+> **Successor**: `ai-spaarke-insights-engine-r3` (Phase 2 — TBD per owner discussion; primary input is [`PHASE-2-OUTLINE.md`](PHASE-2-OUTLINE.md))
 
 Phase 1.5 lifts the Insights Engine from Phase 1's plumbing prototype (one playbook, code-defined universal-ingest, single-entity matter scope, litigation-biased classification) to a **usable, multi-tenant, multi-practice-area, multi-entity insights platform** with both pre-authored playbook and ad-hoc RAG consumption paths, prompts SMEs can iterate without code deploys, and a Spaarke Assistant integration.
 
