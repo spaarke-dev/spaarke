@@ -640,14 +640,17 @@ public sealed class SemanticSearchService : ISemanticSearchService
         }
 
         // Dispatch on parent entity type — these are the lookup fields the upload wizard sets.
+        // Accept both shorthand ("workassignment") and Dataverse logical name ("sprk_workassignment")
+        // since the PCF caller and BFF contract both occur in the wild.
         IEnumerable<DocumentEntity> documents = request.EntityType.ToLowerInvariant() switch
         {
-            "matter" => await _documentService.GetDocumentsByMatterAsync(parentGuid, null, cancellationToken),
-            "project" => await _documentService.GetDocumentsByProjectAsync(parentGuid, null, cancellationToken),
-            "invoice" => await _documentService.GetDocumentsByInvoiceAsync(parentGuid, null, cancellationToken),
+            "matter" or "sprk_matter" => await _documentService.GetDocumentsByMatterAsync(parentGuid, null, cancellationToken),
+            "project" or "sprk_project" => await _documentService.GetDocumentsByProjectAsync(parentGuid, null, cancellationToken),
+            "invoice" or "sprk_invoice" => await _documentService.GetDocumentsByInvoiceAsync(parentGuid, null, cancellationToken),
+            "workassignment" or "sprk_workassignment" => await _documentService.GetDocumentsByWorkAssignmentAsync(parentGuid, null, cancellationToken),
             _ => throw new ArgumentException(
                 $"associatedOnly is not supported for entityType '{request.EntityType}' " +
-                "(supported: matter, project, invoice).",
+                "(supported: matter, project, invoice, workassignment).",
                 nameof(request))
         };
 
