@@ -13,7 +13,11 @@
 // `ChatAttachment` is the canonical attachment-ready payload shape produced
 // by `useChatFileAttachment`. Used by `ISprkChatProps.onAttachmentReady`
 // (R4 task 042 / W-4).
-import type { ChatAttachment } from './hooks/useChatFileAttachment';
+// `AttachmentChip` is the in-flight chip shape (status: extracting | ready |
+// error) used by R5 task 020 / D2-11 chat-pane orchestration props for the
+// "N files attached" indicator, per-file remove cascade, and ready-batch
+// inline-confirmation injection.
+import type { ChatAttachment, AttachmentChip } from './hooks/useChatFileAttachment';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chat Message Types
@@ -546,6 +550,126 @@ export interface ISprkChatProps {
    * requests downstream.
    */
   onAttachmentReady?: (attachment: ChatAttachment) => void;
+
+  /**
+   * Callback fired whenever the chat-attachment chip list changes (add, remove,
+   * status transition) — R5 task 020 / D2-11.
+   *
+   * Fires with the current chip array (NOT a delta). Hosts use this to render a
+   * persistent "N files attached" indicator, derive an `uploadedFileCount` for
+   * tri-mode `/summarize` routing (R5 FR-03), or sync their own session-side
+   * mirror of the chip lifecycle.
+   *
+   * Independent of `onAttachmentReady`:
+   *   - `onAttachmentReady` fires ONCE per file that reaches `status === 'ready'`.
+   *   - `onAttachmentsChanged` fires on EVERY chip list mutation (including
+   *      `extracting`-state inserts and `removeFile` splices).
+   *
+   * The chip array is a new reference on every change so React equality guards
+   * fire correctly when host state subscribes via `useEffect([chips])`.
+   *
+   * The host MUST treat this as a SIDE-EFFECT signal — SprkChat still owns the
+   * chip lifecycle. The callback fires inside a React effect so it runs after
+   * the chip render has committed.
+   *
+   * ADR-012 invariant: the callback receives the generic `AttachmentChip` shape
+   * (chip id, filename, mimeType, status, etc.) — NO host-specific types cross
+   * the shared-library boundary.
+   */
+  onAttachmentsChanged?: (chips: AttachmentChip[]) => void;
+
+  /**
+   * Callback fired when the user clicks the dismiss button on an attachment
+   * chip — R5 task 020 / D2-11.
+   *
+   * Fires BEFORE `useChatFileAttachment.removeFile(index)` is invoked, so the
+   * host can capture the chip metadata (id, filename, etc.) before it's spliced
+   * from local state. SprkChat still calls `removeFile(index)` immediately
+   * after this callback returns — the host MUST NOT splice the chip itself.
+   *
+   * Hosts (e.g. ConversationPane) use this to cascade the removal to the BFF
+   * session manifest (task 004's `ChatSession.UploadedFiles[]`) and the AI
+   * Search session-files index (task 007's cleanup path). The host owns its
+   * own auth boundary for those BFF calls.
+   *
+   * The callback is fire-and-forget: SprkChat does NOT await any returned
+   * Promise. Host failures (e.g. transient HTTP errors during cleanup) do NOT
+   * block the local chip removal — orphaned manifest/index entries are
+   * bounded by the session-end cleanup HostedService (R5 task 007).
+   */
+  onAttachmentRemoved?: (chip: AttachmentChip, index: number) => void;
+
+  /**
+   * One-shot local message to inject into the chat thread — R5 task 020 / D2-11.
+   *
+   * When this prop transitions from `null` (or absent) to a non-null message,
+   * SprkChat appends the message to its in-memory thread via the same
+   * `useChatSession.addMessage` path used for streamed turns. The host is
+   * responsible for clearing the prop back to `null` after dispatch (typically
+   * via the `onLocalMessageInjected` callback below) so the same message is
+   * not injected twice across renders.
+   *
+   * Use cases (R5 chat-pane orchestration UX):
+   *   - Inline file-confirmation: "I have your 3 files: a.pdf, b.docx, c.md"
+   *   - Multi-file combined-summary deterministic interjection:
+   *     "I'll combine all 3 files into a single summary."
+   *
+   * Per R5 spec FR-03 + ADR-012: these messages are CLIENT-RENDERED only —
+   * NOT persisted server-side as model-generated turns. The host emits them
+   * deterministically; the BFF chat history does NOT contain them.
+   *
+   * ADR-022 invariant: the message follows the standard `IChatMessage` shape
+   * with `role: 'Assistant'` (so it renders in the assistant message slot
+   * with the existing styles); use `metadata.responseType === 'markdown'` for
+   * plain-text confirmations. No new chat-message role is introduced.
+   *
+   * @example
+   * const [pendingInjection, setPendingInjection] = useState<IChatMessage | null>(null);
+   * // ... in a useEffect on chip-ready transitions:
+   * setPendingInjection({
+   *   role: 'Assistant',
+   *   content: "I have your 3 files: a.pdf, b.docx, c.md",
+   *   timestamp: new Date().toISOString(),
+   * });
+   * // Pass to SprkChat:
+   * <SprkChat injectLocalMessage={pendingInjection} onLocalMessageInjected={() => setPendingInjection(null)} />
+   */
+  injectLocalMessage?: IChatMessage | null;
+
+  /**
+   * Callback fired after a `injectLocalMessage` is dispatched to the chat
+   * thread — R5 task 020 / D2-11.
+   *
+   * The host uses this to clear the `injectLocalMessage` prop back to `null`
+   * so subsequent renders do not re-inject the same message. Pairs with
+   * `injectLocalMessage` above.
+   */
+  onLocalMessageInjected?: () => void;
+
+  /**
+   * Hook fired BEFORE SprkChat starts an outbound message stream — R5 task
+   * 020 / D2-11.
+   *
+   * Receives the message text the user is about to send. The host MAY use this
+   * to inject a deterministic interjection (e.g. R5 FR-03 multi-file combined-
+   * summary interjection: "I'll combine all 3 files into a single summary.")
+   * via `injectLocalMessage` BEFORE the model response begins.
+   *
+   * This callback is INFORMATIONAL — it does NOT short-circuit or cancel the
+   * send. The host cannot abort the message via this hook; that decision
+   * remains owned by SprkChat (the user clicked Send).
+   *
+   * The callback fires synchronously before `addMessage` runs, so any
+   * `injectLocalMessage` set during the callback is processed in the SAME
+   * render pass and appears in the thread BEFORE the user's message + the
+   * assistant streaming placeholder. This guarantees the FR-03 "interjection
+   * appears before the model response begins" semantics.
+   *
+   * ADR-012 invariant: the callback receives the generic message text only —
+   * NO host-specific context. The host owns its own state (uploadedFileCount,
+   * routing decisions) and consults its own helpers (`routeSummarizeIntent`).
+   */
+  onBeforeSendMessage?: (messageText: string) => void;
 }
 
 /** Props for SprkChatMessage sub-component. */

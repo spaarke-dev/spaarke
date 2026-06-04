@@ -413,8 +413,14 @@ export type {
   FilePreviewContextRenderProps,
   FilePreviewContextWidgetProps,
   FilePreviewFileActionHandler,
+  UseSummarizeOnlyResult,
+  DispatchSummarizeOnlyResult,
 } from './widgets/context/FilePreviewContextWidget';
-export { FILE_PREVIEW_CONTEXT_WIDGET_TYPE } from './widgets/context/FilePreviewContextWidget';
+export {
+  FILE_PREVIEW_CONTEXT_WIDGET_TYPE,
+  useSummarizeOnly,
+  dispatchSummarizeOnly,
+} from './widgets/context/FilePreviewContextWidget';
 
 registerContextWidget('file-preview', {
   factory: () =>

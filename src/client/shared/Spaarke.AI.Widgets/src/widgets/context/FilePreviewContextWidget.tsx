@@ -34,13 +34,27 @@
  *     016 / D2-06). Existing `context` subscribers (entity-info, findings,
  *     citation-highlight) ignore unknown types and continue to function.
  *
- * Future composition (task 021 / D2-12):
- *   - The per-card `FilePreviewCard` sub-component is intentionally kept
- *     simple + composable so the "Summarize this only" affordance (task
- *     021) can extend the card without rewriting markup. The card already
- *     exposes the row-action menu, so adding an `aiSummary`-style button
- *     beside the menu (or wiring the existing `aiSummary` menu item) is a
- *     small additive change.
+ * Per-file "Summarize this only" affordance (task 021 / D2-12):
+ *   - Each file card AND the single-file inline preview header render a
+ *     prominent "Summarize this only" `Button` adjacent to the 3-dot
+ *     `DocumentRowMenu` (Decision B1 from task 021 POML — keep BOTH
+ *     surfaces; button = primary, menu `aiSummary` = alternative discovery).
+ *   - Click handler dispatches via PaneEventBus ONLY (Decision A1 — no
+ *     direct HTTP call from this widget). Two events are emitted in
+ *     sequence per file click:
+ *       (a) `workspace.widget_load` mounts a NEW Workspace tab with the
+ *           `structured-output-stream` widget (FR-06 additive — prior
+ *           tabs preserved). `widgetData.correlationId` carries a fresh
+ *           `crypto.randomUUID()` so concurrent streams disambiguate per
+ *           task 017 widget contract.
+ *       (b) `workspace.streaming_started` carries `streamId === correlationId`
+ *           to flip the mounted widget's reducer from `idle` → `streaming`.
+ *           Subsequent `field_delta` + `streaming_complete` events come
+ *           from the BFF SSE consumer (task 020 chat-pane orchestration).
+ *   - The dispatch is encapsulated in a local `useSummarizeOnly(fileId,
+ *     sessionId, fileName)` hook so both the button AND the existing
+ *     `DocumentRowMenu` `aiSummary` action route through the SAME code
+ *     path (FR-05 + FR-08 dual-surface discovery).
  *
  * Standards:
  *   - ADR-012: lives in `@spaarke/ai-widgets`; consumes `@spaarke/ui-components`
@@ -70,12 +84,16 @@ import {
   MessageBar,
   MessageBarBody,
   MessageBarTitle,
+  Button,
+  Tooltip,
+  Spinner,
 } from '@fluentui/react-components';
 import {
   DocumentRegular,
   DocumentPdfRegular,
   DocumentTextRegular,
   DocumentTableRegular,
+  SparkleRegular,
 } from '@fluentui/react-icons';
 
 import {
@@ -84,7 +102,14 @@ import {
   type DocumentRowAction,
 } from '@spaarke/ui-components';
 import type { ContextWidgetProps } from '../../types/widget-types';
-import { useDispatchPaneEvent } from '../../events/useDispatchPaneEvent';
+import { useDispatchPaneEvent, type DispatchPaneEvent } from '../../events/useDispatchPaneEvent';
+import { usePaneEvent } from '../../events/usePaneEvent';
+import type { WorkspacePaneEvent } from '../../events/PaneEventTypes';
+import {
+  SUMMARIZE_SCHEMA,
+  type StructuredOutputStreamWidgetData,
+} from '../workspace/StructuredOutputStreamWidget';
+import { STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE } from '../workspace/register-structured-output-stream-widget';
 
 // ---------------------------------------------------------------------------
 // Public data types
@@ -136,6 +161,18 @@ export interface FilePreviewContextFile {
 export interface FilePreviewContextData {
   files: FilePreviewContextFile[];
   activeFileId?: string;
+  /**
+   * Active chat session identifier. Used by the per-file "Summarize this only"
+   * affordance (task 021 / D2-12) to anchor the dispatched Workspace tab to
+   * the correct session. When absent, the affordance still renders but the
+   * dispatched `widget_load` payload carries `sessionId: ''` — downstream
+   * consumers (BFF SSE consumer in task 020 / D2-11) MUST treat an empty
+   * `sessionId` as a no-op and surface a UX hint.
+   *
+   * Additive (optional) — does NOT break existing single-/multi-file callers
+   * who only need the preview surface (task 018 baseline behaviour).
+   */
+  sessionId?: string;
 }
 
 /**
@@ -364,6 +401,54 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
 
+  // Per-card "Summarize this only" affordance row (task 021 / D2-12).
+  // Contains a prominent `Button` (label + icon, brand-tinted) and the
+  // existing 3-dot DocumentRowMenu. The button is the primary affordance;
+  // the menu's `aiSummary` action is alternative discovery (FR-05).
+  cardActionRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    flexShrink: 0,
+  },
+  summarizeButton: {
+    // Subtle appearance keeps the card visually quiet; brand icon foreground
+    // signals AI provenance. Disabled state (in-flight) reduces opacity via
+    // Fluent v9's built-in disabled tokens — no override needed.
+    flexShrink: 0,
+  },
+  // Single-file mode header overlay (positioned absolutely above the
+  // RichFilePreview title bar so the button is visible without rewriting
+  // the renderer's markup — wrap-and-overlay composition).
+  singleFileHeaderOverlay: {
+    position: 'relative',
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  singleFileActionBar: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderTopLeftRadius: tokens.borderRadiusMedium,
+    borderTopRightRadius: tokens.borderRadiusMedium,
+    flexShrink: 0,
+  },
+  singleFileActionLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    marginRight: 'auto',
+  },
+
   // Active preview slot — fills remaining vertical space.
   previewSlot: {
     flex: 1,
@@ -478,6 +563,270 @@ function formatFileSize(bytes?: number | null): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Shared dispatch helper + hook: useSummarizeOnly (task 021 / D2-12)
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of `dispatchSummarizeOnly` — pure (no-hook) dispatch helper. The
+ * generated `correlationId` is returned so callers (including the
+ * `DocumentRowMenu` `aiSummary` action callback site) can track the
+ * in-flight stream without subscribing to PaneEventBus themselves.
+ */
+export interface DispatchSummarizeOnlyResult {
+  correlationId: string;
+}
+
+/**
+ * Pure dispatch helper for the per-file "Summarize this only" flow. Both
+ * the `SummarizeOnlyButton` component AND the `DocumentRowMenu.aiSummary`
+ * action callback route through this function so the dispatch shape is
+ * IDENTICAL across both surfaces (FR-05 dual-surface mandate; task 021
+ * Step 5 Test 4 acceptance criterion).
+ *
+ * Emits two PaneEventBus events in sequence (no HTTP call):
+ *
+ *   (a) `workspace.widget_load` mounts a NEW `structured-output-stream`
+ *       Workspace tab (FR-06 additive). The widget receives
+ *       `widgetData: { mode: 'streaming', schema: SUMMARIZE_SCHEMA,
+ *                       correlationId, title, sessionId, fileIds }`.
+ *
+ *   (b) `workspace.streaming_started` carrying `streamId === correlationId`
+ *       to flip the mounted widget's reducer phase to `streaming`.
+ *
+ * The function is intentionally pure (no closures over React state) so it
+ * can be called from non-component contexts (e.g. a `useCallback`'d menu
+ * action handler) without violating the rules of hooks.
+ *
+ * @internal — exported for unit testing and for the parent widget's
+ * `handleFileAction` callback.
+ */
+export function dispatchSummarizeOnly(
+  fileId: string,
+  sessionId: string,
+  fileName: string,
+  dispatch: DispatchPaneEvent,
+): DispatchSummarizeOnlyResult {
+  // `crypto.randomUUID()` is available in modern browsers (Chromium 92+,
+  // Firefox 95+, Safari 15.4+) and Node 14+; React 19's targets cover this
+  // surface. No polyfill required for the SpaarkeAi Code Page host.
+  const correlationId =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  // (a) Mount a NEW Workspace tab with the structured-output-stream widget.
+  // FR-06 additive: existing tabs are NOT touched. The Workspace pane
+  // subscriber pushes a new tab onto its strip; FIFO eviction at
+  // MAX_WORKSPACE_TABS applies if the cap is reached (handled by the
+  // Workspace pane, not this widget).
+  const widgetData: StructuredOutputStreamWidgetData & {
+    // Additive hint fields carried inside the polymorphic `widgetData`
+    // payload — NOT a new top-level event field. Consumers (e.g. task
+    // 020's BFF SSE consumer) narrow to read these; the widget itself
+    // ignores unknown fields per ADR-030.
+    sessionId?: string;
+    fileIds?: string[];
+  } = {
+    mode: 'streaming',
+    schema: SUMMARIZE_SCHEMA,
+    correlationId,
+    title: `Summary: ${fileName}`,
+    sessionId,
+    fileIds: [fileId],
+  };
+
+  dispatch('workspace', {
+    type: 'widget_load',
+    widgetType: STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE,
+    widgetData,
+    displayName: `Summary: ${fileName}`,
+  });
+
+  // (b) Flip the mounted widget's reducer to `streaming` phase. The
+  // `streamId` MUST equal `widgetData.correlationId` so the widget's
+  // correlation gate accepts the event (task 017 subscriber contract).
+  dispatch('workspace', {
+    type: 'streaming_started',
+    streamId: correlationId,
+  });
+
+  return { correlationId };
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of the {@link useSummarizeOnly} hook.
+ *
+ * - `onClick` — fire-and-forget dispatcher for the "Summarize this only" flow.
+ *   Emits two PaneEventBus events in sequence (no HTTP call):
+ *     (a) `workspace.widget_load` mounts a NEW `structured-output-stream`
+ *         Workspace tab (FR-06 additive — prior tabs preserved). The
+ *         widget receives `widgetData: { mode: 'streaming', schema:
+ *         SUMMARIZE_SCHEMA, correlationId, title: "Summary: <fileName>",
+ *         sessionId, fileIds: [fileId] }` so its subscriber can correlate
+ *         incoming `field_delta` events.
+ *     (b) `workspace.streaming_started` carrying `streamId === correlationId`
+ *         to flip the mounted widget's reducer phase to `streaming`.
+ *
+ * - `isInFlight` — local indicator while the dispatched stream is in flight.
+ *   Set `true` on click, cleared when a matching
+ *   `workspace.streaming_complete` event arrives (subscribed at the parent
+ *   widget level — see `FilePreviewContextWidget`). The button renders a
+ *   `Spinner` and is disabled while in flight.
+ *
+ * - `lastRequestId` — the most-recently-issued `correlationId` for this
+ *   `(fileId, sessionId)` tuple. Exposed for test assertions + telemetry; the
+ *   component itself does not depend on this value.
+ */
+export interface UseSummarizeOnlyResult {
+  onClick: () => void;
+  isInFlight: boolean;
+  lastRequestId: string | null;
+}
+
+/**
+ * Shared per-file Summarize dispatcher hook. Used by:
+ *   - the per-card "Summarize this only" `Button` (multi-file mode)
+ *   - the single-file inline preview header "Summarize this only" `Button`
+ *   - the existing `DocumentRowMenu.aiSummary` action (alternative
+ *     discovery; FR-05 dual-surface mandate)
+ *
+ * All three surfaces share a single dispatch shape so behaviour is
+ * indistinguishable across surfaces (FR-08 multi-turn refinement).
+ *
+ * The hook accepts an explicit `dispatch` argument (a `DispatchPaneEvent`
+ * obtained via `useDispatchPaneEvent` at the consuming component) rather
+ * than calling `useDispatchPaneEvent` internally; this keeps the hook
+ * trivially testable (pass a `vi.fn()` for the dispatcher) and avoids
+ * subscribing the parent component to an unrelated context.
+ *
+ * Per ADR-030: emits only existing PaneEventBus event types
+ * (`workspace.widget_load` from R2 origin; `workspace.streaming_started`
+ * added by task 016). NO new channels and NO new discriminants.
+ *
+ * @internal — exported only for unit testing.
+ */
+export function useSummarizeOnly(
+  fileId: string,
+  sessionId: string,
+  fileName: string,
+  dispatch: DispatchPaneEvent,
+): UseSummarizeOnlyResult {
+  const [isInFlight, setInFlight] = React.useState(false);
+  const [lastRequestId, setLastRequestId] = React.useState<string | null>(null);
+
+  // Track in-flight requestIds so the parent's `streaming_complete`
+  // subscription can resolve them via a stable ref. The ref is keyed off
+  // `lastRequestId` so subscribers can match by id.
+  const requestIdRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    requestIdRef.current = lastRequestId;
+  }, [lastRequestId]);
+
+  const onClick = useCallback(() => {
+    const { correlationId } = dispatchSummarizeOnly(fileId, sessionId, fileName, dispatch);
+    setLastRequestId(correlationId);
+    setInFlight(true);
+  }, [dispatch, fileId, fileName, sessionId]);
+
+  // Subscribe to `streaming_complete` so the in-flight indicator resets when
+  // the matching requestId completes. Unknown event types are ignored per
+  // ADR-030.
+  usePaneEvent('workspace', (event: WorkspacePaneEvent) => {
+    if (event.type !== 'streaming_complete') return;
+    if (!requestIdRef.current) return;
+    if (event.streamId !== requestIdRef.current) return;
+    setInFlight(false);
+  });
+
+  return { onClick, isInFlight, lastRequestId };
+}
+
+// ---------------------------------------------------------------------------
+// Sub-component: SummarizeOnlyButton (rendered per file card + inline header)
+// ---------------------------------------------------------------------------
+
+interface SummarizeOnlyButtonProps {
+  fileId: string;
+  fileName: string;
+  sessionId: string;
+  dispatch: DispatchPaneEvent;
+  /**
+   * When `true`, render the button as icon-only with a `Tooltip` (compact
+   * mode used in the per-card layout where horizontal space is constrained).
+   * When `false`, render label + icon (used in the single-file action bar
+   * where the button is the focal action).
+   */
+  compact: boolean;
+  styles: ReturnType<typeof useStyles>;
+  /**
+   * Optional sibling-disabled mode — used by the multi-file card to disable
+   * the button when there is no `sessionId` (the host has not yet bound the
+   * widget to a session). Mirrors the menu's `disabledActions` discipline.
+   */
+  disabled?: boolean;
+}
+
+const SummarizeOnlyButton: React.FC<SummarizeOnlyButtonProps> = ({
+  fileId,
+  fileName,
+  sessionId,
+  dispatch,
+  compact,
+  styles,
+  disabled,
+}) => {
+  const { onClick, isInFlight } = useSummarizeOnly(fileId, sessionId, fileName, dispatch);
+
+  const ariaLabel = `Summarize ${fileName} only`;
+  const isDisabled = disabled === true || isInFlight;
+
+  // Icon-only compact variant (per-card surface).
+  if (compact) {
+    return (
+      <Tooltip content="Summarize this file only" relationship="label" withArrow>
+        <Button
+          className={styles.summarizeButton}
+          appearance="subtle"
+          size="small"
+          aria-label={ariaLabel}
+          disabled={isDisabled}
+          icon={isInFlight ? <Spinner size="extra-tiny" /> : <SparkleRegular />}
+          onClick={(e: React.MouseEvent) => {
+            // Stop the card click handler from firing — selecting the file
+            // is NOT the intent of the summarize affordance.
+            e.stopPropagation();
+            onClick();
+          }}
+          data-testid="summarize-only-button-compact"
+          data-file-id={fileId}
+          data-in-flight={isInFlight ? 'true' : 'false'}
+        />
+      </Tooltip>
+    );
+  }
+
+  // Label + icon variant (single-file action bar surface).
+  return (
+    <Button
+      className={styles.summarizeButton}
+      appearance="primary"
+      size="small"
+      aria-label={ariaLabel}
+      disabled={isDisabled}
+      icon={isInFlight ? <Spinner size="extra-tiny" /> : <SparkleRegular />}
+      onClick={onClick}
+      data-testid="summarize-only-button"
+      data-file-id={fileId}
+      data-in-flight={isInFlight ? 'true' : 'false'}
+    >
+      Summarize this only
+    </Button>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Sub-component: FilePreviewCard (multi-file mode)
 // ---------------------------------------------------------------------------
 
@@ -488,6 +837,17 @@ interface FilePreviewCardProps {
   onAction: (action: DocumentRowAction, fileId: string) => void;
   disabledActions: DocumentRowAction[];
   styles: ReturnType<typeof useStyles>;
+  /**
+   * PaneEventBus dispatcher forwarded to the per-card "Summarize this only"
+   * button (task 021 / D2-12). Passed down from the parent widget to keep
+   * the card stateless + trivially testable.
+   */
+  dispatch: DispatchPaneEvent;
+  /**
+   * Active session id. When absent (empty string), the "Summarize this only"
+   * button is hidden — there is no session anchor to bind the new tab to.
+   */
+  sessionId: string;
 }
 
 /**
@@ -506,6 +866,8 @@ const FilePreviewCard: React.FC<FilePreviewCardProps> = ({
   onAction,
   disabledActions,
   styles,
+  dispatch,
+  sessionId,
 }) => {
   const handleClick = useCallback(() => {
     onSelect(file.fileId);
@@ -559,11 +921,25 @@ const FilePreviewCard: React.FC<FilePreviewCardProps> = ({
           {sizeLabel ? <Text className={styles.cardMetaText}>{sizeLabel}</Text> : null}
         </div>
       </div>
-      <DocumentRowMenu
-        document={{ id: file.fileId, name: file.fileName, documentType: file.documentType }}
-        onAction={handleAction}
-        disabledActions={disabledActions}
-      />
+      <div className={styles.cardActionRow}>
+        {/* Per-card "Summarize this only" affordance (task 021 / D2-12).
+            Hidden when no session anchor exists (no dispatch target). */}
+        {sessionId !== '' && (
+          <SummarizeOnlyButton
+            fileId={file.fileId}
+            fileName={file.fileName}
+            sessionId={sessionId}
+            dispatch={dispatch}
+            compact={true}
+            styles={styles}
+          />
+        )}
+        <DocumentRowMenu
+          document={{ id: file.fileId, name: file.fileName, documentType: file.documentType }}
+          onAction={handleAction}
+          disabledActions={disabledActions}
+        />
+      </div>
     </div>
   );
 };
@@ -623,6 +999,7 @@ const FilePreviewContextWidget: React.FC<FilePreviewContextWidgetProps> = ({
   const dispatch = useDispatchPaneEvent();
 
   const files = data?.files ?? [];
+  const sessionId = data?.sessionId ?? '';
   const isMulti = files.length > 1;
 
   // Active file selection — host's `activeFileId` seeds the initial value;
@@ -672,18 +1049,26 @@ const FilePreviewContextWidget: React.FC<FilePreviewContextWidgetProps> = ({
         : [...disabledActionsProp, 'preview'];
     }
     const defaults: DocumentRowAction[] = ['preview'];
+    // `aiSummary` is now handled IN-WIDGET (task 021 / D2-12) via
+    // `dispatchSummarizeOnly`, regardless of whether the host wires
+    // `onFileAction`. It stays visible whenever a session anchor exists.
+    // When no session anchor is present, the menu item is hidden — there
+    // is no dispatch target and an inert menu item would be misleading.
+    if (sessionId === '') {
+      defaults.push('aiSummary');
+    }
     if (!onFileAction) {
       // No host handler → hide actions whose destinations require host
       // routing. `toggleWorkspace` is handled in-widget so it stays
-      // visible; `aiSummary` and `findSimilar` need host glue.
-      defaults.push('aiSummary', 'findSimilar', 'rename');
+      // visible; `findSimilar` needs host glue.
+      defaults.push('findSimilar', 'rename');
     } else {
       // Host handler available — only hide `rename` defensively (it's
       // commonly host-unimplemented). Hosts can re-enable via prop.
       defaults.push('rename');
     }
     return defaults;
-  }, [disabledActionsProp, onFileAction]);
+  }, [disabledActionsProp, onFileAction, sessionId]);
 
   // -------------------------------------------------------------------------
   // Selection + event dispatch
@@ -740,7 +1125,24 @@ const FilePreviewContextWidget: React.FC<FilePreviewContextWidgetProps> = ({
           onFileAction?.(action, fileId);
           return;
         }
-        case 'aiSummary':
+        case 'aiSummary': {
+          // FR-05 + FR-08 dual-surface mandate: the `aiSummary` menu action
+          // and the per-card / inline "Summarize this only" Button MUST
+          // route through the same dispatch shape so behaviour is
+          // indistinguishable across surfaces (task 021 / D2-12).
+          //
+          // When no session anchor is present we fall through to the host
+          // callback — the host may render its own surface (e.g. an
+          // upload-files prompt) instead.
+          const file = files.find(f => f.fileId === fileId);
+          if (sessionId !== '' && file !== undefined) {
+            dispatchSummarizeOnly(file.fileId, sessionId, file.fileName, dispatch);
+          }
+          // Always bubble to the host so it can attach side-effects (e.g.
+          // analytics, toast). No-op when no handler.
+          onFileAction?.(action, fileId);
+          return;
+        }
         case 'findSimilar':
         case 'openFile':
         case 'openRecord':
@@ -760,7 +1162,7 @@ const FilePreviewContextWidget: React.FC<FilePreviewContextWidgetProps> = ({
         }
       }
     },
-    [dispatch, files, onFileAction]
+    [dispatch, files, onFileAction, sessionId]
   );
 
   // -------------------------------------------------------------------------
@@ -881,10 +1283,34 @@ const FilePreviewContextWidget: React.FC<FilePreviewContextWidgetProps> = ({
                 onAction={handleFileAction}
                 disabledActions={effectiveDisabledActions}
                 styles={styles}
+                dispatch={dispatch}
+                sessionId={sessionId}
               />
             ))}
           </div>
         </>
+      )}
+
+      {/* Single-file action bar (task 021 / D2-12). Rendered above the
+          RichFilePreview when there is exactly one file. The bar is the
+          PRIMARY surface for the "Summarize this only" affordance in
+          single-file mode where there is no per-card surface; in multi-file
+          mode the bar still renders above the ACTIVE file so the per-active
+          file action is unambiguous. Hidden when no session anchor exists. */}
+      {sessionId !== '' && (
+        <div className={styles.singleFileActionBar} data-testid="single-file-action-bar">
+          <Text className={styles.singleFileActionLabel}>
+            {isMulti ? `Active file:` : `File:`} <strong>{activeFile.fileName}</strong>
+          </Text>
+          <SummarizeOnlyButton
+            fileId={activeFile.fileId}
+            fileName={activeFile.fileName}
+            sessionId={sessionId}
+            dispatch={dispatch}
+            compact={false}
+            styles={styles}
+          />
+        </div>
       )}
 
       {/* Active-file preview — extracted RichFilePreview renderer (task 013). */}

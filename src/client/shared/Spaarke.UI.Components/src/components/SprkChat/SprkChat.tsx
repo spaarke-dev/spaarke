@@ -329,6 +329,13 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   initialMessages,
   onPaneEvent: onPaneEventProp,
   onAttachmentReady,
+  // R5 task 020 / D2-11 chat-pane orchestration UX props (all optional;
+  // existing consumers ignore — generic shared-lib hooks per ADR-012).
+  onAttachmentsChanged,
+  onAttachmentRemoved,
+  injectLocalMessage,
+  onLocalMessageInjected,
+  onBeforeSendMessage,
 }) => {
   const styles = useStyles();
   const messageListRef = React.useRef<HTMLDivElement>(null);
@@ -514,6 +521,55 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       if (!currentIds.has(id)) notifiedReadyRef.current.delete(id);
     }
   }, [attachmentFiles, onAttachmentReady]);
+
+  // ── R5 task 020 / D2-11: onAttachmentsChanged host callback ──────────────
+  //
+  // Fires the host callback on every chip lifecycle mutation — add, remove,
+  // status transition. Independent of `onAttachmentReady` (which fires only
+  // on extracting→ready transitions). Hosts (ConversationPane) use this to
+  // derive the "N files attached" indicator count + the `uploadedFileCount`
+  // input for tri-mode `/summarize` routing (R5 FR-03).
+  //
+  // Generic chip shape only crosses the boundary — NO host-specific types,
+  // preserving ADR-012 shared-lib context-agnosticism.
+  React.useEffect(() => {
+    if (!onAttachmentsChanged) return;
+    try {
+      onAttachmentsChanged(attachmentFiles);
+    } catch {
+      // Host callback errors must not break SprkChat's attachment lifecycle.
+      // Errors are swallowed; the host is responsible for its own telemetry.
+    }
+  }, [attachmentFiles, onAttachmentsChanged]);
+
+  // ── R5 task 020 / D2-11: injectLocalMessage one-shot injection ───────────
+  //
+  // When the host transitions `injectLocalMessage` from null → non-null, append
+  // the message to the chat thread via `addMessage` (the same path streamed
+  // turns use). The host is responsible for clearing the prop back to null via
+  // `onLocalMessageInjected` so re-renders do not re-inject the same message.
+  //
+  // The `dispatchedRef` guards against double-injection during React Strict
+  // Mode double-invocation of effects in development: we record the reference
+  // identity of the message we last dispatched and skip if the prop has not
+  // changed identity.
+  const lastInjectedRef = React.useRef<IChatMessage | null>(null);
+  React.useEffect(() => {
+    if (!injectLocalMessage) {
+      lastInjectedRef.current = null;
+      return;
+    }
+    if (lastInjectedRef.current === injectLocalMessage) return;
+    lastInjectedRef.current = injectLocalMessage;
+    addMessage(injectLocalMessage);
+    if (onLocalMessageInjected) {
+      try {
+        onLocalMessageInjected();
+      } catch {
+        // Host callback errors must not break the injection lifecycle.
+      }
+    }
+  }, [injectLocalMessage, onLocalMessageInjected, addMessage]);
 
   // Imperative handle for SprkChatInput so the [Prompt] button in our controls
   // strip can open the slash menu without re-implementing the wiring (FR-09).
@@ -916,6 +972,19 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         return;
       }
 
+      // R5 task 020 / D2-11: synchronous pre-send hook. The host MAY use this
+      // to inject a deterministic interjection (e.g. R5 FR-03 multi-file
+      // combined-summary interjection) via `injectLocalMessage` BEFORE the
+      // user's message is appended below. Per the prop docstring this hook is
+      // INFORMATIONAL — it cannot abort the send.
+      if (onBeforeSendMessage) {
+        try {
+          onBeforeSendMessage(messageText);
+        } catch {
+          // Host failures must not break the send lifecycle.
+        }
+      }
+
       // Clear follow-up suggestions from previous response
       clearSuggestions();
 
@@ -967,6 +1036,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       documentId,
       getAccessToken,
       chatAttachments,
+      onBeforeSendMessage,
     ]
   );
 
@@ -2285,7 +2355,22 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                     appearance="subtle"
                     size="small"
                     icon={<DismissRegular />}
-                    onClick={() => removeAttachmentFile(index)}
+                    onClick={() => {
+                      // R5 task 020 / D2-11: notify host BEFORE local splice so
+                      // it can capture the chip metadata for the manifest +
+                      // session-files index cleanup cascade. Host failures do
+                      // NOT block the local removal — orphaned manifest/index
+                      // entries are bounded by the session-end cleanup
+                      // HostedService (R5 task 007).
+                      if (onAttachmentRemoved) {
+                        try {
+                          onAttachmentRemoved(file, index);
+                        } catch {
+                          // Host failures must not block the local chip removal.
+                        }
+                      }
+                      removeAttachmentFile(index);
+                    }}
                     aria-label={`Remove ${file.filename}`}
                     title={`Remove ${file.filename}`}
                     className={styles.attachmentChipDismiss}
