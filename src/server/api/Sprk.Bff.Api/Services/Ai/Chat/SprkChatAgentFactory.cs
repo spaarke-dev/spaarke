@@ -141,6 +141,19 @@ public class SprkChatAgentFactory
     /// session state). When provided, a <c>capability_change</c> SSE event is emitted if
     /// the current turn's routed tool set differs. Null on the first turn (no comparison).
     /// </param>
+    /// <param name="uploadedFiles">
+    /// R5 task 033: Optional manifest of files the end user uploaded into the current chat
+    /// session (verbatim from <see cref="ChatSession.UploadedFiles"/>). Forwarded into
+    /// <see cref="IChatContextProvider.GetContextAsync"/> so the returned
+    /// <see cref="ChatContext.UploadedFiles"/> reflects session state, and surfaced as a
+    /// compact "Session Files" manifest suffix on the system prompt so the LLM's tool-call
+    /// reasoning sees that uploaded files exist and can correctly invoke
+    /// <see cref="Tools.InvokeSummarizePlaybookTool"/> (the Summarize convergence path —
+    /// FR-01 + FR-08).
+    /// Manifest only (fileId + fileName); never carries extracted text (ADR-015).
+    /// Default <c>null</c> for backward compatibility — pre-R5 sessions / call sites that
+    /// omit the parameter behave exactly as before.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
@@ -158,6 +171,7 @@ public class SprkChatAgentFactory
         Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter = null,
         string? latestUserMessage = null,
         IReadOnlyList<string>? previousTurnToolNames = null,
+        IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -170,13 +184,16 @@ public class SprkChatAgentFactory
         await using var scope = _serviceProvider.CreateAsyncScope();
         var contextProvider = scope.ServiceProvider.GetRequiredService<IChatContextProvider>();
 
-        // Load playbook context (system prompt, document summary, metadata)
+        // Load playbook context (system prompt, document summary, metadata).
+        // R5 task 033: forward uploadedFiles so the provider surfaces them on the
+        // returned ChatContext.UploadedFiles for the manifest-suffix step below.
         var context = await contextProvider.GetContextAsync(
             documentId,
             tenantId,
             playbookId,
             hostContext,
             additionalDocumentIds,
+            uploadedFiles,
             cancellationToken);
 
         // === Document context injection (R2-011, R2-012) ===
@@ -218,6 +235,50 @@ public class SprkChatAgentFactory
             _logger.LogWarning(ex,
                 "Failed to enrich system prompt with Active Capabilities; continuing without");
         }
+
+        // === R5 task 033 — Session Files manifest enrichment ====================
+        // Surface uploaded session-file awareness (fileId + fileName) to the LLM so its
+        // tool-call reasoning correctly invokes invoke_summarize_playbook when the user
+        // asks to summarize. Without this signal the agent has historically (verbatim
+        // observed on Dev 2026-06-04) declined: "I don't see the document uploaded yet"
+        // — even with the InvokeSummarizePlaybookTool registered and the playbook gated
+        // on PlaybookCapabilities.Summarize.
+        //
+        // Constraints (R5 task 033 + ADR-015 + R5 CLAUDE.md §3.4):
+        //   - Manifest only — fileId + fileName + count. NEVER include extracted text
+        //     content, chunk text, or binary previews in the system prompt.
+        //   - Compact — token budget matters (sits alongside playbook prompt + skills +
+        //     reference materials + active capabilities + entity enrichment).
+        //   - Additive — when no files uploaded, leaves the system prompt unchanged
+        //     (zero behavior change for pre-R5 sessions and standalone chat).
+        //   - Tool-name binding — names `invoke_summarize_playbook` explicitly so the
+        //     LLM has the exact tool identifier to invoke (matches the AIFunction name
+        //     registered for InvokeSummarizePlaybookTool — R5 task 015).
+        if (context.UploadedFiles is { Count: > 0 } files)
+        {
+            try
+            {
+                var manifestSuffix = BuildSessionFilesManifestSuffix(files);
+                if (!string.IsNullOrEmpty(manifestSuffix))
+                {
+                    context = context with { SystemPrompt = context.SystemPrompt + manifestSuffix };
+                    _logger.LogInformation(
+                        "R5 task 033: appended Session Files manifest to system prompt — sessionId={SessionId}, fileCount={FileCount}",
+                        sessionId, files.Count);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Soft failure — manifest enrichment is enhancing, not required.
+                // The agent still works without the suffix; the LLM may simply decline
+                // to invoke the summarize tool until the user re-prompts. Logged as
+                // warning so operators see this in App Insights.
+                _logger.LogWarning(ex,
+                    "R5 task 033: failed to append Session Files manifest to system prompt — sessionId={SessionId}, continuing without",
+                    sessionId);
+            }
+        }
+        // === End R5 task 033 ====================================================
 
         // Resolve playbook capabilities from Dataverse to determine which tools should be available.
         // When no playbook is specified (generic/standalone chat mode), use core capabilities only.
@@ -546,6 +607,62 @@ public class SprkChatAgentFactory
     }
 
     // === Private helpers ===
+
+    /// <summary>
+    /// Builds the compact "Session Files" manifest suffix appended to the system prompt
+    /// when <see cref="ChatContext.UploadedFiles"/> is non-empty (R5 task 033).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Format (final wording per task 033 POML §1 step 3):
+    /// <code>
+    /// Session Files: This chat session has {N} uploaded file(s) available for tool calls:
+    /// {comma-separated fileNames}. When the user asks to summarize, invoke the
+    /// `invoke_summarize_playbook` tool with these file IDs: {comma-separated fileIds}.
+    /// </code>
+    /// </para>
+    /// <para>
+    /// ADR-015 invariant: only <see cref="ChatSessionFile.FileName"/> and
+    /// <see cref="ChatSessionFile.FileId"/> are emitted — never extracted text, chunk
+    /// content, MIME, or size beyond what the manifest already exposes.
+    /// </para>
+    /// <para>
+    /// Tool name reference: the literal <c>invoke_summarize_playbook</c> matches the
+    /// AIFunction name registered for
+    /// <see cref="Tools.InvokeSummarizePlaybookTool"/> via
+    /// <c>InvokeSummarizePlaybookTool.ToolName</c> (R5 task 015). Updating that constant
+    /// REQUIRES updating this suffix.
+    /// </para>
+    /// </remarks>
+    /// <param name="uploadedFiles">Non-empty, non-null manifest list. Caller guarantees Count &gt; 0.</param>
+    /// <returns>The suffix beginning with two newlines, ready to concatenate onto a system prompt. Empty string when the manifest yields no usable entries (defensive — should not happen for Count &gt; 0).</returns>
+    internal static string BuildSessionFilesManifestSuffix(IReadOnlyList<ChatSessionFile> uploadedFiles)
+    {
+        if (uploadedFiles is null || uploadedFiles.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        // Defensive: only include entries with non-blank FileId AND FileName. A blank
+        // entry would confuse the LLM (tool call with empty fileId, or fileName like ", ,").
+        var usable = uploadedFiles
+            .Where(f => !string.IsNullOrWhiteSpace(f.FileId) && !string.IsNullOrWhiteSpace(f.FileName))
+            .ToList();
+
+        if (usable.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var fileNames = string.Join(", ", usable.Select(f => f.FileName));
+        var fileIds = string.Join(", ", usable.Select(f => f.FileId));
+        var pluralSuffix = usable.Count == 1 ? string.Empty : "s";
+
+        // Two leading newlines isolate the suffix as its own paragraph so the LLM does
+        // not blend it into the preceding "### Active Capabilities" or entity enrichment.
+        return $"\n\nSession Files: This chat session has {usable.Count} uploaded file{pluralSuffix} available for tool calls: {fileNames}. " +
+               $"When the user asks to summarize, invoke the `invoke_summarize_playbook` tool with these file IDs: {fileIds}.";
+    }
 
     /// <summary>
     /// Creates <see cref="AIFunction"/> tool instances for the agent session.

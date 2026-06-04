@@ -52,6 +52,7 @@ public sealed class NullSprkChatAgentFactory : SprkChatAgentFactory
         Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter = null,
         string? latestUserMessage = null,
         IReadOnlyList<string>? previousTurnToolNames = null,
+        IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
         CancellationToken cancellationToken = default)
     {
         LogDisabled(nameof(CreateAgentAsync));
