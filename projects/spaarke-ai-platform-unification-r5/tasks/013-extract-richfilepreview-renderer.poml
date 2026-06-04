@@ -1,0 +1,382 @@
+<task id="013" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-08 Extract `RichFilePreview` renderer core from `RichFilePreviewDialog`</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G2 (parallel with 012; depends on Phase 1 ✅; unblocks 018, 022)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>Phase 1 ✅</dependencies>
+    <tags>frontend, fluent-ui, react-19, refactor, shared-lib</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Extract the renderer core from the existing
+    `src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx`
+    into a NEW reusable primitive `RichFilePreview.tsx` in the same shared library
+    (`@spaarke/ui-components`). The extracted renderer hosts the iframe + 2-column
+    body grid + metadata pane (Tags + Details) + Prev/Next nav + 3-dot
+    `DocumentRowMenu` UI. The existing `RichFilePreviewDialog` is then refactored to
+    be a thin wrapper that mounts the extracted renderer inside Fluent v9
+    `Dialog`/`DialogSurface`/`DialogActions` chrome (modal use case unchanged).
+
+    This task EXTRACTS only — it does NOT rebuild a parallel preview component. Per
+    R5 CLAUDE.md §3.1 the prohibition on a "parallel file-preview component to
+    `RichFilePreviewDialog`" is explicit: implementer MUST extract (move shared
+    rendering logic out, refactor the dialog to wrap it), MUST NOT author a parallel
+    implementation. Acceptance criteria below VERIFY extraction (existing consumers
+    untouched; same props, same visual output, same behavior).
+
+    Downstream:
+    - Task 018 (D2-09) `FilePreviewContextWidget` consumes the extracted renderer
+      directly (non-modal Context-pane mount).
+    - Task 022 (D2-08 follow-on) upgrades the R4 `DocumentViewerWidget` stub to
+      consume the extracted renderer for Workspace destination. That upgrade is
+      EXPLICITLY OUT OF SCOPE for this task — task 022 is a separate ticket and
+      depends on this task.
+
+    This task touches frontend TypeScript only — zero BFF code changes, so the BFF
+    publish-size budget is NOT consumed by this task.
+  </prompt>
+
+  <role>
+    Senior frontend engineer with Fluent UI v9 + React 19 expertise. Deep
+    familiarity with refactoring large component files into composable primitives
+    without breaking existing prop API, semantic-token dark-mode parity, and
+    component-library boundary discipline in `@spaarke/ui-components`. Equally
+    comfortable reading the existing `RichFilePreviewDialog.tsx` end-to-end before
+    moving any lines.
+  </role>
+
+  <goal>
+    `src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreview.tsx`
+    exists as a NEW reusable renderer that hosts the iframe + 2-column body grid +
+    metadata pane (Tags + Details) + Prev/Next nav + 3-dot `DocumentRowMenu`
+    chrome — i.e. every visual + interactive element of the existing dialog EXCEPT
+    the modal `Dialog`/`DialogSurface`/`DialogActions` envelope. The existing
+    `RichFilePreviewDialog.tsx` is refactored to import + mount `RichFilePreview`
+    inside the modal envelope; its props API is unchanged; every existing consumer
+    (LegalWorkspace, DocumentRelationshipViewer, SemanticSearchControl PCF, Office
+    Add-ins) compiles + renders + behaves identically. New + existing tests pass.
+    Dark-mode visual parity verified. `code-review` + `adr-check` quality gates
+    pass at Step 9.5.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="source-file-to-extract-from">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+    <file purpose="file-preview-barrel">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/index.ts</file>
+    <file purpose="shared-lib-barrel">src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 CLAUDE.md §3.1 (CRITICAL)">MUST EXTRACT the renderer from `RichFilePreviewDialog`. MUST NOT build a parallel file-preview component. R5 reuse mandate explicitly prohibits "parallel file-preview component to `RichFilePreviewDialog` (extract renderer, don't rebuild)". Acceptance criteria below verify extraction (not rebuild).</constraint>
+    <constraint source="project (backward compatibility)">Every existing `RichFilePreviewDialog` consumer (LegalWorkspace `FilePreviewDialog.tsx`, DocumentRelationshipViewer `FilePreviewDialog.tsx`, SemanticSearchControl PCF `FilePreviewDialog.tsx`, any Office Add-in consumer) MUST continue to compile and render with NO prop API change and NO behavioral change. Dialog props (`IFilePreviewDialogProps`) remain stable.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 + dark-mode parity. Extracted renderer MUST use Fluent v9 semantic tokens (`tokens.colorNeutralStroke2`, `tokens.colorNeutralBackground2`, `tokens.colorNeutralForeground1/2/3`, etc.) — NO hard-coded color literals. Dark-mode rendering MUST match light-mode visual hierarchy.</constraint>
+    <constraint source="ADR-022">React 19 — extracted renderer is a function component; uses `React.FC`/hooks; no React 18-only APIs introduced.</constraint>
+    <constraint source="ADR-012">Extracted renderer placed in `@spaarke/ui-components` shared library (`src/client/shared/Spaarke.UI.Components/`), NOT in `@spaarke/ai-widgets`. Both UI Components consumers AND AI Widgets consumers (task 018 `FilePreviewContextWidget`, task 022 `DocumentViewerWidget`) MUST be able to import it.</constraint>
+    <constraint source="ADR-006">No PCF control change in this task. R5 has NO PCF controls per project CLAUDE.md §4.3.</constraint>
+    <constraint source="R5 CLAUDE.md §3.6 + ADR-029">BFF publish-size — this task is frontend-only (zero BFF code change). Confirm publish-size delta = 0 MB in task notes.</constraint>
+    <constraint source="R5 CLAUDE.md §3.7">Test obligation — this task modifies a `@spaarke/ui-components` file. Add new co-located `__tests__/RichFilePreview.test.tsx` covering the extracted renderer; verify existing `RichFilePreviewDialog` test coverage (if any) still passes; if no existing dialog tests exist, add a minimal back-compat smoke test for the dialog wrapper too.</constraint>
+    <constraint source="R5 task scope">Task 022 (DocumentViewerWidget upgrade) and task 018 (FilePreviewContextWidget) are SEPARATE tasks. This task ONLY extracts the renderer + refactors the dialog wrapper. Do NOT modify `DocumentViewerWidget.tsx` or create `FilePreviewContextWidget.tsx` in this task.</constraint>
+    <constraint source="project">3-dot menu — reuse existing `DocumentRowMenu` (12 actions) imported from `../DocumentRowMenu`. Do NOT introduce a parallel menu component. `disabledActions` logic transfers as-is from the dialog (preview / aiSummary / toggleWorkspace / rename hidden by default; findSimilar hidden when no callback) but is parameterized at the renderer boundary so non-modal consumers can override.</constraint>
+    <constraint source="project">Keyboard nav — the existing `ArrowLeft`/`ArrowRight` document-level keydown listener for Prev/Next must move to the extracted renderer. The listener's input-focus guard (`INPUT`/`TEXTAREA`/`SELECT`/`contentEditable`) MUST be preserved exactly.</constraint>
+    <constraint source="project">Effects + state — the iframe-load lifecycle (loading/error/retry state, `previewUrl` fetch on open or `documentId` change) MUST move to the extracted renderer unchanged. Reset-on-close semantics MUST be preserved at the renderer level (renderer behavior is identical regardless of whether the parent is a modal dialog or a non-modal pane).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/fluent-ui-v9/component-extraction</topic>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-and-ui.md</file>
+      <file>.claude/adr/ADR-012-component-libraries.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9-dark-mode.md</file>
+      <file>.claude/adr/ADR-022-react-19.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/FilePreview/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu/index.ts</file>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/design.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Extract renderer, wrap with dialog" location="src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx">
+        The existing component cleanly separates concerns: the `Dialog` /
+        `DialogSurface` / `DialogActions` envelope (modal chrome) vs. the title-bar
+        + 2-column body grid + metadata pane + iframe + nav + 3-dot menu (the
+        renderer). Extract the renderer as `RichFilePreview` exposing the props
+        currently consumed by the JSX subtree below `&lt;DialogSurface&gt;`
+        (documentName, documentId, documentType, createdBy, createdAt, fileSize,
+        fetchPreviewUrl, onOpenFile, onOpenRecord, onEmailDocument, onCopyLink,
+        onToggleWorkspace, isInWorkspace, onFindSimilar, onFetchSummary,
+        navigationTotal, currentIndex, onNavigate, `disabledActions` override).
+        Keep the `open` + `onClose` props on the DIALOG wrapper only — the
+        renderer itself is open/close-agnostic. Move `useStyles`, helper
+        functions (`formatDate`, `formatFileSize`, `nonEmpty`), the `useEffect`s
+        for preview-URL fetch + keyboard listener, and the `handleRowAction` +
+        `disabledActions` computation into the renderer.
+      </pattern>
+      <pattern name="Dialog wraps extracted renderer" location="src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx (post-refactor)">
+        After extraction, `RichFilePreviewDialog` becomes a thin function
+        component: maps its `open`/`onClose` props onto Fluent's `Dialog`
+        `open`/`onOpenChange`, forwards every remaining prop to
+        `&lt;RichFilePreview {...rendererProps} /&gt;` inside
+        `&lt;DialogSurface&gt;`, and supplies the `DialogActions` footer (Close
+        button). Surface-clamp styling (1280px max-width, 85vh height) stays on
+        the dialog wrapper or moves into a `surface` prop on the renderer —
+        choose the cleanest seam during implementation and document the decision
+        in task notes.
+      </pattern>
+      <pattern name="Shared-lib barrel export" location="src/client/shared/Spaarke.UI.Components/src/components/FilePreview/index.ts">
+        After extraction, the barrel must export `RichFilePreview` +
+        `IRichFilePreviewProps` ALONGSIDE the existing `RichFilePreviewDialog` +
+        `IRichFilePreviewDialogProps` exports. Existing exports MUST NOT change
+        name or shape. Optional: a `disabledActions` type alias can be exported
+        if downstream consumers (tasks 018, 022) need it.
+      </pattern>
+      <pattern name="Co-located tests" location="src/client/shared/Spaarke.UI.Components/src/components/**/__tests__/*.test.tsx">
+        Co-locate the new `RichFilePreview.test.tsx` under
+        `src/client/shared/Spaarke.UI.Components/src/components/FilePreview/__tests__/`.
+        Mirror the testing-library + jest pattern used by adjacent component test
+        files (e.g. `SprkChat/__tests__/SprkChatActionMenu.test.tsx`).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R4 stub `DocumentViewerWidget` (task 022's upgrade target) and the new R5
+      `FilePreviewContextWidget` (task 018) both need the rich file-preview UX
+      (iframe + metadata pane + Prev/Next + 3-dot menu) WITHOUT the modal `Dialog`
+      envelope. The existing `RichFilePreviewDialog` is the canonical
+      implementation already promoted to `@spaarke/ui-components` and consumed by
+      LegalWorkspace + DocumentRelationshipViewer + SemanticSearchControl PCF +
+      Office Add-ins (see component file's header comment, lines 1–34). Authoring
+      a parallel preview component would (a) duplicate ~900 LOC of polished UI +
+      a11y + dark-mode work and (b) directly violate the R5 reuse mandate (CLAUDE
+      §3.1). Extraction is the correct path: pull the renderer out as a shared
+      primitive, refactor the dialog into a thin wrapper, and let new R5 consumers
+      mount the renderer directly in non-modal contexts.
+
+      The 2-column body grid + metadata pane + 3-dot menu logic is mature
+      (multiple rounds of UAT feedback baked in — title-bar nav placement, scrollbar
+      hiding, grid-collapse fixes for the iframe mount). Preserving the existing
+      visual output + a11y is the success bar for this task.
+    </background>
+    <dependencies>
+      <dependency task="Phase 1" status="complete">Phase 1 — Platform Extensions. Phase 1 gating per plan.md (BFF clean; session-files index provisioned; FieldDelta back-compat; cleanup job; tests pass; publish-size delta &lt; +0.5 MB).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 018 (D2-09) `FilePreviewContextWidget` — DEPENDS on this task. Consumes the extracted `RichFilePreview` for non-modal Context-pane mount; single + multi-file rendering; per-file 3-dot menu wiring.</item>
+      <item>Task 022 (D2-08 follow-on) — DEPENDS on this task. Upgrades R4 `DocumentViewerWidget` stub from R4 placeholder to the real extracted renderer. EXPLICITLY a separate ticket per `tasks/TASK-INDEX.md`.</item>
+      <item>Existing dialog consumers (NOT modified by this task; back-compat verified): `src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx`, `src/client/code-pages/DocumentRelationshipViewer/src/components/FilePreviewDialog.tsx`, `src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/FilePreviewDialog.tsx`, plus any Office Add-in consumer.</item>
+      <item>Component-library boundary: `@spaarke/ui-components` (shared lib; this task) vs. `@spaarke/ai-widgets` (AI-widget destination wrappers; tasks 018, 022 live there). Per ADR-012 the renderer belongs in the shared component library so both libs can import.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request `/compact`
+      before starting. Declare RIGOR LEVEL per R5 CLAUDE.md §4.1:
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Frontend code change + shared-library refactor + back-compat
+         obligation across 4+ existing consumers + downstream blocker for tasks
+         018 + 022.
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0 → 10 per task-execute SKILL.md;
+         quality gates at Step 9.5 (code-review + adr-check).
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm task 013 status is 🔲, wave is P2-G2,
+      parallel-safe = true, dependencies = Phase 1 ✅. Read `current-task.md` to
+      confirm no conflicting R5 task is in flight. Confirm task 022 (DocumentViewerWidget
+      upgrade) status is 🔲 (will be unblocked by this task) — do NOT pull task
+      022 work into this task.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file listed in &lt;inputs&gt; and &lt;knowledge&gt;. SPECIFICALLY:
+      read `RichFilePreviewDialog.tsx` end-to-end (it's the source you're
+      extracting from). Map every section of the file to its destination:
+      `useStyles` → renderer; helper functions (`formatDate`, `formatFileSize`,
+      `nonEmpty`) → renderer; `useEffect`s + state → renderer; `handleRowAction` +
+      `dialogDisabledActions` → renderer (with override prop); `Dialog` /
+      `DialogSurface` / `DialogActions` envelope → stays in dialog wrapper.
+      Read ADR-021 (semantic tokens) + ADR-022 (React 19) for hygiene reminders.
+      Read R5 CLAUDE.md §3.1 reuse mandate AGAIN — extraction is the explicit
+      requirement; rebuild is the explicit prohibition.
+    </step>
+    <step order="3" name="Plan Extraction Boundaries">
+      Document the seam in task notes:
+      - `RichFilePreview` props (the renderer): documentName, documentId,
+        documentType, createdBy, createdAt, fileSize, fetchPreviewUrl,
+        onFetchSummary, onOpenFile, onOpenRecord, onEmailDocument, onCopyLink,
+        onToggleWorkspace, isInWorkspace, onFindSimilar, navigationTotal,
+        currentIndex, onNavigate, plus optional `disabledActions?:
+        DocumentRowAction[]` so non-modal consumers can override which menu
+        items hide.
+      - `RichFilePreviewDialog` props (the wrapper): unchanged. Adds `open` +
+        `onClose` on top of the renderer's prop set. Renders `&lt;Dialog&gt;` +
+        `&lt;DialogSurface&gt;` + `&lt;RichFilePreview /&gt;` + `&lt;DialogActions&gt;
+        (Close button)`.
+      - Surface-clamp styling decision: keep dialog-specific surface CSS (max
+        1280px × 85vh) on the dialog wrapper; the renderer is layout-agnostic so
+        non-modal consumers control their own container size.
+    </step>
+    <step order="4" name="Create RichFilePreview.tsx (extracted renderer)">
+      Create
+      `src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreview.tsx`.
+      Move into it:
+      - All `useStyles` rules from the dialog EXCEPT the `surface` rule (dialog-only).
+      - All helper functions (`formatDate`, `formatFileSize`, `nonEmpty`).
+      - The `IFilePreviewDialogSummary` interface (re-export from this file; the
+        existing `RichFilePreviewDialog.tsx` re-exports become re-exports of the
+        renderer's definition).
+      - The component body from `RichFilePreviewDialog` MINUS the `&lt;Dialog&gt;`/
+        `&lt;DialogSurface&gt;`/`&lt;DialogActions&gt;` envelope. Output is a plain
+        `&lt;React.Fragment&gt;` (or top-level `&lt;div&gt;`) containing: title-bar
+        (with optional Prev/Next + `DocumentRowMenu`), 2-column body grid (iframe
+        + metadata pane). Footer (Close button) is OMITTED here — that lives in
+        the dialog wrapper.
+      - The preview-URL fetch `useEffect`, the keyboard listener `useEffect`, the
+        `handleRetry`/`handlePrev`/`handleNext` callbacks, the `target` + 3-dot
+        menu wiring, and `renderPreviewArea` + `renderTagSection` +
+        `renderDetailsSection` helpers — all move into the renderer.
+      - The `dialogDisabledActions` constant moves into the renderer as a
+        DEFAULT computed value, but expose `disabledActions?: DocumentRowAction[]`
+        as an optional prop that overrides the default when provided.
+      Export: `RichFilePreview` (component) + `IRichFilePreviewProps` (interface)
+      + `IFilePreviewDialogSummary` (re-export). All exports use semantic Fluent
+      v9 tokens — no hard-coded colors.
+    </step>
+    <step order="5" name="Refactor RichFilePreviewDialog.tsx to wrap RichFilePreview">
+      Refactor the existing
+      `src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx`
+      to:
+      - Keep `IFilePreviewDialogProps` interface UNCHANGED (back-compat).
+      - Body becomes: `&lt;Dialog open onOpenChange&gt; &lt;DialogSurface
+        className={styles.surface}&gt; &lt;RichFilePreview {...rendererProps}
+        /&gt; &lt;DialogActions className={styles.footer}&gt;&lt;Button
+        appearance="primary" onClick={onClose}&gt;Close&lt;/Button&gt;&lt;/DialogActions&gt;
+        &lt;/DialogSurface&gt; &lt;/Dialog&gt;`.
+      - Retain ONLY the dialog-specific styles (`surface`, `footer`).
+      - Existing `displayName = 'RichFilePreviewDialog'` preserved.
+      Verify the refactor by running a `tsc --noEmit` against the shared library
+      and confirming no new errors.
+    </step>
+    <step order="6" name="Update barrel exports">
+      Update
+      `src/client/shared/Spaarke.UI.Components/src/components/FilePreview/index.ts`
+      to ALSO export `RichFilePreview` + `IRichFilePreviewProps` (alongside the
+      existing `RichFilePreviewDialog` + `IRichFilePreviewDialogProps` exports).
+      Verify
+      `src/client/shared/Spaarke.UI.Components/src/index.ts` (top-level
+      barrel) — if it re-exports the FilePreview folder, no change needed; if it
+      enumerates exports, add the new ones.
+    </step>
+    <step order="7" name="Verify Back-Compat — Existing Consumers Unaffected">
+      For each existing consumer found via repository search:
+      - `src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx`
+      - `src/client/code-pages/DocumentRelationshipViewer/src/components/FilePreviewDialog.tsx`
+      - `src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/FilePreviewDialog.tsx`
+      - Any other `RichFilePreviewDialog`-importing file surfaced by `Grep`.
+      Confirm: (a) import statement unchanged; (b) prop usage unchanged; (c) no
+      TypeScript errors after refactor. Run `tsc --noEmit` across the affected
+      packages. Capture results in task notes.
+    </step>
+    <step order="8" name="Add tests for RichFilePreview + back-compat smoke for dialog">
+      Create
+      `src/client/shared/Spaarke.UI.Components/src/components/FilePreview/__tests__/RichFilePreview.test.tsx`
+      with the following coverage (per R5 CLAUDE.md §3.7):
+      - Renders title bar with documentName.
+      - Renders iframe when `fetchPreviewUrl` resolves to a URL.
+      - Renders loading spinner during fetch; renders error + Retry when fetch returns null.
+      - Renders Prev/Next nav when `navigationTotal &gt; 1` + `currentIndex` + `onNavigate` provided; hides when omitted.
+      - ArrowLeft/ArrowRight keydown dispatches Prev/Next; respects INPUT-focus guard.
+      - Metadata pane renders Tags + Details with formatted date/size.
+      - 3-dot menu opens; respects default `dialogDisabledActions`; honors override `disabledActions` prop.
+      - `onFindSimilar` absent → `findSimilar` hidden in menu; present → visible + dispatches.
+      If
+      `src/client/shared/Spaarke.UI.Components/src/components/FilePreview/__tests__/RichFilePreviewDialog.test.tsx`
+      does NOT exist, add a minimal back-compat smoke test that mounts
+      `&lt;RichFilePreviewDialog open ... /&gt;`, verifies the dialog surface
+      renders, the renderer subtree mounts, and the Close button dispatches
+      `onClose`.
+      Run `npm test -- RichFilePreview` (or the workspace test command) and
+      confirm all new + existing tests pass.
+    </step>
+    <step order="9" name="Dark-mode visual parity check">
+      Render both `RichFilePreview` (standalone) and `RichFilePreviewDialog` in
+      light + dark themes via the existing component sandbox / storybook /
+      LegalWorkspace dev page. Capture screenshots or visual diff vs the
+      pre-refactor dialog (light + dark). Verify: borders, backgrounds, foreground
+      colors, hover states, focus rings, and the 3-dot menu's open menu all
+      respect Fluent v9 semantic tokens identically in both themes. No
+      hard-coded color literals slipped in during extraction. Record evidence in
+      task notes.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the new + modified files
+      (`RichFilePreview.tsx`, refactored `RichFilePreviewDialog.tsx`, updated
+      `index.ts`, new test files). Run `adr-check` skill against the same files;
+      verify ADR-006 (PCF/UI — no PCF change), ADR-012 (component-library
+      boundary), ADR-021 (Fluent v9 + semantic tokens + dark-mode parity), ADR-022
+      (React 19). Both gates MUST pass before marking the task complete.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update this task POML status to `complete`. Update `TASK-INDEX.md`: 013 🔲
+      → ✅. Reset `current-task.md` to the next pending P2-G2 task (012) or P2-G3
+      task per CLAUDE.md §7. Confirm BFF publish-size delta = 0 MB (frontend-only
+      task). Confirm extraction (not rebuild) — point to the diff that shows the
+      dialog now imports + renders `&lt;RichFilePreview /&gt;` and no parallel
+      preview component was created. Confirm tasks 018 + 022 are now unblocked.
+      Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test the shared library (`npm run build` / `npm test` from `src/client/shared/Spaarke.UI.Components/`)</tool>
+    <tool name="tsc">TypeScript compile check (`tsc --noEmit`) — verify back-compat across consumers</tool>
+    <tool name="git">Stage + commit refactor on the R5 branch (do NOT commit until task complete)</tool>
+    <tool name="code-review">Quality gate at Step 9.5 (FULL rigor)</tool>
+    <tool name="adr-check">Quality gate at Step 9.5 (FULL rigor)</tool>
+    <tool name="context-handoff">Proactive checkpointing per R5 CLAUDE.md §5 (every 3 steps, &gt; 5 files modified, etc.)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreview.tsx (NEW — extracted renderer)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx (refactor to wrap extracted renderer; props API unchanged)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/index.ts (additive exports: `RichFilePreview`, `IRichFilePreviewProps`)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/__tests__/RichFilePreview.test.tsx (NEW)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/__tests__/RichFilePreviewDialog.test.tsx (NEW back-compat smoke OR confirm existing coverage)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 013 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-013-extraction-evidence.md (extraction-boundary decision; back-compat verification matrix across 4 consumers; dark-mode parity screenshots; tsc + test output; surface-clamp seam decision)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreview.tsx` exists, compiles in `@spaarke/ui-components`, and exports `RichFilePreview` + `IRichFilePreviewProps`.</criterion>
+    <criterion testable="true">`RichFilePreviewDialog.tsx` is refactored to mount `&lt;RichFilePreview /&gt;` inside `Dialog`/`DialogSurface`/`DialogActions` chrome; `IFilePreviewDialogProps` prop API is UNCHANGED (verified by diff).</criterion>
+    <criterion testable="true">Extraction (not rebuild) verified: the dialog's body now consists of `&lt;RichFilePreview {...} /&gt;` (plus modal envelope), and no parallel preview component file was created. Diff evidence in task notes confirms lines moved (not duplicated).</criterion>
+    <criterion testable="true">Every existing `RichFilePreviewDialog` consumer (LegalWorkspace, DocumentRelationshipViewer, SemanticSearchControl PCF, any Office Add-in consumer) compiles with NO change to its import or prop usage. `tsc --noEmit` clean for each consumer package.</criterion>
+    <criterion testable="true">Visual + behavioral output of `RichFilePreviewDialog` is identical to the pre-refactor version: iframe loads, Prev/Next nav, ArrowLeft/ArrowRight keyboard nav (with INPUT-focus guard), 3-dot `DocumentRowMenu` with default hidden actions (preview / aiSummary / toggleWorkspace / rename; findSimilar hidden when no callback), metadata pane (Tags + Details), retry on error, surface clamp 1280px × 85vh.</criterion>
+    <criterion testable="true">Dark-mode parity verified — both `RichFilePreview` (standalone) and `RichFilePreviewDialog` render correctly in light + dark themes; no hard-coded color literals introduced; all colors flow through Fluent v9 semantic tokens.</criterion>
+    <criterion testable="true">`RichFilePreview.test.tsx` covers: title-bar render, iframe render on URL resolve, loading spinner, error + retry, Prev/Next visibility gating on `navigationTotal &gt; 1`, ArrowLeft/ArrowRight keydown nav + INPUT-focus guard, metadata Tags + Details render, default vs override `disabledActions`, `findSimilar` visibility gating. All tests pass.</criterion>
+    <criterion testable="true">`RichFilePreviewDialog.test.tsx` (new or existing) back-compat smoke passes — dialog mounts, renderer subtree mounts inside dialog surface, Close button dispatches `onClose`.</criterion>
+    <criterion testable="true">Barrel `src/client/shared/Spaarke.UI.Components/src/components/FilePreview/index.ts` exports both `RichFilePreview` + `IRichFilePreviewProps` AND the existing `RichFilePreviewDialog` + `IRichFilePreviewDialogProps`; no existing export name or shape changed.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (confirmed in task notes; no BFF code touched by this task per R5 CLAUDE.md §3.6).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5. ADR-006 / ADR-012 / ADR-021 / ADR-022 compliance verified.</criterion>
+    <criterion testable="true">Tasks 022 (`DocumentViewerWidget` upgrade) + 018 (`FilePreviewContextWidget`) remain UNTOUCHED by this task — no `DocumentViewerWidget.tsx` modification, no `FilePreviewContextWidget.tsx` creation. (Negative criterion: confirms scope discipline.)</criterion>
+  </acceptance-criteria>
+</task>

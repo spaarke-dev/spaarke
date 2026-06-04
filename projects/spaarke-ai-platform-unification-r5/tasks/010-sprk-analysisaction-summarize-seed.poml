@@ -1,0 +1,451 @@
+<task id="010" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-01 Seed `sprk_analysisaction` row "Summarize Document for Chat" (Dataverse data deploy)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G1 (parallel-safe with 011; first task of Phase 2)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>Phase 1 ✅</dependencies>
+    <tags>dataverse, seed, playbook, data-deploy</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Seed a NEW `sprk_analysisaction` row "Summarize Document for Chat" (action code
+    `SUM-CHAT@v1`) into Spaarke Dev Dataverse. The row carries the JPS-formatted
+    system prompt + output schema tuned for the R5 chat-driven Summarize vertical
+    slice. This action becomes the prompt-bearing primitive that the downstream
+    `SessionSummarizeOrchestrator` (task 012) + `POST /api/ai/chat/sessions/{id}/summarize`
+    endpoint (task 014) bind to via `sprk_actionid` on the playbook node row that
+    task 011 (D2-02) seeds.
+
+    R5 CLAUDE.md §10 gotcha (BINDING): R5 MUST NOT introduce a new prompt-bearing
+    Dataverse entity. `sprk_analysisaction.sprk_systemprompt` IS the JPS prompt
+    primitive — this lock-in was inherited from Insights r2 explicit decision. New
+    playbooks add new ACTION rows; they do NOT add new entities or store prompts in
+    `.txt` files. This task seeds exactly one new ACTION row alongside the existing 11
+    rows (the 6 Insights actions INS-FACT/IDXR/EVID/GRND/DECL/RART plus 5 legacy
+    R-actions).
+
+    Output schema is tuned for the streaming-aware Workspace renderer (D2-07
+    `StructuredOutputStreamWidget`) per spec FR-02: top-level fields TL;DR
+    (`tldr`), summary (`summary`), per-file highlights (`fileHighlights`),
+    mentioned parties (`mentionedParties`), and call-to-action (`callToAction`).
+    These field paths are the load-bearing contract for the `FieldDelta` SSE event
+    `Path` values that task 006 (D1-06) emits and the Workspace widget consumes.
+
+    R5 is configuration-first. This task is PURE DATA — no BFF code change, no DI
+    change, no schema change. BFF publish-size delta = 0 MB by construction.
+    Deployment is via `scripts/Deploy-Playbook.ps1` (the same script Insights r2
+    uses to deploy `predict-matter-cost@v1` and `universal-ingest@v1`).
+
+    Idempotency is BINDING: re-running the seed against an environment that already
+    has the action row MUST be a no-op (upsert by `sprk_actioncode`). This protects
+    against accidental dual-deploys during R5 Phase 2 ramp-up and is consistent with
+    `scripts/Deploy-Playbook.ps1`'s existing skip-on-exists semantics (line 528-572
+    `Step 5: Check for existing playbook`); the same pattern MUST apply to the action
+    row lookup in this task.
+  </prompt>
+
+  <role>
+    Senior Dataverse data engineer with deep familiarity with: the
+    `sprk_analysisaction` entity contract (`sprk_actioncode` lookup field,
+    `sprk_systemprompt` JPS payload, `sprk_actiontype` lookup, `sprk_outputschemajson`
+    or equivalent output-schema field per existing Insights ACTIONS), the
+    `scripts/Deploy-Playbook.ps1` deployment harness (idempotent OData v9.2 POST/PATCH
+    against `sprk_analysisactions` collection with Azure CLI bearer-token auth), and
+    JPS (JSON Prompt Schema) prompt + output-schema authoring conventions per
+    `docs/architecture/playbook-architecture.md`.
+  </role>
+
+  <goal>
+    A new `sprk_analysisaction` row with `sprk_actioncode = "SUM-CHAT@v1"` and
+    `sprk_name = "Summarize Document for Chat"` is visible in Spaarke Dev Dataverse,
+    carrying: (a) `sprk_systemprompt` = JPS-formatted prompt instructing the LLM to
+    produce a streaming-friendly structured summary with the five top-level fields
+    matching the D2-07 widget contract; (b) `sprk_actiontypeid` linked to the
+    appropriate action-type lookup row (`0 - AiAnalysis` or equivalent — the same
+    type used by existing R-action Summarize rows); (c) an output schema (stored in
+    whatever field the existing Summarize-pattern action uses — likely
+    `sprk_outputschemajson` or embedded in `sprk_configjson`) defining a JSON schema
+    over `tldr` / `summary` / `fileHighlights` / `mentionedParties` / `callToAction`
+    suitable for Azure OpenAI Structured Outputs mode (per task 006). The deploy is
+    idempotent — re-running the seed produces no duplicate rows and no error.
+    `code-review` + `adr-check` at Step 9.5 pass. BFF publish-size delta = 0 MB
+    (confirmed in task notes — no BFF code touched). The new action row is consumed
+    by task 011 (D2-02) as the FK target for the new `sprk_analysisplaybook` row's
+    node.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="deploy-script">scripts/Deploy-Playbook.ps1</file>
+    <file purpose="reference-playbook-insights-synthesis">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json</file>
+    <file purpose="reference-playbook-insights-ingest">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/universal-ingest.playbook.json</file>
+    <file purpose="action-entity-shape">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs</file>
+    <file purpose="action-router">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Routing/InsightsActionRouter.cs</file>
+    <file purpose="playbook-architecture">docs/architecture/playbook-architecture.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 CLAUDE.md §10 gotcha (BINDING)">MUST NOT add a new prompt-bearing Dataverse entity. `sprk_analysisaction.sprk_systemprompt` IS the JPS prompt primitive (lock-in inherited from Insights r2). MUST NOT store the system prompt in a `.txt` file or any new entity. This task creates exactly ONE new row in the existing `sprk_analysisactions` collection.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 (Reuse mandate)">MUST use `scripts/Deploy-Playbook.ps1` (the Insights-r2-proven harness already in the repo) for the deploy invocation OR a thin equivalent that reuses its OData/auth helpers. MUST NOT introduce a parallel deploy mechanism (e.g., new pac CLI workflow, new PowerShell file outside `scripts/`, Python script, etc.).</constraint>
+    <constraint source="R5 CLAUDE.md §3.2 (no new feature flags)">N/A for this task (no BFF code, no DI). Confirm in notes.</constraint>
+    <constraint source="ADR-013 (refined 2026-05-20)">N/A for this task (no BFF service touches, no AI-internal injection). Confirm in notes.</constraint>
+    <constraint source="ADR-014">N/A for this task (no index document writes; `tenantId`/`sessionId` constraint applies to RAG index writes by task 003, not to action-row seeds). Confirm in notes.</constraint>
+    <constraint source="ADR-029 + R5 NFR-07">BFF publish-size delta MUST be 0 MB. Confirmed by construction: this task touches zero `.cs` files and zero project files. Report `0 MB` explicitly in task notes per CLAUDE.md §10 per-task verification rule. No `dotnet publish` measurement required (no BFF code changed).</constraint>
+    <constraint source="R5 spec FR-02">Output schema field paths MUST match the streaming consumer expectation: `tldr` (array of strings), `summary` (string), `fileHighlights` (array of `{ fileId, fileName, highlights[] }`), `mentionedParties` (array of strings), `callToAction` (string). These exact JSON paths are the contract D2-07 `StructuredOutputStreamWidget` consumes via `FieldDelta.Path` values from task 006.</constraint>
+    <constraint source="R5 spec FR-01">Action's `sprk_systemprompt` MUST be JPS-formatted (NOT a free-text prompt). Use the existing Insights INS-* actions as the JPS-format reference. The prompt MUST instruct streaming-aware output (emit `tldr` first, then `summary`, then `fileHighlights`, then `mentionedParties` + `callToAction`) to align with the D1-06 incremental JSON parser's path-emission order.</constraint>
+    <constraint source="R5 spec FR-11">Output schema MUST support the decline-to-find structured response variant. Either (a) the schema defines an optional `decline` discriminated branch with the 5-field DeclineResponse shape (`reason`, `explanation`, `suggested_actions`, `confidence_in_decline`, `metadata`); OR (b) the decline path is delegated entirely to `DeclineToFindNode` per Insights pattern and the schema omits decline fields (typical). Decision MUST be recorded in task notes.</constraint>
+    <constraint source="R5 reuse mandate (R5 CLAUDE.md §3.1)">MUST inspect existing Summarize-pattern action rows (and `predict-matter-cost@v1` + `universal-ingest@v1` reference playbooks) before authoring the prompt + output-schema shape. Cite the reference action(s) in task notes. If proposing any structural deviation from the existing pattern, MUST justify with the gap explicitly.</constraint>
+    <constraint source="project (idempotency — BINDING)">Re-running the seed deploy against an environment that already has the row MUST be a no-op (skip-on-exists) and MUST NOT fail with a uniqueness violation. `Deploy-Playbook.ps1` enforces this for playbooks via name-lookup at Step 5; the action-row seed MUST mirror the pattern via `sprk_actioncode = 'SUM-CHAT@v1'` lookup before insert. Use `-Force` semantics only when an explicit recreate is desired.</constraint>
+    <constraint source="project (no BFF or DI change)">This task is PURE DATA. Zero modifications to `src/server/api/Sprk.Bff.Api/` or any `.cs` file. Zero modifications to any DI module. Zero modifications to `Program.cs`. If the implementation surfaces a need to touch any of these, STOP and escalate per R5 CLAUDE.md §6 — likely a scope mismatch with task 010's plan.md placement.</constraint>
+    <constraint source="ADR-010 (DI minimalism)">N/A for this task (no DI registrations). Confirm in notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/jps-action-seed</topic>
+    <files>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/universal-ingest.playbook.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Action-row lookup-then-insert idempotency" location="scripts/Deploy-Playbook.ps1 (Step 5, lines 514-572)">
+        `Deploy-Playbook.ps1` checks for existing playbook by `sprk_name` BEFORE insert
+        (lines 521-525); when found WITHOUT `-Force`, exits cleanly with the "already
+        exists" message and exit code 0. For the action-row seed, mirror this pattern
+        against `sprk_analysisactions` filtered by `sprk_actioncode` (per the existing
+        Insights INS-* deploy convention surfaced in lines 395-405 `Resolve-ScopeCode`).
+        Implementation choice: either (a) author a sibling script
+        `scripts/Deploy-AnalysisAction.ps1` reusing the same `Get-DataverseHeaders` /
+        `Invoke-DataversePost` helpers, OR (b) extend `Deploy-Playbook.ps1` itself to
+        seed referenced actions when not yet present (preferred per R5 §3.1 reuse
+        mandate — keeps the harness consolidated). Decision recorded in task notes.
+      </pattern>
+      <pattern name="JPS system-prompt structure" location="docs/architecture/playbook-architecture.md + existing Insights actions">
+        The `sprk_systemprompt` field on `sprk_analysisaction` carries the JPS-formatted
+        prompt. Existing Insights actions (INS-FACT / INS-IDXR / INS-EVID / INS-GRND /
+        INS-DECL / INS-RART) are the binding reference shape. For SUM-CHAT@v1, the
+        prompt instructs the LLM to:
+        1. Read the supplied document chunks (passed via the orchestrator runtime context).
+        2. Emit a structured response matching the output schema (5 top-level fields).
+        3. Emit `tldr` FIRST (3-5 bullet strings; ≤140 chars each), then `summary`
+           prose (≤2 paragraphs), then per-file highlights, then parties + CTA.
+        4. Decline with `DeclineToFindNode` semantics if content is insufficient per
+           D-04 honesty contract (per spec FR-11).
+      </pattern>
+      <pattern name="Output schema JSON-Schema shape" location="src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json + Layer 2 outcome-extraction.v1.schema.json (Insights)">
+        Output schema is JSON Schema draft-07. Stored on the action row in
+        `sprk_outputschemajson` (string-typed) OR embedded in `sprk_configjson`
+        depending on existing convention — VERIFY at Step 2 by reading an existing
+        Summarize-pattern action row from Spaarke Dev. Schema MUST be Azure OpenAI
+        Structured Outputs compatible (no unsupported keywords; `additionalProperties:
+        false` on objects; required arrays populated). Field paths drive the
+        `FieldDelta.Path` emissions from task 006.
+      </pattern>
+      <pattern name="Scope code naming convention" location="src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Routing/InsightsActionRouter.cs + predict-matter-cost.playbook.json">
+        Action codes follow `<SCOPE>-<MNEMONIC>@<VERSION>`. Insights uses `INS-*@v1`.
+        For R5 Summarize-for-Chat, propose `SUM-CHAT@v1` (consistent with `@v1` versioning
+        + 3-letter scope prefix `SUM` matching Summarize semantic). VERIFY no existing
+        code conflicts at Step 2 by querying Dataverse for `sprk_actioncode eq 'SUM-CHAT@v1'`
+        before deploying.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The R5 chat-driven Summarize vertical slice (spec FR-01 through FR-08) ships a
+      new direct endpoint (`POST /api/ai/chat/sessions/{id}/summarize`, task 014) and
+      a parallel agent-tool function (`InvokeSummarizePlaybookTool`, task 015), both
+      delegating to a shared internal `SessionSummarizeOrchestrator` (task 012). The
+      orchestrator drives a JPS playbook whose first (and primary) node is an LLM
+      analysis node bound to the `Summarize Document for Chat` action row. The action
+      row's `sprk_systemprompt` IS the prompt; the action row's output-schema field IS
+      the structured-outputs JSON schema that Azure OpenAI's Structured Outputs mode
+      (task 006) enforces; the action row's `sprk_actiontype` lookup IS the dispatch
+      key the playbook executor uses to select the right `INodeExecutor`.
+
+      This task (010) and task 011 (D2-02 playbook config) together unblock the entire
+      Phase 2 Summarize implementation path. The action row is referenced by `actionCode`
+      in the playbook JSON deployed by task 011; without this seed, task 011's
+      `Deploy-Playbook.ps1` invocation would fail at lines 446-510 (Pre-Flight Failed —
+      `Action 'SUM-CHAT@v1' not found`).
+
+      The action-row primitive is the BINDING lock-in from Insights r2 (per R5 CLAUDE.md
+      §10): NO new prompt-bearing entity. Every R5 playbook (Summarize for Chat now;
+      `/analyze` in Phase 3 per D3-01; any R6 follow-on) adds new ROWS to
+      `sprk_analysisactions`, not new entities or prompt files. This task is the FIRST
+      R5 instance of that pattern — get it right and the subsequent rows (D3-01 etc.)
+      follow the template.
+    </background>
+    <dependencies>
+      <dependency task="Phase 1 (001-009)" status="not-started">
+        Phase 1 ✅ gating per plan.md. While this task does not strictly require any
+        Phase 1 code artifact to exist for the seed deploy ITSELF to succeed, the
+        functional VALUE of the action row depends on the Phase 1 `FieldDelta`
+        streaming pipeline (tasks 005 + 006) consuming the action's output schema. Per
+        TASK-INDEX.md, Phase 1 must be ✅ before this task begins. Confirm at Step 1.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Insights Engine r2 `predict-matter-cost@v1` and `universal-ingest@v1`
+        playbooks are the structural reference for the JPS action-row + playbook-row
+        + node-rows triplet. The Insights INS-FACT / INS-IDXR / INS-EVID / INS-GRND /
+        INS-DECL / INS-RART action rows are the JPS-format reference for the
+        `sprk_systemprompt` shape.</item>
+      <item>Task 011 (D2-02) deploys the `sprk_analysisplaybook` row + node row that
+        references THIS task's action row via `actionCode = SUM-CHAT@v1`. The two
+        tasks are parallel-safe per TASK-INDEX.md P2-G1 but the playbook deploy will
+        skip-on-exists or recreate ONCE this action row exists, so if task 011 lands
+        first the operator should re-run task 011's deploy after this task lands.</item>
+      <item>Task 012 (D2-03) introduces the `SessionSummarizeOrchestrator` that reads
+        the action row at runtime via `AnalysisActionService.GetActionAsync` to load
+        the `sprk_systemprompt`. The action's GUID is not used directly; lookup is by
+        `sprk_actioncode`. This task does not need to know the GUID — Dataverse
+        assigns it on insert.</item>
+      <item>Task 040 (D3-01) `/analyze` configuration-only proof point will add a
+        SECOND `sprk_analysisaction` seed using the same pattern this task establishes.
+        Get the template right here.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL declaration">
+      Check context usage. If &gt; 70%, create handoff summary and request `/compact`.
+      Output the mandatory RIGOR LEVEL declaration per CLAUDE.md §8:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Dataverse data deploy with BINDING idempotency + JPS prompt-shape
+         contract that downstream tasks 011/012/014/015 + D3-01 depend on. R5 CLAUDE.md
+         §10 BINDING gotcha applies (no new prompt-bearing entity). Establishes the
+         R5 template for all future config-only action-row seeds.
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0-10 per task-execute SKILL.md Step 0.5.
+      Proceeding with Step 0...
+      ```
+
+      Confirm `current-task.md` reflects task 010 active. Confirm no prior R5 task in
+      flight.
+    </step>
+    <step order="1" name="Review Progress + Dependencies">
+      Read `tasks/TASK-INDEX.md` and confirm: task 010 status is 🔲, wave P2-G1,
+      parallel-safe = true, dependencies = "Phase 1 ✅". Confirm tasks 001 through 009
+      are all ✅. If any Phase 1 task is still 🔲 / 🔄, STOP and report blocker per R5
+      CLAUDE.md §6. Also confirm task 011 status (parallel-safe sibling); if it is
+      ✅ already, the seed flow MUST still work (idempotency is bidirectional —
+      `Deploy-Playbook.ps1` line 528-572 handles existing playbook).
+    </step>
+    <step order="2" name="Gather Resources + Verify Action-Row Convention on Spaarke Dev">
+      Read EVERY file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically extract:
+      (a) the existing `sprk_analysisaction` row shape — query Spaarke Dev for one of
+      the INS-* rows via `az rest --method GET --url "$DATAVERSE_URL/api/data/v9.2/sprk_analysisactions?$filter=sprk_actioncode eq 'INS-FACT@v1'&$select=sprk_analysisactionid,sprk_name,sprk_actioncode,sprk_systemprompt,sprk_outputschemajson,sprk_configjson,_sprk_actiontypeid_value"` (or use `Resolve-ScopeCode` pattern from `Deploy-Playbook.ps1`); record which field carries the output schema (likely `sprk_outputschemajson` OR `sprk_configjson` embedding) — THIS IS THE BINDING SHAPE for the new row;
+      (b) the `sprk_actiontype` lookup row appropriate for an LLM analysis node — use
+      the same type used by the existing R-action Summarize row (likely `0 - AiAnalysis`
+      per the convention in `predict-matter-cost@v1` line 11 `sprk_playbooktype: 0`);
+      (c) confirm `SUM-CHAT@v1` does not collide with any existing `sprk_actioncode`
+      by querying Spaarke Dev with `$filter=sprk_actioncode eq 'SUM-CHAT@v1'`.
+
+      Record findings in `notes/task-010-action-shape-discovery.md`.
+    </step>
+    <step order="3" name="Author JPS System Prompt">
+      Author the `sprk_systemprompt` payload as a JPS-formatted string. Pattern:
+
+      ```
+      ROLE: You are the Spaarke Summarize-for-Chat assistant. You receive 1-N file
+            chunks from a user's chat session and produce a structured summary.
+      INPUT: file_chunks (array of { fileId, fileName, chunkText, chunkOrder })
+      INSTRUCTIONS:
+        - Emit a JSON object matching the output_schema EXACTLY.
+        - Field emission order MUST be: tldr → summary → fileHighlights → mentionedParties → callToAction.
+        - tldr: 3-5 concise bullets, ≤140 chars each. Emit FIRST.
+        - summary: ≤2 paragraphs of prose. Emit SECOND.
+        - fileHighlights: per-file highlight array (one entry per fileId in input).
+        - mentionedParties: array of distinct parties named in the documents.
+        - callToAction: ≤1 sentence suggesting the user's likely next step.
+      DECLINE: If the input is insufficient to produce a faithful summary (no
+               meaningful content, garbled extraction, sensitive-information block),
+               return a declineResponse object per D-04 honesty contract instead of
+               fabricating a summary. The orchestrator routes decline cases to
+               DeclineToFindNode downstream.
+      ```
+
+      Inline the JPS XML/structured form (if existing Insights actions use XML
+      stanzas) or the equivalent structured text form per the existing pattern
+      surfaced at Step 2. DO NOT use a free-text prompt — use JPS exactly.
+    </step>
+    <step order="4" name="Author Output Schema (Structured-Outputs-Compatible JSON Schema)">
+      Author the output schema (JSON Schema draft-07) covering the 5 top-level
+      fields. Constraints: `additionalProperties: false`, required fields populated,
+      no unsupported Structured-Outputs keywords (`anyOf`/`oneOf` only at the
+      decline-discriminator if used). Field shape:
+
+      ```json
+      {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tldr", "summary", "fileHighlights", "mentionedParties", "callToAction"],
+        "properties": {
+          "tldr":            { "type": "array", "items": { "type": "string", "maxLength": 140 }, "minItems": 3, "maxItems": 5 },
+          "summary":         { "type": "string", "maxLength": 2000 },
+          "fileHighlights":  { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["fileId","fileName","highlights"], "properties": { "fileId": {"type":"string"}, "fileName": {"type":"string"}, "highlights": {"type":"array","items":{"type":"string"}} } } },
+          "mentionedParties":{ "type": "array", "items": { "type": "string" } },
+          "callToAction":    { "type": "string", "maxLength": 240 }
+        }
+      }
+      ```
+
+      Decide and record in task notes: does decline-to-find route through
+      `DeclineToFindNode` (preferred per Insights pattern; schema above stays clean) or
+      via a discriminated branch on the schema itself? Record the decision per spec
+      FR-11 constraint.
+    </step>
+    <step order="5" name="Author Seed Deploy Artifact">
+      Per the Step 2 decision on harness extension vs sibling script:
+      Option A (PREFERRED — extends existing harness): Add an "actions" section to
+      `scripts/Deploy-Playbook.ps1`'s definition-file schema so a playbook deploy can
+      ALSO seed referenced actions in one pass. Author the new R5 definition file at
+      `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Playbooks/summarize-for-chat.playbook.json`
+      (mirror the existing Insights `Playbooks/` folder convention) with both an
+      `actions` array (containing the SUM-CHAT@v1 seed) AND a `playbook` + `nodes`
+      section that task 011 fills in. THIS TASK ships only the `actions` array; task
+      011 ships the `playbook` + `nodes` sections in the SAME file.
+      Option B (SIBLING SCRIPT): Author `scripts/Deploy-AnalysisAction.ps1` that
+      reuses `Deploy-Playbook.ps1`'s `Get-DataverseHeaders` / `Invoke-DataversePost` /
+      lookup-then-insert helpers. Action JSON lives at
+      `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Playbooks/sum-chat-action.json`.
+      Either option MUST be idempotent (lookup-then-insert by `sprk_actioncode`).
+      Record the choice + rationale in task notes; preferred is Option A per R5 §3.1
+      reuse mandate.
+    </step>
+    <step order="6" name="Dry-Run Deploy">
+      Invoke the deploy harness in dry-run mode against Spaarke Dev:
+      `pwsh scripts/Deploy-Playbook.ps1 -DefinitionFile <path> -DryRun` (Option A) or
+      `pwsh scripts/Deploy-AnalysisAction.ps1 -DefinitionFile <path> -DryRun` (Option
+      B). Confirm the dry-run output reports "WOULD CREATE action SUM-CHAT@v1" with
+      the correct system prompt + output schema serialized. Capture output to task
+      notes.
+    </step>
+    <step order="7" name="Live Deploy to Spaarke Dev (uses `dataverse-deploy` skill conventions)">
+      Invoke the deploy harness against Spaarke Dev (use the `dataverse-deploy` skill
+      per task-execute conventions — the skill handles `az login` verification +
+      `DATAVERSE_URL` env-var resolution + PowerShell invocation pattern). Confirm
+      the deploy reports "Created: &lt;guid&gt;" for the new action row. Capture stdout to
+      `notes/task-010-deployment-evidence.md` including the new row's GUID.
+    </step>
+    <step order="8" name="Verify Action Row in Spaarke Dev">
+      Issue a verification query against Spaarke Dev:
+      `az rest --method GET --url "$DATAVERSE_URL/api/data/v9.2/sprk_analysisactions?$filter=sprk_actioncode eq 'SUM-CHAT@v1'&$select=sprk_analysisactionid,sprk_name,sprk_actioncode,sprk_systemprompt,sprk_outputschemajson,sprk_configjson,_sprk_actiontypeid_value"`.
+      Confirm: (a) exactly one row returned; (b) `sprk_name` = "Summarize Document
+      for Chat"; (c) `sprk_systemprompt` matches Step 3 output verbatim; (d) the
+      output-schema field (per Step 2 finding) contains the Step 4 schema; (e)
+      `_sprk_actiontypeid_value` references the correct AI Analysis lookup row.
+      Capture response to task notes.
+    </step>
+    <step order="9" name="Verify Idempotency (BINDING)">
+      Re-run the deploy harness a SECOND time (live mode, NOT dry-run, NOT `-Force`).
+      Confirm: (a) deployment exits cleanly with `exit 0`; (b) reports
+      "already exists" semantics OR equivalent skip message; (c) NO duplicate row
+      created (verify with the same `$filter` query — count MUST be 1); (d) row
+      content unchanged. This is the BINDING idempotency guarantee for downstream
+      tasks 011/012/014/015. Capture both deploy runs to task notes.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run the `code-review` skill against the new files (deploy script changes if
+      Option A; the new sibling script if Option B; the new playbook/action JSON). Run
+      the `adr-check` skill against the same files. Both gates MUST pass before
+      marking the task complete. Confirm: ADR-010 (DI minimalism — N/A but
+      confirmed); ADR-013 (BFF Zone B — N/A for data-only seed but confirmed);
+      ADR-014 (tenant isolation — N/A for action-row seeds but confirmed); ADR-018
+      (no new feature flags — N/A but confirmed); ADR-029 (publish hygiene — 0 MB
+      delta confirmed). Record gate outputs in task notes.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 010 🔲 → ✅.
+      Reset `current-task.md` per CLAUDE.md §7 to the next pending task (011 D2-02 if
+      not already in flight; else task 012 D2-03 per dependency order). Record in
+      `notes/task-010-deployment-evidence.md`:
+      (1) the new action row's GUID;
+      (2) the JPS system prompt verbatim;
+      (3) the output schema verbatim;
+      (4) the deploy harness extension/sibling decision + rationale;
+      (5) the action-shape discovery findings from Step 2 (which field carries output
+          schema);
+      (6) the decline-routing decision (DeclineToFindNode vs schema branch);
+      (7) idempotency-run evidence (two clean deploys, no duplicate);
+      (8) BFF publish-size delta = 0 MB (no BFF code touched);
+      (9) Step 9.5 quality-gate outputs.
+      Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">PowerShell 7+ — invoke `scripts/Deploy-Playbook.ps1` (or sibling) for the seed deploy</tool>
+    <tool name="az">Azure CLI — bearer-token acquisition (`az account get-access-token`) + Dataverse Web API verification queries via `az rest`</tool>
+    <tool name="dataverse-deploy">Skill for Dataverse data deploys per Spaarke conventions — handles auth pre-flight + script invocation pattern</tool>
+    <tool name="git">Version control — stage + commit the new playbook/action JSON + any deploy-script changes on the R5 branch (do not commit secrets; `DATAVERSE_URL` is env-var only)</tool>
+    <tool name="code-review">Skill for Step 9.5 quality gate</tool>
+    <tool name="adr-check">Skill for Step 9.5 quality gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Playbooks/summarize-for-chat.playbook.json (NEW — Option A: combined definition file; this task fills the `actions` array, task 011 fills `playbook` + `nodes`) OR src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Playbooks/sum-chat-action.json (NEW — Option B: standalone action definition)</output>
+    <output type="script" conditional="if-Option-A">scripts/Deploy-Playbook.ps1 (MODIFIED — extend definition-file schema with `actions` array + add lookup-then-insert step against `sprk_analysisactions` before playbook deploy)</output>
+    <output type="script" conditional="if-Option-B">scripts/Deploy-AnalysisAction.ps1 (NEW — sibling script reusing `Deploy-Playbook.ps1` helpers)</output>
+    <output type="data">Spaarke Dev Dataverse: new row in `sprk_analysisactions` collection with `sprk_actioncode = 'SUM-CHAT@v1'`</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 010 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-010-action-shape-discovery.md (Step 2 findings: which field carries output schema; sprk_actiontype lookup row reference; SUM-CHAT@v1 collision check)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-010-deployment-evidence.md (dry-run output, live deploy output, verification query response, idempotency-run evidence, harness-extension decision + rationale, decline-routing decision, JPS prompt + output schema verbatim, BFF publish-size delta = 0 MB)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <examples>
+    <example name="Insights synthesis playbook reference" location="src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json">
+      Reference for the playbook-+-nodes definition shape that task 011 (D2-02) uses.
+      This task seeds ONLY the action row; the playbook + nodes are deferred to 011.
+      But the file LOCATION + naming pattern (`...Playbooks/<name>.playbook.json`) is
+      established here for R5 consistency.
+    </example>
+    <example name="Insights ingest playbook reference" location="src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/universal-ingest.playbook.json">
+      Reference for parameterized playbook structure with config + scopes + nodes.
+      The Step 5 Option A combined-file approach mirrors this convention.
+    </example>
+    <example name="Deploy-Playbook.ps1 idempotency pattern" location="scripts/Deploy-Playbook.ps1 (lines 514-572)">
+      The "Step 5: Check for existing playbook" block is the binding idempotency
+      pattern: lookup by name, skip-on-exists, recreate on `-Force`. Mirror this for
+      the action-row seed against `sprk_analysisactions` filtered by `sprk_actioncode`.
+    </example>
+  </examples>
+
+  <acceptance-criteria>
+    <criterion testable="true">New row in Spaarke Dev Dataverse `sprk_analysisactions` collection: `sprk_actioncode = 'SUM-CHAT@v1'`, `sprk_name = 'Summarize Document for Chat'`. Verified via `az rest` `$filter` query at Step 8.</criterion>
+    <criterion testable="true">`sprk_systemprompt` field on the new row contains the JPS-formatted prompt verbatim (per Step 3) — NOT a free-text prompt, NOT loaded from a `.txt` file, NOT a placeholder.</criterion>
+    <criterion testable="true">Output schema (in whichever field Step 2 discovery determined — `sprk_outputschemajson` or embedded in `sprk_configjson`) is the Step 4 JSON Schema verbatim, defining required fields `tldr`, `summary`, `fileHighlights`, `mentionedParties`, `callToAction` with shapes matching spec FR-02 + D2-07 widget contract.</criterion>
+    <criterion testable="true">Output schema is Azure OpenAI Structured Outputs compatible: `additionalProperties: false` on objects; required arrays populated; no unsupported keywords. Verifiable by visual schema inspection; smoke test against Structured Outputs in task 006 is the binding runtime verification.</criterion>
+    <criterion testable="true">`_sprk_actiontypeid_value` on the new row references the correct AI Analysis action-type lookup row (per Step 2 discovery — likely matches the value used by existing R-action Summarize row).</criterion>
+    <criterion testable="true">Idempotency: re-running the deploy a second time (live mode, no `-Force`) exits cleanly with skip-on-exists semantics, produces no duplicate row, and does not error. Verified at Step 9.</criterion>
+    <criterion testable="true">Deploy uses `scripts/Deploy-Playbook.ps1` (Option A — preferred) OR a sibling script reusing its helpers (Option B). NOT a parallel deploy mechanism. Decision recorded in task notes per R5 §3.1 reuse mandate.</criterion>
+    <criterion testable="true">No `.cs` file, no `.csproj` file, no `Program.cs`, no DI module modified by this task. BFF publish-size delta = 0 MB (confirmed in task notes; no `dotnet publish` measurement needed per R5 NFR-07).</criterion>
+    <criterion testable="true">No new Dataverse entity created. No `.txt` prompt file created. The action row IS the prompt-bearing primitive per R5 CLAUDE.md §10 BINDING gotcha.</criterion>
+    <criterion testable="true">`dataverse-deploy` skill invoked correctly (per Step 7) — the skill is the canonical invocation point for Dataverse data deploys per task-execute conventions.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5. Outputs recorded in task notes.</criterion>
+    <criterion testable="true">Task 011 (D2-02) is unblocked: re-running task 011's `Deploy-Playbook.ps1` invocation now resolves `actionCode = 'SUM-CHAT@v1'` successfully at the pre-flight check (lines 395-405) without "NOT FOUND" errors.</criterion>
+  </acceptance-criteria>
+</task>

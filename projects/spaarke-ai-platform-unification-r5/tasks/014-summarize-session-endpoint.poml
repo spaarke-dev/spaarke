@@ -1,0 +1,467 @@
+<task id="014" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-04 New `POST /api/ai/chat/sessions/{sessionId}/summarize` endpoint</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G3 (parallel-safe; siblings 015, 016; gated on 012)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>012</dependencies>
+    <tags>bff, endpoint, sse, auth</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Add a new direct BFF endpoint `POST /api/ai/chat/sessions/{sessionId}/summarize` that
+    is the HTTP entry point for the chat-driven Summarize vertical slice. It is the
+    "endpoint" leg of the dual-path convention described in spec §4: the slash command
+    `/summarize` (D2-10) calls this endpoint directly, while the agent-tool
+    `InvokeSummarizePlaybookTool` (D2-05, task 015) reaches the same destination via the
+    LLM tool-call path. Both legs converge on `SessionSummarizeOrchestrator` (D2-03,
+    task 012) so behavior is identical regardless of entry. The endpoint streams
+    `AnalysisChunk` SSE events including the new `FieldDelta` variant (D1-05, task 005)
+    so the Workspace tab populates progressively as Structured Outputs streams.
+
+    This task ships ONLY the HTTP wrapper. The orchestrator + system prompt + Structured
+    Outputs pipeline already exist (tasks 010–012, 006). The endpoint MUST: (1) authorize
+    via the existing `AddAiAuthorizationFilter()` endpoint-filter pattern (ADR-008);
+    (2) inherit the existing `ai-context` rate-limiting policy (ADR-016); (3) emit
+    ProblemDetails errors with stable `errorCode` extensions per error case (ADR-019);
+    (4) use a fresh OBO token per request — never snapshot the bearer token into a
+    closure (ADR-028 Auth v2); (5) register unconditionally — no new feature flag per
+    R5 CLAUDE.md §3.2 (the §10 F.1 asymmetric-registration rule binds: unconditional
+    endpoint → unconditional service). Mapping is added via the existing
+    `EndpointMappingExtensions.MapDomainEndpoints` site — ZERO new top-level
+    `Program.cs` lines (ADR-010 + R5 §3.3).
+
+    The endpoint is the load-bearing critical-path link between the orchestrator and
+    the new `StructuredOutputStreamWidget` (task 017): without this, the Workspace tab
+    cannot consume `FieldDelta` events.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with Minimal API patterns, ASP.NET Core endpoint
+    filters, SSE streaming, ADR-028 OBO auth, ADR-019 ProblemDetails, and the existing
+    `Sprk.Bff.Api` Chat + Insights endpoint conventions. Familiar with the FULL-rigor
+    task-execute protocol per R5 CLAUDE.md §4.
+  </role>
+
+  <goal>
+    A new Minimal API endpoint `POST /api/ai/chat/sessions/{sessionId}/summarize` is
+    registered on `Sprk.Bff.Api`, reachable on Spaarke Dev, gated by Spaarke Auth v2 OBO
+    + `AddAiAuthorizationFilter()` resource-level filter + `ai-context` rate-limit
+    policy, returning `text/event-stream` 200 responses that progressively emit
+    `AnalysisChunk` events including the new `FieldDelta` variant. The handler is a
+    thin wrapper that derives `tenantId` + caller `oid` from claims, validates the
+    `sessionId` route param + (optional) request body, then `await foreach`-yields chunks
+    from `SessionSummarizeOrchestrator` (task 012) to the response. Every error path
+    returns ProblemDetails with a stable `errorCode` extension per ADR-019. The endpoint
+    is mapped unconditionally inside the existing `MapDomainEndpoints` extension; the
+    new endpoint file lives in `src/server/api/Sprk.Bff.Api/Api/Ai/` adjacent to
+    `ChatEndpoints.cs`. Unit tests cover the happy path + every documented error code.
+    BFF publish-size measurement reported (target ≤ +0.1 MB compressed). Acceptance
+    criteria below all green; FULL-rigor quality gates pass.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="upstream-task">projects/spaarke-ai-platform-unification-r5/tasks/012-session-summarize-orchestrator.poml</file>
+    <file purpose="canonical-sse-endpoint">src/server/api/Sprk.Bff.Api/Api/Insights/InsightsAssistantEndpoint.cs</file>
+    <file purpose="canonical-chat-endpoints">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file purpose="endpoint-mapping-site">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs</file>
+    <file purpose="auth-filter">src/server/api/Sprk.Bff.Api/Api/Filters/AiAuthorizationFilter.cs</file>
+    <file purpose="rate-limit-policies">src/server/api/Sprk.Bff.Api/Infrastructure/DI/RateLimitingModule.cs</file>
+    <file purpose="orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs</file>
+    <file purpose="di-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+    <file purpose="program">src/server/api/Sprk.Bff.Api/Program.cs</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="auth-pattern">.claude/patterns/auth/spaarke-sso-binding.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API only — endpoint is registered via `app.MapPost(...)` inside a `MapXxx(this IEndpointRouteBuilder)` extension method. No Controllers, no MVC.</constraint>
+    <constraint source="ADR-008">Resource-level authorization uses an endpoint filter (`AddAiAuthorizationFilter()` extension), NOT middleware. Fires after `RequireAuthorization()` (token validation) and before the handler.</constraint>
+    <constraint source="ADR-010">DI minimalism — ZERO new top-level `services.AddXxx()` lines in `Program.cs`. If any registration is needed (none expected — endpoint only consumes existing `SessionSummarizeOrchestrator`), it goes inside `AnalysisServicesModule.cs`. Endpoint mapping itself extends `MapDomainEndpoints` in `EndpointMappingExtensions.cs` — that file is the registration surface, not `Program.cs`.</constraint>
+    <constraint source="ADR-013">Endpoint lives in BFF (Zone B for AI consumption). Handler injects `SessionSummarizeOrchestrator` directly (concrete class per task 012; no interface). Does NOT inject `IOpenAiClient`, `IPlaybookService`, or other AI-internal types per refined ADR-013 §3.5 facade boundary.</constraint>
+    <constraint source="ADR-016">Rate limit — endpoint applies the existing `ai-context` policy via `.RequireRateLimiting("ai-context")` (matches `InsightsAssistantEndpoint` semantics — Assistant aggregate budget shared across AI endpoints). Verify `ai-context` policy exists in `RateLimitingModule.cs` before applying. Do NOT define a new rate-limit policy.</constraint>
+    <constraint source="ADR-018">No new feature flags — endpoint maps unconditionally. Kill-switch coverage inherits from existing `Chat:Enabled` / `Analysis:Enabled` flags via the orchestrator's dependencies (`SprkChatAgentFactory` Null-Object pattern). R5 §3.2 binding.</constraint>
+    <constraint source="ADR-019">ProblemDetails for every error path. Each error case carries a stable `errorCode` string extension (e.g., `sessionId.required`, `sessionId.invalid`, `summarize.no-files`, `summarize.session-not-found`, `summarize.feature-disabled`, `summarize.internal-error`). Pattern mirrors `InsightsAssistantEndpoint.BadRequest()` helper. Never leak document content, prompts, or model output in error detail strings.</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2 — endpoint uses fresh OBO token per request. NEVER snapshot the bearer token into a closure. The orchestrator + downstream services receive token via DI-provided `IUserTokenProvider` / `IUserBearerToken` (whichever pattern the orchestrator already uses per task 012); the endpoint MUST NOT capture token into a delegate. Verify by reading orchestrator's signature + downstream Graph/AI client usage.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size verification — measure delta after this task; expect ≤ +0.1 MB compressed (one new endpoint file ~200 LOC). Report absolute size + delta vs baseline in task notes.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 reuse mandate">MUST reuse `SessionSummarizeOrchestrator` (task 012). MUST NOT inline orchestration / playbook-execution / Structured-Outputs logic into the endpoint handler. The handler is the thinnest possible HTTP wrapper.</constraint>
+    <constraint source="R5 CLAUDE.md §3.3 + ADR-010">ZERO new `services.AddXxx()` lines in `Program.cs`. The endpoint mapping itself is added inside the existing `MapDomainEndpoints(WebApplication app)` method in `EndpointMappingExtensions.cs` — same file that already calls `app.MapChatEndpoints()` and `app.MapInsightsAssistantEndpoint()`. Add `app.MapSummarizeSessionEndpoint();` (or extend `MapChatEndpoints` if cohesion warrants — discuss in implementation notes).</constraint>
+    <constraint source="R5 CLAUDE.md §10 F.1 asymmetric-registration rule">Endpoint mapped unconditionally → underlying service (`SessionSummarizeOrchestrator`) MUST be registered unconditionally in `AnalysisServicesModule.cs` (already done in task 012). Verify before merge. PR will be rejected if asymmetric.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF additions governance applies — endpoint is a new HTTP surface on `Sprk.Bff.Api`. Pre-merge checklist + Placement Justification section MUST be completed (this task IS BFF placement; explicitly justify vs. shared library or PCF-direct call).</constraint>
+    <constraint source="spec NFR-07">BFF publish-size — current baseline ~45.65 MB compressed; R5 cumulative budget ≤ +1 MB; this task target ≤ +0.1 MB.</constraint>
+    <constraint source="spec FR-04">Endpoint produces identical output to the slash-command path AND the LLM tool-call path (D2-05). Convergence on `SessionSummarizeOrchestrator` is the mechanism.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/sse-endpoints + bff/auth-filters + bff/problem-details</topic>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Insights/InsightsAssistantEndpoint.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/AiAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/RateLimitingModule.cs</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters-authorization.md</file>
+      <file>.claude/adr/ADR-016-rate-limiting.md</file>
+      <file>.claude/adr/ADR-019-problem-details.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="SSE-streaming endpoint with auth + rate-limit + ProblemDetails" location="src/server/api/Sprk.Bff.Api/Api/Insights/InsightsAssistantEndpoint.cs">
+        Canonical reference. Static class with a `MapXxxEndpoint(this IEndpointRouteBuilder)`
+        extension; uses `MapGroup` for shared `.RequireAuthorization()` +
+        `.RequireRateLimiting("ai-context")` +`.WithTags("...")`; handler is a private
+        `static async Task&lt;IResult&gt;` method; validates the request → derives
+        tenantId + oid from claims → delegates to a domain service → returns
+        `Results.Ok(...)` OR `Results.Problem(...)` with `errorCode` extension. Private
+        `BadRequest(string detail, string errorCode)` helper. Mirror this shape exactly.
+      </pattern>
+      <pattern name="SSE streaming handler returning `text/event-stream`" location="src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (SendMessageAsync, lines 309–611)">
+        For SSE: handler signature returns `Task` (not `Task&lt;IResult&gt;`), writes
+        `Content-Type: text/event-stream` header, opens `HttpContext.Response.BodyWriter`,
+        and `await foreach`-yields chunks from the orchestrator. Pattern in `ChatEndpoints`
+        is the closer fit than `InsightsAssistantEndpoint` (single-shot JSON response).
+        Combine: use `InsightsAssistantEndpoint`'s validation + ProblemDetails error
+        pattern, then for the SSE happy path mirror `ChatEndpoints.SendMessageAsync`'s
+        streaming write-loop.
+      </pattern>
+      <pattern name="`AddAiAuthorizationFilter()` extension" location="src/server/api/Sprk.Bff.Api/Api/Filters/AiAuthorizationFilter.cs">
+        Apply via `.AddAiAuthorizationFilter()` after `MapPost(...)`. Per ADR-008, this
+        is the resource-level filter that runs AFTER `RequireAuthorization()` (token
+        validation) and BEFORE the handler. Reads document/session IDs from the request
+        body or route and verifies access via `IAiAuthorizationService`. Mirrors the
+        pattern used by every existing `/api/ai/chat/sessions/*` endpoint.
+      </pattern>
+      <pattern name="ProblemDetails with stable `errorCode` extension" location="src/server/api/Sprk.Bff.Api/Api/Insights/InsightsAssistantEndpoint.cs (lines 317–326)">
+        ```csharp
+        private static IResult BadRequest(string detail, string errorCode)
+            =&gt; Results.Problem(
+                statusCode: 400, title: "Bad Request", detail: detail,
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                extensions: new Dictionary&lt;string, object?&gt; { ["errorCode"] = errorCode });
+        ```
+        Copy verbatim; vary `errorCode` per error case. For 503 (feature-disabled),
+        catch `FeatureDisabledException` and call `ex.AsFeatureDisabled503()` per
+        existing extension method.
+      </pattern>
+      <pattern name="Endpoint mapping site" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (MapDomainEndpoints)">
+        Add `app.MapSummarizeSessionEndpoint();` to `MapDomainEndpoints(WebApplication app)`
+        adjacent to the existing `app.MapChatEndpoints();` call. This is the single
+        registration surface — Program.cs only calls `app.MapSpaarkeEndpoints()` which
+        delegates here. ADR-010 + R5 §3.3 compliance.
+      </pattern>
+      <pattern name="Fresh OBO token per request (Auth v2)" location=".claude/patterns/auth/spaarke-sso-binding.md">
+        Per ADR-028: endpoint MUST NOT capture the bearer token into a closure. Token is
+        provided via DI (`IUserTokenProvider` / equivalent) and resolved on each handler
+        invocation. The orchestrator (task 012) is responsible for using the DI-provided
+        token; the endpoint's only obligation is to NOT snapshot it. Verify the
+        orchestrator signature accepts no token parameter (token resolved from DI inside
+        the orchestrator/its dependencies).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      D2-04 is the HTTP entry point for the R5 chat-driven Summarize vertical slice. The
+      slash command `/summarize` (D2-10, task 019) routes here when
+      `ChatSession.UploadedFiles.length &gt; 0`. The Workspace `StructuredOutputStreamWidget`
+      (D2-07, task 017) subscribes to the SSE stream this endpoint emits and renders
+      `FieldDelta` events progressively (TL;DR first → summary → per-file highlights).
+      Without this endpoint, the entire Phase 2 Summarize critical path is blocked.
+
+      The dual-path convention (endpoint + agent-tool both reaching the same
+      orchestrator) is the R5 architectural commitment per spec FR-04: identical output
+      whether the user types `/summarize` (this endpoint) or asks "summarize the files I
+      uploaded" (LLM tool-call via task 015's `InvokeSummarizePlaybookTool`).
+    </background>
+    <dependencies>
+      <dependency task="010" status="must-be-complete">
+        New `sprk_analysisaction` seed "Summarize Document for Chat" deployed to Spaarke
+        Dev. The orchestrator (task 012) loads its system prompt from this action row;
+        the endpoint indirectly depends on it via the orchestrator.
+      </dependency>
+      <dependency task="011" status="must-be-complete">
+        New `sprk_analysisplaybook` configuration linking the action. Same indirect
+        dependency.
+      </dependency>
+      <dependency task="012" status="must-be-complete">
+        `SessionSummarizeOrchestrator` concrete class registered in
+        `AnalysisServicesModule.cs`. This endpoint injects + delegates to it. HARD
+        DEPENDENCY — endpoint cannot compile until task 012 lands.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 015 (D2-05) registers the parallel agent-tool path
+        (`InvokeSummarizePlaybookTool`). Both this endpoint and the agent-tool converge
+        on `SessionSummarizeOrchestrator`. Parallel-safe siblings in P2-G3.</item>
+      <item>Task 016 (D2-06) adds the additive `workspace.streaming_started`,
+        `workspace.field_delta`, `workspace.streaming_complete` PaneEventBus event types
+        — frontend-side. Parallel-safe sibling in P2-G3.</item>
+      <item>Task 017 (D2-07) builds `StructuredOutputStreamWidget` which consumes the
+        SSE stream this endpoint emits. Downstream consumer; gated on 014 + 016.</item>
+      <item>Task 019 (D2-10) updates `/summarize` slash command to call this endpoint
+        when `ChatSession.UploadedFiles.length &gt; 0`. Downstream consumer.</item>
+      <item>`InsightsAssistantEndpoint` (Wave E3) is the closest sibling pattern — same
+        auth/rate-limit/ProblemDetails shape, different streaming semantics (Insights is
+        single-shot; this endpoint is SSE-streaming).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. If &gt; 70%, create handoff summary and request `/compact`.
+      Output the mandatory R5 §4.1 rigor declaration:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: BFF code change adding new HTTP endpoint with SSE streaming + Auth v2 OBO + ProblemDetails + critical-path link from orchestrator to Workspace widget.
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 1–10 per this POML with quality gates at Step 9.5.
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress + Verify Dependencies">
+      Read `tasks/TASK-INDEX.md` and confirm: 014 status is 🔲; dependency 012 status is
+      ✅ (orchestrator class exists and is registered in `AnalysisServicesModule.cs`).
+      Read `current-task.md` to verify no other R5 task is mid-flight. Read project
+      README for status. If 012 is not ✅, STOP and report blocker.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file listed in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically extract:
+      (a) the static class + `MapXxxEndpoint(this IEndpointRouteBuilder)` shape from
+      `InsightsAssistantEndpoint.cs`; (b) the SSE streaming write-loop pattern from
+      `ChatEndpoints.SendMessageAsync` (line 309 onward); (c) the
+      `AddAiAuthorizationFilter()` extension signature; (d) the EXACT name of the
+      `ai-context` rate-limit policy as registered in `RateLimitingModule.cs` — verify
+      string match; (e) `SessionSummarizeOrchestrator`'s public signature from task 012
+      output (return type — IAsyncEnumerable&lt;AnalysisChunk&gt; expected — and parameter
+      list); (f) ADR-028 token-handling rules from `.claude/patterns/auth/spaarke-sso-binding.md`.
+    </step>
+    <step order="3" name="Locate Endpoint Mapping Site + Plan File Layout">
+      Open `EndpointMappingExtensions.cs` and locate `MapDomainEndpoints(WebApplication app)`
+      (line 100). Confirm `app.MapChatEndpoints()` at line 141 and
+      `app.MapInsightsAssistantEndpoint()` at line 215. Plan: add
+      `app.MapSummarizeSessionEndpoint();` adjacent to `MapChatEndpoints` (near line 141).
+      Decide endpoint file location:
+      `src/server/api/Sprk.Bff.Api/Api/Ai/SummarizeSessionEndpoint.cs` (matches
+      `ChatEndpoints.cs` neighborhood; consistent with the `/api/ai/chat/...` path the
+      endpoint owns). Document this decision in task notes.
+    </step>
+    <step order="4" name="Author the Endpoint File">
+      Create `src/server/api/Sprk.Bff.Api/Api/Ai/SummarizeSessionEndpoint.cs` as a
+      `public static class SummarizeSessionEndpoint`. Mirror `InsightsAssistantEndpoint`'s
+      shape: static `MapSummarizeSessionEndpoint(this IEndpointRouteBuilder app)`
+      extension that creates a route group at `/api/ai/chat` with `.RequireAuthorization()`
+      + `.RequireRateLimiting("ai-context")` + `.WithTags("AI Chat")`. Inside the group,
+      `MapPost("/sessions/{sessionId}/summarize", SummarizeAsync)` with
+      `.AddAiAuthorizationFilter()` (ADR-008 resource-level filter). Add `WithName`,
+      `WithSummary`, `WithDescription` documenting the dual-path convention (slash
+      command + agent-tool converge here). Add `Produces(200, contentType: "text/event-stream")`
+      + `ProducesProblem(400|401|403|404|429|503|500)` declarations matching the error
+      cases enumerated in Step 5.
+
+      Handler signature: `private static async Task SummarizeAsync(string sessionId,
+      [FromBody] SummarizeRequest? request, HttpContext httpContext,
+      SessionSummarizeOrchestrator orchestrator, ILogger&lt;SummarizeSessionEndpoint&gt;
+      logger, CancellationToken ct)`. Body record (if a body is needed — confirm
+      against task 012's orchestrator API): minimal — possibly `fileIds: string[]?`
+      and `style: string?` (per spec FR-08 the agent-tool path takes the same shape).
+      If orchestrator accepts only `sessionId`, omit the body. Decide based on task 012
+      output; document.
+
+      Inside the handler: derive `tenantId` + `oid` from claims (mirror
+      `InsightsAssistantEndpoint` lines 162–184). Set SSE response headers
+      (`Content-Type: text/event-stream`, `Cache-Control: no-cache`). Open
+      `HttpContext.Response.BodyWriter`. `await foreach (var chunk in
+      orchestrator.SummarizeAsync(sessionId, tenantId, oid, request, ct))` — write each
+      chunk as `data: {json}\n\n` per SSE format mirroring
+      `ChatEndpoints.SendMessageAsync`.
+
+      Token handling (ADR-028): do NOT capture token into a closure. The orchestrator
+      resolves it via DI inside its own dependencies. Verify by reading task 012's
+      output — orchestrator signature should NOT include a token parameter.
+    </step>
+    <step order="5" name="Enumerate + Implement ProblemDetails Error Cases">
+      Implement these error paths with stable `errorCode` extensions (mirror
+      `InsightsAssistantEndpoint.BadRequest()` helper):
+
+      | HTTP | errorCode | When |
+      |---|---|---|
+      | 400 | `sessionId.required` | Route param empty/missing (defensive — routing rejects normally) |
+      | 400 | `sessionId.invalid` | Not a valid GUID / fails session-id format check |
+      | 400 | `summarize.no-files` | `ChatSession.UploadedFiles` is empty when this endpoint hit (per spec FR-03 prompt-first path — endpoint refuses; slash command emits interjection instead) |
+      | 400 | `summarize.too-many-files` | `UploadedFiles.length &gt; 20` (NFR-02 hard cap — defensive; UI enforces) |
+      | 401 | `auth.tid-missing` | `tid` claim absent (auth pipeline misconfig) |
+      | 401 | `auth.oid-missing` | `oid` claim absent |
+      | 403 | (handled by `AddAiAuthorizationFilter`) | Caller lacks read access to session |
+      | 404 | `summarize.session-not-found` | `sessionId` not found in Redis/Cosmos |
+      | 429 | (handled by rate limiter) | `ai-context` policy throttled |
+      | 503 | `summarize.feature-disabled` | `FeatureDisabledException` propagating from orchestrator (Chat or Analysis flag OFF). Use existing `ex.AsFeatureDisabled503()` extension. |
+      | 500 | `summarize.internal-error` | Catch-all; never leak document content or model output in detail string |
+
+      Per ADR-019: every ProblemDetails response includes `correlationId` extension set
+      to `httpContext.TraceIdentifier`. Catch order: `OperationCanceledException` →
+      rethrow; `FeatureDisabledException` → 503 (FIRST per ADR-032 P3 pattern); other
+      domain exceptions → mapped; generic `Exception` → 500 LAST.
+    </step>
+    <step order="6" name="Wire Endpoint Mapping into MapDomainEndpoints">
+      Add `app.MapSummarizeSessionEndpoint();` to `MapDomainEndpoints` in
+      `EndpointMappingExtensions.cs` (near line 141 adjacent to `app.MapChatEndpoints();`).
+      Add the `using Sprk.Bff.Api.Api.Ai;` import if not already present (likely is).
+      Verify ZERO new lines in `Program.cs` — endpoint mapping is invoked transitively
+      via `app.MapSpaarkeEndpoints()` → `MapDomainEndpoints` per ADR-010 + R5 §3.3.
+    </step>
+    <step order="7" name="Verify Auth v2 Fresh-Token-Per-Request">
+      Read the orchestrator code (task 012 output) + its downstream Graph / AI client
+      calls. Confirm: (a) no `string accessToken` field captured at construction;
+      (b) every per-call token resolution goes through DI-provided
+      `IUserTokenProvider` (or equivalent) within scope of the request;
+      (c) no `Task.Run(...)` or background-thread continuation that loses the
+      `HttpContext`. If any of these are violated, escalate (ADR-028 violation — task
+      012 needs follow-up, not 014). Document the verification result in task notes
+      (file + line refs to the token-resolution call sites).
+    </step>
+    <step order="8" name="Author Unit Tests">
+      Add `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/SummarizeSessionEndpointTests.cs`
+      covering: (a) happy path — endpoint reachable, OBO claims parsed, orchestrator
+      invoked, SSE chunks written; (b) each ProblemDetails error case from Step 5
+      (validate `errorCode` extension value, HTTP status code, no PII leakage in
+      detail); (c) `FeatureDisabledException` 503 path; (d) cancellation behavior
+      (token cancelled mid-stream); (e) ADR-028 fresh-token contract — assert that the
+      orchestrator's token-provider dependency is resolved per-call (mock setup). Mirror
+      fixture pattern from existing `InsightsAssistantEndpointTests.cs` /
+      `ChatEndpointsTests.cs`. Per R5 §3.7 + CLAUDE.md §10 F.2: inspect fixture config
+      FIRST before debugging unexpected DI failures — fixture-config-first protocol.
+    </step>
+    <step order="9" name="Build + Test + BFF Publish-Size Verification">
+      Run `dotnet build src/server/api/Sprk.Bff.Api/` — must succeed with zero new
+      warnings. Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — all new tests pass +
+      no existing test regressions. Run `dotnet publish -c Release
+      src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Measure compressed output
+      (`Get-ChildItem deploy/api-publish/ -Recurse | Measure-Object Length -Sum` after
+      compression, OR ZIP step depending on existing R5 measurement convention).
+      Report: absolute compressed size + delta vs prior baseline (~45.65 MB). Target:
+      ≤ +0.1 MB delta. If &gt; +0.5 MB: investigate (one new endpoint file should not
+      bloat the publish). If &gt; +1 MB cumulative R5 budget: escalate per R5 §3.6 +
+      ADR-029.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the new endpoint file + the
+      `EndpointMappingExtensions.cs` diff + the new test file. Run `adr-check` skill
+      verifying: ADR-001 (Minimal API used, not Controllers), ADR-008 (endpoint filter
+      not middleware), ADR-010 (zero new `Program.cs` lines — diff `Program.cs`),
+      ADR-013 (BFF placement; no AI-internal type injection), ADR-016 (`ai-context`
+      policy applied; no new policy defined), ADR-019 (every error returns
+      ProblemDetails with stable `errorCode` + `correlationId`), ADR-028 (no token
+      snapshot — closure scan), ADR-029 (publish-size measured). Also verify:
+      asymmetric-registration rule (R5 CLAUDE.md §10 F.1) — endpoint maps
+      unconditionally AND orchestrator is registered unconditionally in
+      `AnalysisServicesModule.cs`. Both gates MUST pass. Run static-scan recipe per
+      §10 F.1: grep for `if (.*flag.*)` around the new endpoint mapping — must find
+      zero matches.
+    </step>
+    <step order="10" name="BFF-Extensions Checklist + Document + Complete">
+      Walk through `.claude/constraints/bff-extensions.md` pre-merge checklist (§A–F)
+      and tick each item in task notes:
+      - § Placement Justification — explicit statement that this endpoint belongs in
+        BFF (vs. CRUD code or shared lib). Justification: SSE streaming requires
+        long-lived HTTP connection + server-side AI orchestration + OBO auth + rate
+        limiting — none of which can be done in a PCF or Code Page. BFF is the only
+        viable surface.
+      - § AI-PublicContracts facade — N/A (endpoint consumes
+        `SessionSummarizeOrchestrator` directly, which is the public AI surface
+        established by task 012; per refined ADR-013, orchestrators ARE the public
+        contract for CRUD code consumption).
+      - § Publish-size delta — recorded in Step 9 (≤ +0.1 MB target).
+      - § CVE scan — run `dotnet list package --vulnerable --include-transitive` and
+        confirm no new HIGH CVEs.
+      - § Test obligation — covered by Step 8 unit tests.
+      - § Asymmetric-registration — verified in Step 9.5 (unconditional both sides).
+
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 014 🔲 → ✅. Reset
+      `current-task.md` to next pending task per CLAUDE.md §7. Record in task notes:
+      (a) endpoint file path; (b) error-case enumeration table from Step 5; (c)
+      ADR-028 fresh-token verification result with file:line refs; (d) BFF
+      publish-size measurement; (e) bff-extensions checklist sign-off. Report task
+      completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build BFF, run tests, publish for size measurement</tool>
+    <tool name="bff-deploy">Available for Spaarke Dev deployment after Step 9 verification (deployment is operator-led, not part of this task's acceptance — endpoint reachable on dev means deployed)</tool>
+    <tool name="git">Stage + commit the new endpoint file + `EndpointMappingExtensions.cs` diff + test file on the R5 branch</tool>
+    <tool name="code-review">FULL-rigor quality gate at Step 9.5</tool>
+    <tool name="adr-check">FULL-rigor quality gate at Step 9.5</tool>
+    <tool name="conflict-check">Per R5 §3.1 reuse mandate — run before merge</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/SummarizeSessionEndpoint.cs (NEW — Minimal API endpoint + handler + ProblemDetails helpers)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (extend — add `app.MapSummarizeSessionEndpoint();` to `MapDomainEndpoints`)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/Ai/SummarizeSessionEndpointTests.cs (NEW — happy path + every ProblemDetails error case + Auth v2 fresh-token contract assertion)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 014 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-014-implementation-evidence.md (endpoint file decision, error-case enumeration table, ADR-028 fresh-token verification with file:line refs, publish-size measurement, bff-extensions checklist sign-off, asymmetric-registration static-scan result)</output>
+    <output type="report">Task completion report (per task-execute Step 6)</output>
+  </outputs>
+
+  <examples>
+    <example name="InsightsAssistantEndpoint — canonical auth + ProblemDetails shape" location="src/server/api/Sprk.Bff.Api/Api/Insights/InsightsAssistantEndpoint.cs">
+      Closest pattern for non-SSE concerns: static class layout, `MapXxxEndpoint`
+      extension, `MapGroup` with `.RequireAuthorization()` + `.RequireRateLimiting("ai-context")`,
+      handler signature with `[FromBody]` + `HttpContext` + DI services + `ILogger` +
+      `CancellationToken`, claim extraction for tenantId + oid, ProblemDetails
+      `BadRequest(detail, errorCode)` helper, `FeatureDisabledException` catch-FIRST
+      ordering, `correlationId = TraceIdentifier` extension. Copy this shape; differ
+      only in: (a) SSE streaming response instead of `Results.Ok(JSON)`, and
+      (b) `AddAiAuthorizationFilter()` resource-level filter (Insights uses a different
+      auth layer).
+    </example>
+    <example name="ChatEndpoints.SendMessageAsync — SSE streaming write-loop" location="src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (lines 309–611)">
+      Reference for the SSE streaming portion of the handler: how to write
+      `Content-Type: text/event-stream` headers, how to `await foreach` chunks from a
+      domain service and write each as a `data: {json}\n\n` SSE event. Also the
+      reference for `AddAiAuthorizationFilter()` + `.RequireRateLimiting("ai-stream")`
+      usage on a `MapPost` route (note: D2-04 uses `ai-context` per spec, not
+      `ai-stream` — confirm policy choice in implementation notes; defer to
+      `InsightsAssistantEndpoint` semantics since D2-04 is a tool-equivalent endpoint).
+    </example>
+    <example name="AddAiAuthorizationFilter extension" location="src/server/api/Sprk.Bff.Api/Api/Filters/AiAuthorizationFilter.cs">
+      One-line `.AddAiAuthorizationFilter()` application per ADR-008 endpoint-filter
+      pattern. Reads document/session IDs from the request (route param OR body) and
+      verifies access via `IAiAuthorizationService`. Per R5 §10 — endpoint filters are
+      the load-bearing auth surface; do not introduce middleware-level auth.
+    </example>
+  </examples>
+
+  <acceptance-criteria>
+    <criterion testable="true">Endpoint `POST /api/ai/chat/sessions/{sessionId}/summarize` is registered on `Sprk.Bff.Api` and reachable on Spaarke Dev (returns 401 without auth header; returns 200 SSE stream with valid OBO token + valid sessionId + populated `ChatSession.UploadedFiles`).</criterion>
+    <criterion testable="true">Endpoint applies `RequireAuthorization()` (Spaarke Auth v2 token validation) AND `AddAiAuthorizationFilter()` (resource-level read access check) per ADR-008.</criterion>
+    <criterion testable="true">Endpoint applies the existing `ai-context` rate-limit policy (per ADR-016); no new rate-limit policy defined; `RateLimitingModule.cs` is unchanged.</criterion>
+    <criterion testable="true">OBO auth works with a fresh token per request — orchestrator + downstream Graph/AI clients resolve token via DI-provided `IUserTokenProvider` (or equivalent); no closure-captured token. Verified via code-scan in Step 7 + unit test in Step 8(e). ADR-028 compliance.</criterion>
+    <criterion testable="true">SSE stream emits `AnalysisChunk` events progressively including the new `FieldDelta` variant (D1-05 / task 005). End-to-end test: Workspace tab populates TL;DR field FIRST, then summary, then per-file highlights — incremental rendering, not single big-bang.</criterion>
+    <criterion testable="true">Every documented error case returns ProblemDetails with: (a) stable `errorCode` string extension, (b) `correlationId` extension set to `TraceIdentifier`, (c) detail string that NEVER leaks document content / prompts / model output. ADR-019 compliance. Verified by unit tests covering all 11 cases enumerated in Step 5.</criterion>
+    <criterion testable="true">Endpoint is mapped UNCONDITIONALLY (no `if (flag)` block around the `app.MapSummarizeSessionEndpoint();` line). `SessionSummarizeOrchestrator` is registered UNCONDITIONALLY in `AnalysisServicesModule.cs` (from task 012). Asymmetric-registration rule (R5 CLAUDE.md §10 F.1) verified via static-scan in Step 9.5.</criterion>
+    <criterion testable="true">ZERO new top-level lines in `Program.cs` — endpoint mapping added inside existing `MapDomainEndpoints` in `EndpointMappingExtensions.cs`. ADR-010 + R5 §3.3 compliance. Verified by `git diff src/server/api/Sprk.Bff.Api/Program.cs` showing no changes from this task.</criterion>
+    <criterion testable="true">Unit tests in `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/SummarizeSessionEndpointTests.cs` cover happy path + all 11 error cases from Step 5 + cancellation + ADR-028 fresh-token contract. `dotnet test` is green.</criterion>
+    <criterion testable="true">`dotnet build` clean (no new warnings). BFF publish-size measured + reported in task notes; delta ≤ +0.1 MB compressed vs prior baseline (~45.65 MB); no new HIGH CVEs from `dotnet list package --vulnerable --include-transitive`. R5 §3.6 + ADR-029.</criterion>
+    <criterion testable="true">`.claude/constraints/bff-extensions.md` pre-merge checklist signed off in task notes, including explicit Placement Justification (why this is in BFF) per R5 CLAUDE.md §10.</criterion>
+    <criterion testable="true">FULL-rigor quality gates pass at Step 9.5: `code-review` + `adr-check` both green. Asymmetric-registration static-scan recipe (R5 §10 F.1) returns zero matches.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,448 @@
+<task id="012" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-03 New `SessionSummarizeOrchestrator` concrete class (chat-session-scoped orchestration; agent-tool ↔ direct-endpoint convergence)</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G2 (parallel-safe with 013; depends on 010 + 011)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>010, 011</dependencies>
+    <tags>bff, orchestrator, service</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Create the new `SessionSummarizeOrchestrator` concrete class — the load-bearing bridge
+    between the R5 chat-driven Summarize agent-tool path (task 015 / `InvokeSummarizePlaybookTool`)
+    and the R5 chat-driven Summarize direct endpoint (task 014 /
+    `POST /api/ai/chat/sessions/{sessionId}/summarize`). Both downstream paths MUST converge
+    on a single internal method on this orchestrator; that convergence is the entire reason
+    this class exists (per spec FR-01 + FR-08 + SC-08 — "both paths produce identical output").
+
+    The orchestrator is chat-session-scoped (operates on a `sessionId` + `fileIds` subset of
+    `ChatSession.UploadedFiles[]`) and composes EXISTING platform services — it MUST NOT
+    re-implement orchestration logic already provided by `AnalysisOrchestrationService` or
+    `PlaybookService`. Per R5 CLAUDE.md §3.1 the canonical orchestrators are NOT to be
+    paralleled. The justification for a NEW class (rather than an extension on
+    `AnalysisOrchestrationService`) is that this is a NEW kind of orchestration — chat-session
+    scope, session-files RAG index, multi-file combined-summary semantics, and chat-tool/endpoint
+    convergence shape — that the existing analysis-and-playbook orchestrator does not cover.
+    This justification MUST be explicitly stated in code comments and the task notes per
+    spec §"MUST cite the existing component if reusing; if proposing new, cite the gap".
+
+    The class is a CONCRETE class with NO interface (per ADR-010 — no genuine seam beyond
+    unit-testing). It depends on existing services: `RagService` (consumed with the new
+    `sessionId` filter shipped by task 002), `RagIndexingPipeline.IndexSessionFileAsync`
+    (task 003), `ChatSessionManager` (extended by task 004 with `UploadedFiles[]`), the
+    Summarize playbook execution path through the existing `IPlaybookService` /
+    `AnalysisOrchestrationService.ExecutePlaybookAsync`, `AnalysisChunk.FieldDelta` (task 005
+    additive variant), and the Structured Outputs streaming path (task 006). Registration
+    lives inside `AnalysisServicesModule.cs` per ADR-010 feature-module pattern — ZERO new
+    top-level `Program.cs` lines and NO new feature flag (per R5 CLAUDE.md §3.2 + §3.3).
+  </prompt>
+
+  <role>
+    Senior .NET developer fluent in Minimal-API BFF orchestration, IAsyncEnumerable streaming
+    over SSE, Azure OpenAI Structured Outputs incremental JSON, and Spaarke's existing
+    `AnalysisOrchestrationService` + `IPlaybookService` composition pattern. Familiar with
+    ADR-010 (DI minimalism, concrete classes), ADR-013 (BFF-only AI; agents via factory),
+    ADR-018 Flag Scope Discipline, and R5's reuse mandate per project CLAUDE.md §3.1.
+  </role>
+
+  <goal>
+    A new concrete class `Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator`
+    (file: `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs`)
+    that exposes ONE internal/public streaming entry point (e.g.
+    `IAsyncEnumerable&lt;AnalysisStreamChunk&gt; SummarizeSessionFilesAsync(SessionSummarizeRequest, CancellationToken)`)
+    consumed by BOTH task 014's direct endpoint AND task 015's agent-tool handler. The class
+    composes existing platform services (NO new orchestrator built; NO new playbook engine;
+    NO new chat agent). Registered inside `AnalysisServicesModule.cs` (Analysis-services
+    feature module). Unit tests verify: (a) the single convergence method exists and is the
+    single delegation target for both paths; (b) playbook execution delegates to existing
+    `IPlaybookService` / `AnalysisOrchestrationService`; (c) session-scoped RAG retrieval
+    delegates to existing `RagService` with `RagSearchOptions.SessionId` set; (d)
+    multi-file combined-summary deterministic interjection emits before streaming starts;
+    (e) decline-to-find path streams the structured decline response. Acceptance criteria
+    below are all green; `code-review` + `adr-check` quality gates pass; BFF publish-size
+    delta reported.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="bff-extensions-binding">.claude/constraints/bff-extensions.md</file>
+    <file purpose="canonical-orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    <file purpose="canonical-chat-tool-handler">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/AssistantToolCallHandler.cs</file>
+    <file purpose="feature-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+    <file purpose="chat-session-manager">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+    <file purpose="dep-task-002">projects/spaarke-ai-platform-unification-r5/tasks/002-extend-ragsearchoptions-sessionid.poml</file>
+    <file purpose="dep-task-003">projects/spaarke-ai-platform-unification-r5/tasks/003-parameterize-ragindexingpipeline.poml</file>
+    <file purpose="dep-task-004">projects/spaarke-ai-platform-unification-r5/tasks/004-extend-chatsession-uploaded-files.poml</file>
+    <file purpose="dep-task-005">projects/spaarke-ai-platform-unification-r5/tasks/005-add-fielddelta-to-analysischunk.poml</file>
+    <file purpose="dep-task-006">projects/spaarke-ai-platform-unification-r5/tasks/006-azure-openai-structured-outputs-streaming.poml</file>
+    <file purpose="dep-task-010">projects/spaarke-ai-platform-unification-r5/tasks/010-summarize-action-seed.poml</file>
+    <file purpose="dep-task-011">projects/spaarke-ai-platform-unification-r5/tasks/011-summarize-playbook-config.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 CLAUDE.md §3.1 (reuse mandate)">MUST NOT introduce a parallel orchestrator to `AnalysisOrchestrationService` or `InsightsOrchestrator`. This new class is justified ONLY because chat-session-scoped Summarize orchestration is a NEW kind of orchestration not covered by existing services. Justification MUST be explicitly written in the class XML doc-comment AND in task notes per project CLAUDE.md §3.1 step 3 ("if proposing new component: cite the gap explicitly").</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 (reuse mandate)">MUST reuse: `RagService.SearchAsync()` (with `RagSearchOptions.SessionId` per task 002) for grounded retrieval; `RagIndexingPipeline.IndexSessionFileAsync` (task 003) when staging files into the session-files index if needed at orchestration time; `IPlaybookService` + `AnalysisOrchestrationService.ExecutePlaybookAsync` for actual Summarize-playbook execution; `ChatSessionManager` (extended by task 004) for reading `UploadedFiles[]`; `AnalysisChunk` (with `FieldDelta` variant from task 005) as the SSE envelope; Structured-Outputs streaming path from task 006.</constraint>
+    <constraint source="ADR-010 (DI minimalism + concrete classes)">Class MUST be CONCRETE — NO interface unless a genuine seam exists. Unit-testing alone is NOT a genuine seam per ADR-010. The acceptance criterion "no interface introduced" is testable by grep. `virtual` methods only if Null-Object subclassing required — NOT expected per R5 §3.2.</constraint>
+    <constraint source="ADR-010 + R5 CLAUDE.md §3.3 (DI discipline)">Registration MUST be inside `AnalysisServicesModule.cs` via the existing `AddAnalysisOrchestrationServices(...)` helper (or a new private helper inside the module) — ZERO new `services.AddXxx()` lines added to `Program.cs`. Lifetime: `Scoped` (matches `AnalysisOrchestrationService` and Insights orchestration pattern).</constraint>
+    <constraint source="ADR-018 (Flag Scope Discipline) + R5 §3.2">MUST NOT add any new feature flag. Kill-switch coverage inherits from existing `Analysis:Enabled` (parent gate of `AnalysisServicesModule.AddAnalysisOrchestrationServices`) and `Chat:Enabled`. ADR-032 Null-Object NOT applicable — orchestrator is registered only when the parent compound-AI-ON branch is active; consumers (endpoint task 014 + tool handler task 015) inherit the same gating.</constraint>
+    <constraint source="ADR-013 (AI architecture — BFF-only)">Class lives in BFF (`Sprk.Bff.Api.Services.Ai.Chat` namespace). Agent-tool consumer (task 015) goes through `SprkChatAgentFactory` per ADR-013; this orchestrator is the BFF-side delegation target — NOT a chat-agent itself.</constraint>
+    <constraint source="spec FR-01 + FR-08 + SC-08 (convergence — load-bearing)">A SINGLE internal/public method MUST be the convergence point. Task 014 (direct endpoint) AND task 015 (agent-tool handler) MUST both delegate to that exact method with identical request semantics. Output `DocumentAnalysisResult` shape MUST match between paths. This is the load-bearing reason this class exists; absence of single-method convergence = task failure.</constraint>
+    <constraint source="spec FR-04 (combined-summary interjection)">For multi-file (`fileIds.Count >= 2`) requests, the orchestrator MUST emit a deterministic chat-layer interjection ("I'll provide a combined summary for the files you uploaded") via `AnalysisChunk` (Type = "text" or equivalent) BEFORE the playbook streams. Single-file requests MUST NOT emit this.</constraint>
+    <constraint source="spec FR-11 (decline-to-find structured response)">When content is insufficient, MUST chain through `DeclineToFindNode` per existing D-04 honesty contract and stream the structured `DeclineResponse` envelope — NOT a hallucinated summary.</constraint>
+    <constraint source="ADR-014 (tenant isolation)">All `RagService.SearchAsync` calls inside the orchestrator MUST set both `tenantId` AND `sessionId` filters per ADR-014 + spec NFR-03.</constraint>
+    <constraint source="ADR-007 (SpeFileStore facade)">Any file operations (if needed inside the orchestrator) MUST go via `SpeFileStore` / `DocumentCheckoutService`. The orchestrator likely does NOT perform file IO directly — it delegates to the indexing pipeline (already done at upload time) and the playbook service.</constraint>
+    <constraint source="ADR-028 (Spaarke Auth v2)">No token snapshots. Orchestrator accepts `HttpContext` (or already-resolved auth identity) per request — does NOT cache tokens between requests.</constraint>
+    <constraint source="ADR-029 + CLAUDE.md §10 (BFF publish-size verification)">Per-task MANDATORY: run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed output; report absolute size + delta in task notes / PR description; ceiling ≤60 MB compressed; budget R5 ≤+1 MB total; ≥+5 MB single-task delta → escalation.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md (binding governance)">Placement Justification MUST be authored: this orchestrator BELONGS IN BFF (BFF-only architecture per ADR-013; chat orchestration is core BFF responsibility; no extraction candidate). State this explicitly in PR description.</constraint>
+    <constraint source="CLAUDE.md §10 F.1 (asymmetric-registration check)">Endpoint that maps unconditionally (task 014) MUST have unconditional service registration. R5 §3.2 — R5 services unconditionally registered when `Analysis:Enabled = true` (default). Confirm registration is NOT inside a R5-specific `if (flag)` block.</constraint>
+    <constraint source="CLAUDE.md §10 (test update obligation per F-22 / D-05)">PR modifying `src/server/api/Sprk.Bff.Api/Services/` MUST add/update tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/`. Tests MUST cover the convergence-method contract, multi-file interjection emission, decline path, and `RagSearchOptions.SessionId` propagation.</constraint>
+    <constraint source="NFR-02 (per-session cap)">Hard cap 20 files per session — orchestrator MUST reject `fileIds` lists &gt; 20 (or otherwise inheriting from `ChatSession.UploadedFiles[]`'s upstream cap from task 004).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/orchestration + chat-tool/endpoint convergence + ADR-010 concrete-by-default</topic>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/AssistantToolCallHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Routing/InsightsOrchestrator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagSearchOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisChunk.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture-bff-only.md</file>
+      <file>.claude/adr/ADR-018-feature-flag-scope-discipline.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Chat-tool ↔ orchestrator delegation (canonical Insights mirror)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Insights/AssistantToolCallHandler.cs">
+        Insights' Wave-E3 `AssistantToolCallHandler` is the pattern R5 mirrors for chat-tool
+        delegation. AssistantToolCallHandler exposes a single async method (`HandleAsync`)
+        that the BFF facade (`IInsightsAi.AssistantQueryAsync`) AND the chat-agent tool
+        (`insights.query`) both delegate to. The Spaarke Assistant tool-call contract
+        document binds the convergence shape. R5's `SessionSummarizeOrchestrator` follows
+        the same convergence pattern but for the Summarize-playbook + session-scoped RAG
+        composition instead of intent classifier + playbook + RAG.
+      </pattern>
+      <pattern name="Orchestrator constructor composition + ADR-010 reduction" location="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs">
+        `AnalysisOrchestrationService` was reduced from 21 to 10 constructor parameters by
+        extracting `AnalysisDocumentLoader`, `AnalysisRagProcessor`, `AnalysisResultPersistence`.
+        R5's `SessionSummarizeOrchestrator` SHOULD keep its constructor lean (target ≤8 deps):
+        likely `ChatSessionManager`, `IPlaybookService` (or `IAnalysisOrchestrationService`
+        for playbook execution delegation), `RagService`, `RagIndexingPipeline`, `AiTelemetry`,
+        `ILogger&lt;SessionSummarizeOrchestrator&gt;`. If composition grows, extract helpers
+        like `SessionContextBuilder` rather than fattening the constructor.
+      </pattern>
+      <pattern name="IAsyncEnumerable streaming + AnalysisChunk envelope" location="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs">
+        Canonical streaming method shape: `public async IAsyncEnumerable&lt;AnalysisStreamChunk&gt;
+        SummarizeSessionFilesAsync(SessionSummarizeRequest request, HttpContext httpContext,
+        [EnumeratorCancellation] CancellationToken cancellationToken)`. Yield chunks via
+        `yield return`; emit `FieldDelta` chunks during playbook stream; emit interjection
+        chunk for multi-file BEFORE playbook starts; propagate `DeclineToFindNode` output
+        as structured chunks unchanged.
+      </pattern>
+      <pattern name="DI registration inside feature module" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs">
+        `AddAnalysisOrchestrationServices(services, configuration)` is the existing internal
+        helper. Add R5 service registration inside this helper (or a new sibling helper
+        `AddR5SessionSummarizeServices(services)` called from the existing top-level if-block
+        when both `documentIntelligenceEnabled` AND `analysisEnabled` are true). Lifetime:
+        `Scoped`. ZERO new `services.AddXxx()` lines in `Program.cs`.
+      </pattern>
+      <pattern name="Concrete-class-no-interface (ADR-010)" location=".claude/adr/ADR-010-di-minimalism.md">
+        ADR-010 mandates concrete classes by default. Introduce an interface ONLY when a
+        genuine seam exists (Null-Object alternative needed; multiple implementations
+        legitimately required; cross-module boundary). Unit-testability alone is NOT a
+        seam — test the concrete class directly with composed real or fake dependencies.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The R5 vertical slice ships a "Summarize a Document" chat-driven flow with two valid
+      entry points: explicit slash command (`/summarize`) routed through a direct
+      endpoint (task 014) AND natural-language invocation routed through an LLM tool-call
+      to the agent tool (task 015). Spec FR-01 + FR-08 + SC-08 require IDENTICAL output
+      shape from both paths. The canonical way to guarantee identity in Spaarke (per the
+      Insights `AssistantToolCallHandler` pattern shipped in r2 Wave E3) is a single
+      internal method on a single orchestrator that both paths delegate to. This task
+      ships that orchestrator. Without it, the two paths would inevitably drift in
+      streaming shape, multi-file interjection emission, decline-handling, RAG-scope
+      filtering, telemetry, or output schema.
+    </background>
+    <dependencies>
+      <dependency task="002" status="not-started">`RagSearchOptions.SessionId` filter — orchestrator consumes via `RagService.SearchAsync` for grounded retrieval scoped to the active session.</dependency>
+      <dependency task="003" status="not-started">`RagIndexingPipeline.IndexSessionFileAsync` — referenced by orchestrator (or upstream call site) when staging files into the session-files index.</dependency>
+      <dependency task="004" status="not-started">`ChatSession.UploadedFiles[]` manifest — orchestrator reads from `ChatSessionManager` to enumerate active session files.</dependency>
+      <dependency task="005" status="not-started">`AnalysisChunk.FieldDelta` variant — orchestrator streams structured-field deltas through this additive SSE event type.</dependency>
+      <dependency task="006" status="not-started">Azure OpenAI Structured Outputs streaming — orchestrator's playbook delegation produces `FieldDelta` chunks via this path.</dependency>
+      <dependency task="010" status="not-started">`sprk_analysisaction` seed "Summarize Document for Chat" — orchestrator references this action GUID when invoking the playbook.</dependency>
+      <dependency task="011" status="not-started">`sprk_analysisplaybook` configuration — orchestrator passes this playbook ID to `IPlaybookService` / `AnalysisOrchestrationService.ExecutePlaybookAsync`.</dependency>
+    </dependencies>
+    <related-work>
+      <item>`AnalysisOrchestrationService.ExecutePlaybookAsync` — the canonical playbook execution method; R5 orchestrator delegates to it (does NOT reimplement).</item>
+      <item>`AssistantToolCallHandler` (Insights r2 Wave E3 task 042) — canonical chat-tool/endpoint convergence pattern. R5 mirrors the SHAPE but for a different orchestration (Summarize vs Insights).</item>
+      <item>Task 014 (D2-04) — direct endpoint `POST /api/ai/chat/sessions/{sessionId}/summarize` delegates to this orchestrator.</item>
+      <item>Task 015 (D2-05) — `InvokeSummarizePlaybookTool` agent-tool function delegates to this orchestrator.</item>
+      <item>Task 013 (D2-08 RichFilePreview extraction) is the P2-G2 parallel-safe peer; different worktree area (frontend `Spaarke.UI.Components`).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request `/compact`.
+      Declare rigor:
+      `🔒 RIGOR LEVEL: FULL`
+      `📋 REASON: BFF code change + new orchestration class + new DI registration + load-bearing convergence point for two downstream tasks + tag `bff` per TASK-INDEX.md.`
+      `📖 PROTOCOL STEPS: task-execute SKILL.md Step 0.5 FULL path.`
+      Proceeding with Step 0.
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` — confirm task 012 status is 🔲, dependencies 010 + 011 are
+      ✅ (or `not-started` if dispatched together with 010/011 in P2-G1 → P2-G2 sequence;
+      Phase 1 MUST be ✅). Confirm parallel-safe = true alongside task 013.
+      Read `current-task.md`; if it points elsewhere, set it to task 012. Read project
+      README for status.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. From
+      `AnalysisOrchestrationService.cs` extract: constructor composition pattern,
+      `IAsyncEnumerable&lt;AnalysisStreamChunk&gt; ExecuteAnalysisAsync` shape, delegation to
+      `ExecutePlaybookAsync` for playbook-bearing requests. From `AssistantToolCallHandler.cs`
+      extract: single-method convergence shape, contract-anchor doc-comment style, kill-switch
+      propagation discipline. From `AnalysisServicesModule.cs` extract: existing
+      `AddAnalysisOrchestrationServices` helper location, lifetime conventions. From R5
+      CLAUDE.md §3.1 extract the explicit "MUST NOT parallel orchestrator" rule.
+    </step>
+    <step order="3" name="Author Placement Justification + Why-New-Class Justification">
+      **Mandatory step per spec + R5 CLAUDE.md §3.1.** Before coding, author two artifacts:
+      (a) **Placement Justification** (for PR description per CLAUDE.md §10): why this
+      class belongs in BFF (`Services/Ai/Chat/`) — ADR-013 BFF-only architecture; chat
+      orchestration is core BFF responsibility; no extraction candidate; consumed only by
+      BFF endpoint + BFF-registered chat-tool. (b) **Why-New-Class Justification** (for
+      class XML doc-comment AND task notes per R5 CLAUDE.md §3.1 step 3): why a NEW class
+      and not an extension of `AnalysisOrchestrationService` — because (i) chat-session-scope
+      is a NEW orchestration shape (session-files index, `ChatSession.UploadedFiles[]`
+      manifest); (ii) multi-file combined-summary interjection is chat-layer logic, not
+      analysis-layer logic; (iii) agent-tool/endpoint convergence shape requires a dedicated
+      delegation target; (iv) `AnalysisOrchestrationService` orchestrates document-record-scoped
+      analysis, not chat-session-scoped synthesis. Cite spec FR-01 + FR-08 + SC-08 as the
+      load-bearing convergence requirement. Save both as `notes/task-012-justifications.md`.
+    </step>
+    <step order="4" name="Design `SessionSummarizeRequest` Input Shape">
+      Define the request record/class (likely `internal sealed record SessionSummarizeRequest`)
+      that captures the convergence input: `string SessionId`, `IReadOnlyList&lt;string&gt; FileIds`
+      (optional — if empty/null, defaults to ALL active `UploadedFiles[]` per spec FR-08),
+      `string? StyleHint` (per agent-tool function params), `Guid? CorrelationId` (for
+      `x-correlation-id` propagation per NFR-17). Both task 014 (endpoint) and task 015
+      (agent tool) MUST be able to construct this same request shape.
+    </step>
+    <step order="5" name="Implement Concrete `SessionSummarizeOrchestrator`">
+      Create `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs`.
+      Class signature: `public sealed class SessionSummarizeOrchestrator` (concrete; NO
+      interface; `sealed` per Insights `AssistantToolCallHandler` precedent). Constructor
+      injects: `ChatSessionManager` (read `UploadedFiles[]`), `IPlaybookService` or
+      `IAnalysisOrchestrationService` (delegate playbook execution to existing service —
+      pick whichever current public method shape best fits; do NOT introduce a new playbook
+      orchestrator), `RagService` (session-scoped RAG retrieval for combined-summary
+      grounding), `AiTelemetry`, `ILogger&lt;SessionSummarizeOrchestrator&gt;`. Target ≤7
+      constructor params.
+
+      Implement the SINGLE convergence method:
+      ```
+      public async IAsyncEnumerable&lt;AnalysisStreamChunk&gt; SummarizeSessionFilesAsync(
+          SessionSummarizeRequest request,
+          HttpContext httpContext,
+          [EnumeratorCancellation] CancellationToken cancellationToken)
+      ```
+      Flow (high level — verify against existing canonical patterns):
+      1. Validate `request.SessionId` + cap `FileIds.Count` ≤ 20 (NFR-02).
+      2. Load `ChatSession` via `ChatSessionManager`; if `FileIds` empty, default to
+         `chatSession.UploadedFiles[*].FileId`.
+      3. If `FileIds.Count >= 2`, yield deterministic combined-summary interjection chunk
+         (FR-04).
+      4. Build playbook-execute request referencing task 011 playbook config + task 010
+         action seed. Set `tenantId` + `sessionId` per ADR-014 / NFR-03.
+      5. Delegate to existing playbook execution path (`AnalysisOrchestrationService.ExecutePlaybookAsync`
+         or `IPlaybookService.ExecuteAsync` — pick the existing canonical method;
+         emphatically NOT a new method on this orchestrator).
+      6. Forward each `AnalysisStreamChunk` (including `FieldDelta` variants from task 005)
+         to caller via `yield return`.
+      7. On `DeclineToFindNode` activation, forward the structured decline envelope unchanged
+         (FR-11; do NOT post-process).
+      8. Emit telemetry: `r5.summarize.invocation` event with `path = invoking-method` —
+         actually set by callers (endpoint = `direct_endpoint`; tool = `agent_tool`) via
+         a `request.Path` discriminator or `ActivitySource` tag. Per spec D1-08 / NFR-12.
+      Include XML doc-comments on the class + the convergence method citing the "why-new-class"
+      justification + the convergence requirement (FR-01 + FR-08 + SC-08).
+    </step>
+    <step order="6" name="Verify Convergence — Single Internal Method, Both Paths Will Use It">
+      **Mandatory verification step per spec FR-01 + FR-08 + SC-08.** Confirm by code
+      inspection: exactly ONE convergence method exists on `SessionSummarizeOrchestrator`.
+      No alternate path through helper methods that callers could invoke directly. Task 014
+      (endpoint) and task 015 (agent tool) will each accept `SessionSummarizeRequest` and
+      call `SummarizeSessionFilesAsync(...)` and forward chunks via SSE. Document in task
+      notes: the single method name, its signature, and the explicit statement "tasks 014
+      and 015 both delegate to this method; no other entry point." Add a unit test that
+      enumerates public/internal methods on the class and asserts exactly ONE matches the
+      convergence-method signature shape (defensive future-proofing against drift).
+    </step>
+    <step order="7" name="Register Inside `AnalysisServicesModule.cs`">
+      Add registration inside the existing `AddAnalysisOrchestrationServices(services, configuration)`
+      helper in `AnalysisServicesModule.cs` (already gated by `analysisEnabled && documentIntelligenceEnabled`
+      per ADR-018 Flag Scope Discipline). Use `services.AddScoped&lt;SessionSummarizeOrchestrator&gt;();`.
+      ZERO new lines in `Program.cs`. Add `Console.WriteLine` line consistent with module
+      pattern: `Console.WriteLine("✓ R5 SessionSummarizeOrchestrator registered (task 012; ADR-010 concrete; chat-session Summarize convergence)");`.
+      Confirm no `if (flag)` block introduced — registration is unconditional within the
+      already-gated outer block (per CLAUDE.md §10 F.1 sub-mechanism).
+    </step>
+    <step order="8" name="Write Unit Tests">
+      Create `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SessionSummarizeOrchestratorTests.cs`.
+      Tests:
+      (a) **`SummarizeSessionFilesAsync_SingleFile_DoesNotEmitCombinedSummaryInterjection`** —
+          spec FR-04 negative case.
+      (b) **`SummarizeSessionFilesAsync_MultiFile_EmitsCombinedSummaryInterjectionBeforePlaybookStream`** —
+          spec FR-04 positive.
+      (c) **`SummarizeSessionFilesAsync_DelegatesToExistingPlaybookExecution`** — verify
+          via mock/fake `IPlaybookService` / `IAnalysisOrchestrationService` that the
+          existing canonical playbook method is called with the playbook ID from task 011.
+      (d) **`SummarizeSessionFilesAsync_PropagatesSessionIdToRagSearchOptions`** — verify
+          `RagSearchOptions.SessionId` is set on any internal `RagService.SearchAsync` calls
+          (spec NFR-03 + ADR-014).
+      (e) **`SummarizeSessionFilesAsync_RejectsMoreThanTwentyFileIds`** — spec NFR-02 cap.
+      (f) **`SummarizeSessionFilesAsync_DeclinePath_StreamsStructuredDeclineEnvelopeUnchanged`** —
+          spec FR-11.
+      (g) **`SessionSummarizeOrchestrator_HasNoInterface`** — ADR-010 enforcement via
+          reflection: `typeof(SessionSummarizeOrchestrator).GetInterfaces()` returns only
+          framework-supplied interfaces (none authored by R5).
+      (h) **`SessionSummarizeOrchestrator_ExposesExactlyOneConvergenceMethod`** — spec
+          FR-01 + FR-08 + SC-08 enforcement via reflection: exactly one
+          `IAsyncEnumerable&lt;AnalysisStreamChunk&gt;`-returning method matches the
+          convergence shape.
+    </step>
+    <step order="9" name="Verify Build + Tests + Acceptance Criteria">
+      Run `dotnet build src/server/api/Sprk.Bff.Api/` — zero new compiler warnings.
+      Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter FullyQualifiedName~SessionSummarizeOrchestratorTests`
+      — all 8 tests green. Walk through every &lt;acceptance-criterion&gt; below and confirm
+      each is testable + passing. Record evidence per criterion in task notes.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against `SessionSummarizeOrchestrator.cs` +
+      `AnalysisServicesModule.cs` (modified) + `SessionSummarizeOrchestratorTests.cs`.
+      Run `adr-check` skill — verify ADR-010 (concrete; no interface; module registration),
+      ADR-013 (BFF-only; no parallel chat agent), ADR-014 (tenant + session filter),
+      ADR-018 (no new flags), ADR-028 (no token snapshots), ADR-029 (publish-size — see
+      Step 9.7). R5 §3.1 reuse mandate cited; no parallel orchestrator introduced.
+      Both gates MUST pass before marking task complete.
+    </step>
+    <step order="9.7" name="BFF Publish-Size Verification (CLAUDE.md §10 + ADR-029)">
+      Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`.
+      Measure compressed output (e.g. `Compress-Archive deploy/api-publish/* deploy/api-publish.zip; (Get-Item deploy/api-publish.zip).Length / 1MB`).
+      Report: absolute size in MB compressed, delta vs prior baseline (post-task-011 — the
+      immediately-preceding P2-G2 dispatch peer; or post-Phase-1 baseline if 011 was
+      data-only). Confirm: ceiling ≤60 MB; R5 cumulative budget ≤+1 MB; single-task delta
+      &lt; +5 MB. Save to `notes/task-012-publish-size.md`.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 012 🔲 → ✅. Reset
+      `current-task.md` to the next pending task per root CLAUDE.md §7 (next is whichever
+      of 013 / 014 / 015 / 016 is unblocked — likely 014 + 015 which now have task 012 as
+      a satisfied dependency). Record in task notes: (a) Placement Justification + Why-New-Class
+      Justification (from Step 3); (b) single convergence-method signature; (c) constraints
+      verified (each ADR + spec FR cited); (d) publish-size measurement; (e) test results;
+      (f) confirmation that no parallel orchestrator was introduced. Report task completion
+      per task-execute SKILL.md Step 6.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish BFF; measure publish size</tool>
+    <tool name="git">Stage + commit on R5 branch</tool>
+    <tool name="code-review">FULL rigor quality gate at Step 9.5</tool>
+    <tool name="adr-check">FULL rigor quality gate at Step 9.5</tool>
+    <tool name="context-handoff">Checkpoint after Step 3 (justification artifacts), Step 5 (orchestrator), Step 7 (DI), Step 8 (tests), Step 9.5 (gates)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs (NEW concrete sealed class)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeRequest.cs (NEW — or inline within orchestrator file as `internal sealed record`)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (extend — add `Scoped` registration inside existing `AddAnalysisOrchestrationServices` helper)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SessionSummarizeOrchestratorTests.cs (NEW — 8 tests)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 012 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-012-justifications.md (Placement Justification + Why-New-Class Justification per Step 3)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-012-publish-size.md (publish-size verification evidence per Step 9.7)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-012-convergence-evidence.md (single-method convergence verification per Step 6)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <examples>
+    <example name="Single-handler convergence for chat-tool/endpoint (Insights r2 Wave E3)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Insights/AssistantToolCallHandler.cs">
+      Insights' `AssistantToolCallHandler` is the prior-art convergence pattern. Both the
+      BFF endpoint (`POST /api/insights/assistant/query` via `IInsightsAi.AssistantQueryAsync`
+      facade) and the chat-agent tool (`insights.query`) delegate to a single `HandleAsync`
+      method on this handler. The handler's class XML doc-comment cites the binding contract
+      (`design-e3-tool-call-contract.md`). R5's `SessionSummarizeOrchestrator` follows the
+      same convergence pattern, but anchored to spec FR-01 + FR-08 + SC-08 rather than the
+      Insights tool-call contract.
+    </example>
+    <example name="Concrete orchestrator + IAsyncEnumerable streaming + delegation to playbook" location="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs">
+      `AnalysisOrchestrationService.ExecuteAnalysisAsync` shows the canonical
+      `IAsyncEnumerable&lt;AnalysisStreamChunk&gt;` streaming shape AND the delegation
+      pattern (line 84 onwards): when a playbook ID is provided, delegate to
+      `ExecutePlaybookAsync` — do NOT re-implement playbook execution. R5's
+      `SessionSummarizeOrchestrator` delegates to this exact same `ExecutePlaybookAsync`
+      (or its sibling on `IPlaybookService`) — does NOT reimplement.
+    </example>
+    <example name="Concrete sealed class — ADR-010 no-interface enforcement" location="src/server/api/Sprk.Bff.Api/Services/Ai/Insights/AssistantToolCallHandler.cs">
+      `public sealed class AssistantToolCallHandler` — no interface; consumed directly via
+      concrete type from `IInsightsAi` facade impls; registered `Scoped` in DI module. R5's
+      `SessionSummarizeOrchestrator` mirrors this shape.
+    </example>
+    <example name="DI registration inside feature module (ADR-010)" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs">
+      Lines 73–80 show how Wave E3 added `AssistantToolCallHandler` registration inside
+      `AnalysisServicesModule` — `services.AddScoped&lt;...&gt;()` inside the existing
+      `if (analysisEnabled && documentIntelligenceEnabled)` block, with a `Console.WriteLine`
+      diagnostic line. R5 follows the same shape exactly.
+    </example>
+  </examples>
+
+  <acceptance-criteria>
+    <criterion testable="true">File `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs` exists; class is `public sealed class SessionSummarizeOrchestrator` (concrete; NO interface authored by R5).</criterion>
+    <criterion testable="true">The class exposes EXACTLY ONE convergence method (`SummarizeSessionFilesAsync` or equivalent name) returning `IAsyncEnumerable&lt;AnalysisStreamChunk&gt;`. This is the single delegation target for task 014 (direct endpoint) AND task 015 (agent tool). Verified via reflection-based unit test.</criterion>
+    <criterion testable="true">"Why-New-Class Justification" is authored in the class XML doc-comment AND in `notes/task-012-justifications.md` per R5 CLAUDE.md §3.1 step 3. Justification explicitly cites: (a) chat-session-scope is a NEW orchestration shape; (b) multi-file combined-summary interjection is chat-layer; (c) agent-tool/endpoint convergence requires a dedicated delegation target; (d) `AnalysisOrchestrationService` orchestrates document-record-scope, not chat-session-scope synthesis. No parallel orchestrator introduced — task 012 reuses `IPlaybookService` / `AnalysisOrchestrationService.ExecutePlaybookAsync` for playbook execution.</criterion>
+    <criterion testable="true">Placement Justification authored in `notes/task-012-justifications.md` for PR-description per CLAUDE.md §10 + `.claude/constraints/bff-extensions.md`. Cites ADR-013 BFF-only.</criterion>
+    <criterion testable="true">All composition dependencies reuse existing services: `RagService` (with `RagSearchOptions.SessionId` from task 002), `RagIndexingPipeline` (task 003 — if referenced), `ChatSessionManager` (task 004 extends `UploadedFiles[]`), `IPlaybookService` or `IAnalysisOrchestrationService` (for playbook execution delegation), `AnalysisChunk` with `FieldDelta` variant (task 005), Structured Outputs streaming path (task 006), `sprk_analysisaction` seed (task 010), `sprk_analysisplaybook` config (task 011). NO new orchestrator, NO new playbook engine, NO new RAG service.</criterion>
+    <criterion testable="true">Registration is inside `AnalysisServicesModule.cs` via the existing `AddAnalysisOrchestrationServices(...)` helper (or sibling helper called from within the same gated block). Lifetime: `Scoped`. ZERO new `services.AddXxx()` lines added to `Program.cs` — verified by grep / diff.</criterion>
+    <criterion testable="true">No new feature flag introduced (per R5 §3.2 + ADR-018). Registration lives unconditionally within the existing parent-gated `if (analysisEnabled && documentIntelligenceEnabled)` block. No new `if (R5SomeFlag)` introduced per CLAUDE.md §10 F.1.</criterion>
+    <criterion testable="true">Multi-file case (`fileIds.Count >= 2`) emits the deterministic combined-summary interjection chunk BEFORE the playbook streams (spec FR-04). Single-file case does NOT emit it. Verified by unit tests (b) + (a).</criterion>
+    <criterion testable="true">Decline-to-find path streams the structured `DeclineResponse` envelope unchanged (spec FR-11). Verified by unit test (f).</criterion>
+    <criterion testable="true">All internal `RagService.SearchAsync` calls set both `tenantId` AND `sessionId` filters (ADR-014 + spec NFR-03). Verified by unit test (d).</criterion>
+    <criterion testable="true">Hard cap of 20 files per session enforced (spec NFR-02). Verified by unit test (e).</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with ZERO new compiler warnings.</criterion>
+    <criterion testable="true">`dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter FullyQualifiedName~SessionSummarizeOrchestratorTests` — all 8 tests pass.</criterion>
+    <criterion testable="true">BFF publish-size measured: absolute compressed size reported; delta vs prior baseline reported; ceiling ≤60 MB confirmed; single-task delta &lt; +5 MB. Evidence in `notes/task-012-publish-size.md`.</criterion>
+    <criterion testable="true">`code-review` skill passes at Step 9.5 (FULL rigor quality gate).</criterion>
+    <criterion testable="true">`adr-check` skill passes at Step 9.5 — verifies ADR-010 (concrete; module registration), ADR-013 (BFF-only; no parallel agent), ADR-014 (tenant + session filter), ADR-018 (no new flags), ADR-028 (no token snapshots), ADR-029 (publish hygiene).</criterion>
+    <criterion testable="true">Task 014 (D2-04 endpoint) and task 015 (D2-05 agent tool) can BOTH be implemented by accepting `SessionSummarizeRequest` and calling the single convergence method on this orchestrator — no additional surface area required on this class for either consumer.</criterion>
+  </acceptance-criteria>
+</task>
