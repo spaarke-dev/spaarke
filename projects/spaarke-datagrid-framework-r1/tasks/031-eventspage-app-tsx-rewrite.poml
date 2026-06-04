@@ -3,7 +3,7 @@
   <metadata>
     <title>Rewrite EventsPage/App.tsx as ~150-line thin host (DataGrid + Calendar pane + BulkUpdateEventStatus handler)</title>
     <phase>4: Phase D — EventsPage Migration</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>009,030</dependencies>
     <blocks>032,034</blocks>
