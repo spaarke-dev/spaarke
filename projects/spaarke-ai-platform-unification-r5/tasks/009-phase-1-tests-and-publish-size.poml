@@ -1,12 +1,12 @@
 <task id="009" project="spaarke-ai-platform-unification-r5">
   <metadata>
     <title>D1-09 Phase 1 Tests + BFF Publish-Size Verification (Phase 1 GATE)</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>4 hours</estimated-effort>
-    <actual-effort></actual-effort>
-    <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <actual-effort>~15 min (aggregate verification; checks already run in P1-G4/G5 wave commit)</actual-effort>
+    <assigned>Claude Code (main session) — gate verification</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
     <phase>Phase 1 — Platform Extensions</phase>
     <wave>P1-G5 (serial GATE; depends on 002, 003, 004, 005, 006, 007, 008; closes Phase 1)</wave>
     <parallel-safe>false</parallel-safe>
