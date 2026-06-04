@@ -1,9 +1,33 @@
 # Phase D UAT Report — task 035
 
 > **Environment**: `https://spaarkedev1.crm.dynamics.com` (Spaarke Development Environment)
-> **Deploy commit**: `905a2f10` (task 034 — Phase D deploy)
-> **Status**: 🔄 **In progress — awaiting operator (Ralph) sign-off on each checklist item**
+> **Deploy commits**: `905a2f10` (initial Phase D deploy) + this commit (035 fixes 1+2+3 redeploy)
+> **Status**: 🔄 **UAT iteration 2 — awaiting operator re-verification of the 5 regressions found in iteration 1**
 > **Operator**: Ralph Schroeder
+
+---
+
+## UAT iteration 1 (operator findings 2026-06-03) → iteration 2 fixes
+
+Iteration 1 surfaced 5 regressions. All addressed in this commit:
+
+| # | Iteration 1 finding | Root cause | Fix |
+|---|---|---|---|
+| 1 | EventsPage drill-through: header card + inner grid card overflow modal viewport | DataGrid root `padding` + `rowGap` sized for full standalone Custom Page; too generous for `Xrm.Navigation.navigateTo` dialogs and iframe-embedded form tabs | `DataGrid.tsx` `root` style: paddings reduced from L/M → S, rowGap M → S, added `minHeight: 0` for proper flex shrinkage |
+| 2 | Outer container scrolls instead of inner grid card | Same as #1 + missing `minHeight: 0` in the flex chain | Same fix as #1 — `minHeight: 0` is the canonical flex-overflow fix that makes `gridScroll`'s `flex: 1; overflow: auto` actually engage instead of natural-content-height pushing the parent |
+| 3 | Command bar shows only `+ New / Delete / Refresh` (legacy widget had bulk-status operations) | sprk_event configjson authored minimal in task 030; 5 bulk-status handlers existed in `registerEventHandlers.ts` but weren't referenced | configjson `commandBar.primary` extended with 5 new `action: "custom"` items pointing at `CompleteEvents`, `CloseEvents`, `CancelEvents`, `OnHoldEvents`, `ArchiveEvents`. All require multi-select. `Write` privilege gated. 863 → 1672 bytes. |
+| 4 | Calendar side pane stays open after MDA form tab navigation | MDA form tabs HIDE the iframe rather than unmount it → `beforeunload`/`pagehide` miss the case | App.tsx: added `IntersectionObserver` on the root sentinel. When the iframe becomes hidden, `closeAllEventsPanes()`; when it returns visible, re-register the pane. Also added cleanup on React unmount. |
+| 5 | Calendar side pane filter dropdowns don't filter the grid | Pane emitted `CALENDAR_FILTER_CHANGED` messages on the BroadcastChannel, but App.tsx's subscriber was an explicit no-op (placeholder pending task 033 hostFilters API) | App.tsx: added `calendarFilterToHostFilters` translator (CalendarFilterPayload → HostFilterCondition[]) and wired the subscriber to update `calendarHostFilters` state, passed into `<DataGrid hostFilters={...} />`. The task 033a composition layer feeds the result into the FetchXML. |
+
+### Iteration 2 build + deploy
+
+| Artifact | Size | Status |
+|---|---|---|
+| EventsPage `sprk_eventspage.html` | 1,230 KB | ✅ Patched + published |
+| LegalWorkspace `sprk_corporateworkspace.html` | 2,162 KB | ✅ Patched + published (DataGrid CSS fix propagates to Calendar widget transitively) |
+| `sprk_gridconfiguration` (`e15c2b93-…`) | 1,672 bytes | ✅ PATCH succeeded; verified CompleteEvents + ArchiveEvents present |
+
+---
 
 ---
 

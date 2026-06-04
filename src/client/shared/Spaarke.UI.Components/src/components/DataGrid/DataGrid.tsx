@@ -179,24 +179,34 @@ const useStyles = makeStyles({
     // sections in the Power Apps OOB style. Outer surface stays flush with the
     // host modal background.
     //
-    // Tight paddings so the two cards fit cleanly inside a Power Apps dialog
-    // (`navigateTo` dialog frames have ~30px fixed chrome top + bottom; over-
-    // padding here makes the bottom of the grid extend past the dialog).
+    // Tight paddings + minHeight: 0 so the two cards fit cleanly inside:
+    //  - a Power Apps `navigateTo` dialog frame (~30px fixed chrome top/bottom)
+    //  - an MDA form-tab iframe (where the host iframe's height is whatever
+    //    the form layout gives it; root must NOT exceed that)
+    //  - a workspace-widget container (where the parent's flex chain controls
+    //    the available height)
+    //
+    // **Task 035-fix-1 (2026-06-03)**: paddings + rowGap REDUCED from
+    // L/M to S/XS, and `minHeight: 0` added, after UAT showed the original
+    // layout overflowed in dialog mode + iframe-embedded modes (the outer
+    // container scrolled instead of `gridScroll` scrolling its rows). The
+    // 50% padding reduction keeps the two-card OOB look but lets the cards
+    // actually fit in tighter viewports without spillage. `minHeight: 0`
+    // is the canonical flex-overflow fix — without it, the natural content
+    // height of the inner card defeats `flex: 1` shrinkage.
     display: 'flex',
     flexDirection: 'column',
     width: '100%',
     height: '100%',
+    minHeight: 0,
     position: 'relative',
     backgroundColor: tokens.colorNeutralBackground2,
     overflow: 'hidden',
-    // Generous outer padding so the two cards have visible breathing room
-    // from the modal frame — matches the OOB layout dimensions (see
-    // `projects/spaarke-datagrid-framework-r1/notes/testing-screenshots/oob-layout-dimensions.jpg`).
-    rowGap: tokens.spacingVerticalM,
-    paddingTop: tokens.spacingVerticalM,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingBottom: tokens.spacingVerticalM,
+    rowGap: tokens.spacingVerticalS,
+    paddingTop: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingBottom: tokens.spacingVerticalS,
   },
   gridScroll: {
     flex: 1,
