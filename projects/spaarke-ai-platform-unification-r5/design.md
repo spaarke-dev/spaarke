@@ -454,11 +454,12 @@ R5 implementation assumes v1.1 acceptance + delivery by the Insights team. If v1
    - **RAG path** (`path: "rag"`, `structuredResult.kind: "observation"`): render citation-grounded prose with `[n]` tokens. **v1.1 SSE consumption**: `answer` field populates progressively as Azure OpenAI streams tokens through the BFF's `delta` events — same ChatGPT/Claude-style UX as Summarize.
    - **Decline case** (`structuredResult.kind: "decline"` with 200 OK): render `answer` (explanation) + `envelope.SuggestedActions` as plain text (Phase 1.5 default; actionable verbs deferred to R6 backlog).
    - **Empty-results case** (RAG with `citations: []` + `answer: ""`): render "couldn't find anything" hint; do NOT pass empty answer through.
-5. **Clickable citations** (D4 decision; assumes v1.1 `citations[].href`):
+5. **Clickable citations** (D4 decision; assumes v1.1 `citations[].href` — see [`notes/insights-engine-contract-v1.1-request.md`](notes/insights-engine-contract-v1.1-request.md) §3 negotiated state):
    - When `citations[].href` is present, render the `[n]` token as a clickable button
    - Click dispatches `context.context_update` PaneEventBus event with the URL
-   - `FilePreviewContextWidget` (§4.7) opens the URL in the Context pane via iframe — document citations resolve to SPE preview URLs; observation citations resolve to record-view URLs
+   - `FilePreviewContextWidget` (§4.7) opens the URL in the Context pane via iframe — document citations resolve to URLs from `DocumentCheckoutService.GetPreviewUrlAsync(driveId, itemId, ct)` (per Insights team correction); observation citations resolve to record-view URLs (MDA or BFF endpoint per Insights team's choice)
    - When `href` is absent or `null` (back-compat fallback), render display-name-only citation (no click affordance)
+   - **Spike-outcome contingency**: Insights team's 0.5d schema-plumbing spike may reveal that `driveId`/`itemId` plumbing into `AssistantQueryCitation` exceeds the budgeted 1 day. If so, v1.1 ships with `href` only on observation citations; document citations defer to v1.2. R5 lives with display-name-only document citations in v1.1 — implementation-side this means the rendering code already handles `href: null` gracefully (back-compat path), so no R5 code change needed for the contingency.
 6. **Confidence floor badge** (D5 decision):
    - When `confidence < 0.6`, render Fluent v9 `Badge` or `MessageBar` with "Low confidence — verify before relying" text alongside the response
    - Threshold configurable via R5 settings; 0.6 is the v1 default
@@ -694,7 +695,7 @@ Per integration brief §6, R5 owns 6 decisions. R5 lead's choices recorded below
 | **D1** | **SSE streaming on `/api/insights/assistant/query`?** | No SSE (single-shot) | **Request v1.1 minor-version** — leverage R5's `FieldDelta` infrastructure; SSE benefits RAG-path responses significantly | Insights v1.1 contract change requested |
 | D2 | `forceMode: "playbook"` without playbook hint? | BFF resolves to configured default (`predict-matter-cost@v1`) | **Accept default** — R5 won't blind-fire `forceMode: "playbook"` without intent | No action |
 | D3 | Decline rendering: plain strings vs actionable verbs? | Plain strings in `SuggestedActions` | **Accept default for v1**; actionable buttons deferred to R6 backlog | No action |
-| **D4** | **Citation display — clickable URLs needed?** | `citations[].source` is a display name only | **Request v1.1 minor-version** — add `citations[].href` for clickable navigation to source documents/observations | Insights v1.1 contract change requested (bundled with D1) |
+| **D4** | **Citation display — clickable URLs needed?** | `citations[].source` is a display name only | **Request v1.1 minor-version** — add `citations[].href` for clickable navigation to source documents/observations. **Negotiated 2026-06-03 late**: Wave F includes 0.5d spike to confirm `driveId`/`itemId` plumbing through `AssistantQueryCitation`. If plumbing cost is large, document-citation `href` defers to v1.2; observation-citation `href` ships in v1.1. Document URL helper corrected to `DocumentCheckoutService.GetPreviewUrlAsync` (per Insights team). | Insights Wave F (~4.5d incl. spike + 1d citations); R5 v1.0 fallback for document citations if spike defers them |
 | **D5** | Confidence floor for UI low-confidence disclaimer? | None (no threshold) | **Yes, implement** — `confidence < 0.6` → "Low confidence" badge. Pure R5 client-side (no contract change) | R5 implements in §4.12 item 6 |
 | D6 | `previousTurnSummary` to classifier in Phase 1.5? | Logged only | **Accept default** — Phase 2 of classifier can use it; R5 doesn't need it for v1 | No action |
 

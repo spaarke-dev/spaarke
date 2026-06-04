@@ -3,11 +3,11 @@ title: Insights Engine — Contract v1.1 Request (SSE + clickable citations)
 audience: ai-spaarke-insights-engine-r2 (BFF-side; follow-on to Wave E3 task 042)
 requestor: spaarke-ai-platform-unification-r5 (R5)
 requestor-contact: R5 lead via PR / coordination doc §8 changelog
-status: AUTHORED — pending Insights team review + bandwidth confirmation
+status: NEGOTIATED — feedback received from Insights team 2026-06-03 (late); agreed scope in §0a below; pending operator bandwidth approval (Insights team feedback #7) before Wave F kickoff
 contract-base: v1.0 (POST /api/insights/assistant/query) shipped via PR #337 on 2026-06-03
 contract-target: v1.1 (additive, back-compatible)
 created: 2026-06-03
-last-updated: 2026-06-03
+last-updated: 2026-06-03 (late — post Insights team feedback integration)
 related-docs:
   - notes/insights-engine-assistant-integration-brief.md (v1.0 contract spec)
   - notes/insights-r2-coordination.md (cross-project coordination)
@@ -18,6 +18,7 @@ trigger-phrases:
   - "add clickable citations to insights endpoint"
   - "review R5 contract change request"
   - "respond to R5 v1.1 request"
+  - "kick off Wave F"
 ---
 
 # Insights Engine — Contract v1.1 Request (SSE + clickable citations)
@@ -28,7 +29,33 @@ trigger-phrases:
 
 ## 0. TL;DR (one paragraph)
 
-R5 (spaarke-ai-platform-unification-r5) is implementing the chat-agent consumer side of `POST /api/insights/assistant/query` per `notes/insights-engine-assistant-integration-brief.md`. During R5 design review (2026-06-03 late), the operator chose to **request a v1.1 minor-version** of the contract that adds (1) optional SSE streaming on the endpoint, and (2) optional `citations[].href` field on the response. Both are framed as **back-compatible additive changes**: v1.0 clients see no behavior change; v1.1-aware clients (R5's chat agent) opt into the new behavior via standard HTTP content negotiation. Rationale: R5 is already building structured-field SSE infrastructure (`FieldDelta` events in the `AnalysisChunk` protocol) for the Summarize tool; extending the Insights endpoint to use the same protocol gives the chat agent a uniform streaming UX across all AI tools (currently Summarize + Insights, future N+ tools), and clickable citations close a major trust gap when users want to verify cited sources. Effort estimate (Insights side): ~2-3 days for SSE + ~1 day for href = ~3-4 days total + coordination. Effort estimate (R5 side): ~1 day SSE consumption + ~0.5 day citation wiring = ~1.5 days total.
+R5 (spaarke-ai-platform-unification-r5) is implementing the chat-agent consumer side of `POST /api/insights/assistant/query` per `notes/insights-engine-assistant-integration-brief.md`. During R5 design review (2026-06-03 late), the operator chose to **request a v1.1 minor-version** of the contract that adds (1) optional SSE streaming on the endpoint, and (2) optional `citations[].href` field on the response. Both are framed as **back-compatible additive changes**: v1.0 clients see no behavior change; v1.1-aware clients (R5's chat agent) opt into the new behavior via standard HTTP content negotiation. Rationale: R5 is already building structured-field SSE infrastructure (`FieldDelta` events in the `AnalysisChunk` protocol) for the Summarize tool; extending the Insights endpoint to use the same protocol gives the chat agent a uniform streaming UX across all AI tools (currently Summarize + Insights, future N+ tools), and clickable citations close a major trust gap when users want to verify cited sources. Effort estimate (post-negotiation, Insights side): **~4.5 days** total — see §0a.
+
+---
+
+## 0a. Negotiation Outcome (2026-06-03 late — post-Insights-team-feedback)
+
+Insights team reviewed this request and provided 7 feedback points. All have been integrated or accepted. Net negotiated v1.1 scope:
+
+| Item | Pre-negotiation request | Post-negotiation agreement |
+|---|---|---|
+| **SSE on `/api/insights/assistant/query`** | Optional via `Accept: text/event-stream` | ✅ Same. **Streaming surface placement clarified**: lives at `IInsightsAi.SearchStreamAsync` overload (facade) + `InsightsOrchestrator` synthesis layer; `IRagService` interface UNCHANGED. `IOpenAiClient.StreamCompletionAsync` already returns `IAsyncEnumerable<string>` and is reused. |
+| **`delta` event schema** | Mirror R5's `FieldDelta` schema (path + content + sequence) | ✅ Same. |
+| **`citations[].href`** | Optional new field on each citation | ✅ pending spike (see §3 below) |
+| **Document URL helper** | I (R5) suggested `SpeFileStore.GetFilePreviewUrlAsync` | ✏️ **Corrected**: actual helper is `DocumentCheckoutService.GetPreviewUrlAsync(driveId, itemId, ct)`. R5 had this wrong. |
+| **Citation schema plumbing** | Assumed `driveId`/`itemId` flow to citation projection | ⚠️ **Spike required** — current `AssistantQueryCitation` only carries `Source string`. Plumbing IDs through the citation projection MAY be extra work; the 0.5d spike confirms scope. |
+| **Privilege filtering on `href` URLs** | Existing authorized endpoint (no URL signing) | ✅ Confirmed — `href` points to e.g. `/api/v1/documents/{id}/preview` which re-checks auth. No URL signing needed. |
+| **Bundle with `NullInsightsAi` cleanup?** | (Not raised in original request) | ❌ Insights team requested do-not-bundle (keep Wave F scope tight). R5 agreed — `NullInsightsAi` cleanup is a separate ticket. |
+| **Sequencing** | "After task 090 wrap-up" (R5 §6) | ✅ Confirmed — Wave F runs after task 090, not in parallel. |
+| **Effort (Insights side)** | ~3-4 days | ✏️ **Refined to ~4.5 days**: 3 days SSE (accounting for Polly retry semantics + AOAI streaming error handling — `content_filter` / `length` finish reasons mid-stream) + 1 day citations + 0.5d spike + 0.5d docs. R5 accepts. |
+| **Effort (R5 side)** | ~1.75 days | ✅ Unchanged. |
+| **Bandwidth (operator decision)** | Not raised | 🟡 Open per Insights team feedback #7 — operator decides whether ~1 week of Insights engineering capacity is available between task 090 close and Phase 2 outline. R5's analysis: parallel execution math works (R5 Phase 1 + Insights Wave F overlap by ~1 week; R5 Phase 2 Insights consumption is W3+, by which time v1.1 is live). |
+
+**R5 fallback if Wave F slips or is declined**: R5 Phase 2 ships consuming v1.0 (single-shot, display-name-only citations). UX degraded but functional. v1.1 consumption becomes a follow-up.
+
+**Document-citation-`href` fallback if spike reveals large plumbing cost**: Insights team ships v1.1 with `href` only on observation citations; document-citation `href` defers to v1.2. R5 will live with display-name-only document citations in v1.1.
+
+**The original request sections below (§1 through §8) remain as-authored** for negotiation traceability. Inline annotations marked `(updated per Insights feedback)` reflect specific corrections. See §9 changelog at bottom for the full edit log.
 
 ---
 
@@ -99,6 +126,8 @@ Add **optional SSE response mode** to `POST /api/insights/assistant/query`. Nego
 - `Accept: application/json` (or absent) → existing v1.0 single-shot JSON response (no change)
 - `Accept: text/event-stream` → new v1.1 SSE stream
 
+**Streaming surface placement** (updated per Insights feedback #2): the streaming variant lives at `IInsightsAi.SearchStreamAsync` (facade overload) + `InsightsOrchestrator` synthesis layer. `IRagService` interface is UNCHANGED. `IOpenAiClient.StreamCompletionAsync` already returns `IAsyncEnumerable<string>` and is reused — no new streaming primitive needed at the OpenAI-client layer.
+
 ### 2.2 Suggested SSE event protocol
 
 Align with R5's `AnalysisChunk` + `FieldDelta` protocol so a single client-side stream reader handles both tools. Events emitted as SSE frames per the existing convention:
@@ -153,8 +182,10 @@ For Phase 1.5 v1.1, **streaming the RAG-path `answer` field is the must-have**. 
 - [ ] SSE response emits `delta` events for RAG-path `answer` field as Azure OpenAI streams tokens
 - [ ] SSE response emits one final `result` event with the same JSON shape as v1.0 single-shot
 - [ ] SSE response terminates with `data: [DONE]\n\n`
+- [ ] **Polly retry semantics defined** (added per Insights feedback #1): document expected client/server behavior when SSE connection drops mid-stream — retry from token N? restart synthesis? what does the client see? Insights team's choice on implementation, but the behavior must be documented in the brief.
+- [ ] **AOAI streaming error handling** (added per Insights feedback #1): handle Azure OpenAI mid-stream finish reasons — `content_filter` (content policy violation), `length` (max tokens exceeded). Emit `error` SSE event with stable `errorCode` per ADR-019 + truncate stream cleanly.
 - [ ] Existing v1.0 clients (e.g., `swagger` UI tests, any v1.0 smoke tests) continue to work unchanged
-- [ ] New SSE-mode tests added covering: header negotiation, RAG-path delta sequence, playbook-path progress sequence, error-mid-stream, DONE sentinel
+- [ ] New SSE-mode tests added covering: header negotiation, RAG-path delta sequence, playbook-path progress sequence, error-mid-stream, DONE sentinel, connection drop + retry, AOAI content_filter mid-stream, AOAI length-finish mid-stream
 - [ ] Update `notes/insights-engine-assistant-integration-brief.md` §3 (request) + §4 (response) to document v1.1 SSE option
 - [ ] Update `design-e3-tool-call-contract.md` to v1.1 with changelog entry
 
@@ -179,17 +210,27 @@ Add **optional `href` field** to each citation object. URL points to the source 
 }
 ```
 
-### 3.3 URL construction guidance
+### 3.3 URL construction guidance (updated per Insights feedback #3)
 
 The `href` value depends on the citation type:
 
 | Citation source | Suggested `href` format |
 |---|---|
-| Document stored in SPE (file-backed citation) | URL that resolves to a file preview — e.g., `https://spaarke-bff-dev.azurewebsites.net/api/v1/documents/{documentId}/preview` (delegates to existing `SpeFileStore.GetFilePreviewUrlAsync`). R5's `FilePreviewContextWidget` (§4.7 of R5 design.md) consumes this URL via iframe rendering. |
+| Document stored in SPE (file-backed citation) | URL that resolves to a file preview. **Correct helper** (per Insights team): `DocumentCheckoutService.GetPreviewUrlAsync(driveId, itemId, ct)` — NOT `SpeFileStore.GetFilePreviewUrlAsync` as the original request suggested. R5's `FilePreviewContextWidget` (§4.7 of R5 design.md) consumes the produced URL via iframe rendering. **CAVEAT** (per Insights feedback #3): current `AssistantQueryCitation` only carries `Source string` — `driveId`/`itemId` may not flow from chunk/evidence schema into the citation projection today. **0.5-day spike required** (§3.4 below) to confirm; if plumbing is large, document-citation `href` defers to v1.2 per the fallback in §0a. |
 | Observation record (Dataverse-backed citation) | URL to view the observation — either a model-driven-app URL (`https://orgxxx.crm.dynamics.com/main.aspx?etn=sprk_observation&id={observationId}&pagetype=entityrecord`) OR a BFF endpoint returning a JSON-rendering shape (`https://spaarke-bff-dev.azurewebsites.net/api/insights/observations/{observationId}`). Insights team picks based on what's simpler. |
 | Inline RAG hit with no persistent source | `href: null` — R5 falls back to display-name-only rendering (back-compat behavior) |
 
-### 3.4 Privilege filtering / authorization
+### 3.4 Schema-plumbing spike (added per Insights feedback #3)
+
+Before implementation begins, run a 0.5-day spike to confirm:
+
+1. Does the RAG chunk/evidence model carry `driveId` + `itemId` to the citation projection layer?
+2. If not, what's the minimum-cost plumbing? (e.g., add fields to `ChunkResult` → `AssistantQueryCitation` mapping)
+3. If the plumbing cost exceeds ~1 day on top of the base 1-day `href` work, escalate to operator + R5 lead: do we accept observation-citations-only in v1.1 and defer document-citations to v1.2?
+
+Spike output: a short decision memo (1 page) capturing the schema reality + recommended path. Filed under `projects/ai-spaarke-insights-engine-r2/decisions/D-XX-citation-href-plumbing.md`.
+
+### 3.5 Privilege filtering / authorization
 
 `href` URLs MUST respect the AIPU2-027 privilege-group filtering already applied to the citation's underlying data. If the user can't see the source document/observation, the `href` should either:
 - Point to a URL that itself enforces authorization (existing endpoints do this naturally — they return 403 if user lacks access), OR
@@ -197,13 +238,13 @@ The `href` value depends on the citation type:
 
 The contract MUST NOT leak URLs to sources the user can't access. Verification: same authorization layer that filters `citations[]` itself filters `citations[].href` consistently.
 
-### 3.5 Back-compat (binding)
+### 3.6 Back-compat (binding)
 
 - v1.0 clients receive `citations[]` entries without `href` field (or with `href: null`) — no behavior change
 - v1.1-aware clients (R5) check for `href` presence and render clickable citations when present; fall back to display-name-only rendering when absent or `null`
 - Field is OPTIONAL in the schema — Insights team can omit it for citation types where URL construction is not yet implemented (e.g., observation records may take longer than document citations)
 
-### 3.6 Acceptance criteria
+### 3.7 Acceptance criteria
 
 - [ ] Response schema includes optional `href` field on each citation
 - [ ] Document-backed citations (SPE files) receive a working `href` URL that R5 can render in an iframe via `FilePreviewContextWidget`
@@ -218,18 +259,21 @@ The contract MUST NOT leak URLs to sources the user can't access. Verification: 
 
 ## 4. Combined v1.1 contract version bump
 
-Both requests are bundled into a single contract version: **v1.0 → v1.1**.
+Both requests are bundled into a single contract version: **v1.0 → v1.1** (designated "Wave F" by the Insights team).
 
 Per the integration brief §10:
 > "Schema change requests post-1.0: Insights team minor-versions the contract + provides back-compat plan"
 
 R5's expectation:
-- Insights team creates a v1.1 branch from master post-PR-#337-merge
-- Both additions implemented + tested as a single PR
+- Insights team creates a Wave F branch from master after task 090 wrap-up closes Phase 1.5
+- Spike runs first (~0.5 day, see §3.4) — validates schema plumbing for `citations[].href`; produces decision memo
+- Both additions implemented + tested as a single PR (unless spike reveals document-citation `href` needs to split to v1.2 per §0a fallback)
 - `design-e3-tool-call-contract.md` updated with v1.1 changelog entry documenting both additions
 - `notes/insights-engine-assistant-integration-brief.md` updated to reflect v1.1 endpoint behavior
 - Deploy to Spaarke Dev for R5 smoke testing
 - R5 then consumes v1.1 in its `insights.query` tool
+
+**Total Wave F estimate** (post-negotiation): **~4.5 days** = 0.5d spike + 3d SSE + 1d citations + 0.5d docs. Insights team's revised estimate; R5 accepted per §0a.
 
 ---
 
@@ -286,16 +330,31 @@ Total R5 effort: ~1.75 days. Included in R5 Phase 2 scope.
 
 ---
 
-## 8. Open questions for Insights team to answer
+## 8. Open questions for Insights team to answer (RESOLVED 2026-06-03 late)
 
-| # | Question | R5's preferred answer |
-|---|---|---|
-| 1 | Bandwidth available for ~3-4 days v1.1 work in the near-term (within 1-2 weeks of receiving this request)? | Yes preferred; if not, R5 ships Phase 2 with v1.0 consumption and adds v1.1 consumption in a follow-on |
-| 2 | Any objection to the suggested SSE event protocol shape (§2.2) — particularly the `delta` event schema mirroring R5's `FieldDelta`? | No objection preferred (uniformity benefits both projects); alternatives welcome with rationale |
-| 3 | Should `href` URLs use a BFF-managed redirect (more control, more code) or direct SPE / Dataverse URLs (simpler, less indirection)? | Insights team's preference — both work for R5 consumption |
-| 4 | Should v1.1 ship in a single PR or split SSE + citations into two PRs? | Single PR preferred (one minor-version bump); Insights team decides based on review-load |
-| 5 | Is there a deployment-time concern with v1.1 (e.g., feature flag for SSE mode in case of issues)? | Insights team decides; R5 will consume whatever the team ships |
+All questions from the original ask have been answered by the Insights team's feedback. Net resolutions:
+
+| # | Question | R5's preferred answer | Insights team response | Status |
+|---|---|---|---|---|
+| 1 | Bandwidth available for v1.1 work in the near-term? | Yes preferred; graceful v1.0 fallback if not | Open — depends on operator approval (feedback #7) | 🟡 Pending operator decision |
+| 2 | Any objection to suggested SSE event protocol shape (§2.2) — `delta` schema mirroring R5's `FieldDelta`? | No objection preferred | No objection (per feedback #2). Streaming surface placement clarified: `IInsightsAi.SearchStreamAsync` + `InsightsOrchestrator`; `IRagService` unchanged. | ✅ Resolved |
+| 3 | Should `href` URLs use BFF-managed redirect or direct URLs? | Insights team's preference | `href` points to existing authorized endpoint (per feedback #4); no URL signing. Document URL helper corrected to `DocumentCheckoutService.GetPreviewUrlAsync`. | ✅ Resolved |
+| 4 | Should v1.1 ship in single PR or split? | Single PR preferred | Single PR + spike upfront (per feedback #3). Document-citation `href` may defer to v1.2 if spike reveals large plumbing. | ✅ Resolved |
+| 5 | Deployment-time concern (feature flag for SSE)? | Insights team decides | Not explicitly addressed in feedback; Insights team decides per their kill-switch conventions (ADR-032). | ✅ Insights team's call |
+| 6 (new) | Bundle with `NullInsightsAi` asymmetric-registration cleanup? | (Not raised originally) | Do NOT bundle (per feedback #6) — separate ticket. R5 agreed. | ✅ Resolved |
+| 7 (new) | Sequencing — Wave F parallel with task 090 or after? | After task 090 (R5's original §6 stance) | After task 090 (per feedback #5). Confirmed. | ✅ Resolved |
+
+**Net status**: 6/7 questions resolved; 1 pending operator bandwidth decision.
 
 ---
 
-*Authored 2026-06-03 by R5 Claude (Anthropic AI agent) on behalf of the spaarke-ai-platform-unification-r5 project. Mirror this file to the Insights project's notes/ folder if convenient. Insights team's response gets recorded in `notes/insights-r2-coordination.md` §8 (changelog) when accepted/declined/modified.*
+## 9. Changelog
+
+| Date | Change |
+|---|---|
+| 2026-06-03 (early) | Initial authoring by R5 Claude on behalf of R5 project. Original request: SSE + clickable citations as v1.1 minor-version. Effort estimate: ~3-4 days Insights side. 5 open questions for Insights team. |
+| 2026-06-03 (late) | **Negotiation complete** — Insights team provided 7 feedback points; R5 integrated all. Key changes: §0a Negotiation Outcome section added; §2.1 streaming surface placement clarified (`IInsightsAi.SearchStreamAsync` not `IRagService`); §2.7 acceptance criteria expanded (Polly retry, AOAI streaming error handling); §3.3 URL helper corrected (`DocumentCheckoutService.GetPreviewUrlAsync` not `SpeFileStore.*`); §3.4 schema-plumbing spike added (0.5d); §4 effort revised to 4.5 days; §8 questions resolved. R5 operator approval pending for bandwidth (feedback #7); other items agreed. |
+
+---
+
+*Authored 2026-06-03 (early) by R5 Claude (Anthropic AI agent) on behalf of the spaarke-ai-platform-unification-r5 project. Negotiated 2026-06-03 (late) with Insights team via feedback document. Mirror this file to the Insights project's notes/ folder if convenient. Future updates (Wave F start/ship) recorded in `notes/insights-r2-coordination.md` §8 (changelog).*
