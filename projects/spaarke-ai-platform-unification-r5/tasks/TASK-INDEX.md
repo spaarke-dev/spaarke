@@ -71,9 +71,9 @@ R5 ships in 3 sequential phases + 1 wrap-up task, with parallel-execution opport
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| 023 | Pre-G6 | D2-13 R5 lead contract review + sign-off (`design-e3-tool-call-contract.md` v1.0 §10) | 🔲 | 1h | ❌ | — (operator-led) |
-| 024 | P2-G6 | D2-14 `InsightsQueryToolHandler` chat-agent tool function (register `insights.query`) | 🔲 | 4h | ✅ | 023 |
-| 025 | P2-G6 | D2-15 Subject resolution + HTTP client (existing `@spaarke/auth`) | 🔲 | 3h | ✅ | 023 |
+| 023 | Pre-G6 | D2-13 R5 lead contract review + sign-off (`design-e3-tool-call-contract.md` v1.0 §10) | ✅ (skipped-as-redundant; D-decisions locked in spec.md §8.2) | 1h (actual ~5m governance) | ❌ | — (operator-led) |
+| 024 | P2-G6 | D2-14 `InsightsQueryToolHandler` chat-agent tool function (register `insights.query`) | ✅ | 4h | ✅ | 023 |
+| 025 | P2-G6 | D2-15 Subject resolution + HTTP client (existing `@spaarke/auth`) | ✅ | 3h (actual ~2h sub-agent; main session owns commit + quality gates + test execution) | ✅ | 023 |
 | 026 | P2-G6 | D2-16 Two-path response renderer (`InsightsResponseRenderer`) | 🔲 | 1d | ✅ | 017, 024 |
 | 027 | P2-G6 | D2-17 Clickable citations (v1.1 `citations[].href`; v1.0 fallback) | 🔲 | 4h | ✅ | 026 |
 | 028 | P2-G6 | D2-18 Confidence floor badge (D5 R5 client-side; `<0.6` threshold) | 🔲 | 2h | ✅ | 026 |

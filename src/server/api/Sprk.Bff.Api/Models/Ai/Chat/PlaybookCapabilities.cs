@@ -72,6 +72,24 @@ public static class PlaybookCapabilities
     public const string VerifyCitations = "verify_citations";
 
     /// <summary>
+    /// InvokeInsightsQueryTool — entity-scoped analytical questions (matter/project/invoice)
+    /// answered via the Insights Engine Assistant endpoint
+    /// (<c>POST /api/insights/assistant/query</c>). Exposed as the <c>insights.query</c> AI
+    /// function. R5 task 024 / D2-14 — R5 is a Zone B HTTP consumer of the Insights contract
+    /// per refined ADR-013 §3.5; the tool never injects Insights internals.
+    ///
+    /// <para>
+    /// Dataverse option set integer code: PROVISIONAL (not yet assigned by the Insights team's
+    /// capability-manifest backfill — Insights r3 work item F-4). For now this string constant
+    /// is added to the local <see cref="CoreCapabilities"/> set so the tool is discoverable in
+    /// standalone chat mode; when the Dataverse capability row lands, this constant will map
+    /// to that row's <c>sprk_playbookcapabilities</c> integer code and the manifest's
+    /// <c>ToolNames</c> allow-list will gate Layer-2 routing per AIPU2-061.
+    /// </para>
+    /// </summary>
+    public const string InsightsQuery = "insights_query";
+
+    /// <summary>
     /// All defined capability values. Useful for validation and iteration.
     /// </summary>
     public static readonly IReadOnlyList<string> All =
@@ -85,7 +103,8 @@ public static class PlaybookCapabilities
         Summarize,
         LegalResearch,
         CodeInterpreter,
-        VerifyCitations
+        VerifyCitations,
+        InsightsQuery
     ];
 
     /// <summary>
@@ -94,12 +113,22 @@ public static class PlaybookCapabilities
     /// Excludes LegalResearch (needs Bing Grounding), CodeInterpreter (needs Foundry agent),
     /// WebSearch (needs Bing API key), WriteBack (needs analysis context),
     /// and Reanalyze (needs analysis context).
+    ///
+    /// <para>
+    /// R5 D2-14 (task 024) — <see cref="InsightsQuery"/> is included so the
+    /// <c>insights.query</c> tool is discoverable in standalone chat mode. The Insights
+    /// endpoint enforces its own kill-switches (returns 503 for
+    /// <c>ai.insights.disabled</c> / <c>ai.rag.disabled</c> /
+    /// <c>ai.intent-classification.disabled</c>) — surfaced to the renderer per the
+    /// contract v1.0 §5.1 error matrix.
+    /// </para>
     /// </summary>
     public static readonly IReadOnlyList<string> CoreCapabilities =
     [
         Search,
         Analyze,
         SelectionRevise,
-        Summarize
+        Summarize,
+        InsightsQuery
     ];
 }

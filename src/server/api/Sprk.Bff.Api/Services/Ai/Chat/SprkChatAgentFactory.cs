@@ -897,6 +897,67 @@ public class SprkChatAgentFactory
             }
         }
 
+        // --- InvokeInsightsQueryTool (R5 D2-14 / task 024) ---
+        // Gated behind the InsightsQuery capability (PlaybookCapabilities.InsightsQuery).
+        // Reuses the existing capability gate framework (no new feature flag per R5
+        // CLAUDE.md §3.2 + ADR-018; kill-switch coverage inherits via the Insights
+        // endpoint's own 503 responses for ai.insights.disabled / ai.rag.disabled /
+        // ai.intent-classification.disabled).
+        //
+        // Zone B HTTP consumer (R5 CLAUDE.md §3.5 / §10 + refined ADR-013 §3.5): the
+        // tool consumes POST /api/insights/assistant/query via the typed HttpClient
+        // registered in AnalysisServicesModule.AddAnalysisOrchestrationServices. The
+        // tool does NOT inject Insights internals (IInsightsAi, InsightsOrchestrator,
+        // Models.Insights.*) — same-process HTTP is the canonical Zone B pattern.
+        //
+        // Tool routing scope (NFR-12 / UR-01): the tool description text is the
+        // LOAD-BEARING artifact for correct LLM routing between this insights.query
+        // tool and the invoke_summarize_playbook tool (task 015). See
+        // InvokeInsightsQueryTool.ToolDescription — entity-scoped analytical questions
+        // (matter/project/invoice) vs session-uploaded files summarization.
+        //
+        // ADR-028: no token snapshot — the tool reads HttpContext.Request.Headers
+        // Authorization FRESH per outbound call via IHttpContextAccessor (NEVER captured
+        // in constructor or closure).
+        //
+        // Factory-instantiated (ADR-010): the tool class itself is NOT DI-registered;
+        // we resolve the typed HttpClient + IHttpContextAccessor + logger from the
+        // scopedProvider and construct the tool here. Mirrors the canonical
+        // InvokeSummarizePlaybookTool pattern (AIPL-053).
+        if (capabilities.Contains(PlaybookCapabilities.InsightsQuery))
+        {
+            attempted++;
+            try
+            {
+                // The typed HttpClient is registered via
+                // services.AddHttpClient<InvokeInsightsQueryTool>(...) so we resolve the
+                // tool itself directly — IHttpClientFactory wires the HttpClient into the
+                // constructor.
+                var insightsQueryTool =
+                    scopedProvider.GetService<InvokeInsightsQueryTool>();
+                if (insightsQueryTool != null)
+                {
+                    tools.AddRange(insightsQueryTool.GetTools());
+                    resolved++;
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "InvokeInsightsQueryTool not available; insights.query will not be " +
+                        "registered. Verify AnalysisServicesModule.AddAnalysisOrchestrationServices " +
+                        "registered the typed HttpClient (Analysis:Enabled and " +
+                        "DocumentIntelligence:Enabled).");
+                    failedTools.Add(nameof(InvokeInsightsQueryTool));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to resolve InvokeInsightsQueryTool — skipping");
+                failedTools.Add(nameof(InvokeInsightsQueryTool));
+            }
+        }
+
         // --- WebSearchTools ---
         // Gated behind "web_search" capability (task 089).
         // Only available when the playbook explicitly enables web search. Many playbooks

@@ -1,12 +1,13 @@
 <task id="023" project="spaarke-ai-platform-unification-r5">
   <metadata>
     <title>D2-13 R5 Lead Contract Review + Sign-Off (Insights `design-e3-tool-call-contract.md` v1.0 §10)</title>
-    <status>not-started</status>
+    <status>skipped-as-redundant</status>
     <estimated-effort>1 hour</estimated-effort>
-    <actual-effort></actual-effort>
-    <assigned>Operator (R5 lead) — Claude Code assists as walkthrough/checklist runner</assigned>
-    <started></started>
-    <completed></completed>
+    <actual-effort>~5 min (governance discussion; no code, no review walkthrough)</actual-effort>
+    <assigned>Operator (R5 lead — Ralph Schroeder)</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
+    <skip-rationale>D1–D6 decisions were ALREADY MADE during R5 design phase and are recorded verbatim in projects/spaarke-ai-platform-unification-r5/spec.md §8.2 (Owner Clarifications) and in the v1.1 negotiation documents (notes/insights-engine-contract-v1.1-request.md + notes/insights-team-v1.1-response.md). The Insights team Wave F already shipped v1.1 (per insights-r2-coordination.md §8 entry dated 2026-06-04 late) implementing the agreed-upon contract. Recording the same decisions a second time in the Insights project's design-e3-tool-call-contract.md §10 review log is ceremony, not substance. R5 lead chose 2026-06-04 to skip the Insights-side log entry; the decisions remain authoritatively recorded in R5 spec.md §8.2 and are referenced by all downstream R5 tasks (024-031) that depend on them. The Insights-side §10 entry can be appended later via the coordination doc if Insights team requests it for their own governance trail.</skip-rationale>
     <phase>Pre-Phase-2 Gate</phase>
     <wave>Pre-G6 (operator-led gate; serial; blocks Phase 2 §4.12 tasks 024–031)</wave>
     <parallel-safe>false</parallel-safe>

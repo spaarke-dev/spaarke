@@ -390,6 +390,97 @@ public class SprkChatAgentFactoryTests
             because: "the factory MUST emit a capability_change event listing invoke_summarize_playbook as available when Summarize capability is set");
     }
 
+    // ── R5 task 024 — InvokeInsightsQueryTool routing-selection coverage ──────
+
+    /// <summary>
+    /// When the playbook capability set contains <see cref="PlaybookCapabilities.InsightsQuery"/>
+    /// AND <see cref="Sprk.Bff.Api.Services.Ai.Chat.Tools.InvokeInsightsQueryTool"/> is registered
+    /// in DI, the factory MUST register <c>insights.query</c> as an AIFunction on the
+    /// resolved agent's tool list. Verified via the <c>capability_change</c> SSE event:
+    /// when the previous turn did NOT have this tool, the factory emits a "capability_change"
+    /// event listing it as a newly-available tool.
+    ///
+    /// This satisfies R5 task 024 acceptance criterion: "tool is visible in the agent's tool
+    /// catalog when the gating capability is present".
+    /// </summary>
+    [Fact]
+    public async Task CreateAgentAsync_WithInsightsQueryCapability_RegistersInsightsQueryTool()
+    {
+        // Arrange — null playbookId means "use CoreCapabilities" which now includes InsightsQuery
+        // (per R5 task 024 PlaybookCapabilities update).
+        var contextProviderMock = new Mock<IChatContextProvider>();
+        contextProviderMock
+            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateDefaultContext());
+
+        var services = BuildServiceProviderWithInsightsQueryTool(contextProviderMock.Object);
+        var factory = services.GetRequiredService<SprkChatAgentFactory>();
+
+        var capturedEvents = new List<ChatSseEvent>();
+        Func<ChatSseEvent, CancellationToken, Task> sseWriter = (evt, _) =>
+        {
+            capturedEvents.Add(evt);
+            return Task.CompletedTask;
+        };
+
+        // Act — playbookId = null → CoreCapabilities (includes InsightsQuery per task 024).
+        // previousTurnToolNames empty → every current tool is reported as "available".
+        await factory.CreateAgentAsync(
+            TestSessionId, TestDocumentId,
+            playbookId: null,
+            tenantId: TestTenantId,
+            sseWriter: sseWriter,
+            latestUserMessage: "what will this matter cost?",
+            previousTurnToolNames: Array.Empty<string>());
+
+        // Assert — a capability_change event lists `insights.query` as a newly-available tool.
+        capturedEvents.Should()
+            .Contain(e => e.Type == "capability_change",
+                because: "factory must emit capability_change when the tool set differs from the previous turn");
+
+        var changeEvents = capturedEvents.Where(e => e.Type == "capability_change").ToList();
+        var allPayloads = string.Join("\n", changeEvents.Select(e =>
+            System.Text.Json.JsonSerializer.Serialize(e.Data)));
+        allPayloads.Should().Contain(InvokeInsightsQueryTool.ToolName,
+            because: "the factory MUST emit a capability_change event listing insights.query as available when InsightsQuery capability is set");
+    }
+
+    /// <summary>
+    /// Build a service provider that includes the dependencies needed to register
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Chat.Tools.InvokeInsightsQueryTool"/> in DI so the
+    /// tool's gating block in <c>SprkChatAgentFactory.ResolveTools</c> can wire successfully.
+    /// </summary>
+    private static ServiceProvider BuildServiceProviderWithInsightsQueryTool(
+        IChatContextProvider contextProvider)
+    {
+        var services = new ServiceCollection();
+
+        var chatClientMock = new Mock<IChatClient>();
+        services.AddSingleton(chatClientMock.Object);
+
+        var rawChatClientMock = new Mock<IChatClient>();
+        services.AddKeyedSingleton<IChatClient>("raw", rawChatClientMock.Object);
+
+        services.AddScoped(_ => contextProvider);
+        services.AddLogging();
+
+        // Register the typed HttpClient for InvokeInsightsQueryTool — mirrors the
+        // AnalysisServicesModule.AddAnalysisOrchestrationServices registration but with a
+        // test-only BaseAddress. The tool's gating block in ResolveTools only checks "is
+        // the tool resolvable?", it does NOT invoke the HTTP call.
+        services.AddHttpContextAccessor();
+        services.AddHttpClient<Sprk.Bff.Api.Services.Ai.Chat.Tools.InvokeInsightsQueryTool>(client =>
+        {
+            client.BaseAddress = new Uri("https://test.local");
+            client.Timeout = TimeSpan.FromSeconds(60);
+        });
+
+        services.AddSingleton<SprkChatAgentFactory>();
+
+        return services.BuildServiceProvider();
+    }
+
     /// <summary>
     /// Build a service provider that includes the dependencies needed to register
     /// <see cref="Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator"/> in DI so the
