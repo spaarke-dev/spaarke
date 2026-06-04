@@ -84,7 +84,7 @@ R5 ships in 3 sequential phases + 1 wrap-up task, with parallel-execution opport
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| 031 | P2-G8 | D2-22 Phase 2 tests + integration verification (E2E Summarize + Insights smoke + cross-tool disambiguation) | 🔲 | 4h | ❌ | All P2 tasks |
+| 031 | P2-G8 | D2-22 Phase 2 tests + integration verification (E2E Summarize + Insights smoke + cross-tool disambiguation) | 🔄 code-side gate ✅; final ✅ pending PR merge + Dev deploy + 030 SME | 4h (actual ~30m) | ❌ | All P2 tasks |
 
 ---
 

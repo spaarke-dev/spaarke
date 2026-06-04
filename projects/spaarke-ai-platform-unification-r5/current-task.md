@@ -10,12 +10,12 @@
 
 | Field | Value |
 |---|---|
-| **Active flow** | Phase 2 in progress — 5 of 22 P2 tasks done (010, 011, 013, 016, 019) |
-| **Pipeline status** | ✅ Phase 1 (9/9); ✅ Phase 2 Wave A (010+011+013+016+019); next: 012, 014/015, 017/018, 020-022 |
-| **Last wave verified** | Phase 2 Wave A (5 tasks via 4 parallel sub-agents): Dataverse SUM-CHAT@v1 action + summarize-document-for-chat@v1 playbook live on Spaarke Dev 1; TypeScript clean across ui-components + ai-widgets + ConversationPane.tsx (errors filtered to pre-existing files only); 0 BFF .cs touched (publish-size delta = 0). New `scripts/Deploy-AnalysisAction.ps1` companion to Deploy-Playbook.ps1 ships idempotent action upsert (sibling-script approach per task 010 POML Option B). |
-| **Branch** | `work/spaarke-ai-platform-unification-r5` on top of `origin/master` `7e20dc82` |
-| **Next action** | Phase 2 Wave B: dispatch 012 (orchestrator; depends on 010+011 ✅) in parallel with anything else ready. Then 014+015 (depend on 012). Then 017+018 (depend on 016+013). Then 020/021/022 (depend on 017/018/013). |
-| **Status** | ready-to-execute (Phase 2 mid-execution) |
+| **Active flow** | ✅ PHASE 2 CODE-SIDE COMPLETE — 20 of 22 P2 tasks ✅ + task 030 partial (scaffold done; SME walkthrough pending post-deploy) + task 031 partial (code-side gate green; final ✅ post-deploy) |
+| **Pipeline status** | ✅ Phase 1 (9/9 complete); ✅ Phase 2 Waves A-E5 (code complete); next: PR → master → CI/CD deploy → SME walkthrough → Phase 3 |
+| **P2 gate (code-side)** | GREEN. 6198/6198 BFF tests pass, 45 MB publish, no new CVEs, zero new Program.cs lines, ADR compliance matrix all green (17 ADRs). Evidence: `notes/task-031-phase-2-closeout.md` |
+| **Branch** | `work/spaarke-ai-platform-unification-r5` (~17 commits ahead of `origin/master`) — PR-ready |
+| **Next action** | Open R5 PR against master via `gh pr create`. After merge + CI/CD deploys to Spaarke Dev, run task 030 SME walkthrough (~45 min operator + 1 SME session), then close 030 + 031 final ✅, then start Phase 3 (D3-01 /analyze proof point). |
+| **Status** | PR-ready (Phase 2 code-side complete; awaiting merge + deploy) |
 
 ### Files Modified This Session (committed)
 - `projects/spaarke-ai-platform-unification-r5/design.md` — initial draft + Insights coordination + v1.1 negotiation integration (commits `8ae4e59c`, `6a6c7a29`, `1ecf41a6`)

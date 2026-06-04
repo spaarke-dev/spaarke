@@ -1,12 +1,13 @@
 <task id="031" project="spaarke-ai-platform-unification-r5">
   <metadata>
     <title>D2-22 Phase 2 Tests + Integration Verification (Phase 2 GATE)</title>
-    <status>not-started</status>
+    <status>complete-code-verification-pending-sme</status>
     <estimated-effort>4 hours</estimated-effort>
-    <actual-effort></actual-effort>
-    <assigned>AI Agent</assigned>
-    <started></started>
+    <actual-effort>~30 min code-side gate (aggregate verification; final ✅ requires task 030 SME walkthrough completion post-deploy)</actual-effort>
+    <assigned>Claude Code (main session) — code-side gate verification</assigned>
+    <started>2026-06-04</started>
     <completed></completed>
+    <status-note>Code-side gate GREEN per notes/task-031-phase-2-closeout.md (6198/6198 tests pass; 45 MB publish; no new CVEs; ADR compliance matrix all green; asymmetric-registration audit clean). Final ✅ pending: (1) PR merge to master + CI/CD deploy to Spaarke Dev; (2) task 030 SME walkthrough completion against deployed environment. Both deferred per operator decision 2026-06-04.</status-note>
     <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
     <wave>P2-G8 (serial GATE; depends on ALL P2 tasks 010–030; closes Phase 2)</wave>
     <parallel-safe>false</parallel-safe>
