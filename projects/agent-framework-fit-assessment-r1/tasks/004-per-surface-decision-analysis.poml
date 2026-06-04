@@ -4,7 +4,8 @@
     <phase>3</phase>
     <tags>assessment, decision-matrix, per-surface, criteria</tags>
     <estimate>2h</estimate>
-    <status>pending</status>
+    <status>completed</status>
+    <completion-summary>Completed 2026-06-03 via sub-agent (commit d473c023). Output: notes/04-per-surface-decision-matrix.md (708 lines, 10 surfaces). S5 correctly bifurcated into S5A (shipped Foundry wrapper) + S5B (planned canonical durable HITL); 2 S8 surfaces from task 001 (SessionSummarizationService + CapabilityRouter) included. Distribution: 1 ADOPT / 5 PARTIAL / 4 DON'T ADOPT — anti-bias guard rail passes decisively. Top 3 conclusions: (1) S2 JPS DON'T ADOPT — Workflows is conceptually competitive but no incremental migration path; rewrite touches 30+ files + Dataverse schema + plugin pipeline, cost grossly disproportionate to benefit; (2) S5B is the only ADOPT — F7 Workflows + F11 RequestPort + F12 Foundry hosting purpose-built for multi-day legal workflows; importantly workflow HITL is framework-internal not Foundry-exclusive, narrowing Foundry-vs-framework to deployment-only; (3) S1 PARTIAL gated on Issue #6268 — structural fit is highest in assessment but bug affects SprkChat's canonical multi-tool streaming, adopting before resolution ships a regression. Unexpected verdict: S6 DON'T ADOPT for the right reason — uses Microsoft.Agents.Builder (M365 Agents SDK), an entirely separate SDK from Microsoft.Agents.AI; conflating would push wrong abstraction onto Copilot integration boundary. Top open questions for synthesis §8: VM-isolation requirement for S5B (Foundry-hosted vs Workflows-in-BFF/Function); S1 wait-or-pilot timing for #6268; S7 D-A20 contract authoring address 3 UNKNOWNs (host library, deployment model, BFF seam).</completion-summary>
     <parallel-group>—</parallel-group>
     <parallel-safe>false</parallel-safe>
     <dependencies>001, 002, 003</dependencies>
