@@ -1,12 +1,12 @@
 <task id="006" project="spaarke-ai-platform-unification-r5">
   <metadata>
     <title>D1-06 Azure OpenAI Structured Outputs mode + incremental JSON parser (Summarize streaming)</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>1 day</estimated-effort>
-    <actual-effort></actual-effort>
-    <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <actual-effort>~2 hours (PATH A confirmed by spike; orchestrator wiring scope-deferred to task 012)</actual-effort>
+    <assigned>Claude Code (main session) + spike against Azure OpenAI Spaarke Dev</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
     <phase>Phase 1 — Platform Extensions</phase>
     <wave>P1-G4 (serial; wraps Structured Outputs + incremental JSON parser)</wave>
     <parallel-safe>false</parallel-safe>

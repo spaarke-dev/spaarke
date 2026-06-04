@@ -19,6 +19,15 @@ public static class AnalysisServicesModule
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        // R5 Summarize telemetry (task 008, D1-08). Unconditional registration per R5 CLAUDE.md §3.2
+        // (R5 introduces NO new feature flags; kill-switch coverage inherits from existing AI flags
+        // via NullSprkChatAgentFactory). Registering this singleton outside the documentIntelligenceEnabled
+        // gate is intentional: the telemetry surface is harmless when unused (zero events emitted) and
+        // sidesteps the asymmetric-registration anti-pattern (CLAUDE.md §10 F.1) by removing the conditional
+        // entirely. Downstream consumers (tasks 012 / 014 / 015) inject this singleton and call
+        // RecordSummarizeInvocation; task 007 cleanup may call RecordSessionFilesIndexSize.
+        services.AddSingleton<Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry>();
+
         var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
         if (documentIntelligenceEnabled)
         {
@@ -97,6 +106,12 @@ public static class AnalysisServicesModule
 
         AddRecordMatchingServices(services, configuration);
 
+        // R5 task 007 (D1-07) — bind cleanup-job options unconditionally so the
+        // options graph is well-formed regardless of compound-gate state. The
+        // hosted-service registration itself is still gated above (under the
+        // compound AI gate via AddPlaybookServices).
+        AddSessionFilesCleanupOptions(services, configuration);
+
         // Unconditional chat-CRUD + notification services (task 011 Phase 1b Tier 1, D-09 §2 B1/B4/B5/L5).
         // These services have ZERO AI dependencies; their previous conditional registration was
         // misclassification (they were placed inside compound-gated helpers because AI features
@@ -143,12 +158,19 @@ public static class AnalysisServicesModule
         services.AddScoped<IChatDataverseRepository, ChatDataverseRepository>();
 
         // B4 — ChatSessionManager (deps: IDistributedCache, IChatDataverseRepository,
-        // ILogger, optional ISessionPersistenceService — last is null-tolerant via GetService).
+        // ILogger, optional ISessionPersistenceService, optional ISessionFilesCleanupSignal —
+        // both nullable injections are null-tolerant via GetService).
+        //
+        // R5 task 007 (D1-07) — ISessionFilesCleanupSignal is registered inside the
+        // compound AI gate (AddPlaybookServices). When AI is OFF, GetService returns
+        // null and ChatSessionManager's fire-and-forget signal call short-circuits.
+        // Back-compat preserved for existing call sites and unit tests.
         services.AddScoped<ChatSessionManager>(sp => new ChatSessionManager(
             cache: sp.GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(),
             dataverseRepository: sp.GetRequiredService<IChatDataverseRepository>(),
             logger: sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChatSessionManager>>(),
-            persistence: sp.GetService<Sprk.Bff.Api.Services.Ai.Sessions.ISessionPersistenceService>()));
+            persistence: sp.GetService<Sprk.Bff.Api.Services.Ai.Sessions.ISessionPersistenceService>(),
+            cleanupSignal: sp.GetService<Sprk.Bff.Api.Services.Ai.Chat.ISessionFilesCleanupSignal>()));
 
         // B5 — ChatHistoryManager (deps: ChatSessionManager + IChatDataverseRepository + ILogger — all unconditional).
         services.AddScoped<ChatHistoryManager>();
@@ -323,6 +345,39 @@ public static class AnalysisServicesModule
         // NotificationService promoted to unconditional registration (task 011 Phase 1b Tier 1, D-09 §2 B1).
         // See AddUnconditionalChatAndNotificationServices below.
         services.AddHostedService<Sprk.Bff.Api.Services.PlaybookSchedulerService>();
+
+        // R5 task 007 (D1-07) — Session-files cleanup hosted service per spec NFR-02
+        // "Aggressive cleanup on session-end". Scheduled sweep (every IntervalHours;
+        // default 6) + on-session-end immediate trigger via in-process channel;
+        // idempotent. Inherits kill-switch from this compound AI gate per
+        // R5 CLAUDE.md §3.2 (no new feature flag). ZERO new top-level Program.cs
+        // lines per R5 CLAUDE.md §3.3 + ADR-010.
+        //
+        // ADR-010 single-seam justification: ISessionFilesCleanupSignal is the
+        // single allowed interface seam in this addition — it exists solely to
+        // keep ChatSessionManager unit-testable in isolation (mirrors the
+        // ISessionPersistenceService nullable-injection convention). The
+        // concrete SessionFilesCleanupSignal is the actual singleton owning
+        // the Channel<SessionEndSignal>; the interface registration is a
+        // forwarding alias (no new instance).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Chat.SessionFilesCleanupSignal>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Chat.ISessionFilesCleanupSignal>(
+            sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.Chat.SessionFilesCleanupSignal>());
+        services.AddHostedService<Sprk.Bff.Api.Services.Ai.Chat.SessionFilesCleanupJob>();
+        Console.WriteLine("✓ Session-files cleanup hosted service enabled (R5 task 007, NFR-02)");
+    }
+
+    /// <summary>
+    /// R5 task 007 (D1-07) — bind <see cref="Sprk.Bff.Api.Services.Ai.Chat.SessionFilesCleanupOptions"/>
+    /// to the <c>SessionFilesCleanup</c> configuration section. Called from the
+    /// top of <see cref="AddAnalysisServicesModule"/> so the options graph is
+    /// constructed regardless of compound-gate state (the hosted-service
+    /// registration itself remains gated).
+    /// </summary>
+    private static void AddSessionFilesCleanupOptions(IServiceCollection services, IConfiguration configuration)
+    {
+        services.Configure<Sprk.Bff.Api.Services.Ai.Chat.SessionFilesCleanupOptions>(
+            configuration.GetSection(Sprk.Bff.Api.Services.Ai.Chat.SessionFilesCleanupOptions.SectionName));
     }
 
     /// <summary>

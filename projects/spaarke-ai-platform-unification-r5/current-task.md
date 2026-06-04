@@ -10,12 +10,12 @@
 
 | Field | Value |
 |---|---|
-| **Active flow** | Phase 1 implementation — Waves P1-G1, P1-G2, P1-G3 ✅ complete (5 of 9 P1 tasks done) |
-| **Pipeline status** | ✅ POML generation; ✅ Task 001 deploy; ✅ Wave P1-G2/G3 (tasks 002-005) code + tests authored + verified |
-| **Last wave verified** | P1-G2/G3 (tasks 002+003+004+005): dotnet build clean, 6101/6101 tests pass (0 failures, 111 pre-existing skips), publish-size 45 MB (delta negligible; well under 60 MB ceiling), no NEW HIGH CVE (Kiota Abstractions HIGH pre-exists on master per `dotnet list package --vulnerable`) |
+| **Active flow** | Phase 1 implementation — Waves P1-G1, P1-G2, P1-G3, P1-G4, P1-G5(non-gate) ✅ complete (8 of 9 P1 tasks done) |
+| **Pipeline status** | ✅ POML generation; ✅ Task 001 deploy; ✅ Tasks 002-008 code + tests authored + verified |
+| **Last wave verified** | P1-G4 + P1-G5 (tasks 006+007+008): build clean, 6132/6132 tests pass, publish 45 MB, no new CVEs. PATH A confirmed by Spaarke Dev spike (Azure OpenAI Structured Outputs streams 191 events @ ~4.9 chars/token in JSON declaration order). |
 | **Branch** | `work/spaarke-ai-platform-unification-r5` on top of `origin/master` `7e20dc82` |
-| **Next action** | Task 006 (P1-G4) — Azure OpenAI Structured Outputs + incremental JSON parser. SERIAL (depends on 005); HIGH RISK (spike + impl). |
-| **Status** | ready-to-execute (P1-G4 task 006 next; then P1-G5 wave 007+008+009) |
+| **Next action** | Task 009 (P1-G5 gate) — Phase 1 closeout: aggregate test verification, publish-size, CVE scan, smoke tests, asymmetric-registration audit. SERIAL (depends on 002-008). |
+| **Status** | ready-to-execute (only task 009 P1-G5 gate remains before Phase 2) |
 
 ### Files Modified This Session (committed)
 - `projects/spaarke-ai-platform-unification-r5/design.md` — initial draft + Insights coordination + v1.1 negotiation integration (commits `8ae4e59c`, `6a6c7a29`, `1ecf41a6`)
