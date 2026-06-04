@@ -1,0 +1,619 @@
+<task id="031" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-22 Phase 2 Tests + Integration Verification (Phase 2 GATE)</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G8 (serial GATE; depends on ALL P2 tasks 010–030; closes Phase 2)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>010, 011, 012, 013, 014, 015, 016, 017, 018, 019, 020, 021, 022, 023, 024, 025, 026, 027, 028, 029, 030</dependencies>
+    <tags>tests, verification, integration, e2e, phase-gate</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    This task is the **Phase 2 closeout GATE** for R5. Phase 2 ships ONLY when this task
+    passes. It aggregates and runs the unit + integration tests authored by D2-03 through
+    D2-20, fills any test-coverage gaps revealed by the aggregate, performs end-to-end
+    Summarize flow verification (both slash command + natural-language tool-call invocation
+    paths), verifies the Insights `insights.query` tool consumption (both playbook + RAG
+    response paths), runs cross-tool disambiguation tests between `summarize` and
+    `insights.query` (NFR-12 quality), measures the cumulative `dotnet publish` BFF size
+    delta across the entire R5 series (Phase 1 + Phase 2), runs a transitive-CVE scan, and
+    walks through the Phase 2 phase-gating checklist verbatim from `plan.md`.
+
+    Per CLAUDE.md §10 and R5 CLAUDE.md §3.6 / §3.7, this task is the binding pre-merge
+    enforcement point for the Phase 2 publish-size + test-obligation rules. Per `plan.md`
+    Phase 2 phase-gating list, all of the following MUST be green before Phase 3 begins:
+      1. End-to-end Summarize flow works on Spaarke Dev (slash command + natural-language
+         tool-call both produce identical output per FR-01 + SC-08)
+      2. SSE token streaming populates Workspace tab progressively (FR-02 + SC-02)
+      3. Context pane file preview + multi-file selection works (FR-05 + SC-04)
+      4. Tab persistence + static restoration works (FR-07 + SC-05)
+      5. `insights.query` tool registered + both response paths render correctly
+         (FR-12 + FR-13 + SC-11)
+      6. R5 lead has signed off on Insights contract v1.0 + recorded D1–D6 decisions
+         (DR-03 + SC-10 + closure of Insights task 042 sub-task A.5) — confirmed via task 023
+      7. Smoke tests pass for both tools against Spaarke Dev synthetic test entities
+         (D7 GUIDs from integration brief §8 — verified via task 030)
+
+    Additional cross-tool obligations:
+      - Cross-tool disambiguation (NFR-12) — tool routing between `summarize` and
+        `insights.query` handles ambiguous prompts gracefully ("summarize this matter" with
+        files present vs without; UR-01 resolution path)
+      - Cumulative publish-size delta (Phase 1 + Phase 2) ≤ R5 budget (≤+1 MB total;
+        target +0.5 MB) per spec NFR-07 + R5 CLAUDE.md §3.6
+      - No new HIGH-severity CVE per spec NFR-13 + ADR-029
+
+    This task does NOT add new production BFF or frontend code. It adds tests + verification
+    evidence. Single allowed exception: if the aggregate surfaces a missing test that a
+    prior D2-* task should have authored, this task fills the gap (recorded in task notes
+    with the originating D2-* task ID).
+  </prompt>
+
+  <role>
+    Senior .NET + frontend test engineer with deep familiarity with the Sprk.Bff.Api test
+    project layout, the Spe.Integration.Tests project layout, xUnit conventions, the
+    `dotnet publish` size-measurement protocol from `.claude/constraints/azure-deployment.md`,
+    the CVE-scan workflow per ADR-029, the asymmetric-registration audit recipe from
+    `.claude/constraints/bff-extensions.md` § F.1, and the Spaarke Dev E2E smoke-test
+    methodology (Wave D7 synthetic test entities from the Insights integration brief §8).
+    Operator of Spaarke Dev smoke tests for chat-agent tool invocations + SSE consumption
+    verification + cross-tool disambiguation observations.
+  </role>
+
+  <goal>
+    Phase 2 GATE is GREEN. Concretely:
+      - Every unit + integration test file authored by tasks 010–030 is present + passing;
+        coverage gaps are filled if any are found
+      - E2E Summarize flow verified on Spaarke Dev across BOTH invocation paths
+        (`/summarize` slash → direct endpoint AND natural-language → `InvokeSummarizePlaybookTool`
+        via `SprkChatAgent`); output schemas identical per SC-08
+      - SSE `FieldDelta` streaming populates `StructuredOutputStreamWidget` progressively;
+        new Workspace tab opens additively (FR-06); tab persists + restores statically (FR-07)
+      - Context pane `FilePreviewContextWidget` renders single + multi-file with click-to-swap
+        (FR-05); "Summarize this only" per-file affordance produces additive tab (FR-08)
+      - `insights.query` tool registered; smoke tests against Spaarke Dev synthetic test
+        entities (matter `da116923-d65a-f111-a825-3833c5d9bcb1`, project
+        `27845394-8e5f-f111-a825-70a8a59455f4`, invoice `05c8ef8d-8e5f-f111-a825-70a8a59455f4`)
+        confirm BOTH response paths (playbook structured envelope rendered via
+        `StructuredOutputStreamWidget` static mode; RAG path rendered with citation-grounded
+        prose + `[n]` tokens) work correctly
+      - Cross-tool disambiguation tests show acceptable routing on ambiguous prompts
+        (UR-01 resolution recorded; any misroute observations flagged for Phase 3 follow-up)
+      - Cumulative Phase 1 + Phase 2 BFF publish-size delta ≤ R5 budget (≤+1 MB; target
+        +0.5 MB) vs pre-R5 baseline (~45.65 MB → ceiling target ≤46.15 MB; hard ceiling 60 MB)
+      - No new HIGH-severity CVE in `dotnet list package --vulnerable --include-transitive`
+      - R5 lead sign-off on Insights contract v1.0 confirmed (from task 023 closeout)
+      - `TASK-INDEX.md` reflects: 031 ✅; Phase 2 status flipped to ✅; `current-task.md`
+        reset to next pending task (task 040 D3-01 `/analyze` proof point)
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="publish-size-rule">.claude/constraints/azure-deployment.md</file>
+    <file purpose="bff-extensions">.claude/constraints/bff-extensions.md</file>
+    <file purpose="insights-integration-brief">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+    <file purpose="insights-coordination">projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md</file>
+    <file purpose="phase-1-closeout">projects/spaarke-ai-platform-unification-r5/notes/phase-1-closeout-report.md</file>
+    <file purpose="bff-test-project">tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj</file>
+    <file purpose="integration-test-project">tests/integration/Spe.Integration.Tests/</file>
+    <file purpose="task-010-poml">projects/spaarke-ai-platform-unification-r5/tasks/010-sprk-analysisaction-summarize-seed.poml</file>
+    <file purpose="task-011-poml">projects/spaarke-ai-platform-unification-r5/tasks/011-sprk-analysisplaybook-summarize-config.poml</file>
+    <file purpose="task-012-poml">projects/spaarke-ai-platform-unification-r5/tasks/012-session-summarize-orchestrator.poml</file>
+    <file purpose="task-013-poml">projects/spaarke-ai-platform-unification-r5/tasks/013-extract-richfilepreview-renderer.poml</file>
+    <file purpose="task-014-poml">projects/spaarke-ai-platform-unification-r5/tasks/014-summarize-session-endpoint.poml</file>
+    <file purpose="task-015-poml">projects/spaarke-ai-platform-unification-r5/tasks/015-invoke-summarize-playbook-tool.poml</file>
+    <file purpose="task-016-poml">projects/spaarke-ai-platform-unification-r5/tasks/016-paneeventbus-additive-event-types.poml</file>
+    <file purpose="task-017-poml">projects/spaarke-ai-platform-unification-r5/tasks/017-structured-output-stream-widget.poml</file>
+    <file purpose="task-018-poml">projects/spaarke-ai-platform-unification-r5/tasks/018-file-preview-context-widget.poml</file>
+    <file purpose="task-019-poml">projects/spaarke-ai-platform-unification-r5/tasks/019-slash-command-summarize-semantic-extension.poml</file>
+    <file purpose="task-020-poml">projects/spaarke-ai-platform-unification-r5/tasks/020-chat-pane-orchestration-ux.poml</file>
+    <file purpose="task-021-poml">projects/spaarke-ai-platform-unification-r5/tasks/021-per-file-summarize-this-only-affordance.poml</file>
+    <file purpose="task-022-poml">projects/spaarke-ai-platform-unification-r5/tasks/022-upgrade-documentviewerwidget.poml</file>
+    <file purpose="task-023-poml">projects/spaarke-ai-platform-unification-r5/tasks/023-insights-contract-review-signoff.poml</file>
+    <file purpose="task-024-poml">projects/spaarke-ai-platform-unification-r5/tasks/024-insights-query-tool-handler.poml</file>
+    <file purpose="task-025-poml">projects/spaarke-ai-platform-unification-r5/tasks/025-subject-resolution-http-client.poml</file>
+    <file purpose="task-026-poml">projects/spaarke-ai-platform-unification-r5/tasks/026-insights-response-renderer.poml</file>
+    <file purpose="task-027-poml">projects/spaarke-ai-platform-unification-r5/tasks/027-clickable-citations-v1-1.poml</file>
+    <file purpose="task-028-poml">projects/spaarke-ai-platform-unification-r5/tasks/028-confidence-floor-badge.poml</file>
+    <file purpose="task-029-poml">projects/spaarke-ai-platform-unification-r5/tasks/029-insights-12-error-codes-retry.poml</file>
+    <file purpose="task-030-poml">projects/spaarke-ai-platform-unification-r5/tasks/030-insights-tool-smoke-tests.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="plan.md Phase 2 gating">Phase 2 ships only when ALL of: E2E Summarize works on Spaarke Dev (slash + natural-language identical output); SSE streaming populates Workspace tab progressively; Context pane file preview + multi-file selection works; tab persistence + static restoration works; `insights.query` registered + both response paths render correctly; R5 lead sign-off on Insights contract v1.0 + D1–D6 decisions recorded; smoke tests pass against Spaarke Dev synthetic test entities. This task is the binding gate.</constraint>
+    <constraint source="spec FR-01 + SC-08">Both `/summarize` (slash command → direct endpoint) AND natural-language summarize requests (LLM tool-call → agent tool) MUST produce identical `DocumentAnalysisResult` shape. Verify by invoking both paths with same files; compare outputs.</constraint>
+    <constraint source="spec FR-02 + SC-02">Summary output MUST stream progressively via `FieldDelta` SSE events; `StructuredOutputStreamWidget` renders each field progressively (ChatGPT/Claude-style; NOT plop). Verify by SSE event capture in browser DevTools.</constraint>
+    <constraint source="spec FR-05 + SC-04">Context pane MUST render single-file preview AND multi-file list with click-to-swap. Per-file 3-dot menu reuses existing `DocumentRowMenu` (aiSummary + toggleWorkspace + findSimilar actions).</constraint>
+    <constraint source="spec FR-07 + SC-05">After streaming completes, browser refresh MUST restore the summary tab statically via persisted `ISummarizeResult`; NO re-streaming.</constraint>
+    <constraint source="spec FR-12 + FR-13 + SC-11">`insights.query` tool MUST be registered on `SprkChatAgent`; both response paths (playbook structured envelope + RAG citation-grounded prose) MUST render correctly against Spaarke Dev Wave D7 synthetic test entities (matter `da116923-d65a-f111-a825-3833c5d9bcb1`, project `27845394-8e5f-f111-a825-70a8a59455f4`, invoice `05c8ef8d-8e5f-f111-a825-70a8a59455f4`).</constraint>
+    <constraint source="spec NFR-07">Cumulative R5 BFF publish-size delta ≤ +1 MB compressed (target +0.5 MB); total ≤ 47 MB compressed (current pre-R5 baseline ~45.65 MB; NFR-01 ceiling 60 MB). Phase 2 cumulative measurement is THIS task's verification responsibility.</constraint>
+    <constraint source="spec NFR-12">Tool descriptions for `summarize` and `insights.query` MUST be non-overlapping and scope-explicit. Cross-tool disambiguation tests MUST exercise ambiguous prompts ("summarize this matter" with files vs without) and document routing observations. Per UR-01 resolution path.</constraint>
+    <constraint source="spec NFR-13">No new HIGH-severity CVE permitted. `dotnet list package --vulnerable --include-transitive` MUST be clean before Phase 2 closes.</constraint>
+    <constraint source="spec NFR-14">Test coverage — new endpoints, services, widgets MUST have corresponding tests; endpoints mapping unconditionally MUST have unconditional service registration (R5 services unconditionally registered per ADR-018 Flag Scope Discipline; verified at Phase 1 close).</constraint>
+    <constraint source="CLAUDE.md §10 BFF Hygiene item 6">PRs modifying `src/server/api/Sprk.Bff.Api/Services/` MUST add/update tests in `tests/unit/Sprk.Bff.Api.Tests/`. This task is the binding verification of the test-update obligation for Phase 2 BFF changes (tasks 012, 014, 015, 024, 025, 026, 027, 028, 029).</constraint>
+    <constraint source="CLAUDE.md §10 BFF Hygiene item 4">Every BFF-touching task measures publish size. This task aggregates the cumulative Phase 1 + Phase 2 delta and is the binding per-phase verification point for Phase 2.</constraint>
+    <constraint source="spec DR-03 + SC-10">R5 lead sign-off on Insights `design-e3-tool-call-contract.md` v1.0 + 6 contract-review decisions (D1–D6) recorded in §10 review log MUST be complete (closure of Insights task 042 sub-task A.5). Verified via task 023 closeout; confirmed here as Phase 2 gate prerequisite.</constraint>
+    <constraint source="ADR-018">R5 introduces NO new feature flags. All Phase 2 services unconditionally registered. Asymmetric-registration audit clean per task 009 Phase 1 closeout; Phase 2 changes inherit this discipline.</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — framework-dependent linux-x64; report absolute size + diff vs baseline; ≥+5 MB single-task / phase delta requires explicit escalation; ≥55 MB cumulative requires architecture review; ≥60 MB is HARD STOP.</constraint>
+    <constraint source="R5 CLAUDE.md §3.6">R5 budget ≤ +1 MB total (target +0.5 MB). Phase 1 should consume well under half; Phase 2 lands the remainder. If cumulative delta is ≥ +1 MB: escalate per CLAUDE.md §6 BEFORE marking the gate green.</constraint>
+    <constraint source="R5 CLAUDE.md §3.7">Endpoints map unconditionally → services register unconditionally. Verified at Phase 1 close; this task confirms Phase 2 BFF additions (new `POST /api/ai/chat/sessions/{id}/summarize` endpoint per task 014) followed the same discipline.</constraint>
+    <constraint source="project">This task adds tests + verification evidence ONLY. No new production BFF or frontend code unless required to fill a gap surfaced by the aggregate run. Any gap-fill code MUST be recorded in task notes with cross-reference to the originating D2-* task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing/phase-2-aggregate-verification + e2e/summarize + e2e/insights-tool + cross-tool/disambiguation + deployment/cumulative-publish-size + security/cve-scan</topic>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj</file>
+      <file>tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/phase-1-closeout-report.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+    </files>
+    <patterns>
+      <pattern name="Phase 2 BFF test aggregate run" location="tests/unit/Sprk.Bff.Api.Tests/">
+        `dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj --logger
+        "trx;LogFileName=phase2-aggregate.trx"`. Examine output for new test files created
+        by D2-03..D2-19. Expected new test files (locations TBD per each D2-* task POML):
+        `SessionSummarizeOrchestratorTests.cs` (task 012), `SummarizeSessionEndpointTests.cs`
+        (task 014), `InvokeSummarizePlaybookToolTests.cs` (task 015),
+        `InsightsQueryToolHandlerTests.cs` (task 024), `InsightsSubjectResolutionTests.cs`
+        (task 025), `InsightsResponseRendererTests.cs` (task 026 — frontend),
+        `InsightsErrorCodeHandlingTests.cs` (task 029). Confirm presence + green status.
+        Fill gaps if found.
+      </pattern>
+      <pattern name="Phase 2 integration test run" location="tests/integration/Spe.Integration.Tests/">
+        `dotnet test tests/integration/Spe.Integration.Tests/ --logger
+        "trx;LogFileName=phase2-integration.trx"`. Existing fixture
+        (`IntegrationTestFixture.cs`) provides Spaarke Dev test-host. Expected new files:
+        Summarize end-to-end test exercising new endpoint + agent-tool path;
+        `insights.query` tool consumption test against synthetic test entities.
+      </pattern>
+      <pattern name="E2E Summarize flow verification (both paths)" location="Spaarke Dev BFF + SpaarkeAi shell">
+        (a) Slash command path: open SpaarkeAi on Spaarke Dev; upload sample file (within
+            R4 25 MB cap + MIME allow-list per docs/standards/CHAT-ATTACHMENT-POLICY.md);
+            invoke `/summarize`; verify SSE delta events stream into new Workspace tab via
+            `StructuredOutputStreamWidget` progressively; final `ISummarizeResult`
+            persists; refresh restores tab statically.
+        (b) Natural-language path: same setup; type "summarize the file I uploaded"
+            (natural language, no slash); verify `SprkChatAgent` tool-calls
+            `InvokeSummarizePlaybookTool`; verify output schema identical to slash-command
+            path per SC-08.
+        (c) Capture SSE event log from DevTools + screenshot references for both paths.
+      </pattern>
+      <pattern name="Insights tool consumption verification (both response paths)" location="Spaarke Dev BFF + SpaarkeAi shell">
+        (a) Playbook path: invoke `insights.query` with `forceMode` = playbook-classifier
+            target (e.g., `predict-matter-cost@v1`) against matter
+            `da116923-d65a-f111-a825-3833c5d9bcb1`; verify response renders via
+            `StructuredOutputStreamWidget` in static mode (v1.0 fallback) OR progressively
+            via SSE (v1.1 when Wave F shipped); verify confidence badge per FR-15.
+        (b) RAG path: invoke natural-language entity-scoped question without
+            `forceMode`; verify response renders as citation-grounded prose with `[n]`
+            tokens; verify clickable citations (v1.1) OR display-name-only (v1.0); verify
+            x-correlation-id propagated end-to-end via App Insights / Kusto lookup.
+        (c) Decline + empty-result cases: trigger with low-content matter / out-of-scope
+            query; verify decline state renders `SuggestedActions`; empty-results renders
+            "couldn't find anything" hint (not empty answer).
+      </pattern>
+      <pattern name="Cross-tool disambiguation tests (NFR-12 / UR-01)" location="Spaarke Dev SpaarkeAi shell">
+        Exercise ambiguous prompts that COULD match both `summarize` and `insights.query`:
+        (a) "summarize this matter" WITH files uploaded → expected route: `summarize`
+            (file-scoped wins)
+        (b) "summarize this matter" WITHOUT files uploaded → expected route:
+            `insights.query` (entity-scoped wins; or interjection per FR-03 if no entity
+            context either)
+        (c) "what's the predicted cost on this matter?" → expected route: `insights.query`
+        (d) "what's in the file I just uploaded?" → expected route: ad-hoc grounded RAG
+            via session-scoped retrieval (FR-09); NOT `summarize` unless user invoked it.
+        Record observations. Misroutes are NOT a Phase 2 blocker (UR-01 resolution path
+        permits Phase 3 follow-up); document for Phase 3 if observed.
+      </pattern>
+      <pattern name="Cumulative publish-size measurement (Phase 1 + Phase 2)" location=".claude/constraints/azure-deployment.md § 'BFF Publish-Size Per-Task Verification Rule (NFR-01)'">
+        Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`.
+        Compress and measure. Compare against pre-R5 baseline (~45.65 MB recorded in task
+        002's pre-Phase-1 evidence + verified at task 009 Phase 1 closeout). Cumulative
+        delta = current_size − pre_R5_baseline. Budget: ≤ +1 MB total; target +0.5 MB.
+        Report in task notes using the binding format: `BFF Hygiene §10 + NFR-01 verified:
+        Phase 2 publish size = X MB, R5 cumulative delta = +Y MB, baseline = 45.65 MB,
+        ceiling = 60 MB compressed, no new HIGH CVEs.`
+      </pattern>
+      <pattern name="CVE scan recipe" location="CLAUDE.md §10 item 5 + ADR-029">
+        `dotnet list package --vulnerable --include-transitive` from repo root. Filter for
+        HIGH severity. Compare against the pre-R5 baseline + Phase 1 close baseline (both
+        in task 009 evidence). Any NEW HIGH MUST block Phase 2 close until either resolved
+        (package upgrade) or explicitly accepted (ADR amendment).
+      </pattern>
+      <pattern name="R5 lead sign-off verification" location="task 023 closeout + projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md §10">
+        Confirm task 023 marked ✅ in TASK-INDEX. Confirm Insights contract §10 review log
+        shows R5 lead sign-off + 6 decisions (D1–D6) recorded. Confirm Insights task 042
+        sub-task A.5 closed via cross-project coordination doc reference. This is a binding
+        Phase 2 prerequisite per spec DR-03 + SC-10.
+      </pattern>
+      <pattern name="Phase 2 phase-gating walk-through" location="plan.md Phase 2 § 'Phase gating'">
+        Walk verbatim through each of the 7 phase-gating items from plan.md (E2E Summarize;
+        SSE streaming; Context pane preview; tab persistence; insights.query both paths;
+        R5 lead sign-off; smoke tests). For each: record evidence (test result, smoke log,
+        screenshot reference, contract §10 link). All 7 MUST be GREEN before marking the
+        gate ✅.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 2 of R5 ships the chat-driven Summarize vertical slice AND the Insights tool
+      integration — together making R5's chat surface the operational **Spaarke Assistant**
+      with two coexisting AI tool capabilities. Shipping Phase 2 in a degraded state
+      (failing E2E flow, misrouting tool calls, broken cross-tool disambiguation, oversized
+      publish, undetected CVE) would compound into Phase 3 polish + the platform-extension
+      proof point. Per CLAUDE.md §10 the BFF binding rule REQUIRES per-task publish-size
+      verification AND a phase-level verification at the close of every phase that adds to
+      the BFF. Per R5 CLAUDE.md §3.7 the test obligation requires every D2-* task to have
+      authored its own tests — but as with Phase 1, an aggregate verification gate runs at
+      phase close to catch gaps.
+
+      Cross-tool disambiguation (NFR-12 / UR-01) is the highest novel risk in Phase 2.
+      Phase 1 platform-extension work introduced the `summarize` chat-agent tool; Phase 2
+      adds the `insights.query` chat-agent tool. Both LLM tool descriptions must scope
+      cleanly (`summarize` = file-scoped, session-scoped; `insights.query` = entity-scoped,
+      knowledge-scoped). Misroute risk is medium per plan.md High-Risk Items. The gate
+      includes explicit disambiguation tests + observation recording for Phase 3 follow-up.
+
+      The R5 lead sign-off prerequisite (DR-03) is operator-led and was verified during
+      task 023 (Pre-G6 gate). This task confirms task 023 remains ✅ and the §10 review log
+      still reflects the 6 D-decisions.
+
+      Insights Wave F status: Wave F (v1.1 SSE + clickable citations) is in flight in
+      parallel via Claude Code on branch `work/ai-spaarke-insights-engine-r2-wave-f`. R5
+      Phase 2 ships with graceful v1.0 fallback per NFR-11. If Wave F has shipped by the
+      time this task runs, R5 consumes v1.1; otherwise v1.0 fallback engages and Phase 2
+      ships in the degraded-but-functional state per plan.md High-Risk Items.
+
+      Cost of skipping this gate: a Phase 3 task discovers a Phase 2 regression in flight,
+      blocking the `/analyze` proof point that validates the platform-extension claim (SC-19)
+      and forcing a rebase across the polish-phase deliverables.
+    </background>
+    <dependencies>
+      <dependency task="010" status="not-started">D2-01 `sprk_analysisaction` "Summarize Document for Chat" seed — verify deployed + visible on Spaarke Dev</dependency>
+      <dependency task="011" status="not-started">D2-02 `sprk_analysisplaybook` configuration — verify linked to D2-01 action</dependency>
+      <dependency task="012" status="not-started">D2-03 `SessionSummarizeOrchestrator` — verify tests + unconditional registration</dependency>
+      <dependency task="013" status="not-started">D2-08 `RichFilePreview` renderer extraction — verify existing wizard consumers unaffected</dependency>
+      <dependency task="014" status="not-started">D2-04 `POST /api/ai/chat/sessions/{id}/summarize` endpoint — verify tests + Auth v2 filter + SSE FieldDelta streaming</dependency>
+      <dependency task="015" status="not-started">D2-05 `InvokeSummarizePlaybookTool` agent-tool registration — verify tool catalog + tool description quality (NFR-12)</dependency>
+      <dependency task="016" status="not-started">D2-06 additive PaneEventBus event types — verify existing subscribers unaffected</dependency>
+      <dependency task="017" status="not-started">D2-07 `StructuredOutputStreamWidget` — verify progressive rendering + decline state + empty-result state</dependency>
+      <dependency task="018" status="not-started">D2-09 `FilePreviewContextWidget` — verify single + multi-file + click-to-swap + 3-dot menu</dependency>
+      <dependency task="019" status="not-started">D2-10 `/summarize` slash command semantic extension — verify dual-mode routing + prompt-first interjection</dependency>
+      <dependency task="020" status="not-started">D2-11 chat-pane orchestration UX — verify file chips + indicator + multi-file interjection</dependency>
+      <dependency task="021" status="not-started">D2-12 "Summarize this only" per-file affordance — verify additive tab + prior tab preserved</dependency>
+      <dependency task="022" status="not-started">D2-08 `DocumentViewerWidget` upgrade — verify R4 stub now uses extracted renderer</dependency>
+      <dependency task="023" status="not-started">D2-13 R5 lead contract review + sign-off — verify §10 review log shows 6 D-decisions; Insights task 042 sub-task A.5 closed</dependency>
+      <dependency task="024" status="not-started">D2-14 `InsightsQueryToolHandler` — verify tool registered on `SprkChatAgent` + middleware inheritance</dependency>
+      <dependency task="025" status="not-started">D2-15 subject resolution + HTTP client — verify auth header + correlation-id + v1.1 Accept opt-in + graceful v1.0 fallback</dependency>
+      <dependency task="026" status="not-started">D2-16 `InsightsResponseRenderer` — verify all 4 cases (playbook / RAG / decline / empty) render correctly</dependency>
+      <dependency task="027" status="not-started">D2-17 clickable citations — verify v1.1 `href` click opens Context pane; v1.0 fallback works</dependency>
+      <dependency task="028" status="not-started">D2-18 confidence floor badge — verify `<0.6` triggers badge; ≥0.6 absent; threshold configurable</dependency>
+      <dependency task="029" status="not-started">D2-19 12 error codes + retry — verify each code triggers correct UX; no raw stack traces / document content leaking; correlation-id surfaced</dependency>
+      <dependency task="030" status="not-started">D2-20 Insights tool smoke tests — verify Wave D7 synthetic test entities work + 5 realistic questions per practice area (CTRNS/IPPAT/BNKF) per integration brief §8; SME walkthrough complete</dependency>
+    </dependencies>
+    <related-work>
+      <item>Phase 1 closeout (task 009) — established pre-Phase-2 publish-size baseline + asymmetric-registration audit clean. This task builds on that baseline; cumulative measurement starts from pre-R5 baseline (~45.65 MB) recorded in task 002.</item>
+      <item>Insights r2 task 042 sub-task A.5 — R5 lead sign-off closure was the Pre-G6 gate (task 023). This task verifies closure remains valid at Phase 2 close.</item>
+      <item>R4 task 045 (`SummarizeFilesDialog` wizard) — back-compat verification was done at Phase 1 close (task 009 step 7). No further wizard back-compat verification needed at Phase 2 close (Phase 2 added no new SSE protocol; wizard path is back-compat by Phase 1 close).</item>
+      <item>Insights Wave F (parallel project) — R5 Phase 2 ships with graceful v1.0 fallback if Wave F not yet on Spaarke Dev. This task observes Wave F status via `notes/insights-r2-coordination.md` §8 changelog.</item>
+      <item>`projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md` §8 changelog — Phase 2 close entry will reference Phase 2 completion timestamp + Wave F status at close.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL Declaration">
+      Check context usage. If &gt; 70%, create handoff summary and request `/compact`. Output
+      the mandatory RIGOR LEVEL declaration per root CLAUDE.md §8:
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Phase 2 gate task aggregating unit + integration tests + E2E Summarize
+                  verification (both invocation paths) + Insights tool verification (both
+                  response paths) + cross-tool disambiguation + cumulative publish-size +
+                  CVE scan + R5-lead-sign-off confirmation across 21 dependency tasks;
+                  blocking gate before Phase 3.
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0 through 10 below.
+      Proceeding with Step 0...
+      ```
+    </step>
+
+    <step order="1" name="Review Progress + Dependency Validation">
+      Read `tasks/TASK-INDEX.md` and confirm tasks 010–030 ALL show ✅. If ANY show 🔲 or 🔄,
+      STOP and report the gate cannot run yet. Read `current-task.md` to confirm 031 is the
+      next pending task. Read `notes/phase-1-closeout-report.md` to extract the pre-R5
+      publish-size baseline + Phase 1 cumulative delta + Phase 1 CVE baseline. Read each
+      D2-* task's POML to extract:
+        (a) the test file path(s) the task was supposed to author;
+        (b) the per-task publish-size delta the task recorded in its notes (for BFF tasks
+            only — Dataverse seeds + frontend tasks contribute 0 MB);
+        (c) any deferred / open items the task flagged for Phase 2 close;
+        (d) for tasks 024/025/026/027/028/029 (Insights consumption suite): the v1.1 vs
+            v1.0 status at task completion.
+      Aggregate the per-task publish-size deltas into the expected cumulative Phase 2
+      delta (informational; the authoritative measurement is Step 5 below).
+    </step>
+
+    <step order="2" name="Gather Resources">
+      Read every file listed in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically extract:
+        (a) the Phase 2 phase-gating list from `plan.md` (7 items);
+        (b) the publish-size protocol from `.claude/constraints/azure-deployment.md`;
+        (c) the test-update obligation from CLAUDE.md §10 item 6;
+        (d) the integration brief §5.1 error matrix (12 codes) — referenced for E2E
+            verification of task 029's coverage;
+        (e) the Wave D7 synthetic test entity GUIDs from integration brief §8 — used by
+            Step 7 Insights tool consumption verification.
+      Read the R5 CLAUDE.md §3.6 + §3.7 in full. Read `notes/insights-r2-coordination.md`
+      §8 changelog to capture current Wave F status (informs v1.0-vs-v1.1 verification
+      branch in Step 7).
+    </step>
+
+    <step order="3" name="R5 Lead Sign-Off Verification (Phase 2 prerequisite)">
+      (a) Confirm task 023 (D2-13) status is ✅ in TASK-INDEX.
+      (b) Read task 023's closeout notes — confirm Insights contract
+          `projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md` §10
+          review log shows R5 lead sign-off + 6 D-decisions (D1–D6) recorded.
+      (c) Confirm Insights task 042 sub-task A.5 closure is referenced.
+      (d) If ANY of the above are missing: STOP and escalate per CLAUDE.md §6 — Phase 2
+          gate cannot close without DR-03 + SC-10 satisfied.
+      Record verification outcome in task notes with file references / timestamps.
+    </step>
+
+    <step order="4" name="Build BFF + Aggregate Unit + Integration Test Runs">
+      (a) Run `dotnet build src/server/api/Sprk.Bff.Api/` — MUST succeed with zero errors
+          and no new warnings vs Phase 1 close baseline. Capture warning delta.
+      (b) Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj --logger
+          "trx;LogFileName=phase2-aggregate.trx"`. MUST show zero failures.
+      (c) Run `dotnet test tests/integration/Spe.Integration.Tests/ --logger
+          "trx;LogFileName=phase2-integration.trx"`. MUST show zero failures.
+      (d) For each D2-* task that authored tests, verify the expected test file(s) (per
+          the POML's `&lt;outputs&gt;` section) exist in the appropriate test project and
+          contain at least one passing test per FR/NFR the task targeted. If a test file
+          is missing or under-covered, RECORD the gap in task notes.
+      (e) For frontend tasks (013, 017, 018, 020, 021, 022, 026, 027, 028): run the
+          relevant component test suites (`npm test` in the appropriate package); confirm
+          zero failures.
+      (f) If gaps surface: AUTHOR the missing tests in this task (record the originating
+          D2-* task ID for traceability). Re-run the aggregate. MUST converge to green.
+    </step>
+
+    <step order="5" name="Cumulative Publish-Size Measurement (Phase 1 + Phase 2)">
+      (a) Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`.
+      (b) Measure compressed size of `deploy/api-publish/` (zip or `Compress-Archive` then
+          inspect `.Length`).
+      (c) Compute the cumulative R5 delta = current_compressed_size −
+          pre_R5_baseline_compressed_size (per Phase 1 closeout recorded baseline,
+          originally from task 002). Also compute the Phase-2-only delta = current_size −
+          Phase_1_close_size (per task 009 evidence).
+      (d) Verify: cumulative R5 delta ≤ +1 MB (budget) AND ideally ≤ +0.5 MB (target). If
+          ≥ +0.5 MB but ≤ +1 MB: still inside budget; flag in PR description per R5
+          CLAUDE.md §3.6. If ≥ +1 MB: ESCALATE per CLAUDE.md §6 — do NOT mark the gate
+          green.
+      (e) Report in task notes using the binding format: `BFF Hygiene §10 + NFR-01
+          verified: Phase 2 publish size = X MB, R5 cumulative delta = +Y MB,
+          Phase-2-only delta = +Z MB, baseline = 45.65 MB, ceiling = 60 MB compressed,
+          no new HIGH CVEs.`
+    </step>
+
+    <step order="6" name="CVE Transitive Scan">
+      Run `dotnet list package --vulnerable --include-transitive` from repo root. Capture
+      full output. Filter for entries marked HIGH severity. Compare against the Phase 1
+      close baseline (in task 009 evidence) + the pre-R5 baseline. MUST be zero NEW HIGH.
+      Record the full HIGH list (existing + new) in task notes. If new HIGH surfaces:
+      either upgrade the offending package or ESCALATE per CLAUDE.md §6.
+    </step>
+
+    <step order="7" name="E2E Summarize Flow Verification (BOTH invocation paths) on Spaarke Dev">
+      Per FR-01 + FR-02 + FR-06 + FR-07 + SC-01 + SC-02 + SC-03 + SC-05 + SC-08:
+      (a) **Slash command path**: Open SpaarkeAi on Spaarke Dev. Upload sample file
+          (within R4 25 MB cap + MIME allow-list per docs/standards/CHAT-ATTACHMENT-POLICY.md).
+          Invoke `/summarize`. Verify:
+            - SSE delta events stream into new Workspace tab via
+              `StructuredOutputStreamWidget` progressively (NOT a final-result plop)
+            - Tab opens additively (other tabs untouched per FR-06 + SC-03)
+            - Final `ISummarizeResult` persists to workspace tab state
+            - Browser refresh restores tab statically (no re-streaming) per FR-07 + SC-05
+            - Capture DevTools SSE event log + screenshot references for evidence
+      (b) **Natural-language path**: Same setup; instead of `/summarize`, type "summarize
+          the file I uploaded" (natural language). Verify:
+            - `SprkChatAgent` tool-calls `InvokeSummarizePlaybookTool`
+            - Output schema identical to slash-command path per SC-08 (compare
+              `DocumentAnalysisResult` JSON structurally)
+            - Capture DevTools event log + final-output reference
+      (c) **Multi-file path** (FR-04 + SC-04): Upload 3+ files. Invoke `/summarize`.
+          Verify multi-file deterministic interjection ("I'll provide a combined summary
+          for the files you uploaded") appears once before streaming begins. Verify
+          Context pane shows list of file cards + click-to-swap. Verify combined summary
+          populates `fileHighlights[]`.
+      (d) **Prompt-first path** (FR-03): Open fresh session with no files; invoke
+          `/summarize` first; verify deterministic interjection ("Upload the file(s) you'd
+          like me to summarize") appears; upload file; verify subsequent flow completes.
+      (e) **Per-file affordance path** (FR-08 + SC-06): Upload 2+ files; click "Summarize
+          this only" on file card 2; verify new additive tab opens; prior tab preserved.
+      (f) **Decline-to-find path** (FR-11 + SC-09): Upload empty/tiny file; invoke
+          `/summarize`; verify `StructuredOutputStreamWidget` renders decline state
+          distinctly with `SuggestedActions` (not hallucinated summary).
+      (g) **General grounded Q&A path** (FR-09 + SC-07): With files in session, ask
+          "are there litigation risks?"; verify response cites session-file chunks via
+          `RagSearchOptions.sessionId` filter (not knowledge-index citations).
+      Record evidence references (DevTools captures, screenshots, log query refs) in task
+      notes for each sub-step.
+    </step>
+
+    <step order="8" name="Insights Tool Verification (BOTH response paths) on Spaarke Dev">
+      Per FR-12 + FR-13 + FR-14 + FR-15 + FR-16 + FR-17 + SC-11 + SC-12 + SC-13 + SC-14 +
+      SC-15 + SC-16 + SC-17:
+      (a) **Playbook response path**: Invoke `insights.query` with `forceMode` set (via
+          `/ask-insights` slash command path) against matter
+          `da116923-d65a-f111-a825-3833c5d9bcb1`. Verify:
+            - Response renders via `StructuredOutputStreamWidget` in static mode (v1.0)
+              OR progressively via SSE (v1.1 if Wave F shipped — check coordination doc §8)
+            - Confidence badge per FR-15: appears when `confidence < 0.6`; absent
+              otherwise; threshold configurable
+            - Capture screenshot + structured-envelope reference
+      (b) **RAG response path**: Invoke natural-language entity-scoped question (e.g.,
+          "what are the key risks for this matter?") against same matter; verify:
+            - Response renders as citation-grounded prose with `[n]` tokens via
+              `InsightsResponseRenderer` RAG sub-renderer
+            - Clickable citations (v1.1 `href` present) open source in
+              `FilePreviewContextWidget` via PaneEventBus `context.context_update` event
+            - v1.0 fallback (when `href: null` or absent): citations render as
+              display-name-only per FR-14 + NFR-11 + SC-13
+            - x-correlation-id propagated end-to-end per FR-17 + SC-16; verify via App
+              Insights / Kusto lookup with the correlation ID surfaced in DevTools network
+              tab
+      (c) **Decline + empty-result paths**: Trigger with low-content matter or
+          out-of-scope query; verify:
+            - Decline state renders `answer` + `envelope.SuggestedActions` as plain text
+              per integration brief §5 + FR-13
+            - Empty-results renders "couldn't find anything" hint (not empty answer)
+      (d) **Project + invoice verification**: Repeat playbook path with project
+          `27845394-8e5f-f111-a825-70a8a59455f4` and invoice
+          `05c8ef8d-8e5f-f111-a825-70a8a59455f4`; confirm responses usable per
+          integration brief §8 SME walkthrough criteria.
+      (e) **Error code coverage**: Verify task 030 smoke tests captured all 12 error
+          codes per integration brief §5.1; confirm per-code UX rendered correctly with
+          no raw stack traces / document content leaking per FR-16 + SC-15.
+      Record evidence references in task notes for each sub-step.
+    </step>
+
+    <step order="9" name="Cross-Tool Disambiguation Tests (NFR-12 / UR-01)">
+      Exercise ambiguous prompts that could match both `summarize` AND `insights.query`:
+      (a) "summarize this matter" WITH files uploaded → expected route: `summarize`
+          (file-scoped wins per FR-01 + NFR-12 tool description)
+      (b) "summarize this matter" WITHOUT files uploaded → expected route:
+          `insights.query` (entity-scoped wins) OR prompt-first interjection per FR-03 if
+          no entity context resolvable
+      (c) "what's the predicted cost on this matter?" → expected route: `insights.query`
+      (d) "what's in the file I just uploaded?" → expected route: ad-hoc grounded RAG via
+          `RagSearchOptions.sessionId` filter (FR-09); NOT `summarize` unless user
+          explicitly invokes it
+      (e) "tell me about this matter" → expected route: `insights.query` (entity-scoped
+          generic question)
+      For each prompt: record the LLM's tool-call decision + observation of whether
+      routing matched expectation. Misroutes are NOT a Phase 2 blocker (UR-01 resolution
+      path permits Phase 3 follow-up — tool description refinement + explicit "did you
+      mean..." clarification). Document each misroute observation for Phase 3 backlog with
+      enough detail to refine tool descriptions during Phase 3.
+      Record disambiguation matrix in task notes:
+        | Prompt | Expected route | Actual route | Pass/Observe |
+    </step>
+
+    <step order="10" name="Phase 2 Phase-Gating Checklist Walk-Through">
+      Walk verbatim through each of the 7 phase-gating items from `plan.md` Phase 2
+      header. For each, record GREEN / RED + evidence link:
+      (i)   E2E Summarize works on Spaarke Dev (slash + natural-language identical
+            output per FR-01 + SC-08) → evidence: Step 7 (a) + (b) captures
+      (ii)  SSE token streaming populates Workspace tab progressively (FR-02 + SC-02) →
+            evidence: Step 7 (a) DevTools SSE event log
+      (iii) Context pane file preview + multi-file selection works (FR-05 + SC-04) →
+            evidence: Step 7 (c) + (e) screenshot references
+      (iv)  Tab persistence + static restoration works (FR-07 + SC-05) → evidence:
+            Step 7 (a) refresh-restoration screenshot
+      (v)   `insights.query` tool registered + both response paths render correctly
+            (FR-12 + FR-13 + SC-11) → evidence: Step 8 (a) + (b) captures
+      (vi)  R5 lead has signed off on Insights contract v1.0 + recorded D1–D6 decisions
+            (DR-03 + SC-10; closes Insights task 042 sub-task A.5) → evidence: Step 3
+            verification
+      (vii) Smoke tests pass for both tools against Spaarke Dev synthetic test entities
+            (Wave D7 GUIDs per integration brief §8) → evidence: task 030 closeout + Step
+            8 (d) verification
+      ALL 7 MUST be GREEN. ANY RED MUST be remediated before marking the gate ✅.
+    </step>
+
+    <step order="10.5" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is testable +
+      passing. Record evidence per criterion in task notes.
+    </step>
+
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against any new test files authored by this task (gap-fill
+      tests, if any). Run `adr-check` skill against new test files + any module changes;
+      verify ADR-018 (no new flags — Phase 2 inherits), ADR-029 (publish hygiene),
+      ADR-010 (DI minimalism — Phase 2 services registered inside `AnalysisServicesModule`
+      per task 014), ADR-013 (BFF-only — R5 is Zone B consumer of Insights HTTP contract;
+      no Insights internals injected per task 024/025 closeout), ADR-014 (tenant isolation
+      — session-files index + Insights filtering preserve `tenantId` per task 030 smoke
+      tests), ADR-028 (Auth v2 — new endpoint per task 014; no token snapshots),
+      ADR-030 (PaneEventBus additive — Phase 2 added 5 event types within existing 4
+      channels per task 016). Both gates MUST pass before marking the task ✅.
+    </step>
+
+    <step order="11" name="Phase 2 Closeout + TASK-INDEX Update">
+      (a) Update task 031 POML status to `complete`. Record actual-effort.
+      (b) Update `TASK-INDEX.md`: 031 🔲 → ✅. Flip Phase 2 phase status to ✅.
+      (c) Update `current-task.md` to reset to the next pending task per CLAUDE.md §7.
+          Next-up per TASK-INDEX is task 040 (D3-01 `/analyze` configuration-only proof
+          point — validates SC-19 platform-extension claim). Set `current-task.md`
+          accordingly.
+      (d) Author the Phase 2 closeout report at
+          `projects/spaarke-ai-platform-unification-r5/notes/phase-2-closeout-report.md`
+          containing: aggregate unit + integration test result; E2E Summarize verification
+          (both paths) evidence; Insights tool verification (both response paths) evidence;
+          cross-tool disambiguation matrix + Phase 3 backlog items (if any); cumulative
+          publish-size measurement (Phase 1 + Phase 2); CVE scan result; R5 lead sign-off
+          confirmation; Phase 2 phase-gating walk-through outcome (7 items GREEN); any
+          gap-fill tests authored by this task; list of carry-over items (if any).
+      (e) Update `projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md`
+          §8 changelog with the Phase 2 close entry (timestamp + reference to the closeout
+          report + Wave F status at Phase 2 close — informs Phase 3 reading).
+      (f) Report task completion + Phase 2 GATE GREEN declaration.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test (unit + integration) + publish + CVE scan</tool>
+    <tool name="npm">Frontend component test suites (widget + renderer + chat-pane UX)</tool>
+    <tool name="az">Azure CLI — AI Search REST calls for session-files index verification, App Service log tail, App Insights / Kusto queries for x-correlation-id propagation verification</tool>
+    <tool name="git">Diff Phase 2 changes against Phase 1 close baseline + pre-R5 baseline</tool>
+    <tool name="code-review">Quality gate at Step 9.5</tool>
+    <tool name="adr-check">Quality gate at Step 9.5</tool>
+    <tool name="bff-deploy">Available if Step 7 / 8 reveal Spaarke Dev BFF needs re-deploy with latest Phase 2 changes (assumed pre-existing via task 030 deploy artifacts)</tool>
+    <tool name="code-page-deploy">Available if SpaarkeAi shell needs re-deploy to pick up latest frontend Phase 2 changes (assumed pre-existing)</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ (any gap-fill BFF unit test files authored by this task; recorded with originating D2-* task ID)</output>
+    <output type="test">tests/integration/Spe.Integration.Tests/ (any gap-fill integration test files — e.g., E2E Summarize end-to-end or `insights.query` consumption verification — recorded with originating D2-* task ID)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 031 🔲 → ✅; Phase 2 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task — task 040 D3-01 `/analyze` proof point)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md (§8 changelog: Phase 2 close entry + Wave F status at close)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/phase-2-closeout-report.md (aggregate test result, E2E Summarize evidence, Insights tool evidence, cross-tool disambiguation matrix, cumulative publish-size, CVE scan, R5-lead-sign-off confirmation, phase-gating walk-through, gap-fill record, carry-over items)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-031-evidence/ (TRX test output for unit + integration; publish-size measurement output; CVE scan output; SSE event log captures from DevTools for E2E Summarize; Insights tool screenshots + correlation-id App Insights / Kusto query refs; cross-tool disambiguation observation log)</output>
+    <output type="report">Task completion report (per task-execute template Step 6) + Phase 2 GATE GREEN declaration</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` completes with zero errors and zero new warnings vs Phase 1 close baseline.</criterion>
+    <criterion testable="true">`dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj` completes with zero failures; every Phase 2 BFF task (012, 014, 015, 024, 025, 029) has an associated passing test file in the test project (gaps filled by this task if any are surfaced).</criterion>
+    <criterion testable="true">`dotnet test tests/integration/Spe.Integration.Tests/` completes with zero failures; integration tests cover E2E Summarize endpoint + agent-tool consumption AND `insights.query` tool consumption against Spaarke Dev synthetic test entities (gaps filled if any are surfaced).</criterion>
+    <criterion testable="true">Frontend component test suites (for tasks 013, 017, 018, 020, 021, 022, 026, 027, 028) complete with zero failures (`npm test` in each relevant package).</criterion>
+    <criterion testable="true">E2E Summarize flow on Spaarke Dev: BOTH invocation paths (slash command → direct endpoint `POST /api/ai/chat/sessions/{id}/summarize` AND natural-language → `InvokeSummarizePlaybookTool` via `SprkChatAgent`) produce identical `DocumentAnalysisResult` output schema per SC-08; SSE `FieldDelta` events stream progressively into `StructuredOutputStreamWidget`; new Workspace tab opens additively (others untouched); tab persists + restores statically after refresh; multi-file combined-summary interjection appears once; prompt-first interjection works; per-file "Summarize this only" produces additive tab; decline-to-find renders distinctly; general grounded Q&A cites session-file chunks via `sessionId`-filtered RAG.</criterion>
+    <criterion testable="true">Insights `insights.query` tool on Spaarke Dev: BOTH response paths render correctly — playbook path renders structured envelope via `StructuredOutputStreamWidget` (static mode for v1.0; progressive SSE for v1.1 if Wave F shipped); RAG path renders citation-grounded prose with `[n]` clickable citations (v1.1) OR display-name-only (v1.0 fallback); decline + empty-result cases render distinctly; confidence badge appears for `<0.6` and absent otherwise; x-correlation-id propagates end-to-end (verified via App Insights / Kusto); all 3 Wave D7 synthetic test entities (matter `da116923-d65a-f111-a825-3833c5d9bcb1`, project `27845394-8e5f-f111-a825-70a8a59455f4`, invoice `05c8ef8d-8e5f-f111-a825-70a8a59455f4`) produce usable responses; all 12 error codes from integration brief §5.1 verified per task 030 closeout with no raw stack traces / document content leaking.</criterion>
+    <criterion testable="true">Cross-tool disambiguation (NFR-12 / UR-01): 5 ambiguous prompts tested; routing observations recorded in disambiguation matrix; misroutes (if any) documented for Phase 3 backlog (not a Phase 2 blocker per UR-01 resolution path).</criterion>
+    <criterion testable="true">Cumulative R5 BFF publish-size delta ≤ +1 MB compressed (budget) vs pre-R5 baseline (~45.65 MB); target ≤ +0.5 MB; total ≤ 47 MB; reported in task notes using the binding format from `.claude/constraints/azure-deployment.md`.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` shows zero NEW HIGH-severity CVEs vs Phase 1 close baseline + pre-R5 baseline (full output captured in task notes).</criterion>
+    <criterion testable="true">R5 lead sign-off on Insights `design-e3-tool-call-contract.md` v1.0 + 6 D-decisions (D1–D6) recorded in §10 review log is confirmed (task 023 ✅ + §10 link verified) per DR-03 + SC-10; Insights task 042 sub-task A.5 closure confirmed.</criterion>
+    <criterion testable="true">Phase 2 phase-gating walk-through: all 7 phase-gating items from `plan.md` Phase 2 header recorded GREEN with evidence references.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5; ADR-018 / ADR-029 / ADR-010 / ADR-013 / ADR-014 / ADR-028 / ADR-030 compliance verified.</criterion>
+    <criterion testable="true">Phase 2 closeout report exists at `projects/spaarke-ai-platform-unification-r5/notes/phase-2-closeout-report.md` and captures all 7 phase-gating checks + cross-tool disambiguation matrix + cumulative publish-size + CVE scan + R5-lead-sign-off confirmation + gap-fill record.</criterion>
+    <criterion testable="true">`TASK-INDEX.md` reflects: 031 ✅; Phase 2 phase status flipped to ✅; `current-task.md` reset to next pending task (task 040 D3-01 `/analyze` proof point) per CLAUDE.md §7; `notes/insights-r2-coordination.md` §8 changelog updated with Phase 2 close entry.</criterion>
+  </acceptance-criteria>
+</task>

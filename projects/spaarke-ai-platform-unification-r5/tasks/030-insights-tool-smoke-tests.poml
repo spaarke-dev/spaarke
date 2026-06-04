@@ -1,0 +1,892 @@
+<task id="030" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-20 Insights tool smoke tests on Spaarke Dev (Wave D7 synthetic GUIDs + SME walkthrough)</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G8 (serial; runs after ALL Insights tool implementation tasks 024+025+026+027+028+029 complete; blocks 031 Phase 2 verification)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>024 (InsightsQueryToolHandler), 025 (subject resolution + HTTP client), 026 (two-path InsightsResponseRenderer), 027 (clickable citations v1.1 + v1.0 fallback), 028 (confidence floor badge), 029 (12 error codes + retry + correlation propagation)</dependencies>
+    <tags>tests, integration, insights, smoke</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Smoke-test the complete `insights.query` tool integration end-to-end against the
+    Spaarke Dev BFF deployment, using the Wave D7 synthetic test entities reserved by
+    the Insights Engine r2 team for cross-project consumer validation:
+
+    - Matter:  `da116923-d65a-f111-a825-3833c5d9bcb1`
+    - Project: `27845394-8e5f-f111-a825-70a8a59455f4`
+    - Invoice: `05c8ef8d-8e5f-f111-a825-70a8a59455f4`
+
+    This task is the binding evidence layer for spec.md SC-11 + SC-18 — the two
+    success criteria that gate Phase 2 ship. It exercises (a) the in-process
+    Assistant tool catalog registration from task 024, (b) the HTTP transport from
+    task 025 (subject resolution + `@spaarke/auth` `authenticatedFetch` +
+    `x-correlation-id` propagation), (c) the two-path `InsightsResponseRenderer`
+    from task 026 (playbook structured envelope + RAG citation-grounded prose +
+    decline + empty-results sub-renderers), (d) v1.1 clickable citations / v1.0
+    fallback from task 027, (e) the confidence floor badge from task 028, and (f)
+    the full 12-code error matrix + retry policy + correlation-id surfacing from
+    task 029.
+
+    The task ships THREE concrete artifacts:
+
+    1. **15-question Spaarke Dev smoke matrix** — 5 realistic questions per
+       practice area (CTRNS contracts/transactional, IPPAT IP/patents, BNKF
+       banking/finance) per integration brief §8. The matrix is executed against
+       Spaarke Dev BFF (`https://spaarke-bff-dev.azurewebsites.net/api/insights/assistant/query`)
+       via the existing R5 chat-agent path (NOT via direct `curl` — the chat-agent
+       path is what's being validated). Each question's response is graded against
+       the binding contract — playbook envelope present and well-formed OR RAG
+       citations grounded + non-fabricated. Pass criteria are recorded in task
+       notes; raw response content is NEVER committed (per integration brief §5.2
+       no-information-leakage discipline + R5 CLAUDE.md §3.5).
+
+    2. **SME walkthrough coordination + signoff** — 1 legal-ops SME minimum walks
+       through the 15-question matrix on Spaarke Dev tenant. Operator coordinates
+       SME participation (this task is OPERATOR-LED for the SME-availability
+       portion; the AI agent prepares the walkthrough script + grading rubric +
+       evidence-capture template and supports the operator). SME signoff is
+       recorded by name + date in task notes; raw SME observations are
+       paraphrased / summarized for the notes (NEVER verbatim if they contain
+       customer-data references — Spaarke Dev synthetic entities are designed for
+       this exact reason, but the discipline is reinforced here).
+
+    3. **Findings capture + remediation backlog** — Any defects, UX rough edges,
+       cross-tool disambiguation surprises (e.g., `/summarize` vs `insights.query`
+       routing), v1.0 ↔ v1.1 contract behavior drift (especially around `citations[].href`
+       per FR-11 Wave F spike outcome), or low-confidence-badge calibration
+       observations are filed as ranked findings. Severity-1 findings block task
+       031 (Phase 2 verification); Severity-2/3 findings feed the R6 backlog per
+       D3-05.
+
+    This task is **PURE TEST + DOCUMENTATION** — ZERO production code change.
+    BFF publish-size delta = 0 MB (no `dotnet publish` measurement required;
+    confirm = 0 MB in task notes per R5 CLAUDE.md §3.6).
+  </prompt>
+
+  <role>
+    Senior QA / integration test engineer with deep familiarity of the Spaarke
+    AI integration test harness (`tests/integration/Spe.Integration.Tests/`), the
+    existing `IntegrationTestFixture` pattern, the R5 chat-agent tool surface
+    (tasks 024–029), and the Insights v1.0 binding contract (integration brief).
+    Comfortable coordinating SME participation, designing pass/fail rubrics for
+    LLM-generated responses, and applying ADR-018 information-leakage discipline
+    when capturing evidence. Familiar with ADR-013 §3.5 Zone B consumer boundary
+    (R5 consumes the HTTP contract ONLY — smoke tests assert wire-level behavior,
+    NOT Insights internals).
+  </role>
+
+  <goal>
+    Three concrete deliverables, all on the R5 branch (no production code change):
+
+    1. **`tests/integration/Spe.Integration.Tests/InsightsToolIntegrationTests.cs`**
+       (NEW) — xUnit integration test class following the existing
+       `IntegrationTestFixture` pattern. Tests are tagged with the existing
+       Spaarke `[Trait("Category", "Integration")]` + new
+       `[Trait("Feature", "InsightsTool")]`. Each test corresponds to one of the
+       15 smoke questions; tests authenticate via the existing fixture's OBO
+       flow, issue the request through the R5 chat-agent tool surface (task 024
+       `InsightsQueryToolHandler` — NOT raw HTTP), assert the response shape
+       matches the binding contract (`path` is `"playbook"` or `"rag"`;
+       `citations[]` shape valid; `confidence` in [0,1]; `correlationId` echoed;
+       no fabricated content per FR-04 anti-hallucination). Tests SKIP gracefully
+       when Spaarke Dev is unreachable (per existing fixture pattern; see
+       `PlaybookExecutionIntegrationTests.cs`). Raw response bodies are NOT
+       asserted character-by-character; tests assert structural conformance to
+       contract + categorical correctness rubric (defined in &lt;steps&gt; Step 5).
+
+    2. **`projects/spaarke-ai-platform-unification-r5/notes/task-030-smoke-evidence.md`**
+       (NEW, ephemeral notes) — Smoke test execution log. Records: 15 questions
+       executed + structural-pass / structural-fail per question + categorical
+       assessment (response usable / not-usable / inconclusive) WITHOUT raw
+       content (per integration brief §5.2 information-leakage discipline). Per
+       practice area: aggregate verdict + notable patterns. End-to-end
+       `correlationId` traced through one representative request (smoke test
+       captures the ID returned in the HTTP response header chain; if Spaarke
+       Dev App Insights / Kusto is operator-accessible, the operator captures
+       the trace and pastes the query result reference — NOT the trace body —
+       into the notes). BFF publish-size delta = 0 MB confirmation. Zero-new-
+       dependencies confirmation.
+
+    3. **`projects/spaarke-ai-platform-unification-r5/notes/task-030-sme-walkthrough.md`**
+       (NEW, ephemeral notes) — SME walkthrough record. Records: SME name + role
+       + date of session + tenant (Spaarke Dev); paraphrased findings per
+       question (NOT verbatim if customer-data-shaped); aggregate SME verdict
+       per practice area (usable / partially usable / not usable + brief
+       rationale); SME signoff statement (e.g., "Responses are usable for the
+       intended Phase 1.5 acceptance bar"); ranked findings backlog (Sev-1
+       blocks task 031; Sev-2/3 feeds R6 backlog).
+
+    The 15-question matrix runs PASS (all 15 structurally conform to the
+    binding contract; at least 12/15 are categorically usable per the rubric in
+    Step 5) AND the SME walkthrough completes with signoff. Quality gates
+    (`code-review` + `adr-check`) pass at Step 9.5.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="binding-contract">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+    <file purpose="v1.1-contract">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md</file>
+    <file purpose="coordination">projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md</file>
+    <file purpose="dependency-task-024">projects/spaarke-ai-platform-unification-r5/tasks/024-insights-query-tool-handler.poml</file>
+    <file purpose="dependency-task-025">projects/spaarke-ai-platform-unification-r5/tasks/025-subject-resolution-http-client.poml</file>
+    <file purpose="dependency-task-026">projects/spaarke-ai-platform-unification-r5/tasks/026-insights-response-renderer.poml</file>
+    <file purpose="dependency-task-027">projects/spaarke-ai-platform-unification-r5/tasks/027-clickable-citations-v1-1.poml</file>
+    <file purpose="dependency-task-028">projects/spaarke-ai-platform-unification-r5/tasks/028-confidence-floor-badge.poml</file>
+    <file purpose="dependency-task-029">projects/spaarke-ai-platform-unification-r5/tasks/029-insights-12-error-codes-retry.poml</file>
+    <file purpose="existing-integration-fixture">tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs</file>
+    <file purpose="existing-test-pattern">tests/integration/Spe.Integration.Tests/PlaybookExecutionIntegrationTests.cs</file>
+    <file purpose="decision-tree-guide">docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec SC-11 (binding success criterion)">`insights.query` tool registered in `SprkChatAgent`'s tool/skill registry; both response paths (playbook structured envelope + RAG citation-grounded prose) render correctly. Verify by: smoke test against Spaarke Dev with matter `da116923-d65a-f111-a825-3833c5d9bcb1`, project `27845394-8e5f-f111-a825-70a8a59455f4`, invoice `05c8ef8d-8e5f-f111-a825-70a8a59455f4` (Wave D7 synthetic test entities).</constraint>
+    <constraint source="spec SC-18 (binding success criterion)">UX walkthrough with ≥1 legal-ops SME on Spaarke Dev — 5 realistic questions per practice area (CTRNS, IPPAT, BNKF) — responses usable. Verify by: SME signoff in walkthrough notes. SME signoff is REQUIRED for task completion — without signoff, the task is BLOCKED pending SME availability (escalate to operator).</constraint>
+    <constraint source="integration brief §8 (binding acceptance criteria)">15-question matrix is 5 questions per practice area × 3 practice areas (CTRNS contracts/transactional, IPPAT IP/patents, BNKF banking/finance). MUST run against Wave D7 synthetic GUIDs above. SME walkthrough is the binding completion criterion (1 SME minimum per integration brief §8 bullet 8).</constraint>
+    <constraint source="integration brief §5.2 / ADR-018 (no information leakage)">Raw response content (LLM-generated answer text, citation excerpts, document content fragments) MUST NOT be committed into the test repo or task notes verbatim. Task notes record STRUCTURAL pass/fail + CATEGORICAL verdict (usable / partial / not usable) + paraphrased patterns. The synthetic test entities are designed to make this discipline easy (no real customer data), but the rule applies regardless — train the muscle memory.</constraint>
+    <constraint source="R5 CLAUDE.md §3.5 / ADR-013 §3.5 Zone B boundary">R5 is a Zone B consumer of the Insights HTTP contract. Smoke tests assert WIRE-LEVEL behavior of the binding contract — they do NOT import or assert against any `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/` internals (handlers, classifiers, routing logic). The test references the contract envelope via R5-local types (mirror of task 029's `InsightsProblemDetails` + the success-shape types from task 026). NO `using Sprk.Bff.Api.Services.Ai.Insights;` imports in the smoke test file.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 / reuse mandate">MUST use the EXISTING `IntegrationTestFixture` pattern (see `tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs`). DO NOT create a parallel test fixture, parallel auth bootstrap, or parallel HTTP client. The smoke tests MUST exercise the same R5 chat-agent tool handler (task 024 `InsightsQueryToolHandler`) that production traffic uses — testing the HTTP endpoint directly via `HttpClient` would miss the tool-catalog registration + middleware chain + correlation-id generation path that SC-11 requires verified.</constraint>
+    <constraint source="R5 CLAUDE.md §3.6 / ADR-029">BFF publish-size delta = 0 MB (this task adds test code + notes only; no `src/server/api/Sprk.Bff.Api/` changes). Confirm in task notes; no `dotnet publish` measurement required.</constraint>
+    <constraint source="CLAUDE.md §10 / bff-extensions §F test obligation">This task IS the test obligation for the P2-G6/G7 Insights integration suite (tasks 024–029). The 15-question matrix is the integration test surface. Unit tests within tasks 024–029 cover internal behavior; this task covers end-to-end wire-level behavior.</constraint>
+    <constraint source="spec FR-04 (anti-hallucination guarantee — RAG path)">RAG path returns `citations: []` AND `answer: ""` when retrieval finds zero hits. Smoke tests for empty-results scenarios MUST verify the empty-results branch renders correctly (per task 026's empty-results sub-renderer) — do NOT incorrectly mark these as failures. Empty results from synthetic entities on out-of-corpus questions is EXPECTED behavior, not a bug.</constraint>
+    <constraint source="spec NFR-11 (v1.1 graceful fallback)">If Wave F (Insights v1.1) has deployed to Spaarke Dev by smoke-test time, exercise SSE consumption + `citations[].href` clickable citations. If v1.1 has NOT deployed, exercise v1.0 fallback paths (single-shot response + display-name-only citations). EITHER state is acceptable per NFR-11 graceful fallback contract. Task notes MUST record which state was tested + the Wave F deployment status at test time.</constraint>
+    <constraint source="integration brief §11 / ADR-016 (aggregate rate budget)">Aggregate budget is 60/min/oid across `/ask` + `/search` + `/assistant/query`. Smoke test executor (or SME) MUST NOT exceed this — pace the 15 questions across at least 1 minute (~4-second average inter-request gap). If 429 is observed during smoke testing, honor `Retry-After` (already verified by task 029 Test 9/10) — do NOT count as a smoke-test failure. Document the 429 occurrence in task notes as a positive validation that rate-limit handling works end-to-end.</constraint>
+    <constraint source="project (SME coordination)">SME availability is OPERATOR-DRIVEN. The AI agent prepares the walkthrough script + grading rubric + evidence-capture template but does NOT execute the SME session unsupervised. If no SME is available within the task's execution window, the AI agent completes the 15-question structural matrix + filed evidence + clearly marks the SME walkthrough as BLOCKED-ON-SME-AVAILABILITY; operator schedules SME and updates the task notes when complete. The task does NOT close until SME signoff is recorded (per spec SC-18 binding requirement).</constraint>
+    <constraint source="integration brief §11 / Wave E deployment dependency">Smoke test execution requires `POST /api/insights/assistant/query` to be live on Spaarke Dev BFF — i.e., Insights r2 PR #337 (Wave E) MUST be merged to master + BFF redeployed. Verify by `GET https://spaarke-bff-dev.azurewebsites.net/swagger` → `Insights` tag → `InsightsAssistantQuery` endpoint present. If endpoint is NOT present, the task is BLOCKED pending Wave E ship (escalate; do NOT proceed with partial smoke tests).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>integration-testing/insights-tool-smoke + sme-walkthrough-coordination + spaarke-dev-deployment-verification</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/024-insights-query-tool-handler.poml</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/025-subject-resolution-http-client.poml</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/026-insights-response-renderer.poml</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/029-insights-12-error-codes-retry.poml</file>
+      <file>tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs</file>
+      <file>tests/integration/Spe.Integration.Tests/PlaybookExecutionIntegrationTests.cs</file>
+      <file>tests/integration/Spe.Integration.Tests/AnalysisEndpointsIntegrationTests.cs</file>
+      <file>docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-016-rate-limiting.md</file>
+      <file>.claude/adr/ADR-018-information-leakage-prevention.md</file>
+      <file>.claude/adr/ADR-019-error-handling.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing integration test class scaffold" location="tests/integration/Spe.Integration.Tests/PlaybookExecutionIntegrationTests.cs">
+        Use the EXISTING `IntegrationTestFixture` + `[Collection("Integration")]`
+        + `[Trait("Category", "Integration")]` pattern. Inject `IntegrationTestFixture`
+        + `ITestOutputHelper` via constructor. Tests SKIP gracefully when fixture
+        reports Spaarke Dev unreachable (existing pattern; do NOT change). Add a
+        new `[Trait("Feature", "InsightsTool")]` discriminator so the smoke
+        suite is independently runnable.
+      </pattern>
+      <pattern name="15-question matrix shape (binding — integration brief §8 + spec SC-18)" location="(this task — defined in Step 5)">
+        Three practice areas × 5 questions each = 15 questions. Each entry has:
+        (a) practice area (CTRNS / IPPAT / BNKF), (b) subject entity (one of
+        the three Wave D7 GUIDs — diversified across the 15 entries), (c)
+        natural-language query, (d) expected path (`playbook` / `rag` /
+        `decline` / `empty-results`), (e) categorical pass rubric (what makes
+        the response "usable" for this question). Author this matrix as a
+        TypeScript-equivalent C# `theory` data source (xUnit `[Theory]` +
+        `MemberData`) OR as a co-located JSON test-data file
+        (`tests/integration/Spe.Integration.Tests/fixtures/insights-smoke-matrix.json`)
+        consumed by a single `[Theory]` test method. JSON-driven is preferred
+        — it keeps the question text out of compiled artifacts and centralizes
+        the matrix for easy update.
+      </pattern>
+      <pattern name="Question seed source (background — decision-tree guide)" location="docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md">
+        The decision-tree guide already contains 15 worked examples across
+        CTRNS / IPPAT / BNKF (per integration brief §A.1) — use these as the
+        starting point for the smoke matrix. The 15 worked examples in the
+        guide are already calibrated for the playbook-vs-RAG decision boundary,
+        which exercises the classifier path (when `forceMode` is null) and the
+        forced path (when `forceMode` is `playbook` or `rag`). Cross-reference
+        + reuse where applicable; adjust as needed for synthetic-GUID
+        applicability.
+      </pattern>
+      <pattern name="Categorical pass rubric (binding per integration brief §8)" location="(this task — defined in Step 5)">
+        For each question, "usable" means ALL of:
+        - Response status = 200 (or 200 with `structuredResult.kind = "decline"` —
+          decline is a legitimate playbook outcome per integration brief §4.5).
+        - Response shape conforms to binding contract (`path` ∈ {playbook, rag};
+          `citations` is array; `confidence` ∈ [0,1]; `correlationId` present;
+          `playbookId` present when `path = playbook`).
+        - For RAG path: `citations[].source` is a recognizable document name (NOT
+          empty when `answer` is non-empty); `[n]` tokens in `answer` match
+          `citations[].n` values (no orphans).
+        - For playbook path: `structuredResult.envelope` is non-empty (or
+          decline envelope is well-formed with `Reason` + `MinimumEvidenceNeeded` +
+          `SuggestedActions`).
+        - For empty-results: BOTH `answer = ""` AND `citations = []` (per FR-04
+          anti-hallucination contract).
+        - No raw stack traces, document content fragments, or prompt text in
+          `answer` field (the BFF strips these per ADR-018; smoke test re-verifies).
+
+        SME categorical verdict is qualitative — "would a legal-ops practitioner
+        find this response useful in their workflow?". Capture per question +
+        aggregate per practice area.
+      </pattern>
+      <pattern name="Correlation-id end-to-end propagation verification (spec FR-17 / SC-16)" location="(integration test assertion)">
+        For at least one question per practice area (3 total minimum), capture
+        the request's `x-correlation-id` header value (generated by task 024
+        per Assistant turn). Assert that:
+        (a) The response's `X-Insights-*` headers OR ProblemDetails
+            `correlationId` extension echoes the same value.
+        (b) If Spaarke Dev App Insights / Kusto is operator-accessible, the
+            operator runs a sample trace lookup (e.g.,
+            `requests | where customDimensions.correlationId == "&lt;captured-id&gt;"`)
+            and captures the trace-count + result reference (NOT the trace
+            body) in task notes.
+
+        This verifies SC-16 end-to-end propagation pre-Phase-2-close.
+      </pattern>
+      <pattern name="SME walkthrough script template" location="(this task — co-located in walkthrough notes)">
+        Walkthrough session structure (operator-led, ~30–45 min):
+        1. SME orientation (5 min): explain Spaarke Dev synthetic entities,
+           Wave D7 GUIDs, the chat-agent tool surface, the goal (Phase 1.5
+           usability acceptance).
+        2. 15-question walkthrough (25–30 min): operator drives the chat-agent
+           UI; SME observes responses; per question, SME assigns categorical
+           verdict (usable / partial / not usable) + brief paraphrased note.
+        3. Aggregate verdict per practice area (5 min): SME synthesizes
+           overall practice-area assessment.
+        4. Signoff (5 min): SME states "Responses are usable for Phase 1.5
+           acceptance bar" OR identifies specific blockers + Sev rating.
+
+        Operator captures notes during session; AI agent compiles + structures
+        them into the evidence file after the session.
+      </pattern>
+      <pattern name="No-raw-content evidence discipline (binding per integration brief §5.2 + ADR-018)" location="(task notes authoring)">
+        When recording evidence in `task-030-smoke-evidence.md` /
+        `task-030-sme-walkthrough.md`, follow these explicit rules:
+        - Question text: OK to record verbatim (synthetic questions about
+          synthetic entities; no customer data risk).
+        - Response answer text: paraphrase or abstract (e.g., "Answer cited
+          Closing Memo + Acme APA across 3 citations; confidence 0.81;
+          structurally well-formed") — do NOT paste the full answer.
+        - Citation source names: OK to record (synthetic document names).
+        - Citation excerpt fields: paraphrase ONLY — do NOT paste verbatim
+          even though synthetic (rule discipline).
+        - LLM-generated content beyond the answer/citations: ignore entirely.
+        - CorrelationId values: OK to record verbatim (opaque debugging keys).
+      </pattern>
+      <pattern name="Wave F deployment status pre-flight check" location="(this task — Step 2)">
+        Before authoring the smoke matrix, the agent MUST verify:
+        - Spaarke Dev BFF endpoint live: `GET /swagger` shows
+          `InsightsAssistantQuery` in `Insights` tag.
+        - Wave F (v1.1) deployment status: check
+          `notes/insights-r2-coordination.md` §8 changelog for the most recent
+          Wave F update. If Wave F has shipped (SSE + `citations[].href`
+          available), the smoke matrix targets v1.1 behavior. If Wave F has
+          NOT shipped, the matrix targets v1.0 single-shot + display-name-only
+          citations + the v1.1 fallback paths from tasks 026/027.
+        - Either state is contract-acceptable per NFR-11; the choice affects
+          test design, not pass/fail.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 030 is the **integration evidence layer** for the Insights tool work
+      shipped by tasks 024–029. It is the binding evidence layer for spec.md
+      SC-11 (registered tool + both response paths render correctly) and SC-18
+      (SME walkthrough signoff). Without this task's evidence, Phase 2 cannot
+      close — SC-11 and SC-18 are explicit success criteria, not aspirational
+      goals.
+
+      The Wave D7 synthetic test entities (matter
+      `da116923-d65a-f111-a825-3833c5d9bcb1`, project
+      `27845394-8e5f-f111-a825-70a8a59455f4`, invoice
+      `05c8ef8d-8e5f-f111-a825-70a8a59455f4`) were reserved by the Insights
+      Engine r2 team specifically for cross-project consumer validation. They
+      are tagged with practice-area metadata so the same three entities can
+      drive 15 questions across CTRNS / IPPAT / BNKF. The integration brief §8
+      bullet 8 names them explicitly. Using these entities (rather than
+      arbitrary real-customer GUIDs) is the binding test-data choice — it
+      avoids customer-data exposure and produces deterministic, reviewable
+      evidence.
+
+      The 5-questions-per-practice-area structure is borrowed from the
+      `INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md` decision-tree guide, which
+      already contains 15 worked examples across CTRNS / IPPAT / BNKF. Those
+      worked examples are calibrated for the playbook-vs-RAG decision
+      boundary — they naturally exercise both response paths, plus the
+      classifier vs `forceMode` decision branch. Reusing this calibration
+      (rather than inventing fresh question text) anchors the smoke matrix to
+      a peer-reviewed reference and aligns the cross-project narrative.
+
+      The SME walkthrough is a soft acceptance test — it asks a legal-ops
+      practitioner to judge "would this be useful in my actual work?"
+      categorically per question and per practice area. The SME's role is
+      qualitative judgment, NOT contract conformance (the integration tests
+      assert contract conformance independently). SME signoff is binding per
+      SC-18 — without it, the task cannot close. If no SME is available within
+      the execution window, the task is BLOCKED pending SME availability —
+      operator schedules and the task re-opens to close the loop.
+
+      Information-leakage discipline (ADR-018 + integration brief §5.2) is
+      load-bearing during evidence capture. The synthetic entities make this
+      easy (no real customer data is at risk) but the discipline is
+      reinforced here so the muscle memory carries into future tasks that may
+      touch real-customer data. Question text and citation source names are
+      OK to record verbatim; response answer text and citation excerpt text
+      are paraphrased.
+
+      Rate-limit considerations: aggregate budget is 60/min/oid across
+      `/ask` + `/search` + `/assistant/query` per integration brief §11. Fifteen
+      questions paced across at least 1 minute (~4s gap) stays well under
+      budget. If smoke testing accidentally trips the 429 budget, that's a
+      POSITIVE end-to-end validation of the rate-limit handling shipped by
+      task 029 — log it as evidence, not as a failure.
+
+      Cross-tool disambiguation observation: the Phase 2 verification suite
+      (task 031) explicitly tests `/summarize` vs `insights.query` routing
+      disambiguation. Task 030's SME walkthrough may surface disambiguation
+      oddities (e.g., SME asks "summarize this matter" — does the agent route
+      to `/summarize` or `insights.query`?). These observations are NOT
+      pass/fail for task 030; they feed task 031's design AND the R6 backlog.
+
+      After task 030 completes, task 031 runs the consolidated Phase 2
+      end-to-end + cross-tool verification. After 030 + 031 ship, Phase 2
+      closes and the project transitions to Phase 3.
+    </background>
+    <dependencies>
+      <dependency task="024" status="required-blocking">
+        D2-14 — `InsightsQueryToolHandler` chat-agent tool function. The smoke
+        tests invoke this handler through the chat-agent tool surface. Task
+        030 MUST NOT begin until task 024 is ✅.
+      </dependency>
+      <dependency task="025" status="required-blocking">
+        D2-15 — Subject resolution + HTTP client (`@spaarke/auth`
+        `authenticatedFetch` + `x-correlation-id` propagation). The smoke
+        tests exercise this transport layer end-to-end. Task 030 MUST NOT
+        begin until task 025 is ✅.
+      </dependency>
+      <dependency task="026" status="required-blocking">
+        D2-16 — Two-path `InsightsResponseRenderer`. The smoke tests + SME
+        walkthrough observe rendered output from this component. Task 030
+        MUST NOT begin until task 026 is ✅.
+      </dependency>
+      <dependency task="027" status="required-blocking">
+        D2-17 — Clickable citations (v1.1 `citations[].href` + v1.0
+        fallback). The smoke tests verify whichever behavior is active per
+        Wave F deployment status. Task 030 MUST NOT begin until task 027 is ✅.
+      </dependency>
+      <dependency task="028" status="required-blocking">
+        D2-18 — Confidence floor badge. The smoke tests + SME walkthrough
+        verify the badge renders for low-confidence responses (some smoke
+        questions are intentionally designed to produce confidence &lt; 0.6 to
+        exercise this path). Task 030 MUST NOT begin until task 028 is ✅.
+      </dependency>
+      <dependency task="029" status="required-blocking">
+        D2-19 — 12 error codes + retry policy + correlation propagation. The
+        smoke tests verify error UX in the happy-path 15-question matrix
+        does NOT spuriously surface error envelopes when the contract returns
+        200. Smoke tests do NOT intentionally trigger all 12 error codes
+        (that's task 029's unit test surface). Task 030 MUST NOT begin until
+        task 029 is ✅.
+      </dependency>
+      <dependency task="Wave-E (Insights r2 PR #337)" status="external-required-blocking">
+        `POST /api/insights/assistant/query` MUST be live on Spaarke Dev BFF.
+        Verified at Step 2 pre-flight via `GET /swagger`. If not live, task
+        is BLOCKED pending Wave E ship (escalate to operator).
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 031 (D2-22) — Phase 2 verification + cross-tool disambiguation.
+        Consumes this task's evidence + SME findings to design the consolidated
+        end-to-end verification pass.</item>
+      <item>Task 043 (D3-04) — Operator-led end-to-end testing during Phase 3.
+        Different scope (full SpaarkeAi surface), but complementary — task 030
+        validates Insights tool specifically; task 043 validates the broader
+        Phase 2+3 shipped surface.</item>
+      <item>Task 044 (D3-05) — Lessons-learned + R6 backlog. Inherits Sev-2/3
+        findings from this task's SME walkthrough.</item>
+      <item>Insights Engine r2 task 042 (Wave E sub-task C) — Authored the
+        integration brief (`notes/insights-engine-assistant-integration-brief.md`)
+        + Wave D7 synthetic test entities. This task is the binding
+        consumer-side validation of that contract.</item>
+      <item>`docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md` — 15 worked
+        examples across CTRNS/IPPAT/BNKF. Source material for the smoke matrix.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request `/compact`.
+      Declare RIGOR LEVEL explicitly per CLAUDE.md §8:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Integration smoke test surface for SC-11 + SC-18 binding success
+                 criteria; gates Phase 2 close; depends on 6 prior tasks (024–029)
+                 + external Wave E deployment; coordinates SME walkthrough +
+                 information-leakage discipline. Tags: tests + integration +
+                 insights + smoke. Creates `.cs` test file + structured evidence
+                 notes (binding rigor trigger per task-execute decision tree).
+                 Serial after all Insights impl tasks. Qualifies for FULL.
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0–10 with Step 9.5 quality gates.
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress + verify dependencies">
+      Read `tasks/TASK-INDEX.md`. Confirm task 030 status is 🔲, dependencies
+      024 + 025 + 026 + 027 + 028 + 029 are ALL ✅ (BLOCKING — if ANY is 🔲, STOP
+      and report; smoke tests cannot validate an incomplete integration stack),
+      parallel-safe = false (serial within P2-G8). Read `current-task.md` to
+      verify no R5 task is in flight that conflicts with the smoke surface.
+      Read project README for project status. Confirm task 031 is 🔲 (downstream
+      sibling; this task feeds 031).
+    </step>
+    <step order="2" name="Pre-flight Spaarke Dev + Wave F deployment status">
+      Verify deployment prerequisites BEFORE authoring any test code:
+
+      (a) **Spaarke Dev BFF endpoint check**: `GET
+          https://spaarke-bff-dev.azurewebsites.net/swagger` — confirm the
+          `Insights` tag exists and contains `InsightsAssistantQuery`. If
+          missing → STOP, escalate to operator (Wave E PR #337 not merged or
+          BFF not redeployed).
+
+      (b) **Wave F deployment status**: Read
+          `notes/insights-r2-coordination.md` §8 changelog. Capture: Wave F
+          shipped to Spaarke Dev? (v1.1 SSE + `citations[].href` clickable
+          citations available?). Record in task notes — affects whether smoke
+          matrix targets v1.1 behavior or v1.0 fallback paths. Either state is
+          contract-acceptable per NFR-11.
+
+      (c) **Synthetic entity availability**: Verify the three Wave D7 GUIDs
+          are accessible on Spaarke Dev (operator confirms via Dataverse query
+          if uncertain). The Insights Engine r2 team reserved these specifically
+          for consumer validation; they should be live + queryable.
+
+      (d) **Aggregate rate budget headroom**: Confirm no concurrent smoke
+          testing or load testing is in flight on Spaarke Dev that would
+          compete for the 60/min/oid `ai-context` budget.
+
+      Document all four checks in task notes; gate Step 3 on all four passing.
+    </step>
+    <step order="3" name="Author the 15-question smoke matrix">
+      Compose `tests/integration/Spe.Integration.Tests/fixtures/insights-smoke-matrix.json`
+      (NEW). Schema:
+
+      ```json
+      {
+        "version": "1.0",
+        "wave-f-status": "shipped | not-shipped",   // per Step 2(b)
+        "matrix": [
+          {
+            "id": "ctrns-001",
+            "practiceArea": "CTRNS",
+            "subject": "matter:da116923-d65a-f111-a825-3833c5d9bcb1",
+            "query": "What are the closing conditions in this matter?",
+            "expectedPath": "rag",
+            "rubric": "Citations grounded in matter documents; [n] tokens match citations; no fabrication.",
+            "forceMode": null
+          },
+          // ... 14 more entries
+        ]
+      }
+      ```
+
+      Question authoring guidance:
+
+      - **5 CTRNS questions (contracts/transactional)** — exercise both paths
+        + decline + low-confidence. Examples (adapt from decision-tree guide):
+        - "What are the closing conditions in this matter?" → RAG (search
+          documents for closing conditions; expect grounded citations).
+        - "What is the predicted cost of this matter?" → playbook
+          (`predict-matter-cost@v1`; structured inference envelope; high
+          confidence).
+        - "Who are the parties to this transaction?" → RAG (citation-grounded).
+        - "What's the tail policy obligation here?" → RAG with potential
+          decline (matter may not have explicit tail-policy docs; decline path
+          legitimate per §4.5).
+        - "Is there a regulatory approval requirement?" → RAG.
+      - **5 IPPAT questions (IP/patents)** — exercise different document
+        shapes + different playbook scope (if any IP playbook configured).
+        Examples:
+        - "What patents are claimed in this matter?" → RAG.
+        - "What's the priority date for the parent application?" → RAG with
+          potential decline (specific factual question with citation
+          requirement).
+        - "Who are the named inventors?" → RAG.
+        - "What's the prosecution strategy here?" → RAG; potential
+          low-confidence (subjective synthesis).
+        - "Are there any pending office actions?" → RAG.
+      - **5 BNKF questions (banking/finance)** — exercise invoice subject +
+        financial-shape playbook (if configured). Examples (use invoice GUID
+        for at least 2):
+        - "What's the total billed on this invoice?" (subject:
+          `invoice:05c8ef8d-...`) → playbook OR RAG (depends on configured
+          invoice playbook).
+        - "What's the average matter cost across similar transactions?"
+          (subject: matter GUID) → playbook (`predict-matter-cost@v1`).
+        - "What collateral securitization is documented here?" → RAG.
+        - "What's the loan covenant compliance status?" → RAG with potential
+          decline.
+        - "Are there any outstanding fee disputes on this invoice?" (subject:
+          invoice GUID) → RAG.
+
+      Each entry MUST diversify: at least 3 questions per Wave D7 GUID across
+      the full 15. Mix `expectedPath`: ~6 playbook, ~7 RAG, ~2 decline /
+      empty-results. `forceMode` mix: ~10 null (classifier), ~3
+      `"playbook"`, ~2 `"rag"` to exercise the forced paths.
+
+      Cross-reference each question against the decision-tree guide where
+      applicable. Author the matrix in one logical authoring pass; reviewer
+      cross-checks at Step 9.5 against integration brief §8 + spec SC-18.
+    </step>
+    <step order="4" name="Author InsightsToolIntegrationTests.cs">
+      Create `tests/integration/Spe.Integration.Tests/InsightsToolIntegrationTests.cs`
+      following the existing `PlaybookExecutionIntegrationTests.cs` pattern:
+
+      ```csharp
+      using FluentAssertions;
+      using Microsoft.Extensions.DependencyInjection;
+      using Xunit;
+      using Xunit.Abstractions;
+      // NO using Sprk.Bff.Api.Services.Ai.Insights;   // Zone B boundary
+
+      namespace Spe.Integration.Tests;
+
+      [Collection("Integration")]
+      [Trait("Category", "Integration")]
+      [Trait("Feature", "InsightsTool")]
+      public class InsightsToolIntegrationTests : IClassFixture<IntegrationTestFixture>
+      {
+          private readonly IntegrationTestFixture _fixture;
+          private readonly ITestOutputHelper _output;
+          // ... constructor
+
+          [Theory]
+          [MemberData(nameof(LoadSmokeMatrix))]
+          public async Task InsightsToolHandler_SmokeQuestion_ConformsToContract(
+              string questionId,
+              string practiceArea,
+              string subject,
+              string query,
+              string expectedPath,
+              string? forceMode,
+              string rubric)
+          {
+              // SKIP if Spaarke Dev unreachable (existing fixture pattern).
+              if (!_fixture.SpaarkeDevReachable) {
+                  _output.WriteLine($"SKIPPED {questionId}: Spaarke Dev not reachable.");
+                  return;
+              }
+
+              // Resolve InsightsQueryToolHandler via DI (task 024 wired the registration).
+              using var scope = _fixture.Services.CreateScope();
+              var handler = scope.ServiceProvider.GetRequiredService<IInsightsQueryToolHandler>(); // type from task 024
+              handler.Should().NotBeNull("InsightsQueryToolHandler must be registered (SC-11)");
+
+              // Generate correlationId per turn (mirror of task 024 Step 4 behavior).
+              var correlationId = Guid.NewGuid().ToString();
+
+              // Invoke via the tool surface (NOT raw HTTP).
+              var response = await handler.QueryAsync(new {
+                  query, subject, forceMode, conversationContext = (object?)null
+              }, correlationId, CancellationToken.None);
+
+              // Structural assertions (binding contract).
+              response.Should().NotBeNull();
+              response.Path.Should().BeOneOf("playbook", "rag");
+              if (expectedPath != "decline" && expectedPath != "empty-results") {
+                  response.Path.Should().Be(expectedPath, $"{questionId} expected {expectedPath}");
+              }
+              response.Citations.Should().NotBeNull();
+              response.Confidence.Should().BeInRange(0.0, 1.0);
+              response.CorrelationId.Should().Be(correlationId, "FR-17/SC-16 correlation propagation");
+
+              if (response.Path == "playbook") {
+                  response.PlaybookId.Should().NotBeNullOrEmpty();
+                  response.StructuredResult.Should().NotBeNull();
+              }
+              if (response.Path == "rag") {
+                  // FR-04 anti-hallucination: empty answer ⇔ empty citations.
+                  if (string.IsNullOrEmpty(response.Answer)) {
+                      response.Citations.Should().BeEmpty();
+                  } else {
+                      response.Citations.Should().NotBeEmpty();
+                      // [n] tokens in answer match citation ns.
+                      // ... custom assertion (no-orphan-token check)
+                  }
+              }
+
+              // Log STRUCTURAL outcome only (per ADR-018 information leakage).
+              _output.WriteLine($"PASS {questionId}: path={response.Path}, " +
+                                $"confidence={response.Confidence:F2}, " +
+                                $"citationCount={response.Citations.Count}, " +
+                                $"correlationId={correlationId}");
+              // Do NOT _output.WriteLine(response.Answer) — would log raw content.
+          }
+
+          public static IEnumerable<object[]> LoadSmokeMatrix() {
+              var json = File.ReadAllText("fixtures/insights-smoke-matrix.json");
+              // ... deserialize + project to object[]
+          }
+      }
+      ```
+
+      Pace the matrix execution: insert a deliberate ~3s `Task.Delay` between
+      questions inside the theory data (or via a serial test collection
+      `[CollectionDefinition("InsightsSmokeSerial", DisableParallelization = true)]`)
+      to stay under the 60/min aggregate rate budget.
+
+      The test file does NOT exercise all 12 error codes — that's task 029's
+      unit test surface. The smoke matrix exercises HAPPY PATH + the natural
+      decline / empty-results / low-confidence variants that synthetic data
+      produces organically.
+    </step>
+    <step order="5" name="Execute smoke matrix + capture evidence (no-leak discipline)">
+      Run the integration test suite against Spaarke Dev:
+
+      ```powershell
+      dotnet test tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj `
+        --filter "Category=Integration&amp;Feature=InsightsTool" `
+        --logger "console;verbosity=detailed" `
+        --logger "trx;LogFileName=insights-smoke-results.trx"
+      ```
+
+      For each question in the matrix:
+      - Capture STRUCTURAL pass/fail (assertion outcome).
+      - Capture CATEGORICAL verdict via reviewer judgment (usable / partial /
+        not-usable) — operator + AI agent collaborate to assign.
+      - Capture per-question correlationId (for the SC-16 propagation trace).
+      - NEVER capture verbatim answer text or citation excerpts (per ADR-018
+        + integration brief §5.2). Per-question paraphrase in evidence notes:
+        e.g., "PASS: RAG path; 3 citations from matter documents; confidence
+        0.78; answer cites closing conditions across [1][2][3]; rubric met."
+
+      Compile `projects/spaarke-ai-platform-unification-r5/notes/task-030-smoke-evidence.md`
+      with the following sections:
+      1. Pre-flight status (Step 2 outcomes)
+      2. Wave F deployment status (v1.0 vs v1.1 path tested)
+      3. 15-question matrix results table (id, practice area, subject scheme,
+         path observed, confidence, citation count, categorical verdict,
+         correlationId)
+      4. Aggregate per practice area: structural pass rate, categorical verdict
+         (target ≥ 12/15 categorically usable per Step 5 rubric)
+      5. Correlation-id end-to-end trace: at least 3 questions (one per
+         practice area) with App Insights / Kusto trace reference (where
+         operator-accessible)
+      6. Rate-limit observations: any 429s observed (positive validation if
+         so; nothing to fix)
+      7. Defects / Sev-1 findings: NONE expected if all prior tasks shipped
+         correctly; if any → STOP, escalate, do not proceed to Step 6
+      8. BFF publish-size delta = 0 MB (confirmed; no BFF code changed)
+      9. Zero-new-dependencies confirmation (no new NuGet/npm packages)
+    </step>
+    <step order="6" name="Coordinate SME walkthrough">
+      This step is OPERATOR-LED. AI agent prepares:
+
+      (a) **Walkthrough script**: structured 30–45 min session plan per the
+          knowledge pattern in &lt;knowledge&gt; (orientation → 15-question
+          walkthrough → aggregate verdict → signoff).
+
+      (b) **Grading rubric template**: per-question + per-practice-area
+          categorical verdict template + paraphrased-notes template (with
+          explicit no-verbatim-content rule reminder).
+
+      (c) **Signoff template**: SME name + role + date + tenant (Spaarke
+          Dev) + signoff statement OR blocker rating (Sev-1/2/3 with
+          paraphrased rationale).
+
+      Operator schedules SME participation. If SME is available within the
+      task execution window:
+      - Operator drives the SpaarkeAi chat-agent UI through the 15 questions
+        on Spaarke Dev tenant.
+      - SME observes + assigns categorical verdicts.
+      - Operator captures notes during the session.
+      - AI agent compiles + structures notes into
+        `projects/spaarke-ai-platform-unification-r5/notes/task-030-sme-walkthrough.md`
+        after the session, applying the no-verbatim-content discipline.
+
+      If SME is NOT available within the task execution window:
+      - AI agent completes Steps 1–5 + 7–10.
+      - SME walkthrough section of evidence is marked BLOCKED-ON-SME-AVAILABILITY.
+      - Task status remains in-progress (not complete) until operator schedules
+        SME and signoff is recorded.
+      - Operator updates TASK-INDEX.md when signoff complete (close-out
+        amendment).
+    </step>
+    <step order="7" name="Findings capture + remediation backlog">
+      Compile any findings (defects, UX rough edges, cross-tool disambiguation
+      surprises, v1.0↔v1.1 drift, badge calibration observations) into a
+      ranked backlog section in
+      `notes/task-030-smoke-evidence.md` and
+      `notes/task-030-sme-walkthrough.md`:
+
+      - **Sev-1 (blocking)**: contract violation, no-leakage failure (any
+        forbidden content leaked into rendered DOM or evidence files), SC-11
+        or SC-18 not met. Sev-1 BLOCKS task 031 and Phase 2 close. STOP and
+        escalate.
+      - **Sev-2 (Phase 3 candidate)**: UX rough edges, SME-flagged usability
+        gaps, low-confidence-badge calibration issues. Feeds task 044 R6
+        backlog.
+      - **Sev-3 (nice-to-have)**: polish items, observation-only patterns,
+        future-enhancement seeds. Feeds task 044 R6 backlog.
+
+      Cross-link findings to existing project artifacts (e.g., "Sev-2 finding
+      X relates to spec UR-02 StructuredOutputStreamWidget complexity concern
+      — feeds R6 backlog item Y").
+    </step>
+    <step order="8" name="Cross-tool disambiguation observation (informational)">
+      During the SME walkthrough OR a separate ~15 min observation session
+      after the matrix, exercise the cross-tool disambiguation surface
+      INFORMALLY:
+
+      - SME or operator types prompts that COULD route to either tool:
+        - "summarize this matter" → does the agent route to `/summarize`
+          (which would expect uploaded files) or `insights.query` (which
+          would query the matter)? Either may be correct depending on tool
+          description discipline per NFR-12. Capture the observed routing.
+        - "what's the cost of this matter" + uploaded files → does the agent
+          route to `insights.query` (predict-matter-cost playbook) or
+          `/summarize` (summarize the files)? Both are plausible; observe.
+        - "tell me about this invoice" + no upload → should route to
+          `insights.query` (RAG on invoice docs).
+
+      This observation is NOT pass/fail for task 030 — it informs task 031's
+      design of the consolidated cross-tool verification suite. Capture
+      observations as paraphrased notes; rank as Sev-2/3 for R6 backlog if
+      misroutes are observed.
+    </step>
+    <step order="9" name="Verify acceptance criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is
+      testable + passing. Record evidence per criterion in
+      `notes/task-030-smoke-evidence.md`. If ANY criterion is failing and
+      cannot be remediated within the task window:
+      - Sev-1 criterion failure → STOP, escalate, task is BLOCKED.
+      - SME signoff missing (SC-18 unmet) → task remains in-progress pending
+        SME availability per Step 6 protocol.
+      - All other criterion failures → file Sev-2/3 in backlog; if remediable
+        within Phase 2 close, fix; if not, escalate to operator decision.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the new files
+      (`InsightsToolIntegrationTests.cs` + `insights-smoke-matrix.json` +
+      both evidence notes). Run `adr-check` skill against the same; verify:
+
+      - **ADR-013 §3.5 (Zone B boundary)**: Smoke test file imports
+        NOTHING from `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/`
+        internals. Tool handler is resolved via DI interface from task 024;
+        wire types are R5-local mirrors of the contract. Verified by grep
+        of `InsightsToolIntegrationTests.cs` for forbidden imports.
+      - **ADR-016 (rate-limit honoring)**: Matrix execution paces requests
+        to stay under 60/min aggregate budget; observed 429s (if any) are
+        captured as positive validation. Verified by Step 5 evidence
+        section 6.
+      - **ADR-018 (no information leakage)**: Evidence files contain ZERO
+        verbatim answer text or citation excerpts. Verified by reviewer
+        scan of both evidence notes — search for substrings that look
+        like LLM-generated prose; flag any verbatim-looking passages.
+      - **ADR-019 (ProblemDetails parsing)**: Tests handle any error
+        responses via task 029's already-shipped envelope parsing; smoke
+        tests do NOT re-implement error handling. Verified by inspection
+        of test file (no parallel error-parsing logic).
+      - **R5 CLAUDE.md §3.1 (reuse mandate)**: Test class uses EXISTING
+        `IntegrationTestFixture`; matrix consumed via xUnit theory pattern
+        consistent with `PlaybookExecutionIntegrationTests.cs`; no
+        parallel test infrastructure. Verified by inspection.
+      - **R5 CLAUDE.md §3.5 (Insights consumer governance)**: All 6
+        dependencies (024–029) confirmed ✅ before this task began (Step 1).
+        Verified by TASK-INDEX.md status snapshot in task notes.
+      - **spec SC-11**: `insights.query` tool registered + both response
+        paths render correctly. Verified by Step 4 test execution +
+        Step 5 evidence per-question outcomes (target ≥ 12/15 categorically
+        usable).
+      - **spec SC-18**: SME walkthrough with ≥1 legal-ops SME + signoff
+        recorded. Verified by `notes/task-030-sme-walkthrough.md`
+        signoff section. If signoff is BLOCKED-ON-SME-AVAILABILITY, the
+        quality gate is INCOMPLETE — task does NOT close until signoff
+        recorded.
+
+      All gates MUST pass before marking the task complete. Confirm BFF
+      publish-size delta = 0 MB (no BFF code changed). Confirm
+      zero-new-dependencies. No CVE scan required.
+    </step>
+    <step order="10" name="Document + Complete">
+      If SME signoff IS recorded:
+      - Update task POML status to `complete`.
+      - Update `TASK-INDEX.md`: 030 🔲 → ✅.
+      - Reset `current-task.md` to the next pending task per CLAUDE.md §7
+        (likely 031 — Phase 2 verification).
+      - Record final evidence summary in
+        `notes/task-030-smoke-evidence.md` final-summary section:
+        * 15-question matrix outcome (X/15 structural pass, Y/15 categorical
+          usable).
+        * SME signoff statement (paraphrased; SME name + role + date).
+        * Wave F deployment status at test time (v1.0 vs v1.1 paths tested).
+        * Sev-1 findings: NONE (if otherwise, task would have been BLOCKED).
+        * Sev-2/3 findings filed to R6 backlog: list + cross-links.
+        * `correlationId` propagation traced end-to-end: confirmed.
+        * BFF publish-size delta = 0 MB.
+        * Zero-new-dependencies.
+        * `code-review` + `adr-check` pass results.
+      - Report task completion + handoff to task 031 (Phase 2 verification).
+
+      If SME signoff is NOT recorded (SME unavailable):
+      - Update task POML status to `in-progress` (NOT complete).
+      - Update `TASK-INDEX.md`: 030 🔲 → 🔄 with note "Awaiting SME walkthrough".
+      - Do NOT reset `current-task.md` — task remains in-progress.
+      - Operator owns scheduling SME + closing the task once signoff captured.
+      - Phase 2 close (and task 031 start) gates on this task's completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run integration tests (`dotnet test tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj --filter "Category=Integration&amp;Feature=InsightsTool"`)</tool>
+    <tool name="az">Azure CLI — `GET /swagger` pre-flight check; optional App Insights / Kusto trace lookup for correlation-id propagation verification</tool>
+    <tool name="git">Stage + commit on the R5 branch (one logical commit: smoke matrix + test class + evidence notes; SME walkthrough notes may be a separate follow-up commit if SME schedules after main commit)</tool>
+    <tool name="code-review">Quality gate at Step 9.5 (FULL rigor)</tool>
+    <tool name="adr-check">Quality gate at Step 9.5 (FULL rigor) — verify ADR-013 §3.5, ADR-016, ADR-018, ADR-019, R5 CLAUDE.md §§3.1/3.5</tool>
+    <tool name="context-handoff">Checkpointing per R5 CLAUDE.md §5 (after Step 3, Step 5, Step 9; verbose at &gt;60%)</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Spe.Integration.Tests/InsightsToolIntegrationTests.cs (NEW — xUnit theory test class consuming the 15-question matrix; uses existing `IntegrationTestFixture` per R5 CLAUDE.md §3.1 reuse mandate)</output>
+    <output type="test-data">tests/integration/Spe.Integration.Tests/fixtures/insights-smoke-matrix.json (NEW — 15-question smoke matrix; 5 questions × 3 practice areas; diversified across Wave D7 GUIDs + paths + forceMode values)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 030 🔲 → ✅ if SME signoff captured; → 🔄 if SME pending)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending task — likely 031 — only if SME signoff captured)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-030-smoke-evidence.md (pre-flight status, Wave F deployment status, 15-question matrix results, aggregate per practice area, correlation-id propagation evidence, rate-limit observations, defect/findings backlog, publish-size + dependency confirmations, quality gate results)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-030-sme-walkthrough.md (SME name + role + date + tenant, paraphrased per-question findings, aggregate per-practice-area SME verdict, SME signoff statement, ranked findings backlog for R6)</output>
+    <output type="report">Task completion report (per task-execute template Step 6) — OR in-progress handoff if SME pending</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">15-question smoke matrix executed on Spaarke Dev BFF; structural pass rate is 15/15 (every question conforms to binding contract per integration brief §4 + §5). Confirmed by `dotnet test` run output + `notes/task-030-smoke-evidence.md` matrix results table.</criterion>
+    <criterion testable="true">Categorical pass rate is ≥ 12/15 per the Step 5 rubric (response is "usable" — well-formed contract envelope + appropriate path + grounded citations or structured envelope, no fabrication). Sub-target pass (≤ 11/15) triggers Sev-2 finding + R6 backlog entry (not a Sev-1 block unless underlying contract violation).</criterion>
+    <criterion testable="true">5 questions per practice area (CTRNS, IPPAT, BNKF) included in matrix; each Wave D7 GUID (matter, project, invoice) used as subject at least 3 times across the 15. Confirmed by `insights-smoke-matrix.json` content inspection.</criterion>
+    <criterion testable="true">Matrix exercises both response paths: at least 5 questions resolve to `playbook` path AND at least 5 questions resolve to `rag` path. At least 1 question exercises the decline path (`structuredResult.kind = "decline"`) OR the empty-results path (RAG returns `answer="" + citations=[]`). Confirmed by Step 5 evidence per-question outcomes.</criterion>
+    <criterion testable="true">`forceMode` mix exercises both branches: at least 3 questions with `forceMode = "playbook"`, at least 2 questions with `forceMode = "rag"`, remaining null (classifier path). Confirmed by matrix content + execution evidence.</criterion>
+    <criterion testable="true">**SME walkthrough completed with ≥1 legal-ops SME on Spaarke Dev tenant**; signoff statement recorded in `notes/task-030-sme-walkthrough.md` (binding per spec SC-18). If SME unavailable at test execution time, task is BLOCKED-ON-SME-AVAILABILITY and does NOT close until signoff recorded.</criterion>
+    <criterion testable="true">SME categorical verdict per practice area recorded (CTRNS, IPPAT, BNKF — each rated usable / partially usable / not usable with paraphrased rationale). Aggregate verdict supports Phase 1.5 acceptance bar OR identifies specific blockers ranked Sev-1/2/3.</criterion>
+    <criterion testable="true">**Information-leakage discipline (ADR-018 + integration brief §5.2)**: evidence files contain ZERO verbatim answer text or citation excerpts. Question text + citation source names OK; response text paraphrased. Confirmed by reviewer scan at Step 9.5.</criterion>
+    <criterion testable="true">`x-correlation-id` propagation traced end-to-end (FR-17 / SC-16): same correlationId on at least 3 representative requests (one per practice area) from tool-handler issue → BFF response → (where operator-accessible) App Insights / Kusto trace. Confirmed in `notes/task-030-smoke-evidence.md` correlation-id section.</criterion>
+    <criterion testable="true">**Zone B boundary verified**: `InsightsToolIntegrationTests.cs` imports NOTHING from `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/` internals; tool handler resolved via DI interface from task 024; wire types are R5-local mirrors. Confirmed by grep at Step 9.5.</criterion>
+    <criterion testable="true">**Reuse mandate verified (R5 CLAUDE.md §3.1)**: Test class uses EXISTING `IntegrationTestFixture` + `[Collection("Integration")]` pattern; matrix consumed via xUnit theory; no parallel test infrastructure created. Confirmed by inspection.</criterion>
+    <criterion testable="true">All 6 dependency tasks (024 + 025 + 026 + 027 + 028 + 029) confirmed ✅ in TASK-INDEX.md before smoke testing began. Confirmed by Step 1 evidence in task notes.</criterion>
+    <criterion testable="true">Wave E deployment pre-flight passed: `GET https://spaarke-bff-dev.azurewebsites.net/swagger` shows `InsightsAssistantQuery` in `Insights` tag. Wave F status (v1.1 SSE + `citations[].href`) recorded as shipped or not-shipped; smoke matrix targets the live state appropriately per NFR-11 graceful fallback. Confirmed by Step 2 evidence.</criterion>
+    <criterion testable="true">No Sev-1 findings (contract violation, no-leakage failure, SC-11 or SC-18 not met). Sev-2/3 findings filed to R6 backlog per task 044 with cross-links. Confirmed by Step 7 evidence backlog section.</criterion>
+    <criterion testable="true">Rate-limit observations recorded — if 429s occurred during smoke testing, captured as positive validation of task 029 end-to-end behavior (NOT as failures). Pace of execution stayed under 60/min aggregate budget per ADR-016 + integration brief §11.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (confirmed in task notes; no BFF code changed by this task). Zero new dependencies introduced (no new NuGet / npm packages; verified by repository diff).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5 (ADR-013 §3.5, ADR-016, ADR-018, ADR-019, R5 CLAUDE.md §§3.1/3.5, spec SC-11 + SC-18 confirmed).</criterion>
+  </acceptance-criteria>
+</task>
