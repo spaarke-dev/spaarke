@@ -192,13 +192,18 @@ export const App: React.FC = () => {
       paneRegistered = true;
     }, 500);
 
+    // eslint-disable-next-line no-console
+    console.info('[EventsPage] subscribing to calendar filter channel');
     const unsubscribe = subscribeToCalendarFilter(payload => {
       // The CalendarSidePane wraps its CalendarFilterOutput in { filter: ... };
       // unwrap before translation so the operator selection actually reaches
       // the grid's FetchXML composition.
       const wrapped = payload as CalendarFilterPayload | null | undefined;
       const inner = wrapped?.filter ?? null;
-      setCalendarHostFilters(calendarFilterToHostFilters(inner));
+      const next = calendarFilterToHostFilters(inner);
+      // eslint-disable-next-line no-console
+      console.info('[EventsPage] calendar filter received', { payload, inner, hostFilters: next });
+      setCalendarHostFilters(next);
     });
 
     const cleanup = () => closeAllEventsPanes();

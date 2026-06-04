@@ -743,14 +743,29 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
   const anchorRef = React.useRef<HTMLButtonElement>(null);
 
   return (
-    // Stop click propagation at the outer span so clicks on the chevron menu
-    // trigger Button don't bubble up to the Fluent v9 <DataGridHeaderCell>,
-    // which has its own onClick that toggles column sort when the column
-    // definition is `sortable: true`. Without this, opening the chevron menu
-    // also re-sorts the column — the long-standing "filter chevron also
-    // sorts" bug. Task 035 UAT iteration 3 — confirmed root cause + fix.
+    // Stop ALL pointer events at the outer span so clicks on the chevron menu
+    // trigger Button (and anything inside the menu/filter popover portals)
+    // don't bubble up to the Fluent v9 <DataGridHeaderCell>, which has its
+    // own onClick that calls `toggleColumnSort` when the column's compare is
+    // present (see @fluentui/react-table/lib/components/DataGridHeaderCell/
+    // useDataGridHeaderCell.js L40-46). Iteration 4 used onClick alone but
+    // that wasn't enough — some Fluent internals dispatch on mousedown / focus.
+    // Iteration 5 stops onMouseDown + onClick + uses
+    // nativeEvent.stopImmediatePropagation to also block any non-React
+    // listeners that might be attached. Sort can still be invoked via the
+    // chevron menu's Sort A→Z / Sort Z→A items (those call onSortChange).
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
-    <span className={mergeClasses(styles.root, className)} onClick={e => e.stopPropagation()}>
+    <span
+      className={mergeClasses(styles.root, className)}
+      onClick={e => {
+        e.stopPropagation();
+        e.nativeEvent.stopImmediatePropagation?.();
+      }}
+      onMouseDown={e => {
+        e.stopPropagation();
+        e.nativeEvent.stopImmediatePropagation?.();
+      }}
+    >
       <Menu open={menuOpen} onOpenChange={(_e, data) => setMenuOpen(data.open)}>
         <MenuTrigger disableButtonEnhancement>
           <Button
