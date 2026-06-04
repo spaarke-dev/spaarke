@@ -1,12 +1,12 @@
 <task id="028" project="spaarke-ai-platform-unification-r5">
   <metadata>
     <title>D2-18 Confidence floor badge (D5 R5 client-side; `&lt;0.6` threshold, configurable)</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>2 hours</estimated-effort>
-    <actual-effort></actual-effort>
+    <actual-effort>~1h (sub-agent, code-authoring scope only; main session owns build / code-review / adr-check / commit / push)</actual-effort>
     <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
     <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
     <wave>P2-G6 (parallel-safe; runs alongside 024/025/026/027 — last of the Insights tool integration suite)</wave>
     <parallel-safe>true</parallel-safe>

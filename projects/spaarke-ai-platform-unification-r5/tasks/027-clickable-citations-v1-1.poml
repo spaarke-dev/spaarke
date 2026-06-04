@@ -1,12 +1,12 @@
 <task id="027" project="spaarke-ai-platform-unification-r5">
   <metadata>
     <title>D2-17 Clickable citations (v1.1 `citations[].href`; v1.0 fallback)</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>4 hours</estimated-effort>
-    <actual-effort></actual-effort>
+    <actual-effort>~1.5h (sub-agent code-authoring scope; main session owns build, quality gates, commit, push)</actual-effort>
     <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
     <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
     <wave>P2-G6 (parallel-safe within group; share `InsightsResponseRenderer` surface with tasks 024, 025, 026, 028)</wave>
     <parallel-safe>true</parallel-safe>
