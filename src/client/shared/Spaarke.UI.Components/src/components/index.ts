@@ -1,13 +1,8 @@
 // Fluent UI v9 Wrappers (Spaarke standards)
 export * from './SprkButton';
 
-// Dataset components
-export * from './DatasetGrid/UniversalDatasetGrid';
-export * from './DatasetGrid/GridView';
-export * from './DatasetGrid/CardView';
-export * from './DatasetGrid/ListView';
-export * from './DatasetGrid/VirtualizedGridView';
-export * from './DatasetGrid/VirtualizedListView';
+// Dataset components — legacy view components retired in Phase F (task 051).
+// Only ViewSelector remains; the new DataGrid framework lives under './DataGrid'.
 export * from './DatasetGrid/ViewSelector';
 
 // Toolbar components

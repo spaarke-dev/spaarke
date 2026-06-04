@@ -3,7 +3,7 @@
   <metadata>
     <title>Remove DatasetGrid/{GridView, CardView, ListView, VirtualizedGridView, VirtualizedListView}.tsx + barrel update</title>
     <phase>6: Phase F — Legacy Retirement</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>050</dependencies>
     <blocks>054</blocks>
@@ -80,6 +80,20 @@
 
   <notes>
     Parallels task 052. Safe parallelization because task 050 audit gave us confidence + task 052 only touches SpeAdminApp.
+
+    Completion summary (2026-06-04):
+    - Deleted 7 files: GridView.tsx, CardView.tsx, ListView.tsx, VirtualizedGridView.tsx, VirtualizedListView.tsx,
+      UniversalDatasetGrid.tsx, __tests__/GridView.test.tsx.
+    - Scope expanded beyond POML's literal 5-file list: also deleted `UniversalDatasetGrid.tsx` (composition root —
+      audit confirmed zero external consumers; it imports the 3 routed views and breaks the build if they're gone)
+      and `__tests__/GridView.test.tsx` (imports the deleted GridView). Both deletions were the obvious closure of
+      the 5-file deletion, not a scope creep.
+    - Kept ViewSelector.tsx + ViewSelector.test.tsx (per POML constraint; ViewSelector has no dependency on the
+      deleted views).
+    - Barrel `src/components/index.ts` reduced from 7 DatasetGrid exports to 1 (ViewSelector only).
+    - `npm run build` (tsc) passes cleanly; clean rebuild emits only ViewSelector outputs in dist/.
+    - Source grep for `from '...DatasetGrid/(GridView|CardView|ListView|VirtualizedGridView|VirtualizedListView|UniversalDatasetGrid)'`
+      returns zero matches across `src/`.
   </notes>
 
   <execution>

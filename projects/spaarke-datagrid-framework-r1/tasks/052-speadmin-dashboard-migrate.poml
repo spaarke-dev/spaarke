@@ -3,7 +3,7 @@
   <metadata>
     <title>Migrate SpeAdminApp/DashboardPage.tsx from UniversalDatasetGrid PCF to new DataGrid</title>
     <phase>6: Phase F — Legacy Retirement</phase>
-    <status>not-started</status>
+    <status>completed-partial</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>015,050</dependencies>
     <blocks>053</blocks>
@@ -83,6 +83,17 @@
 
   <notes>
     Parallels task 051. Once this lands, UDG PCF has no remaining consumers — safe to retire in task 053.
+
+    Closeout (2026-06-04): Closed as ✅¹ no-op. Task 050 audit established that DashboardPage
+    was never on UDG — it uses Fluent v9 `<DataGrid>` directly from `@fluentui/react-components`.
+    The original POML premise traced back to a misleading file-level docblock comment at
+    DashboardPage.tsx:405-406 that *documented a design choice not to use UDG* but was read as
+    if DashboardPage was on UDG. The comment was doubly stale (also referenced a defunct
+    `RecentActivityGrid` sibling component). Action this task: removed those 2 lines from
+    DashboardPage.tsx; preserved the ADR-021 dark-mode comment above. No migration code
+    changes; no screenshots required. Full rationale in
+    `notes/drafts/052-deviations.md`. Downstream: task 053 can proceed immediately
+    (no UDG consumers remain); task 054 UAT shrinks (no DashboardPage visual diff needed).
   </notes>
 
   <execution>

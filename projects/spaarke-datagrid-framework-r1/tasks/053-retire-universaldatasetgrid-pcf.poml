@@ -3,7 +3,7 @@
   <metadata>
     <title>Retire UniversalDatasetGrid PCF + solution manifest version bump</title>
     <phase>6: Phase F — Legacy Retirement</phase>
-    <status>not-started</status>
+    <status>completed-partial</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>052</dependencies>
     <blocks>054</blocks>
@@ -80,6 +80,17 @@
 
   <notes>
     PCF-DEPLOYMENT-GUIDE.md is MANDATORY reading per the task-create skill's tag-to-knowledge mapping. The 4-location version bump is the canonical Spaarke gotcha — skipping it ships stale code.
+
+    Closeout (2026-06-04): Closed ✅¹ with corrected scope. Two factual errors in the original POML:
+    (1) `src/dataverse/solutions/SpaarkeControls/Solution.xml` does NOT exist — UDG is its own
+    self-contained solution `SpaarkeUniversalDatasetGrid` at `src/client/pcf/UniversalDatasetGrid/Solution/`;
+    (2) the 4-location version bump rule applies to *republishing* a control, not retiring it.
+    Action taken: `git rm -r src/client/pcf/UniversalDatasetGrid/` (64 source files removed); workspace
+    `controls.pcfproj` auto-adapts via glob exclusion. `Spaarke.UI.Components` build clean (exit 0). Nine
+    surviving comment-only references in unrelated files were left in place (historical context, no
+    compile impact, optional doc-rot for task 090). Operator action for task 054: uninstall the deployed
+    `SpaarkeUniversalDatasetGrid` solution from `spaarkedev1.crm.dynamics.com`. Full rationale in
+    `notes/drafts/053-deviations.md`.
   </notes>
 
   <execution>

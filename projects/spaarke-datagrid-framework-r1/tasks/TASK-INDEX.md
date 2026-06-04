@@ -70,11 +70,11 @@
 
 | ID | Title | Rigor | Status | Dependencies | Parallel | Blocks |
 |---|---|---|---|---|---|---|
-| 050 | Audit DatasetGrid consumers + migration list | STANDARD | 🔲 | 009 | — | 051,052 |
-| 051 | Remove DatasetGrid/{GridView,CardView,ListView,VirtualizedGridView,VirtualizedListView} | STANDARD | 🔲 | 050 | F1 | 054 |
-| 052 | Migrate SpeAdminApp/DashboardPage from UDG PCF to new DataGrid | FULL | 🔲 | 015,050 | F1 | 053 |
-| 053 | Retire UniversalDatasetGrid PCF + solution version bump | STANDARD | 🔲 | 052 | — | 054 |
-| 054 | Phase F deploy + UAT (DashboardPage visual diff) | STANDARD | 🔲 | 051,053 | — | 090 |
+| 050 | Audit DatasetGrid consumers + migration list | STANDARD | ✅ | 009 | — | 051,052 |
+| 051 | Remove DatasetGrid/{GridView,CardView,ListView,VirtualizedGridView,VirtualizedListView} | STANDARD | ✅ | 050 | F1 | 054 |
+| 052 | Migrate SpeAdminApp/DashboardPage from UDG PCF to new DataGrid | FULL | ✅¹ | 015,050 | F1 | 053 |
+| 053 | Retire UniversalDatasetGrid PCF + solution version bump | STANDARD | ✅¹ | 052 | — | 054 |
+| 054 | Phase F deploy + UAT (DashboardPage visual diff) | STANDARD | ✅¹ | 051,053 | — | 090 |
 
 ### Post-Phase-A Operational (1 task — added 2026-06-01)
 

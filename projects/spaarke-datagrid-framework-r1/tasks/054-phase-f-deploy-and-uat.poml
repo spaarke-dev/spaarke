@@ -3,7 +3,7 @@
   <metadata>
     <title>Phase F deploy + UAT (SpeAdminApp DashboardPage visual diff vs UDG)</title>
     <phase>6: Phase F — Legacy Retirement</phase>
-    <status>not-started</status>
+    <status>completed-partial</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>051,053</dependencies>
     <blocks>090</blocks>
@@ -79,6 +79,20 @@
 
   <notes>
     DEV deploy only. Production deploy gated on final project wrap-up (task 090). Phase F closes the legacy code surface — the next task (090) is the project wrap-up.
+
+    Closeout (2026-06-04): Closed ✅¹ with revised scope per upstream deviations.
+    - Ran `Deploy-AllDataGridConsumers.ps1` — all 4 framework consumers (EventsPage, sprk_invoicespage,
+      sprk_kpiassessmentspage, LegalWorkspace) rebuilt + PATCHed + atomically published to
+      https://spaarkedev1.crm.dynamics.com. Exit 0.
+    - Built SpeAdminApp (Vite, exit 0, 12.82s, 1889 KB inline bundle) to verify the task 052 docblock
+      scrub didn't regress anything.
+    - "DashboardPage visual diff" criterion N/A — task 052 deviation established DashboardPage was never
+      on UDG, so there is no pre-migration UDG render to compare against.
+    - "UDG PCF absent from Dataverse" criterion is operator-pending: source dir deleted (task 053);
+      the operator must uninstall the deployed `SpaarkeUniversalDatasetGrid` solution from
+      `spaarkedev1.crm.dynamics.com` via the Power Apps maker portal. Runbook in
+      `notes/phase-f-deploy-uat.md` "Operator action" section.
+    - Full deploy report: `notes/phase-f-deploy-uat.md`.
   </notes>
 
   <execution>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Audit consumers of @spaarke/ui-components/DatasetGrid removed exports + migration list</title>
     <phase>6: Phase F — Legacy Retirement</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>009</dependencies>
     <blocks>051,052</blocks>
