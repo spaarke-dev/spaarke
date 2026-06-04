@@ -1,0 +1,200 @@
+<task id="034" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>P2-CLOSEOUT-03 Frontend auto-trigger: when chat upload completes AND user intent was "summarize", auto-invoke summary</title>
+    <status>🔲</status>
+    <status-note>Closeout task added 2026-06-04 per operator UX clarification: user does NOT expect to issue a third message after upload — when intent + file are both present, summary should run automatically. See notes/summarize-vertical-remediation-plan.md §3.3 (pattern B chosen for Phase 2 closeout; pattern A backend-injection deferred to R6).</status-note>
+    <estimated-effort>1 hour</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration (CLOSEOUT)</phase>
+    <wave>P2-G10-CLOSEOUT (serial; runs AFTER 032+033 deployed and verified backend-side)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>032 (upload populates UploadedFiles[]), 033 (chat agent sees uploaded files), 015 (InvokeSummarizePlaybookTool), 019 (slash-command menu — same intent-recognition trigger words)</dependencies>
+    <tags>pcf, react, fluent-ui, frontend, chat, closeout, sev-1-fix</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Add a frontend auto-trigger so that when a chat session upload completes
+    AND the user's most recent message expressed a Summarize intent (per a
+    narrow whitelist), the chat automatically sends a Summarize follow-up
+    message without requiring the user to type a third message.
+
+    Operator UX expectation clarified 2026-06-04: the user says "let's
+    summarize" → Assistant says "please upload" → user uploads → summary
+    RUNS AUTOMATICALLY. The user should NOT have to type "/summarize" or
+    "summarize it" as a third message.
+
+    Implementation pattern B per notes/summarize-vertical-remediation-plan.md
+    §3.3 (chosen for Phase 2 closeout; backend system-message injection
+    pattern A is R6 territory):
+
+    1. In SprkChat.tsx (or SprkChatUploadZone's onUploadComplete handler),
+       capture a new lightweight `intent` hint per session: the last user
+       message's intent classification. Maintain it as React state in the
+       SprkChat component scope.
+
+    2. On each user message sent, run a NARROW trigger-phrase check (CASE
+       INSENSITIVE; whitespace-normalized; full-word match):
+       - "summarize" / "summary" / "summarise"
+       - "tldr" / "tl;dr"
+       - "/summarize" (literal slash command typed but not yet recognized
+         as a command)
+       - "let's summarize" / "summarize this" / "summarize the document"
+       - similar narrow variations
+       If a trigger matches → set session-scoped intent state to
+       `'summarize-pending-file'` along with the timestamp.
+
+    3. On successful upload (the SprkChatUploadZone.onUploadComplete
+       callback fires with the 202 response), check session-scoped intent:
+       - IF `intent === 'summarize-pending-file'` AND the intent timestamp
+         is within the last 5 minutes (stale-intent guard)
+       - THEN automatically dispatch a follow-up chat message containing
+         "/summarize" (so the same downstream tool-call routing fires)
+       - AND clear the intent state (so subsequent uploads don't re-trigger
+         until intent is re-expressed)
+
+    4. UX polish: when auto-trigger fires, show a brief inline indicator
+       (e.g., a subtle "Summarizing your file..." chip) so the user sees
+       the system is acting. The chip auto-dismisses when streaming begins
+       in the Workspace pane.
+
+    5. Edge cases (all should result in NO auto-trigger):
+       - Upload completes but no recent Summarize intent → no auto-fire
+       - User typed a non-summarize message AFTER the summarize intent
+         (e.g., changed mind, asked something else) → intent is invalidated
+         by the subsequent message; no auto-fire
+       - Multiple files uploaded in sequence — first triggers, subsequent
+         uploads do NOT (one summarize per intent)
+       - Stale intent (> 5 minutes since trigger phrase) → no auto-fire
+       - User explicitly clicks an action chip OTHER than upload (e.g.,
+         "Browse Matter Documents") → intent stays pending; uploading later
+         in flow still triggers if no other message intervened
+
+    Add or extend jest tests covering:
+    - Intent capture: each whitelisted trigger phrase sets intent state
+    - Intent expiry: 5-minute window enforced (mock Date.now)
+    - Intent invalidation: subsequent non-summarize message clears intent
+    - Auto-trigger fires when intent + upload-success co-occur
+    - Auto-trigger sends "/summarize" payload (verifies the message body
+      sent matches what we expect downstream)
+    - Auto-trigger does NOT fire when intent is absent / stale / cleared
+    - Multiple uploads in same session: only first triggers (no spam)
+
+    OUT OF SCOPE for this task:
+    - Backend system-message injection (pattern A) — R6
+    - LLM-based intent classification (currently using narrow phrase
+      whitelist) — R6
+    - Inline preview of TL;DR in chat composer before sending — R6 polish
+
+    Acceptance: with this task deployed AFTER 032+033 are live on Spaarke
+    Dev, the SC-18 walkthrough (task 035) reproduction sequence completes
+    end-to-end without requiring a third user message:
+    1. User says "summarize a document" → Assistant prompts for upload
+    2. User uploads via [action:upload] → upload succeeds
+    3. Within 2 seconds (no third user message needed) — Workspace pane
+       starts streaming the TL;DR-first summary
+  </prompt>
+
+  <context>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatUploadZone.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionHandlers.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/SprkChat.attachments.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/summarize-vertical-remediation-plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/task-030-summarize-walkthrough.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-tokens-dark-mode.md</file>
+      <file>.claude/adr/ADR-022-react-19.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus-channels.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint>Narrow trigger-phrase whitelist ONLY — do NOT introduce LLM-based intent classification (R6 scope).</constraint>
+    <constraint>5-minute stale-intent guard MUST be enforced to prevent surprising users with a long-delayed auto-fire.</constraint>
+    <constraint>Single auto-trigger per intent expression: subsequent uploads after the first must NOT auto-fire until intent is re-expressed.</constraint>
+    <constraint>NO new PaneEventBus channel (ADR-030 closed at 4); use existing chat-pane-local state.</constraint>
+    <constraint>NO snapshotted token state per ADR-028; the existing `/messages` POST uses authenticatedFetch which handles tokens correctly.</constraint>
+    <constraint>Fluent v9 semantic tokens for the inline indicator chip; dark-mode tested per ADR-021.</constraint>
+    <constraint>React 19 per ADR-022; use existing React state hooks; no class components.</constraint>
+    <constraint>Backward-compat: existing SprkChat consumers that don't upload files MUST continue to work unchanged; intent state is purely additive.</constraint>
+  </constraints>
+
+  <steps>
+    <step>Load notes/summarize-vertical-remediation-plan.md §3.3 + §4 row 034 + §5 acceptance.</step>
+    <step>Read SprkChat.tsx (especially the message-sent handler) + SprkChatUploadZone.tsx (onUploadComplete callback path) + existing useActionHandlers hooks.</step>
+    <step>Design the intent-tracking state shape (probably a small useState in SprkChat). Decide between a hook (useSummarizeIntent) vs inline state — prefer the hook for testability.</step>
+    <step>Implement the trigger-phrase whitelist + intent capture on message send.</step>
+    <step>Implement the auto-trigger logic on onUploadComplete.</step>
+    <step>Add the inline UI indicator chip (Fluent v9; dark-mode-friendly).</step>
+    <step>Add 7 jest tests per acceptance criteria.</step>
+    <step>Run `npm test` in @spaarke/ui-components — verify all pass.</step>
+    <step>Run `npm run lint` + `npm run build` — verify 0 errors / 0 new warnings.</step>
+    <step>Build SpaarkeAi code-page bundle (npm run build:prod in src/solutions/SpaarkeAi).</step>
+    <step>Commit with conventional message; reference remediation plan.</step>
+    <step>Update TASK-INDEX.md status 🔲 → ✅.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Auto-trigger on summarize intent + upload (end-to-end)">
+      <url>https://&lt;dev-env&gt;.crm.dynamics.com/main.aspx?pagetype=control&amp;controlName=sprk_SpaarkeAi</url>
+      <steps>
+        <step>Open SpaarkeAi standalone Code Page</step>
+        <step>In chat composer, type "Let's summarize a document" and send</step>
+        <step>Wait for Assistant response with [action:upload] link</step>
+        <step>Click [action:upload], select a small PDF</step>
+        <step>Wait for upload to complete</step>
+        <step>Verify: within 2 seconds, "Summarizing your file..." chip appears in chat</step>
+        <step>Verify: Workspace pane starts streaming a structured summary (TL;DR first, then Summary)</step>
+        <step>Verify: chip disappears once streaming begins</step>
+        <step>Verify: NO additional user-typed message was sent (DevTools Network tab shows the auto-sent /summarize message originated from the auto-trigger, not from user input)</step>
+      </steps>
+      <expected>End-to-end Summarize works without requiring user to send a third message. Spec FR-01/FR-02/FR-08/SC-08 all validated by this single flow.</expected>
+    </test>
+    <test name="No auto-trigger when intent absent">
+      <url>https://&lt;dev-env&gt;.crm.dynamics.com/main.aspx?pagetype=control&amp;controlName=sprk_SpaarkeAi</url>
+      <steps>
+        <step>Open SpaarkeAi</step>
+        <step>Send a non-summarize message (e.g., "What time is it?")</step>
+        <step>Click [action:upload] (if surfaced) OR drag-drop a file into the upload zone</step>
+        <step>Wait for upload to complete</step>
+        <step>Verify: NO "Summarizing your file..." chip appears</step>
+        <step>Verify: Workspace pane does NOT start streaming a summary</step>
+      </steps>
+      <expected>Upload completes silently; no auto-action. User must explicitly request summary.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion>Trigger-phrase whitelist captures summarize intent on user message send.</criterion>
+    <criterion>5-minute stale-intent guard prevents auto-fire from old intent.</criterion>
+    <criterion>Subsequent non-summarize messages invalidate pending intent (no auto-fire).</criterion>
+    <criterion>Auto-trigger fires on upload-complete when intent + upload-success co-occur within window.</criterion>
+    <criterion>Only first upload after intent triggers; subsequent uploads in same session do NOT (until intent re-expressed).</criterion>
+    <criterion>Inline UI indicator ("Summarizing your file...") shown during auto-trigger; dismisses on stream start.</criterion>
+    <criterion>All 7 new jest tests pass; existing SprkChat tests unaffected.</criterion>
+    <criterion>UI tests (in &lt;ui-tests&gt; above) pass on Spaarke Dev SpaarkeAi shell.</criterion>
+    <criterion>npm run lint + npm run build clean.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output>Modified files: SprkChat.tsx, SprkChatUploadZone.tsx, types.ts</output>
+    <output>New optional hook: src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSummarizeIntent.ts</output>
+    <output>New tests: SprkChat.summarize-intent.test.tsx (or extend SprkChat.attachments.test.tsx)</output>
+    <output>Evidence note: projects/spaarke-ai-platform-unification-r5/notes/task-034-evidence.md</output>
+    <output>TASK-INDEX.md row 034 flipped 🔲 → ✅</output>
+  </outputs>
+</task>

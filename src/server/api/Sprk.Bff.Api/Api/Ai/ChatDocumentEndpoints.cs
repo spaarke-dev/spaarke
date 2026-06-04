@@ -142,8 +142,14 @@ public static class ChatDocumentEndpoints
     {
         var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
 
-        // 1. Extract tenant ID from JWT claims (ADR-014: tenant-scoped keys)
+        // 1. Extract tenant ID from JWT claims (ADR-014: tenant-scoped keys).
+        // Microsoft.Identity.Web's JwtBearer middleware may rename `tid` to the schema URL
+        // form depending on Microsoft.IdentityModel.Tokens.DefaultInboundClaimTypeMap state.
+        // Check both forms to match the pattern used by ChatEndpoints.cs and
+        // SummarizeSessionEndpoint.cs (R5). Fallback to X-Tenant-Id header for
+        // server-to-server scenarios that bypass JWT.
         var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
             ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
 
         if (string.IsNullOrEmpty(tenantId))
@@ -428,8 +434,14 @@ public static class ChatDocumentEndpoints
     {
         var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
 
-        // 1. Extract tenant ID from JWT claims (ADR-014: tenant-scoped keys)
+        // 1. Extract tenant ID from JWT claims (ADR-014: tenant-scoped keys).
+        // Microsoft.Identity.Web's JwtBearer middleware may rename `tid` to the schema URL
+        // form depending on Microsoft.IdentityModel.Tokens.DefaultInboundClaimTypeMap state.
+        // Check both forms to match the pattern used by ChatEndpoints.cs and
+        // SummarizeSessionEndpoint.cs (R5). Fallback to X-Tenant-Id header for
+        // server-to-server scenarios that bypass JWT.
         var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
             ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
 
         if (string.IsNullOrEmpty(tenantId))
