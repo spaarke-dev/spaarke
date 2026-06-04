@@ -405,6 +405,18 @@ const useStyles = makeStyles({
 // Helper — pretty-print arbitrary cell value into a string
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Clamp a percentage value to 1..100, falling back to the supplied default for
+ * undefined / null / NaN / out-of-range inputs. Used by the `formDialog`
+ * rowOpen handler for `Xrm.Navigation.navigateTo` width/height options.
+ */
+function clampPercent(value: number | undefined | null, fallback: number): number {
+  if (value === null || value === undefined) return fallback;
+  if (!Number.isFinite(value)) return fallback;
+  if (value < 1 || value > 100) return fallback;
+  return Math.round(value);
+}
+
 function renderCellValue(value: unknown, renderer: string): string {
   if (value === null || value === undefined || value === '') return '';
   switch (renderer) {
@@ -824,23 +836,55 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   }, [chipDescriptors]);
 
   /**
-   * Default record-open handler: opens the record's form in a new browser tab via
-   * `window.open` against the MDA `main.aspx?pagetype=entityrecord&etn=…&id=…` URL.
-   * The current modal stays open in the parent tab — matches OOB Power Apps
-   * "open in new tab" behavior. Used only when the host did NOT pass `onRecordOpen`.
+   * Default record-open handler — dispatches on the configjson `rowOpen.type`.
+   *
+   * Supported types today:
+   *   - `formDialog` → `Xrm.Navigation.navigateTo({pageType:'entityrecord'},
+   *     {target:2,position:1,...})` — Dataverse-native centered modal of the
+   *     entity record form. Width/height default to 80% if not specified in
+   *     the configjson.
+   *   - anything else (including `navigateToForm` and `undefined`) → opens the
+   *     record's form in a new browser tab via `window.open` against the MDA
+   *     URL. This is the legacy default ("open in new tab") behavior.
+   *
+   * Used only when the host did NOT pass `onRecordOpen`. Hosts can still pass
+   * `onRecordOpen` to override anything in the configjson (escape hatch for
+   * surfaces that need custom side panes, registered React dialogs, etc.).
    */
   const defaultRecordOpen = React.useCallback(
     (recordId: string, _record: Record<string, unknown>, ctx: DataGridHostContext) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const xrm = (window.parent as any)?.Xrm ?? (window as any).Xrm;
+      if (!ctx.entityName || !recordId) return;
+
+      const rowOpen = resolved?.rowOpen;
+      if (rowOpen?.type === 'formDialog' && xrm?.Navigation?.navigateTo) {
+        const cleanId = recordId.replace(/[{}]/g, '');
+        const widthPct = clampPercent(rowOpen.formDialogWidthPercent, 80);
+        const heightPct = clampPercent(rowOpen.formDialogHeightPercent, 80);
+        const pageInput = { pageType: 'entityrecord', entityName: ctx.entityName, entityId: cleanId };
+        const navOptions = {
+          target: 2,
+          position: 1,
+          width: { value: widthPct, unit: '%' },
+          height: { value: heightPct, unit: '%' },
+        };
+        void Promise.resolve(xrm.Navigation.navigateTo(pageInput, navOptions)).catch((err: unknown) => {
+          // eslint-disable-next-line no-console
+          console.error('[DataGrid] formDialog navigateTo failed:', err);
+        });
+        return;
+      }
+
+      // Legacy default: open in new tab
       const clientUrl = xrm?.Utility?.getGlobalContext?.().getClientUrl?.();
-      if (!clientUrl || !ctx.entityName || !recordId) return;
+      if (!clientUrl) return;
       const url =
         `${clientUrl}/main.aspx?pagetype=entityrecord` +
         `&etn=${encodeURIComponent(ctx.entityName)}&id=${encodeURIComponent(recordId)}`;
       window.open(url, '_blank', 'noopener,noreferrer');
     },
-    []
+    [resolved]
   );
   const effectiveRecordOpen = onRecordOpen ?? defaultRecordOpen;
 

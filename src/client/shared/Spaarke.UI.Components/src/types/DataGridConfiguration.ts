@@ -167,7 +167,7 @@ export interface CommandBarConfig {
 // Row open — what happens when the user clicks the primary-name link
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type RowOpenType = 'sidePane' | 'wizard' | 'navigateToForm' | 'dialog' | 'webResource' | 'custom';
+export type RowOpenType = 'sidePane' | 'wizard' | 'navigateToForm' | 'formDialog' | 'dialog' | 'webResource' | 'custom';
 
 /**
  * `rowOpen` is intentionally a flat shape (not a discriminated union per type)
@@ -197,6 +197,14 @@ export interface RowOpenConfig {
   // type = 'dialog'
   /** Dialog component registered via `registerDialog`. */
   dialogComponent?: string;
+
+  // type = 'formDialog' — Dataverse-native centered modal dialog of the
+  // entity record form (Xrm.Navigation.navigateTo with target=2). Width
+  // and height default to 80% if omitted.
+  /** Dialog width percentage (1-100). Default 80. */
+  formDialogWidthPercent?: number;
+  /** Dialog height percentage (1-100). Default 80. */
+  formDialogHeightPercent?: number;
 
   // type = 'webResource'
   webResource?: string;

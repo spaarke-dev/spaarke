@@ -33,7 +33,6 @@ import {
   CALENDAR_PANE_WIDTH,
   CALENDAR_WEB_RESOURCE_NAME,
 } from './config';
-import { getXrm } from './xrmHelpers';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Config record id (authored in task 030)
@@ -120,40 +119,6 @@ function calendarPaneTranslator(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Standalone row-open: open Event record in a centered Dataverse dialog.
-//
-// UAT-2 (2026-06-04): drill-through hosts (Matter card → Events grid) use the
-// framework's default `rowOpen.type=navigateToForm` from the configjson and
-// open the record in a new tab. The standalone EventsPage (the one with the
-// Calendar side pane) wants a different UX. Long-term: open in the Event
-// detail side pane. Short-term (for easier testing): open in a centered
-// dialog. This handler is only wired in standalone mode (no parentContext);
-// drill-through hosts skip it and get the framework default.
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function openEventInDialog(recordId: string): Promise<void> {
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  const xrm: any = getXrm();
-  if (!xrm?.Navigation?.navigateTo) {
-    // eslint-disable-next-line no-console
-    console.warn('[EventsPage] Xrm.Navigation.navigateTo unavailable; cannot open dialog');
-    return;
-  }
-  const cleanId = recordId.replace(/[{}]/g, '');
-  try {
-    await xrm.Navigation.navigateTo(
-      { pageType: 'entityrecord', entityName: 'sprk_event', entityId: cleanId },
-      // target 2 = inline dialog; position 1 = center.
-      { target: 2, position: 1, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
-    );
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('[EventsPage] Failed to open Event in dialog:', error);
-  }
-  /* eslint-enable @typescript-eslint/no-explicit-any */
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // App component
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -206,12 +171,6 @@ export const App: React.FC = () => {
     return ctx;
   }, []);
 
-  // Drill-through hosts (Matter card → Events grid) have a parentContext.
-  // Standalone EventsPage does not. Only the standalone variant overrides
-  // row-open to use the dialog; drill-through stays on the framework default
-  // (configjson `rowOpen.type=navigateToForm` → new tab).
-  const isDrillThrough = parentContext !== undefined;
-
   return (
     <DataGridPageShell
       configId={EVENT_CONFIG_ID}
@@ -219,9 +178,6 @@ export const App: React.FC = () => {
       sidePaneFilter={IS_DIALOG_MODE ? undefined : {
         paneId: CALENDAR_PANE_ID,
         translator: calendarPaneTranslator,
-      }}
-      onRecordOpen={isDrillThrough ? undefined : (recordId) => {
-        if (recordId) void openEventInDialog(recordId);
       }}
     />
   );
