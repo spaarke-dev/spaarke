@@ -3,9 +3,11 @@
 > **Author**: Phase 3 Sub-Agent I (synthesis from Phase 2 outputs)
 > **Date**: 2026-06-04
 > **Pinned to**: Phase 1 inventory commit `357e6936`
-> **Status**: Phase 3 primary deliverable; pending Q-002 end-of-audit owner review
-> **Source documents**: All 8 Phase 2 analysis docs + 4 wave summaries (W1+W2+W3+W4) under [`phase2/`](phase2/)
-> **Methodology lock**: Q-001 (scope: Cats 1-6 + DI/Configuration); Q-002 (single end-of-audit review); Q-003 (sequential cross-team coordination); Q-004 ("Spaarke Canonical AI Stack" framing — names SURFACED not LOCKED); Q-005 (ADRs DEFERRED — bullets only); Q-006 (Quarterly Review Skill DEFERRED).
+> **Status**: Phase 3 primary deliverable + Phase 2.5 (Cat 10) addendum in §14; pending Q-002 end-of-audit owner review
+> **Source documents**: All 8 Phase 2 analysis docs + 4 wave summaries (W1+W2+W3+W4) + 1 Phase 2.5 Cat 10 analysis + 1 LATENT BUG #2 verification doc under [`phase2/`](phase2/)
+> **Methodology lock**: Q-001 (scope: Cats 1-6 + DI/Configuration + **Cat 10 added per Path B authorization 2026-06-04**); Q-002 (single end-of-audit review); Q-003 (sequential cross-team coordination); Q-004 ("Spaarke Canonical AI Stack" framing — names SURFACED not LOCKED); Q-005 (ADRs DEFERRED — bullets only); Q-006 (Quarterly Review Skill DEFERRED).
+>
+> **⚠️ READ ALSO §14 (Phase 2.5 Cat 10 Addendum)** — Owner authorized Path B mini-audit 2026-06-04. Cat 10 (Tool Framework) ran after Phase 3 synthesis. Findings: COEXIST verdict (3 surfaces, not 2 as inventory said); 5 NEW ADR candidates (34 → 39 total); LATENT BUG #2 candidate REFUTED by Sub-Agent M verification; Bundled DELETE scope grows ~2000 → ~2285 LOC pending team confirmations (owner pre-approved).
 
 ---
 
@@ -813,3 +815,106 @@ Each DR-### should reference the source analysis doc + this document's §2 canon
 ---
 
 *Phase 3 Sub-Agent I synthesis authored 2026-06-04. Source attribution preserved throughout; ALL claims trace back to Phase 2 analysis docs + wave summaries. Phase 4 = single end-of-audit owner review per Q-002 (this document + Sub-Agent J migration plan + Sub-Agent K DR-### records).*
+
+---
+
+## §14 — Phase 2.5 Cat 10 Addendum (Tool Framework Mini-Audit)
+
+> **Authored by**: Main session integration 2026-06-04 post-Sub-Agent L + Sub-Agent M
+> **Authorization**: Path B per owner direction 2026-06-04 ("go with Path B")
+> **Source documents**: [`phase2/analysis-tool-framework.md`](phase2/analysis-tool-framework.md) (Sub-Agent L) + [`phase2/verification-latent-bug-2.md`](phase2/verification-latent-bug-2.md) (Sub-Agent M)
+
+### §14.1 Cat 10 headline: TRIALITY, not duality
+
+Inventory §2.10 framed "2 parallel tool surfaces" — empirically WRONG. Sub-Agent L identified **3 coexisting surfaces** with genuinely distinct execution contexts:
+
+- **Layer 9 — Spaarke Canonical Chat Agent Tool Pattern** (12 `AIFunction` tools in `Chat/Tools/`, factory-instantiated per session by `SprkChatAgentFactory`)
+- **Pattern-level — Playbook Tool Handler Pattern** (4 `IAiToolHandler` impls; 3 ORPHAN candidates for DELETE)
+- **Layer 10 — Spaarke Canonical Analysis Tool Handler Registry** (4 `IAnalysisToolHandler` impls + `IToolHandlerRegistry` assembly-scan; canonical reference impl: `GenericAnalysisHandler`)
+
+**Cat 10 verdict**: COEXIST (intentional). REJECT consolidation — consistent with universal Phase 2 verdict.
+
+### §14.2 LATENT BUG #2 candidate — REFUTED by Sub-Agent M verification
+
+Sub-Agent L (Cat 10 §4.6) hypothesized a second LATENT BUG: `IToolHandlerRegistry` registered only in compound-AI-ON branch + `HandlerEndpoints` mapped unconditionally → 500 under compound-AI-OFF.
+
+**Sub-Agent M empirically REFUTED this hypothesis.** Sub-Agent L cited `HandlerEndpoints.cs:17` (method definition) as evidence of unconditional mapping — but that's just the method signature. The actual **call site at `EndpointMappingExtensions.cs:130` IS inside the same compound-AI gate** that gates `AddToolFramework`. Gates are symmetric by construction. Failure mode under compound-OFF: 404 (routing miss), not 500/503. Reasonable behavior.
+
+**Methodology recommendation captured**: always cite the CALL SITE (`app.MapXxxEndpoints()`) when claiming an endpoint is mapped unconditionally — not the method definition line.
+
+**Cross-validation success**: this is the **4th instance** of audit cross-sub-agent validation catching an error (W2 corrected W1; W3 corrected W2; W4 corrected inventory; M corrected L). Methodology validated.
+
+### §14.3 Cat 10 per-surface decisions
+
+| # | Surface | Verdict | Path forward |
+|---|---|---|---|
+| 1 | `Chat/Tools/` (12 × `AIFunction`) | **KEEP — designate Layer 9 canonical** | No action; reference impl: AIPL-053 / AIPU2-061 / AIPU2-063 patterns |
+| 2 | `IAiToolHandler` (4 impls; 3 orphan) | **DOWNSIZE** | DELETE 3 orphans (`InvoiceExtractionToolHandler`, `DataverseUpdateToolHandler`, `SendCommunicationToolHandler`) — **owner pre-approved 2026-06-04**; bundle into PR #2 (~285 LOC) |
+| 3 | `IAnalysisToolHandler` + `IToolHandlerRegistry` | **KEEP — designate Layer 10 canonical** | No action; reference impl: `GenericAnalysisHandler` (assembly-scan + HandlerId-keyed lookup) |
+
+### §14.4 New canonical layers added to Spaarke Canonical AI Stack
+
+| Layer | Name | Reference impl | ADR candidate |
+|---|---|---|---|
+| 9 | **Spaarke Canonical Chat Agent Tool Pattern** | `SprkChatAgentFactory.ResolveTools()` | L-2 |
+| 10 | **Spaarke Canonical Analysis Tool Handler Registry** | `GenericAnalysisHandler` + `IToolHandlerRegistry` | L-3 |
+
+Plus pattern-level (no canonical layer): **Spaarke Playbook Tool Handler Pattern** (post-DOWNSIZE).
+
+**Total Spaarke Canonical AI Stack layers: 8 → 10** (Phase 3 § 2 layers 1-8 plus Cat 10 layers 9-10).
+
+### §14.5 ADR candidates added (5 new — L-5 refuted)
+
+| # | Candidate | Priority |
+|---|---|---|
+| L-1 | **Three-Surface Tool Framework Pattern** — codifies 3 distinct surfaces + explicit REJECT-CONSOLIDATION clause | HIGH (prevents re-litigation) |
+| L-2 | **Chat-Tool Factory-Instantiation Pattern** | MEDIUM |
+| L-3 | **Analysis Tool Handler Registry Pattern** | MEDIUM |
+| L-4 | **`IAiToolHandler` Orphan-Impl Mitigation Convention** | MEDIUM |
+| ~~L-5~~ | ~~`IToolHandlerRegistry` Symmetry Rule application (LATENT BUG candidate)~~ | **REFUTED — removed** |
+| L-6 | **Tool-Surface Directory Naming Rule** — no mixed-surface directories | LOW |
+
+**Total ADR candidates: 34 → 39** (5 added; L-5 not counted).
+
+### §14.6 Inventory accuracy corrections (4 new — added to §6 PR #3 scope)
+
+| Inventory error | Empirical correction |
+|---|---|
+| `Chat/Tools/` count "10 AIFunction tools" | **12** AIFunction tools |
+| `Tools/` "5 IAiToolHandler impls" | **MIXED** directory: 2 `IAiToolHandler` + 3 `IAnalysisToolHandler` + 1 helper |
+| `IAiToolHandler` total impls "5" | **4** (`FinancialCalculationToolHandler`, `InvoiceExtractionToolHandler`, `DataverseUpdateToolHandler`, `SendCommunicationToolHandler`) |
+| "Two parallel surfaces" framing | **"Three coexisting surfaces"** (TRIALITY) |
+
+**Total inventory drift findings: 18 → 22** (4 added).
+
+### §14.7 Bundled DELETE PR scope update
+
+Per owner pre-approval 2026-06-04 ("we no additional team confirmation required-- proceed"):
+
+- W1+W2+W3 bundled DELETE: ~2000 LOC
+- Cat 10 §2.4 orphan tool handlers added: ~285 LOC
+  - `InvoiceExtractionToolHandler` + interface
+  - `DataverseUpdateToolHandler` + interface
+  - `SendCommunicationToolHandler` + interface (concrete-singleton registration too)
+  - DI line removals in `FinanceModule.cs:176, 181` + `CommunicationModule.cs:30`
+- **Updated bundled DELETE total: ~2285 LOC**
+
+### §14.8 Phase 2.5 deliverables (additions to Phase 3)
+
+| File | Lines | Author |
+|---|---|---|
+| `notes/phase2/analysis-tool-framework.md` | 250+ | Sub-Agent L |
+| `notes/phase2/verification-latent-bug-2.md` | ~150 | Sub-Agent M (verification) |
+| `notes/canonical-architecture-decisions.md` §14 (this section) | ~150 | Main session integration |
+
+### §14.9 Phase 4 readiness — RECONFIRMED
+
+All Phase 3 + Phase 2.5 deliverables now complete. Phase 4 = single end-of-audit owner review per Q-002. Owner has already pre-approved:
+- PR #1: LATENT BUG #1 fix (~280 LOC) — LATENT BUG #2 refuted; no bundle needed; PR #1 stands alone
+- PR #2: Bundled DELETE (~2285 LOC) — fast-tracked, no cross-team gates
+- PR #3: Retroactive doc corrections (22 items including Cat 10's 4)
+- PR #9: `docs/architecture/` + `docs/guides/` + `.claude/patterns/` updates
+
+---
+
+*Phase 2.5 Cat 10 addendum integrated 2026-06-04 by main session. Path B authorization closed; audit ships with 8 + 2 canonical layers + 39 ADR candidates + 22 inventory corrections + 1 confirmed LATENT BUG + 1 refuted LATENT BUG hypothesis (methodology validation).*
