@@ -743,7 +743,14 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
   const anchorRef = React.useRef<HTMLButtonElement>(null);
 
   return (
-    <span className={mergeClasses(styles.root, className)}>
+    // Stop click propagation at the outer span so clicks on the chevron menu
+    // trigger Button don't bubble up to the Fluent v9 <DataGridHeaderCell>,
+    // which has its own onClick that toggles column sort when the column
+    // definition is `sortable: true`. Without this, opening the chevron menu
+    // also re-sorts the column — the long-standing "filter chevron also
+    // sorts" bug. Task 035 UAT iteration 3 — confirmed root cause + fix.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
+    <span className={mergeClasses(styles.root, className)} onClick={e => e.stopPropagation()}>
       <Menu open={menuOpen} onOpenChange={(_e, data) => setMenuOpen(data.open)}>
         <MenuTrigger disableButtonEnhancement>
           <Button

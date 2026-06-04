@@ -40,24 +40,36 @@ import {
 } from './calendarPaneOrchestrator';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Calendar filter payload → HostFilterCondition[] translation (task 035-fix-2)
+// Calendar filter payload → HostFilterCondition[] translation (task 035 UAT
+// iteration 3 — corrected payload shape after iteration 2 missed the
+// wrapping `{ filter: ... }` and the filter never reached the DataGrid.)
 //
-// The calendar side pane (`sprk_calendarsidepane.html`) emits messages on the
-// `spaarke-events-page-channel` BroadcastChannel of shape:
+// The CalendarSidePane web resource (`sprk_calendarsidepane.html`) emits
+// CALENDAR_FILTER_CHANGED on the `spaarke-events-page-channel` BroadcastChannel
+// with this shape (see `src/solutions/CalendarSidePane/src/utils/postMessage.ts`):
 //
-//   { type: 'single', date: '2026-06-15', dateFields?: ['sprk_duedate'] }
+//   { type: 'CALENDAR_FILTER_CHANGED', payload: { filter: <CalendarFilterOutput> } }
+//
+// `subscribeToCalendarFilter` (calendarPaneOrchestrator) passes `e.data.payload`
+// to the callback — so the value our callback receives is `{ filter: ... }`,
+// NOT the filter directly. Iteration 2 forgot to unwrap; this version does.
+//
+// The inner filter shape:
+//   { type: 'single', date: '2026-06-15', dateFields?: ['sprk_DueDate'] }
 //   { type: 'range',  start: '2026-06-01', end: '2026-06-30', dateFields?: [...] }
 //   { type: 'clear' }
 //
-// This translator converts each into a single HostFilterCondition pinned to
-// the first dateField (`sprk_duedate` if unset — matches the Calendar widget's
-// effective-default-field behavior). Multi-field OR is intentionally NOT
-// expressed here: the flat HostFilterCondition API only supports AND;
-// nested OR groups are a follow-up (see notes/drafts/033a-deviations.md
-// "Option 2 — richer (follow-up project)").
+// `dateFields` in the side pane uses PascalCase per its own field metadata
+// (`sprk_DueDate`, `CreatedOn`, etc.). Dataverse FetchXML attribute names are
+// case-insensitive but Spaarke convention is all-lowercase — so we lowercase
+// the chosen field defensively.
+//
+// Multi-field OR (when dateFields has multiple entries) intentionally NOT
+// expressed — flat HostFilterCondition API is AND-only; nested OR groups are
+// the deferred Option-2 follow-up.
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface CalendarFilterPayload {
+interface CalendarFilterInner {
   type: 'single' | 'range' | 'clear';
   date?: string;
   start?: string;
@@ -65,14 +77,21 @@ interface CalendarFilterPayload {
   dateFields?: string[];
 }
 
-function calendarFilterToHostFilters(payload: CalendarFilterPayload | null | undefined): HostFilterCondition[] {
-  if (!payload || payload.type === 'clear') return [];
-  const field = payload.dateFields?.[0] ?? 'sprk_duedate';
-  if (payload.type === 'single' && payload.date) {
-    return [{ attribute: field, operator: 'on', value: payload.date }];
+interface CalendarFilterPayload {
+  filter: CalendarFilterInner | null;
+}
+
+function calendarFilterToHostFilters(filter: CalendarFilterInner | null | undefined): HostFilterCondition[] {
+  if (!filter || filter.type === 'clear') return [];
+  // Strip the "All Dates" sentinel (`__all__`) if it slipped through; if that's
+  // the only entry, fall back to sprk_duedate so we still produce a useful filter.
+  const fields = (filter.dateFields ?? []).filter(f => f && f !== '__all__');
+  const field = (fields[0] ?? 'sprk_duedate').toLowerCase();
+  if (filter.type === 'single' && filter.date) {
+    return [{ attribute: field, operator: 'on', value: filter.date }];
   }
-  if (payload.type === 'range' && payload.start && payload.end) {
-    return [{ attribute: field, operator: 'between', value: [payload.start, payload.end] }];
+  if (filter.type === 'range' && filter.start && filter.end) {
+    return [{ attribute: field, operator: 'between', value: [filter.start, filter.end] }];
   }
   return [];
 }
@@ -174,9 +193,12 @@ export const App: React.FC = () => {
     }, 500);
 
     const unsubscribe = subscribeToCalendarFilter(payload => {
-      // Translate the calendar pane's filter payload into hostFilters that the
-      // DataGrid framework consumes via the task 033a composition layer.
-      setCalendarHostFilters(calendarFilterToHostFilters(payload as CalendarFilterPayload));
+      // The CalendarSidePane wraps its CalendarFilterOutput in { filter: ... };
+      // unwrap before translation so the operator selection actually reaches
+      // the grid's FetchXML composition.
+      const wrapped = payload as CalendarFilterPayload | null | undefined;
+      const inner = wrapped?.filter ?? null;
+      setCalendarHostFilters(calendarFilterToHostFilters(inner));
     });
 
     const cleanup = () => closeAllEventsPanes();

@@ -210,6 +210,7 @@ const useStyles = makeStyles({
   },
   gridScroll: {
     flex: 1,
+    minHeight: 0,
     overflow: 'auto',
     position: 'relative',
     // Inset the rows away from the inner-card border so per-row bottom borders
