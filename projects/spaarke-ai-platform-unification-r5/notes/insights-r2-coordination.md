@@ -2,8 +2,9 @@
 
 > **Purpose**: Document alignment, overlap, and required coordination between R5 (Spaarke AI Platform Unification — chat-pane Summarize a Document + platform foundations) and the parallel in-flight project Insights Engine R2 (Phase 1.5).
 > **Created**: 2026-06-03 (during R5 design)
+> **Last updated**: 2026-06-03 (late — post-Wave-E PR #337 push) by Claude (Anthropic AI agent) on behalf of the Insights Engine r2 project. See §8 changelog entry dated 2026-06-03 (late) for the Wave D + E status update + cross-reference to the new integration brief.
 > **Maintenance**: Living document. Updated as Insights r2 progresses. Subject to the final-refinement gate (see §6 below) once Insights r2 completes.
-> **Provenance**: Synthesis from a comprehensive read-through of Insights r2 artifacts (README, spec.md, TASK-INDEX.md, current-task.md, recent commits) on 2026-06-03.
+> **Provenance**: Original synthesis from a comprehensive read-through of Insights r2 artifacts on 2026-06-03 (early). Subsequent updates per §8 changelog.
 
 ---
 
@@ -19,7 +20,9 @@ This document is the explicit accounting of what's shared, what's separate, what
 
 ---
 
-## 2. Insights Engine R2 — Snapshot (as of 2026-06-03)
+## 2. Insights Engine R2 — Snapshot (as of 2026-06-03 early)
+
+> 🔔 **STATUS UPDATE — 2026-06-03 (late)**: The snapshot below was captured before Waves D and E shipped. **Current state: Wave D ✅ (PR #336 merged), Wave E ✅ implementation (PR #337 auto-merging), only wrap-up task 090 (~4h) remains.** See [§8 Changelog 2026-06-03 (late)](#8-changelog) for the full Wave D + E status update, the new integration brief reference, and the refresh of touchpoint resolutions. The original snapshot below is preserved for history per §7 maintenance protocol.
 
 **Identity**: Phase 1.5 of Spaarke Insights Engine. Succeeds Phase 1 (r1, shipped + deployed; 17/17 D-P deliverables complete). Lifts from "plumbing prototype" to "multi-tenant, multi-practice-area, multi-entity insights platform with pre-authored playbook AND ad-hoc RAG consumption paths."
 
@@ -319,4 +322,90 @@ This document is updated:
 
 | Date | Change |
 |---|---|
-| 2026-06-03 | Initial authoring during R5 design phase. Insights r2 at ~62% by task count (Wave C complete, D-G1 just landed, D-G2 next). All 5 coordination touchpoints + 7 non-conflicts documented. Refinement gate plan locked. |
+| 2026-06-03 (early) | Initial authoring during R5 design phase. Insights r2 at ~62% by task count (Wave C complete, D-G1 just landed, D-G2 next). All 5 coordination touchpoints + 7 non-conflicts documented. Refinement gate plan locked. |
+| 2026-06-03 (late) | **Wave D + E ship update + integration-brief cross-reference.** Updated by Claude (Anthropic AI agent) on behalf of the Insights Engine r2 project — see details below. |
+
+---
+
+### 2026-06-03 (late) — Wave D + E ship update
+
+**Updated by**: Claude (Anthropic AI agent) on behalf of the Insights Engine r2 project (operator: Ralph Schroeder).
+**Trigger**: Wave E task 042 (Spaarke Assistant integration) completed; PR #337 opened with auto-merge; companion integration brief authored for R5 consumption.
+
+#### 8.1 Wave-status updates (supersedes §2 status table)
+
+| Wave | Status @ 2026-06-03 early (§2) | Status @ 2026-06-03 late (NOW) | Notes |
+|---|---|---|---|
+| Wave B — Unblock | ✅ Complete (5/6) | ✅ Complete (unchanged) | PR #330 merged |
+| Wave A — Foundation design | ✅ Complete (6/6) | ✅ Complete (unchanged) | PR #334 merged |
+| Wave C — JPS compliance refactor | ✅ Complete (5/5) | ✅ Complete (unchanged) | PR #334 merged |
+| **Wave D — 2D taxonomy + multi-entity** | 🔄 In progress (2/7) | **✅ Complete (7/7)** | **PR #336 merged 2026-06-03 22:02 UTC** |
+| **Wave E — Hybrid + Spaarke Assistant** | 🔲 Not started (0/4) | **✅ Implementation complete (4/4)** | **PR #337 auto-merging; 36 files +5883/−146 LOC; 0 errors, 15 pre-existing warnings, 6,072 tests pass + 1 flaky timing test fixed in follow-up commit** |
+| Wrap-up | 🔲 Not started (0/1) | 🔲 Pending (task 090, ~4h) | Lessons-learned + Phase 2 outline + archive; runs after PR #337 merges to master |
+
+**Honest math now**: 28/29 tasks ✅ (97% by count); only 4h of wrap-up remaining. **Insights r2 is effectively complete** subject to PR #337 merge + task 090.
+
+#### 8.2 Coordination touchpoint resolutions (supersedes §4 open questions)
+
+| Touchpoint | §4 open question @ early | Resolution @ late |
+|---|---|---|
+| **§4.1 SprkChatAgent tool registration** | "Did Insights E3 establish a tool-registration convention R5 should follow?" | ✅ YES. Wave E3 ships `POST /api/insights/assistant/query` as a **unified tool surface** (single endpoint, single response shape — `path: "playbook" | "rag"` discriminates the rendering). The BFF does routing internally via Wave E2 intent classifier. R5 should follow this pattern: **one endpoint per tool capability, not subtools**. Canonical contract: `projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md` v1.0. |
+| **§4.2 Intent classifier catalog** | "Is R5's Summarize tool in the classifier's catalog? What's the conflict-resolution rule?" | 🟡 STILL OPEN. Wave E2 classifier ships with playbook/RAG routing for **Insights-only** queries; R5's Summarize tool is NOT in the catalog. **Decision needed at R5 refinement gate**: extend the Insights classifier to be a global router, OR keep classifiers per-tool and let `SprkChatAgent` orchestrate at a higher layer. Current contract supports `forceMode` override so R5 can bypass classification when invoking via slash command. |
+| **§4.3 ADR-010 DI pressure** | "Did combined service growth surface cohesion issues?" | ✅ NO. Wave E added 4 new services (classifier + NullClassifier + AssistantToolCallHandler + handler-internal helpers) all inside `AnalysisServicesModule`; ADR-010 compliance unchanged (modules pattern works as designed). |
+| **§4.4 `FieldDelta` SSE reuse** | "Did Insights E3 reuse `FieldDelta`?" | ✅ NO — and intentionally so. Wave E3 chose **single-shot, non-streaming** for Phase 1.5 (per contract §11 — streaming is a Phase 2 deferral). Insights E3 response shape does NOT include `FieldDelta` events. **No protocol fragmentation**: R5's `FieldDelta` remains R5-specific until Phase 2 of Insights, where SSE adoption will be re-evaluated. If R5 ships `FieldDelta` first, Insights Phase 2 can adopt the existing protocol. |
+| **§4.5 PaneEventBus event-type collisions** | "Did event-type names collide?" | ✅ NO. Wave E3 emits zero new PaneEventBus events (the contract is HTTP-only; rendering is the Assistant's responsibility). No coordination needed at code level. R5 retains exclusive ownership of `workspace.*` and `context.*` discriminants in scope. |
+| **§4.6 Non-conflicts** | All verified | ✅ Still verified. Wave D added the 2 promised Dataverse entities (`sprk_documenttype_ref` + `sprk_practicearea_documenttype` N:N); no other entity additions. AI Search index split (`spaarke-insights-index` vs R5's planned `spaarke-session-files`) unchanged. |
+
+#### 8.3 Refinement gate trigger conditions (per §6.2)
+
+Original trigger required 4 conditions. Status now:
+
+| Condition | Status |
+|---|---|
+| All Wave D tasks (030–036) ✅ | ✅ DONE (PR #336 merged) |
+| All Wave E tasks (040–043) ✅ | ✅ Implementation done (PR #337 auto-merging) |
+| Wrap-up task 090 ✅ (lessons-learned authored) | 🔲 Pending — ~4h estimated, runs after PR #337 merges |
+| Insights r2 branch merged to master | 🔄 In flight (PR #337) |
+
+**Estimated gate-fire window**: Within hours of PR #337 merging (assumes CI passes on the flake-fix re-run). Original estimate was "mid-to-late July 2026" — actual is dramatically faster due to parallel-subagent execution acceleration in Waves D + E.
+
+#### 8.4 New companion document for R5
+
+A focused **integration brief** has been authored for R5 implementation use:
+
+> **`notes/insights-engine-assistant-integration-brief.md`** (this folder)
+
+The brief is self-contained (cross-worktree references mirrored inline) and covers:
+
+- Endpoint URL + auth + rate-limit + content-type
+- Full request schema with `forceMode` semantics + sample payload
+- Full response schema with per-path field semantics + worked examples (playbook + RAG + decline + empty-results)
+- All 12 binding error codes + recommended Assistant action per code
+- 6 open questions R5 owns (to record in contract review log)
+- R5 scope-of-work (9 required items) + Phase 2 deferrals
+- 10-item acceptance criteria checklist + Wave D7 synthetic test entity GUIDs
+- 3 sample curl commands for smoke testing
+- Coordination protocol (bug routing matrix)
+- References to canonical artifacts + 8 relevant ADRs
+
+**How the two docs relate**:
+
+- `insights-r2-coordination.md` (this doc) → R5 **architecture / planning**: what's shared, what we MUST NOT rebuild, when to refine R5 design
+- `insights-engine-assistant-integration-brief.md` (new) → R5 **implementation**: what endpoint to call, what payload to send, what to render, what errors to handle
+
+Both docs are required reading for R5 implementers touching Insights consumption.
+
+#### 8.5 What R5 should do next
+
+1. **HOLD Phase 2 chat-tool work** per §6.5 risk guidance UNTIL PR #337 merges + task 090 lessons-learned authored. Estimated gate-fire: hours, not weeks.
+2. When the refinement gate fires, run the §6.3 refinement pass — re-validate §3 reuse mandate + §4 touchpoint resolutions above + update R5 design.md.
+3. Schedule R5 lead review of `design-e3-tool-call-contract.md` v1.0 (sub-task A.5 of Insights task 042 — formally PENDING until R5 records review). Decisions on the 6 open questions in `insights-engine-assistant-integration-brief.md` §6 belong in the contract's §10 review log.
+4. Adopt the **single-endpoint-per-tool-capability** convention established by Wave E3 (per §8.2 §4.1 resolution above) when designing R5's Summarize tool registration.
+
+#### 8.6 Provenance of this update
+
+- Wave E3 author: Claude (Anthropic AI agent) running task-execute skill at FULL rigor, dispatched as sub-agent by main session
+- Companion integration brief author: same agent (different turn)
+- This changelog entry author: same agent (this turn)
+- Operator approval: Ralph Schroeder (project owner)
+- Verifiable via: PR #337 commits `7411a9c5` (Wave E impl) + `015445ea` (test tolerance fix); BFF source diff in `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/`
