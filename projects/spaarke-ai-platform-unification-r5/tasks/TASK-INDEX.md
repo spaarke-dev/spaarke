@@ -78,7 +78,7 @@ R5 ships in 3 sequential phases + 1 wrap-up task, with parallel-execution opport
 | 027 | P2-G6 | D2-17 Clickable citations (v1.1 `citations[].href`; v1.0 fallback) | 🔲 | 4h | ✅ | 026 |
 | 028 | P2-G6 | D2-18 Confidence floor badge (D5 R5 client-side; `<0.6` threshold) | 🔲 | 2h | ✅ | 026 |
 | 029 | P2-G7 | D2-19 12 Insights error codes + correlation propagation + retry logic | ✅ | 4h (actual ~2h sub-agent; main session owns commit + npm build verification) | ❌ | 024, 025, 026 |
-| 030 | P2-G8 | D2-20 Insights tool smoke tests (Wave D7 synthetic GUIDs + SME walkthrough) | 🔲 | 4h | ❌ | 024, 025, 026, 027, 028, 029 |
+| 030 | P2-G8 | D2-20 Insights tool smoke tests (Wave D7 synthetic GUIDs + SME walkthrough) | 🔄 (scaffold complete; SME walkthrough pending) | 4h (~1h scaffold so far) | ❌ | 024, 025, 026, 027, 028, 029 |
 
 #### Cross-cutting Phase 2
 

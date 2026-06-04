@@ -1,11 +1,12 @@
 <task id="030" project="spaarke-ai-platform-unification-r5">
   <metadata>
     <title>D2-20 Insights tool smoke tests on Spaarke Dev (Wave D7 synthetic GUIDs + SME walkthrough)</title>
-    <status>not-started</status>
+    <status>complete-code-scaffold-pending-sme</status>
+    <status-note>Custom non-terminal status (2026-06-04). Sub-agent shipped: (a) 15-question smoke matrix JSON, (b) xUnit `[SkippableTheory]` integration test class, (c) smoke-evidence template, (d) SME-walkthrough template. SME walkthrough deferred by operator decision; binding per spec SC-18. Re-opens when operator schedules SME; transitions to `complete` after SME signoff captured in `notes/task-030-sme-walkthrough.md` §8.</status-note>
     <estimated-effort>4 hours</estimated-effort>
-    <actual-effort></actual-effort>
+    <actual-effort>~1h scaffold (sub-agent, 2026-06-04); SME walkthrough effort TBD at scheduling.</actual-effort>
     <assigned>AI Agent</assigned>
-    <started></started>
+    <started>2026-06-04</started>
     <completed></completed>
     <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
     <wave>P2-G8 (serial; runs after ALL Insights tool implementation tasks 024+025+026+027+028+029 complete; blocks 031 Phase 2 verification)</wave>
