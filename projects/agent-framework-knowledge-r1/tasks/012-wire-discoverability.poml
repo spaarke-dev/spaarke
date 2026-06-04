@@ -1,0 +1,63 @@
+<task id="012" project="agent-framework-knowledge-r1">
+  <metadata>
+    <title>Update root CLAUDE.md, .claude/skills/INDEX.md, REFRESH-LOG</title>
+    <phase>6</phase>
+    <tags>knowledge-base, agent-framework, discoverability, documentation</tags>
+    <estimate>30m</estimate>
+    <status>pending</status>
+    <parallel-group>—</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>011</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Wire the new skill + knowledge base into the discoverability surface so engineers and Claude can find it. Three files updated: (1) root CLAUDE.md Pointers table (§16) — add entry for agent-framework-component skill + knowledge/agent-framework/; (2) .claude/skills/INDEX.md — add the new skill to the index; (3) knowledge/REFRESH-LOG.md — append completion entry for project agent-framework-knowledge-r1.</goal>
+    <context>The skill exists physically after task 010 but is undiscoverable unless wired into the indices Claude routes through (`.claude/skills/INDEX.md` is consulted at every session start; root CLAUDE.md Pointers table is the human-facing table-of-contents). This task makes the project visible.</context>
+    <constraints>
+      - MAIN SESSION ONLY for the .claude/ + root writes (write-boundary rule)
+      - Root CLAUDE.md entry MUST follow the existing Pointers table format (Topic | Pointer with link)
+      - .claude/skills/INDEX.md entry MUST follow the existing format (skill name + 1-line description + tags)
+      - REFRESH-LOG.md entry follows the format established in knowledge/REFRESH-LOG.md
+      - Do NOT modify existing entries — append only
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>CLAUDE.md</file>
+      <file>.claude/skills/INDEX.md</file>
+      <file>knowledge/REFRESH-LOG.md</file>
+      <file>.claude/skills/agent-framework-component/SKILL.md</file>
+      <file>knowledge/agent-framework/NOTES.md</file>
+      <file>projects/agent-framework-knowledge-r1/SPEC.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read CLAUDE.md §16 (Pointers — Where to find everything) to identify the right insertion row for an agent-framework entry — likely near the existing "Researcher subagent" or "Architecture (subsystems, design)" rows. Decide whether to add one row or two (one for the skill, one for the knowledge base)</step>
+    <step>Edit root CLAUDE.md: add row(s) to the Pointers table linking (a) the new skill at .claude/skills/agent-framework-component/SKILL.md, (b) the knowledge base at knowledge/agent-framework/, and (c) NOTES.md as the Spaarke-grounded commentary entry</step>
+    <step>Read .claude/skills/INDEX.md to find the right insertion point (alphabetical? by-category? mirror existing convention)</step>
+    <step>Edit .claude/skills/INDEX.md: add the agent-framework-component skill entry with its description line + tags</step>
+    <step>Read knowledge/REFRESH-LOG.md to identify the format used for completed projects vs. monthly refresh entries</step>
+    <step>Edit knowledge/REFRESH-LOG.md: append a completion entry for agent-framework-knowledge-r1 — date completed, topics affected (agent-framework), files added (new samples count, new docs count, NOTES.md rewritten, INDEX.md added, skill + 5 patterns added), GAPs surfaced (forwarded to monthly refresh cadence)</step>
+    <step>Also: add a row to .claude/CHANGELOG.md if the convention requires one for procedure-surface changes (per root CLAUDE.md §17 footer)</step>
+    <step>Verify all linked paths in updated files resolve (Glob each new path)</step>
+    <step>Commit: `docs(knowledge): wire agent-framework knowledge + skill into discoverability (R1 task 012)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>CLAUDE.md (root — Pointers table updated)</output>
+    <output>.claude/skills/INDEX.md (updated)</output>
+    <output>knowledge/REFRESH-LOG.md (completion entry appended)</output>
+    <output>.claude/CHANGELOG.md (if convention requires)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Root CLAUDE.md Pointers table contains an entry for the new skill AND the knowledge base</criterion>
+    <criterion>.claude/skills/INDEX.md lists the new skill</criterion>
+    <criterion>knowledge/REFRESH-LOG.md has a completion entry for project R1</criterion>
+    <criterion>All linked paths in updates resolve</criterion>
+    <criterion>Main session only — no sub-agent attempted to write .claude/ or CLAUDE.md</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,72 @@
+<task id="010" project="agent-framework-knowledge-r1">
+  <metadata>
+    <title>Create .claude/skills/agent-framework-component/SKILL.md</title>
+    <phase>5</phase>
+    <tags>knowledge-base, agent-framework, skill, claude-config</tags>
+    <estimate>1h</estimate>
+    <status>pending</status>
+    <parallel-group>—</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>009</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create .claude/skills/agent-framework-component/SKILL.md modeled on .claude/skills/fluent-v9-component/SKILL.md. This is the user-facing skill that triggers loading of the patterns + knowledge/agent-framework/ NOTES + relevant docs when Claude detects Agent Framework work. Without this skill, the knowledge base sits unused — the skill is the activation surface.</goal>
+    <context>fluent-v9-component is the proven template. It declares frontmatter (description / tags / techStack / appliesTo / alwaysApply), has Purpose / Applies When / Workflow (Step 0 intent routing → Step 1 knowledge load → Step 2 ADR contracts → Step 3 code review checklist → Step 4 verify before claiming done) / Related skills / Related references sections. The new skill mirrors this for Agent Framework: intent-routing table maps tasks (new agent / new tool / new middleware / observability / agent-vs-workflow decision) to pattern files, ADRs are ADR-013 + (anchor only) ADR-001 ADR-028 bff-extensions.md constraint.</context>
+    <constraints>
+      - MAIN SESSION ONLY — .claude/ write boundary applies (root CLAUDE.md §3)
+      - Frontmatter MUST match the format of other skills (.claude/skills/fluent-v9-component/SKILL.md is the canonical example)
+      - `appliesTo` globs: target src/server/api/Sprk.Bff.Api/Services/Ai/ + Spaarke.Core AI surfaces; do NOT over-target (e.g., do NOT match all .cs in the BFF — only Services/Ai/)
+      - `tags` include: ai, agent-framework, dotnet, ichatclient, middleware, openai
+      - Workflow Step 0 routing table maps user intent → pattern files to load (mirrors fluent-v9-component Step 0)
+      - Workflow Step 1 mandatory load list: knowledge/agent-framework/NOTES.md FIRST, then the intent-specific patterns, then drill into docs/ only if a pattern punts there with `→`
+      - Workflow Step 2 ADR application: ADR-013 (PublicContracts/ facade for CRUD→AI) + .claude/constraints/bff-extensions.md (BFF-extension governance before adding new endpoints/services)
+      - Workflow Step 3 code review checklist: 8-10 items targeting the specific drift risks (e.g., "ChatMessage namespace alias used when both Models.Ai.Chat and Microsoft.Extensions.AI imported", "AIFunctionFactory.Create with [Description] not raw delegates", "Middleware composition order: telemetry outermost", "UseFunctionInvocation vs raw client for compound intent detection")
+      - Workflow Step 4: explicit "test in BFF integration env" requirement; do not claim done after only `dotnet build`
+      - Total length 100-150 lines — matches fluent-v9-component scope
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ai/INDEX.md</file>
+      <file>knowledge/agent-framework/NOTES.md</file>
+      <file>knowledge/agent-framework/docs/INDEX.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/fluent-v9-component/SKILL.md as the template</step>
+    <step>Read .claude/patterns/ai/INDEX.md (created by task 009) to inventory pattern files the skill will reference</step>
+    <step>Read knowledge/agent-framework/NOTES.md (rewritten by task 007) to confirm the §1/§2 structure the skill will load</step>
+    <step>Draft frontmatter: description (1 sentence, plain English — what the skill does); tags (ai, agent-framework, dotnet, ichatclient, middleware, openai); techStack (dotnet-8, agent-framework, microsoft-extensions-ai, azure-openai); appliesTo globs (target Services/Ai/ paths only); alwaysApply: false</step>
+    <step>Draft Purpose section — explain why this skill exists (anchor every Agent Framework component task in Spaarke patterns + the live Microsoft reference)</step>
+    <step>Draft Applies When section — list intent triggers ("Creating or modifying a chat agent in Services/Ai/Chat/", "Editing IChatClient middleware", etc.) AND explicit NOT-applicable list (NOT for JPS playbook authoring → jps-action-create; NOT for Foundry Agent Service → foundry-agent skill)</step>
+    <step>Draft Workflow Step 0 — intent routing table mapping user intent to pattern files</step>
+    <step>Draft Workflow Step 1 — knowledge load order: NOTES.md first, then patterns, then docs/* only if `→` punts there</step>
+    <step>Draft Workflow Step 2 — ADR contracts: ADR-013 PublicContracts/ facade requirement + bff-extensions.md governance + (cite) ADR-028 for managed-identity credential choice</step>
+    <step>Draft Workflow Step 3 — code review checklist with 8-10 Spaarke-specific items (drift-targeted)</step>
+    <step>Draft Workflow Step 4 — verification standard: explicit "integration test in BFF env" requirement for changes touching middleware or tool registration</step>
+    <step>Draft Related skills + Related references sections</step>
+    <step>Write to .claude/skills/agent-framework-component/SKILL.md</step>
+    <step>Commit: `feat(skills): add agent-framework-component SKILL.md (R1 task 010)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Glob</tool>
+    <tool>Write</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>.claude/skills/agent-framework-component/SKILL.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>SKILL.md exists at .claude/skills/agent-framework-component/SKILL.md</criterion>
+    <criterion>Frontmatter matches the format of other Spaarke skills (description / tags / techStack / appliesTo / alwaysApply)</criterion>
+    <criterion>appliesTo globs target Services/Ai/ paths only — not all .cs in the BFF</criterion>
+    <criterion>Workflow has all 4 standard steps (intent routing / knowledge load / ADR contracts / verify before done)</criterion>
+    <criterion>Code review checklist has 8-10 items, each targeting a specific drift the new patterns identified</criterion>
+    <criterion>Length 100-150 lines</criterion>
+    <criterion>Main session only — no sub-agent attempted to write .claude/</criterion>
+  </acceptance-criteria>
+</task>

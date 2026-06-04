@@ -1,0 +1,89 @@
+<task id="006" project="agent-framework-fit-assessment-r1">
+  <metadata>
+    <title>Synthesize findings into the canonical assessment document</title>
+    <phase>5</phase>
+    <tags>assessment, synthesis, deliverable, decision-document</tags>
+    <estimate>2.5h</estimate>
+    <status>completed</status>
+    <completion-summary>Completed 2026-06-03. Draft via sub-agent (commit cdaab907); Step 9.5 quality gates in main session. Output: docs/assessments/agent-framework-fit-assessment-2026-06-03.md (893 lines, target 800-1500). All 10 sections present and correctly numbered: §1 Executive summary (1-page, self-contained with 10-row recommendation table + 4 narrative paragraphs) · §2 Context+scope · §3 Current state inventory · §4 Feature map F1-F12 · §5 Per-surface matrix (10 surfaces + §5.11 summary table) · §6 Deployment recommendations · §7 Migration cost+risks (shared infra + publish-size + 10-row risk register + 8-17 PW estimate) · §8 Open questions (6 items, exceeds ≥3 floor) · §9 Forward-references (knowledge-r1 + ADR-013 + REFRESH cadence) · §10 Sources appendix (36 rows). Citations: 18 live primary URLs (13 Microsoft Learn + 3 Devblog + 2 GitHub Issue), 100% within 2026-04-01 recency floor (P12 one day below — inline stable-content justification per project rule). Closing line 893 enumerates 5 named owner decisions for action. Quality gates: adr-check ✅ no violations (2 forward-looking warnings on implied ADR-013 amendment for shared middleware lift + S5B prototyping recommendation — both correctly deferred to downstream PRs per scoping); code-review ✅ accepted with 2 warnings: (W1) S8a verdict changed from notes/04 PARTIAL to DON'T ADOPT based on deeper "textbook anti-fit" analysis — defensible but divergence not disclosed inline; (W2) two synthesis judgment-call extensions beyond notes/05 not flagged inline. Both warnings routed to task 007 adversarial review as inputs.</completion-summary>
+    <parallel-group>—</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>004, 005</dependencies>
+    <rigor-level>FULL</rigor-level>
+    <rigor-reason>This task produces the project's primary deliverable. Decision-grade synthesis affects how all future Spaarke AI projects approach Agent Framework. Quality bar matches docs/assessments/bff-ai-extraction-assessment-2026-05-20.md. Runs adr-check + code-review at Step 9.5.</rigor-reason>
+  </metadata>
+  <prompt>
+    <goal>Write the canonical assessment document at docs/assessments/agent-framework-fit-assessment-YYYY-MM-DD.md by synthesizing notes/01 through notes/05. Required sections per SPEC §5: (1) Executive summary, (2) Context and scope, (3) Current state inventory, (4) Agent Framework feature map, (5) Per-surface decision matrix, (6) Deployment model recommendations, (7) Migration cost + risks, (8) Open questions / human-decision points, (9) Forward-references.</goal>
+    <context>Tone reference: docs/assessments/bff-ai-extraction-assessment-2026-05-20.md. That assessment delivered "structurally AI-dominant but operationally justified" — honest, citation-backed, willing to acknowledge tension. This assessment must hit the same bar. The document is the project's primary output; all downstream decisions (ADR amendments, knowledge curation scope, future SPECs) reference this file.</context>
+    <constraints>
+      - File path: docs/assessments/agent-framework-fit-assessment-YYYY-MM-DD.md where YYYY-MM-DD is the synthesis date
+      - All 9 sections from SPEC §5 — no skipping
+      - Executive summary is FIRST and one page max — must stand alone if a reader reads only it
+      - **Citation discipline (MANDATORY)**: every conclusion in §4 (feature map), §5 (recommendations), §6 (deployment), §7 (migration) cites at least ONE primary-source URL with fetched date (from notes/00-primary-source-baseline.md or task 003 captures). Spaarke-code claims cite file:line. ADR claims cite ADR number + section. NO recommendations citing only the curated knowledge/agent-framework/ snapshot — that snapshot is 3+ weeks stale by synthesis date
+      - **Recency floor**: every primary-source citation MUST have a fetched-date no older than 60 days from synthesis date (i.e., if synthesis runs 2026-06-03, citations must be fetched 2026-04-03 or later). Older citations permitted ONLY for: foundational/conceptual pages that don't rev, ADRs, Spaarke internal docs. Any older citation must have a "stable content" justification inline
+      - §8 open questions: 3+ items, each with "Why this is unresolved" + "What's needed to resolve"
+      - §9 forward-references: explicit named projects/ADRs that this assessment unblocks or implies — including the parked agent-framework-knowledge-r1
+      - **Add §10 Sources** appendix: complete table of every primary source cited in the document, with URL + fetched date + section(s) that reference it. Acts as the freshness audit trail
+      - Tone: declarative ("S1 adopts Agent Framework's middleware composition pattern"). No hedging ("might want to consider"). When uncertain, say so explicitly in §8, not in the body
+      - Length: 800-1500 lines target. BFF AI extraction assessment is in that range — match the depth
+      - Do NOT edit ADR-013, do NOT edit agent-framework-knowledge-r1 SPEC — those are downstream (per scoping decision)
+      - Length budget exception: if the surface count requires more, the assessment may run longer. Do not truncate analysis to fit a length cap
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/agent-framework-fit-assessment-r1/SPEC.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/CLAUDE.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/notes/00-primary-source-baseline.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/notes/01-spaarke-ai-surfaces-inventory.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/notes/02-non-bff-ai-touchpoints-inventory.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/notes/03-agent-framework-feature-map.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/notes/04-per-surface-decision-matrix.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/notes/05-deployment-and-migration.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Re-read docs/assessments/bff-ai-extraction-assessment-2026-05-20.md in full — internalize the tone, structure, citation style</step>
+    <step>Re-read notes/01-05 in sequence — load all source findings into working context</step>
+    <step>Draft §1 Executive summary — one page. Lead with the recommendation summary table from notes/04 closing; follow with 2-3 paragraphs naming the most consequential decisions and the most consequential open question</step>
+    <step>Draft §2 Context and scope — surfaces evaluated (S1-S7 / S8 if found), what's out of scope (no code changes, no ADR amendments per scoping decision), the half-adopted starting state (Extensions.AI in prod, Agents.AI not yet)</step>
+    <step>Draft §3 Current state inventory — synthesis of notes/01 + notes/02; structured table with surface | current state | abstractions used | deployment</step>
+    <step>Draft §4 Agent Framework feature map — synthesis of notes/03; one row per feature category with what-it-is + Extensions.AI-baseline + Spaarke-applicability</step>
+    <step>Draft §5 Per-surface decision matrix — synthesis of notes/04; one detailed subsection per surface with technical-fit + value + cost + recommendation + open question</step>
+    <step>Draft §6 Deployment model recommendations — synthesis of notes/05; per surface, deployment model + cited ADR-013 criteria</step>
+    <step>Draft §7 Migration cost + risks — synthesis of notes/05; total estimate, shared infra changes, risk register, publish-size analysis, reversibility</step>
+    <step>Draft §8 Open questions / human-decision points — 3+ items; each with current-evidence + what's-needed-to-resolve</step>
+    <step>Draft §9 Forward-references — projects this unblocks (agent-framework-knowledge-r1 SPEC refinement), ADRs this implies amendments to (ADR-013 §Constraints additions for Agent Framework adoption boundaries), future REFRESH cadence to re-check</step>
+    <step>Draft §10 Sources appendix — table of every primary source cited: URL | fetched date | section(s) referencing | one-line content note. This is the freshness audit trail; readers + future REFRESH cycles use this to detect when conclusions need re-verification</step>
+    <step>Recency audit (self-check before writing the file): scan §4-§7 citations. Confirm ≥80% are dated 2026-04-01 onwards. Any older citation must have a "stable content" justification inline. Flag any borderline items in §8 open questions</step>
+    <step>Write to docs/assessments/agent-framework-fit-assessment-YYYY-MM-DD.md</step>
+    <step>Run adr-check skill against the document (Step 9.5 of FULL rigor)</step>
+    <step>Run code-review skill against the document as a deliverable (Step 9.5)</step>
+    <step>Commit: `docs(assessment): agent-framework fit assessment YYYY-MM-DD (R1 task 006)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Skill(adr-check)</tool>
+    <tool>Skill(code-review)</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>docs/assessments/agent-framework-fit-assessment-YYYY-MM-DD.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document exists at docs/assessments/agent-framework-fit-assessment-YYYY-MM-DD.md with all 10 required sections (9 from SPEC + §10 Sources appendix)</criterion>
+    <criterion>Executive summary fits on one page and is self-contained</criterion>
+    <criterion>Every conclusion in §4-§7 cites at least 1 primary-source URL with fetched date (NOT solely the 2026-05-14 curated snapshot)</criterion>
+    <criterion>Recency audit confirms ≥80% of citations fetched 2026-04-01 onwards</criterion>
+    <criterion>§8 has at least 3 open questions, each with current-evidence + what's-needed</criterion>
+    <criterion>§9 explicitly names agent-framework-knowledge-r1 + ADR-013 as forward-references</criterion>
+    <criterion>§10 Sources appendix tables every primary source URL + fetched date + referencing sections</criterion>
+    <criterion>Length 800-1500 lines (or more if analysis warrants)</criterion>
+    <criterion>adr-check + code-review both run at Step 9.5</criterion>
+    <criterion>Document is in declarative tone — uncertainty lives in §8, not the body</criterion>
+  </acceptance-criteria>
+</task>

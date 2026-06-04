@@ -1,0 +1,68 @@
+<task id="009" project="agent-framework-knowledge-r1">
+  <metadata>
+    <title>Create .claude/patterns/ai/agent-framework-*.md pointer files</title>
+    <phase>5</phase>
+    <tags>knowledge-base, agent-framework, patterns, claude-config</tags>
+    <estimate>1.5h</estimate>
+    <status>pending</status>
+    <parallel-group>—</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>007, 008</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create 5 pattern pointer files under .claude/patterns/ai/ that the new agent-framework-component skill (task 010) will load. Each pattern is ~25 lines, points to specific knowledge/agent-framework/docs/* + src/ files, and encodes a single decision or convention.</goal>
+    <context>The fluent-v9-component skill loads .claude/patterns/ui/fluent-v9-*.md and .claude/patterns/pcf/fluent-v9-*.md (6 files total). These short pointer files (the skill says "telling you WHICH code to read") are the load-balanced middle layer between the SKILL.md and the verbose knowledge/ docs. Without them, the SKILL.md would either be too long or too vague.</context>
+    <constraints>
+      - MAIN SESSION ONLY — sub-agents CANNOT write to .claude/ (root CLAUDE.md §3). All Write operations in this task must happen in the main session
+      - Each pattern file is 20-30 lines, format: `# Pattern: &lt;name&gt;` H1 + "When this fires:" + "The pattern:" + "Where it lives in code:" + "Drill-down:" subsections
+      - Use real file paths in src/server/api/Sprk.Bff.Api/Services/Ai/ — verify each with Glob before writing
+      - The `→` punt links target docs/ files added by tasks 003-005
+      - Create .claude/patterns/ai/INDEX.md (or update if exists) listing all 5 patterns
+      - Mirror naming convention from .claude/patterns/ui/fluent-v9-*.md
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>knowledge/agent-framework/NOTES.md</file>
+      <file>knowledge/agent-framework/docs/INDEX.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentTelemetryMiddleware.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read 2-3 existing .claude/patterns/ui/fluent-v9-*.md files to internalize the pointer-file format and tone</step>
+    <step>Glob .claude/patterns/ai/ to check if the directory exists; if not, create it (mkdir)</step>
+    <step>Write .claude/patterns/ai/agent-framework-component-authoring.md — covers: creating a new IChatClient-based agent in Sprk.Bff.Api; punts to docs/chat-client.md + docs/agents.md + docs/providers.md; cites SprkChatAgent.cs as the canonical example</step>
+    <step>Write .claude/patterns/ai/agent-framework-middleware-pipeline.md — covers: middleware composition order (outermost=telemetry per AgentTelemetryMiddleware comment), required wrapping interface, when to inject middleware; punts to docs/middleware.md; cites the 3 Spaarke middleware classes</step>
+    <step>Write .claude/patterns/ai/agent-framework-tool-registration.md — covers: AIFunctionFactory.Create + [Description] attributes + parameter types; the IChatClient.UseFunctionInvocation vs raw-client split for compound intent detection; punts to docs/tools.md + docs/structured-outputs.md; cites Tools/*.cs files + CompoundIntentDetector.cs</step>
+    <step>Write .claude/patterns/ai/agent-framework-observability.md — covers: OTel source-name conventions, .AsBuilder().UseOpenTelemetry() wiring, Azure Monitor exporter from APPLICATIONINSIGHTS_CONNECTION_STRING, alignment with Sprk.Bff.Api's existing OTel pipeline; punts to docs/observability.md; cites AgentTelemetryMiddleware.cs as the in-code reference</step>
+    <step>Write .claude/patterns/ai/agent-framework-agent-vs-workflow-decision.md — decision tree: (a) chat-style single-agent loop → Agent Framework agent + IChatClient (Sprk pattern: SprkChatAgent), (b) deterministic multi-step JPS-orchestrated pipeline → keep using AnalysisOrchestrationService + JPS, NOT Agent Framework Workflows, (c) durable / HITL / A2A → Foundry Agent Service (see knowledge/foundry-agent-service/); punts to NOTES.md §1 and docs/workflows.md</step>
+    <step>Write .claude/patterns/ai/INDEX.md listing all 5 patterns with one-line descriptions, matching .claude/patterns/ui/INDEX.md format (Glob and read .claude/patterns/ui/INDEX.md to mirror)</step>
+    <step>Verify every cited path resolves (Glob each)</step>
+    <step>Commit: `feat(patterns): add .claude/patterns/ai/agent-framework-* pointer files (R1 task 009)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Glob</tool>
+    <tool>Write</tool>
+    <tool>Bash</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>.claude/patterns/ai/agent-framework-component-authoring.md</output>
+    <output>.claude/patterns/ai/agent-framework-middleware-pipeline.md</output>
+    <output>.claude/patterns/ai/agent-framework-tool-registration.md</output>
+    <output>.claude/patterns/ai/agent-framework-observability.md</output>
+    <output>.claude/patterns/ai/agent-framework-agent-vs-workflow-decision.md</output>
+    <output>.claude/patterns/ai/INDEX.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>5 pattern files exist under .claude/patterns/ai/, each 20-30 lines</criterion>
+    <criterion>Every file path cited in any pattern resolves (verified by Glob)</criterion>
+    <criterion>Each pattern has the standard sections (When this fires / The pattern / Where it lives / Drill-down)</criterion>
+    <criterion>INDEX.md exists with all 5 patterns listed</criterion>
+    <criterion>All writes occurred in the main session — no sub-agent attempted to write to .claude/</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,67 @@
+<task id="011" project="agent-framework-knowledge-r1">
+  <metadata>
+    <title>Verify skill influences agent output on realistic prompts</title>
+    <phase>6</phase>
+    <tags>knowledge-base, agent-framework, verification, skill-validation</tags>
+    <estimate>1h</estimate>
+    <status>pending</status>
+    <parallel-group>—</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>009, 010</dependencies>
+    <rigor-level>FULL</rigor-level>
+    <rigor-reason>Cross-validates skill triggers + patterns + NOTES.md against Spaarke runtime code; affects future correctness of all Agent Framework work. Includes adr-check + code-review gates at Step 9.5.</rigor-reason>
+  </metadata>
+  <prompt>
+    <goal>Verify the agent-framework-component skill changes agent output on at least 3 realistic Spaarke prompts. This is the load-bearing check — without verification, the skill might trigger correctly on description but fail to actually load NOTES.md or change output. Mirror the verification approach used in coding-knowledge-base-setup-r1 Phase 5 (TASK-INDEX.md row "Verify each skill influences agent output").</goal>
+    <context>Phase 5 of the prior knowledge-base project ran 1 prompt per skill through 6 verification sub-agents and found 2 defects (declarative-agent sample dir path wrong, spe-integration ADR-005 framing wrong). The patterns generalize. For Agent Framework: at least 3 prompts targeting different intents — (a) adding a new middleware, (b) registering a new function tool, (c) deciding agent vs. workflow vs. Foundry. Each verification reads the patterns + NOTES.md and produces output that should differ from baseline (without the skill) in specific, citable ways.</context>
+    <constraints>
+      - Run via sub-agents — main session orchestrates + collates results
+      - Each verification prompt MUST be realistic — phrasing a Spaarke engineer would actually type, e.g., "Add a per-tenant rate limit middleware to SprkChatAgent" not "How does middleware work"
+      - Each verification MUST cite (a) which patterns / docs were loaded, (b) what specifically changed vs. baseline, (c) any defects found in the skill / patterns / NOTES.md
+      - Defects found in this task get fixed in main session immediately (do NOT defer — the project is not done if defects survive)
+      - This task has FULL rigor: adr-check + code-review at Step 9.5 (run against the curated SKILL.md + pattern files)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/agent-framework-component/SKILL.md</file>
+      <file>.claude/patterns/ai/INDEX.md</file>
+      <file>knowledge/agent-framework/NOTES.md</file>
+      <file>projects/coding-knowledge-base-setup-r1/TASK-INDEX.md</file>
+      <file>projects/agent-framework-knowledge-r1/SPEC.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read TASK-INDEX.md from coding-knowledge-base-setup-r1 — note the Phase 5 verification pattern + the 2 defects found + how they were fixed</step>
+    <step>Define 3 verification prompts: (P1) "Add a per-tenant rate limit middleware to SprkChatAgent. Use Agent Framework conventions and respect the existing middleware order.", (P2) "I'm adding a new tool to AnalysisQueryTools.cs that searches the Spaarke knowledge index. Show me the registration pattern.", (P3) "I need to add a new multi-step analysis pipeline for invoice line-item review. Should I use Agent Framework Workflows, JPS playbooks, or Foundry Agent Service?"</step>
+    <step>For each prompt: spawn a sub-agent (general-purpose) given the prompt + access to the skill + patterns + NOTES. Capture which files the sub-agent loaded and what it produced. Limit each sub-agent to ≤ 200-word response so collation stays tractable</step>
+    <step>For each result: evaluate (a) did the skill trigger? (b) was NOTES.md loaded? (c) were the right patterns loaded? (d) is the output Spaarke-aligned (no AutoGen / SK idioms creeping in)? (e) does the output respect ADR-013 PublicContracts/ facade?</step>
+    <step>Catalog defects found — wrong file path in a pattern, missing checklist item, NOTES.md missing a critical clarification, skill `appliesTo` glob over/under-triggering, etc.</step>
+    <step>For each defect: fix in main session immediately (Edit on the affected SKILL.md / pattern / NOTES.md file)</step>
+    <step>Run adr-check skill against SKILL.md + pattern files (Step 9.5 of FULL rigor protocol)</step>
+    <step>Run code-review skill against SKILL.md + pattern files (Step 9.5)</step>
+    <step>Append verification summary to TASK-INDEX.md "Gaps / blocks log" section: (a) which prompts ran, (b) which defects were found and fixed, (c) any residual concerns</step>
+    <step>Commit: `verify(knowledge): validate agent-framework-component skill output + fix defects (R1 task 011)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+    <tool>Agent(general-purpose)</tool>
+    <tool>Skill(adr-check)</tool>
+    <tool>Skill(code-review)</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>Verification summary appended to projects/agent-framework-knowledge-r1/TASK-INDEX.md</output>
+    <output>Defect fixes applied in-place to SKILL.md / patterns / NOTES.md as needed</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>3 verification prompts run via sub-agents</criterion>
+    <criterion>Each verification result evaluated against 5 criteria (skill triggered / NOTES loaded / right patterns / Spaarke-aligned / ADR-013 honored)</criterion>
+    <criterion>Defects found are fixed in main session before task closes — no defects deferred to task 013</criterion>
+    <criterion>adr-check + code-review both run at Step 9.5 (FULL rigor requirement)</criterion>
+    <criterion>Verification summary entry exists in TASK-INDEX.md</criterion>
+  </acceptance-criteria>
+</task>

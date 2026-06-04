@@ -1,0 +1,59 @@
+<task id="006" project="agent-framework-knowledge-r1">
+  <metadata>
+    <title>Capture community / MVP content (best-effort; release is new)</title>
+    <phase>3</phase>
+    <tags>knowledge-base, agent-framework, community, mvp, devblog</tags>
+    <estimate>1h</estimate>
+    <status>pending</status>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>003, 004, 005</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Search for and capture high-quality community / MVP / Microsoft Devblog content on Agent Framework into knowledge/agent-framework/docs/community/. Honest scope acknowledgment: Agent Framework released early 2026, so community content is expected to be sparse. Capture what genuinely exists and is high-quality; do NOT pad with low-quality blog posts to hit a count.</goal>
+    <context>The fluent-ui-v9 topic has 8 community captures because Fluent v9 had multi-year community ramp before curation. Agent Framework is months old. Likely-existing content: Microsoft Devblog launch posts, Semantic Kernel team posts on the merge, a small set of MVP / early-adopter posts. Treat 0-3 captures as a reasonable outcome.</context>
+    <constraints>
+      - YAML frontmatter on every capture (`source: &lt;url&gt;`, `author: &lt;name&gt;`, `fetched: &lt;date&gt;`, `notes: WebFetch capture — verify against live post before quoting verbatim`)
+      - WebFetch captures are semi-summarized — note this honestly in every capture's frontmatter
+      - Skip official Microsoft Devblog posts that duplicate what's already in docs/overview.md or docs/migration-*.md — focus on content that adds Spaarke-relevant angle (Azure OpenAI focus, .NET 8 specifics, production deployment war stories, OTel + App Insights wiring)
+      - File naming: docs/community/&lt;author-slug&gt;-&lt;short-title&gt;.md
+      - If a post is paywalled / requires login: note it in SOURCE.md GAPs and skip
+      - Sub-agents may write to knowledge/ but NOT to .claude/
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>knowledge/agent-framework/SOURCE.md</file>
+      <file>knowledge/fluent-ui-v9/SOURCE.md</file>
+      <file>projects/agent-framework-knowledge-r1/SPEC.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>WebSearch: `Microsoft Agent Framework site:devblogs.microsoft.com` — capture launch + deep-dive posts from devblogs.microsoft.com/semantic-kernel/ and devblogs.microsoft.com/ai/</step>
+    <step>WebSearch: `"Microsoft Agent Framework" Azure OpenAI` — focus on .NET / production wiring posts</step>
+    <step>WebSearch: `"Microsoft Agent Framework" OpenTelemetry` — relevant to Spaarke's observability story</step>
+    <step>For each candidate post: WebFetch the URL, evaluate whether content is (a) Spaarke-relevant, (b) not already covered by docs/ snapshots, (c) high-quality (not a sponsored re-post of the launch blog)</step>
+    <step>For each accepted post: write knowledge/agent-framework/docs/community/&lt;slug&gt;.md with YAML frontmatter and the captured content. Add the verify-against-live-post caveat to frontmatter `notes:`</step>
+    <step>Update knowledge/agent-framework/SOURCE.md "Reference docs snapshot" section — add a "Community / MVP (verify against live post before quoting verbatim)" subsection with one row per capture</step>
+    <step>If 0-1 captures result: log in SOURCE.md GAPs section: "Community content on Agent Framework is sparse as of &lt;date&gt; (release is recent). Next refresh should re-survey."</step>
+    <step>Commit: `docs(knowledge): capture agent-framework community content (R1 task 006)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>WebSearch</tool>
+    <tool>WebFetch</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>knowledge/agent-framework/docs/community/*.md × 0-3</output>
+    <output>knowledge/agent-framework/SOURCE.md (updated Community subsection + any GAPs)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>WebSearch run for at least 3 search angles (general, Azure OpenAI, OpenTelemetry)</criterion>
+    <criterion>Each capture has YAML provenance + verify-against-live-post caveat</criterion>
+    <criterion>Sparse-content honestly logged in SOURCE.md GAPs if applicable</criterion>
+    <criterion>No padding — captures must be Spaarke-relevant AND not redundant with docs/ snapshots</criterion>
+  </acceptance-criteria>
+</task>

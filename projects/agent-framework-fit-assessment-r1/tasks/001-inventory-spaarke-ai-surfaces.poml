@@ -1,0 +1,70 @@
+<task id="001" project="agent-framework-fit-assessment-r1">
+  <metadata>
+    <title>Inventory Spaarke AI code surfaces (S1-S4 + S8 catch)</title>
+    <phase>1</phase>
+    <tags>assessment, inventory, spaarke-ai, read-only</tags>
+    <estimate>1.5h</estimate>
+    <status>completed</status>
+    <completion-summary>Completed 2026-06-03 via parallel sub-agent (commit cb883dd9). Output: notes/01-spaarke-ai-surfaces-inventory.md (5 surfaces + 7 cross-cutting observations). Key findings: (1) Microsoft.Agents.AI package is referenced in Sprk.Bff.Api.csproj but ZERO source usage — clean evidence for "half-adopted" framing; (2) S1 SprkChat is the ONLY surface using Extensions.AI primitives; S2/S3/S4 use IOpenAiClient wrapper or OpenAI.Chat SDK directly; (3) Middleware decorates ISprkChatAgent (Spaarke interface) not IChatClient — Spaarke missed canonical chatClient.AsBuilder().Use(...).Build() idiom; (4) Two S8 surfaces discovered: SessionSummarizationService + CapabilityRouter — recommend folding into S1 perimeter for task 004; (5) GitHub Issue #6268 carried forward as RED FLAG on S1 lift-to-ChatClientAgent.</completion-summary>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>000</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Produce a structured inventory of all in-BFF Spaarke AI agent surfaces (S1 SprkChat, S2 AnalysisOrchestration + JPS, S3 Builder, S4 Background AI Jobs) and catch any unanticipated surface (S8). The output is a project-local findings table at `projects/agent-framework-fit-assessment-r1/notes/01-spaarke-ai-surfaces-inventory.md` — NOT the final assessment document. Task 006 pulls from these notes.</goal>
+    <context>The assessment can only be decision-grade if it's grounded in what Spaarke actually has, not what the team thinks they have. Past patterns: SprkChatAgent.cs declares itself an "Agent Framework agent" in its doc-comment but wraps raw IChatClient — the inventory must capture this kind of nuance. Surfaces that aren't surfaced here become invisible to the per-surface decision matrix in task 004.</context>
+    <constraints>
+      - READ-ONLY on src/ — no .cs file modifications
+      - For each surface: capture (a) primary class/service, (b) what Microsoft.* abstractions it uses by name (IChatClient, ChatClientAgent, AIFunction, AIAgent, AIFunctionFactory, ChatResponseUpdate, etc.), (c) what Spaarke-specific abstractions wrap or replace those (ChatContext, IChatContextProvider, IAiToolHandler, etc.), (d) deployment model (in-process BFF? Function? other?), (e) streaming behavior, (f) state management approach, (g) middleware composition if applicable
+      - Use Grep to verify abstraction usage — do not infer from class names alone
+      - For S8 catch: Grep across Services/ for any IChatClient / AIAgent / IRagService usage outside Chat/Analysis/Builder/Jobs — flag anything found
+      - Output as a structured markdown file with one section per surface + a "Cross-cutting observations" section
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/agent-framework-fit-assessment-r1/SPEC.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentTelemetryMiddleware.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentContentSafetyMiddleware.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentCostControlMiddleware.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/CompoundIntentDetector.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IPlaybookOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Builder/BuilderAgentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAiToolHandler.cs</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Create projects/agent-framework-fit-assessment-r1/notes/ directory if not present (mkdir)</step>
+    <step>S1 SprkChat: Read SprkChatAgent.cs + SprkChatAgentFactory.cs (if exists) + the 3 middleware files + CompoundIntentDetector.cs in full. Inventory the Microsoft.Extensions.AI types used; note that it does NOT use Microsoft.Agents.AI.ChatClientAgent. Capture the UseFunctionInvocation vs raw-client split rationale</step>
+    <step>S2 AnalysisOrchestration: Read AnalysisOrchestrationService.cs, IPlaybookOrchestrationService.cs, and Glob Nodes/*Executor.cs. Inventory: is this LLM-driven or deterministic? Does it use any Agent Framework type, or only JPS playbook abstractions + direct LLM calls? Capture the relationship to IAiToolHandler</step>
+    <step>S3 Builder: Glob Services/Ai/Builder/ + read BuilderAgentService.cs + BuilderToolDefinitions.cs + BuilderToolExecutor.cs. Same questions as S1/S2</step>
+    <step>S4 Background AI jobs: Glob Services/Jobs/ + Services/Ai/Jobs/. Identify which job handlers touch AI (call IOpenAiClient, IChatClient, IRagService). For each AI-touching handler: what Microsoft.* abstractions used? Sync or async LLM call patterns?</step>
+    <step>S8 catch: Grep for IChatClient | ChatClientAgent | AIAgent | AIFunctionFactory across all of Services/ (excluding the surfaces already inventoried). Flag anything found that doesn't belong to S1-S4</step>
+    <step>Cross-cutting observations: Identify patterns shared across surfaces — e.g., "all surfaces use Microsoft.Extensions.AI directly; none use Microsoft.Agents.AI"; "all middleware is per-instance via the SprkChatAgent factory, not via IChatClient.AsBuilder().Use*().Build() composition"</step>
+    <step>Write notes/01-spaarke-ai-surfaces-inventory.md with sections: S1 SprkChat | S2 AnalysisOrchestration | S3 Builder | S4 Background AI Jobs | S8 Discovered surfaces | Cross-cutting observations. Each surface section captures the 7 fields from constraints. Cite file:line for every claim</step>
+    <step>Commit: `docs(assessment): inventory Spaarke AI code surfaces (R1 task 001)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+    <tool>Write</tool>
+    <tool>Bash</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>projects/agent-framework-fit-assessment-r1/notes/01-spaarke-ai-surfaces-inventory.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>notes/01-spaarke-ai-surfaces-inventory.md exists with one section per surface S1-S4 + S8 catch</criterion>
+    <criterion>Every claim about a surface cites file:line via the markdown convention</criterion>
+    <criterion>Microsoft.Extensions.AI vs Microsoft.Agents.AI distinction explicitly noted per surface</criterion>
+    <criterion>Cross-cutting observations section identifies at least 3 patterns shared or contrasted across surfaces</criterion>
+    <criterion>S8 catch Grep run — even if no new surface found, the negative result is recorded</criterion>
+  </acceptance-criteria>
+</task>
