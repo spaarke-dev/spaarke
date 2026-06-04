@@ -32,11 +32,7 @@ import {
   CALENDAR_PANE_ID,
   CALENDAR_PANE_WIDTH,
   CALENDAR_WEB_RESOURCE_NAME,
-  EVENT_DETAIL_PANE_ID,
-  EVENT_DETAIL_WEB_RESOURCE_NAME,
-  PANE_WIDTH,
 } from './config';
-import { getXrm } from './xrmHelpers';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Config record id (authored in task 030)
@@ -123,68 +119,6 @@ function calendarPaneTranslator(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Event Detail side pane — opens via Xrm.Navigation; mutually exclusive with
-// the Calendar pane via the orchestrator's mutuallyExclusiveWith mechanism.
-// Preserved verbatim from the prior iteration's calendarPaneOrchestrator.
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function openEventDetailPane(eventId: string, eventTypeId?: string): Promise<void> {
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  const xrm: any = getXrm();
-  if (!xrm?.App?.sidePanes) return;
-  try {
-    const sidePanes = xrm.App.sidePanes;
-    // Mutual exclusivity preserve: re-register Calendar pane if user closed it.
-    const calendarPane = sidePanes.getPane(CALENDAR_PANE_ID);
-    if (!calendarPane) {
-      await sidePanes.createPane({
-        title: 'Date Filter: Event',
-        paneId: CALENDAR_PANE_ID,
-        canClose: true,
-        width: CALENDAR_PANE_WIDTH,
-        isSelected: false,
-        imageSrc: 'WebResources/sprk_calendarline_24',
-      });
-      const recreated = sidePanes.getPane(CALENDAR_PANE_ID);
-      if (recreated) {
-        await recreated.navigate({
-          pageType: 'webresource',
-          webresourceName: CALENDAR_WEB_RESOURCE_NAME,
-        });
-      }
-    }
-
-    const cleanId = eventId.replace(/[{}]/g, '');
-    const navigationOptions = {
-      pageType: 'webresource',
-      webresourceName: EVENT_DETAIL_WEB_RESOURCE_NAME,
-      data: `eventId=${cleanId}&eventType=${eventTypeId ?? ''}`,
-    };
-
-    const existing = sidePanes.getPane(EVENT_DETAIL_PANE_ID);
-    if (existing) {
-      await existing.navigate(navigationOptions);
-      existing.select?.();
-      return;
-    }
-
-    const newPane = await sidePanes.createPane({
-      title: 'Event',
-      paneId: EVENT_DETAIL_PANE_ID,
-      canClose: true,
-      width: PANE_WIDTH,
-      isSelected: true,
-      imageSrc: 'WebResources/sprk_tabaddline_24',
-    });
-    await newPane.navigate(navigationOptions);
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('[EventsPage] Failed to open Event detail pane:', error);
-  }
-  /* eslint-enable @typescript-eslint/no-explicit-any */
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // App component
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -205,7 +139,6 @@ export const App: React.FC = () => {
         webResourceName: CALENDAR_WEB_RESOURCE_NAME,
         width: CALENDAR_PANE_WIDTH,
         iconName: 'WebResources/sprk_calendarline_24',
-        mutuallyExclusiveWith: [EVENT_DETAIL_PANE_ID],
       });
     }, 500);
 
@@ -245,17 +178,6 @@ export const App: React.FC = () => {
       sidePaneFilter={IS_DIALOG_MODE ? undefined : {
         paneId: CALENDAR_PANE_ID,
         translator: calendarPaneTranslator,
-      }}
-      onRecordOpen={(recordId, record) => {
-        // Override the framework's default record-open (which uses configjson
-        // rowOpen.type=webResource) so EventsPage opens the Event detail
-        // side pane instead — matches the legacy in-app UX. Drill-through
-        // and embedded modes still get the configjson behavior because
-        // those hosts skip this prop.
-        const eventTypeId = String(
-          (record as Record<string, unknown>)._sprk_eventtype_ref_value ?? ''
-        );
-        if (recordId) void openEventDetailPane(recordId, eventTypeId || undefined);
       }}
     />
   );
