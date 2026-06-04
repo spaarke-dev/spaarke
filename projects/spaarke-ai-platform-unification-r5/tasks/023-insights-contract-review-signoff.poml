@@ -1,0 +1,362 @@
+<task id="023" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-13 R5 Lead Contract Review + Sign-Off (Insights `design-e3-tool-call-contract.md` v1.0 §10)</title>
+    <status>skipped-as-redundant</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~5 min (governance discussion; no code, no review walkthrough)</actual-effort>
+    <assigned>Operator (R5 lead — Ralph Schroeder)</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
+    <skip-rationale>D1–D6 decisions were ALREADY MADE during R5 design phase and are recorded verbatim in projects/spaarke-ai-platform-unification-r5/spec.md §8.2 (Owner Clarifications) and in the v1.1 negotiation documents (notes/insights-engine-contract-v1.1-request.md + notes/insights-team-v1.1-response.md). The Insights team Wave F already shipped v1.1 (per insights-r2-coordination.md §8 entry dated 2026-06-04 late) implementing the agreed-upon contract. Recording the same decisions a second time in the Insights project's design-e3-tool-call-contract.md §10 review log is ceremony, not substance. R5 lead chose 2026-06-04 to skip the Insights-side log entry; the decisions remain authoritatively recorded in R5 spec.md §8.2 and are referenced by all downstream R5 tasks (024-031) that depend on them. The Insights-side §10 entry can be appended later via the coordination doc if Insights team requests it for their own governance trail.</skip-rationale>
+    <phase>Pre-Phase-2 Gate</phase>
+    <wave>Pre-G6 (operator-led gate; serial; blocks Phase 2 §4.12 tasks 024–031)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>Phase 1 complete (D1-01 through D1-09 shipped)</dependencies>
+    <tags>operator-led, governance, insights, contract-review, signoff</tags>
+    <rigor-level>MINIMAL</rigor-level>
+  </metadata>
+
+  <prompt>
+    This task is the binding **Pre-Phase-2 gate** before R5 begins any Insights tool
+    integration work (Phase 2 §4.12; tasks 024 through 031). The R5 lead reviews the
+    Insights team's canonical contract document
+    `projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md` v1.0 and
+    records six explicit contract-review decisions (D1 through D6 per spec.md §8.2) in
+    that contract's §10 review log. The decisions have already been **agreed** between
+    R5 and the Insights team during the 2026-06-03 v1.1 negotiation; this task is the
+    operator-led act of formally recording those decisions in the contract document
+    where the Insights team expects the sign-off to live, and notifying the Insights
+    team that their task 042 sub-task A.5 ("Assistant team contract review") is closed.
+
+    This is **NOT a code task**. There is no implementation, no test, no BFF publish-size
+    impact. The deliverable is a documentation update in another worktree
+    (`projects/ai-spaarke-insights-engine-r2/`) and an explicit notification to the
+    Insights team. Claude Code's role is to walk the operator through the steps as a
+    checklist, surface the exact decision text per spec §8.2 / design.md §8.2, and
+    verify acceptance after the operator completes the sign-off.
+
+    **Why this gate exists**: per CLAUDE.md §3.5 (Insights tool integration governance),
+    `R5 lead MUST sign off on design-e3-tool-call-contract.md v1.0 + record 6
+    contract-review decisions (D1–D6) in §10 review log BEFORE Phase 2 §4.12 work
+    begins`. Per plan.md PR-04 and spec.md DR-03 / SC-10, this sign-off is a binding
+    project requirement. Bypassing it leaves Phase 2 Insights work without a recorded
+    contract baseline, breaks the R5↔r2 coordination protocol, and leaves Insights task
+    042 sub-task A.5 open indefinitely.
+  </prompt>
+
+  <role>
+    R5 lead acting as the consuming-side authority on the Insights v1.0 tool-call
+    contract. Claude Code is the walkthrough assistant — it does NOT make the decisions
+    (those are operator-owned, already pre-agreed per spec §8.2). Its job is to load
+    the source-of-truth documents, present the six decisions verbatim, prompt the
+    operator to record them in the Insights contract's §10 review log, and verify
+    acceptance after the recording is done.
+  </role>
+
+  <goal>
+    The Insights project's contract document
+    `projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md` §10 review
+    log is updated to show: (a) R5 lead identity + sign-off date, (b) all six D1–D6
+    decisions recorded verbatim per spec.md §8.2 / design.md §8.2 with the agreed
+    outcomes ("Request v1.1 SSE", "Accept default", "Accept default", "Request v1.1
+    `citations[].href`", "R5 client-side confidence badge", "Accept default"), and (c)
+    a one-line cross-reference back to R5 (`spaarke-ai-platform-unification-r5` task
+    023). The Insights team is explicitly notified — by PR comment, by direct ping, or
+    by closing the sub-task — that Insights task 042 sub-task A.5 is closed. R5
+    TASK-INDEX 023 is flipped 🔲 → ✅; `current-task.md` advances to task 024 (the first
+    Phase 2 §4.12 Insights tool integration task). Phase 2 §4.12 is now unblocked.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="integration-brief">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+    <file purpose="v1.1-negotiation-outcome">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md</file>
+    <file purpose="insights-team-response">projects/spaarke-ai-platform-unification-r5/notes/insights-team-v1.1-response.md</file>
+    <file purpose="coordination-snapshot">projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md</file>
+    <file purpose="contract-to-update" cross-worktree="true">projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="plan.md PR-04">R5 lead reviews + signs off Insights `design-e3-tool-call-contract.md` v1.0 BEFORE Phase 2 §4.12 Insights tool integration work begins. This is a hard gate — tasks 024 through 031 MUST NOT start until this task is ✅.</constraint>
+    <constraint source="spec.md DR-03">R5 lead signs off on Insights `design-e3-tool-call-contract.md` v1.0 and records 6 contract-review decisions (D1–D6 per design.md §8.2) in the contract's §10 review log. Closes Insights task 042 sub-task A.5.</constraint>
+    <constraint source="spec.md SC-10">R5 lead has reviewed `design-e3-tool-call-contract.md` v1.0 and recorded 6 contract-review decisions (D1–D6) in contract's §10 review log. Closes Insights task 042 sub-task A.5.</constraint>
+    <constraint source="CLAUDE.md §3.5">R5 lead MUST sign off on `projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md` v1.0 + record 6 contract-review decisions (D1–D6 per spec.md §8.2) in §10 review log BEFORE Phase 2 §4.12 work begins. R5 is Zone B consumer of HTTP contract only.</constraint>
+    <constraint source="spec.md §8.2">The six decisions are pre-agreed per the 2026-06-03 v1.1 negotiation: D1 = Request v1.1 SSE; D2 = Accept default (forceMode without playbook hint resolves to `predict-matter-cost@v1`); D3 = Accept default (decline rendering plain strings in v1; actionable buttons → R6); D4 = Request v1.1 `citations[].href` (Wave F 0.5d spike confirms schema plumbing; fallback to display-name-only if plumbing > 1d); D5 = R5 implements client-side confidence badge (`confidence < 0.6` → "Low confidence"; no contract change); D6 = Accept default (`previousTurnSummary` logged only in v1; classifier Phase 2 may consume in R6).</constraint>
+    <constraint source="project">Operator MUST record the decisions verbatim with the exact wording above. Paraphrasing risks downstream misalignment with the Insights team.</constraint>
+    <constraint source="project">Cross-worktree edit semantics: the contract doc lives in the Insights project worktree (`projects/ai-spaarke-insights-engine-r2/`). The operator MAY edit cross-worktree directly OR coordinate via a PR comment on the Insights team's open PR for contract v1.0 (whichever the Insights team prefers per coordination snapshot). The act of recording is the same either way.</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — this task adds NO BFF code and NO infrastructure. Publish-size delta = 0 MB; no `dotnet publish` measurement required. Confirm in task notes.</constraint>
+    <constraint source="ADR-010">DI minimalism — N/A for this task (no service registrations, no Program.cs changes).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>governance/contract-review-signoff</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md (§8.2 contract-review decisions table — verbatim source for D1–D6)</file>
+      <file>projects/spaarke-ai-platform-unification-r5/design.md (§8.2 design-side rationale for D1–D6)</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md (v1.0 contract baseline)</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md §0a (Insights team negotiation outcome — confirms D1, D4 path)</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-team-v1.1-response.md (Insights team's 7-point feedback integrated)</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md (R5↔r2 coordination snapshot; §8 changelog)</file>
+      <file>projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md (the document being edited; §10 review log is the target section)</file>
+    </files>
+    <patterns>
+      <pattern name="Six-decision verbatim text" location="spec.md §8.2 table rows for D1 through D6">
+        Each decision must be recorded with: (a) decision ID (D1–D6), (b) the question
+        being decided (left column of spec §8.2 table), (c) the agreed outcome (right
+        column, sometimes prefixed with **Request v1.1** or **Accept default**), (d)
+        rationale snippet, (e) FR/NFR cross-reference. Claude Code surfaces this verbatim
+        in Step 3 below; the operator copies it into §10.
+      </pattern>
+      <pattern name="Cross-worktree coordination" location="notes/insights-r2-coordination.md §8 changelog">
+        Per coordination protocol, milestones touching either project are mirrored in the
+        coordination doc's §8 changelog. Add a one-line entry after sign-off:
+        "2026-MM-DD — R5 lead signed off `design-e3-tool-call-contract.md` v1.0 §10;
+        D1–D6 recorded; Insights task 042 sub-task A.5 closed; Phase 2 §4.12 unblocked."
+      </pattern>
+      <pattern name="Insights team notification" location="N/A — operator action">
+        Three acceptable mechanisms (operator picks one based on Insights team's
+        preference at the moment of sign-off): (1) comment on the Insights team's open
+        PR for contract v1.0 with link to the §10 entry, (2) ping in shared coordination
+        channel referencing the §10 line, (3) directly tick the Insights task 042
+        sub-task A.5 in the Insights project's TASK-INDEX. Whichever path is used, log
+        which one in R5 task notes for audit.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The Insights Engine R2 project shipped a Phase 1.5 read-only single-shot v1.0
+      tool-call contract (`POST /api/insights/assistant/query`) via Wave E3 task 042
+      on 2026-06-03. The Insights team's task 042 explicitly carries a sub-task A.5
+      requiring "Assistant team contract review" — this is the consuming team (R5)
+      signing off on the contract shape, scopes, error codes, and routing decisions
+      before R5 starts implementing the consumer side. On 2026-06-03 late, R5 design
+      review (`design.md` / `spec.md` §8.2) made the six pre-agreed decisions across
+      the open contract questions (v1.1 SSE; forceMode default; decline rendering;
+      clickable citations; confidence badge; previousTurnSummary). Those decisions
+      were communicated to the Insights team via the v1.1 request document
+      (`notes/insights-engine-contract-v1.1-request.md`); the Insights team responded
+      with 7 feedback points (all integrated in §0a), and Wave F (v1.1 minor-version
+      implementation) was approved by the operator on 2026-06-03 late for parallel
+      execution. **The remaining missing step is the formal recording**: putting the
+      six decisions into the Insights contract's §10 review log so the Insights team
+      has a durable artifact that R5 has signed off. Until this is done, Insights task
+      042 sub-task A.5 stays open and R5's Phase 2 §4.12 tasks (024–031) are formally
+      blocked even though the negotiated content is already settled.
+    </background>
+    <dependencies>
+      <dependency task="Phase 1 (D1-01 → D1-09)" status="complete">
+        All Phase 1 platform-extension tasks ✅. This gate is the first task of the
+        Pre-Phase-2 transition.
+      </dependency>
+      <dependency task="External — Insights R2 Wave E3 task 042" status="complete">
+        Insights team shipped the v1.0 contract document on 2026-06-03 via PR #337;
+        the `design-e3-tool-call-contract.md` file exists and has a §10 review log
+        section ready to receive R5's sign-off.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>The 2026-06-03 v1.1 negotiation (`notes/insights-engine-contract-v1.1-request.md`
+        §0a + `notes/insights-team-v1.1-response.md`) pre-decided D1 and D4 substance.
+        This task is the formal record-keeping step, not a new negotiation.</item>
+      <item>R5↔r2 coordination protocol (`notes/insights-r2-coordination.md` §8 changelog)
+        — every cross-project milestone is mirrored there. Sign-off is one such
+        milestone.</item>
+      <item>Tasks 024 through 031 (Phase 2 §4.12 Insights tool integration suite —
+        `InsightsQueryToolHandler`, subject resolution, two-path renderer, clickable
+        citations, error codes, smoke tests) are formally blocked on this task. The
+        first downstream task is 024 (D2-14 `InsightsQueryToolHandler` chat-agent tool
+        function).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. If &gt; 70%, create handoff and request `/compact`.
+      Output verbatim:
+      ```
+      🔒 RIGOR LEVEL: MINIMAL
+      📋 REASON: Operator-led governance task — no code, no tests, no infrastructure
+         change. Documentation update in another worktree + Insights team notification +
+         TASK-INDEX status flip. No FULL-rigor quality gates required per CLAUDE.md §8.
+      📖 PROTOCOL STEPS TO EXECUTE: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7
+      Proceeding with Step 0...
+      ```
+    </step>
+
+    <step order="1" name="Review Contract v1.0 (Source-of-Truth Walkthrough)">
+      Claude Code reads the Insights v1.0 contract document
+      `projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md` and the
+      R5-side integration brief
+      `projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md`.
+      Output a brief walkthrough for the operator covering: (a) the endpoint surface
+      (`POST /api/insights/assistant/query`), (b) the request/response envelope shape,
+      (c) the 12 binding error codes, (d) the playbook-vs-RAG routing model, (e) where
+      §10 review log lives in the contract document. The operator confirms they
+      recognize each — no decisions made here; this is the orientation pass.
+    </step>
+
+    <step order="2" name="Review v1.1 Negotiation Outcome (Pre-Agreed Decisions Recap)">
+      Claude Code reads both
+      `projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md`
+      §0a (R5-side negotiated agreement) and
+      `projects/spaarke-ai-platform-unification-r5/notes/insights-team-v1.1-response.md`
+      (Insights team's 7-point feedback) and recaps to the operator: (a) D1 SSE
+      accepted as v1.1 minor; (b) D4 `citations[].href` accepted with 0.5d Wave F
+      spike to confirm plumbing; (c) Wave F sized at ~4.5d Insights engineering,
+      operator-approved 2026-06-03 late, in flight via Claude Code; (d) graceful v1.0
+      fallback exists for both v1.1 features per spec NFR-11. Operator confirms they
+      recognize the v1.1 outcome — still no recording action; this is context for the
+      next step.
+    </step>
+
+    <step order="3" name="Record D1–D6 Decisions in Contract §10 Review Log">
+      Claude Code prints the six decision entries verbatim, one block per decision,
+      using the exact wording derived from `spec.md` §8.2 / `design.md` §8.2:
+
+      ```
+      ### Review log entry — R5 lead sign-off, {YYYY-MM-DD}
+
+      Reviewer: R5 lead ({operator name})
+      Consuming project: spaarke-ai-platform-unification-r5 (task 023)
+      Contract under review: design-e3-tool-call-contract.md v1.0
+
+      **D1 — SSE on `/api/insights/assistant/query`**
+      Question: Accept default (no SSE) or request v1.1 minor-version SSE?
+      Decision: **REQUEST v1.1 SSE**.
+      Rationale: R5 has FieldDelta SSE infrastructure for Summarize; reusing the same
+      protocol gives the chat agent uniform streaming UX across AI tools. v1.0 single-shot
+      fallback retained per spec NFR-11.
+      Cross-reference: FR-13 + NFR-11.
+
+      **D2 — `forceMode` without playbook hint**
+      Question: Accept default (BFF resolves to `predict-matter-cost@v1`)?
+      Decision: **ACCEPT DEFAULT**.
+      Rationale: R5 will not blind-fire `forceMode` without a known intent. The default
+      fallback playbook is acceptable.
+      Cross-reference: FR-17.
+
+      **D3 — Decline rendering**
+      Question: Plain strings or actionable verbs?
+      Decision: **ACCEPT DEFAULT** — plain strings in v1.
+      Rationale: Actionable button affordances deferred to R6 backlog. Plain strings
+      adequate for Phase 1.5.
+      Cross-reference: FR-13 (Decline case).
+
+      **D4 — Clickable citations (`citations[].href`)**
+      Question: Accept default (display-name only) or request `citations[].href`?
+      Decision: **REQUEST v1.1 `citations[].href`**.
+      Rationale: Clickable citations close major trust gap. Insights Wave F includes
+      0.5d spike to confirm schema plumbing; fallback to display-name-only `href` if
+      document-citation plumbing is large; document `href` defers to v1.2 if needed.
+      Cross-reference: FR-14 + NFR-11.
+
+      **D5 — Confidence floor / low-confidence badge**
+      Question: Accept default (no badge) or implement client-side badge?
+      Decision: **IMPLEMENT CLIENT-SIDE** — `confidence < 0.6` → "Low confidence" badge.
+      Rationale: Pure R5 client-side work; no contract change required.
+      Cross-reference: FR-15.
+
+      **D6 — `previousTurnSummary` to classifier**
+      Question: Accept default (logged only)?
+      Decision: **ACCEPT DEFAULT**.
+      Rationale: Phase 2 of classifier may consume `previousTurnSummary` in R6; R5 v1
+      does not need it.
+      Cross-reference: (no FR impact in R5 v1).
+      ```
+
+      The operator then either: (a) edits
+      `projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md` §10
+      directly cross-worktree (Claude Code uses the Edit tool to insert the block at
+      the appropriate spot in §10), OR (b) posts the block as a PR comment on the
+      Insights team's open contract PR for them to integrate, per coordination
+      preference. The operator confirms which path was taken; Claude Code records the
+      path in task notes (Step 7).
+    </step>
+
+    <step order="4" name="Confirm Sign-Off Date + R5 Lead Identity">
+      Operator confirms: (a) sign-off date (today, expected 2026-06-04 or 2026-06-05);
+      (b) R5 lead identity string used in the review log entry header (e.g., "Ralph
+      Schroeder" or the agreed pseudonymous label per coordination convention). Claude
+      Code verifies the §10 review log block (or PR comment) contains both values
+      explicitly and matches them against the date emitted by the system clock.
+    </step>
+
+    <step order="5" name="Notify Insights Team — Close Their Task 042 Sub-Task A.5">
+      Operator picks one notification mechanism (per knowledge §"Insights team
+      notification" pattern):
+      1. **PR comment** on the Insights team's open contract PR linking to the §10
+         entry just added; OR
+      2. **Coordination channel ping** referencing the §10 line; OR
+      3. **Direct sub-task tick** in the Insights project's TASK-INDEX (task 042
+         sub-task A.5 → ✅) if cross-worktree edit is preferred.
+
+      Claude Code helps execute whichever mechanism is chosen. The operator confirms
+      the Insights team has been notified. Add a one-line entry to
+      `projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md`
+      §8 changelog:
+      ```
+      - YYYY-MM-DD — R5 lead signed off `design-e3-tool-call-contract.md` v1.0 §10;
+        D1–D6 recorded; Insights task 042 sub-task A.5 closed; Phase 2 §4.12 unblocked
+        (R5 task 023 ✅).
+      ```
+    </step>
+
+    <step order="6" name="Update TASK-INDEX Status">
+      Edit `projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md`: flip
+      task 023 status 🔲 → ✅. Verify no other R5 tasks were accidentally touched.
+      Confirm tasks 024 through 031 (Phase 2 §4.12) now show their dependency on 023
+      as satisfied — they remain 🔲 (not started) but are no longer formally blocked.
+    </step>
+
+    <step order="7" name="Document + Complete">
+      Update this POML's `<status>` to `complete`, fill in `<completed>` date and
+      `<actual-effort>`. Reset `projects/spaarke-ai-platform-unification-r5/current-task.md`
+      to point to task 024 (D2-14 `InsightsQueryToolHandler`) per CLAUDE.md §7. Write
+      a short notes file
+      `projects/spaarke-ai-platform-unification-r5/notes/task-023-signoff-evidence.md`
+      capturing: (a) sign-off date, (b) R5 lead identity used, (c) which path was used
+      to record (cross-worktree edit vs PR comment vs sub-task tick), (d) which
+      notification mechanism was used, (e) one-line confirmation each of D1–D6 was
+      recorded verbatim, (f) link/anchor to the §10 review log entry, (g) BFF
+      publish-size delta = 0 MB (no BFF code touched). Report task completion to the
+      operator with the next task (024) called out as ready to start.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read v1.0 contract, integration brief, v1.1 negotiation outcome, spec §8.2, design §8.2.</tool>
+    <tool name="Edit">Insert the §10 review log entry into the Insights project's contract document (cross-worktree edit path); update TASK-INDEX status; update coordination doc §8 changelog.</tool>
+    <tool name="Write">Create the task-023 evidence notes file under `notes/`.</tool>
+    <tool name="git">Stage + commit the documentation changes on the R5 branch (and, if cross-worktree edit was used, on the Insights worktree's branch per its conventions). Operator-supervised — Claude Code does NOT commit autonomously for this task.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs" cross-worktree="true">projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md §10 review log — NEW entry with R5 lead sign-off + D1–D6 verbatim</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md §8 changelog — NEW one-line sign-off entry</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md — status: 023 🔲 → ✅</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md — reset to next pending task (024 D2-14)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-023-signoff-evidence.md — recording path, notification mechanism, D1–D6 verification, §10 anchor</output>
+    <output type="external-action">Insights team notified via PR comment / coordination channel / direct sub-task tick; Insights task 042 sub-task A.5 closed</output>
+    <output type="report">Task completion report (Step 7) — surfaces task 024 as the next ready task</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md` §10 review log contains a NEW entry headed with R5 lead identity + sign-off date and dated within ±2 days of task 023 execution.</criterion>
+    <criterion testable="true">All six decisions D1, D2, D3, D4, D5, D6 are recorded in the §10 entry with the exact decision outcomes ("REQUEST v1.1 SSE", "ACCEPT DEFAULT", "ACCEPT DEFAULT", "REQUEST v1.1 `citations[].href`", "IMPLEMENT CLIENT-SIDE", "ACCEPT DEFAULT" respectively) per spec.md §8.2.</criterion>
+    <criterion testable="true">Each decision entry includes the question being decided + rationale snippet + FR/NFR cross-reference per the Step 3 template.</criterion>
+    <criterion testable="true">Insights task 042 sub-task A.5 is explicitly closed (via one of the three notification mechanisms in Step 5); the chosen mechanism is recorded in `notes/task-023-signoff-evidence.md`.</criterion>
+    <criterion testable="true">`notes/insights-r2-coordination.md` §8 changelog contains a NEW one-line sign-off entry dated within ±2 days of task 023 execution, referencing R5 task 023 ✅ and Phase 2 §4.12 unblock.</criterion>
+    <criterion testable="true">`tasks/TASK-INDEX.md` shows task 023 status as ✅; tasks 024 through 031 remain 🔲 (not started) but are no longer formally blocked.</criterion>
+    <criterion testable="true">`current-task.md` has been reset to point to the next pending task (expected: 024 D2-14 `InsightsQueryToolHandler`).</criterion>
+    <criterion testable="true">`notes/task-023-signoff-evidence.md` exists and records: sign-off date, R5 lead identity used, recording path (cross-worktree edit vs PR comment vs sub-task tick), notification mechanism used, per-decision verification (D1–D6), §10 anchor/link, and BFF publish-size delta = 0 MB.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (confirmed in evidence notes; no BFF code touched by this task).</criterion>
+    <criterion testable="true">spec.md SC-10 acceptance criterion is now satisfiable (R5 lead has reviewed v1.0 + recorded D1–D6 + closed Insights sub-task A.5).</criterion>
+  </acceptance-criteria>
+</task>

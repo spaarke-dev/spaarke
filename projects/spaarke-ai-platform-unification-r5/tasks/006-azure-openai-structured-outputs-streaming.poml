@@ -1,0 +1,493 @@
+<task id="006" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D1-06 Azure OpenAI Structured Outputs mode + incremental JSON parser (Summarize streaming)</title>
+    <status>complete</status>
+    <estimated-effort>1 day</estimated-effort>
+    <actual-effort>~2 hours (PATH A confirmed by spike; orchestrator wiring scope-deferred to task 012)</actual-effort>
+    <assigned>Claude Code (main session) + spike against Azure OpenAI Spaarke Dev</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
+    <phase>Phase 1 — Platform Extensions</phase>
+    <wave>P1-G4 (serial; wraps Structured Outputs + incremental JSON parser)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>005</dependencies>
+    <tags>bff, ai, streaming, openai</tags>
+    <rigor-level>FULL</rigor-level>
+    <risk-level>HIGH</risk-level>
+  </metadata>
+
+  <prompt>
+    Switch the Summarize playbook execution path to emit progressive, field-tagged
+    `FieldDelta` SSE events as Azure OpenAI streams a structured JSON response. The
+    Summarize wizard today returns a final `DocumentAnalysisResult` (summary, TL;DR,
+    keywords, entities) at the end of streaming. R5 needs each top-level JSON field to
+    populate progressively in the new R5 Workspace `StructuredOutputStreamWidget`
+    (D2-07) — TL;DR field first, then summary prose, then per-file highlights, then
+    mentioned parties / call-to-action — using the new `AnalysisChunk.FieldDelta`
+    variant produced by task 005.
+
+    This is the HIGHEST-RISK task in Phase 1: Azure OpenAI Structured Outputs
+    streaming behavior may not give us per-field incremental JSON tokens in the shape
+    we need. Per `plan.md` "High-Risk Items" row 1, Phase 1 MUST run a small spike
+    BEFORE committing to one path. The spike validates Structured Outputs streaming
+    vs Function Calling for incremental JSON streaming. If Structured Outputs streams
+    full-record-chunks (not partial-token JSON) or if JSON-path inference fails on the
+    target schema, the spike result drives a switch to Function Calling with manual
+    JSON parsing.
+
+    Implementation MUST EXTEND the existing Summarize playbook execution code path
+    (the `AnalysisOrchestrationService.ExecutePlaybookAsync` / node-executor pipeline
+    that drives the Summarize playbook); MUST NOT introduce a parallel orchestrator.
+    The incremental JSON parser may be a NEW helper class — its existence is
+    justified because the repo has no equivalent: existing `GetStructuredCompletionAsync`
+    paths use `CompleteChatAsync` (single-shot), not streaming + incremental parse.
+
+    Output schema MUST match the existing wizard `DocumentAnalysisResult` so that
+    the same payload feeds both (a) the new R5 `StructuredOutputStreamWidget`
+    (progressive via `FieldDelta` events) AND (b) the existing wizard consumer
+    `LegalWorkspace SummarizeFilesDialog` (final-result static render via the
+    existing `AnalysisChunk.Completed(DocumentAnalysisResult)` event — which still
+    fires at end of stream for back-compat per NFR-10).
+  </prompt>
+
+  <role>
+    Senior .NET / Azure OpenAI engineer with deep familiarity with the Azure OpenAI
+    Chat Completions SDK (`OpenAI.Chat`, `Azure.AI.OpenAI`), Structured Outputs
+    response format (JSON Schema strict mode), `CompleteChatStreamingAsync` streaming
+    update parsing, and incremental JSON-token reconstruction. Comfortable with
+    `IAsyncEnumerable&lt;T&gt;` and `[EnumeratorCancellation]` async streaming patterns
+    in the existing `OpenAiClient` / `AnalysisOrchestrationService` style.
+  </role>
+
+  <goal>
+    The Summarize playbook execution path produces field-tagged `FieldDelta` SSE
+    events progressively (TL;DR populated first, then summary, then per-file
+    highlights, then mentioned parties / call-to-action), with the final
+    `AnalysisChunk.Completed(DocumentAnalysisResult)` event continuing to fire at
+    stream end for wizard back-compat. A Phase 1 spike has been run + recorded in
+    `notes/task-006-spike-results.md`; that spike validated either (a) Azure OpenAI
+    Structured Outputs streaming + incremental JSON parser path OR (b) the
+    Function-Calling-with-manual-JSON-parse fallback path. The chosen path is
+    implemented end-to-end. BFF builds clean, all acceptance criteria pass,
+    publish-size delta is measured + within R5 budget, `code-review` + `adr-check`
+    quality gates pass.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="dependency-task">projects/spaarke-ai-platform-unification-r5/tasks/005-additive-fielddelta-variant-analysischunk.poml</file>
+    <file purpose="ai-architecture">docs/architecture/AI-ARCHITECTURE.md</file>
+    <file purpose="playbook-architecture">docs/architecture/playbook-architecture.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="bff-extensions-constraint">.claude/constraints/bff-extensions.md</file>
+    <file purpose="azure-deployment-constraint">.claude/constraints/azure-deployment.md</file>
+    <file purpose="canonical-openai-client">src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs</file>
+    <file purpose="canonical-orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    <file purpose="streaming-handler-interface">src/server/api/Sprk.Bff.Api/Services/Ai/IStreamingAnalysisToolHandler.cs</file>
+    <file purpose="existing-summary-handler">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SummaryHandler.cs</file>
+    <file purpose="analysischunk-envelope">src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisChunk.cs</file>
+    <file purpose="document-analysis-result-schema">src/server/api/Sprk.Bff.Api/Models/Ai/DocumentAnalysisResult.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 spec FR-02">SSE token-streamed structured summary in Workspace pane. Summary output MUST stream progressively via `FieldDelta` SSE events as Azure OpenAI emits tokens; structured fields (TL;DR, summary, per-file highlights, mentioned parties, call-to-action) MUST populate progressively. NOT a final-result plop.</constraint>
+    <constraint source="R5 spec FR-13">`StructuredOutputStreamWidget` consumes `FieldDelta` events progressively. R5 Workspace D2-07 widget depends on this task's event emission order + shape.</constraint>
+    <constraint source="R5 spec NFR-10">Back-compat for AnalysisChunk SSE protocol. The new `FieldDelta` variant is ADDITIVE; existing wizard consumers (LegalWorkspace `SummarizeFilesDialog` via `streamSummarize()`) MUST continue to function — they ignore unknown event types and continue to receive the final `AnalysisChunk.Completed(DocumentAnalysisResult)` event at stream end.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 (Reuse mandate)">MUST extend the existing Summarize playbook execution code path (`AnalysisOrchestrationService.ExecutePlaybookAsync` + the Summarize tool/node pipeline). MUST NOT introduce a parallel orchestrator. Tool registration for `InvokeSummarizePlaybookTool` is task 015 — out of scope here.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 (Reuse exception justification)">The incremental JSON parser MAY be a new helper class. Justification: the existing `OpenAiClient.GetStructuredCompletionAsync&lt;T&gt;` / `GetStructuredCompletionRawAsync` use `CompleteChatAsync` (single-shot) and return only the final JSON string. `StreamCompletionAsync` exists but is plain-text streaming — no incremental JSON-path tagging. R5 needs the union: streaming + incremental JSON path inference. Record this justification in the PR design notes.</constraint>
+    <constraint source="R5 CLAUDE.md §3.2 (NO new feature flags)">R5 introduces NO new feature flags per ADR-018 Flag Scope Discipline. The new Structured-Outputs streaming path replaces (or wraps) the existing non-streaming structured-output path unconditionally. No `if (FeatureFlag.X)` branching at the service layer.</constraint>
+    <constraint source="R5 CLAUDE.md §3.3 (DI discipline)">If a new helper service (incremental JSON parser) needs DI registration, register it INSIDE `AnalysisServicesModule.cs` feature module per ADR-010. ZERO new top-level `services.AddXxx()` lines in `Program.cs`. Concrete classes by default; no interface unless an existing test seam demands it.</constraint>
+    <constraint source="R5 CLAUDE.md §3.6 + ADR-029 (BFF publish-size)">Per-task verification mandatory. Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` AFTER implementation. Measure compressed output. Report absolute size + delta vs prior baseline in task notes. Current baseline ~45.65 MB; R5 budget ≤ +1 MB total across R5; this task's individual delta should approach 0 MB if no new NuGet packages are added. If Azure OpenAI / Structured Outputs requires a package upgrade, measure carefully and flag.</constraint>
+    <constraint source="ADR-013 (BFF-only AI placement)">AI orchestration stays in BFF. No new project / library carved out for the JSON parser. Helper class lives alongside `OpenAiClient` in `Services/Ai/` (suggested folder: `Services/Ai/Streaming/`).</constraint>
+    <constraint source="ADR-014 (tenant isolation)">N/A directly for this task — task does not introduce new index documents. Confirm no impact in task notes.</constraint>
+    <constraint source="ADR-019 (ProblemDetails)">Any new error surface (e.g., JSON parse failure mid-stream) maps to ProblemDetails with a stable `errorCode` extension if it propagates to an endpoint. Mid-stream parse failure should emit an `AnalysisChunk.FromError(...)` event, NOT crash the stream.</constraint>
+    <constraint source="ADR-029 + CVE policy">No new HIGH-severity CVEs from `dotnet list package --vulnerable --include-transitive`. If Structured Outputs spike reveals a need for a newer Azure.AI.OpenAI / OpenAI SDK package, verify CVE-clean before adopting.</constraint>
+    <constraint source="R5 NFR-01 (Latency)">SSE TTFB &lt; 500ms per ADR-013. Field-level emissions should NOT block waiting for full-field completion before first emission — the FIRST `FieldDelta` event for a field SHOULD fire as soon as the JSON parser recognizes the field boundary opening (`"tldr":`), with subsequent intra-field deltas optional but preferred.</constraint>
+    <constraint source="spike requirement (plan.md High-Risk Items row 1)">Before committing to Structured Outputs, run a small spike validating: (a) Azure OpenAI Structured Outputs streams partial JSON tokens (not chunked full-record); (b) chosen JSON-path inference works for the Summarize schema. If spike fails, fallback path is Function Calling with manual JSON parsing.</constraint>
+    <constraint source="output schema parity">Final `DocumentAnalysisResult` shape (summary, tldr, keywords, entities, emailMetadata, parsedSuccessfully, rawResponse) MUST be preserved end-to-stream so D2-07 `StructuredOutputStreamWidget` can render either streaming or static-restored output, and the existing wizard consumer continues to function unchanged. If R5 wants additional fields (per-file highlights, mentioned parties, call-to-action), they are added ADDITIVELY to `DocumentAnalysisResult` — but that is a SEPARATE concern; do not block this task on schema additions if not strictly needed for Phase 1. Document any deferred additions in task notes for task 010 (action seed).</constraint>
+    <constraint source="back-compat (wizard consumer)">The wizard consumer (`LegalWorkspace SummarizeFilesDialog` → `streamSummarize()` in `summarizeService.ts`) MUST continue to render correctly. Verify by reading the consumer code + confirming it ignores `Type = "delta"` events and waits for `Type = "complete"`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>azure-openai/structured-outputs-streaming</topic>
+    <topic>azure-openai/incremental-json-parsing</topic>
+    <topic>bff/ai-orchestration-extension</topic>
+    <files>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IStreamingAnalysisToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SummaryHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisChunk.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/DocumentAnalysisResult.cs</file>
+      <file>src/solutions/LegalWorkspace/src/components/SummarizeFiles/summarizeService.ts</file>
+    </files>
+    <patterns>
+      <pattern name="Existing structured-output (non-streaming) pattern" location="src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs">
+        `GetStructuredCompletionAsync&lt;T&gt;()` + `GetStructuredCompletionRawAsync()` already use
+        `ChatResponseFormat.CreateJsonSchemaFormat(schemaName, jsonSchema, jsonSchemaIsStrict: true)`
+        with `CompleteChatAsync`. R5 keeps this exact response-format configuration but switches
+        to `CompleteChatStreamingAsync` so the JSON arrives as `StreamingChatCompletionUpdate`
+        tokens. The new helper consumes those tokens and emits `FieldDelta` events as JSON paths
+        complete (or open, depending on spike outcome).
+      </pattern>
+      <pattern name="Existing plain-text streaming pattern" location="src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs">
+        `StreamCompletionAsync()` shows the streaming-iteration shape: wrap
+        `chatClient.CompleteChatStreamingAsync(...)` in circuit-breaker; iterate
+        `streamingResult.WithCancellation(ct)` → each `update.ContentUpdate` part yields
+        `contentPart.Text`. R5's new path layers an incremental JSON parser on top of this
+        same iteration to surface field-boundary events.
+      </pattern>
+      <pattern name="Playbook execution streaming envelope" location="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs">
+        `ExecutePlaybookAsync` is the entry-point used by Summarize. It yields
+        `AnalysisStreamChunk` events (`Metadata`, `TextChunk`, etc.). R5 emits `AnalysisChunk`
+        `FieldDelta` events through this same pipeline (envelope shape per task 005).
+        The new behavior plugs into the Summarize tool/node execution; the orchestrator
+        signature does not change.
+      </pattern>
+      <pattern name="Streaming tool handler opt-in interface" location="src/server/api/Sprk.Bff.Api/Services/Ai/IStreamingAnalysisToolHandler.cs">
+        `IStreamingAnalysisToolHandler` extends `IAnalysisToolHandler` for per-token
+        streaming. R5 may upgrade `SummaryHandler` (or its node-executor wrapper) to
+        implement `IStreamingAnalysisToolHandler` and emit `ToolStreamEvent.Token` events
+        carrying field-tagged JSON deltas. Verify whether to extend `ToolStreamEvent` with
+        a new `FieldDelta` variant or piggyback on `Token(text)`; record decision in task notes.
+      </pattern>
+      <pattern name="Incremental JSON parser implementation reference" location="(no in-repo equivalent — new helper)">
+        Read approaches: `System.Text.Json.Utf8JsonReader` over a growing buffer; OR a small
+        state machine that scans for top-level field-name tokens + closing-quote / closing-brace.
+        For the Summarize schema (flat-ish: `summary` string, `tldr` array of strings, `keywords`
+        string, `entities` object), a state machine keyed on JSON path
+        (`$.tldr[0]`, `$.summary`, `$.keywords`, `$.entities.organizations[0]`, ...) is sufficient.
+        Spike validates whether the granularity is per-character, per-token, or per-field-complete.
+      </pattern>
+      <pattern name="DI registration via feature module" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs">
+        Per ADR-010 + R5 CLAUDE.md §3.3: register any new helper inside the existing
+        `AnalysisServicesModule.cs` feature module. Concrete class; no interface unless a
+        test seam demands it.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships a chat-driven "Summarize a Document" vertical slice. The user experience
+      requires ChatGPT/Claude-style progressive rendering of the structured summary
+      (TL;DR appears first as a "cursor", then summary prose fills in token-by-token,
+      then per-file highlights, then call-to-action). The existing wizard `Summarize`
+      playbook today returns a final `DocumentAnalysisResult` only at stream end — there
+      is no progressive structured-field emission. R5 task 005 introduces the
+      `AnalysisChunk.FieldDelta` variant (additive SSE event type, `Type = "delta"`,
+      with a `FieldDelta` record carrying `Path`, `Content`, `Sequence`). THIS task wires
+      that envelope to the actual Summarize execution path so events fire in order as
+      Azure OpenAI streams JSON tokens.
+
+      The risk is in the AI layer: Azure OpenAI Structured Outputs (JSON Schema strict
+      mode) is documented to support streaming, BUT empirically (per plan.md High-Risk
+      Items row 1) the granularity of streamed JSON tokens may not match R5's needs.
+      Possible failure modes: (a) Azure streams the full structured response at end of
+      stream (defeating the purpose); (b) Azure streams character-by-character but
+      JSON-path inference at character granularity is fragile; (c) JSON Schema strict
+      mode disables streaming entirely. The spike at Step A resolves this empirically.
+    </background>
+    <dependencies>
+      <dependency task="005" status="not-started">
+        Task 005 (D1-05) introduces the `AnalysisChunk.FieldDelta` variant + `FieldDelta`
+        record. This task EMITS those events through the Summarize execution path.
+        Task 005 MUST be complete before this task starts.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>
+        Task 010 (D2-01) deploys the "Summarize Document for Chat" `sprk_analysisaction`
+        seed. The action's JPS-formatted system prompt + output schema MUST align with
+        the JSON parser's expected paths. Any schema field additions surfaced during
+        this task should be communicated to task 010 via task notes.
+      </item>
+      <item>
+        Task 017 (D2-07) implements `StructuredOutputStreamWidget` — the Workspace
+        consumer of these `FieldDelta` events. The widget reads `Path` + `Content` to
+        render progressively. Path conventions established here (`$.tldr[0]`, `$.summary`,
+        etc.) become the widget's input contract.
+      </item>
+      <item>
+        Tasks 012, 014 (D2-03 SessionSummarizeOrchestrator + D2-04 endpoint) depend on
+        this task as the underlying streaming engine.
+      </item>
+      <item>
+        Task 020 (D2-11 chat-pane orchestration UX) ultimately renders the streaming
+        result; this is the producer.
+      </item>
+      <item>
+        Wizard back-compat: `src/solutions/LegalWorkspace/src/components/SummarizeFiles/summarizeService.ts`
+        is the existing consumer that ignores `delta` events. Verify it tolerates the
+        new event type without behavior change.
+      </item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL declaration">
+      Check context usage per CLAUDE.md §5. If &gt; 70%, create handoff summary and request `/compact`.
+      Declare:
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: BFF code change + AI infrastructure + new helper class + HIGH-RISK task per plan.md
+      📖 PROTOCOL STEPS TO EXECUTE: Step 0 → Step 1 → ... → Step A (spike) → ... → Step 9.5 (quality gates) → Step 10
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress + Verify Dependency">
+      Read `tasks/TASK-INDEX.md`. Confirm task 006 status is 🔲. Confirm task 005 status is ✅
+      (FieldDelta variant lands first). If 005 is still 🔲, STOP and report blocker.
+      Read `current-task.md` to confirm no prior R5 task is in flight. Read project README
+      for project status.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically extract:
+      (a) The current `AnalysisChunk` envelope shape AFTER task 005 — confirm `Type = "delta"`
+          and the `FieldDelta` record are present.
+      (b) `OpenAiClient.GetStructuredCompletionAsync&lt;T&gt;` + `GetStructuredCompletionRawAsync`
+          to understand current Structured Outputs configuration (`CreateJsonSchemaFormat`,
+          `jsonSchemaIsStrict: true`).
+      (c) `OpenAiClient.StreamCompletionAsync` to see streaming iteration pattern.
+      (d) `AnalysisOrchestrationService.ExecutePlaybookAsync` to locate where the Summarize
+          tool/node fires and how `AnalysisStreamChunk` events flow today.
+      (e) `IStreamingAnalysisToolHandler` to understand the per-token streaming opt-in.
+      (f) `SummaryHandler` to understand the current non-streaming Summarize implementation.
+      (g) `DocumentAnalysisResult` to confirm the target output schema.
+      (h) `summarizeService.ts` (wizard consumer) to verify back-compat behavior.
+      Record the exact code-path that today drives Summarize (tool handler vs node executor)
+      in task notes. THIS is the path you will extend.
+    </step>
+    <step order="3" name="Plan Implementation (file inventory + decisions)">
+      Produce a plan document at `notes/task-006-implementation-plan.md` covering:
+      (a) Which files will be CREATED (e.g., `Services/Ai/Streaming/IncrementalJsonParser.cs`,
+          `Services/Ai/Streaming/StructuredOutputStreamingService.cs`).
+      (b) Which files will be MODIFIED (e.g., `OpenAiClient.cs` to add a streaming structured-output
+          method; `SummaryHandler.cs` or its node-executor wrapper to use the streaming variant;
+          `AnalysisServicesModule.cs` for DI registration).
+      (c) JSON-path conventions for `FieldDelta.Path`: `$.tldr[0]`, `$.summary`, `$.keywords`,
+          `$.entities.organizations[0]`, etc.
+      (d) Field-emission ordering target: TL;DR → summary → keywords → entities. (Note:
+          Azure OpenAI may emit in JSON-property-declaration order; the JSON schema declared in
+          `DocumentAnalysisResult.cs` is summary first. If R5 wants TL;DR first as
+          UX requirement, REORDER the schema property declarations to match — record decision.)
+      (e) Open questions that the spike (Step A) will answer.
+    </step>
+    <step order="A" name="SPIKE: validate Structured Outputs streaming behavior (HIGH-RISK)">
+      Per plan.md High-Risk Items row 1, BEFORE committing to one path, run a small spike.
+      Spike scope (~2–3 hours, throwaway code in `notes/spikes/task-006-structured-outputs/`):
+      (1) Write a minimal console / test harness that calls Azure OpenAI on Spaarke Dev with:
+          - Structured Outputs (JSON Schema strict mode) — same `CreateJsonSchemaFormat` config
+            as existing `GetStructuredCompletionRawAsync`.
+          - `CompleteChatStreamingAsync` (NOT `CompleteChatAsync`).
+          - A trimmed Summarize-style schema (summary string, tldr array of strings,
+            keywords string).
+          - A representative legal-document prompt.
+      (2) Log every `StreamingChatCompletionUpdate.ContentUpdate[*].Text` token to console,
+          accumulating into a string buffer.
+      (3) Observe + record:
+          - Does Azure stream partial JSON tokens? (yes/no/character-level/word-level/field-level)
+          - Is the stream syntactically valid JSON at every intermediate state?
+            (Likely not — partial strings have open quotes; the parser must tolerate this.)
+          - Can a simple state machine detect field-boundary events
+            (`"tldr":` opens → `]` closes) at acceptable granularity?
+          - What is the TTFB latency? (target: &lt; 500ms per NFR-01)
+          - If Structured Outputs streaming returns only the FINAL full record, the spike fails.
+      (4) ALSO test Function Calling fallback path:
+          - Define a `record_summary` function whose parameters ARE the Summarize schema.
+          - Stream via `CompleteChatStreamingAsync` and observe tool-call argument streaming.
+      (5) Write `notes/task-006-spike-results.md` with:
+          - Outcome: PATH A (Structured Outputs streaming + incremental JSON parser) OR
+            PATH B (Function Calling with manual JSON parse).
+          - Evidence: representative log excerpts + TTFB measurement + character-granularity
+            assessment.
+          - Decision rationale: which path is cheaper to implement, more robust, more
+            future-proof.
+          - Known risks / caveats for the chosen path.
+      (6) Checkpoint via `context-handoff` skill after spike completion.
+
+      The spike outcome DRIVES the implementation in Steps 4–7. If the spike reveals
+      a third unexpected option (e.g., Azure SDK exposes a structured-streaming helper
+      we missed), document + escalate to operator per CLAUDE.md §6 before proceeding.
+    </step>
+    <step order="4" name="Implement IncrementalJsonParser helper">
+      Create `src/server/api/Sprk.Bff.Api/Services/Ai/Streaming/IncrementalJsonParser.cs`
+      (or equivalent path per Step 3 plan). Behavior:
+      - Accepts a stream of partial JSON text via `Append(string token)`.
+      - Maintains internal buffer + JSON-path state (current `$.summary`, `$.tldr[0]`, etc.).
+      - Yields `FieldDeltaEvent` records carrying `(Path, Content, Sequence, IsFieldStart, IsFieldComplete)`
+        as field boundaries are detected.
+      - Tolerates unclosed strings / partial arrays — the parser is "best-effort";
+        when a field's contents fully arrive (closing `"` or closing `]`), it emits an
+        `IsFieldComplete` event.
+      - On end-of-stream, attempts a final full-document parse via `JsonSerializer.Deserialize&lt;DocumentAnalysisResult&gt;`
+        and returns it for the closing `AnalysisChunk.Completed(result)` event.
+      - On unrecoverable parse failure, returns the raw buffer for `DocumentAnalysisResult.Fallback(rawResponse)`.
+      Implementation may use `System.Text.Json.Utf8JsonReader` with `bytesConsumed` /
+      `isFinalBlock` semantics, OR a custom state machine — pick the simpler approach
+      per spike outcome. Unit-test thoroughly (Step 5 below).
+
+      IF spike outcome is PATH B (Function Calling): instead, parser consumes tool-call
+      argument deltas from `StreamingChatCompletionUpdate.ToolCallUpdates` and emits the
+      same `FieldDeltaEvent` shape so the downstream service is path-agnostic.
+    </step>
+    <step order="5" name="Wire incremental parser into Summarize execution path">
+      Extend the Summarize execution code path (per Step 2 finding — either `SummaryHandler` /
+      its node-executor wrapper, or `AnalysisOrchestrationService.ExecutePlaybookAsync`'s
+      Summarize-tool branch):
+      (a) Add a new method on `OpenAiClient` (e.g., `StreamStructuredCompletionAsync`) that
+          combines `CreateJsonSchemaFormat(strict: true)` + `CompleteChatStreamingAsync`
+          + circuit-breaker wrapping (mirrors `StreamCompletionAsync` shape). Yields
+          `StreamingChatCompletionUpdate` tokens.
+      (b) The Summarize path consumes that stream, feeds each token to
+          `IncrementalJsonParser.Append(...)`, and translates each emitted
+          `FieldDeltaEvent` into an `AnalysisChunk` with `Type = "delta"` + populated
+          `FieldDelta` payload (per the variant added by task 005).
+      (c) At end of stream, the parser returns the final `DocumentAnalysisResult` (or
+          `Fallback`), which is emitted as `AnalysisChunk.Completed(result)` — UNCHANGED
+          envelope shape, preserves wizard back-compat per NFR-10.
+      (d) On mid-stream parse failure, emit `AnalysisChunk.FromError(...)` and terminate
+          the stream gracefully.
+    </step>
+    <step order="6" name="Verify field-level progressive emission ordering">
+      Manually run the Summarize path against a representative document on Spaarke Dev
+      (use existing dev environment / playbook GUID `4a72f99c-a119-f111-8343-7ced8d1dc988`
+      per FR-01 acceptance criterion). Capture the SSE event stream via browser DevTools
+      or `curl --no-buffer`. Verify:
+      (a) `Type = "delta"` events fire BEFORE the final `Type = "complete"` event.
+      (b) First `delta` event references TL;DR (e.g., `Path = "$.tldr[0]"`) — or whatever
+          field is first in JSON property order (record the actual observed order).
+      (c) `Sequence` is monotonically increasing across all `delta` events.
+      (d) Final `complete` event carries a fully-populated `DocumentAnalysisResult` matching
+          the wizard schema (summary, tldr, keywords, entities all present).
+      (e) Intra-field intermediate updates (token-by-token cursor) are present (preferred)
+          OR field-level granularity only (acceptable per spec).
+      Record observed event stream in `notes/task-006-field-emission-trace.md`.
+    </step>
+    <step order="7" name="DI registration + write/update unit tests">
+      Register the new `IncrementalJsonParser` (and any new streaming service) in
+      `AnalysisServicesModule.cs` (concrete class; no interface unless test seam demands).
+      Confirm: ZERO new top-level lines in `Program.cs`.
+
+      Add unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Streaming/`:
+      - `IncrementalJsonParserTests.cs`: feed canned JSON token sequences, assert
+        `FieldDeltaEvent` emission order + content + path conventions.
+      - Integration-style test in `AnalysisOrchestrationServiceTests.cs` (or sibling):
+        mock `OpenAiClient.StreamStructuredCompletionAsync` to return canned tokens,
+        assert the orchestrator emits the expected `AnalysisChunk` sequence ending in
+        `AnalysisChunk.Completed(result)`.
+      - Negative test: mid-stream malformed JSON → `AnalysisChunk.FromError` emitted.
+      Per CLAUDE.md §10 F.1: tests live in `tests/unit/Sprk.Bff.Api.Tests/`.
+    </step>
+    <step order="8" name="Wizard back-compat verification (NFR-10)">
+      Read `src/solutions/LegalWorkspace/src/components/SummarizeFiles/summarizeService.ts`
+      to confirm the wizard consumer:
+      (a) Switches on `chunk.type` and handles `"text"` + `"complete"` + `"error"` —
+          confirm it has a default-case that IGNORES unknown event types (or simply
+          falls through without erroring on `"delta"`).
+      (b) Renders the final result from the `"complete"` event, NOT from accumulated
+          `"text"` chunks (since R5 changes the streaming from raw-text to structured-
+          field deltas).
+      If the wizard relies on accumulating `"text"` chunks for its display, this task
+      MUST preserve at least one `Type = "text"` event carrying summary prose as it
+      streams — OR the wizard consumer is updated as part of this task (small change,
+      probably not — verify first).
+      Record findings in task notes; escalate to operator per CLAUDE.md §6 if a wizard
+      change is required (that would be scope expansion).
+    </step>
+    <step order="9" name="Build + test + publish-size verification">
+      Run:
+      - `dotnet build src/server/api/Sprk.Bff.Api/` — clean build, zero new warnings.
+      - `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — all tests pass including new ones.
+      - `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` —
+        measure compressed output (e.g., `Compress-Archive` or `du -sh` of contents) and
+        record absolute size + delta vs current baseline (~45.65 MB).
+      - `dotnet list package --vulnerable --include-transitive` — zero new HIGH-severity CVEs.
+      Record all measurements in `notes/task-006-build-verification.md`.
+      If publish-size delta &gt; +1 MB, ESCALATE per ADR-029 + CLAUDE.md §10.
+      If a new NuGet package was added (e.g., for incremental JSON parsing), explicitly
+      flag package-name + size impact + CVE status in the PR description.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor; MANDATORY)">
+      Run `code-review` skill against ALL new + modified files (parser, streaming service,
+      OpenAiClient additions, orchestrator wiring, DI registration, tests). Address any
+      blocker findings.
+      Run `adr-check` skill against the same fileset. Verify compliance with:
+      - ADR-010 (DI minimalism — registered inside `AnalysisServicesModule`; zero new
+        top-level lines)
+      - ADR-013 (AI orchestration in BFF; no cross-project carve-out)
+      - ADR-018 (no new feature flags)
+      - ADR-019 (mid-stream errors map to structured error events)
+      - ADR-029 (publish-size verified)
+      - ADR-030 (PaneEventBus N/A here — this is BFF; confirm)
+      Both gates MUST pass before marking the task complete.
+    </step>
+    <step order="10" name="Document + Complete (with TASK-INDEX update)">
+      - Update this task POML's `&lt;status&gt;` from `not-started` → `complete`.
+      - Update `TASK-INDEX.md`: change 006 row's status from 🔲 → ✅.
+      - Reset `current-task.md` per CLAUDE.md §7 — clear steps/files/decisions and set
+        to the next pending task in TASK-INDEX (likely 007 D1-07 cleanup IHostedService).
+      - Ensure all task notes are present:
+        - `notes/task-006-spike-results.md` (PATH A or B outcome + evidence)
+        - `notes/task-006-implementation-plan.md`
+        - `notes/task-006-field-emission-trace.md`
+        - `notes/task-006-build-verification.md`
+      - Report task completion with summary of: spike outcome, chosen path, files changed,
+        publish-size delta, test coverage, quality-gate status.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish, list packages, list vulnerable packages</tool>
+    <tool name="az">Azure CLI — Key Vault retrieval if spike harness needs Azure OpenAI creds</tool>
+    <tool name="git">Stage + commit on R5 branch (main session does the commit; agent stages)</tool>
+    <tool name="code-review">Quality-gate skill (FULL-rigor mandatory at Step 9.5)</tool>
+    <tool name="adr-check">ADR-compliance gate (FULL-rigor mandatory at Step 9.5)</tool>
+    <tool name="context-handoff">Proactive checkpointing per CLAUDE.md §5 (after spike; after Step 5; before quality gates)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Streaming/IncrementalJsonParser.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Streaming/StructuredOutputStreamingService.cs (NEW; optional — may be folded into existing Summarize execution path)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs (MODIFIED — add `StreamStructuredCompletionAsync` or equivalent method)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (MODIFIED — wire `FieldDelta` emission into Summarize execution path)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SummaryHandler.cs (MODIFIED if SummaryHandler is the execution entry — TBD per Step 2 finding)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (MODIFIED — register IncrementalJsonParser)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Streaming/IncrementalJsonParserTests.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Streaming/StructuredOutputStreamingTests.cs (NEW; or extension of existing AnalysisOrchestrationServiceTests)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 006 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-006-spike-results.md (SPIKE OUTCOME — PATH A vs PATH B; evidence; rationale)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-006-implementation-plan.md (file inventory + JSON-path conventions + open questions)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-006-field-emission-trace.md (observed SSE event stream — verifies field ordering + sequence + final-result fidelity)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-006-build-verification.md (build output + publish-size measurement + CVE scan)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/spikes/task-006-structured-outputs/ (throwaway spike harness code)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Spike outcome (PATH A Structured Outputs streaming vs PATH B Function Calling) is documented in `notes/task-006-spike-results.md` with evidence: representative token-stream excerpts, TTFB measurement, character/word/field-granularity assessment.</criterion>
+    <criterion testable="true">Summarize playbook execution emits at least one `AnalysisChunk` with `Type = "delta"` and populated `FieldDelta` (Path + Content + Sequence) per top-level field of `DocumentAnalysisResult` (summary, tldr, keywords, entities) BEFORE the final `AnalysisChunk.Completed(result)` event.</criterion>
+    <criterion testable="true">First `delta` event references TL;DR (`Path` starts with `$.tldr`) when JSON property order is configured TL;DR-first; OR observed first-field path is documented in field-emission-trace if natural order is preserved. Either way, ORDER is deterministic + recorded.</criterion>
+    <criterion testable="true">`FieldDelta.Sequence` is monotonically increasing across all `delta` events in a single stream (sequence numbers do not repeat or decrease).</criterion>
+    <criterion testable="true">Final stream event is `AnalysisChunk.Completed(DocumentAnalysisResult)` with a fully-populated `DocumentAnalysisResult` (summary, tldr, keywords, entities all present and matching the wizard schema).</criterion>
+    <criterion testable="true">Wizard back-compat verified: `summarizeService.ts` (LegalWorkspace) renders the Summarize wizard correctly after the change — final result populates; unknown `delta` events do not crash the consumer.</criterion>
+    <criterion testable="true">Mid-stream JSON parse failure path emits `AnalysisChunk.FromError(...)` and terminates the stream gracefully (covered by negative unit test).</criterion>
+    <criterion testable="true">All new unit tests pass (`IncrementalJsonParserTests`, streaming-service tests). `dotnet test` green for entire `tests/unit/Sprk.Bff.Api.Tests/` project.</criterion>
+    <criterion testable="true">BFF builds clean: `dotnet build src/server/api/Sprk.Bff.Api/` succeeds with zero new warnings.</criterion>
+    <criterion testable="true">BFF publish-size measured and recorded in `notes/task-006-build-verification.md`. Absolute compressed size + delta vs baseline (~45.65 MB) reported. Delta within R5 ≤+1 MB budget for the cumulative project; this single task's delta SHOULD approach 0 MB. If a new NuGet package was added, package-name + size + CVE status are explicitly flagged in PR description.</criterion>
+    <criterion testable="true">DI registration: any new helper class is registered INSIDE `AnalysisServicesModule.cs` per ADR-010. ZERO new top-level `services.AddXxx()` lines in `Program.cs` (verify via `git diff Program.cs`).</criterion>
+    <criterion testable="true">No new HIGH-severity CVEs: `dotnet list package --vulnerable --include-transitive` clean.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5 (FULL-rigor mandatory).</criterion>
+    <criterion testable="true">`TASK-INDEX.md` row 006 status updated 🔲 → ✅; `current-task.md` reset to next pending task per CLAUDE.md §7.</criterion>
+  </acceptance-criteria>
+</task>

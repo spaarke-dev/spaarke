@@ -1,0 +1,670 @@
+<task id="007" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D1-07 Session-files cleanup `IHostedService` (background job)</title>
+    <status>complete</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort>4 hours</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
+    <phase>Phase 1 — Platform Extensions</phase>
+    <wave>P1-G5 (parallel with 008; runs after 001 ✅ AND 003 ✅)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001 (D1-01 `spaarke-session-files` index exists), 003 (D1-03 write path exists; cleanup deletes what 003 writes)</dependencies>
+    <tags>bff, hosted-service, background-job, cleanup</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Implement the session-files cleanup `IHostedService` that sweeps orphaned documents
+    from the `spaarke-session-files` Azure AI Search index (provisioned by task 001;
+    written to by task 003). The job runs on TWO triggers:
+
+    1. **Scheduled** — every 6 hours by default (configurable via options). The job
+       lists all distinct `sessionId` values currently present in the
+       `spaarke-session-files` index (per-tenant scan), checks each against the active
+       Redis session set (`chat:session:{tenantId}:{sessionId}` keys), and deletes
+       every document whose `sessionId` is NOT in the active set.
+
+    2. **On session-end (immediate)** — when `ChatSessionManager.DeleteSessionAsync`
+       runs (existing code path; called when a user ends a chat session OR the session
+       TTL expires from Redis), the cleanup service receives an in-process signal
+       (Channel-based trigger) and deletes all session-files documents matching
+       `(tenantId, sessionId)` immediately — no scheduled-sweep delay (per spec NFR-02
+       "Aggressive cleanup on session-end").
+
+    Both triggers converge on the SAME private delete helper that issues a filtered
+    `DeleteDocumentsAsync` (or batched delete) against the `spaarke-session-files`
+    `SearchClient`. The operation MUST be IDEMPOTENT — deleting the same
+    `(tenantId, sessionId)` twice MUST succeed without error and MUST emit a zero-count
+    eviction metric on the second pass.
+
+    This is a **REUSE-MANDATE** task per R5 CLAUDE.md §3.1: follow the existing
+    `BackgroundService` + `Channel`-trigger patterns canonically used in
+    `Services/Jobs/ServiceBusJobProcessor.cs` and
+    `Services/Ai/PlaybookEmbedding/PlaybookIndexingBackgroundService.cs`. DO NOT
+    introduce a parallel job-scheduling framework. Per R5 CLAUDE.md §3.2 NO new feature
+    flag is introduced — the service registers unconditionally inside
+    `AnalysisServicesModule.cs` (the module that already owns the session + RAG
+    pipeline; coverage inherits from existing `DocumentIntelligence:Enabled` /
+    `Analysis:Enabled` compound gate). Per R5 CLAUDE.md §3.3 ZERO new top-level
+    `Program.cs` lines.
+
+    Telemetry: emit `r5.session_files_cleanup.run` event per run (trigger=scheduled|on_session_end;
+    sessions_evicted; documents_deleted; per_tenant_breakdown[]; duration_ms;
+    completion_status). Telemetry plumbing piggybacks on the existing `AiTelemetry`
+    singleton (no new telemetry service); the dedicated R5 telemetry pass is task 008
+    so this task emits the raw events + a counter — task 008 wires dashboards.
+  </prompt>
+
+  <role>
+    Senior .NET developer with deep familiarity with `Microsoft.Extensions.Hosting`
+    `BackgroundService` + `PeriodicTimer`, `System.Threading.Channels` for in-process
+    fan-out triggers, Azure AI Search SDK (`SearchClient.DeleteDocumentsAsync`,
+    filtered query for distinct facet enumeration), `IDistributedCache` (Redis)
+    introspection, and Spaarke's existing job conventions per ADR-001 + ADR-010.
+    Comfortable wiring an in-process signal channel from
+    `ChatSessionManager.DeleteSessionAsync` to a `BackgroundService` without
+    introducing new DI registrations beyond the hosted-service itself.
+  </role>
+
+  <goal>
+    A working `SessionFilesCleanupJob : BackgroundService` is registered inside
+    `AnalysisServicesModule.cs` (no new top-level lines in `Program.cs`). It:
+
+    - **Schedules**: a `PeriodicTimer(SessionFilesCleanupOptions.IntervalHours)` (default 6h)
+      fires the cleanup loop until the host shuts down.
+    - **Signals**: a `Channel<SessionEndSignal>` accepts immediate triggers from
+      `ChatSessionManager.DeleteSessionAsync` (additive instrumentation —
+      `ChatSessionManager` gains a fire-and-forget call to
+      `ISessionFilesCleanupSignal.SignalSessionEnded(tenantId, sessionId)`; signal
+      service is a tiny concrete class registered in the same module and exposes the
+      channel's writer-side to producers + reader-side to the BackgroundService).
+    - **Deletes**: a private `EvictSessionAsync(tenantId, sessionId, ct)` helper
+      filters the session-files index by
+      `tenantId eq '...' and sessionId eq '...'`, pages through the matching
+      document keys, and issues a batched `DeleteDocumentsAsync` call. Re-running
+      against the same `(tenantId, sessionId)` returns 0 hits and is a no-op (idempotent).
+    - **Scheduled-pass orphan detection**: lists distinct `sessionId` facet values
+      from the index per tenant, joins against the active Redis session-key set
+      (`chat:session:{tenantId}:{sessionId}` via `IConnectionMultiplexer.GetServer().Keys`
+      pattern OR a tenant-scoped session-key registry if one exists — verify during
+      Step 3), and evicts every `sessionId` NOT present in the active set.
+    - **Telemetry**: emits `r5.session_files_cleanup.run` events via `AiTelemetry`
+      with per-run + per-tenant counts.
+
+    Tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/SessionFilesCleanupJobTests.cs`:
+    new test class covering idempotency, on-session-end immediate trigger, scheduled
+    orphan-detection logic, per-tenant isolation, and zero-results no-op path.
+
+    BFF publish-size delta measured per R5 CLAUDE.md §3.6; expected ≤ +0.1 MB
+    (small additive `BackgroundService` + signal channel; no new packages).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="sibling-task-001">projects/spaarke-ai-platform-unification-r5/tasks/001-provision-session-files-index.poml</file>
+    <file purpose="sibling-task-003">projects/spaarke-ai-platform-unification-r5/tasks/003-parameterize-ragindexingpipeline.poml</file>
+    <file purpose="canonical-bgservice-pattern">src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+    <file purpose="canonical-bgservice-pattern-2">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookIndexingBackgroundService.cs</file>
+    <file purpose="canonical-scheduled-pattern">src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledRagIndexingService.cs</file>
+    <file purpose="session-end-trigger-site">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+    <file purpose="existing-di-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+    <file purpose="ai-search-options">src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs</file>
+    <file purpose="ai-telemetry">src/server/api/Sprk.Bff.Api/Telemetry/AiTelemetry.cs</file>
+    <file purpose="new-index-schema">infrastructure/ai-search/spaarke-session-files.json</file>
+    <file purpose="bff-extensions-constraints">.claude/constraints/bff-extensions.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">No Azure Functions — use `BackgroundService` (`Microsoft.Extensions.Hosting`) for the scheduled + signal-driven cleanup loop. Existing canonical examples: `ServiceBusJobProcessor`, `PlaybookIndexingBackgroundService`, `ScheduledRagIndexingService`.</constraint>
+    <constraint source="ADR-010">DI minimalism — register the `BackgroundService` AND the signal service inside `AnalysisServicesModule.cs` via `services.AddHostedService<SessionFilesCleanupJob>()` (precedent: line 325 already registers `PlaybookSchedulerService`). ZERO new top-level `Program.cs` lines. Concrete classes by default; no new interface unless a genuine seam is required (the signal service WILL get a tiny `ISessionFilesCleanupSignal` interface to keep `ChatSessionManager` testable — that is the single allowed seam; document the rationale).</constraint>
+    <constraint source="ADR-013">All R5 endpoints + services in BFF only. This task adds an `IHostedService` + signal helper inside the BFF; NO endpoint, NO new service extraction.</constraint>
+    <constraint source="ADR-014">Per-document deletion filters MUST be `tenantId eq '...' and sessionId eq '...'` — both predicates required. The job MUST NOT delete cross-tenant by `sessionId` alone. Tenant isolation contract is binding.</constraint>
+    <constraint source="ADR-018">R5 introduces NO new feature flags. The cleanup job runs unconditionally inside the `if (analysisEnabled && documentIntelligenceEnabled)` compound gate (precedent: `PlaybookSchedulerService`). Kill-switch coverage inherits from the existing compound gate via the parent module.</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — verify publish-size delta per task. Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report absolute size + delta vs prior baseline in task notes. Expected ≤ +0.1 MB.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 (Reuse Mandate)">MUST follow the existing `BackgroundService` + `PeriodicTimer` pattern in `ScheduledRagIndexingService` AND the `Channel`-based queue pattern in `PlaybookIndexingService`/`PlaybookIndexingBackgroundService`. MUST NOT introduce a parallel job-scheduling framework, Hangfire, Quartz, or any external scheduler dependency.</constraint>
+    <constraint source="R5 CLAUDE.md §3.2">NO new feature flags. Schedule cadence + on/off behavior controlled by `SessionFilesCleanupOptions` (binding config section); no `SessionFilesCleanup:Enabled` flag — the service registration itself is the kill-switch, gated by the existing compound AI gate.</constraint>
+    <constraint source="R5 CLAUDE.md §3.3">Hosted service + signal helper registered inside `AnalysisServicesModule.cs`. ZERO new top-level `Program.cs` lines. The compound gate `if (analysisEnabled && documentIntelligenceEnabled)` already covers the registration; insert below the existing `Console.WriteLine("✓ Analysis services enabled")` line.</constraint>
+    <constraint source="R5 CLAUDE.md §3.6">Per-task BFF publish-size verification mandatory. Report absolute + delta in task notes.</constraint>
+    <constraint source="R5 CLAUDE.md §3.7">Tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/SessionFilesCleanupJobTests.cs` MUST be added. Existing `ChatSessionManagerTests.cs` MUST be updated for the new fire-and-forget `SignalSessionEnded` call (verify the new signal injection is null-tolerant — the manager MUST NOT fail if the cleanup signal is absent in tests).</constraint>
+    <constraint source="spec NFR-02">Aggressive cleanup on session-end (no scheduled-sweep delay) — the on-session-end signal path MUST issue the delete WITHIN seconds of `DeleteSessionAsync` returning. Idempotent: re-running the delete on an already-evicted session is a no-op + emits a zero-count metric.</constraint>
+    <constraint source="spec NFR-03">Multi-tenancy — per-tenant scans + per-tenant delete filters. Cross-tenant cleanup is a defect.</constraint>
+    <constraint source="project (idempotency)">Idempotent re-runs MUST succeed without throwing. A second invocation against an already-evicted `(tenantId, sessionId)` MUST: (a) issue the filtered query, (b) find 0 matching documents, (c) skip the delete batch, (d) emit `documents_deleted: 0` telemetry, (e) return success.</constraint>
+    <constraint source="project (back-compat)">`ChatSessionManager.DeleteSessionAsync` signature MUST remain byte-for-byte unchanged. The new `SignalSessionEnded` call is fire-and-forget at the end of `DeleteSessionAsync` (after Redis remove + Dataverse archive + Cosmos delete); a thrown signal-service exception MUST NOT propagate (log-and-swallow per fire-and-forget convention already used for Cosmos persist in the same method).</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Per BFF additions governance — this task adds a new `IHostedService` + helper inside BFF. Placement justification: cleanup is tightly coupled to BFF-owned session + index plumbing; extraction would require crossing the chat-session manager / AI-search infrastructure boundary — not justified. Cite this in PR description per §10 binding workflow rule.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>azure-ai-search/scheduled-eviction + bff/hosted-services</topic>
+    <files>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/rag-architecture.md</file>
+      <file>docs/adr/ADR-001-no-azure-functions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-014-ai-caching-tenant-isolation.md</file>
+      <file>docs/adr/ADR-018-flag-scope-discipline.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookIndexingBackgroundService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledRagIndexingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/AiTelemetry.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="BackgroundService + PeriodicTimer (scheduled-pass shape)" location="src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledRagIndexingService.cs">
+        Canonical reference for the scheduled-pass half of this task. Note the
+        options binding via `IOptions&lt;ScheduledRagIndexingOptions&gt;`, the
+        `_options.Enabled` early-exit, the `_serviceProvider.CreateScope()` per-run
+        scope for scoped dependency resolution, the `PeriodicTimer`-equivalent
+        `await Task.Delay(interval, stoppingToken)` loop, and the
+        `OperationCanceledException` catch-on-shutdown idiom. The R5 cleanup job
+        mirrors this shape but: (a) defaults `Enabled` to TRUE (no opt-in flag per
+        R5 §3.2); (b) uses `PeriodicTimer` for cleaner cancellation semantics; (c)
+        ALSO drains a `Channel&lt;SessionEndSignal&gt;` reader in the same loop via
+        `Task.WhenAny(timer.WaitForNextTickAsync, channelReader.WaitToReadAsync)`.
+      </pattern>
+      <pattern name="Channel-based in-process signal (on-session-end trigger)" location="src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookIndexingService.cs">
+        Canonical reference for the in-process signal half of this task.
+        `PlaybookIndexingService` exposes a `Channel&lt;PlaybookIndexingRequest&gt;` with
+        an unbounded writer; producers (the trigger endpoint) call
+        `.Writer.TryWrite(request)`; the BackgroundService `ProcessQueueAsync` reads
+        via `await reader.WaitToReadAsync(ct)` + `while (reader.TryRead(out var req))`.
+        R5 cleanup job uses the SAME pattern via a small `SessionFilesCleanupSignal`
+        helper class (concrete; registered as singleton inside
+        `AnalysisServicesModule`). Helper exposes `ISessionFilesCleanupSignal`
+        interface — single allowed seam, justified by `ChatSessionManager` test
+        isolation (Tier-1 unconditional service mocking convention).
+      </pattern>
+      <pattern name="AddHostedService inside AnalysisServicesModule (DI registration)" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs">
+        Line 325 (current): `services.AddHostedService&lt;Sprk.Bff.Api.Services.PlaybookSchedulerService&gt;();`
+        is the precedent for adding a hosted service inside the compound-gated
+        Analysis registration. The R5 cleanup-job registration goes immediately
+        below this line, inside the same `if (analysisEnabled &amp;&amp; documentIntelligenceEnabled)`
+        block. Registration block:
+        ```csharp
+        services.AddSingleton&lt;SessionFilesCleanupSignal&gt;();
+        services.AddSingleton&lt;ISessionFilesCleanupSignal&gt;(sp =&gt; sp.GetRequiredService&lt;SessionFilesCleanupSignal&gt;());
+        services.Configure&lt;SessionFilesCleanupOptions&gt;(configuration.GetSection(SessionFilesCleanupOptions.SectionName));
+        services.AddHostedService&lt;SessionFilesCleanupJob&gt;();
+        Console.WriteLine("✓ Session-files cleanup hosted service enabled (R5 task 007, NFR-02)");
+        ```
+        ZERO new top-level `Program.cs` lines. The compound-gate placement also
+        keeps the service OFF when AI is disabled (kill-switch inheritance per R5 §3.2).
+      </pattern>
+      <pattern name="AiSearchOptions.SessionFilesIndexName (already added by task 003)" location="src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs">
+        Task 003 adds `SessionFilesIndexName` (default `"spaarke-session-files"`).
+        The cleanup job consumes this via `IOptions&lt;AiSearchOptions&gt;` — no new
+        options property required. If task 003 hasn't merged yet, coordinate via
+        the project's parallel-execution group P1-G5 (003 is in P1-G2; 007 is in
+        P1-G5 — 003 lands first).
+      </pattern>
+      <pattern name="Fire-and-forget producer call in ChatSessionManager (mirror Cosmos pattern)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs">
+        Lines 215–231 already show the fire-and-forget Cosmos-persist convention:
+        try/catch + `LogWarning` on failure; never throws. The new
+        `SignalSessionEnded` call follows the same shape at the end of
+        `DeleteSessionAsync`. Inject `ISessionFilesCleanupSignal? _cleanupSignal`
+        as a nullable constructor parameter via `GetService&lt;&gt;()` (mirroring the
+        existing `ISessionPersistenceService?` null-tolerance) so existing tests
+        + the compound-AI-OFF path continue to work without re-wiring.
+      </pattern>
+      <pattern name="AiTelemetry event emission" location="src/server/api/Sprk.Bff.Api/Telemetry/AiTelemetry.cs">
+        Use the existing `AiTelemetry` singleton for the
+        `r5.session_files_cleanup.run` event. Telemetry instrumentation depth
+        (dashboards, cost rollups) is task 008's scope — this task emits the raw
+        event + a counter; task 008 wires Application Insights queries.
+      </pattern>
+      <pattern name="Test conventions for BackgroundService" location="tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SessionCleanupSecurityTests.cs">
+        Existing session-cleanup security tests follow the in-process test
+        convention. Test the cleanup job by: (a) instantiating directly (no
+        host startup); (b) calling the private/internal `EvictSessionAsync`
+        helper via `InternalsVisibleTo` OR by writing to the signal channel and
+        invoking the loop body directly; (c) mocking `SearchClient`,
+        `IDistributedCache`, `AiTelemetry`. Idempotency tests: invoke
+        `EvictSessionAsync` twice; assert second invocation calls
+        `SearchAsync` (to enumerate keys) but skips `DeleteDocumentsAsync` when
+        results are empty.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships a chat-driven "Summarize a Document" vertical slice. Users upload up
+      to 20 files per chat session; those files are indexed into the
+      `spaarke-session-files` Azure AI Search index (provisioned by task 001;
+      written by task 003). When a session ends — either explicitly via
+      `ChatSessionManager.DeleteSessionAsync` OR implicitly via Redis TTL expiry —
+      the session's indexed documents become orphaned and MUST be evicted (spec
+      NFR-02: "Aggressive cleanup on session-end"). The cleanup job owns this
+      eviction: scheduled scans catch implicit TTL expirations; the on-session-end
+      signal handles explicit deletes immediately.
+
+      Design rationale (design.md §4.2; spec.md Open Decisions): keeping the
+      ephemeral session-files index lean prevents AI Search cost creep + keeps
+      query-time relevance high. Without active cleanup, an N-week-old session's
+      documents would still be searchable for some time after Redis TTL expiry
+      (since AI Search indexes don't auto-evict). The cleanup job is the
+      operational guarantor of the session-scoped retention contract.
+
+      Per R5 §3.1 reuse mandate, this task uses existing patterns
+      (`BackgroundService`, `Channel`, `IOptions`) and adds NO new external
+      scheduler dependency. The task is parallel-safe with task 008 (telemetry)
+      in P1-G5; together they ship Phase 1's operational guarantees.
+    </background>
+    <dependencies>
+      <dependency task="001" status="dependency">
+        Task 001 provisions the `spaarke-session-files` index. Cleanup writes
+        DELETE batches to this index — must exist on Spaarke Dev.
+      </dependency>
+      <dependency task="003" status="dependency">
+        Task 003 adds `AiSearchOptions.SessionFilesIndexName` + the indexing
+        write path. Cleanup deletes from the same index using the same options
+        property. Field-name alignment (`sessionId`, `tenantId`) is task 001's
+        schema; this task consumes it.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 008 (D1-08) is the dedicated R5 telemetry pass — it wires
+        dashboards consuming the `r5.session_files_cleanup.run` events this task
+        emits. Coordinate event name + field shape with task 008 at PR time.</item>
+      <item>Task 009 (D1-09) runs the Phase 1 test consolidation + publish-size
+        verification — this task contributes its publish-size measurement to
+        the Phase 1 baseline.</item>
+      <item>`ChatSessionManager.DeleteSessionAsync` is the canonical session-end
+        site for the explicit-end signal. Redis-TTL-driven implicit ends are
+        only caught by the scheduled pass (no callback exists for natural
+        Redis expiry — the scheduled scan is the only mechanism).</item>
+      <item>`PlaybookIndexingBackgroundService` is the closest existing pattern
+        (signal-driven `BackgroundService` inside the AI module); follow its
+        shape closely.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. If &gt; 70%, create handoff summary and request
+      `/compact`. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: BFF code change (Sprk.Bff.Api/Services/Ai/ + Chat/ + DI/) +
+         new `IHostedService` registration + ADR-014 tenant isolation contract +
+         new test obligation + ChatSessionManager additive instrumentation.
+         Per CLAUDE.md §8 FULL applies.
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0–10 below; quality gates at 9.5.
+      Proceeding with Step 0...
+      ```
+    </step>
+
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm task 007 status is 🔲, dependencies
+      are `001, 003`, wave is P1-G5, parallel-safe = ✅ (with 008). Verify
+      tasks 001 and 003 status is ✅ (or that 003's `AiSearchOptions.SessionFilesIndexName`
+      property has landed). Read `current-task.md` to verify no conflicting R5
+      task is in flight. Read project README for project status.
+    </step>
+
+    <step order="2" name="Gather Resources">
+      Read every file listed in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically:
+      - Read `ServiceBusJobProcessor.cs`, `PlaybookIndexingBackgroundService.cs`,
+        and `ScheduledRagIndexingService.cs` end-to-end to internalize the three
+        canonical patterns (Service Bus shape, channel-signal shape, periodic-timer
+        shape).
+      - Read `AnalysisServicesModule.cs` lines around the existing
+        `AddHostedService&lt;PlaybookSchedulerService&gt;` call (line 325) — this
+        is the registration site.
+      - Read `ChatSessionManager.DeleteSessionAsync` (lines 198–232) to confirm
+        the fire-and-forget Cosmos-persist convention to mirror for the new
+        `SignalSessionEnded` call.
+      - Read `AiSearchOptions.cs` to confirm `SessionFilesIndexName` exists
+        (added by task 003) and its default value.
+      - Read `AiTelemetry.cs` to identify the existing event-emission API
+        (likely an `EmitEvent` or `RecordEvent` method).
+      - Read ADR-014, ADR-018, ADR-010 in full.
+      - Read R5 CLAUDE.md §§3.1, 3.2, 3.3, 3.6, 3.7 and spec NFR-02.
+    </step>
+
+    <step order="3" name="Locate Active-Session Source of Truth">
+      Determine HOW the scheduled pass discovers active sessions. Options:
+      (a) `IConnectionMultiplexer.GetServer().Keys(pattern: "chat:session:*")` —
+      Redis-direct key enumeration; works but pricey on large key sets and
+      requires `IConnectionMultiplexer` injection (verify it's already
+      registered unconditionally). (b) A tenant-scoped session-key registry
+      Sorted Set if one exists (search for `chat:session-registry` or similar).
+      (c) Dataverse `sprk_aichatsummary` table query for non-archived sessions.
+
+      RECOMMENDED: (a) Redis key scan with the `chat:session:` pattern, gated
+      on the same `IDistributedCache` Redis backend the manager uses. Performance
+      acceptable at session counts &lt; 100k per tenant; if scaling becomes a
+      concern, a future task can add a registry Sorted Set.
+
+      Record the decision + rationale in task notes. If `IConnectionMultiplexer`
+      is conditionally registered, fall back to option (c) Dataverse query.
+    </step>
+
+    <step order="4" name="Plan Implementation">
+      Decompose into 6 subtasks:
+      1. Add `SessionFilesCleanupOptions` (binding config) + `ISessionFilesCleanupSignal` + `SessionFilesCleanupSignal` (concrete; channel-owning singleton).
+      2. Add `SessionFilesCleanupJob : BackgroundService` with scheduled + signal-driven loops + shared `EvictSessionAsync` helper.
+      3. Register the trio inside `AnalysisServicesModule.cs` under the existing compound gate (immediately below the `PlaybookSchedulerService` registration).
+      4. Wire `ChatSessionManager.DeleteSessionAsync` fire-and-forget signal call (null-tolerant injection).
+      5. Add unit tests for idempotency, on-session-end signal, scheduled scan orphan detection, per-tenant isolation, zero-results no-op, ChatSessionManager null-tolerance.
+      6. Run build + publish-size + CVE + quality gates.
+
+      Acknowledge `SessionFilesCleanupJob.cs` will live at
+      `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionFilesCleanupJob.cs`
+      per R5 CLAUDE.md §8 path table (chat-session lifecycle ownership). Co-locate
+      `SessionFilesCleanupSignal.cs` + `ISessionFilesCleanupSignal.cs` +
+      `SessionFilesCleanupOptions.cs` in the same folder for cohesion.
+    </step>
+
+    <step order="5" name="Implement — Options + Signal Helper">
+      Create `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionFilesCleanupOptions.cs`:
+
+      ```csharp
+      public class SessionFilesCleanupOptions
+      {
+          public const string SectionName = "SessionFilesCleanup";
+
+          /// &lt;summary&gt;Hours between scheduled cleanup runs. Default 6.&lt;/summary&gt;
+          public int IntervalHours { get; set; } = 6;
+
+          /// &lt;summary&gt;Max documents deleted per batch call. Default 1000 (AI Search SDK limit).&lt;/summary&gt;
+          public int DeleteBatchSize { get; set; } = 1000;
+
+          /// &lt;summary&gt;Max session keys scanned per tenant per scheduled run. Default 10000.&lt;/summary&gt;
+          public int MaxKeysPerScan { get; set; } = 10_000;
+      }
+      ```
+
+      Create `ISessionFilesCleanupSignal.cs` + `SessionFilesCleanupSignal.cs`:
+
+      ```csharp
+      public interface ISessionFilesCleanupSignal
+      {
+          void SignalSessionEnded(string tenantId, string sessionId);
+      }
+
+      // Concrete: owns Channel&lt;SessionEndSignal&gt; (unbounded, single-reader).
+      // Writer-side: TryWrite from producers (ChatSessionManager).
+      // Reader-side: ChannelReader exposed via internal property for the
+      // BackgroundService (same package; InternalsVisibleTo on test assembly).
+      public sealed class SessionFilesCleanupSignal : ISessionFilesCleanupSignal
+      {
+          private readonly Channel&lt;SessionEndSignal&gt; _channel =
+              Channel.CreateUnbounded&lt;SessionEndSignal&gt;(new UnboundedChannelOptions
+              {
+                  SingleReader = true,
+                  SingleWriter = false,
+              });
+
+          internal ChannelReader&lt;SessionEndSignal&gt; Reader =&gt; _channel.Reader;
+
+          public void SignalSessionEnded(string tenantId, string sessionId)
+          {
+              if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(sessionId)) return;
+              _channel.Writer.TryWrite(new SessionEndSignal(tenantId, sessionId));
+          }
+      }
+
+      internal readonly record struct SessionEndSignal(string TenantId, string SessionId);
+      ```
+    </step>
+
+    <step order="6" name="Implement — SessionFilesCleanupJob BackgroundService">
+      Create `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionFilesCleanupJob.cs`
+      following the `ScheduledRagIndexingService` shape, modified to drain the
+      signal channel alongside the periodic timer. Constructor injects:
+      `IServiceProvider serviceProvider, IOptions&lt;SessionFilesCleanupOptions&gt; options,
+      SessionFilesCleanupSignal signal, ILogger&lt;SessionFilesCleanupJob&gt; logger`.
+
+      `ExecuteAsync` shape:
+      1. Read `_options.IntervalHours`; create `PeriodicTimer(TimeSpan.FromHours(_options.IntervalHours))`.
+      2. Log startup line.
+      3. Loop until cancellation:
+         a. Build a `Task` racing `timer.WaitForNextTickAsync(stoppingToken)` against
+            `_signal.Reader.WaitToReadAsync(stoppingToken).AsTask()`.
+         b. `await Task.WhenAny(timerTask, signalTask)`.
+         c. If signal won: drain all pending signals via
+            `while (_signal.Reader.TryRead(out var sig))` and call
+            `EvictSessionAsync(sig.TenantId, sig.SessionId, scope, "on_session_end", stoppingToken)`
+            for each.
+         d. If timer won: call `RunScheduledScanAsync(scope, stoppingToken)`.
+      4. Catch `OperationCanceledException` on shutdown; log "Stopped".
+
+      Per-run scope: `using var scope = _serviceProvider.CreateScope();` resolve
+      `SearchIndexClient`, `IOptions&lt;AiSearchOptions&gt;`, `AiTelemetry`, optionally
+      `IConnectionMultiplexer` (or `IDistributedCache` + Redis-direct API).
+
+      `RunScheduledScanAsync`:
+      1. Enumerate tenants via the configured session-key registry pattern
+         (Step 3 decision). For each tenant:
+         a. List distinct `sessionId` facet values from the
+            `spaarke-session-files` index filtered by `tenantId eq '{tenant}'`
+            (Azure Search `facets: ["sessionId,count:0"]` to get all distinct values).
+         b. List active Redis keys matching `chat:session:{tenantId}:*`; extract
+            sessionIds.
+         c. Compute `orphans = indexedSessionIds.Except(activeSessionIds)`.
+         d. For each orphan call `EvictSessionAsync(tenantId, orphanSessionId,
+            scope, "scheduled", stoppingToken)`.
+      2. Emit a single `r5.session_files_cleanup.run` event with
+         `trigger="scheduled"`, `sessions_evicted=orphans.Count`,
+         `documents_deleted=totalDeleted`, `per_tenant_breakdown=[...]`,
+         `duration_ms=stopwatch`.
+
+      `EvictSessionAsync(tenantId, sessionId, scope, trigger, ct)`:
+      1. Get `SearchClient` via
+         `scope.ServiceProvider.GetRequiredService&lt;SearchIndexClient&gt;()
+         .GetSearchClient(aiSearchOptions.SessionFilesIndexName)`.
+      2. Build filter `tenantId eq '{escaped}' and sessionId eq '{escaped}'`.
+      3. Page through matching document keys via
+         `SearchAsync&lt;Dictionary&lt;string, object&gt;&gt;("*", new SearchOptions { Filter=..., Select={ "id" }, Size=1000 })`
+         and collect doc keys.
+      4. If `keys.Count == 0`: emit telemetry `documents_deleted: 0`; return.
+      5. Batch keys into chunks of `_options.DeleteBatchSize` and call
+         `client.DeleteDocumentsAsync(keyField: "id", keys: batch, ct)`.
+      6. Emit `r5.session_files_cleanup.run` event with
+         `trigger=trigger`, `sessions_evicted=1`, `documents_deleted=keys.Count`,
+         `tenant_id=tenantId`, `session_id=sessionId`, `duration_ms=stopwatch`.
+
+      Add `[assembly: InternalsVisibleTo("Sprk.Bff.Api.Tests")]` if not already
+      present (likely is) so tests can poke at internal types/methods.
+    </step>
+
+    <step order="7" name="Implement — DI Registration in AnalysisServicesModule">
+      Open `AnalysisServicesModule.cs`. Locate the existing line:
+      ```csharp
+      services.AddHostedService&lt;Sprk.Bff.Api.Services.PlaybookSchedulerService&gt;();
+      ```
+      Immediately below, inside the same `if (analysisEnabled &amp;&amp; documentIntelligenceEnabled)`
+      compound gate, insert:
+
+      ```csharp
+      // R5 task 007 (D1-07) — Session-files cleanup hosted service per spec NFR-02.
+      // Scheduled sweep + on-session-end immediate trigger; idempotent. Inherits
+      // kill-switch from this compound gate per R5 CLAUDE.md §3.2 (no new flag).
+      services.AddSingleton&lt;Sprk.Bff.Api.Services.Ai.Chat.SessionFilesCleanupSignal&gt;();
+      services.AddSingleton&lt;Sprk.Bff.Api.Services.Ai.Chat.ISessionFilesCleanupSignal&gt;(
+          sp =&gt; sp.GetRequiredService&lt;Sprk.Bff.Api.Services.Ai.Chat.SessionFilesCleanupSignal&gt;());
+      services.Configure&lt;Sprk.Bff.Api.Services.Ai.Chat.SessionFilesCleanupOptions&gt;(
+          configuration.GetSection(Sprk.Bff.Api.Services.Ai.Chat.SessionFilesCleanupOptions.SectionName));
+      services.AddHostedService&lt;Sprk.Bff.Api.Services.Ai.Chat.SessionFilesCleanupJob&gt;();
+      Console.WriteLine("✓ Session-files cleanup hosted service enabled (R5 task 007, NFR-02)");
+      ```
+
+      Verify ZERO new top-level `Program.cs` lines. Verify no edits outside the
+      compound-gated block (registration MUST inherit the existing kill-switch).
+    </step>
+
+    <step order="8" name="Implement — ChatSessionManager Signal Wiring + Tests">
+      A. Wire the producer call in `ChatSessionManager.cs`:
+
+      1. Add a nullable constructor parameter `ISessionFilesCleanupSignal? cleanupSignal = null`
+         (mirroring the existing `ISessionPersistenceService?` null-tolerance pattern).
+      2. Store as `private readonly ISessionFilesCleanupSignal? _cleanupSignal`.
+      3. Update the `AnalysisServicesModule.AddUnconditionalChatAndNotificationServices`
+         factory registration (line 147) to inject the new parameter via
+         `sp.GetService&lt;ISessionFilesCleanupSignal&gt;()` (null-tolerant).
+      4. At the end of `DeleteSessionAsync` (after the existing Cosmos-delete block
+         lines 215–231), add:
+         ```csharp
+         // R5 task 007 — fire-and-forget signal to session-files cleanup job (NFR-02).
+         try { _cleanupSignal?.SignalSessionEnded(tenantId, sessionId); }
+         catch (Exception ex) { _logger.LogWarning(ex, "Session-files cleanup signal failed for session {SessionId}", sessionId); }
+         ```
+
+      B. Update `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ChatSessionManagerTests.cs`:
+      add one test asserting `DeleteSessionAsync` calls
+      `ISessionFilesCleanupSignal.SignalSessionEnded` exactly once with the
+      tenant + session IDs. Add one regression test asserting `DeleteSessionAsync`
+      succeeds when `cleanupSignal` is null (back-compat for callers that don't
+      register the service).
+
+      C. Create new test file
+      `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/SessionFilesCleanupJobTests.cs`
+      with these tests:
+      1. `EvictSession_with_no_matching_docs_emits_zero_count_no_op` (idempotency).
+      2. `EvictSession_emits_telemetry_with_trigger_and_counts`.
+      3. `EvictSession_filter_includes_both_tenantId_and_sessionId` (ADR-014).
+      4. `EvictSession_invoked_twice_for_same_session_is_idempotent`
+         (second call finds 0 docs; emits zero-count event).
+      5. `OnSignalReceived_drains_all_pending_signals_in_single_batch`.
+      6. `ScheduledScan_evicts_only_orphans_not_in_active_set`.
+      7. `ScheduledScan_per_tenant_isolation_no_cross_tenant_delete`.
+
+      Use existing `Mock&lt;SearchIndexClient&gt;` + `Mock&lt;SearchClient&gt;` conventions
+      from `RagIndexingPipelineTests.cs`. Mock `AiTelemetry` to capture emitted
+      event names + payloads. Active-session source: mock the chosen abstraction
+      from Step 3.
+
+      Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` and confirm all green.
+    </step>
+
+    <step order="9" name="Verify — Build + Publish Size + CVE + Spaarke Dev Smoke">
+      1. Run `dotnet build src/server/api/Sprk.Bff.Api/` — confirm zero new warnings.
+      2. Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — confirm green
+         (new + existing tests).
+      3. Per CLAUDE.md §10 + R5 CLAUDE.md §3.6: run
+         `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`.
+         Measure compressed output. Report absolute MB + delta vs prior baseline
+         (current ~45.65 MB; expected ≤ +0.1 MB). If delta ≥ +5 MB → ESCALATE
+         per CLAUDE.md §10.
+      4. Run `dotnet list package --vulnerable --include-transitive` — confirm
+         zero new HIGH-severity CVEs vs prior baseline.
+      5. Spaarke Dev smoke (optional but recommended given hosted-service nature):
+         deploy via `bff-deploy` skill; tail logs for the
+         `"Session-files cleanup hosted service enabled"` startup line; wait for
+         one scheduled tick OR trigger an explicit session delete via
+         `DELETE /api/ai/chat/sessions/{sessionId}` to fire the on-session-end
+         signal path; verify the `r5.session_files_cleanup.run` event appears in
+         App Insights.
+      6. Record all measurements + smoke results in task notes
+         (`notes/task-007-verification-evidence.md`).
+    </step>
+
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run the `code-review` skill against the new + modified files:
+      `SessionFilesCleanupJob.cs`, `SessionFilesCleanupSignal.cs`,
+      `ISessionFilesCleanupSignal.cs`, `SessionFilesCleanupOptions.cs`,
+      `AnalysisServicesModule.cs` (the registration block), `ChatSessionManager.cs`
+      (the producer wiring), `SessionFilesCleanupJobTests.cs`,
+      `ChatSessionManagerTests.cs` (additions).
+
+      Run the `adr-check` skill against the same files; verify:
+      - ADR-001 (no Azure Functions; `BackgroundService` pattern used)
+      - ADR-010 (DI minimalism; zero new top-level lines; signal helper has the
+        one allowed seam — `ISessionFilesCleanupSignal` — for `ChatSessionManager`
+        test isolation)
+      - ADR-014 (delete filter includes BOTH `tenantId` AND `sessionId`)
+      - ADR-018 (no new feature flag; kill-switch inherits compound gate)
+      - ADR-029 (BFF publish hygiene measured + reported)
+      - ADR-013 (BFF-only; no AI-service extraction)
+      - Reuse mandate (R5 CLAUDE.md §3.1): patterns mirror
+        `PlaybookIndexingBackgroundService` + `ScheduledRagIndexingService`; no
+        parallel scheduler framework introduced
+
+      Both quality gates MUST pass with no BLOCKER findings before Step 10.
+      Document any non-blocker observations in task notes.
+    </step>
+
+    <step order="10" name="Document + Complete">
+      1. Update this task POML's `&lt;status&gt;` to `complete`; fill
+         `&lt;actual-effort&gt;`, `&lt;started&gt;`, `&lt;completed&gt;`.
+      2. Update `tasks/TASK-INDEX.md`: 007 🔲 → ✅ in the Phase 1 table.
+      3. Reset `current-task.md` for the next pending task per CLAUDE.md §7
+         (likely 008 if not already complete; otherwise 009).
+      4. Write the PR description summary including: (a) reuse-mandate fulfillment
+         citation (BackgroundService + Channel patterns mirrored from existing
+         services); (b) Placement Justification per `.claude/constraints/bff-extensions.md`
+         (cleanup is tightly coupled to BFF session + index plumbing — extraction
+         not justified); (c) publish-size delta + CVE-scan result; (d) quality-gate
+         passes; (e) Spaarke Dev smoke evidence (job startup line +
+         `r5.session_files_cleanup.run` event observed).
+      5. Note cross-task signals for task 008 (telemetry — event name +
+         schema lock-in: `r5.session_files_cleanup.run` with fields above) and
+         task 009 (Phase 1 test consolidation — this task contributes ~7 new
+         tests).
+      6. Report task completion to the user.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build BFF + run unit tests + publish + CVE scan (`build`, `test`, `publish`, `list package --vulnerable`)</tool>
+    <tool name="az">Optional — Spaarke Dev log tail / App Insights query for smoke verification</tool>
+    <tool name="bff-deploy">Optional — Spaarke Dev deployment for end-to-end smoke at Step 9</tool>
+    <tool name="git">Stage + commit changes on the R5 branch</tool>
+    <tool name="adr-check">Quality-gate skill — runs at Step 9.5</tool>
+    <tool name="code-review">Quality-gate skill — runs at Step 9.5</tool>
+    <tool name="context-handoff">Checkpointing per CLAUDE.md §5 (mandatory every 3 steps for FULL rigor)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionFilesCleanupJob.cs (NEW — `BackgroundService` with scheduled + signal-driven loops + shared `EvictSessionAsync` helper)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionFilesCleanupSignal.cs (NEW — concrete singleton owning the `Channel&lt;SessionEndSignal&gt;`)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ISessionFilesCleanupSignal.cs (NEW — single seam for ChatSessionManager test isolation per ADR-010 §"genuine seam" exception)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionFilesCleanupOptions.cs (NEW — bound to config section `SessionFilesCleanup`)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (extend — add 4-line registration block under existing compound gate immediately below `PlaybookSchedulerService` registration; ZERO new top-level Program.cs lines)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs (extend — add nullable `ISessionFilesCleanupSignal? cleanupSignal` constructor parameter + fire-and-forget call at end of `DeleteSessionAsync`)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/SessionFilesCleanupJobTests.cs (NEW — 7 tests per Step 8)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ChatSessionManagerTests.cs (extend — 2 new tests for signal call + null-tolerance)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 007 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/007-session-files-cleanup-hostedservice.poml (status: complete)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-007-verification-evidence.md (active-session source-of-truth decision + rationale, build + test output, publish-size measurement + delta, CVE-scan result, Spaarke Dev smoke evidence, quality-gate findings, cross-task signals to 008 + 009)</output>
+    <output type="report">Task completion report (per task-execute template Step 6) including cross-task signals to tasks 008 (telemetry event schema lock-in) + 009 (Phase 1 test consolidation)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SessionFilesCleanupJob : BackgroundService` exists at `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionFilesCleanupJob.cs`, compiles, and is registered via `services.AddHostedService&lt;SessionFilesCleanupJob&gt;()` inside `AnalysisServicesModule.cs` under the existing `if (analysisEnabled &amp;&amp; documentIntelligenceEnabled)` compound gate.</criterion>
+    <criterion testable="true">ZERO new top-level `services.AddXxx()` lines added to `Program.cs` per R5 CLAUDE.md §3.3 / ADR-010. Verified by `git diff Program.cs` showing no changes.</criterion>
+    <criterion testable="true">NO new feature flag introduced (per R5 CLAUDE.md §3.2). The service registers unconditionally inside the existing AI compound gate; `SessionFilesCleanupOptions` controls cadence + batch sizes but has no `Enabled` property.</criterion>
+    <criterion testable="true">Scheduled trigger fires the cleanup loop every `IntervalHours` (default 6h). Verified by unit test that drives the `PeriodicTimer` tick and asserts the scheduled-scan path executes.</criterion>
+    <criterion testable="true">On-session-end immediate trigger works: `ChatSessionManager.DeleteSessionAsync` calls `ISessionFilesCleanupSignal.SignalSessionEnded(tenantId, sessionId)` at the end of its existing logic; the signal channel receives the message; the `BackgroundService` loop drains it and invokes `EvictSessionAsync` for that session. Verified by unit test `OnSignalReceived_drains_all_pending_signals_in_single_batch`.</criterion>
+    <criterion testable="true">`ChatSessionManager.DeleteSessionAsync` signature is byte-for-byte unchanged (verified by git diff); the new signal call is fire-and-forget + log-and-swallow on failure (mirrors the existing Cosmos persist pattern); the new `cleanupSignal` constructor parameter is nullable + defaulted to null (back-compat for tests + the compound-AI-OFF path).</criterion>
+    <criterion testable="true">Delete filter on every eviction is `tenantId eq '{tenantId}' and sessionId eq '{sessionId}'` — BOTH predicates always present. Verified by unit test `EvictSession_filter_includes_both_tenantId_and_sessionId` (ADR-014 compliance).</criterion>
+    <criterion testable="true">Idempotent re-runs: invoking `EvictSessionAsync` twice for the same `(tenantId, sessionId)` succeeds without error; the second invocation returns 0 hits from the search query, skips the delete batch, and emits a zero-count telemetry event. Verified by unit test `EvictSession_invoked_twice_for_same_session_is_idempotent`.</criterion>
+    <criterion testable="true">Per-tenant isolation: scheduled scan + on-session-end deletes NEVER cross tenants. Verified by unit test `ScheduledScan_per_tenant_isolation_no_cross_tenant_delete` (ADR-014 + spec NFR-03).</criterion>
+    <criterion testable="true">Scheduled scan correctly identifies orphans: indexed `sessionId` values NOT present in the active Redis session set are evicted; active sessions are untouched. Verified by unit test `ScheduledScan_evicts_only_orphans_not_in_active_set`.</criterion>
+    <criterion testable="true">Telemetry event `r5.session_files_cleanup.run` emitted on every run with fields: `trigger` (scheduled|on_session_end), `sessions_evicted`, `documents_deleted`, `tenant_id` (per-tenant for on-session-end; per-tenant breakdown array for scheduled), `session_id` (on-session-end only), `duration_ms`, `completion_status` (success|partial|error). Verified by unit test `EvictSession_emits_telemetry_with_trigger_and_counts`.</criterion>
+    <criterion testable="true">`SessionFilesCleanupOptions` binds to config section `SessionFilesCleanup` with defaults: `IntervalHours = 6`, `DeleteBatchSize = 1000`, `MaxKeysPerScan = 10000`. Admin-overridable per environment.</criterion>
+    <criterion testable="true">`SessionFilesCleanupSignal` is a concrete singleton owning an unbounded `Channel&lt;SessionEndSignal&gt;` (single-reader, multi-writer); the `ISessionFilesCleanupSignal` interface exposes only the producer-side `SignalSessionEnded(tenantId, sessionId)` method (consumer-side reader access is internal to the assembly per `InternalsVisibleTo`).</criterion>
+    <criterion testable="true">All existing tests in `ChatSessionManagerTests.cs` pass WITHOUT modification (back-compat regression). 2 new tests added covering: (a) signal call invoked exactly once on session delete; (b) `DeleteSessionAsync` succeeds when `cleanupSignal` is null.</criterion>
+    <criterion testable="true">7 new tests in `SessionFilesCleanupJobTests.cs` all pass (idempotency, telemetry, ADR-014 filter, idempotent re-run, signal batch drain, scheduled orphan detection, per-tenant isolation).</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with zero new warnings.</criterion>
+    <criterion testable="true">BFF publish-size measured per CLAUDE.md §10 + R5 CLAUDE.md §3.6. Absolute size + delta vs prior baseline recorded in task notes. Delta ≤ +0.5 MB compressed (expected ≈ +0.05–0.1 MB for hosted service + signal helper + options class). Total ≤ 47 MB per spec NFR-07 / project budget.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` reports zero new HIGH-severity CVEs vs prior baseline. No new package dependencies added.</criterion>
+    <criterion testable="true">`code-review` quality gate passes at Step 9.5 with no BLOCKER findings.</criterion>
+    <criterion testable="true">`adr-check` quality gate passes at Step 9.5 confirming compliance with ADR-001 (BackgroundService pattern), ADR-010 (DI minimalism), ADR-014 (tenant isolation), ADR-018 (Flag Scope Discipline — no new flag), ADR-029 (publish hygiene), ADR-013 (BFF-only), and R5 reuse mandate.</criterion>
+    <criterion testable="true">PR description / task notes cite (a) reuse-mandate fulfillment (mirrored `PlaybookIndexingBackgroundService` + `ScheduledRagIndexingService` patterns); (b) Placement Justification per `.claude/constraints/bff-extensions.md`; (c) the active-session source-of-truth decision from Step 3 with rationale.</criterion>
+  </acceptance-criteria>
+</task>

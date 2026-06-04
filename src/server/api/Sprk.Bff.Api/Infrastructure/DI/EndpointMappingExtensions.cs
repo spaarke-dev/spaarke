@@ -139,6 +139,15 @@ public static class EndpointMappingExtensions
         // AI Capabilities: webhook-triggered manifest refresh (AIPU2-011)
         app.MapCapabilityEndpoints();
         app.MapChatEndpoints();
+
+        // R5 task 014 (D2-04) — direct entry point for the chat-driven Summarize vertical
+        // slice. Maps POST /api/ai/chat/sessions/{sessionId}/summarize and delegates to
+        // SessionSummarizeOrchestrator (task 012). UNCONDITIONAL mapping per R5 §3.2 — the
+        // orchestrator is also registered unconditionally in AnalysisServicesModule.cs
+        // (asymmetric-registration rule R5 §10 F.1 satisfied). Sibling agent-tool path
+        // (task 015) converges on the same orchestrator.
+        app.MapSummarizeSessionEndpoint();
+
         try { app.MapChatDocumentEndpoints(); }
         catch (Exception ex)
         {

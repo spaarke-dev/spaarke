@@ -30,12 +30,17 @@ public static class TelemetryModule
                 metrics.AddMeter("Sprk.Bff.Api.AiCapabilities");
                 // AI Latency meter (AIPU2-066): TTFT, TBT, TTLT, prompt tokens, routing latency
                 metrics.AddMeter(Sprk.Bff.Api.Telemetry.AiLatencyTelemetry.MeterName);
+                // R5 Summarize meter (D1-08 task 008): r5.summarize.invocation + r5.session_files.index_size
+                // Stable downstream contract for Phase 3 D3-03 dashboards.
+                metrics.AddMeter(Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry.MeterName);
             })
             .WithTracing(tracing =>
             {
                 tracing.AddSource("Sprk.Bff.Api.Ai");
                 tracing.AddSource("Sprk.Bff.Api.Rag");
                 tracing.AddSource("Sprk.Bff.Api.Finance");
+                // R5 Summarize ActivitySource (D1-08 task 008): distributed-trace spans for Summarize-for-Chat invocations.
+                tracing.AddSource(Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry.MeterName);
             });
 
         // Circuit Breaker Registry

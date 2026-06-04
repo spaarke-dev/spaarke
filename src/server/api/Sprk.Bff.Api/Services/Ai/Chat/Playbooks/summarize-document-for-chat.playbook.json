@@ -1,0 +1,146 @@
+{
+  "$comment": "Spaarke AI Platform Unification R5 (tasks 010 D2-01 + 011 D2-02, combined) — Chat-driven Summarize-for-Chat playbook + action seed. ONE definition file holds BOTH the sprk_analysisaction seed (SUM-CHAT@v1, with JPS-formatted sprk_systemprompt + Azure-OpenAI-Structured-Outputs-compatible output schema) AND the single-node sprk_analysisplaybook that binds it. Mirrors the in-repo Insights *.playbook.json convention (predict-matter-cost.playbook.json + universal-ingest.playbook.json) but extends with an 'actions' array that the deploy harness MUST upsert into sprk_analysisactions BEFORE resolving the node's actionCode FK. R5 CLAUDE.md §10 BINDING gotcha: NO new prompt-bearing Dataverse entity — sprk_analysisaction.sprk_systemprompt IS the JPS prompt primitive. The wizard-path Summarize playbook (GUID 4a72f99c-a119-f111-8343-7ced8d1dc988) stays unchanged; this is its chat-pane sibling per R5 design.md §2. Deploy via: scripts/Deploy-Playbook.ps1 -DefinitionFile <this-file> after az login. Idempotent without -Force (upsert by sprk_actioncode for the action; skip-by-name for the playbook).",
+  "$comment-publication": "Published as: (1) one sprk_analysisaction row (sprk_actioncode=SUM-CHAT@v1) carrying the JPS system prompt + the JSON Schema output schema; (2) one sprk_analysisplaybook row (name=summarize-document-for-chat@v1, isSystemPlaybook=true, sprk_playbooktype=0); (3) one sprk_playbooknode row (single AiAnalysis node, FK to the action via sprk_actionid). The SessionSummarizeOrchestrator (R5 task 012 / D2-03) resolves this playbook by name and invokes it from both the direct endpoint POST /api/ai/chat/sessions/{id}/summarize (task 014 / D2-04) and the InvokeSummarizePlaybookTool agent-tool path (task 015 / D2-05). Together they form the chat-driven Summarize vertical slice (FR-01 / FR-02).",
+  "$comment-schema-order": "OUTPUT SCHEMA PROPERTY DECLARATION ORDER IS LOAD-BEARING. Per task 006 spike results (notes/task-006-spike-results.md), Azure OpenAI honors JSON-Schema property declaration order when streaming Structured Outputs. The schema below declares: tldr → summary → keywords → entities (in this exact order). This is the R5 UX requirement (TL;DR-FIRST per spec FR-02). The IncrementalJsonParser (task 006) emits FieldDelta SSE events in arrival order; the StructuredOutputStreamWidget (task 017 / D2-07) renders TL;DR before any other field — Workspace-pane streams TL;DR visible to the user within ~300-500ms of stream start. DO NOT REORDER without coordinating with task 006 spike results + StructuredOutputStreamWidget contract.",
+
+  "actions": [
+    {
+      "$comment-action": "R5 task 010 (D2-01) action seed. Carries the JPS-formatted system prompt + the streaming-aware structured-outputs JSON Schema. Upserted by the deploy harness into sprk_analysisactions (lookup by sprk_actioncode). The playbook node below references this row via actionCode='SUM-CHAT@v1' for FK resolution.",
+      "actionCode": "SUM-CHAT@v1",
+      "name": "Summarize Document for Chat",
+      "description": "Streaming structured summary of session-uploaded file(s) for the R5 chat-driven Summarize vertical slice. Emits FieldDelta SSE events per top-level field of DocumentAnalysisResult (tldr → summary → keywords → entities, in declaration order per task 006 spike).",
+      "actionTypeName": "Summarize",
+      "$comment-actionTypeName": "Resolves to sprk_analysisactiontype lookup by name. The 'Summarize' row (id 3a8daf85-36da-f011-8406-7ced8d1dc988, sprk_executoractiontype=0) is the platform's generic Summarize executor type. Deploy-AnalysisAction.ps1 looks this up by name and sets sprk_actiontypeid@odata.bind.",
+      "actionType": 0,
+      "$comment-actionType": "ActionType.AiAnalysis = 0 (matches universal-ingest@v1 layer1Classify + layer2Extract + predict-matter-cost@v1 convention). Handled by AiAnalysisNodeExecutor (existing platform executor — no new node executor needed per R5 reuse mandate / CLAUDE.md §3.1).",
+      "systemPrompt": "ROLE: You are the Spaarke Summarize-for-Chat assistant. You receive 1-N file chunks from a user's chat session and produce a structured summary suitable for streaming progressive rendering in the Spaarke Assistant Workspace pane.\n\nINPUT: file_chunks (array of { fileId, fileName, chunkText, chunkOrder })\n\nINSTRUCTIONS:\n  1. Read the supplied document chunks and identify the key takeaways, the overall narrative, the dominant topics/keywords, and the named organizations + persons.\n  2. Emit a JSON object matching the output_schema EXACTLY. additionalProperties is false; do not invent fields.\n  3. STREAMING-AWARE EMISSION ORDER (LOAD-BEARING): emit fields in EXACTLY this order: tldr → summary → keywords → entities. This order is enforced by the JSON Schema property declaration order below; Azure OpenAI Structured Outputs honors declaration order during streaming (verified per Spaarke R5 task 006 spike). The R5 UI renders TL;DR within ~300-500ms of stream start; mis-ordered emission breaks the TL;DR-first UX requirement (spec FR-02).\n  4. tldr: 1-3 concise bullets, each ≤140 chars. Each bullet is a complete, standalone takeaway. Emit FIRST.\n  5. summary: ≤2 paragraphs of prose; ≤2000 chars total. Multi-sentence narrative summary suitable for the Workspace pane below the TL;DR. Emit SECOND.\n  6. keywords: comma-separated keyword string (NOT an array) suitable for search indexing + categorization. 5-15 keywords. Emit THIRD.\n  7. entities: { organizations: string[], persons: string[] } — distinct named entities mentioned in the documents. Empty arrays are valid when no entities are present. Emit LAST.\n  8. Do NOT include rawResponse, parsedSuccessfully, or emailMetadata fields — those are populated by the BFF post-processing layer (DocumentAnalysisResult), not by the LLM.\n  9. Do NOT fabricate content. If the supplied chunks contain insufficient material to summarize faithfully (no meaningful content, garbled extraction, sensitive-information block), the orchestrator routes to DeclineToFindNode downstream per spec FR-11; do NOT attempt to invent a summary in this action.\n\nQUALITY:\n  - tldr bullets are independently useful (read in isolation, still informative).\n  - summary text references file names when distinguishing multi-file content (e.g., 'In contract.pdf …').\n  - keywords prefer concrete terms (party names, dollar amounts, dates, contract types) over generic terms ('document', 'agreement', 'matter').\n  - entities.organizations + entities.persons are deduplicated (case-insensitive) and use canonical forms (e.g., 'Acme Corp.' not 'acme corp').",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tldr", "summary", "keywords", "entities"],
+        "$comment-property-order": "DECLARATION ORDER IS LOAD-BEARING — see file-level $comment-schema-order. tldr first to satisfy R5 UX FR-02 TL;DR-first streaming requirement. Per task 006 spike, Azure OpenAI streams properties in this declaration order.",
+        "properties": {
+          "tldr": {
+            "type": "array",
+            "description": "1-3 concise bullet takeaways, each ≤140 chars. Emitted FIRST in the stream so the Workspace pane can populate the TL;DR section within ~300-500ms of stream start (spec FR-02).",
+            "items": { "type": "string", "maxLength": 140 },
+            "minItems": 1,
+            "maxItems": 3
+          },
+          "summary": {
+            "type": "string",
+            "description": "Multi-sentence narrative summary (≤2 paragraphs, ≤2000 chars). Emitted SECOND. References file names when distinguishing multi-file content.",
+            "maxLength": 2000
+          },
+          "keywords": {
+            "type": "string",
+            "description": "Comma-separated keywords (5-15 terms) for search indexing + categorization. Emitted THIRD. NOTE: this is a STRING (not array) to match DocumentAnalysisResult.Keywords. Prefer concrete terms (party names, amounts, dates, contract types) over generic terms."
+          },
+          "entities": {
+            "type": "object",
+            "description": "Named entities. Emitted LAST. organizations + persons arrays may be empty when none are present.",
+            "additionalProperties": false,
+            "required": ["organizations", "persons"],
+            "properties": {
+              "organizations": {
+                "type": "array",
+                "description": "Distinct organizations mentioned in the documents (deduplicated, canonical form).",
+                "items": { "type": "string" }
+              },
+              "persons": {
+                "type": "array",
+                "description": "Distinct persons mentioned in the documents (deduplicated, canonical form).",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+
+  "playbook": {
+    "name": "summarize-document-for-chat@v1",
+    "description": "Chat-driven Summarize-for-Chat playbook (R5 D2-02). Single AiAnalysis node executes the SUM-CHAT@v1 action against 1-N session-scoped files; emits structured DocumentAnalysisResult-shaped output (tldr, summary, keywords, entities) with progressive FieldDelta SSE emission per task 006 (D1-06) Structured Outputs + IncrementalJsonParser. Output schema family matches the existing wizard-path Summarize playbook (GUID 4a72f99c-a119-f111-8343-7ced8d1dc988); this is its chat-pane sibling.",
+    "isPublic": false,
+    "isSystemPlaybook": true,
+    "sprk_playbooktype": 0,
+    "$comment-type": "sprk_playbooktype=0 (AiAnalysis) — matches universal-ingest@v1 + predict-matter-cost@v1 convention. System-owned (isSystemPlaybook=true), not user-authored.",
+    "sprk_configjson": {
+      "mode": "chat-summarize",
+      "tier": "inference",
+      "cacheTtlSeconds": 0,
+      "$comment-cacheTtl": "Cache TTL = 0 — Summarize-for-Chat is per-session and per-file-set; the file set changes mid-session as users upload/remove files (per FR-08 + R5 §3.8 20-file cap). Idempotency comes from session-files index isolation (task 001) + per-invocation file-set targeting, not from cache.",
+      "parameterSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "required": ["sessionId", "tenantId"],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "Chat session GUID. Used by RagService.SearchAsync(sessionId=...) per task 002 to scope retrieval to the spaarke-session-files index slice for this session. Required for tenant + session isolation per ADR-014."
+          },
+          "tenantId": {
+            "type": "string",
+            "description": "Tenant ID for multi-tenant isolation per ADR-014. Required on every spaarke-session-files index query."
+          },
+          "fileIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "OPTIONAL — subset of session-uploaded files to summarize (e.g., from FR-08 'summarize just one of the files'). When absent, all files in ChatSession.UploadedFiles per task 004 are summarized as a combined-summary (FR-04 multi-file acknowledgement)."
+          },
+          "style": {
+            "type": "string",
+            "description": "OPTIONAL — natural-language style hint passed through to the action's system prompt (e.g., 'executive', 'detailed', 'bullet-points'). The action's JPS prompt interprets this; absent style defaults to the prompt's default rendering."
+          }
+        }
+      }
+    },
+    "scopes": {
+      "actions": [],
+      "skills": [],
+      "knowledge": [],
+      "tools": []
+    },
+    "$comment-scopes": "Scopes left empty intentionally — matches universal-ingest@v1 + predict-matter-cost@v1 convention. The single node's executor (AiAnalysisNodeExecutor for actionType=0) is auto-discovered by NodeExecutorRegistry; per-node scope binding via actionCode FK is sufficient. The node-level actionCode='SUM-CHAT@v1' below collected into allActionCodes by Deploy-Playbook.ps1 line 361 forces resolution against the action seeded by this file's actions[] array."
+  },
+
+  "nodes": [
+    {
+      "name": "summarize",
+      "nodeType": "AIAnalysis",
+      "actionCode": "SUM-CHAT@v1",
+      "$comment-actionCode": "Resolved by Deploy-Playbook.ps1 line 396-405 against sprk_analysisactions filtered by sprk_actioncode. This file's actions[] array (top-level) seeds the action FIRST so resolution succeeds. The deploy harness sets sprk_playbooknode.sprk_actionid to the resolved GUID (line 737-740). The orchestrator (R5 task 012) reads the action at runtime via the FK to load sprk_systemprompt + output schema.",
+      "actionType": 0,
+      "$comment-actionType": "ActionType.AiAnalysis = 0; handled by AiAnalysisNodeExecutor (existing platform executor — no new node executor needed per R5 reuse mandate). The task-010 action (actions[0] above) carries sprk_systemprompt with the JPS-formatted Summarize-for-Chat prompt + the structured-outputs JSON Schema (declaration order: tldr → summary → keywords → entities).",
+      "outputVariable": "summary",
+      "positionX": 400, "positionY": 200,
+      "configJson": {
+        "sessionIdFrom": "parameters.sessionId",
+        "tenantIdFrom": "parameters.tenantId",
+        "fileIdsFrom": "parameters.fileIds",
+        "styleFrom": "parameters.style",
+        "$comment": "AiAnalysisNodeExecutor receives session + tenant + file scope via parameters. The actual document text retrieval is performed by the orchestrator (R5 task 012 SessionSummarizeOrchestrator) via the spaarke-session-files index slice (task 001) before invoking this playbook. The Structured Outputs mode + IncrementalJsonParser (task 006 / D1-06) emit progressive FieldDelta SSE events as the model streams (tldr first, then summary, then keywords, then entities — declaration order per task 006 spike); the StructuredOutputStreamWidget (task 017 / D2-07) renders the deltas in the Workspace pane."
+      }
+    }
+  ],
+
+  "dependsOnGraph": {
+    "$comment": "Single-node playbook — no edges. Mirrors the structural shape of multi-node playbooks for tooling consistency.",
+    "edges": []
+  },
+
+  "acceptanceCriteria": {
+    "$comment": "Mirrors tasks 010 + 011 POML <acceptance-criteria>. Used as documentation + smoke-test fixture targets for the orchestrator (task 012) + endpoint (task 014) integration tests.",
+    "criteria": [
+      "Action seed publishes successfully — sprk_analysisaction row with sprk_actioncode='SUM-CHAT@v1', sprk_name='Summarize Document for Chat', sprk_systemprompt populated with the JPS prompt verbatim, output schema populated with declaration order tldr → summary → keywords → entities",
+      "Playbook publishes successfully — sprk_analysisplaybook row + 1 sprk_playbooknode row in Dataverse, name='summarize-document-for-chat@v1', isSystemPlaybook=true, sprk_playbooktype=0",
+      "Lint check passes — the single node has actionCode reference 'SUM-CHAT@v1' resolving to the action seeded by this file's actions[] array",
+      "Output schema family matches DocumentAnalysisResult — required fields tldr (string[]), summary (string), keywords (string), entities (object with organizations + persons string[]) per spec FR-02",
+      "Output schema declaration order tldr → summary → keywords → entities is preserved verbatim (load-bearing for streaming-aware UX per task 006 spike + spec FR-02)",
+      "Output schema is Azure OpenAI Structured Outputs compatible — additionalProperties: false on all objects, required arrays populated, no anyOf/oneOf/discriminator keywords",
+      "Re-running Deploy-Playbook.ps1 without -Force is idempotent (no-op; both action upsert by sprk_actioncode and playbook skip-by-name semantics)"
+    ]
+  }
+}

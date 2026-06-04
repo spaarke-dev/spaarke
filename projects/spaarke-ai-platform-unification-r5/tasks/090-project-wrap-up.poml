@@ -1,0 +1,334 @@
+<task id="090" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>Wrap — Project wrap-up (README → Complete; coordination doc §8; R5 PR + merge)</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Wrap-up</phase>
+    <wave>Wrap (serial; final; depends on ALL prior tasks)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>001, 002, 003, 004, 005, 006, 007, 008, 009, 010, 011, 012, 013, 014, 015, 016, 017, 018, 019, 020, 021, 022, 023, 024, 025, 026, 027, 028, 029, 030, 031, 040, 041, 042, 043, 044</dependencies>
+    <tags>wrap-up, documentation, coordination, pr-merge</tags>
+    <rigor-level>STANDARD</rigor-level>
+  </metadata>
+
+  <prompt>
+    Close out the Spaarke AI Platform Unification R5 project. This is the FINAL task of R5
+    and is mandatory per the task-create Step 3.7 wrap-up convention + CLAUDE.md §7 task
+    completion + transition rules. Wrap-up is documentation + governance only — no new
+    code is shipped by this task.
+
+    The wrap-up performs five distinct closeouts:
+
+    1. README status update: `projects/spaarke-ai-platform-unification-r5/README.md`
+       status line flips from its pre-implementation framing ("Pre-planning — user testing
+       + FR feedback work scoped at session kickoff") to **Complete**, with a brief summary
+       of what shipped (chat-driven Summarize vertical slice + Insights `insights.query`
+       tool integration + `/analyze` configuration-only proof point + Get Started welcome
+       card + telemetry dashboards). The Graduation Criteria checklist is filled in based
+       on what actually shipped.
+
+    2. Lessons-learned verification: confirm `notes/lessons-learned.md` exists (produced
+       by task 044 / D3-05) AND is comprehensive (covers surprises, deferrals, R6 backlog
+       items per CLAUDE.md §7). If gaps are found, escalate to the operator — do NOT
+       silently edit the lessons-learned doc; it is the task-044 deliverable's authoritative
+       record.
+
+    3. Archive project artifacts per the `repo-cleanup` skill's project-completion
+       conventions: contents of `notes/` are NOT deleted (lessons-learned + coordination
+       doc + ground-truth survey + kickoff prompt are permanent project artifacts).
+       Ephemeral subdirectories (debug/, spikes/, drafts/, handoffs/, test-data/) are
+       cleaned per `repo-cleanup` rules if present. Apply the skill's recipe; do not
+       invent a parallel cleanup path.
+
+    4. Coordination changelog update: append a new R5 completion entry to
+       `notes/insights-r2-coordination.md` §8 changelog. The entry mirrors the structure
+       of the existing 2026-06-03 (late) + 2026-06-04 (late) entries authored by the
+       Insights r2 team — declare the R5 update authorship, summarize what R5 shipped,
+       resolve any remaining open touchpoint questions in §4 (specifically §4.1 chat tool
+       registration convention adoption + §4.2 intent classifier catalog status), report
+       BFF publish-size final delta vs Phase 5 baseline, and close the §6 refinement gate
+       as fired + executed.
+
+    5. R5 PR + merge: open the R5 PR against master via the `push-to-github` skill (or
+       manual `gh pr create` if the skill is not applicable for a wrap-up PR with many
+       commits). Run final code review (`/code-review`) + `/adr-check` against the
+       cumulative R5 delta. Merge to master after gates pass. TASK-INDEX 090 flips 🔲 → ✅
+       AFTER PR merge — this is the LAST action.
+
+    R5 spans 36 implementation tasks (001–031 + 040–044) plus this wrap-up. The wrap-up
+    is the only task with `parallel-safe = false` and dependencies spanning ALL prior R5
+    tasks. After this task, R5 is shipped and the project transitions to monitoring
+    (R6 backlog items live in `notes/lessons-learned.md` for the next project to pick up).
+  </prompt>
+
+  <role>
+    Senior delivery / release engineer with experience closing out multi-week multi-phase
+    Spaarke projects. Deep familiarity with the `push-to-github`, `code-review`,
+    `adr-check`, and `repo-cleanup` skills; with Spaarke's project-completion conventions
+    per CLAUDE.md §7; and with cross-project coordination protocol via the R5↔Insights
+    coordination doc §8 changelog.
+  </role>
+
+  <goal>
+    R5 is shipped to master. `README.md` status reads **Complete** with a shipped-summary
+    section and filled-in graduation criteria. `notes/lessons-learned.md` exists and is
+    comprehensive (verified, not edited). `notes/insights-r2-coordination.md` §8 has a new
+    R5 completion entry mirroring the Insights team's authoring convention. The R5 PR has
+    opened against master, passed final code-review + adr-check gates, and merged.
+    TASK-INDEX 090 is flipped 🔲 → ✅. `current-task.md` is reset to "none — project
+    complete". The project is formally closed.
+  </goal>
+
+  <inputs>
+    <file purpose="project-readme">projects/spaarke-ai-platform-unification-r5/README.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="current-task">projects/spaarke-ai-platform-unification-r5/current-task.md</file>
+    <file purpose="lessons-learned">projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+    <file purpose="coordination-doc">projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §7">Task completion + transition rules: update task POML status to "complete"; update TASK-INDEX (🔲 → ✅); reset `current-task.md`; report completion. Wrap-up task is the LAST flip — 090 → ✅ ONLY after PR merges to master.</constraint>
+    <constraint source="CLAUDE.md §10 NFR-01">BFF publish-size verification: report cumulative R5 publish-size delta vs the Phase 5 baseline (~45.65 MB as of 2026-05-26 per CLAUDE.md §10). Per project CLAUDE.md §3.6: R5 budget ≤ +1 MB (target +0.5 MB); ≥+5 MB single-task delta requires escalation; ≥60 MB ceiling is a HARD STOP. Wrap-up report MUST cite the final cumulative number.</constraint>
+    <constraint source="project CLAUDE.md §3.5">Insights tool integration governance: confirm the 6 R5-lead-sign-off decisions (D1–D6 per spec §8.2) recorded in `design-e3-tool-call-contract.md` §10 review log during task 023 (D2-13) are still in force. No silent revision of those decisions during wrap-up.</constraint>
+    <constraint source="ADR-018">Flag Scope Discipline: confirm no new feature flags were introduced by R5 (per project CLAUDE.md §3.2). R5 services remain unconditionally registered. ADR-032 Null-Object kill-switch patterns remain non-applicable.</constraint>
+    <constraint source="ADR-030">PaneEventBus channels remain closed at 4. R5 only added additive event types within existing channels. Confirm no 5th channel was added.</constraint>
+    <constraint source="project">No new code shipped by this task. README + lessons-learned + coordination doc + TASK-INDEX + current-task are the ONLY editable surfaces. The R5 PR aggregates work already merged via per-task PRs OR opens the single trunk PR if the operator chose squash strategy.</constraint>
+    <constraint source="project">Wrap-up does NOT silently edit `notes/lessons-learned.md` — that doc is the task-044 deliverable's authoritative record. If gaps are found at verification step, escalate to the operator per CLAUDE.md §6 human escalation triggers.</constraint>
+    <constraint source="project">Path-drift correction: any reference to AI Search infrastructure paths uses `infrastructure/ai-search/` (not `infra/ai-search/`).</constraint>
+    <constraint source="project CLAUDE.md §7">Cross-project coordination: append R5 completion entry to `notes/insights-r2-coordination.md` §8 changelog mirroring the Insights team's authoring convention (2026-06-03 late + 2026-06-04 late entries) — declare authorship, summarize delivery, resolve any remaining open touchpoint questions, close refinement gate as fired + executed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-completion/spaarke-conventions</topic>
+    <files>
+      <file>CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/README.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/lessons-learned.md</file>
+    </files>
+    <patterns>
+      <pattern name="R4 wrap-up reference" location="projects/spaarke-ai-platform-unification-r4/README.md">
+        R4 README's "shipped to master at `18b9323f` on 2026-06-03" framing is the
+        canonical Spaarke project-completion phrasing. R5 README's Complete status MUST
+        mirror this style (status line + commit SHA + date) plus a 3–5 line summary of
+        what shipped + the graduation-criteria checklist filled in based on actual
+        outcomes.
+      </pattern>
+      <pattern name="Insights coordination changelog authoring convention" location="projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md §8 entries dated 2026-06-03 (late) + 2026-06-04 (late)">
+        The Insights r2 team's two recent changelog entries establish the bilateral
+        authoring convention: (a) one-line summary in the changelog table at the top of §8;
+        (b) a dated subsection below with "Updated by" + "Trigger" + status tables +
+        touchpoint resolutions + "What [the other project] should do next" + Provenance.
+        R5's completion entry mirrors this structure — R5-authored, declares the
+        coordination doc bilateral, summarizes R5 delivery, resolves the §4 open
+        questions still open at gate fire, closes the §6 refinement gate as fired +
+        executed.
+      </pattern>
+      <pattern name="push-to-github skill for wrap-up PR" location=".claude/skills/push-to-github/SKILL.md">
+        The `push-to-github` skill handles the common case (commit + push + open PR
+        with conventional title + body). For wrap-up PRs the body should call out
+        cumulative scope (36 implementation tasks across Phase 1 / Phase 2 / Phase 3),
+        BFF publish-size final delta vs Phase 5 baseline, ADR compliance summary, and
+        link to lessons-learned.md. If `push-to-github` skill output is insufficient,
+        fall back to manual `gh pr create` per the operator's preference.
+      </pattern>
+      <pattern name="repo-cleanup conventions for project completion" location=".claude/skills/repo-cleanup/SKILL.md">
+        At project completion, `notes/` permanent files (lessons-learned.md,
+        coordination docs, ground-truth surveys) are retained. Ephemeral subdirectories
+        (`notes/debug/`, `notes/spikes/`, `notes/drafts/`, `notes/handoffs/`,
+        `notes/test-data/`) are cleaned. Apply the skill's recipe; do not invent a
+        parallel cleanup path.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 began as a pre-planning user-testing / FR-feedback effort (per the original README
+      framing) but evolved into a full vertical-slice + Insights tool integration project
+      after the kickoff session. The final scope shipped: chat-driven "Summarize a
+      Document" vertical slice (FR-01 through FR-08), Insights `insights.query` tool
+      integration per the binding integration brief v1.1 contract (FR-09 through FR-14),
+      a `/analyze` configuration-only proof point validating the platform-extension claim
+      (SC-19), a Get Started welcome card, telemetry dashboards, and end-to-end operator
+      testing.
+
+      The R5↔Insights coordination doc has been bilaterally maintained: Insights team
+      appended Wave D + E ship update (2026-06-03 late) and Wave F v1.1 ship update
+      (2026-06-04 late) to §8. R5's completion entry is the R5-side closeout that closes
+      the bilateral cycle. §6 refinement gate (originally planned for "mid-to-late July
+      2026") was fired within hours of Insights PR #337 merging — dramatically faster than
+      original estimate due to parallel-subagent execution acceleration.
+
+      Per CLAUDE.md §7, the wrap-up task is the LAST flip in TASK-INDEX (090 🔲 → ✅) and
+      the `current-task.md` is reset to "none — project complete" only after the PR
+      merges. The wrap-up itself is non-blocking on the merge — the PR merge is the
+      final-final closeout step.
+    </background>
+    <dependencies>
+      <dependency task="001-031" status="complete">All Phase 1 + Phase 2 tasks must be ✅ before wrap-up.</dependency>
+      <dependency task="040" status="complete">D3-01 `/analyze` configuration-only proof point — validates SC-19.</dependency>
+      <dependency task="041" status="complete">D3-02 Get Started welcome card.</dependency>
+      <dependency task="042" status="complete">D3-03 Telemetry dashboards live.</dependency>
+      <dependency task="043" status="complete">D3-04 Operator-led end-to-end testing complete; findings synthesized.</dependency>
+      <dependency task="044" status="complete">D3-05 Lessons-learned + R6 backlog authored.</dependency>
+    </dependencies>
+    <related-work>
+      <item>R4 wrap-up README pattern: `projects/spaarke-ai-platform-unification-r4/README.md`
+        — "shipped to master at `18b9323f` on 2026-06-03" framing is the canonical Spaarke
+        project-completion phrasing R5 mirrors.</item>
+      <item>Insights r2 wrap-up: ran approximately 2026-06-04 (post-Wave-F) following the
+        same Spaarke conventions. R5 looks at it as a recent peer example.</item>
+      <item>Coordination doc bilateral authoring: `notes/insights-r2-coordination.md`
+        §8 entries dated 2026-06-03 (late) + 2026-06-04 (late) establish the R5-side
+        appending convention to mirror.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. If &gt; 70%, create handoff summary and request `/compact`.
+      Declare RIGOR LEVEL: STANDARD per CLAUDE.md §8 (wrap-up documentation + governance;
+      no new code; no quality gates run at Step 9.5 per STANDARD rigor — but `code-review`
+      + `adr-check` ARE run as part of the R5 PR gate at Step 6).
+    </step>
+    <step order="1" name="Review Progress + Verify All Prior Tasks Complete">
+      Read `tasks/TASK-INDEX.md` and confirm EVERY prior task (001–031 + 040–044) is ✅.
+      Read `current-task.md` for any in-flight context. Read project README to confirm
+      it's still on the pre-implementation framing (about to be updated to Complete in
+      Step 2). If any prior task is not ✅, STOP and report per CLAUDE.md §6 — do not
+      proceed with wrap-up against an incomplete project.
+    </step>
+    <step order="2" name="Update R5 README Status">
+      Edit `projects/spaarke-ai-platform-unification-r5/README.md`:
+      (a) Change status line from "Pre-planning — user testing + FR feedback work scoped
+      at session kickoff" to **"Complete — shipped to master at `[commit-sha]` on
+      [YYYY-MM-DD]"** mirroring R4 README phrasing.
+      (b) Add a "What R5 Shipped" section (3–5 lines): chat-driven Summarize vertical
+      slice (FR-01..FR-08); Insights `insights.query` tool integration (FR-09..FR-14);
+      `/analyze` configuration-only proof point (SC-19); Get Started welcome card
+      ("Summarize a Document"); telemetry dashboards; end-to-end operator testing.
+      (c) Fill in the Graduation Criteria checklist with actual outcomes (5 candidate
+      criteria → each → ✅ with brief evidence reference).
+      (d) Add an entry to the Changelog table at the bottom dated today with summary.
+      Note: commit-sha will be filled in at Step 6 after PR merges; leave a placeholder
+      `[merge-commit-sha-tbd]` until then.
+    </step>
+    <step order="3" name="Verify Lessons-Learned Exists + Is Comprehensive">
+      Read `projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md` (produced
+      by task 044 / D3-05). Verify it covers: (a) what shipped vs original spec; (b) what
+      surprised the team; (c) what was deferred to R6 backlog; (d) per CLAUDE.md §7 wrap-up
+      requirements. If the doc is missing or substantially incomplete, STOP and escalate
+      per CLAUDE.md §6 human escalation triggers — task 044 owns this artifact, not the
+      wrap-up. Do NOT silently edit lessons-learned during wrap-up.
+    </step>
+    <step order="4" name="Archive Project Artifacts (repo-cleanup conventions)">
+      Apply `repo-cleanup` skill conventions for project completion to the R5 `notes/`
+      directory. Permanent artifacts retained: `lessons-learned.md`, `insights-r2-coordination.md`,
+      `insights-engine-assistant-integration-brief.md`, `insights-engine-contract-v1.1-request.md`,
+      `insights-team-v1.1-response.md`, `ground-truth-spaarkeai-state.md`,
+      `user-testing-kickoff.md`. Ephemeral subdirectories cleaned if present:
+      `notes/debug/`, `notes/spikes/`, `notes/drafts/`, `notes/handoffs/`, `notes/test-data/`.
+      If `repo-cleanup` is unsure about a specific file, leave it AND note it for operator
+      review in the wrap-up report. Do NOT delete files outside the `repo-cleanup` recipe.
+    </step>
+    <step order="5" name="Append R5 Completion Entry to Coordination Doc §8 Changelog">
+      Edit `projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md`:
+      (a) Append a one-line summary entry to the changelog TABLE at top of §8 dated today,
+      with summary "**R5 shipped.** Refinement gate fired + executed; R5-side closeout
+      published. Touchpoint resolutions updated. Updated by Claude (Anthropic AI agent)
+      on behalf of the R5 project — see §8.X below."
+      (b) Append a new dated subsection §8.X below (next available number after Insights
+      team's last entry) mirroring the Insights authoring convention: "Updated by",
+      "Trigger" (Wrap-up task 090 / R5 closeout), "Wave / Phase status summary table"
+      (Phase 1 + Phase 2 + Phase 3 + Wrap-up all ✅), "Touchpoint resolutions" addressing
+      §4.1 (Did R5 adopt the single-endpoint-per-tool-capability convention? Cite the
+      Summarize endpoint + `insights.query` tool registration as evidence) + §4.2 (Did
+      Insights classifier surface R5's Summarize tool? Status: still per-tool classifiers
+      per Insights team's 2026-06-03 late note; R5 used `forceMode` bypass via slash
+      command — no rework needed) + §4.4 (FieldDelta SSE reuse confirmed via shape parity
+      per 2026-06-04 late entry) + §4.5 (no PaneEventBus discriminant collisions; R5 added
+      5 additive event types within existing channels), "BFF publish-size final delta"
+      (cite cumulative MB + headroom vs 60 MB ceiling), "Refinement gate (§6) fired +
+      executed" status, "Provenance".
+    </step>
+    <step order="6" name="Open R5 PR + Final Code Review + Merge">
+      (a) Invoke `push-to-github` skill (or `gh pr create` manually for a wrap-up PR) to
+      open the R5 PR against master. PR title: "feat(r5): Spaarke AI Platform Unification —
+      chat-driven Summarize + Insights tool integration". PR body: cumulative scope summary
+      (36 tasks across 3 phases + wrap-up); BFF publish-size final delta vs Phase 5
+      baseline; ADR compliance summary; link to lessons-learned.md + coordination doc.
+      (b) Run `code-review` skill against the cumulative R5 delta (or against the PR's
+      diff if `code-review` supports PR mode). Resolve any blocking findings.
+      (c) Run `adr-check` skill against the cumulative R5 delta. Resolve any blocking
+      ADR violations.
+      (d) After both gates pass, merge the PR to master (via `gh pr merge` or operator-led
+      merge per Spaarke convention). Capture the merge commit SHA.
+      (e) Backfill the README placeholder `[merge-commit-sha-tbd]` from Step 2(a) with the
+      actual merge commit SHA + today's date. Commit + push this final README touch on
+      master (or on the branch if the merge strategy uses a separate cleanup commit).
+    </step>
+    <step order="7" name="Final TASK-INDEX Flip + current-task.md Reset">
+      Edit `projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md`: flip 090
+      🔲 → ✅ in the Wrap-up section. Add a brief completion note to the row. Update the
+      phase status table at top of TASK-INDEX: Wrap-up status from 🔲 → ✅.
+      Edit `projects/spaarke-ai-platform-unification-r5/current-task.md`: reset to
+      "none — project complete" per CLAUDE.md §7. Include the completion date + merge
+      commit SHA + link to lessons-learned.md.
+    </step>
+    <step order="8" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is testable +
+      passing. Record evidence per criterion in the task completion report.
+    </step>
+    <step order="9" name="Final Report">
+      Output the task completion report per task-execute template Step 6. Include: R5
+      shipped summary; merge commit SHA; final BFF publish-size + delta; all acceptance
+      criteria evidence; pointer to lessons-learned + coordination doc; pointer to R6
+      backlog. Report to operator that R5 is formally closed.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Stage + commit README + TASK-INDEX + current-task + coordination doc edits; tag merge commit if Spaarke convention applies</tool>
+    <tool name="gh">GitHub CLI — open PR, run final gates, merge to master</tool>
+    <tool name="push-to-github">Skill for PR open + push convention</tool>
+    <tool name="code-review">Skill for final cumulative R5 code review</tool>
+    <tool name="adr-check">Skill for final cumulative ADR compliance check</tool>
+    <tool name="repo-cleanup">Skill for project-completion artifact cleanup conventions</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/README.md (status → Complete + shipped summary + graduation criteria filled + changelog entry)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md (§8 changelog appended with R5 completion entry mirroring Insights team's authoring convention)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (090 🔲 → ✅; phase status table updated)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to "none — project complete")</output>
+    <output type="pr">R5 PR against master (opened + reviewed + merged); merge commit SHA captured</output>
+    <output type="report">Task completion report per task-execute template Step 6 (shipped summary + final publish-size + acceptance evidence)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`projects/spaarke-ai-platform-unification-r5/README.md` status reads **Complete** with merge commit SHA + date; "What R5 Shipped" section present; Graduation Criteria checklist filled in with actual outcomes; Changelog table has new entry dated today.</criterion>
+    <criterion testable="true">`projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md` exists, is comprehensive per CLAUDE.md §7 (covers what shipped, surprises, deferrals, R6 backlog), and was NOT edited during wrap-up — task 044 retains authorship.</criterion>
+    <criterion testable="true">`projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md` §8 changelog has a new R5 completion entry mirroring the Insights team's authoring convention: one-line summary in the changelog table at top of §8 + a dated subsection below with status tables + touchpoint resolutions + BFF publish-size final delta + refinement gate closure + Provenance.</criterion>
+    <criterion testable="true">`notes/` directory archived per `repo-cleanup` conventions: permanent artifacts retained (lessons-learned, coordination docs, ground-truth survey, kickoff prompt, integration brief, v1.1 request + response); ephemeral subdirectories cleaned if present.</criterion>
+    <criterion testable="true">R5 PR opened against master; final `code-review` skill run cleanly; final `adr-check` skill run cleanly; PR merged; merge commit SHA captured + backfilled into README.</criterion>
+    <criterion testable="true">`projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md` 090 row flipped 🔲 → ✅ AFTER PR merge (last action); phase status table at top reflects Wrap-up ✅.</criterion>
+    <criterion testable="true">`projects/spaarke-ai-platform-unification-r5/current-task.md` reset to "none — project complete" with completion date + merge commit SHA + link to lessons-learned.md.</criterion>
+    <criterion testable="true">BFF publish-size cumulative delta vs Phase 5 baseline (~45.65 MB) reported in wrap-up report; ≤ +1 MB R5 budget (target +0.5 MB per project CLAUDE.md §3.6); &lt; 60 MB ceiling confirmed.</criterion>
+    <criterion testable="true">No new feature flags introduced (per ADR-018 + project CLAUDE.md §3.2); no new PaneEventBus channels (per ADR-030 — only additive event types within existing 4 channels); no ADR-032 Null-Object impls added (R5 services unconditionally registered).</criterion>
+    <criterion testable="true">Coordination touchpoints §4.1 + §4.2 + §4.4 + §4.5 in `insights-r2-coordination.md` have R5-side resolutions recorded in the new §8.X subsection; §6 refinement gate marked as fired + executed.</criterion>
+  </acceptance-criteria>
+</task>

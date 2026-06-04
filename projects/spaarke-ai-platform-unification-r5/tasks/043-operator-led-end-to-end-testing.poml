@@ -1,0 +1,716 @@
+<task id="043" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D3-04 Operator-led end-to-end testing (discoverability + correctness pass across 7 high-readiness surfaces)</title>
+    <status>not-started</status>
+    <estimated-effort>1 day</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>Operator — Claude Code assists as walkthrough/checklist runner + evidence compiler</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 3 — Polish + Future-Use Validation</phase>
+    <wave>P3-3 (serial; runs after 040 + 041 + 042 complete; blocks 044 lessons-learned)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>040 (D3-01 `/analyze` proof point), 041 (D3-02 Get Started welcome card), 042 (D3-03 telemetry dashboards)</dependencies>
+    <tags>operator-led, testing, e2e, discoverability</tags>
+    <rigor-level>STANDARD</rigor-level>
+  </metadata>
+
+  <prompt>
+    Run an operator-led end-to-end testing pass against the R5-shipped SpaarkeAi
+    surface on Spaarke Dev. Test along TWO axes — **discoverability** (can a user
+    find the capability without prompting?) and **correctness** (does it behave as
+    specified once invoked?) — across the seven high-readiness surfaces called out
+    in the R5 user-testing kickoff doc (`notes/user-testing-kickoff.md`) and the
+    `notes/ground-truth-spaarkeai-state.md` §7 "Suggested initial test focus":
+
+    1. **Workspace switching** — dropdown + auto-install + pinned + tab persistence + custom layouts (FR carry-over from R3/R4; R5 left this surface untouched, but it is the most-used entry point and must regress-pass).
+    2. **Attachment uploads** — 25 MB binary cap, MIME allow-list, end-to-end chat + file association (per `docs/standards/CHAT-ATTACHMENT-POLICY.md`; R5 extends this with `ChatSession.UploadedFiles[]` manifest from task 004).
+    3. **Section picker** — WorkspaceLayoutWizard "+ New Workspace" → picker shows all 7 sections including Calendar + Daily Briefing; compose + save + reopen.
+    4. **Pane collapse** — click any pane header to collapse to icon-only strip; click strip to re-expand; state persists across refresh; all three panes independently collapsible (R4 task 094 shipped this).
+    5. **Chat + playbook lifecycle** — chat session creation → message exchange → playbook invocation (e.g., Predict Matter Cost) → response rendering → session close + restoration on next visit (R5 left the chat lifecycle intact; this is a regression pass).
+    6. **W-4 / W-5 concept validation (NOW REAL — was partial in R4)** — Assistant → Workspace mount (W-4: DocumentViewerWidget dispatcher wiring shipped by task 022) AND Context → Workspace mount (W-5: per-wizard final-step "Add to Workspace" handlers). Concept validation now testable end-to-end (where R4 left them as "infrastructure-only" caveats).
+    7. **NEW Summarize + Insights tool integration** — Slash command `/summarize` + natural-language tool routing → `StructuredOutputStreamWidget` progressive rendering → `FilePreviewContextWidget` preview → Insights `insights.query` tool (playbook + RAG paths) → `InsightsResponseRenderer` + clickable citations + confidence floor badge.
+
+    This is a **PURE TEST + DOCUMENTATION** task — ZERO production code change. The
+    AI agent does NOT drive the SpaarkeAi UI; the **operator** does. Claude Code
+    serves as the walkthrough/checklist runner: it surfaces each surface's expected
+    discoverability cues + correctness assertions verbatim from the spec / kickoff
+    doc, prompts the operator to exercise the surface on Spaarke Dev tenant,
+    captures findings via the operator's spoken/typed observations, ranks findings
+    by severity (Blocking / High / Medium / Low) using the rubric defined in Step 4
+    below, and compiles everything into the ONE deliverable
+    `notes/testing-pass-results.md`.
+
+    The output of this task feeds task 044 (D3-05 lessons-learned + R6 backlog) —
+    High and Medium findings populate the R6 backlog; Blocking findings escalate
+    immediately and gate task 044. Low findings inform polish backlog without
+    blocking. BFF publish-size delta = 0 MB (no BFF code touched; confirm in
+    results doc).
+  </prompt>
+
+  <role>
+    Operator-led testing facilitator. The OPERATOR is the user-testing driver —
+    they exercise the SpaarkeAi UI on Spaarke Dev tenant, observe behavior, and
+    speak/type observations. Claude Code is the walkthrough assistant — it does
+    NOT make UI clicks (no browser automation in this task), does NOT judge UX
+    independently. Its job is to:
+
+    1. Load the seven surface specs verbatim from `spec.md` / `notes/user-testing-kickoff.md` / `notes/ground-truth-spaarkeai-state.md`.
+    2. Surface each surface's expected discoverability cues + correctness assertions one at a time.
+    3. Prompt the operator with a structured per-surface walkthrough script.
+    4. Capture operator observations as paraphrased text (no verbatim customer-data quotes; Spaarke Dev is synthetic, but the discipline is reinforced).
+    5. Rank each finding per the Step 4 severity rubric.
+    6. Compile the consolidated `notes/testing-pass-results.md` at the end.
+    7. Flag Blocking findings to the operator immediately for escalation (do NOT silently log).
+
+    Claude Code is competent on the platform — familiar with R5 spec, kickoff doc,
+    ground-truth doc, R4 lessons-learned, and the seven surface implementations.
+    It is NOT a QA automation harness — it is a structured-walkthrough coach.
+  </role>
+
+  <goal>
+    ONE concrete deliverable on the R5 branch:
+
+    **`projects/spaarke-ai-platform-unification-r5/notes/testing-pass-results.md`** (NEW, ephemeral notes)
+
+    Contents:
+    1. Test session metadata — date, tenant (Spaarke Dev), operator identity (e.g., "Ralph Schroeder"), Wave F deployment status at test time (per `notes/insights-r2-coordination.md` §8 changelog), session duration.
+    2. Per-surface walkthrough record (7 sections, one per surface above). Each section captures:
+       - Discoverability axis: was the entry point findable without prompting? (yes / partial / no, paraphrased rationale).
+       - Correctness axis: did the surface behave per spec? (pass / partial / fail, paraphrased per-assertion outcomes).
+       - Findings filed against this surface (linked to the ranked findings list in §3 below).
+    3. Consolidated findings list, ranked by severity (Blocking / High / Medium / Low) per the Step 4 rubric. Each finding has: ID (FIND-NNN), surface, axis (discoverability / correctness / both), severity, paraphrased description, suggested remediation owner (R5 patch / R6 backlog / R5 lessons-learned doc note only).
+    4. Aggregate verdict per surface (regression / pass / partial / fail).
+    5. Aggregate verdict for the testing pass overall (Phase 3 ship-ready / Phase 3 ship-with-followups / Phase 3 ship-blocked-on-finding-X).
+    6. Confirmations: BFF publish-size delta = 0 MB; zero new dependencies; no production code change.
+    7. Cross-link to task 044 R6 backlog seed list (High + Medium findings) for downstream consumption.
+
+    Acceptance: ALL seven surfaces walked through; findings captured + ranked;
+    `testing-pass-results.md` exists with the seven structured sections + ranked
+    findings; ZERO unresolved Blocking findings (or, if Blocking is present, it is
+    explicitly escalated to the operator with a recorded next-step + the task is
+    BLOCKED-PENDING-ESCALATION until resolved).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="kickoff-doc">projects/spaarke-ai-platform-unification-r5/notes/user-testing-kickoff.md</file>
+    <file purpose="ground-truth">projects/spaarke-ai-platform-unification-r5/notes/ground-truth-spaarkeai-state.md</file>
+    <file purpose="insights-coordination">projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md</file>
+    <file purpose="binding-contract">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+    <file purpose="dependency-task-040">projects/spaarke-ai-platform-unification-r5/tasks/040-analyze-configuration-only-proof-point.poml</file>
+    <file purpose="dependency-task-041">projects/spaarke-ai-platform-unification-r5/tasks/041-get-started-welcome-card-summarize.poml</file>
+    <file purpose="dependency-task-042">projects/spaarke-ai-platform-unification-r5/tasks/042-telemetry-dashboards.poml</file>
+    <file purpose="chat-attachment-policy">docs/standards/CHAT-ATTACHMENT-POLICY.md</file>
+    <file purpose="dashboard-widget-model">docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    <file purpose="workspace-architecture">docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="plan.md D3-04">Discoverability + correctness pass per kickoff doc's high-readiness surfaces (workspace switching, attachment uploads, section picker, pane collapse, chat + playbook lifecycle, W-4/W-5 concept validation now that they're real, NEW Summarize + Insights tool integration). Output: `notes/testing-pass-results.md`. Findings synthesized + ranked by severity.</constraint>
+    <constraint source="plan.md Phase 3 gating">Phase 3 ships when: operator-led end-to-end testing complete; lessons-learned authored. This task (043) is the operator-led testing step; task 044 is the lessons-learned step. Both must close before project wrap-up (task 090).</constraint>
+    <constraint source="kickoff doc §"High readiness"">The seven high-readiness surfaces are the binding test scope. Lower-readiness surfaces (W-4/W-5 in R4 were "partial"; R5 made them real via task 022 dispatcher wiring + task 017/018 widget surface) are NOW in scope per kickoff doc's "now that they're real" qualifier. Test recommendation in ground-truth doc §7 specifically calls out the W-4/W-5 + chat lifecycle as fair game once R5 ships them.</constraint>
+    <constraint source="project (operator-led)">This task is testing/QA. Claude Code is a guided walkthrough; operator drives actual testing on Spaarke Dev. NO browser automation in this task — operator clicks, observes, speaks/types. Claude Code captures + structures + ranks.</constraint>
+    <constraint source="project (severity ranking — binding)">Findings ranked Blocking / High / Medium / Low per the Step 4 rubric. Blocking = contract violation, data loss, security issue, or "Phase 3 ship cannot proceed". High = major UX gap, regression, broken happy-path. Medium = polish gap, minor UX rough edge, R6 backlog candidate. Low = nice-to-have, observation-only.</constraint>
+    <constraint source="R5 CLAUDE.md §3.6 / ADR-029">BFF publish-size delta = 0 MB (this task adds notes only; no production code change; no `dotnet publish` measurement required). Confirm in results doc.</constraint>
+    <constraint source="ADR-018 (no information leakage)">Even on Spaarke Dev synthetic data, evidence is paraphrased — NO verbatim citations / answer text / customer-data-shaped content in `testing-pass-results.md`. Operator observations captured as structural + categorical, not as raw quotes.</constraint>
+    <constraint source="spec SC-22">Lessons-learned + R6 backlog produced per phase wrap-up (task 044 D3-05). High + Medium findings from this task seed that backlog; cross-link explicitly in §7 of results doc.</constraint>
+    <constraint source="project (Wave F state recording)">Wave F (Insights v1.1 SSE + clickable citations `href`) deployment status MUST be recorded in results doc metadata. If Wave F shipped, test the v1.1 paths (SSE streaming + clickable `href` citations). If Wave F NOT shipped, test the v1.0 fallback paths (single-shot + display-name-only citations). Either is contract-acceptable per NFR-11 graceful fallback.</constraint>
+    <constraint source="project (Blocking escalation)">If a Blocking finding is observed during the walkthrough, the walkthrough PAUSES — the operator decides immediately whether to (a) continue testing other surfaces with the Blocking issue flagged for parallel remediation, OR (b) STOP the testing pass and escalate. Either choice is captured in results doc §5 (aggregate verdict).</constraint>
+    <constraint source="project (zero-code-change)">This task touches ZERO `.cs`, `.ts`, `.tsx`, `.bicep`, `.json` (other than the results notes file). If the testing pass surfaces a Blocking finding that requires immediate code fix, that fix is a SEPARATE follow-up task (not bundled into task 043). Task 043 captures the finding and unblocks itself by handing the fix to a new ticket.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 / reuse mandate">No parallel test infrastructure created. No new test fixtures. No new docs templates. The results doc follows the existing R5 `notes/` markdown convention. The walkthrough script is inline in Step 3 of this POML — NOT a separate file.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>operator-led-testing/discoverability-correctness-pass</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md (FRs + NFRs + SCs as correctness criteria)</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/user-testing-kickoff.md §"High readiness" + §"Suggested initial test focus"</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/ground-truth-spaarkeai-state.md §7 (test focus + readiness tiers)</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md §8 changelog (for Wave F status at test time)</file>
+      <file>docs/standards/CHAT-ATTACHMENT-POLICY.md (binding for attachment-upload surface)</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md (workspace switching + mount sources reference)</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md (pane collapse + tab persistence reference)</file>
+    </files>
+    <patterns>
+      <pattern name="Per-surface walkthrough template (two-axis: discoverability + correctness)" location="(this task — used by Steps 3.1 through 3.7)">
+        For each of the seven surfaces, the walkthrough has the same shape:
+        1. **Discoverability prompt to operator**: "Open Spaarke Dev in a fresh
+           browser session (cleared session storage). Without using any prior
+           knowledge, find {surface}. Note: what cues led you to it? Was it
+           obvious, partial, or hidden?"
+        2. **Operator action**: exercise the surface per the discoverability path
+           found.
+        3. **Correctness prompt to operator**: "Now exercise {surface} through
+           {N specific assertions}. For each, report pass / partial / fail."
+        4. **Findings capture**: operator speaks/types observations; Claude
+           Code paraphrases + assigns severity per Step 4 rubric.
+        5. **Surface aggregate verdict**: operator summarizes one-line.
+        6. Move to next surface.
+
+        The seven surfaces use the same template; only the per-surface assertions
+        differ (defined in Steps 3.1 through 3.7 inline).
+      </pattern>
+      <pattern name="Severity rubric (binding for ranking findings)" location="(this task — Step 4 inline)">
+        - **Blocking (B)**: Contract violation, data loss, security issue,
+          authentication failure, or "Phase 3 cannot ship until this is fixed".
+          Stops the testing pass for immediate escalation OR is filed with
+          explicit escalation in §5 of results doc.
+        - **High (H)**: Major UX gap, regression vs prior shipped state, broken
+          happy-path, surface-level discoverability failure (cue completely
+          absent for a designed-discoverable capability). Feeds R6 backlog
+          with HIGH priority; should be addressed within R6 scope.
+        - **Medium (M)**: Polish gap, minor UX rough edge, partial-but-usable
+          discoverability cue, edge-case correctness gap. Feeds R6 backlog;
+          R6 prioritizes per available bandwidth.
+        - **Low (L)**: Nice-to-have, observation-only, future-enhancement seed,
+          single-user-perspective preference. Recorded but does NOT seed R6
+          backlog — feeds task 044 lessons-learned doc only.
+      </pattern>
+      <pattern name="Information-leakage discipline (per ADR-018)" location="(this task — applies to all evidence capture)">
+        Spaarke Dev uses synthetic data, but the discipline applies regardless:
+        - Question text from operator: OK verbatim (operator's own words).
+        - Response answer text from LLM: paraphrase only (e.g., "Insights
+          returned a structured Predict-Matter-Cost envelope with 4
+          contributing factors; structurally well-formed").
+        - Citation source names from synthetic documents: OK verbatim.
+        - Citation excerpt text / passage content: paraphrase only.
+        - UI labels, button text, error messages: OK verbatim (these are
+          product strings, not customer data).
+        - CorrelationIds, tab IDs, session IDs: OK verbatim (opaque debug keys).
+      </pattern>
+      <pattern name="Discoverability cue source-of-truth (where each surface's expected entry point lives)" location="(this task — inline per surface in Step 3)">
+        - Workspace switching: SwitchWorkspace dropdown in shell header (R4
+          shipped); auto-install of pinned workspaces on cold load
+          (`docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md`).
+        - Attachment uploads: paperclip icon in `ChatInputBar`; 25 MB binary
+          cap; MIME allow-list (`docs/standards/CHAT-ATTACHMENT-POLICY.md`).
+        - Section picker: "+ New Workspace" button → WorkspaceLayoutWizard →
+          section picker shows 7 sections including Calendar + Daily Briefing
+          (R3 shipped; R4 unchanged).
+        - Pane collapse: click pane header → collapses to icon-only strip;
+          click strip → re-expands (R4 task 094).
+        - Chat + playbook lifecycle: ConversationPane → slash command menu OR
+          natural language → playbook invocation → response render →
+          session persists across page reloads (R3/R4 shipped; R5 left intact).
+        - W-4: in Assistant pane, after a file-related response, click "Open as
+          Workspace tab" → `DocumentViewerWidget` opens in Workspace pane (R5
+          task 022 dispatcher wiring).
+        - W-5: in Context pane, complete a wizard (e.g., Create Project), final
+          step has "Add to Workspace" button → wizard result opens as Workspace
+          tab (R5 dispatcher; if R5 did NOT ship a W-5 dispatcher, mark this
+          sub-surface as "still partial — concept validation tests dispatcher
+          design only" and downgrade testing to design-review depth).
+        - Summarize: `/summarize` slash command OR Get Started welcome card
+          (task 041) OR natural-language "summarize these files" → file upload
+          → `StructuredOutputStreamWidget` progressive rendering →
+          `FilePreviewContextWidget` shows preview.
+        - Insights tool: natural-language matter/project/invoice question OR
+          `/ask-insights` slash command → `InsightsQueryToolHandler` →
+          `InsightsResponseRenderer` (playbook OR RAG path) → clickable
+          citations (v1.1) or display-name-only (v1.0) → confidence floor
+          badge (`< 0.6` threshold).
+      </pattern>
+      <pattern name="Wave F deployment state inquiry (binding for Surface 7 design)" location="(this task — Step 2 pre-flight)">
+        Before testing Surface 7 (Summarize + Insights), check
+        `notes/insights-r2-coordination.md` §8 changelog for Wave F status.
+        If Wave F shipped to Spaarke Dev: test v1.1 paths (SSE streaming +
+        clickable `href` citations). If Wave F NOT shipped: test v1.0
+        fallback paths (single-shot + display-name-only citations). Record
+        which state was tested in results doc metadata. Either is
+        contract-acceptable per NFR-11 — DO NOT mark a v1.0 state as a
+        finding; the graceful fallback IS the design.
+      </pattern>
+      <pattern name="Cross-link findings to task 044 R6 backlog seed list" location="(this task — Step 6)">
+        High + Medium findings from this task are the seed list for task 044
+        (D3-05 lessons-learned + R6 backlog). In §7 of `testing-pass-results.md`,
+        Claude Code produces a markdown-table seed list with: finding ID,
+        surface, severity (H or M only — Low is excluded), paraphrased
+        description, suggested R6 framing. Task 044 consumes this list
+        directly to seed the R6 backlog section of `lessons-learned.md`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 043 is the **operator-led end-to-end testing** pass that closes Phase 3
+      polish. It is binding per plan.md D3-04 + spec SC-22 (lessons-learned
+      produced per phase wrap-up — which task 044 produces using findings from this
+      task). Without this task's evidence, Phase 3 cannot close.
+
+      The seven surfaces under test are NOT arbitrary — they are exactly the
+      kickoff doc's high-readiness list (`notes/user-testing-kickoff.md` §Q3 +
+      `notes/ground-truth-spaarkeai-state.md` §7) plus the two surfaces R5
+      MATERIALLY CHANGED (Summarize vertical slice from Phase 2 + Insights tool
+      integration). The kickoff doc explicitly added the "now that they're real"
+      qualifier for W-4/W-5 — R4 left those infrastructure-only (dispatcher gap);
+      R5 task 022 (DocumentViewerWidget upgrade) shipped the W-4 dispatcher; W-5
+      remained partial unless R5 extended a wizard (operator-driven scope choice
+      at test time — see Step 3.6 below).
+
+      The testing pass is **operator-led** by design. UI testing on a model-driven
+      Power App + Code Page surface is intrinsically observation-heavy — most
+      "discoverability" judgments are subjective and require human intuition
+      ("did the cue feel obvious?"). Claude Code's role is structural: prompt
+      the operator in a consistent way per surface, capture observations without
+      editorializing, apply the severity rubric consistently, and compile the
+      ranked findings. The operator's judgment is the source of truth; Claude's
+      output is the structured artifact.
+
+      The dependency chain matters: this task depends on 040 + 041 + 042 ALL
+      shipping FIRST. Task 040 (`/analyze` configuration-only proof point)
+      validates the platform-extension claim and gives the operator a fresh
+      surface to test the configuration-extension story. Task 041 (Get Started
+      welcome card) gives the operator a binary new discoverability cue for
+      Surface 7 — does the welcome card make `/summarize` discoverable for new
+      users? Task 042 (telemetry dashboards) gives the operator access to App
+      Insights / Grafana panels during testing so they can observe the
+      `r5.summarize.invocation` event stream + cost-per-session live as they
+      test. Skipping ANY of 040/041/042 leaves the test pass incomplete.
+
+      The Wave F state question matters specifically for Surface 7 (Insights
+      tool). At time of task 043 execution, Wave F may or may not have shipped
+      to Spaarke Dev — both states are contract-acceptable per NFR-11 graceful
+      fallback. Test the live state and record it. Do NOT mark a v1.0 state
+      as a finding — the graceful fallback IS the design.
+
+      Severity-ranked findings flow to task 044 (lessons-learned + R6 backlog).
+      Blocking findings, if any, BLOCK task 044 until resolved (the operator
+      decides whether to file a hot-fix follow-up task or accept the surface
+      with explicit Phase 3 ship caveats). High + Medium findings seed the R6
+      backlog. Low findings are recorded in the lessons-learned doc as
+      observations but do NOT seed backlog work.
+
+      The information-leakage discipline (ADR-018) is reinforced even on
+      synthetic data — train muscle memory. Question text + UI labels +
+      citation source names are OK verbatim; response answer text + citation
+      excerpts are paraphrased. Operator observations captured paraphrased
+      (the operator's own paraphrasing of what they observed; not Claude
+      Code's interpretation).
+
+      After task 043 closes, task 044 (D3-05 lessons-learned + R6 backlog)
+      runs. After 044 closes, task 090 (project wrap-up) runs. Then R5 ships.
+    </background>
+    <dependencies>
+      <dependency task="040" status="required-blocking">
+        D3-01 — `/analyze` configuration-only proof point. Validates SC-19
+        platform-extension claim. Provides a fresh proof-point surface for the
+        testing pass to exercise (Surface 6/7 spillover — `/analyze` is a
+        proof-point of the same surface family as `/summarize`). Task 043 MUST
+        NOT begin until task 040 is ✅.
+      </dependency>
+      <dependency task="041" status="required-blocking">
+        D3-02 — Get Started welcome card "Summarize a Document". Provides a
+        binary new discoverability cue for Surface 7 (Summarize). Operator
+        tests whether the card makes `/summarize` more discoverable than
+        slash-command-only. Task 043 MUST NOT begin until task 041 is ✅.
+      </dependency>
+      <dependency task="042" status="required-blocking">
+        D3-03 — Telemetry dashboards (App Insights / Grafana). Provides live
+        observability during testing — operator can watch `r5.summarize.invocation`
+        events stream as they test, observe cost-per-session breakdown, see
+        SSE event-rate histograms. Task 043 MUST NOT begin until task 042 is ✅.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 030 (D2-20) — Insights tool smoke tests + SME walkthrough.
+        Different scope (Insights tool specifically, with 15-question matrix);
+        complementary to task 043 (broader 7-surface pass). Findings from
+        task 030 may already cover some Surface 7 territory — cross-link in
+        results doc to avoid duplication.</item>
+      <item>Task 031 (D2-22) — Phase 2 tests + integration verification.
+        End-to-end Summarize + Insights + cross-tool disambiguation. Task 043's
+        Surface 5 (chat + playbook lifecycle) + Surface 7 (Summarize +
+        Insights) builds on task 031's coverage by adding the discoverability
+        axis (task 031 was correctness-focused).</item>
+      <item>Task 044 (D3-05) — Lessons-learned + R6 backlog. Direct consumer
+        of this task's High + Medium findings; can NOT close before this task
+        closes.</item>
+      <item>R4 task 094 — Pane collapse shipping. Surface 4 in this task is a
+        regression pass for R4-shipped behavior.</item>
+      <item>R3/R4 carry-over — Surfaces 1, 2, 3, 5 are largely R3/R4-shipped
+        behavior. R5 left them intact. Regression-pass intent: confirm R5
+        Phase 1/Phase 2 work did NOT regress these surfaces.</item>
+      <item>`notes/user-testing-kickoff.md` — Source-of-truth for the
+        7-surface scope; Q1-Q6 scoping outcomes anchored the test design.</item>
+      <item>`notes/ground-truth-spaarkeai-state.md` §7 — Source-of-truth for
+        readiness tiers; "high readiness" surfaces map directly to this
+        task's Surfaces 1-4; W-4/W-5 promotion documented in same §7.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request `/compact`.
+      Declare RIGOR LEVEL explicitly per CLAUDE.md §8:
+
+      ```
+      🔒 RIGOR LEVEL: STANDARD
+      📋 REASON: Operator-led testing/QA task — zero production code change, zero
+                 new infrastructure, zero new dependencies. Documentation/notes
+                 output only. Quality gates (code-review + adr-check) are NOT
+                 applicable to test-execution evidence per CLAUDE.md §8 (gates
+                 trigger on code changes, not on test session findings). The
+                 task IS Phase 3 binding (plan.md D3-04 + spec SC-22 feed), but
+                 rigor is calibrated to the artifact shape (notes doc) not the
+                 strategic stake. Tags: operator-led + testing + e2e +
+                 discoverability — matches STANDARD per task-execute decision tree.
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0–7 (Step 4.5 quality gates SKIPPED).
+      Proceeding with Step 0...
+      ```
+    </step>
+
+    <step order="1" name="Review Progress + verify dependencies">
+      Read `tasks/TASK-INDEX.md`. Confirm task 043 status is 🔲, dependencies
+      040 + 041 + 042 are ALL ✅ (BLOCKING — if ANY is 🔲 or 🔄, STOP and report;
+      operator-led testing of incomplete Phase 3 polish would yield spurious
+      findings), parallel-safe = false (serial within P3-3). Read
+      `current-task.md` to verify no R5 task is in flight that conflicts with
+      the test surface. Confirm task 044 is 🔲 (downstream sibling; this task
+      feeds 044).
+    </step>
+
+    <step order="2" name="Pre-flight Spaarke Dev environment + Wave F state inquiry">
+      Verify environment prerequisites BEFORE walking the operator through the
+      seven surfaces. Operator confirms each:
+
+      (a) **Spaarke Dev tenant accessible**: operator logs in, lands on
+          SpaarkeAi home; confirm shell loads + auth works.
+
+      (b) **R5 build deployed**: confirm the latest R5 BFF + code-page bundle
+          is live on Spaarke Dev (i.e., Phase 2 + Phase 3 polish tasks
+          040/041/042 are in the deployed bits, not just merged to branch).
+          Check by visiting the Get Started welcome card (Surface 7 entry —
+          if "Summarize a Document" card visible, task 041 IS deployed).
+
+      (c) **Wave F deployment status**: read `notes/insights-r2-coordination.md`
+          §8 changelog. Record: Wave F shipped to Spaarke Dev? (v1.1 SSE +
+          `citations[].href` clickable citations available?). Affects Surface 7
+          test design — record state in results doc metadata.
+
+      (d) **Telemetry dashboards reachable**: operator opens the App Insights
+          / Grafana panels deployed in task 042; confirms they load + show
+          recent data.
+
+      (e) **Synthetic test entities available** (for Surface 7 Insights path):
+          confirm Wave D7 GUIDs (matter `da116923-d65a-f111-a825-3833c5d9bcb1`,
+          project `27845394-8e5f-f111-a825-70a8a59455f4`, invoice
+          `05c8ef8d-8e5f-f111-a825-70a8a59455f4`) are queryable on Spaarke Dev.
+
+      (f) **Fresh-session readiness for discoverability**: operator opens a
+          fresh browser profile OR clears Spaarke Dev session storage so the
+          discoverability axis is tested with no prior-session muscle memory
+          (cold-load behavior + Get Started welcome card visibility depends
+          on `sessionStorage` sentinel state per `LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md`).
+
+      Document all six checks in `notes/testing-pass-results.md` metadata
+      section. Gate Step 3 on all six passing — if ANY check fails, STOP and
+      escalate (typically a deployment / environment issue, not a R5 design
+      issue).
+    </step>
+
+    <step order="3" name="Walk operator through the seven surfaces (binding scope)">
+      For EACH of the seven surfaces below, Claude Code follows the
+      per-surface walkthrough template from &lt;knowledge&gt; patterns:
+      (1) discoverability prompt → (2) operator action → (3) correctness
+      prompt with explicit assertions → (4) findings capture + severity →
+      (5) surface aggregate verdict → next surface.
+
+      Surfaces are executed in numeric order 3.1 → 3.7 unless the operator
+      requests a different order. Each sub-step is its own checkpoint —
+      after Surface 3.3 completes (3 surfaces done), Claude Code runs a
+      silent context-handoff ("✅ Checkpoint."); after Surface 3.6 (6 done),
+      another checkpoint; after Surface 3.7, the final synthesis Step 4
+      begins.
+
+      ### Step 3.1 — Surface 1: Workspace switching (REGRESSION)
+      Discoverability axis: SwitchWorkspace dropdown in shell header is the
+      designed entry; auto-install of pinned workspaces on cold load
+      (`docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md` reference).
+      Correctness assertions:
+      - SwitchWorkspace dropdown lists all available layouts.
+      - Clicking a layout opens it as a tab.
+      - Pinned workspaces auto-open on cold load.
+      - Tab persistence: tabs survive browser refresh AND browser close+reopen.
+      - Custom layouts saved via WorkspaceLayoutWizard appear in dropdown.
+      Regression intent: confirm R5 Phase 1/Phase 2 work did NOT regress this surface.
+
+      ### Step 3.2 — Surface 2: Attachment uploads (PARTIAL R5 EXTENSION)
+      Discoverability axis: paperclip icon in `ChatInputBar` is the designed
+      entry; drag-drop also supported. New R5 element: `ChatSession.UploadedFiles[]`
+      manifest persists across tab close/reopen.
+      Correctness assertions (per `docs/standards/CHAT-ATTACHMENT-POLICY.md`):
+      - 1 MB file uploads OK.
+      - 10 MB file uploads OK.
+      - 24 MB file uploads OK.
+      - 26 MB file REJECTS with clear error message.
+      - Disallowed MIME type REJECTS with clear error message.
+      - File chip visible in chat input area after upload (R5 D2-11).
+      - "N files attached" indicator visible (R5 D2-11).
+      - Remove file via chip click — file removed from session-files index (R5 D2-11).
+      - Uploaded files survive tab close + reopen (R5 D1-04 `ChatSession.UploadedFiles` manifest).
+      Regression intent: confirm R5 chip/indicator/remove UX does not break the 25 MB cap correctness.
+
+      ### Step 3.3 — Surface 3: Section picker (REGRESSION)
+      Discoverability axis: "+ New Workspace" button in SwitchWorkspace dropdown.
+      Correctness assertions:
+      - WorkspaceLayoutWizard opens.
+      - Section picker shows all 7 sections (per ground-truth doc) including Calendar + Daily Briefing.
+      - Operator composes a custom layout with at least 3 sections.
+      - Save flow completes; custom layout appears in dropdown.
+      - Reopening the custom layout renders the saved sections correctly.
+      Regression intent: confirm R5 Phase 1/Phase 2 work did NOT regress this surface.
+
+      **CHECKPOINT** (after 3.3 completes): silent context-handoff "✅ Checkpoint."
+
+      ### Step 3.4 — Surface 4: Pane collapse (REGRESSION)
+      Discoverability axis: pane header click → collapse to icon-only strip
+      (R4 task 094 shipped).
+      Correctness assertions:
+      - Click Workspace pane header → collapses to icon-only strip.
+      - Click strip → re-expands to default width.
+      - State persists across browser refresh.
+      - All three panes (Workspace + Assistant + Context) support independent collapse.
+      - All-panes-collapsed overlay renders correctly per `SPAARKEAI-WORKSPACE-ARCHITECTURE.md`.
+      Regression intent: confirm R5 work did NOT regress this surface.
+
+      ### Step 3.5 — Surface 5: Chat + playbook lifecycle (REGRESSION + R5 SLICE)
+      Discoverability axis: ConversationPane is the central chat surface;
+      slash command menu via `/` keystroke; playbook gallery via Context pane.
+      Correctness assertions:
+      - Chat session creates on first message.
+      - Messages exchange correctly.
+      - Playbook invocation via slash command (e.g., `/playbook predict-matter-cost`) routes to `PlaybookOrchestrationService` and produces structured output.
+      - Response rendering via existing widget surface works.
+      - Session persists across browser refresh + reopens (triple-tier persistence: Redis + Cosmos + Dataverse).
+      - R5 addition: `ChatSession.UploadedFiles[]` survives session lifecycle (already exercised in Surface 2; here confirm it integrates correctly with playbook invocation — does playbook see uploaded files in its context?).
+      Regression intent: confirm chat + playbook lifecycle works end-to-end with R5 changes layered in.
+
+      ### Step 3.6 — Surface 6: W-4 / W-5 concept validation (NEW VIA R5)
+      Discoverability axis (W-4): in Assistant pane, after a file-related
+      response, "Open as Workspace tab" button should be visible (R5 task 022
+      shipped DocumentViewerWidget dispatcher wiring).
+      Discoverability axis (W-5): in Context pane, complete a wizard (e.g.,
+      Create Project) — final step should have "Add to Workspace" button.
+      **NOTE**: R5 did NOT ship a W-5 dispatcher in the canonical scope.
+      Operator decides at test time whether W-5 is testable as "concept
+      validation only" (design review without UI exercise) OR is in scope
+      because a parallel project wired it. Document the operator's choice
+      in results doc Surface 6 section.
+      Correctness assertions (W-4):
+      - "Open as Workspace tab" button visible after Assistant produces a file-related response.
+      - Click button → DocumentViewerWidget opens in Workspace pane.
+      - Document preview renders correctly (uses extracted `RichFilePreview` renderer per R5 task 013).
+      - Tab persists per Surface 1 tab-persistence behavior.
+      Correctness assertions (W-5 — if testable):
+      - "Add to Workspace" button visible at wizard final step.
+      - Click button → wizard result opens as Workspace tab.
+      - Tab persists.
+      Concept validation intent: validate W-4/W-5 design ASSUMING dispatcher wiring is now real (R5 shipped W-4; W-5 may still be partial).
+
+      **CHECKPOINT** (after 3.6 completes): silent context-handoff "✅ Checkpoint."
+
+      ### Step 3.7 — Surface 7: NEW Summarize + Insights tool integration (R5 CORE)
+      Discoverability axis (Summarize):
+      - Get Started welcome card "Summarize a Document" visible at welcome stage (R5 task 041).
+      - `/summarize` slash command discoverable via `/` keystroke.
+      - Natural-language "summarize these files" routes correctly (R5 task 015 `InvokeSummarizePlaybookTool`).
+      Discoverability axis (Insights):
+      - `/ask-insights` slash command discoverable.
+      - Natural-language matter/project/invoice question routes to `insights.query` (R5 task 024).
+      Correctness assertions (Summarize):
+      - Upload 2-3 files via paperclip.
+      - `/summarize` produces progressive rendering via `StructuredOutputStreamWidget` (R5 task 017) — TL;DR populates first, then summary, then per-file highlights.
+      - `FilePreviewContextWidget` shows preview of uploaded files (R5 task 018).
+      - "Summarize this only" per-file affordance produces a new Workspace tab (R5 task 021).
+      - Slash command `/summarize` semantic extension routes correctly when files attached vs not (R5 task 019).
+      Correctness assertions (Insights — Wave F state-dependent):
+      - `InsightsResponseRenderer` (R5 task 026) renders playbook path correctly (e.g., Predict Matter Cost).
+      - `InsightsResponseRenderer` renders RAG path correctly (e.g., "What are the closing conditions?").
+      - Decline case renders correctly (low-evidence questions).
+      - Empty-results case renders correctly (off-topic questions per FR-04 anti-hallucination).
+      - **If Wave F shipped**: clickable citations open source in `FilePreviewContextWidget`; SSE streaming visible.
+      - **If Wave F NOT shipped**: display-name-only citations; single-shot response; graceful fallback per NFR-11.
+      - Confidence floor badge renders for `confidence < 0.6` responses (R5 task 028).
+      - 12 error codes handled with appropriate UX (R5 task 029) — exercise at least 1 organic error if observed; do NOT intentionally trigger all 12.
+      - Cross-tool disambiguation: ambiguous prompt ("summarize this matter") — operator notes which tool the agent picked + whether the routing felt sensible (NFR-12).
+      Concept validation intent: validate the FULL R5 vertical slice + Insights tool integration end-to-end.
+
+      Per-surface findings are captured inline as Step 3.X completes. Move to
+      Step 4 (severity ranking) ONLY after all seven surfaces complete (or
+      after an explicit operator-decided STOP on a Blocking finding).
+    </step>
+
+    <step order="4" name="Rank findings by severity (binding rubric)">
+      Compile findings from all seven surfaces into a single ranked list.
+      Apply severity rubric from &lt;knowledge&gt; pattern:
+
+      - **Blocking (B)**: Contract violation, data loss, security issue,
+        authentication failure, "Phase 3 cannot ship until this is fixed".
+        Each Blocking finding triggers immediate escalation to operator —
+        Claude Code surfaces the finding in chat with the recommendation
+        "ESCALATE: this is Blocking. Continue testing other surfaces with
+        this flagged for parallel remediation, OR STOP this task pending
+        fix." Operator picks the path; record decision in results doc §5.
+      - **High (H)**: Major UX gap, regression vs prior shipped state,
+        broken happy-path, surface-level discoverability failure. Feeds R6
+        backlog with HIGH priority. Does NOT block Phase 3 ship if remediation
+        is captured in R6 backlog.
+      - **Medium (M)**: Polish gap, minor UX rough edge, partial-but-usable
+        discoverability cue, edge-case correctness gap. Feeds R6 backlog with
+        MEDIUM priority. R6 addresses per available bandwidth.
+      - **Low (L)**: Nice-to-have, observation-only, future-enhancement seed,
+        single-user-perspective preference. Recorded but does NOT seed R6
+        backlog — feeds task 044 lessons-learned doc only.
+
+      For each finding, record: ID (FIND-NNN starting at FIND-001), surface
+      (one of the 7), axis (discoverability / correctness / both), severity
+      (B/H/M/L), paraphrased description (≤2 sentences, NO verbatim LLM
+      content), suggested remediation owner (R5 hot-fix / R6 backlog / R5
+      lessons-learned doc note only).
+
+      Number of findings is NOT prescriptive — could be zero, could be 10+.
+      The pass is "complete" when all seven surfaces are walked and findings
+      (if any) ranked. Zero findings + all surfaces pass + zero regressions
+      is the IDEAL Phase 3 close.
+    </step>
+
+    <step order="5" name="Author testing-pass-results.md (consolidated deliverable)">
+      Create `projects/spaarke-ai-platform-unification-r5/notes/testing-pass-results.md`
+      with seven structured sections:
+
+      **§1 — Metadata**
+      - Date, tenant (Spaarke Dev), operator identity (e.g., "Ralph Schroeder"),
+        Wave F deployment status at test time, session duration, Claude Code
+        session ID (if useful for downstream audit).
+      - Pre-flight check outcomes from Step 2 (all six checks).
+
+      **§2 — Per-surface walkthrough records (7 sub-sections, one per Surface 1-7)**
+      Each sub-section:
+      - Surface name + reference to Step 3.X.
+      - Discoverability outcome (yes / partial / no + paraphrased rationale).
+      - Correctness assertions outcomes (per-assertion pass / partial / fail).
+      - Findings filed against this surface (cross-referenced to §3 by FIND-NNN).
+      - Surface aggregate verdict (regression-pass / pass / partial / fail).
+
+      **§3 — Consolidated findings list (ranked by severity)**
+      Markdown table:
+      | ID | Surface | Axis | Severity | Description (paraphrased) | Remediation owner |
+      |---|---|---|---|---|---|
+      | FIND-001 | 7 | discoverability | M | ... | R6 backlog |
+      | ... | ... | ... | ... | ... | ... |
+
+      **§4 — Aggregate verdict per surface**
+      Table:
+      | Surface | Verdict |
+      |---|---|
+      | 1. Workspace switching | regression-pass |
+      | ... | ... |
+
+      **§5 — Aggregate verdict for the testing pass overall**
+      One of: "Phase 3 ship-ready (no Blocking; H/M findings → R6 backlog)" OR
+      "Phase 3 ship-with-followups (no Blocking; followup tickets filed for X/Y)" OR
+      "Phase 3 ship-blocked-on-finding-FIND-NNN (Blocking — escalation required)".
+
+      **§6 — Confirmations**
+      - BFF publish-size delta = 0 MB (no BFF code touched by this task).
+      - Zero new dependencies (no new NuGet / npm packages introduced).
+      - No production code change (notes file only).
+      - Information-leakage discipline observed: ZERO verbatim LLM-content quotes in §2-§3.
+
+      **§7 — Cross-link to task 044 R6 backlog seed list**
+      Markdown table of H + M findings only (Low excluded; Blocking is its own escalation row):
+      | ID | Surface | Severity | Paraphrased description | Suggested R6 framing |
+      |---|---|---|---|---|
+
+      This §7 IS the seed list task 044 consumes directly.
+
+      Author the doc in a single logical pass. Reviewer cross-checks at Step 6
+      against the seven surfaces actually walked.
+    </step>
+
+    <step order="6" name="Verify acceptance criteria + cross-link to task 044">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is
+      testable + passing. Record evidence per criterion inline in
+      `testing-pass-results.md` §6.
+
+      Confirm cross-link to task 044 §7 seed list is well-formed (each row has
+      ID + surface + severity + paraphrased description + suggested R6 framing
+      column). Task 044 will consume this directly.
+
+      If ANY criterion is failing AND remediable in-task, fix it (e.g., re-walk
+      a missed surface). If a criterion is failing AND tied to a Blocking
+      finding, STOP — task is BLOCKED-PENDING-ESCALATION. If a Blocking
+      finding is recorded with operator-decided "continue with parallel
+      remediation" path, the task may close with the Blocking finding
+      explicitly flagged in §5 + a follow-up task ID referenced.
+    </step>
+
+    <step order="7" name="Document + Complete">
+      If all acceptance criteria pass AND no unresolved Blocking findings:
+      - Update task POML status to `complete`.
+      - Update `TASK-INDEX.md`: 043 🔲 → ✅.
+      - Reset `current-task.md` to the next pending task per CLAUDE.md §7
+        (next: 044 D3-05 lessons-learned + R6 backlog).
+      - Report task completion to operator with the next task (044) called
+        out as ready to start, AND surface the §7 seed list as the direct
+        input to task 044.
+
+      If a Blocking finding is recorded but operator chose "continue with
+      parallel remediation":
+      - Update task POML status to `complete` BUT with explicit Blocking
+        finding flagged in completion report.
+      - Update `TASK-INDEX.md`: 043 🔲 → ✅ with note "Completed with Blocking
+        finding FIND-NNN — see results doc §5 escalation path".
+      - Operator owns scheduling the parallel remediation; task 044 may
+        proceed.
+
+      If a Blocking finding is recorded AND operator chose "STOP pending fix":
+      - Update task POML status to `in-progress` (NOT complete).
+      - Update `TASK-INDEX.md`: 043 🔲 → 🔄 with note "Awaiting fix for
+        Blocking finding FIND-NNN".
+      - Do NOT reset `current-task.md` — task remains in-progress.
+      - Phase 3 close (and task 044) gates on this task's completion AFTER
+        the Blocking fix lands.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load spec / kickoff doc / ground-truth doc / dependency tasks 040 + 041 + 042 / Insights coordination doc / standards docs as walkthrough source-of-truth.</tool>
+    <tool name="Write">Create `notes/testing-pass-results.md` consolidated deliverable.</tool>
+    <tool name="Edit">Update TASK-INDEX.md status + current-task.md per Step 7 paths.</tool>
+    <tool name="context-handoff">Checkpointing per R5 CLAUDE.md §5 (silent after Step 3.3 + Step 3.6; verbose if &gt;60%).</tool>
+    <tool name="git">Stage + commit on the R5 branch (one logical commit: results doc + TASK-INDEX update + current-task.md update). Operator-supervised — Claude Code does NOT commit autonomously.</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/testing-pass-results.md (NEW — 7-section consolidated deliverable: metadata + per-surface walkthrough records + ranked findings + per-surface verdicts + overall verdict + confirmations + R6 backlog seed list)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 043 🔲 → ✅ if no unresolved Blocking; → 🔄 if Blocking + operator chose STOP)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending task — likely 044 — only if task 043 closes)</output>
+    <output type="report">Task completion report (per task-execute template Step 6) — surfaces task 044 as next ready task + flags any Blocking findings for operator awareness</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All SEVEN high-readiness surfaces (workspace switching, attachment uploads, section picker, pane collapse, chat + playbook lifecycle, W-4/W-5 concept validation, NEW Summarize + Insights tool integration) walked through end-to-end with the operator on Spaarke Dev. Confirmed by `testing-pass-results.md` §2 containing seven sub-sections (one per surface) each with discoverability outcome + correctness assertions outcomes + surface verdict.</criterion>
+    <criterion testable="true">Each surface walkthrough tested BOTH axes — discoverability (entry-point findable? cue obvious / partial / hidden?) AND correctness (behaves per spec assertions?). Confirmed by per-surface sub-sections in §2 each containing both axes' outcomes.</criterion>
+    <criterion testable="true">Findings captured per surface + consolidated in §3 ranked findings list. Each finding has: ID (FIND-NNN), surface, axis, severity (Blocking / High / Medium / Low), paraphrased description (≤2 sentences), suggested remediation owner. Confirmed by §3 table content.</criterion>
+    <criterion testable="true">Severity ranking applied per the binding rubric (Blocking / High / Medium / Low) defined in Step 4 + &lt;knowledge&gt; patterns. Confirmed by reviewer scan of §3 — each finding's severity rationale traceable to rubric criteria.</criterion>
+    <criterion testable="true">`notes/testing-pass-results.md` exists with all seven structured sections (§1 metadata, §2 per-surface walkthroughs, §3 ranked findings, §4 per-surface verdicts, §5 overall verdict, §6 confirmations, §7 R6 backlog seed list). Confirmed by file inspection.</criterion>
+    <criterion testable="true">**ZERO unresolved Blocking findings** — OR — if Blocking finding(s) recorded, EACH is explicitly escalated to operator in §5 with a recorded next-step decision (continue with parallel remediation OR STOP pending fix). Confirmed by §5 content + Step 7 task status path.</criterion>
+    <criterion testable="true">Pre-flight Spaarke Dev environment + Wave F state recorded in §1 metadata: all six pre-flight checks (tenant access, R5 build deployed, Wave F status, telemetry dashboards reachable, synthetic test entities available, fresh-session readiness). Confirmed by §1 content.</criterion>
+    <criterion testable="true">Wave F deployment status recorded — testing pass targeted v1.1 paths (SSE + clickable `href` citations) if shipped OR v1.0 fallback paths (single-shot + display-name-only citations) if not shipped. Either state is contract-acceptable per NFR-11; the choice was recorded, NOT marked as a finding. Confirmed by §1 + Surface 7 evidence.</criterion>
+    <criterion testable="true">**Information-leakage discipline (ADR-018) observed** — results doc §2-§3 contains ZERO verbatim LLM-generated answer text or citation excerpts. Question text, UI labels, error messages, citation source names OK verbatim; response answer text + citation passages paraphrased. Confirmed by reviewer scan.</criterion>
+    <criterion testable="true">Cross-link to task 044 R6 backlog seed list in §7 is well-formed: markdown table with H + M findings only (Low excluded; Blocking is its own §5 escalation row); each row has finding ID + surface + severity + paraphrased description + suggested R6 framing column. Confirmed by §7 content. Task 044 will consume this directly.</criterion>
+    <criterion testable="true">All 3 dependency tasks (040 + 041 + 042) confirmed ✅ in TASK-INDEX.md before testing pass began. Confirmed by Step 1 evidence in results doc §1 metadata.</criterion>
+    <criterion testable="true">**Reuse mandate verified (R5 CLAUDE.md §3.1)** — No new test fixtures, no new doc templates, no parallel test infrastructure created. Results doc follows existing R5 `notes/` markdown convention. Walkthrough script remained INLINE in this POML's Step 3 — NOT spun out into a separate file. Confirmed by repository diff.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (confirmed in §6; no BFF code touched). Zero new dependencies introduced (no new NuGet / npm packages; verified by repository diff). No production code change (only notes + TASK-INDEX status + current-task.md update). Confirmed by §6 content + git diff.</criterion>
+    <criterion testable="true">Aggregate verdict for the testing pass overall recorded in §5 as one of: "Phase 3 ship-ready" / "Phase 3 ship-with-followups" / "Phase 3 ship-blocked-on-finding-X". Choice traceable to §3 findings list + §4 per-surface verdicts. Confirmed by §5 content.</criterion>
+    <criterion testable="true">Operator-led discipline observed — Claude Code did NOT drive the SpaarkeAi UI; the operator did. Claude Code captured + structured + ranked observations without editorializing. Per-surface walkthrough followed the consistent template from &lt;knowledge&gt; patterns. Confirmed by reviewer scan of §2 for consistent structure across all seven surfaces.</criterion>
+  </acceptance-criteria>
+</task>

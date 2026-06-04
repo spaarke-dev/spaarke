@@ -31,6 +31,13 @@ public class RagServiceTests
     private readonly Mock<ILogger<RagService>> _loggerMock;
     private readonly IOptions<AnalysisOptions> _options;
 
+    // R5 task 002 — session-files routing requires per-test SearchIndexClient mock
+    // configuration. The mock is constructed once per test class instance and exposed
+    // so tests targeting SessionId-routing can pre-configure GetSearchClient(indexName)
+    // to return a mock SearchClient and Verify that the session-files index was selected.
+    private readonly Mock<SearchIndexClient> _searchIndexClientMock;
+    private const string SessionFilesIndexName = "spaarke-session-files";
+
     // Test embedding (3072 dimensions like text-embedding-3-large)
     private readonly ReadOnlyMemory<float> _testEmbedding;
 
@@ -41,6 +48,7 @@ public class RagServiceTests
         _embeddingCacheMock = new Mock<IEmbeddingCache>();
         _privilegeGroupResolverMock = new Mock<IPrivilegeGroupResolver>();
         _loggerMock = new Mock<ILogger<RagService>>();
+        _searchIndexClientMock = new Mock<SearchIndexClient>(MockBehavior.Loose);
         _options = Options.Create(new AnalysisOptions
         {
             DefaultRagModel = RagDeploymentModel.Shared,
@@ -70,13 +78,19 @@ public class RagServiceTests
         // KnowledgeBaseEndpoints. Existing unit tests do not exercise the B8 admin methods,
         // so a Loose mock SearchIndexClient + a default-shape AiSearchOptions satisfies the
         // constructor without affecting test semantics.
-        var searchIndexClientMock = new Mock<SearchIndexClient>(MockBehavior.Loose);
+        //
+        // R5 task 002 (2026-06-04): the shared `_searchIndexClientMock` field is also used
+        // by session-files-routing tests to Verify that GetSearchClient(SessionFilesIndexName)
+        // is invoked when `RagSearchOptions.SessionId` is non-empty. The AiSearchOptions
+        // here includes the SessionFilesIndexName default so existing tests remain unaffected.
         var aiSearchOptions = Options.Create(new AiSearchOptions
         {
             Endpoint = "https://test-search.search.windows.net",
             ApiKeySecretName = "test-api-key",
             KnowledgeIndexName = "spaarke-knowledge-index-v2",
-            DiscoveryIndexName = "discovery-index"
+            DiscoveryIndexName = "discovery-index",
+            SessionFilesIndexName = SessionFilesIndexName,
+            SessionFilesSemanticConfigName = "session-files-semantic-config"
         });
 
         return new RagService(
@@ -85,7 +99,7 @@ public class RagServiceTests
             _embeddingCacheMock.Object,
             _privilegeGroupResolverMock.Object,
             _options,
-            searchIndexClientMock.Object,
+            _searchIndexClientMock.Object,
             aiSearchOptions,
             _loggerMock.Object);
     }
@@ -265,6 +279,153 @@ public class RagServiceTests
 
     #endregion
 
+    #region SearchAsync — Session-Files Routing (R5 task 002 / FR-09)
+
+    // The four tests in this region verify the additive `SessionId` routing branch added
+    // by R5 task 002. They cover (a) regression — SessionId absent leaves behavior
+    // identical to pre-R5; (b) routing — SessionId present invokes
+    // SearchIndexClient.GetSearchClient(SessionFilesIndexName); (c) filter invariant —
+    // BOTH `tenantId eq '...'` AND `sessionId eq '...'` clauses are emitted per
+    // ADR-014 (tenant + session isolation); (d) skip-behavior — knowledge-source /
+    // privilege-group / parent-entity filters are NOT applied under session routing
+    // because the session-files schema does not carry those columns (task 001).
+
+    [Fact]
+    public async Task SearchAsync_WhenSessionIdAbsent_RoutesToTenantKnowledgeIndex()
+    {
+        // R5 task 002 regression: pre-R5 callers (R3/R4 wizard, document classifier,
+        // analysis nodes) pass NO SessionId — behavior MUST stay byte-for-byte identical.
+        // Spec NFR-10 back-compat.
+
+        // Arrange
+        var service = CreateService();
+        var options = new RagSearchOptions { TenantId = "tenant-1" }; // No SessionId
+
+        SetupMockEmbedding();
+        SetupMockSearchClient();
+
+        // Act
+        await service.SearchAsync("test query", options);
+
+        // Assert — Deployment-service path (existing) is invoked, session-files index
+        // is NOT touched.
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync("tenant-1", It.IsAny<CancellationToken>()),
+            Times.Once);
+        _searchIndexClientMock.Verify(
+            x => x.GetSearchClient(SessionFilesIndexName),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SearchAsync_WhenSessionIdProvided_RoutesToSessionFilesIndex()
+    {
+        // R5 task 002 / FR-09: session-scoped retrieval routes via
+        // SearchIndexClient.GetSearchClient(SessionFilesIndexName) — NOT via
+        // IKnowledgeDeploymentService (which routes per-tenant for the knowledge index).
+
+        // Arrange
+        var sessionSearchClientMock = SetupSessionFilesSearchClient();
+        var service = CreateService();
+        var options = new RagSearchOptions
+        {
+            TenantId = "tenant-1",
+            SessionId = "session-abc-123"
+        };
+
+        SetupMockEmbedding();
+
+        // Act
+        await service.SearchAsync("test query", options);
+
+        // Assert — session-files index is selected via SearchIndexClient;
+        // deployment-service path is NOT touched.
+        _searchIndexClientMock.Verify(
+            x => x.GetSearchClient(SessionFilesIndexName),
+            Times.Once);
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientByDeploymentAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SearchAsync_WhenSessionIdProvided_AppliesTenantAndSessionFilter()
+    {
+        // R5 task 002 / ADR-014: tenant isolation invariant — when SessionId is set,
+        // the OData filter MUST AND `tenantId eq '<tid>'` with `sessionId eq '<sid>'`.
+        // A session query in tenant A can never leak across to tenant B.
+
+        // Arrange
+        SearchOptions? capturedOptions = null;
+        var sessionSearchClientMock = SetupSessionFilesSearchClient(capture: opts => capturedOptions = opts);
+        var service = CreateService();
+        var options = new RagSearchOptions
+        {
+            TenantId = "tenant-A",
+            SessionId = "session-xyz"
+        };
+
+        SetupMockEmbedding();
+
+        // Act
+        await service.SearchAsync("test query", options);
+
+        // Assert — OData filter contains BOTH tenant AND session clauses ANDed.
+        capturedOptions.Should().NotBeNull();
+        capturedOptions!.Filter.Should().NotBeNull();
+        capturedOptions.Filter.Should().Contain("tenantId eq 'tenant-A'");
+        capturedOptions.Filter.Should().Contain("sessionId eq 'session-xyz'");
+        capturedOptions.Filter.Should().Contain(" and ");
+        // Defense-in-depth — ensure clauses are NEVER OR'd (cross-tenant leak risk).
+        capturedOptions.Filter.Should().NotContain("tenantId eq 'tenant-A' or sessionId");
+    }
+
+    [Fact]
+    public async Task SearchAsync_WhenSessionIdProvided_DoesNotApplyKnowledgeSourceOrPrivilegeFilters()
+    {
+        // R5 task 002 — session-files schema (task 001) does NOT carry
+        // `knowledgeSourceId` / `parentEntityType` / `parentEntityId` / `privilege_group_ids`
+        // columns. The session-routing branch SKIPS those filters even when callers pass
+        // them. Documented in task 002 POML constraints.
+
+        // Arrange
+        SearchOptions? capturedOptions = null;
+        var sessionSearchClientMock = SetupSessionFilesSearchClient(capture: opts => capturedOptions = opts);
+        var service = CreateService();
+        var options = new RagSearchOptions
+        {
+            TenantId = "tenant-1",
+            SessionId = "session-abc",
+            KnowledgeSourceId = "ks-001", // SHOULD BE IGNORED
+            DocumentType = "contract",    // SHOULD BE IGNORED
+            ParentEntityType = "matter",  // SHOULD BE IGNORED
+            ParentEntityId = "matter-456" // SHOULD BE IGNORED
+        };
+
+        SetupMockEmbedding();
+
+        // Act
+        await service.SearchAsync("test query", options);
+
+        // Assert — knowledge-source / document-type / parent-entity clauses NOT emitted,
+        // privilege-group clause NOT emitted; only tenant + session remain (plus any
+        // tag-based clauses, which ARE valid against the session-files schema).
+        capturedOptions.Should().NotBeNull();
+        capturedOptions!.Filter.Should().NotContain("knowledgeSourceId");
+        capturedOptions.Filter.Should().NotContain("documentType eq");
+        capturedOptions.Filter.Should().NotContain("parentEntityType eq");
+        capturedOptions.Filter.Should().NotContain("parentEntityId eq");
+        capturedOptions.Filter.Should().NotContain("privilege_group_ids");
+        // Tenant + session ARE present (regression guard).
+        capturedOptions.Filter.Should().Contain("tenantId eq 'tenant-1'");
+        capturedOptions.Filter.Should().Contain("sessionId eq 'session-abc'");
+    }
+
+    #endregion
+
     #region RagSearchOptions Extended Properties Tests
 
     [Fact]
@@ -315,6 +476,33 @@ public class RagServiceTests
 
         // Assert
         options.ParentEntityId.Should().BeNull();
+    }
+
+    [Fact]
+    public void RagSearchOptions_SessionId_DefaultsToNull()
+    {
+        // R5 task 002 — SessionId is the new additive property; default-null preserves
+        // pre-R5 routing behavior for all existing callers (NFR-10 back-compat).
+
+        // Arrange & Act
+        var options = new RagSearchOptions { TenantId = "tenant-1" };
+
+        // Assert
+        options.SessionId.Should().BeNull();
+    }
+
+    [Fact]
+    public void RagSearchOptions_SessionId_CanBeSet()
+    {
+        // Arrange & Act
+        var options = new RagSearchOptions
+        {
+            TenantId = "tenant-1",
+            SessionId = "session-abc-123"
+        };
+
+        // Assert
+        options.SessionId.Should().Be("session-abc-123");
     }
 
     [Fact]
@@ -1163,6 +1351,47 @@ public class RagServiceTests
         _deploymentServiceMock
             .Setup(x => x.GetSearchClientByDeploymentAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(searchClientMock.Object);
+    }
+
+    /// <summary>
+    /// R5 task 002 — wire <c>SearchIndexClient.GetSearchClient(SessionFilesIndexName)</c>
+    /// to return a mock <see cref="SearchClient"/> that returns empty results, capturing
+    /// the <see cref="SearchOptions"/> passed to <c>SearchAsync</c> so tests can assert
+    /// the OData filter contents (tenant + session clauses) and the absence of
+    /// knowledge-source / privilege-group clauses.
+    /// </summary>
+    private Mock<SearchClient> SetupSessionFilesSearchClient(Action<SearchOptions>? capture = null)
+    {
+        var searchClientMock = new Mock<SearchClient>();
+
+        var searchResults = SearchModelFactory.SearchResults<KnowledgeDocument>(
+            values: new List<SearchResult<KnowledgeDocument>>(),
+            totalCount: 0,
+            facets: null,
+            coverage: null,
+            rawResponse: null!);
+
+        var responseMock = Response.FromValue(searchResults, null!);
+
+        searchClientMock
+            .Setup(x => x.SearchAsync<KnowledgeDocument>(
+                It.IsAny<string>(),
+                It.IsAny<SearchOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, SearchOptions, CancellationToken>((_, opts, _) => capture?.Invoke(opts))
+            .ReturnsAsync(responseMock);
+
+        // IndexName is read by RagService.SearchAsync's LogRetrievalQuery call — supply
+        // the session-files index name so the structured log emits the correct value.
+        searchClientMock
+            .SetupGet(x => x.IndexName)
+            .Returns(SessionFilesIndexName);
+
+        _searchIndexClientMock
+            .Setup(c => c.GetSearchClient(SessionFilesIndexName))
+            .Returns(searchClientMock.Object);
+
+        return searchClientMock;
     }
 
     private void SetupMockSearchClientForIndexing()

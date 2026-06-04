@@ -1,0 +1,34 @@
+{
+  "messages": [
+    {"role": "system", "content": "You analyze legal documents and return structured summaries."},
+    {"role": "user", "content": "Summarize this employment contract: ACME Corp hires Jane Doe as Senior Engineer effective 2026-07-01. Salary $180,000 annually. Non-compete clause for 12 months post-termination within California. Confidentiality obligations indefinite. Termination requires 30 days written notice from either party."}
+  ],
+  "temperature": 0,
+  "stream": true,
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "DocumentSummary",
+      "strict": true,
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tldr", "summary", "keywords", "entities"],
+        "properties": {
+          "tldr": {"type": "array", "items": {"type": "string"}, "description": "Top 3 bullet points"},
+          "summary": {"type": "string", "description": "Full prose summary"},
+          "keywords": {"type": "string", "description": "Comma-separated key terms"},
+          "entities": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["organizations", "persons"],
+            "properties": {
+              "organizations": {"type": "array", "items": {"type": "string"}},
+              "persons": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        }
+      }
+    }
+  }
+}

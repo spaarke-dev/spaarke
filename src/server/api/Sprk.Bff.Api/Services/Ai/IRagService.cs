@@ -288,6 +288,24 @@ public record RagSearchOptions
     public string? ParentEntityId { get; init; }
 
     /// <summary>
+    /// R5 spec §4.2 / FR-09 — optional session identifier for session-scoped retrieval.
+    /// When set (non-null/non-empty), <see cref="IRagService.SearchAsync(string, RagSearchOptions, CancellationToken)"/>
+    /// routes the underlying <c>SearchClient</c> to the session-files index
+    /// (see <c>AiSearchOptions.SessionFilesIndexName</c>) instead of the tenant-scoped
+    /// knowledge index, and appends a <c>sessionId eq '...'</c> clause to the OData
+    /// filter ANDed with the existing unconditional <c>tenantId eq '...'</c> clause —
+    /// preserving the ADR-014 tenant-isolation invariant (a session query in tenant A
+    /// can never leak across to tenant B). When null/empty, behavior is byte-for-byte
+    /// identical to the pre-R5 path: tenant-deployment routing via
+    /// <c>IKnowledgeDeploymentService</c>. Under session-scoped routing, the
+    /// <c>KnowledgeSourceId(s)</c> / <c>ExcludeKnowledgeSourceIds</c> /
+    /// <c>ParentEntityType</c>+<c>ParentEntityId</c> / privilege-group filters are
+    /// SKIPPED (with debug log) because the session-files schema does not carry those
+    /// columns (per task 001 schema).
+    /// </summary>
+    public string? SessionId { get; init; }
+
+    /// <summary>
     /// Whether to use semantic ranking.
     /// Default: true (recommended for best relevance)
     /// </summary>

@@ -128,6 +128,19 @@ export interface WorkspacePaneEvent {
    *                              adapt their view to the new active context (Round 4 Fix 4 signal
    *                              infrastructure — no consumers yet, just the foundation for future
    *                              pane coordination)
+   * - `streaming_started`      — a structured-output streaming run has begun; downstream widgets
+   *                              (e.g. StructuredOutputStreamWidget, R5 task 017 / D2-07) mount and
+   *                              prepare to receive field deltas. Carries `streamId` so multiple
+   *                              concurrent streams can be disambiguated (R5 D2-06 / spec NFR-09).
+   * - `field_delta`            — a single delta in an in-flight structured-output stream; carries
+   *                              `streamId`, `fieldPath` (JSON path of the target field),
+   *                              `fieldContent` (the delta content) and monotonic `sequence`.
+   *                              Subscribed by StructuredOutputStreamWidget to progressively
+   *                              render the output as it streams (R5 D2-06 / spec NFR-09).
+   * - `streaming_complete`     — the structured-output stream has finished; carries `streamId`
+   *                              and `completionStatus` (`'complete' | 'declined' | 'empty'`) so
+   *                              the widget can finalise its rendering or show a terminal state
+   *                              (R5 D2-06 / spec NFR-09).
    */
   type:
     | 'widget_load'
@@ -140,7 +153,10 @@ export interface WorkspacePaneEvent {
     | 'wizard_step'
     | 'entity_resolved'
     | 'session_reset'
-    | 'active_widget_changed';
+    | 'active_widget_changed'
+    | 'streaming_started'
+    | 'field_delta'
+    | 'streaming_complete';
 
   /** Identifies the widget kind (e.g. `"document-summary"`, `"clause-list"`). */
   widgetType?: string;
@@ -236,6 +252,68 @@ export interface WorkspacePaneEvent {
    * Typed as `unknown` because field values vary by wizard and step.
    */
   fieldValue?: unknown;
+
+  // ── streaming fields ──────────────────────────────────────────────────────
+  //
+  // Carried by the three R5 structured-output streaming discriminants:
+  // `streaming_started`, `field_delta`, `streaming_complete`. All four fields
+  // are optional on the base type so existing subscribers (which never touch
+  // them) remain type-safe. Subscribers that handle the streaming events MUST
+  // narrow on `event.type` before accessing these fields.
+  //
+  // Added by R5 task 016 (D2-06) per spec NFR-09 + ADR-030 additive-types rule.
+
+  /**
+   * Stable identifier correlating the three lifecycle events of a single
+   * structured-output stream (`streaming_started` → `field_delta` (N) →
+   * `streaming_complete`). Required when
+   * `type === 'streaming_started' | 'field_delta' | 'streaming_complete'`.
+   * Subscribers use this to disambiguate concurrent streams when more than
+   * one structured-output run is in flight in the same session.
+   */
+  streamId?: string;
+
+  /**
+   * JSON path of the field receiving the delta within the structured-output
+   * schema (e.g. `"summary"`, `"parties[0].name"`, `"keyTerms"`).
+   * Required when `type === 'field_delta'`. Subscribers route the delta to
+   * the correct UI element in the progressively-rendered output.
+   */
+  fieldPath?: string;
+
+  /**
+   * The delta content for a `field_delta` event. Strings are appended in
+   * `sequence` order to build the final field value. Required when
+   * `type === 'field_delta'`.
+   *
+   * Typed as `string` (NOT `unknown`) because field deltas are token-stream
+   * fragments produced by the BFF SSE `FieldDelta` variant of `AnalysisChunk`
+   * (R5 task 005 / D1-05). Non-string structured deltas use `widgetData` on
+   * a different discriminant, not this field.
+   */
+  fieldContent?: string;
+
+  /**
+   * Monotonically-increasing sequence number for `field_delta` events within
+   * a single stream (keyed by `streamId`). Subscribers MUST order deltas by
+   * `sequence` before concatenation; out-of-order arrival is possible under
+   * heavy load. Required when `type === 'field_delta'`.
+   */
+  sequence?: number;
+
+  /**
+   * Terminal status of a structured-output stream.
+   *
+   * - `'complete'` — stream finished and all fields received successfully
+   * - `'declined'` — the orchestrator declined (e.g. safety perimeter block,
+   *                  insufficient grounding) without emitting a full payload
+   * - `'empty'`    — stream completed but produced no field deltas (degenerate
+   *                  case — e.g. zero-length document); UI should show a
+   *                  no-content message
+   *
+   * Required when `type === 'streaming_complete'`.
+   */
+  completionStatus?: 'complete' | 'declined' | 'empty';
 }
 
 // ---------------------------------------------------------------------------
@@ -287,8 +365,18 @@ export interface ContextPaneEvent {
    * - `context_update`    — the primary context document or data changed
    * - `context_highlight` — a citation or selection should be highlighted in-document
    * - `stage_change`      — the AI extraction / analysis stage advanced
+   * - `files_staged`      — one or more files were staged into the active chat session
+   *                         (e.g. user uploaded files in the Conversation pane); carries
+   *                         `stagedFileIds`. Subscribed by FilePreviewContextWidget
+   *                         (R5 task 018 / D2-09) to surface a preview affordance for the
+   *                         newly-available files (R5 D2-06 / spec NFR-09).
+   * - `file_selected`     — the user selected a single staged file for preview / focused
+   *                         action (e.g. clicked a chip or per-file "Summarize this only"
+   *                         affordance, R5 task 021 / D2-12); carries `selectedFileId`.
+   *                         Subscribed by FilePreviewContextWidget to switch its preview
+   *                         to the chosen file (R5 D2-06 / spec NFR-09).
    */
-  type: 'context_update' | 'context_highlight' | 'stage_change';
+  type: 'context_update' | 'context_highlight' | 'stage_change' | 'files_staged' | 'file_selected';
 
   /** Classifies the context payload (e.g. `"document"`, `"email"`, `"clause"`). */
   contextType?: string;
@@ -308,6 +396,48 @@ export interface ContextPaneEvent {
    * Format is source-widget-specific (e.g. `"char:1024-1200"`).
    */
   selectionRef?: string;
+
+  // ── files_staged / file_selected fields ──────────────────────────────────
+  //
+  // Carried by the two R5 chat-attachment context discriminants:
+  // `files_staged` and `file_selected`. All three fields are optional on the
+  // base type so existing subscribers (which never touch them) remain
+  // type-safe. Subscribers that handle these events MUST narrow on
+  // `event.type` before accessing these fields.
+  //
+  // Added by R5 task 016 (D2-06) per spec NFR-09 + ADR-030 additive-types
+  // rule. File IDs are session-scoped identifiers from
+  // `ChatSession.UploadedFiles[]` (R5 NFR-02; max 20 files per session).
+
+  /**
+   * Identifiers of the files staged into the current chat session. Required
+   * when `type === 'files_staged'`. Subscribers cross-reference these IDs
+   * against `ChatSession.UploadedFiles[]` to retrieve file metadata (name,
+   * size, MIME type) for display.
+   */
+  stagedFileIds?: string[];
+
+  /**
+   * Identifier of the single staged file the user selected for preview or a
+   * focused per-file action (e.g. "Summarize this only" affordance, R5 task
+   * 021 / D2-12). Required when `type === 'file_selected'`. The ID
+   * cross-references `ChatSession.UploadedFiles[]` for full metadata.
+   */
+  selectedFileId?: string;
+
+  /**
+   * Optional UX hint describing how the user expressed the file selection.
+   * Lets the receiving widget tailor its response (e.g. focus the preview
+   * pane vs. open a focused-action toolbar).
+   *
+   * - `'chip'`         — user clicked a file chip in the Conversation pane
+   * - `'context-card'` — user clicked a file row in the Context pane card
+   * - `'preview'`      — user activated a per-file preview affordance
+   *
+   * Optional on `type === 'file_selected'` (subscribers default to chip-like
+   * behaviour when absent).
+   */
+  selectionSource?: 'chip' | 'context-card' | 'preview';
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,225 @@
+<task id="001" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D1-01 Provision `spaarke-session-files` Azure AI Search Index</title>
+    <status>complete</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort>~1 hour</actual-effort>
+    <assigned>Claude Code (main session) + operator (ralph.schroeder@spaarke.com) for Azure deploy</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
+    <phase>Phase 1 — Platform Extensions</phase>
+    <wave>P1-G1 (serial; foundation; blocks 002, 003, 007)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>none</dependencies>
+    <tags>infrastructure, ai-search, bff, bicep, rag</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Provision the new `spaarke-session-files` Azure AI Search index on Spaarke Dev. The
+    index hosts session-scoped chunked file content for the R5 chat-driven "Summarize a
+    Document" vertical slice. Schema mirrors the existing canonical
+    `spaarke-knowledge-index-v2` (3072-dim HNSW + BM25 + semantic config) and adds a
+    `sessionId` field so the cleanup `IHostedService` (task 007) and the RAG search path
+    (task 002) can scope queries to an individual chat session. Per ADR-014, every
+    document MUST carry both `tenantId` AND `sessionId`. The Bicep module that provisions
+    the index MUST be idempotent — re-running on an existing environment is a no-op.
+
+    R5 is configuration-first: this task ships infrastructure-as-code and an index JSON
+    schema. It does NOT modify BFF code, so the BFF publish-size budget is not consumed
+    by this task. It DOES unblock the entire downstream P1-G2/G3/G4/G5 wave.
+  </prompt>
+
+  <role>
+    Senior infrastructure engineer with Azure AI Search + Bicep experience. Deep
+    familiarity with HNSW vector field configuration, semantic ranker setup, and
+    idempotent Bicep deployments against Spaarke Dev.
+  </role>
+
+  <goal>
+    The `spaarke-session-files` Azure AI Search index is provisioned on Spaarke Dev with
+    a schema that mirrors `spaarke-knowledge-index-v2` (3072-dim HNSW vector field with
+    `text-embedding-3-large`, BM25 keyword retrieval, semantic configuration) and adds
+    `sessionId` (filterable, facetable) alongside the existing `tenantId` field. The
+    Bicep module that creates the index is committed to the repo and is idempotent
+    (`az deployment` re-runs succeed without error). A test query
+    `POST /indexes/spaarke-session-files/docs/search` against the empty index returns an
+    empty hit set with no auth errors. Acceptance criteria below are all green.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="canonical-index-schema">infrastructure/ai-search/spaarke-knowledge-index-v2.json</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-014">All `spaarke-session-files` index documents MUST carry both `tenantId` AND `sessionId` for tenant isolation + session scoping. Both fields MUST be filterable.</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — this task adds infrastructure-as-code only; verify no BFF binary impact. Index provisioning does NOT consume R5's ≤+1 MB BFF publish-size budget.</constraint>
+    <constraint source="ADR-010">DI minimalism — N/A for this task (no service registrations). Confirm.</constraint>
+    <constraint source="spec NFR-03">Multi-tenancy — initial scope is shared index with `tenantId` + `sessionId` filters. Per-tenant dedicated session-files indexes are deferred to a Phase 1 spike (see spec.md Open Decisions § "Per-tenant routing for session-files index"). Document the routing decision in task notes.</constraint>
+    <constraint source="spec NFR-07">BFF publish-size — index provisioning is not BFF code; no `dotnet publish` measurement required for this task. Confirm publish-size delta = 0 MB in task notes.</constraint>
+    <constraint source="spec.md MUST">MUST emit `tenantId` + `sessionId` on every `spaarke-session-files` index document per ADR-014 — encode as required filterable fields.</constraint>
+    <constraint source="R5 reuse mandate (CLAUDE.md §3.1)">MUST copy schema shape from `spaarke-knowledge-index-v2` (3072-dim HNSW + BM25 + semantic config) — do NOT invent a parallel schema. Add only the `sessionId` field beyond the canonical reference.</constraint>
+    <constraint source="project">Bicep module MUST be idempotent — re-running the deployment on an environment that already has the index MUST NOT fail and MUST NOT data-destructively re-create the index.</constraint>
+    <constraint source="project">Embedding model selection — `text-embedding-3-large` (3072 dims) per spec.md Open Decisions to match knowledge-index parity. May revisit in Phase 1 spike if cost telemetry surfaces issues.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>azure-ai-search/index-provisioning</topic>
+    <files>
+      <file>docs/architecture/rag-architecture.md</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+      <file>docs/adr/ADR-014-ai-caching-tenant-isolation.md</file>
+      <file>infrastructure/ai-search/spaarke-knowledge-index-v2.json</file>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Index schema canonical reference" location="infrastructure/ai-search/spaarke-knowledge-index-v2.json">
+        Copy this file's structure as the starting point. Add `sessionId` field
+        (Edm.String, filterable=true, facetable=true, searchable=false, sortable=false)
+        adjacent to the existing `tenantId` field. Preserve all other fields, the
+        3072-dim HNSW vector field configuration, scoring profiles, and the semantic
+        configuration unchanged. Change the `"name"` to `"spaarke-session-files"`.
+      </pattern>
+      <pattern name="Bicep idempotency for AI Search indexes" location="infrastructure/ (existing modules)">
+        Search for the existing Bicep module that provisions `spaarke-knowledge-index-v2`
+        and either extend it to also provision `spaarke-session-files` (parameterize)
+        OR add a sibling module following the same shape. Use `az search` REST API via
+        deployment script resource if direct Bicep resource is not available for index
+        schema; ensure conditional-create semantics so re-runs are no-ops.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships a chat-driven "Summarize a Document" vertical slice. Users upload up to 20
+      files per chat session; those files are chunked, embedded, and indexed into a
+      dedicated `spaarke-session-files` Azure AI Search index. The index is queried by
+      the existing `RagService` (extended in task 002 with a `sessionId` filter) and
+      swept by a new background `IHostedService` (task 007) when sessions end. Choosing
+      a dedicated index (vs. extending `spaarke-knowledge-index-v2` with a `sessionId`
+      filter) was an explicit decision per design.md §4.2 / spec.md Open Decisions: it
+      provides clean isolation, simple eviction, and doesn't pollute customer-corpus
+      query metrics with ephemeral session traffic.
+    </background>
+    <dependencies></dependencies>
+    <related-work>
+      <item>`spaarke-knowledge-index-v2` provisioning — canonical reference and the
+        existing index this schema mirrors. Located in `infrastructure/ai-search/`.</item>
+      <item>Task 002 (D1-02) extends `RagSearchOptions` with a `sessionId` filter and
+        routes `RagService.SearchAsync()` to this new index. Task 003 (D1-03)
+        parameterizes `RagIndexingPipeline` to write to this index. Task 007 (D1-07)
+        sweeps documents from this index on session-end. All three depend on task 001.</item>
+      <item>R2 Insights Engine added scope shape migration to the knowledge index
+        (`scripts/Migrate-InsightsIndexScopeShape.ps1`) — referenced as a similar
+        provisioning pattern; not a direct dependency.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">
+      Check context usage. If &gt; 70%, create handoff summary and request `/compact`.
+      Declare RIGOR LEVEL: FULL per CLAUDE.md §8 (infrastructure change + downstream
+      blocker for 8+ tasks).
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm task 001 status is 🔲, dependencies are
+      empty, parallel-safe = false. Read `current-task.md` to verify no prior R5 task is
+      in flight. Read project README for project status.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file listed in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically extract
+      from `spaarke-knowledge-index-v2.json`: full field list, HNSW vector configuration
+      (3072 dims, algorithm parameters), scoring profiles, semantic configuration. Read
+      ADR-014 in full and confirm the tenant-isolation contract.
+    </step>
+    <step order="3" name="Locate Existing Bicep Provisioning">
+      Search `infrastructure/` for the existing Bicep module(s) that provision Azure AI
+      Search indexes. Identify the pattern used (direct Bicep resource vs deployment
+      script vs ARM template). Confirm how `spaarke-knowledge-index-v2` is currently
+      created on Spaarke Dev. Decide between extending the existing module vs. adding a
+      sibling module. Document the decision in task notes.
+    </step>
+    <step order="4" name="Author Index Schema JSON">
+      Create `infrastructure/ai-search/spaarke-session-files.json` by copying
+      `spaarke-knowledge-index-v2.json` verbatim, then: (a) change `"name"` to
+      `"spaarke-session-files"`; (b) add the `sessionId` field (Edm.String, filterable,
+      facetable, non-searchable, non-sortable) adjacent to `tenantId`; (c) preserve
+      every other field, HNSW configuration, scoring profile, and semantic configuration
+      unchanged. Diff against canonical to verify only intended deltas.
+    </step>
+    <step order="5" name="Extend Bicep Module(s)">
+      Extend or add the Bicep module to provision the new index. Ensure idempotency:
+      re-runs must succeed without error and must not destroy existing data. Parameterize
+      the index name + schema-file path where the existing module pattern supports it.
+    </step>
+    <step order="6" name="Deploy to Spaarke Dev">
+      Run the deployment against Spaarke Dev via `az deployment ...` (using the
+      `azure-deploy` skill if applicable). Verify the index appears in Azure Portal.
+      Capture the deployment output + Portal screenshot reference for task notes.
+    </step>
+    <step order="7" name="Smoke Test the Empty Index">
+      Issue a `POST /indexes/spaarke-session-files/docs/search` against the empty index
+      using `az rest` or `curl` with the Azure Search admin key (via Key Vault per
+      ADR-028 pattern). Confirm: (a) auth succeeds; (b) response is an empty `value: []`
+      hit set; (c) no schema-validation errors. Capture the response for task notes.
+    </step>
+    <step order="8" name="Verify Idempotency">
+      Re-run the Bicep deployment a second time. Confirm: deployment succeeds, index
+      schema is unchanged, no data destruction. Capture the second deployment output.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is testable +
+      passing. Record evidence per criterion in task notes.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the new files (index JSON + Bicep). Run `adr-check`
+      skill against the new files; verify ADR-014 (tenant isolation), ADR-029 (BFF
+      publish hygiene — N/A but confirmed), ADR-010 (DI minimalism — N/A but confirmed).
+      Both gates MUST pass before marking the task complete.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 001 🔲 → ✅. Reset
+      `current-task.md` to the next pending task per CLAUDE.md §7. Record the per-tenant
+      routing decision (initial shared index with `tenantId` + `sessionId` filters; spike
+      deferred) in task notes. Note BFF publish-size delta = 0 MB (no BFF code changed).
+      Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI — Bicep deployment, AI Search index REST calls, Key Vault secret retrieval</tool>
+    <tool name="pac">Power Platform CLI — not directly used by this task; available if downstream Dataverse coordination surfaces</tool>
+    <tool name="dotnet">Not used directly (no BFF code change) — available for verification builds if requested</tool>
+    <tool name="git">Stage + commit the new index JSON + Bicep changes on the R5 branch</tool>
+    <tool name="azure-deploy">Skill for executing Bicep deployments per Spaarke conventions</tool>
+  </tools>
+
+  <outputs>
+    <output type="infrastructure">infrastructure/ai-search/spaarke-session-files.json (NEW)</output>
+    <output type="infrastructure">infrastructure/ (Bicep module extension — extends existing AI Search provisioning to include `spaarke-session-files`)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 001 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-001-deployment-evidence.md (deployment output, Portal screenshot reference, smoke-test response, idempotency-run evidence, per-tenant routing decision)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Index `spaarke-session-files` is visible in the Azure Portal AI Search resource on Spaarke Dev.</criterion>
+    <criterion testable="true">Index schema field set matches `spaarke-knowledge-index-v2` plus the mandatory `tenantId` AND `sessionId` fields (both Edm.String, filterable=true, facetable=true).</criterion>
+    <criterion testable="true">HNSW vector field is configured at 3072 dimensions matching the `text-embedding-3-large` embedding model.</criterion>
+    <criterion testable="true">BM25 keyword retrieval AND a semantic configuration are present, mirroring `spaarke-knowledge-index-v2`.</criterion>
+    <criterion testable="true">The Bicep module is idempotent — a second `az deployment` run against the same environment succeeds without error and does not destroy or recreate the existing index.</criterion>
+    <criterion testable="true">Smoke test `POST /indexes/spaarke-session-files/docs/search` against the empty index returns an empty hit set (`value: []`) with no auth errors and no schema-validation errors.</criterion>
+    <criterion testable="true">Task notes record the per-tenant routing decision (initial shared index with `tenantId` + `sessionId` filters; per-tenant dedicated indexes deferred to a Phase 1 spike per spec.md Open Decisions).</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (confirmed in task notes; no BFF code changed by this task).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+  </acceptance-criteria>
+</task>

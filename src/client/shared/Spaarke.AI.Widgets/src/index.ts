@@ -22,6 +22,14 @@ import { registerSearchCriteriaResultWidget } from './widgets/workspace/register
 registerSearchCriteriaResultWidget();
 
 // ---------------------------------------------------------------------------
+// Side-effect: register StructuredOutputStreamWidget (R5 task 017 / D2-07)
+// Schema-driven structured AI output renderer — destination for Summarize
+// streaming (FR-02) AND Insights playbook static rendering (FR-13 via D2-16).
+// ---------------------------------------------------------------------------
+import { registerStructuredOutputStreamWidget } from './widgets/workspace/register-structured-output-stream-widget';
+registerStructuredOutputStreamWidget();
+
+// ---------------------------------------------------------------------------
 // Side-effect: register all 6 R1 source widgets into ContextWidgetRegistry
 // (AIPU2-081 — migrate source widgets to context pane)
 // ---------------------------------------------------------------------------
@@ -119,6 +127,35 @@ export { DOCUMENT_VIEWER_WIDGET_TYPE } from './widgets/workspace/register-docume
 export { default as SearchCriteriaResultWidget } from './widgets/workspace/SearchCriteriaResultWidget';
 export type { SearchCriteriaResultWidgetData } from './widgets/workspace/SearchCriteriaResultWidget';
 export { SEARCH_CRITERIA_RESULT_WIDGET_TYPE } from './widgets/workspace/register-search-criteria-result-widget';
+
+// ---------------------------------------------------------------------------
+// Widgets: StructuredOutputStreamWidget — schema-driven AI output (R5 task 017)
+//
+// Workspace widget that renders structured AI output PROGRESSIVELY via
+// `FieldDelta` SSE events (FR-02 — Summarize streaming) OR statically from a
+// pre-filled envelope (FR-13 — Insights playbook rendering via D2-16 / task
+// 026). The same widget serves both consumers via different schemas — that
+// "schema-driven" design is the load-bearing reuse claim of R5's platform
+// extensibility story (risk UR-02 mitigation).
+//
+// Two CONCRETE schemas are exported (SUMMARIZE_SCHEMA, INSIGHTS_PLAYBOOK_SCHEMA)
+// so downstream consumers (chat-pane dispatcher, InsightsResponseRenderer) do
+// not redeclare them. Per task 006 spike: schema declaration order = stream
+// arrival order = render order (TL;DR first for Summarize).
+//
+// Registered under 'structured-output-stream' via
+// register-structured-output-stream-widget.ts.
+// ---------------------------------------------------------------------------
+
+export { default as StructuredOutputStreamWidget } from './widgets/workspace/StructuredOutputStreamWidget';
+export type {
+  StructuredOutputStreamWidgetData,
+  StructuredOutputSchema,
+  StructuredOutputField,
+  StructuredOutputDisplayHint,
+} from './widgets/workspace/StructuredOutputStreamWidget';
+export { SUMMARIZE_SCHEMA, INSIGHTS_PLAYBOOK_SCHEMA } from './widgets/workspace/StructuredOutputStreamWidget';
+export { STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE } from './widgets/workspace/register-structured-output-stream-widget';
 
 // ---------------------------------------------------------------------------
 // Widgets: RedlineViewerWidget — side-by-side document comparison (AIPU2-085)
@@ -350,6 +387,45 @@ registerContextWidget('findings', {
     // Generic variance at the registry boundary — see PlaybookGalleryWidget
     // registration above for the same pattern.
     import('./widgets/context/FindingsWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
+});
+
+// ---------------------------------------------------------------------------
+// Widgets: FilePreviewContextWidget (context pane — chat-driven Summarize)
+//
+// R5 task 018 / D2-09. Inline (non-modal) file preview for files uploaded
+// into the active chat session. Wraps the extracted `RichFilePreview`
+// renderer (task 013 / D2-08) instead of rebuilding iframe/metadata/menu
+// UI (R5 CLAUDE.md §3.1 reuse mandate). Per-file 3-dot menu reuses the
+// canonical `DocumentRowMenu` 12-action component. Dispatches additive
+// `context.file_selected` events on the `context` channel (R5 task 016 /
+// D2-06; ADR-030 additive-types rule). Registered under 'file-preview'.
+// ---------------------------------------------------------------------------
+
+export { default as FilePreviewContextWidget } from './widgets/context/FilePreviewContextWidget';
+export type {
+  FilePreviewContextData,
+  FilePreviewContextFile,
+  FilePreviewContextRenderProps,
+  FilePreviewContextWidgetProps,
+  FilePreviewFileActionHandler,
+  UseSummarizeOnlyResult,
+  DispatchSummarizeOnlyResult,
+} from './widgets/context/FilePreviewContextWidget';
+export {
+  FILE_PREVIEW_CONTEXT_WIDGET_TYPE,
+  useSummarizeOnly,
+  dispatchSummarizeOnly,
+} from './widgets/context/FilePreviewContextWidget';
+
+registerContextWidget('file-preview', {
+  factory: () =>
+    // Type-erasure cast: registry stores ContextWidgetComponent<unknown>; the
+    // widget's default export is typed ContextWidgetComponent<FilePreviewContextData>.
+    // Generic variance at the registry boundary — see PlaybookGalleryWidget
+    // registration above for the same pattern.
+    import('./widgets/context/FilePreviewContextWidget').then(m => ({
       default: m.default as unknown as ContextWidgetComponent,
     })),
 });

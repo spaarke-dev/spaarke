@@ -1,0 +1,711 @@
+<task id="024" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-14 Register `InsightsQueryToolHandler` (`insights.query`) on `SprkChatAgent`</title>
+    <status>complete</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort>~3 hours (sub-agent code-authoring; main session reserves build/publish/CVE verification)</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G6 (parallel-safe; first task of the Insights tool integration suite — deps 023; siblings 025, 026, 027, 028)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>023 (R5 lead contract review + sign-off on `design-e3-tool-call-contract.md` v1.0 §10 — BLOCKING gate)</dependencies>
+    <tags>bff, chat-agent, tool-registration, insights, ai</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Register a new `InsightsQueryToolHandler` chat-agent tool function on the existing
+    `SprkChatAgent` via the established tool-registration mechanism (the
+    `SprkChatAgentFactory.ResolveTools` site that already wires `AnalysisExecutionTools`,
+    `DocumentSearchTools`, `WorkingDocumentTools`, and — once task 015 lands —
+    `InvokeSummarizePlaybookTool` through `AIFunctionFactory.Create` and the AIPU2-061
+    `CapabilityRouter` per-turn tool-injection contract). The tool exposes a single
+    function (`InsightsQueryAsync`) with parameters `{ query: string, subject: string,
+    forceMode?: string }` that POSTs to the Insights BFF endpoint
+    `POST /api/insights/assistant/query` per binding contract v1.0
+    (`notes/insights-engine-assistant-integration-brief.md`).
+
+    R5 is a **Zone B consumer** of the Insights contract per refined ADR-013 §3.5 and
+    R5 CLAUDE.md §3.5 / §10 "Don't inject Insights internals": this tool MUST call the
+    HTTP endpoint via an HTTP client. It MUST NOT inject `IInsightsAi`,
+    `InsightsOrchestrator`, `AssistantToolCallHandler`, `InsightsIntentClassifier`,
+    `IRagService` Insights-specific extensions, or any other Insights-internal type
+    directly. The Insights endpoint co-locates in the same BFF process today, but the
+    boundary discipline is binding regardless — same-process HTTP is the canonical
+    pattern for Zone B consumption.
+
+    Tool description text is load-bearing for correct LLM routing (NFR-12) and MUST
+    scope routing to "matter / project / invoice-scoped analytical questions about
+    entities" — explicitly differentiated from `InvokeSummarizePlaybook` (task 015,
+    file-scoped / session-scoped). This is the UR-01 mitigation flagged in plan.md High-
+    Risk Items.
+
+    The tool accepts an optional `forceMode` parameter: `null` (LLM tool-call leaves
+    absent → BFF intent classifier runs server-side), `"playbook"` (slash command path
+    knows intent), or `"rag"` (slash command path knows intent). Slash command path
+    (task 019 `/ask-insights`) sets `forceMode` explicitly per spec FR-12 / SC-17;
+    natural-language LLM tool-calls leave it absent.
+
+    R5 is configuration-first + reuse-first: this task adds ZERO new top-level
+    `Program.cs` lines, ZERO new feature flags (per ADR-018 + R5 CLAUDE.md §3.2), and
+    ZERO new chat-agent / tool frameworks. Tool registration goes inside
+    `AnalysisServicesModule.cs` (or — preferred per AIPL-053 precedent —
+    in-factory tool-resolution block requiring no DI registration). The tool inherits
+    the existing middleware stack (cost, content safety, telemetry, service routing)
+    and the existing kill-switch coverage via `NullSprkChatAgentFactory` when Chat
+    capability is disabled. The Insights endpoint itself enforces its own kill-switches
+    (returns 503 `ai.insights.disabled` / `ai.rag.disabled` /
+    `ai.intent-classification.disabled`) — this tool surfaces those errors to the user
+    per the integration brief §5.1 error matrix.
+  </prompt>
+
+  <role>
+    Senior .NET developer with deep familiarity of the Spaarke chat-agent + AI-tool
+    framework: `SprkChatAgentFactory.ResolveTools`, the `AIFunctionFactory.Create` tool
+    registration pattern, the AIPU2-061 CapabilityRouter-driven per-turn tool injection,
+    `CapabilityValidator`, `AnalysisServicesModule` DI conventions, `IHttpClientFactory`
+    typed-client pattern, and the middleware stack (`AgentCostControlMiddleware`,
+    `AgentContentSafetyMiddleware`, `AgentTelemetryMiddleware`,
+    `AgentServiceRoutingMiddleware`). Understands ADR-013 (BFF-only AI; agents via
+    factory; §3.5 Zone B consumer boundary), ADR-010 (feature-module DI minimalism),
+    ADR-018 (no new feature flags), ADR-019 (ProblemDetails error parsing), ADR-028
+    (no token snapshots — fresh OBO per request), ADR-016 (rate-limit honoring).
+  </role>
+
+  <goal>
+    `InsightsQueryToolHandler` is registered as an `AIFunction` on every `SprkChatAgent`
+    session via the existing `SprkChatAgentFactory.ResolveTools` mechanism
+    (capability-gated alongside `AnalysisExecutionTools` / `WorkingDocumentTools` /
+    `InvokeSummarizePlaybookTool`). The tool name is `insights.query` (exact).
+
+    The tool's function (`InsightsQueryAsync`) accepts parameters `{ query: string,
+    subject: string, forceMode?: string }` and POSTs them as JSON to
+    `POST /api/insights/assistant/query` using an `IHttpClientFactory` typed client
+    configured for the BFF base address, forwarding the active OBO bearer token (per
+    ADR-028 — fresh from `HttpContext`, NOT snapshotted), generating + propagating an
+    `x-correlation-id` header per Assistant turn (per spec FR-17 / SC-16), and parsing
+    success / error responses per the contract v1.0 schema (integration brief §3 / §4 /
+    §5). On success the tool returns the response payload (or a string-serialized
+    summary suitable for the chat agent's conversation context); on error it surfaces
+    a structured tool-error so the renderer (task 026) maps to per-code UX (integration
+    brief §5.1). Both response paths (`path: "playbook"` and `path: "rag"`) are
+    forwarded unchanged for downstream rendering by task 026's `InsightsResponseRenderer`.
+
+    The LLM correctly tool-calls `insights.query` for natural-language matter/project/
+    invoice analytical questions ("what will this matter cost?", "what closing
+    conditions are in this matter?", "list outstanding invoices for project X") routed
+    via the existing AIPU2-061 keyword + LLM capability router. The tool description
+    text is curated specifically to scope routing to entity-scoped analytical questions
+    and does NOT overlap semantically with `InvokeSummarizePlaybook` (task 015, scoped
+    to chat-session uploaded-files Summarize).
+
+    The `forceMode` parameter is correctly observed: slash command path (task 019)
+    sets it (`"playbook"` or `"rag"` depending on slash invoked); LLM tool-calls leave
+    it absent for natural-language routing through the BFF classifier. Verified by unit
+    tests covering each path.
+
+    The middleware stack (cost, safety, telemetry, service routing) wraps the tool
+    execution inherited from `SprkChatAgentFactory.CreateAgent`; ZERO new `Program.cs`
+    lines; ZERO new feature flags; ZERO Insights internals injected (verified via
+    grep); BFF publish-size delta is measured + reported.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="binding-contract">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+    <file purpose="v1.1-contract">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md</file>
+    <file purpose="dependency-task-023">projects/spaarke-ai-platform-unification-r5/tasks/023-r5-lead-contract-review-signoff.poml</file>
+    <file purpose="sibling-pattern-task-015">projects/spaarke-ai-platform-unification-r5/tasks/015-invoke-summarize-playbook-tool.poml</file>
+    <file purpose="canonical-tool-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs</file>
+    <file purpose="canonical-tool-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisQueryTools.cs</file>
+    <file purpose="tool-resolution-site">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="di-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+    <file purpose="capability-router-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs</file>
+    <file purpose="insights-endpoint-reference">src/server/api/Sprk.Bff.Api/Api/Insights/InsightsAssistantEndpoint.cs</file>
+    <file purpose="insights-request-dto">src/server/api/Sprk.Bff.Api/Models/Insights/InsightsAssistantQueryRequest.cs</file>
+    <file purpose="bff-extensions-binding">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 CLAUDE.md §3.5 / §10 / ADR-013 §3.5 Zone B boundary">R5 is a **Zone B consumer** of the Insights HTTP contract. Tool MUST call `POST /api/insights/assistant/query` via HTTP. MUST NOT inject `IInsightsAi`, `InsightsOrchestrator`, `AssistantToolCallHandler`, `InsightsIntentClassifier`, `IInsightsPlaybookExecutionCache`, `IRagService` Insights-specific extensions, or any other type from `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/` (or `Models/Insights/`) directly. The endpoint co-locates in the same BFF process — same-process HTTP is the canonical pattern for Zone B consumption and is intentional. Boundary verified by grep of the new tool class for `using ...Services.Ai.Insights` / `Models.Insights` namespaces.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 / reuse mandate">MUST register on the EXISTING `SprkChatAgent` via the EXISTING `SprkChatAgentFactory.ResolveTools` mechanism (the same site that wires `AnalysisExecutionTools`, `DocumentSearchTools`, `WorkingDocumentTools`, and `InvokeSummarizePlaybookTool` from task 015 through `AIFunctionFactory.Create`). MUST NOT introduce a parallel chat agent, a parallel tool registration framework, a parallel `IChatAgent` interface, or a parallel `AIFunction`-emitting abstraction.</constraint>
+    <constraint source="ADR-013">All AI orchestration in BFF; agents are created exclusively via `SprkChatAgentFactory`; the middleware stack (cost control, content safety, telemetry, service routing) MUST wrap tool execution by virtue of using the existing factory. R5 is Zone A in the chat-tool-handler space (BFF service surface) AND Zone B in the Insights contract space — the tool's job is to bridge these zones cleanly.</constraint>
+    <constraint source="ADR-010 + R5 §3.3">DI minimalism — tool class is constructed inside `SprkChatAgentFactory.ResolveTools` per the AIPL-053 / AnalysisExecutionTools precedent (preferred path — zero new DI registration); if a typed `HttpClient` is required, register it inside the EXISTING `AnalysisServicesModule.cs` feature module via `services.AddHttpClient<InsightsQueryToolHandler>(...)` (single line, inside the feature module — NOT in `Program.cs`). ZERO new top-level `services.AddXxx()` lines in `Program.cs`.</constraint>
+    <constraint source="ADR-018 (R5 §3.2)">R5 introduces NO new feature flags. Tool registers unconditionally inside the existing capability-gated tool block. Kill-switch coverage inherits via `NullSprkChatAgentFactory` when Chat capability is disabled. The Insights endpoint enforces its own kill-switches (`Compound:AI:Enabled`, `Insights:Rag:Enabled`, `Insights:IntentClassifier:Enabled`) — this tool surfaces their 503 responses to the renderer for per-code UX.</constraint>
+    <constraint source="ADR-029 / R5 CLAUDE.md §3.6">BFF publish-size verification — run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, measure compressed output, report absolute size + delta vs prior baseline in task notes. Ceiling ≤60 MB compressed; R5 budget ≤+1 MB cumulative (target +0.5 MB). Expected delta is small (one new tool class + tool-resolution block + at most one `AddHttpClient` line) — target ≤+0.1 MB.</constraint>
+    <constraint source="spec NFR-12 (tool routing discipline)">Tool description text is load-bearing for correct LLM tool-routing. Description MUST be: "Answer matter/project/invoice-scoped analytical questions about entities" (per plan.md D2-14 + spec NFR-12). MUST explicitly differentiate from `InvokeSummarizePlaybook` (file-scoped, session-scoped) per UR-01 mitigation. Description text is curated explicitly to prevent ambiguous routing. Tool name registered via `AIFunctionFactory.Create` is `insights.query` exactly.</constraint>
+    <constraint source="spec FR-12 (Insights tool registration)">Tool MUST be registered; LLM MUST be able to call it for natural-language matter/project/invoice queries; slash command path (task 019) MUST bypass the BFF classifier via `forceMode` parameter.</constraint>
+    <constraint source="spec FR-16 (12 error codes)">Tool MUST surface ALL 12 contract error codes (integration brief §5.1) to the renderer with stable `errorCode` extension preserved + `correlationId` preserved. Errors NEVER include document content, prompt text, LLM raw output, or stack traces. 503 `ai.intent-classification.disabled` triggers an Assistant-side retry with `forceMode` (if intent signal available); 500 triggers a single retry with 1s backoff. Per-code UX is the renderer's job (task 026) — this task surfaces the structured error.</constraint>
+    <constraint source="spec FR-17 / SC-16 (correlation-id propagation)">Tool MUST generate a unique `x-correlation-id` per Assistant turn and propagate it as an HTTP request header on every outbound call. The same correlation ID MUST appear in chat-agent telemetry (e.g., `Activity` span tag or telemetry event property) per ADR-019 so App Insights / Kusto end-to-end correlation works. Verified by an integration log inspection at Step 8.</constraint>
+    <constraint source="spec FR-12 / SC-17 (forceMode semantics)">Tool accepts `forceMode: string?` parameter. Slash command path (task 019 `/ask-insights playbook ...` / `/ask-insights rag ...`) sets it explicitly. LLM tool-call path leaves it absent (BFF classifier decides). Tool MUST forward whatever value the caller provides (or omit when null) — does NOT default `forceMode` itself. Invalid values surface as the contract's 400 `forceMode.invalid` error from the BFF.</constraint>
+    <constraint source="ADR-028 (R5 §10)">No token snapshots — the tool runs inside the existing agent session whose host context already carries a fresh OBO token per `SprkChatAgentFactory`. Forward `HttpContext.Request.Headers.Authorization` (or use the existing `@spaarke/auth`-equivalent server-side helper) per request — do NOT snapshot or pass tokens into the tool class constructor.</constraint>
+    <constraint source="ADR-016 (rate limiting honoring)">Tool MUST honor `Retry-After` on 429 responses (`ai-context` policy; 60/min/oid aggregate across `/ask` + `/search` + `/assistant/query`). On 429, surface the rate-limit error structurally to the renderer; do NOT auto-retry inside the tool.</constraint>
+    <constraint source="ADR-019 (ProblemDetails parsing)">Tool MUST parse error responses as `application/problem+json` per ADR-019. Extract `errorCode` (stable extension), `correlationId`, `status`, `title`, `detail`. Preserve these in the structured tool-error so the renderer (task 026) can map per-code UX from integration brief §5.1 column 4.</constraint>
+    <constraint source="CLAUDE.md §10 / bff-extensions §F test obligation">PRs modifying `src/server/api/Sprk.Bff.Api/Services/` MUST add/update tests in `tests/unit/Sprk.Bff.Api.Tests/`. Tool wrapper class + tool-registration site changes require accompanying tests (mock `HttpMessageHandler` for the typed client; assert request shape, header propagation, response parsing, error mapping).</constraint>
+    <constraint source="project (AIPU2-061 routing)">Tool name `insights.query` MUST be discoverable by `CapabilityRouter` — added to the appropriate playbook capability's `ToolNames` allow-list (e.g., new `PlaybookCapabilities.InsightsQuery` constant if no existing fit; prefer reuse). Verify routing through both the keyword (Layer 1) and LLM (Layer 2) layers selects this tool for natural-language matter/project/invoice analytical prompts.</constraint>
+    <constraint source="contract v1.0 §3 (subject format)">Tool accepts `subject` parameter as a string in the format `<scheme>:<guid>` where scheme is `matter` / `project` / `invoice`. Tool does NOT validate the subject format itself — the BFF returns 400 `subject.invalid` for malformed values, surfaced via the error path. Subject RESOLUTION from chat context is task 025's job; this task accepts whatever subject the caller (LLM or slash command) provides.</constraint>
+    <constraint source="contract v1.0 §3.1 (query length)">Tool accepts `query` parameter (required, 1..500 chars). Tool does NOT pre-truncate or pre-validate length; the BFF returns 400 `query.required` for empty/whitespace and rejects oversized requests via ProblemDetails — surfaced via the error path.</constraint>
+    <constraint source="contract v1.1 forward-compat">Phase 1.5 contract is forward-compatible. New optional response fields (e.g., v1.1 `citations[].href` per task 027) that this tool ignores will be silently accepted in Phase 2. Tool response forwarding MUST NOT strip unknown fields — use loose JSON deserialization (e.g., `JsonElement` passthrough or DTO with `[JsonExtensionData]`) for the structured-result envelope.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/chat-agent-tool-registration + bff/zone-b-http-consumption</topic>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisQueryTools.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/ICapabilityRouter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/NullSprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Insights/InsightsAssistantEndpoint.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Insights/InsightsAssistantQueryRequest.cs</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-018-feature-flag-scope-discipline.md</file>
+      <file>.claude/adr/ADR-019-error-handling.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="AIFunctionFactory.Create tool wiring (canonical reference)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs">
+        Tool class is a `public sealed class` constructed inside
+        `SprkChatAgentFactory.ResolveTools` (NOT registered in DI per ADR-010 + AIPL-053).
+        Exposes a `public IEnumerable&lt;AIFunction&gt; GetTools()` method that yields
+        `AIFunctionFactory.Create(methodReference, name: "insights.query", description: "Answer matter/project/invoice-scoped analytical questions about entities")`.
+        The `[Description("...")]` attribute on the method + parameters is load-bearing
+        for LLM tool-schema generation. Mirror this exactly for
+        `InsightsQueryToolHandler`.
+      </pattern>
+      <pattern name="Capability-gated tool resolution block" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (lines 807–834 for AnalysisExecutionTools)">
+        Tool instantiation lives inside `ResolveTools` wrapped in `try/catch` with
+        `attempted++ / resolved++ / failedTools.Add(...)` bookkeeping per AIPU2-063
+        per-tool error isolation. Gate behind the chosen Insights playbook capability
+        (e.g., `capabilities.Contains(PlaybookCapabilities.InsightsQuery)`). The factory
+        resolves required services (typed `HttpClient`, logger, telemetry) from
+        `scopedProvider`. Mirror the same shape used in task 015's
+        `InvokeSummarizePlaybookTool` block.
+      </pattern>
+      <pattern name="Zone B HTTP consumption via IHttpClientFactory typed client" location="(repository-wide — typed `HttpClient` precedent)">
+        Register the typed client inside `AnalysisServicesModule.cs`:
+        `services.AddHttpClient&lt;InsightsQueryToolHandler&gt;(client =&gt; { client.BaseAddress = new Uri(bffBaseAddress); client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json")); });`
+        Configure timeout to a sensible upper bound (e.g., 60s — Insights playbook path
+        latency p95 ~2s but RAG path can spike). Forward bearer token per request from
+        `HttpContext` (DO NOT snapshot per ADR-028). Generate `x-correlation-id` per
+        call using `Activity.Current?.Id ?? Guid.NewGuid().ToString("N")`.
+      </pattern>
+      <pattern name="ProblemDetails error parsing (ADR-019)" location="(repository-wide — ProblemDetails parsing precedent)">
+        Parse error responses as `application/problem+json`. Use
+        `JsonSerializer.Deserialize&lt;ProblemDetails&gt;(content)` (or a custom record
+        with `errorCode` + `correlationId` extensions). Preserve all 12 contract error
+        codes from integration brief §5.1 (`query.required`, `subject.required`,
+        `subject.invalid`, `forceMode.invalid`, `conversationContext.invalid`,
+        `ai.insights.disabled`, `ai.rag.disabled`, `ai.intent-classification.disabled`,
+        `ai.assistant-default-playbook.unconfigured`,
+        `INSIGHTS_ASSISTANT_INTERNAL_ERROR`, plus 401 + 429 generic).
+      </pattern>
+      <pattern name="AIPU2-061 CapabilityRouter per-turn tool-injection" location="src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs">
+        The Layer 1 keyword classifier + Layer 2 LLM classifier select a subset of
+        tools per turn. The capability manifest entries' `ToolNames` lists determine
+        which tools are discoverable. Register `insights.query` in the appropriate
+        playbook capability's `ToolNames` allow-list (or add a new capability key —
+        prefer reuse).
+      </pattern>
+      <pattern name="Loose response deserialization for forward-compat" location="(integration brief §4 + v1.1 forward-compat)">
+        Use `JsonElement` or `[JsonExtensionData]` for unknown fields on the response
+        DTO so v1.1 additions (`citations[].href`, SSE-related fields) pass through to
+        the renderer (task 026) without code changes here.
+      </pattern>
+      <pattern name="Sibling tool registration block (task 015 — InvokeSummarizePlaybookTool)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (added by task 015)">
+        Mirror the exact shape used by task 015 — same try/catch error-isolation
+        scaffolding, same `attempted++ / resolved++ / failedTools.Add(...)` discipline,
+        same capability-gated `if (capabilities.Contains(...))` guard. Place this block
+        adjacent to task 015's block for visual grouping.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships a chat-driven "Summarize a Document" vertical slice AND the Insights tool
+      integration (`insights.query`) through the SpaarkeAi three-pane shell. The R5 chat
+      agent becomes the **Spaarke Assistant** in operational form — hosting two AI tool
+      capabilities (Summarize from task 015 + Insights from this task) alongside the
+      existing ad-hoc grounded-LLM mode.
+
+      The Insights Engine R2 Wave E shipped `POST /api/insights/assistant/query` (BFF
+      task 042) specifically as the R5 consumption surface — a single endpoint that
+      internally routes between a playbook path (predictive structured answer) and a
+      RAG path (citation-grounded prose) via an LLM intent classifier (or via the
+      Assistant-supplied `forceMode` override). The contract is binding at v1.0
+      (`notes/insights-engine-assistant-integration-brief.md`); v1.1 (SSE + clickable
+      citations) is the Wave F deliverable, ship-time-coordinated with R5 Phase 2 per
+      `notes/insights-r2-coordination.md`.
+
+      Tool-routing disambiguation between `insights.query` and `InvokeSummarizePlaybook`
+      (task 015) is the load-bearing UR-01 risk — the LLM Layer 2 classifier must pick
+      the right tool for natural-language prompts. The mitigation is tool-description-
+      quality discipline (spec NFR-12 + plan.md High-Risk Items table). This task's
+      description text — "Answer matter/project/invoice-scoped analytical questions
+      about entities" — is the entity-scoped / knowledge-scoped half of the
+      mitigation; task 015's description is the file-scoped / session-scoped half.
+
+      This is the FIRST task of P2-G6 (Insights tool integration suite). Subsequent
+      tasks: 025 (subject resolution + HTTP client refinement), 026 (two-path response
+      renderer `InsightsResponseRenderer`), 027 (clickable citations — v1.1 forward),
+      028 (confidence floor badge). This task ships the BFF-side tool handler that
+      tasks 025–028 build atop on the frontend.
+
+      Zone B boundary discipline: R5 CLAUDE.md §3.5 and §10 explicitly call out that
+      R5 NEVER injects Insights internals. The endpoint co-locates in the same BFF
+      process today, but the boundary is binding per refined ADR-013 §3.5. Same-
+      process HTTP is the canonical Zone B consumption pattern.
+
+      This task adds NO new top-level `Program.cs` lines, NO new feature flags
+      (kill-switch coverage inherits from `NullSprkChatAgentFactory` + the Insights
+      endpoint's own kill-switches), and NO new chat-agent or tool framework. It does
+      add ONE `services.AddHttpClient&lt;InsightsQueryToolHandler&gt;(...)` line inside
+      `AnalysisServicesModule.cs` to register the typed client (preferred pattern per
+      `IHttpClientFactory` best practice).
+    </background>
+    <dependencies>
+      <dependency task="023" status="required-blocking">
+        D2-13 — R5 lead contract review + sign-off on
+        `projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md` v1.0
+        §10. This task is gated on the operator-led sign-off + the 6 contract-review
+        decisions (D1–D6 per spec.md §8.2) being recorded. Task 024 MUST NOT begin
+        until task 023 is ✅.
+      </dependency>
+      <dependency task="015" status="recommended-parallel">
+        D2-05 — `InvokeSummarizePlaybookTool` registration. Sibling tool registered on
+        the same `SprkChatAgentFactory.ResolveTools` site. Tool-description-quality
+        discipline (NFR-12) requires this task's description to differentiate from
+        task 015's. Both tasks can run in parallel waves (P2-G3 vs P2-G6) but the
+        descriptions MUST be considered jointly.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 025 (D2-15) — Subject resolution from chat context (HostContext active
+        matter / project / invoice → `&lt;scheme&gt;:&lt;guid&gt;` format) + the frontend
+        HTTP client that calls this tool's BFF surface. Parallel-safe sibling in P2-G6.</item>
+      <item>Task 026 (D2-16) — `InsightsResponseRenderer` two-path React component
+        (playbook structured envelope + RAG citation-grounded prose). Consumes this
+        tool's responses. P2-G6.</item>
+      <item>Task 027 (D2-17) — Clickable citations (v1.1 `citations[].href`; v1.0
+        display-name-only fallback). Builds on task 026. P2-G6.</item>
+      <item>Task 028 (D2-18) — Confidence floor badge (`&lt;0.6` → "low-confidence"
+        hint per integration brief §6 question 5 + R5 decision D5). Builds on task
+        026. P2-G6.</item>
+      <item>Task 019 (D2-09) — Slash command `/ask-insights` semantic extension. Sets
+        `forceMode` for unambiguous invocation per spec FR-12 / SC-17. The slash
+        command path calls this tool with `forceMode` set; natural-language LLM
+        tool-call path leaves it absent.</item>
+      <item>Task 015 (D2-05) — `InvokeSummarizePlaybookTool`. Sibling tool;
+        description must differentiate per NFR-12. The UR-01 risk centers on these
+        two tools' routing disambiguation.</item>
+      <item>Insights Engine R2 task 042 (E3) — `POST /api/insights/assistant/query`
+        BFF endpoint + handler. The HTTP contract this tool consumes. Already merged
+        in master (PR #337) prior to R5 Phase 2.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request `/compact`.
+      Declare RIGOR LEVEL explicitly per CLAUDE.md §8:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: BFF code change in chat-agent tool registration site + new tool class
+                 + Zone B HTTP consumption (Insights contract) + AI infrastructure +
+                 AIPU2-061 capability router coupling. Tags: bff + chat-agent +
+                 tool-registration + insights + ai. Qualifies for FULL per task-execute
+                 decision tree.
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0–10 with Step 9.5 quality gates.
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md`. Confirm task 024 status is 🔲, dependency 023 is ✅
+      (BLOCKING gate — if 023 is 🔲, STOP and report; do not begin tool integration
+      without contract sign-off), parallel-safe = true (P2-G6), siblings 025/026/027/
+      028. Read `current-task.md` to verify no R5 task is in flight conflicting with
+      this site. Confirm task 015 status (sibling — `InvokeSummarizePlaybookTool`
+      description-coordination concern). Read project README for project status.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically:
+      (a) Read `notes/insights-engine-assistant-integration-brief.md` in full — this
+          is the BINDING contract v1.0. Internalize §3 (request schema), §4 (response
+          schema both paths), §5 (12 error codes + per-code recommended action), §10
+          (coordination protocol).
+      (b) Read `notes/insights-engine-contract-v1.1-request.md` §0a Negotiation
+          Outcome — confirm v1.1 forward-compat scope (SSE + clickable citations) is
+          OUT of this task's scope (task 027 covers v1.1 citations; SSE is Wave F
+          coordination).
+      (c) Read `SprkChatAgentFactory.ResolveTools` (lines 540–1040) to internalize the
+          tool-registration block pattern + AIPU2-063 error-isolation discipline.
+      (d) Read `AnalysisExecutionTools.cs` (canonical tool-class shape) and
+          `AnalysisQueryTools.cs` (canonical pattern when constructor takes a service).
+      (e) Read task 015's POML to confirm the InvokeSummarizePlaybookTool description
+          text + capability constant chosen (drives NFR-12 differentiation discipline).
+      (f) Read task 023's POML to confirm the contract sign-off decisions D1–D6
+          (any decisions affect this task's surface — e.g., D1 SSE deferral confirms
+          single-shot HTTP, D2 forceMode-without-playbookHint defaults to BFF config,
+          D4 citation display name fallback shape).
+      (g) Read ADR-013 (§3.5 Zone B boundary), ADR-010, ADR-018, ADR-019, ADR-028 in
+          full.
+      (h) Read `InsightsAssistantEndpoint.cs` + `InsightsAssistantQueryRequest.cs`
+          ONLY for reference — do NOT import them in the new tool class (Zone B
+          boundary; same-process HTTP only).
+      (i) Read `bff-extensions.md` §F (test obligation) + §F.1 (asymmetric-registration
+          anti-pattern) — verify unconditional registration discipline.
+    </step>
+    <step order="3" name="Tool description authoring (NFR-12 + UR-01 mitigation)">
+      The description text is the single most load-bearing artifact of this task per
+      NFR-12. The spec MANDATES the wording: "Answer matter/project/invoice-scoped
+      analytical questions about entities" (spec NFR-12 + plan.md D2-14). This is the
+      baseline. Author + record in task notes a fuller parameter-aware description for
+      `AIFunctionFactory.Create`:
+
+      Mandatory baseline: "Answer matter/project/invoice-scoped analytical questions
+      about entities. Use for questions about a specific matter, project, or invoice
+      (predicted cost, key dates, closing conditions, outstanding amounts, etc.). Do
+      NOT use for summarizing files uploaded to the current chat session (use
+      InvokeSummarizePlaybook for that)."
+
+      Author parameter-level `[Description(...)]` attributes for `query`, `subject`,
+      and `forceMode`:
+      - `query`: "The user's natural-language question (1..500 chars). Required."
+      - `subject`: "The scope entity in the format '&lt;scheme&gt;:&lt;guid&gt;' where
+        scheme is 'matter', 'project', or 'invoice'. Resolved from the active chat
+        host context. Required."
+      - `forceMode`: "Optional. Set to 'playbook' or 'rag' when invoking via an
+        explicit slash command. Omit for natural-language tool-calls — the BFF
+        intent classifier will route automatically."
+
+      Record the final description text (method-level + each parameter-level) in
+      task notes `notes/task-024-evidence.md` for cross-reference with task 015's
+      description (NFR-12 audit pair).
+
+      Also: identify the playbook capability under which to gate the tool. Read
+      `PlaybookCapabilities` constants in the existing factory; prefer to reuse an
+      existing Insights-related capability if one exists; otherwise add a new constant
+      `PlaybookCapabilities.InsightsQuery`. Decide between (a) typed `HttpClient`
+      injected via `IHttpClientFactory` registered in `AnalysisServicesModule.cs`
+      (preferred), or (b) `HttpClient` passed in directly from the factory's scoped
+      provider. Record decision.
+    </step>
+    <step order="4" name="Create `InsightsQueryToolHandler` class">
+      Create
+      `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/InsightsQueryToolHandler.cs`
+      following the canonical `AnalysisExecutionTools` shape:
+      - `public sealed class InsightsQueryToolHandler`
+      - Constructor: takes `HttpClient httpClient` (typed client, scoped),
+        `ILogger&lt;InsightsQueryToolHandler&gt; logger`, optional `HttpContext` for
+        OBO bearer-token forwarding per ADR-028 (NOT a token snapshot — pass the
+        context through and read the auth header per call).
+      - Method:
+        `public async Task&lt;string&gt; InsightsQueryAsync(string query, string subject, string? forceMode, CancellationToken ct)`
+        decorated with `[Description("Answer matter/project/invoice-scoped analytical questions about entities. ...")]`
+      - Parameter attributes: `[Description("...")]` on each parameter per Step 3.
+      - Implementation:
+        1. Construct request DTO `{ query, subject, forceMode, conversationContext: null }`
+           per integration brief §3 (request schema). Use a private record matching
+           the contract — does NOT import `InsightsAssistantQueryRequest` (Zone B
+           boundary).
+        2. Generate `x-correlation-id`:
+           `var correlationId = Activity.Current?.Id ?? Guid.NewGuid().ToString("N");`
+           Add as request header. Log + emit as telemetry tag for FR-17 / SC-16.
+        3. Forward OBO bearer token from `HttpContext.Request.Headers.Authorization`
+           to the outbound request (set `Authorization` header on the HttpRequestMessage).
+        4. POST to `/api/insights/assistant/query` (relative to typed client's
+           configured BaseAddress).
+        5. Parse response:
+           - On 200 OK: deserialize loosely (use `JsonElement` for `structuredResult`
+             + `[JsonExtensionData]` on the outer DTO for v1.1 forward-compat). Return
+             the JSON string to the agent's conversation context.
+           - On non-2xx with `application/problem+json`: parse `ProblemDetails` per
+             ADR-019; extract `errorCode`, `correlationId`, `status`, `title`,
+             `detail`; throw a structured `InsightsToolException` (private exception
+             type in the same file or a small companion file) preserving all four
+             fields. The middleware stack / agent SSE pipe converts this into the
+             tool-error envelope surfaced to the renderer (task 026).
+           - On 401 with no `errorCode`: surface as `InsightsToolException` with
+             `errorCode = "auth.401"` (synthetic — distinct from contract codes).
+           - On 429: extract `Retry-After` header; surface as `InsightsToolException`
+             with `errorCode = "rate-limit.429"` + retry-after value.
+        6. Telemetry: emit `Activity` span tags for `insights.path` (from response
+           header `X-Insights-Path` when present), `insights.elapsedMs`,
+           `insights.cacheHit`, `correlationId` per FR-17 / FR-18.
+      - `public IEnumerable&lt;AIFunction&gt; GetTools()` yielding
+        `AIFunctionFactory.Create(InsightsQueryAsync, name: "insights.query", description: "...")`.
+      Mirror the XML doc-comment density of `AnalysisExecutionTools.cs`.
+
+      Verify Zone B boundary by grep: the new file MUST NOT contain
+      `using Sprk.Bff.Api.Services.Ai.Insights` or
+      `using Sprk.Bff.Api.Models.Insights` namespaces. Use the local private request
+      record + loose response DTO with `JsonElement` instead.
+    </step>
+    <step order="5" name="Register typed HttpClient inside `AnalysisServicesModule.cs`">
+      Inside the EXISTING `AnalysisServicesModule.cs` feature module (NOT in
+      `Program.cs` per ADR-010 + R5 §3.3), add a single `services.AddHttpClient&lt;...&gt;`
+      line for the tool's typed client:
+
+      ```csharp
+      // --- InsightsQueryToolHandler typed client (R5 D2-14) ---
+      // Zone B HTTP consumption of the Insights /assistant/query endpoint.
+      services.AddHttpClient&lt;InsightsQueryToolHandler&gt;(client =&gt;
+      {
+          var bffBaseAddress = configuration["Bff:BaseAddress"]
+              ?? "https://localhost:7001"; // local dev fallback
+          client.BaseAddress = new Uri(bffBaseAddress);
+          client.Timeout = TimeSpan.FromSeconds(60);
+          client.DefaultRequestHeaders.Accept.Add(
+              new MediaTypeWithQualityHeaderValue("application/json"));
+      });
+      ```
+
+      Verify the config key `Bff:BaseAddress` resolves correctly across environments
+      (Spaarke Dev / Local). If a different key is conventional in the repo (e.g.,
+      `ApiBaseAddress`), use the existing convention — search for prior typed-client
+      registrations in `AnalysisServicesModule.cs` and adjacent modules. Document the
+      chosen config key in task notes.
+
+      ZERO new top-level `Program.cs` lines per ADR-010.
+    </step>
+    <step order="6" name="Wire tool into `SprkChatAgentFactory.ResolveTools`">
+      Extend `SprkChatAgentFactory.ResolveTools` with a new capability-gated block,
+      placed adjacent to task 015's `InvokeSummarizePlaybookTool` block. Pattern
+      (mirror existing tool-resolution blocks + task 015 exactly):
+
+      ```csharp
+      // --- InsightsQueryToolHandler (R5 D2-14) ---
+      // Gated behind the InsightsQuery capability.
+      // Consumes POST /api/insights/assistant/query (Insights endpoint, Zone B).
+      if (capabilities.Contains(PlaybookCapabilities.InsightsQuery))
+      {
+          attempted++;
+          try
+          {
+              var insightsQueryTool = scopedProvider.GetRequiredService&lt;InsightsQueryToolHandler&gt;();
+              tools.AddRange(insightsQueryTool.GetTools());
+              resolved++;
+          }
+          catch (Exception ex)
+          {
+              _logger.LogWarning(ex, "Failed to resolve InsightsQueryToolHandler — skipping");
+              failedTools.Add(nameof(InsightsQueryToolHandler));
+          }
+      }
+      ```
+
+      The tool is resolved from `scopedProvider` because the typed `HttpClient` is
+      registered via `AddHttpClient&lt;InsightsQueryToolHandler&gt;` (which transitively
+      registers the handler as transient/scoped). If a new capability constant is
+      needed, add it inside `PlaybookCapabilities` static class. ZERO new
+      `Program.cs` lines per ADR-010.
+    </step>
+    <step order="7" name="Update capability manifest + `ToolNames` allow-list (AIPU2-061)">
+      Update the appropriate capability manifest entry (or capability constants file)
+      so `insights.query` appears in `ToolNames` for the chosen capability
+      (`InsightsQuery`). This makes the tool discoverable by
+      `CapabilityRouter.RouteAsync` and selectable for per-turn injection when the
+      user's prompt classifies as entity-scoped analytical-question intent. Verify via
+      the `CapabilityValidator` flow (per AIPU2-061 line 1088+ in
+      `SprkChatAgentFactory.cs`).
+    </step>
+    <step order="8" name="Author tests (delegation, Zone B boundary, error mapping, forceMode, correlation-id)">
+      Add a unit test in
+      `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/InsightsQueryToolHandlerTests.cs`:
+      - **Test 1 (success — playbook path)**: Mock `HttpMessageHandler` returns 200
+        OK with the integration brief §4.6 playbook sample. Assert
+        `InsightsQueryAsync("predicted cost?", "matter:...", "playbook", ct)` POSTs
+        to `/api/insights/assistant/query` with request body
+        `{ query, subject, forceMode: "playbook", conversationContext: null }`,
+        forwards bearer token, sets `x-correlation-id` header. Assert response is
+        returned with `path: "playbook"` preserved.
+      - **Test 2 (success — RAG path)**: Mock returns 200 OK with integration brief
+        §4.6 RAG sample. Assert `forceMode` omitted from request when null. Assert
+        response `path: "rag"` preserved.
+      - **Test 3 (forceMode semantics)**: `forceMode: null` → field omitted /
+        serialized as null per contract; `forceMode: "playbook"` → forwarded;
+        `forceMode: "rag"` → forwarded; `forceMode: "garbage"` → forwarded (BFF
+        returns 400 `forceMode.invalid` — tool does NOT pre-validate).
+      - **Test 4 (error mapping — 12 codes)**: For each of the 12 contract error
+        codes (integration brief §5.1), mock the response and assert the tool throws
+        `InsightsToolException` preserving `errorCode`, `correlationId`, `status`,
+        `title`, `detail`. Include: `query.required`, `subject.required`,
+        `subject.invalid`, `forceMode.invalid`, `conversationContext.invalid`,
+        `auth.401` (synthetic), `rate-limit.429` (synthetic with Retry-After),
+        `ai.insights.disabled`, `ai.rag.disabled`,
+        `ai.intent-classification.disabled`,
+        `ai.assistant-default-playbook.unconfigured`,
+        `INSIGHTS_ASSISTANT_INTERNAL_ERROR`.
+      - **Test 5 (correlation-id propagation)**: Tool generates a unique
+        `x-correlation-id` per call; same value emitted as telemetry tag /
+        `Activity` baggage; recoverable from log output. Assert via mocked logger
+        + captured `HttpRequestMessage`.
+      - **Test 6 (Zone B boundary)**: Programmatic grep against the new tool class
+        file — assert no `using Sprk.Bff.Api.Services.Ai.Insights` or `Models.Insights`
+        appears. Implement as a unit test reading the source file content (or use a
+        repo-level convention test if one exists).
+      - **Test 7 (v1.1 forward-compat)**: Mock returns 200 with extra unknown fields
+        (e.g., `citations[0].href = "..."`, top-level `streaming: true`). Tool
+        passes them through unchanged.
+      - **Test 8 (no token snapshot)**: Assert that the tool reads
+        `HttpContext.Request.Headers.Authorization` per call (NOT in constructor).
+        Simulated case: first call carries token A, second call carries token B
+        (token rotated mid-session) — tool forwards the correct token each call.
+
+      Add a routing test in
+      `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SprkChatAgentFactoryTests.cs`
+      (or a new file) asserting: when `capabilities` contains
+      `PlaybookCapabilities.InsightsQuery`, `insights.query` appears in the resolved
+      `IReadOnlyList&lt;AIFunction&gt;`; when absent, it does NOT appear; when
+      `routingResult` filters tools to a different capability, this tool is excluded
+      per AIPU2-061.
+    </step>
+    <step order="9" name="Smoke test against Spaarke Dev BFF (acceptance criteria)">
+      With BFF deployed to Spaarke Dev (or running locally with `Bff:BaseAddress`
+      pointed to Spaarke Dev), exercise the chat agent end-to-end:
+
+      Positive prompts (MUST tool-call `insights.query`):
+      - "what will this matter cost to complete?" (set HostContext to test matter
+        `da116923-d65a-f111-a825-3833c5d9bcb1`)
+      - "what closing conditions are in this matter?"
+      - "list outstanding invoices for this project" (HostContext project
+        `27845394-8e5f-f111-a825-70a8a59455f4`)
+      - "give me a status update on this invoice" (HostContext invoice
+        `05c8ef8d-8e5f-f111-a825-70a8a59455f4`)
+
+      Negative prompts (MUST NOT tool-call `insights.query`):
+      - "summarize the attached document" (with files uploaded → should select
+        `InvokeSummarizePlaybook` from task 015)
+      - "give me a TL;DR of the files I uploaded"
+
+      Slash command path:
+      - `/ask-insights playbook ...` (task 019) → tool called with `forceMode:
+        "playbook"`
+      - `/ask-insights rag ...` (task 019) → tool called with `forceMode: "rag"`
+      - Natural language `/ask-insights ...` without explicit mode → tool called with
+        `forceMode` omitted
+
+      Verifications:
+      - At least 3 of 4 positive prompts route correctly to `insights.query`.
+      - Negative prompts do NOT spuriously trigger `insights.query` (UR-01 mitigation).
+      - `x-correlation-id` header is set on every outbound request (capture via BFF
+        log inspection on Spaarke Dev). Same ID appears in App Insights / Kusto
+        end-to-end trace.
+      - Slash command path sets `forceMode` correctly; natural-language path omits it.
+      - Sample error response (intentionally malformed subject) surfaces the contract
+        error code (`subject.invalid`) via `InsightsToolException`.
+
+      Capture all tool-call traces in task notes `notes/task-024-evidence.md`. If
+      routing is incorrect, refine the description text (Step 3) and re-run.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the new tool class +
+      `SprkChatAgentFactory.ResolveTools` extension + `AnalysisServicesModule.cs`
+      AddHttpClient line + test file(s). Run `adr-check` skill against the same;
+      verify:
+      - **ADR-013 §3.5 (Zone B boundary)**: tool calls Insights via HTTP; no
+        `using ...Services.Ai.Insights` / `Models.Insights` imports. Verified by
+        explicit grep at Step 8 Test 6 + reviewer inspection.
+      - **ADR-010 (DI minimalism)**: zero new top-level `Program.cs` lines; single
+        `AddHttpClient` inside feature module.
+      - **ADR-018 (no new feature flag)**: kill-switch inherits via
+        `NullSprkChatAgentFactory`; Insights endpoint enforces own kill-switches and
+        their 503 responses surface to the renderer.
+      - **ADR-019 (ProblemDetails parsing)**: error path preserves `errorCode` +
+        `correlationId` + `status` + `title` + `detail`.
+      - **ADR-028 (no token snapshot)**: token forwarded fresh per call from
+        `HttpContext`; Test 8 confirms.
+      - **ADR-016 (rate-limit honoring)**: 429 surfaced structurally; no in-tool
+        auto-retry.
+
+      All gates MUST pass before marking the task complete.
+
+      Run BFF publish + size check:
+      `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`
+      Measure compressed output; record absolute size + delta vs prior baseline (per
+      R5 CLAUDE.md §3.6). Expected delta is small (one new tool class +
+      `AddHttpClient` line + one tool-resolution block) — target +0.0–0.1 MB.
+
+      Verify no new HIGH-severity CVE:
+      `dotnet list package --vulnerable --include-transitive`.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 024 🔲 → ✅.
+      Reset `current-task.md` to the next pending P2-G6 task per CLAUDE.md §7 (likely
+      025 or 026). Record in task notes (`notes/task-024-evidence.md`):
+      - Final method-level + parameter-level description text (NFR-12 audit pair
+        cross-reference to task 015's description).
+      - Chosen gating capability (existing constant reused vs new
+        `PlaybookCapabilities.InsightsQuery` added).
+      - Config key for `Bff:BaseAddress` (or repo convention used).
+      - Routing smoke-test traces (positive + negative prompts).
+      - Correlation-id propagation evidence (App Insights / Kusto trace IDs).
+      - `forceMode` test results (slash command vs natural-language).
+      - 12 error code mapping results.
+      - Zone B boundary grep result.
+      - BFF publish-size delta.
+      - CVE scan result.
+      Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build BFF, run tests, run `dotnet publish` for size measurement, run `dotnet list package --vulnerable`</tool>
+    <tool name="curl / az rest">Smoke-test the Insights endpoint directly with the contract v1.0 cURL examples from integration brief §9</tool>
+    <tool name="git">Stage + commit on the R5 branch (one logical commit for tool class + factory wiring + DI registration + tests)</tool>
+    <tool name="code-review">Quality gate at Step 9.5 (FULL rigor)</tool>
+    <tool name="adr-check">Quality gate at Step 9.5 (FULL rigor) — verify ADR-013 §3.5, ADR-010, ADR-018, ADR-019, ADR-028, ADR-016</tool>
+    <tool name="context-handoff">Checkpointing per R5 CLAUDE.md §5 (after Step 3, Step 6, Step 8; verbose at &gt;60%)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/InsightsQueryToolHandler.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (EXTEND — add capability-gated resolution block in ResolveTools adjacent to task 015's InvokeSummarizePlaybookTool block)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookCapabilities.cs (EXTEND — add `InsightsQuery` constant if no existing fit; prefer reuse)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (EXTEND — add `services.AddHttpClient&lt;InsightsQueryToolHandler&gt;(...)` line; NO new `Program.cs` lines)</output>
+    <output type="code">Capability manifest entry / `ToolNames` allow-list update for AIPU2-061 routing (exact file per existing capability manifest convention; `insights.query` added to `ToolNames`)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/InsightsQueryToolHandlerTests.cs (NEW — 8 tests including 12-error-code mapping, Zone B boundary, no-token-snapshot, forceMode semantics, correlation-id propagation, v1.1 forward-compat)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SprkChatAgentFactoryTests.cs (EXTEND — add routing-selection test for `insights.query`)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 024 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending P2-G6 task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-024-evidence.md (description text final, capability decision, config key, routing smoke-test traces, correlation-id propagation evidence, forceMode test results, 12-error-code mapping, Zone B boundary grep, publish-size delta, CVE scan result)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`InsightsQueryToolHandler` is registered via the EXISTING `SprkChatAgentFactory.ResolveTools` mechanism (no new chat agent, no new tool framework, no new top-level DI lines). Confirmed by `SprkChatAgentFactoryTests` assertion that the tool appears in the resolved `IReadOnlyList&lt;AIFunction&gt;` when the gating capability is present.</criterion>
+    <criterion testable="true">Tool name registered via `AIFunctionFactory.Create` is exactly `insights.query` (lowercase, dot-separated). Confirmed by unit test asserting `AIFunction.Name == "insights.query"`.</criterion>
+    <criterion testable="true">Tool description scopes routing correctly per NFR-12 baseline: "Answer matter/project/invoice-scoped analytical questions about entities ..." with explicit differentiation from `InvokeSummarizePlaybook` (file-scoped / session-scoped). Final description text recorded in task notes; NFR-12 audit pair cross-reference to task 015's description confirms no semantic overlap.</criterion>
+    <criterion testable="true">Tool is visible in the agent's tool catalog (factory log line emits `resolved++` count including this tool; `ResolveTools` returns it). Confirmed by integration log inspection on Spaarke Dev.</criterion>
+    <criterion testable="true">LLM correctly tool-calls `insights.query` for at least 3 of 4 natural-language matter/project/invoice analytical test prompts (smoke test Step 9). Negative prompts (file-scoped Summarize prompts) do NOT spuriously trigger this tool — UR-01 mitigation verified.</criterion>
+    <criterion testable="true">HTTP POST to `/api/insights/assistant/query` works end-to-end against Spaarke Dev BFF — both playbook path (200 OK with `path: "playbook"`) and RAG path (200 OK with `path: "rag"`) responses parsed correctly and forwarded to the renderer. Confirmed by smoke-test traces in task notes.</criterion>
+    <criterion testable="true">`x-correlation-id` is generated per Assistant turn, set on every outbound request, retained in chat-agent telemetry, recoverable end-to-end in App Insights / Kusto (spec FR-17 / SC-16). Confirmed by smoke-test correlation-id trace evidence in task notes.</criterion>
+    <criterion testable="true">`forceMode` parameter works correctly: slash command path (task 019) sets it (`"playbook"` or `"rag"`); LLM tool-call path omits it (null). BFF returns 400 `forceMode.invalid` for invalid values (surfaced via error path). Confirmed by unit Test 3 + smoke test Step 9 slash command verification.</criterion>
+    <criterion testable="true">All 12 contract error codes from integration brief §5.1 are surfaced via `InsightsToolException` preserving `errorCode`, `correlationId`, `status`, `title`, `detail`. Confirmed by unit Test 4 covering all 12 codes.</criterion>
+    <criterion testable="true">**Zone B boundary verified by explicit grep**: the new tool class file contains ZERO `using Sprk.Bff.Api.Services.Ai.Insights` and ZERO `using Sprk.Bff.Api.Models.Insights` imports — no Insights internals injected per R5 CLAUDE.md §3.5 + §10 + refined ADR-013 §3.5. Confirmed by unit Test 6 + reviewer inspection at Step 9.5.</criterion>
+    <criterion testable="true">No token snapshot: tool reads `HttpContext.Request.Headers.Authorization` per call (NOT in constructor). Confirmed by unit Test 8 (simulated token rotation mid-session — second call forwards the rotated token).</criterion>
+    <criterion testable="true">Middleware stack (cost control, content safety, telemetry, service routing) wraps tool execution by virtue of using the existing `SprkChatAgentFactory`. Confirmed by telemetry event presence in App Insights / log output during the smoke test.</criterion>
+    <criterion testable="true">AIPU2-061 routing: `insights.query` appears in the appropriate capability manifest's `ToolNames` allow-list; `CapabilityRouter.RouteAsync` selects this tool for entity-scoped analytical prompts; `SprkChatAgentFactory.ResolveTools` respects the per-turn filter. Confirmed by routing-selection unit test.</criterion>
+    <criterion testable="true">ZERO new top-level `Program.cs` lines (ADR-010); ZERO new feature flags (ADR-018); tool registers unconditionally inside the existing capability-gated block; kill-switch coverage inherits via `NullSprkChatAgentFactory`. Confirmed by `git diff Program.cs` showing no changes + `adr-check` pass at Step 9.5.</criterion>
+    <criterion testable="true">v1.1 forward-compat: unknown response fields (e.g., `citations[].href`, top-level SSE fields) pass through unchanged via `JsonElement` + `[JsonExtensionData]`. Confirmed by unit Test 7.</criterion>
+    <criterion testable="true">BFF publish-size delta is measured + reported (per R5 CLAUDE.md §3.6); target ≤ +0.1 MB; absolute publish size stays well under the 60 MB ceiling. Recorded in `notes/task-024-evidence.md`.</criterion>
+    <criterion testable="true">No new HIGH-severity CVE introduced (`dotnet list package --vulnerable --include-transitive` clean).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5 (ADR-013 §3.5, ADR-010, ADR-018, ADR-019, ADR-028, ADR-016 confirmed).</criterion>
+  </acceptance-criteria>
+</task>

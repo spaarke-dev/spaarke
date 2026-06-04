@@ -30,6 +30,23 @@ public class KnowledgeDocument
     public string TenantId { get; set; } = string.Empty;
 
     /// <summary>
+    /// R5 (spec.md §4.2 / FR-09 / ADR-014): chat-session identifier for session-scoped
+    /// retrieval and eviction in the <c>spaarke-session-files</c> index. NULL on writes
+    /// to the knowledge / discovery / references indexes (those schemas do not declare
+    /// a <c>sessionId</c> field; Azure Search SDK ignores absent fields on incoming
+    /// documents, so back-compat is preserved). REQUIRED (non-null, non-empty) on writes
+    /// to the session-files index per ADR-014 tenant + session isolation invariant —
+    /// enforced at the call boundary by
+    /// <see cref="Sprk.Bff.Api.Services.Ai.RagIndexingPipeline.IndexSessionFileAsync"/>.
+    /// Serialized only when non-null so existing customer-corpus payloads are byte-for-byte
+    /// unchanged.
+    /// </summary>
+    [SimpleField(IsFilterable = true, IsFacetable = true)]
+    [JsonPropertyName("sessionId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionId { get; set; }
+
+    /// <summary>
     /// Deployment identifier (sprk_aiknowledgedeployment record ID).
     /// </summary>
     [SimpleField(IsFilterable = true, IsFacetable = true)]
