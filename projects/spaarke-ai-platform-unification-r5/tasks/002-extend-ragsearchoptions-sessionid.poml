@@ -1,0 +1,403 @@
+<task id="002" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D1-02 Extend `RagSearchOptions` with `sessionId` filter (additive parameter) + route `RagService.SearchAsync()` to `spaarke-session-files` index</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 1 — Platform Extensions</phase>
+    <wave>P1-G2 (parallel with task 003)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001 (index schema; smoke-test only — code change can be authored against schema spec)</dependencies>
+    <tags>bff, rag, additive</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Extend the existing `RagSearchOptions` record with an additive `SessionId` property and
+    route `RagService.SearchAsync()` to the new `spaarke-session-files` Azure AI Search index
+    when `SessionId` is provided. The existing tenant-scoped knowledge-index path (the
+    customer-corpus search used by the existing Summarize wizard query) MUST remain
+    functionally identical when `SessionId` is absent — this is the binding
+    backward-compatibility contract for R5 Phase 1.
+
+    Per ADR-014, the session-files index documents carry BOTH `tenantId` AND `sessionId`.
+    The filter built inside `BuildSearchOptions` MUST AND both fields when routing
+    session-scoped, so a session query in tenant A can never leak across to tenant B (the
+    existing `tenantId eq '...'` filter is preserved, and `sessionId eq '...'` is added).
+
+    This task is REUSE-FIRST per R5 CLAUDE.md §3.1: MUST extend the existing
+    `RagSearchOptions` record (defined in `IRagService.cs`) and the existing `RagService`
+    class — do NOT introduce a parallel `SessionRagSearchOptions` / `SessionRagService`.
+    The task introduces ZERO new feature flags (R5 CLAUDE.md §3.2). DI registrations, if
+    any are needed (none expected for this task), MUST go inside
+    `Infrastructure/DI/AnalysisServicesModule.cs` per R5 CLAUDE.md §3.3 + ADR-010.
+
+    The session-files index name MUST be admin-overridable via existing
+    `AiSearchOptions` configuration (mirror the `KnowledgeIndexName` /
+    `RagReferencesIndexName` pattern at `src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs`).
+    Default: `"spaarke-session-files"`.
+  </prompt>
+
+  <role>
+    Senior .NET developer with Azure AI Search experience. Deep familiarity with
+    `RagService`'s hybrid-search pipeline (keyword + vector + semantic), the
+    `IKnowledgeDeploymentService`-driven multi-tenant index routing, and the OData filter
+    builder in `BuildSearchOptions`. Strong instinct for additive, backward-compatible
+    extensions to widely-consumed record types.
+  </role>
+
+  <goal>
+    `RagSearchOptions` exposes a new optional `SessionId` (string?) initializer.
+    `RagService.SearchAsync(query, options, ct)` routes to the `spaarke-session-files`
+    index (resolved via `AiSearchOptions.SessionFilesIndexName`, default
+    `"spaarke-session-files"`) when `options.SessionId` is non-empty, and applies a
+    `tenantId eq '...' and sessionId eq '...'` filter (preserving existing
+    privilege-group + tag + entity-scope filters as applicable; see §Existing-Filter-Preservation
+    in design notes). When `options.SessionId` is null/empty, the method's behavior is
+    BYTE-FOR-BYTE identical to current — the existing
+    `IKnowledgeDeploymentService.GetSearchClientAsync(tenantId, ct)` path is used,
+    customer-corpus queries (e.g., R3/R4 wizard `streamSummarize()` callers) remain
+    unaffected. Unit tests demonstrate both code paths. BFF builds clean; publish-size
+    delta ≤ +0.1 MB per task budget; existing wizard tests still pass.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="sibling-task-context">projects/spaarke-ai-platform-unification-r5/tasks/001-provision-session-files-index.poml</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-extensions-constraint">.claude/constraints/bff-extensions.md</file>
+    <file purpose="primary-target-record">src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs</file>
+    <file purpose="primary-target-service">src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+    <file purpose="index-name-config">src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs</file>
+    <file purpose="null-object-impl">src/server/api/Sprk.Bff.Api/Services/Ai/NullRagService.cs</file>
+    <file purpose="session-files-schema-from-001">infrastructure/ai-search/spaarke-session-files.json</file>
+    <file purpose="existing-test-suite">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagServiceTests.cs</file>
+    <file purpose="privilege-aware-tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Security/PrivilegeAwareRagServiceTests.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-014">All session-files-index queries MUST apply both `tenantId eq '...'` AND `sessionId eq '...'` filters — the OData clause is appended via `BuildSearchOptions` and ANDed with the existing tenant filter so tenant isolation is preserved.</constraint>
+    <constraint source="ADR-013">All R5 AI capabilities live in BFF; this task does NOT alter that — `RagService` stays in `Sprk.Bff.Api` per ADR-013 Zone A.</constraint>
+    <constraint source="ADR-010">DI minimalism — zero new top-level `Program.cs` lines. If any new registration is needed (none expected; the index-name config is already covered by extending `AiSearchOptions`), it goes inside `Infrastructure/DI/AnalysisServicesModule.cs` per the feature-module pattern.</constraint>
+    <constraint source="ADR-018">R5 introduces ZERO new feature flags. `SessionId` is an optional parameter on the existing options record — NOT a kill-switch boundary. ADR-032 Null-Object pattern is NOT applicable to this change (the existing `NullRagService` kill-switch already covers `RagService` as a whole when `Analysis:Enabled` is false; the new `SessionId` parameter inherits that coverage without any new wiring).</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — per-task verification mandatory. Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report absolute size + delta vs prior baseline. R5 budget ≤ +1 MB single-task delta; this task ≤ +0.1 MB target (additive property + small routing branch). Hard ceiling 60 MB compressed (current baseline ~45.65 MB).</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 (reuse mandate)">MUST extend the EXISTING `RagSearchOptions` record + EXISTING `RagService` class — MUST NOT introduce parallel `SessionRagSearchOptions` / `SessionRagService` / new search service. Cite this rule in the PR description.</constraint>
+    <constraint source="R5 CLAUDE.md §3.2 (no new flags)">Zero new feature flags introduced.</constraint>
+    <constraint source="R5 CLAUDE.md §3.3 (DI discipline)">If a new service registration is required (none expected), it goes inside `AnalysisServicesModule.cs` — zero new lines in `Program.cs`.</constraint>
+    <constraint source="R5 CLAUDE.md §3.6 (publish-size)">Per-task `dotnet publish` measurement reported in task notes / PR description (absolute + delta).</constraint>
+    <constraint source="R5 CLAUDE.md §3.7 (test obligation)">Modifying `Sprk.Bff.Api/Services/Ai/RagService.cs` triggers the test obligation — new tests MUST land in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagServiceTests.cs` (extend existing) covering both routing branches.</constraint>
+    <constraint source="spec FR-09">General grounded Q&amp;A over session-scoped files routes through `RagSearchOptions.sessionId` filter; this task ships the filter primitive that downstream tasks depend on.</constraint>
+    <constraint source="spec NFR-10 (back-compat)">New `SessionId` parameter is ADDITIVE. Existing callers (R3/R4 wizard `streamSummarize`, knowledge-base admin, document-classifier handler, AI analysis nodes) MUST behave identically when they pass no `SessionId`. Verified via existing test suite remaining green.</constraint>
+    <constraint source="spec PR-02">Per-task BFF publish-size verification — report in task notes.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF additions governance — this task modifies `Services/Ai/`; cite Placement Justification in PR description (placement: BFF; criterion: existing service extension, not net-new capability).</constraint>
+    <constraint source="project">The session-files index name MUST be admin-overridable via `AiSearchOptions.SessionFilesIndexName` (default `"spaarke-session-files"`), mirroring the existing `KnowledgeIndexName` / `RagReferencesIndexName` / `FilesIndexName` properties.</constraint>
+    <constraint source="project">Routing decision uses `SearchIndexClient.GetSearchClient(indexName)` directly when `SessionId` is provided (NOT `IKnowledgeDeploymentService.GetSearchClientAsync`) — session-files is a shared session-scoped index per task 001 routing decision; deployment-service routing is for tenant-dedicated knowledge indexes.</constraint>
+    <constraint source="project">When `SessionId` is provided, the `KnowledgeSourceId(s)` / `ExcludeKnowledgeSourceIds` / `ParentEntityType+Id` filters are NOT applicable to session-files docs (session-files have `tenantId` + `sessionId` + chunk schema only, no knowledge-source / parent-entity columns). Validate inputs OR silently ignore those filters with a debug log; document the choice in task notes.</constraint>
+    <constraint source="project">Privilege-group filter (AIPU2-027) — session-files documents do NOT carry `privilege_group_ids`. Confirm behavior of `PrivilegeFilterBuilder.BuildFilter([])` over a session-files schema during implementation; if it conflicts, branch the privilege filter to a session-files-aware no-op for session-scoped queries (document the decision).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>azure-ai-search/hybrid-search + session-scoping</topic>
+    <files>
+      <file>docs/architecture/rag-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>docs/adr/ADR-014-ai-caching-tenant-isolation.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-018-feature-flag-scope-discipline.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/NullRagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Security/PrivilegeFilterBuilder.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Additive record property on RagSearchOptions" location="src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs (line ~199)">
+        `RagSearchOptions` is a C# `record` with `init`-only properties. Add `SessionId`
+        as a `public string? SessionId { get; init; }` adjacent to the existing
+        `KnowledgeSourceId` (or `ParentEntityId`) initializer. XML-doc the property to
+        explain that, when set, search routes to the session-files index and applies a
+        `sessionId eq '...'` filter ANDed with the existing `tenantId` filter.
+      </pattern>
+      <pattern name="Index-name configuration extension" location="src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs">
+        Add `public string SessionFilesIndexName { get; init; } = "spaarke-session-files";`
+        adjacent to the existing `FilesIndexName` / `InsightsIndexName` properties. This
+        gives ops the same admin-override knob R2 / R3 use for other indexes.
+      </pattern>
+      <pattern name="Session-files routing branch inside SearchAsync" location="src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs (Step 2 of SearchAsync, line ~189)">
+        Today: `searchClient = options.DeploymentId.HasValue ? GetSearchClientByDeploymentAsync(...)
+        : _deploymentService.GetSearchClientAsync(tenantId, ct);`. Add a precedence branch:
+        if `!string.IsNullOrEmpty(options.SessionId)` → use
+        `_searchIndexClient.GetSearchClient(_aiSearchOptions.SessionFilesIndexName)`
+        (existing injected `SearchIndexClient`). Otherwise fall through to existing
+        deployment-routing path. Branch order: SessionId first, then DeploymentId, then
+        default tenant routing — most specific first.
+      </pattern>
+      <pattern name="Session-files filter clause inside BuildSearchOptions" location="src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs (BuildSearchOptions, line ~935)">
+        The existing tenant filter (`filters.Add($"tenantId eq '{EscapeFilterValue(options.TenantId)}'");`)
+        is unconditional. ADD: if `!string.IsNullOrEmpty(options.SessionId)` then append
+        `filters.Add($"sessionId eq '{EscapeFilterValue(options.SessionId)}'");`. The clause
+        joins via " and " (existing pattern). The privilege-group / tags / entity-scope
+        filters are gated on session-scoped queries per the constraint above — implement a
+        small branch that SKIPS privilege-group filter when `SessionId` is set, since
+        session-files docs do not carry that column.
+      </pattern>
+      <pattern name="NullRagService kill-switch coverage" location="src/server/api/Sprk.Bff.Api/Services/Ai/NullRagService.cs">
+        `NullRagService.SearchAsync` returns an empty `RagSearchResponse` when the kill
+        switch is on. The `SessionId` extension inherits this — no separate
+        `NullRagService` change is needed. Verify by reading `NullRagService` and noting in
+        task notes that the existing throw-FeatureDisabledException / empty-response
+        pattern still covers the session-scoped code path with zero new wiring.
+      </pattern>
+      <pattern name="Test extension pattern" location="tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagServiceTests.cs">
+        Extend the existing `RagServiceTests` class with new tests: (a)
+        `SearchAsync_WhenSessionIdAbsent_RoutesToTenantKnowledgeIndex`; (b)
+        `SearchAsync_WhenSessionIdProvided_RoutesToSessionFilesIndex`; (c)
+        `SearchAsync_WhenSessionIdProvided_AppliesTenantAndSessionFilter`; (d)
+        `SearchAsync_WhenSessionIdProvided_DoesNotApplyKnowledgeSourceFilter`.
+        Use the existing test fixtures' mocked `SearchIndexClient` /
+        `IKnowledgeDeploymentService` patterns.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships a chat-driven "Summarize a Document" vertical slice. The R5 chat agent
+      grounds responses on session-uploaded files via session-scoped retrieval against the
+      new `spaarke-session-files` Azure AI Search index (provisioned by task 001). This
+      task extends the existing `RagService` retrieval primitive — the same service used
+      by the existing knowledge-base-grounded wizard path, document-classifier handler, AI
+      analysis nodes, and Insights `IndexRetrieveNode` — with an additive `SessionId`
+      filter. When R5 downstream tasks (Phase 2 endpoint, Phase 2 LLM tool, Phase 2 chat
+      Q&amp;A flow) need to scope retrieval to a chat session's files, they pass
+      `options with { SessionId = chatSession.Id }`. Existing callers continue to pass
+      no `SessionId` and get the customer-corpus knowledge index they already use.
+
+      Why additive on `RagSearchOptions` and NOT a parallel options class: per R5 CLAUDE.md
+      §3.1 reuse mandate (and consistent with how the Insights team extended
+      `RagSearchOptions` with subject / artifactType / predicate filters during Wave D),
+      `RagSearchOptions` IS the canonical RAG search query DTO. A parallel
+      `SessionRagSearchOptions` would diverge and require parallel `RagService` overloads
+      that drift. Single record, single service, additive property — back-compat
+      preserved by null-default + branch on presence.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">
+        Provisions `spaarke-session-files` index on Spaarke Dev. Required for end-to-end
+        smoke testing of this task's session-routing branch. NOT required for authoring
+        the code change or running unit tests (which mock the SearchClient). Implementer
+        can ship the code change against the schema spec in task 001 even if task 001 has
+        not yet completed deployment; smoke test against the empty index happens once
+        task 001 lands.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 001 (D1-01) provisions the `spaarke-session-files` index whose schema this
+        task's routing branch queries. The index includes `tenantId` + `sessionId` fields
+        per ADR-014.</item>
+      <item>Task 003 (D1-03) parameterizes `RagIndexingPipeline` to WRITE to the session-files
+        index. Tasks 002 (this) + 003 are independent and parallel-safe within wave P1-G2:
+        002 touches READ-path (`RagService.SearchAsync` + `RagSearchOptions`); 003 touches
+        WRITE-path (`RagIndexingPipeline`).</item>
+      <item>Insights r2 Wave D added `subject` / `artifactType` / `predicate` filters to
+        `RagSearchOptions` — the same additive-extension pattern this task uses. Reference
+        `notes/insights-r2-coordination.md` to verify no merge conflict in the property
+        ordering.</item>
+      <item>Task 007 (D1-07) consumes the session-scoped retrieval indirectly via the
+        cleanup `IHostedService`. Task 009 (D1-09) extends Phase 1 tests covering this
+        task's branches end-to-end.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL declaration">
+      Check context usage. If &gt; 70%, create handoff summary and request `/compact`.
+      Output mandatory rigor declaration per CLAUDE.md §8:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: BFF code change (Services/Ai/RagService.cs); new public-API property
+         on a widely-consumed record (RagSearchOptions); requires backward-compat
+         verification + adr-check + code-review per CLAUDE.md §8 (FULL triggers:
+         modifying `.cs`, tags include `bff` + `rag`, multi-step work).
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0–10 with Step 9.5 quality gates.
+      Proceeding with Step 0...
+      ```
+    </step>
+
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md`; confirm task 002 row shows 🔲 + wave P1-G2 + deps 001 +
+      parallel-safe ✅. Read `current-task.md` and confirm task 002 is set as active.
+      Read `tasks/001-provision-session-files-index.poml` to absorb the session-files
+      index schema decisions (field set, routing decision, per-tenant deferral). Confirm
+      task 001 status — if not yet complete, the code change can still be authored
+      against task 001's schema spec; end-to-end smoke test deferred to task 001 ship.
+    </step>
+
+    <step order="2" name="Gather Resources">
+      Read every file listed in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically:
+      - `IRagService.cs` — locate the `RagSearchOptions` record definition (line ~199);
+        identify property ordering + XML-doc style.
+      - `RagService.cs` — locate (a) `SearchAsync` line ~95 entry + ~189 SearchClient
+        resolution; (b) `BuildSearchOptions` line ~935 filter construction.
+      - `AiSearchOptions.cs` — locate the existing `KnowledgeIndexName` /
+        `RagReferencesIndexName` / `FilesIndexName` properties for the extension pattern.
+      - `NullRagService.cs` — confirm kill-switch behavior covers the session path
+        automatically.
+      - `tests/.../RagServiceTests.cs` — note existing test patterns (fixtures, mocks,
+        assertion style).
+      Extract: existing OData filter pattern in `BuildSearchOptions`; the
+      `_searchIndexClient.GetSearchClient(indexName)` pattern used in the B8 admin
+      methods; the `EscapeFilterValue` utility.
+    </step>
+
+    <step order="3" name="Plan the additive extension">
+      Sub-plan:
+      (a) Add `SessionId` to `RagSearchOptions` (record property + XML doc).
+      (b) Add `SessionFilesIndexName` to `AiSearchOptions` (default `"spaarke-session-files"`).
+      (c) In `RagService.SearchAsync`: insert session-routing branch BEFORE the existing
+          deployment/tenant resolution branch. When `SessionId` is set, resolve
+          `searchClient = _searchIndexClient.GetSearchClient(_aiSearchOptions.SessionFilesIndexName)`.
+          When NOT set, fall through to existing routing — byte-for-byte identical
+          behavior.
+      (d) In `RagService.BuildSearchOptions`: ADD `sessionId eq '...'` filter clause when
+          `SessionId` set; SKIP `privilege_group_ids` filter when `SessionId` set (since
+          session-files docs don't carry that field); SKIP knowledge-source / parent-entity
+          filters with a debug log when `SessionId` set; PRESERVE existing tenant filter
+          unconditionally. Document the skip decisions in inline code comments + task notes.
+      (e) Add 4 new unit tests in `RagServiceTests.cs` covering: tenant-routing default
+          path; session-routing path; tenant + session filter applied together;
+          knowledge-source filter ignored with session-id.
+
+      Output: file-by-file change list before writing code.
+    </step>
+
+    <step order="4" name="Implement record + config additions">
+      (a) Edit `src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs`: add `SessionId`
+          property to `RagSearchOptions` adjacent to the existing entity-scope properties.
+          XML-doc explains routing semantics + ADR-014 tenant-isolation invariant.
+      (b) Edit `src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs`: add
+          `SessionFilesIndexName` property with default `"spaarke-session-files"` and
+          XML-doc citing R5 spec §4.2 + ADR-014.
+    </step>
+
+    <step order="5" name="Implement routing branch in SearchAsync">
+      Edit `src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs`: inside the internal
+      `SearchAsync(string, RagSearchOptions, ClaimsPrincipal?, CancellationToken)` method,
+      modify Step 2 (searchClient resolution, ~line 189) to add the session-first branch.
+      Preserve all existing logging structure (`LogRetrievalQuery` should now emit the
+      session-files index name when routed there — verify by reading the LogRetrievalQuery
+      signature). Add code comment citing this task ID + R5 spec FR-09.
+    </step>
+
+    <step order="6" name="Implement filter branch in BuildSearchOptions">
+      Edit `RagService.BuildSearchOptions`: append the `sessionId eq '...'` clause when
+      `options.SessionId` is non-empty. Add the branching logic that skips
+      privilege-group / knowledge-source / parent-entity filters under session-scoped
+      routing (per the constraint above). Inline comment explains the rationale + cites
+      ADR-014 tenant-isolation invariant.
+    </step>
+
+    <step order="7" name="Author / extend unit tests">
+      Extend `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagServiceTests.cs` with the 4 new
+      tests planned in Step 3. Use existing fixtures + mocks. Verify:
+      - tenant routing unaltered when `SessionId` absent (regression guard);
+      - `SearchIndexClient.GetSearchClient(sessionFilesIndexName)` invoked when
+        `SessionId` set;
+      - OData filter contains BOTH `tenantId eq` AND `sessionId eq` when `SessionId` set;
+      - `knowledgeSourceId` clause absent when `SessionId` set + a knowledge source was
+        also passed (proves the skip behavior).
+      Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` and confirm all tests (existing +
+      new) pass.
+    </step>
+
+    <step order="8" name="Build + back-compat verification">
+      Run:
+      - `dotnet build src/server/api/Sprk.Bff.Api/` — confirm clean compile.
+      - `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — confirm full suite passes (existing
+        callers passing no `SessionId` MUST remain green; this is the binding back-compat
+        signal).
+      Diff `RagServiceTests` and `PrivilegeAwareRagServiceTests` outputs vs prior baseline
+      where possible (no failure delta acceptable). Capture results in task notes.
+    </step>
+
+    <step order="9" name="Publish-size verification (PR-02 + R5 CLAUDE.md §3.6)">
+      Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`.
+      Measure compressed output size. Compute delta vs prior baseline (~45.65 MB per R5
+      CLAUDE.md §3.6). Report absolute size + delta in task notes / PR description per
+      CLAUDE.md §10. Target ≤ +0.1 MB; budget ≤ +1 MB; ceiling 60 MB. If delta exceeds
+      target with no clear cause, investigate before marking task complete.
+    </step>
+
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Invoke `code-review` skill on the changed files
+      (`IRagService.cs`, `RagService.cs`, `AiSearchOptions.cs`, `RagServiceTests.cs`).
+      Invoke `adr-check` skill against the same changed files; verify:
+      - ADR-010 — DI registrations: zero new `Program.cs` lines (confirm).
+      - ADR-013 — placement: BFF (`Sprk.Bff.Api`); no new injected types (confirm).
+      - ADR-014 — tenant-isolation invariant preserved (`tenantId` filter still
+        unconditional; `sessionId` ANDed; never OR'd).
+      - ADR-018 — zero new feature flags (confirm).
+      - ADR-029 — publish-size measured + reported (confirm).
+      Both gates MUST pass before marking the task complete. Record evidence in task
+      notes.
+    </step>
+
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `tasks/TASK-INDEX.md`: row 002 🔲 → ✅.
+      Reset `current-task.md` to the next pending task per CLAUDE.md §7 (next is
+      003 — `RagIndexingPipeline` parameterization, the parallel-safe sibling in P1-G2 if
+      not yet picked up; otherwise the first 🔲 by index order). Record in task notes:
+      - publish-size absolute + delta (confirm ≤ +0.1 MB target / ≤ +1 MB budget);
+      - back-compat verification result (existing tests green);
+      - skip-decisions for privilege-group / knowledge-source / parent-entity filters
+        under session-scoped routing;
+      - whether end-to-end smoke test against the live session-files index was performed
+        (depends on task 001 status — if task 001 complete: run smoke; if not:
+        defer to task 001 ship and link as a follow-on hook).
+      Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, and publish-size measurement</tool>
+    <tool name="git">Stage + commit the new + modified files on the R5 branch (main session commits the wave)</tool>
+    <tool name="az">Optional — for end-to-end smoke test against the live session-files index once task 001 lands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs (MODIFIED — `SessionId` added to `RagSearchOptions`)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs (MODIFIED — session-routing branch in `SearchAsync` + `sessionId` filter clause in `BuildSearchOptions`)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs (MODIFIED — `SessionFilesIndexName` added)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagServiceTests.cs (MODIFIED — 4 new tests covering routing + filter branches)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 002 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-002-implementation-notes.md (publish-size measurement, back-compat verification result, skip-decision rationale for privilege-group/knowledge-source filters under session routing, smoke-test evidence or deferral note)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`RagSearchOptions` has a new optional `string? SessionId { get; init; }` property with XML doc explaining session routing + ADR-014 tenant isolation invariant.</criterion>
+    <criterion testable="true">`AiSearchOptions` exposes `SessionFilesIndexName` (default `"spaarke-session-files"`, admin-overridable) mirroring the existing `KnowledgeIndexName` / `RagReferencesIndexName` / `FilesIndexName` pattern.</criterion>
+    <criterion testable="true">`RagService.SearchAsync(query, options, ct)` routes the underlying `SearchClient` to the session-files index (via `_searchIndexClient.GetSearchClient(_aiSearchOptions.SessionFilesIndexName)`) when `options.SessionId` is non-empty.</criterion>
+    <criterion testable="true">`RagService.SearchAsync(query, options, ct)` routes to the existing tenant-scoped knowledge index (via `IKnowledgeDeploymentService.GetSearchClientAsync(tenantId, ct)`) when `options.SessionId` is null/empty — byte-for-byte identical to current behavior.</criterion>
+    <criterion testable="true">`BuildSearchOptions` appends `sessionId eq '&lt;value&gt;'` to the OData filter (ANDed with the existing unconditional `tenantId eq '...'` clause) when `options.SessionId` is set.</criterion>
+    <criterion testable="true">Knowledge-source / parent-entity / privilege-group filters are SKIPPED (with debug log + inline comment) when `SessionId` is set (those columns don't exist on `spaarke-session-files` schema per task 001).</criterion>
+    <criterion testable="true">4 new unit tests in `RagServiceTests.cs` pass: (a) default-path routing; (b) session-path routing; (c) tenant+session filter ANDed; (d) knowledge-source filter ignored under session routing.</criterion>
+    <criterion testable="true">Full existing test suite (`tests/unit/Sprk.Bff.Api.Tests/`) remains green — verifies back-compat for R3/R4 wizard, document-classifier, AI analysis nodes, and Insights `IndexRetrieveNode` callers that pass no `SessionId`.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` produces zero new warnings.</criterion>
+    <criterion testable="true">BFF publish-size delta reported in task notes: absolute compressed size + delta vs baseline (~45.65 MB); ≤ +0.1 MB target / ≤ +1 MB R5 task budget / 60 MB ceiling preserved.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5; evidence (ADR-010, ADR-013, ADR-014, ADR-018, ADR-029 each marked verified) recorded in task notes.</criterion>
+    <criterion testable="true">Zero new feature flags introduced; zero new `Program.cs` registration lines; `NullRagService` requires no edits (kill-switch coverage inherits automatically — explicitly documented in task notes).</criterion>
+  </acceptance-criteria>
+</task>

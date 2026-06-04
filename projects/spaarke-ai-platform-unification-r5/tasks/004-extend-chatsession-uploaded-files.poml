@@ -1,0 +1,338 @@
+<task id="004" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D1-04 Extend `ChatSession` model with `UploadedFiles[]` manifest</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 1 — Platform Extensions</phase>
+    <wave>P1-G3 (parallel-safe with 005; no dependencies; blocks 007 cleanup job)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+    <tags>bff, model, session</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Extend the existing `ChatSession` record at
+    `src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs` with a new
+    `UploadedFiles` property of type `IReadOnlyList&lt;ChatSessionFile&gt;` and introduce the
+    `ChatSessionFile` record alongside it. `ChatSessionFile` carries the per-file manifest
+    used by (a) the session-scoped RAG retrieval path (extended in task 002), (b) the
+    session-files cleanup `IHostedService` (task 007), and (c) the chat-pane file-chip UX
+    (Phase 2, task 020). The manifest property MUST round-trip cleanly through the existing
+    triple-tier persistence: Redis hot tier (24h sliding TTL, `IDistributedCache`), Cosmos
+    DB warm tier (`ISessionPersistenceService` write-through), and Dataverse cold-tier
+    audit (`IChatDataverseRepository`).
+
+    Per spec §4.4 + NFR-02 + project CLAUDE.md §3.8: the per-session manifest is hard-capped
+    at 20 files (rejects 21st upload). Files smaller than 500 tokens skip chunking
+    (single-chunk index; downstream contract consumed by tasks 003 + 006 + 007). Aggressive
+    cleanup-on-session-end (cleanup job task 007 owns this). Backward compatibility is
+    binding — existing `ChatSession` consumers and persistence paths MUST keep working
+    unchanged when `UploadedFiles` is null / empty / absent on the wire.
+
+    This is the model-only deliverable D1-04. Downstream consumers (task 007 cleanup job,
+    task 020 chat-pane file chips, task 003 indexing pipeline) depend on the SHAPE this
+    task ships. Get the shape right; resist scope creep into orchestration.
+  </prompt>
+
+  <role>
+    Senior .NET 8 developer with deep familiarity with the Spaarke BFF AI chat session
+    storage model (Redis hot + Cosmos warm write-through + Dataverse cold per ADR-009 +
+    D-06). Comfortable extending C# `record` types additively and verifying JSON
+    serialization round-trips across three persistence tiers without breaking existing
+    consumers.
+  </role>
+
+  <goal>
+    The `ChatSession` record at `src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs`
+    is extended with an additional optional `IReadOnlyList&lt;ChatSessionFile&gt;? UploadedFiles`
+    property (default `null` for backward compatibility); a new `ChatSessionFile` record
+    is introduced in the same namespace with the six fields specified in design.md §4.4
+    (`FileId`, `FileName`, `ContentType`, `SizeBytes`, `SearchDocumentIdsCsv`,
+    `UploadedAt`). The 20-file per-session cap is encoded as a const on `ChatSession`
+    (`MaxUploadedFiles = 20`) and the &lt;500-token chunking-skip threshold is documented in
+    XML doc-comments on the relevant property/field for downstream consumers. A
+    serialization round-trip test confirms the manifest survives Redis JSON serialization,
+    Cosmos write-through, and Dataverse cold-tier audit unchanged. BFF builds clean,
+    publish-size delta is within budget (≤ +0.5 MB target, ≤ +1 MB ceiling per project
+    CLAUDE.md §3.6), and existing `ChatSession` consumers compile + behave unchanged.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="target-model">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs</file>
+    <file purpose="session-manager">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+    <file purpose="session-persistence">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/ISessionPersistenceService.cs</file>
+    <file purpose="dataverse-repo">src/server/api/Sprk.Bff.Api/Services/Dataverse/IChatDataverseRepository.cs</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="module-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="chat-architecture">docs/architecture/chat-architecture.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 CLAUDE.md §3.1 (reuse mandate)">MUST extend the existing `ChatSession` record at `src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs` — do NOT introduce a parallel session model or a new session-management layer (per spec §2.11 explicitly prohibits parallel session management to `ChatSessionManager`). `ChatSessionFile` is a NEW record type but lives in the existing `Sprk.Bff.Api.Models.Ai.Chat` namespace as part of the same model surface.</constraint>
+    <constraint source="R5 CLAUDE.md §3.2 (no new feature flags)">MUST NOT introduce a new feature flag for the manifest property. `UploadedFiles` is unconditionally part of the model. Population is gated by callers (uploads), not by configuration.</constraint>
+    <constraint source="R5 CLAUDE.md §3.8 + spec NFR-02">Hard cap = 20 files per session (rejects 21st upload). Encode as `public const int MaxUploadedFiles = 20;` on `ChatSession` so callers can reference one source of truth. Files &lt; 500 tokens skip chunking (single-chunk index) — document in XML doc-comments on `ChatSessionFile` so downstream consumers (task 003 indexing pipeline, task 007 cleanup) read the contract from the model.</constraint>
+    <constraint source="ADR-009 (storage seam)">Manifest persistence is INHERITED from existing triple-tier storage: Redis hot tier (24h sliding TTL via `IDistributedCache`), Cosmos warm tier (`ISessionPersistenceService` write-through per D-06), Dataverse cold-tier audit (`IChatDataverseRepository`). This task MUST NOT modify `ChatSessionManager`'s storage flow; the manifest is an additive `ChatSession` property that rides existing serialization.</constraint>
+    <constraint source="ADR-010 (DI minimalism)">N/A for this task — no new service registrations. Confirm in task notes that zero new `services.AddXxx()` lines were added.</constraint>
+    <constraint source="ADR-014 (tenant isolation)">`ChatSessionFile` records belong to a single `ChatSession` which carries `TenantId`. Manifest entries inherit tenant scoping from the parent session. Do NOT add a redundant `TenantId` on `ChatSessionFile`.</constraint>
+    <constraint source="ADR-019 (ProblemDetails)">N/A for this task (no endpoint surface). Endpoints that consume the manifest (e.g., task 014 summarize endpoint) own ProblemDetails error mapping for "21st-file-rejection".</constraint>
+    <constraint source="ADR-028 (Auth v2)">N/A for this task (no auth-bearing surface). Confirm no token snapshots are added.</constraint>
+    <constraint source="ADR-029 + R5 CLAUDE.md §3.6 (BFF publish-size)">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` after the change. Measure compressed output. Report absolute size + delta vs prior baseline (~45.65 MB) in task notes. Hard ceiling 60 MB; R5 target delta ≤ +0.5 MB, max +1 MB. A model-only change should produce a delta &lt; 0.1 MB; anything larger triggers investigation.</constraint>
+    <constraint source="R5 CLAUDE.md §3.7 (test obligation per task)">PRs modifying `src/server/api/Sprk.Bff.Api/Services/` MUST add/update tests. This task modifies `Models/` (not `Services/`), but the model is consumed by `ChatSessionManager`; therefore add at minimum a serialization round-trip test under `tests/unit/Sprk.Bff.Api.Tests/Models/Ai/Chat/`.</constraint>
+    <constraint source="project (backward compatibility)">`UploadedFiles` MUST be nullable (`IReadOnlyList&lt;ChatSessionFile&gt;? = null` default) so existing `ChatSession` constructions, deserialized payloads from already-running production sessions, and pre-R5 Cosmos / Dataverse records continue to work. A null / absent manifest is semantically equivalent to "no files uploaded".</constraint>
+    <constraint source="project (additive property only)">MUST be the LAST positional record parameter (or use a non-positional property initializer) so existing positional `new ChatSession(...)` calls don't break. Add the property AFTER `AdditionalDocumentIds` (current last parameter).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/chat-session-model + persistence-tiers</topic>
+    <files>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/adr/ADR-009-caching-storage-seams.md</file>
+      <file>docs/adr/ADR-014-ai-caching-tenant-isolation.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/design.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+    </files>
+    <patterns>
+      <pattern name="ChatSessionFile shape (binding)" location="projects/spaarke-ai-platform-unification-r5/design.md §4.4">
+        The `ChatSessionFile` record shape is specified verbatim in design.md §4.4:
+        ```csharp
+        record ChatSessionFile(
+          string FileId,                 // stable session-scoped ID
+          string FileName,
+          string ContentType,
+          long SizeBytes,
+          string SearchDocumentIdsCsv,   // IDs in spaarke-session-files index (CSV)
+          DateTimeOffset UploadedAt);
+        ```
+        Implement exactly this shape — no additional fields beyond these six. The CSV
+        format for `SearchDocumentIdsCsv` is intentional (compact, Redis-friendly, no
+        nested arrays in the hot-tier blob).
+      </pattern>
+      <pattern name="Additive record extension (positional record)" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs">
+        `ChatSession` is a positional `record`. Append `UploadedFiles` AFTER
+        `AdditionalDocumentIds` (the current last parameter) with a default of `null` to
+        preserve existing call sites. Add XML doc-comments matching the style of existing
+        parameters. Add the `MaxUploadedFiles = 20` const inside the record body.
+      </pattern>
+      <pattern name="Triple-tier serialization round-trip" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs">
+        `ChatSessionManager` uses `System.Text.Json` (`JsonSerializer`) for Redis-cache
+        serialization and forwards the same `ChatSession` object to `ISessionPersistenceService`
+        (Cosmos write-through) + `IChatDataverseRepository` (cold-tier audit). Because the
+        manifest property rides the existing serialization paths, NO change to
+        `ChatSessionManager` is required — the round-trip test must PROVE this empirically
+        rather than rely on it.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5's "Summarize a Document" vertical slice depends on the chat agent knowing which
+      files the user has uploaded into the current session, where each file's chunks live
+      in the new `spaarke-session-files` AI Search index (task 001), and when each file
+      was uploaded so cleanup logic (task 007) can identify abandoned-session leftovers.
+      The existing `ChatSession` record carries `AdditionalDocumentIds` (a flat string
+      list of SPE document IDs pinned to the session) but lacks the richer per-file
+      manifest required. D1-04 is the model extension that backs all four R5 surfaces
+      consuming session-file state: (1) RAG retrieval (task 002 `sessionId` filter route);
+      (2) indexing writes (task 003 pipeline parameterization); (3) cleanup job (task 007);
+      (4) chat-pane file-chip UX (task 020).
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">
+        Task 001 provisions the `spaarke-session-files` AI Search index. This task (004)
+        does NOT depend on 001 directly — model + index are independent concerns — but
+        the `SearchDocumentIdsCsv` field on `ChatSessionFile` only has meaning once the
+        index exists. They can land in any order; 001 is technically the downstream
+        consumer of this model when indexing pipeline writes (task 003) populate the field.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 005 (D1-05) — adds `FieldDelta` variant to `AnalysisChunk`. Sibling
+        wave-mate (P1-G3); both are model-only edits in different files; parallel-safe.</item>
+      <item>Task 007 (D1-07) — Session-files cleanup `IHostedService`. Direct downstream
+        consumer of `ChatSession.UploadedFiles[]` — sweeps `SearchDocumentIdsCsv` entries
+        for sessions not in active Redis set.</item>
+      <item>Task 020 (D2-11) — Chat-pane file chips. Frontend consumer of the manifest
+        via the chat session API; per-file remove must dispatch both manifest removal AND
+        index document removal (the latter via task 007's cleanup path).</item>
+      <item>Task 003 (D1-03) — Indexing pipeline parameterization. Writes session-files
+        index documents and is the natural producer of `SearchDocumentIdsCsv` values.</item>
+      <item>R3 added `AdditionalDocumentIds` (last positional parameter on `ChatSession`).
+        That property is structurally adjacent but semantically distinct — it pins
+        pre-existing SPE documents for cross-reference; `UploadedFiles` carries the
+        manifest for files the user actively uploaded into the chat session. Both
+        properties coexist.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL Declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request `/compact`. Output
+      mandatory rigor-level declaration per CLAUDE.md §8:
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: BFF model code change (.cs); downstream consumers in 4 R5 tasks
+         (007 cleanup, 003 indexing, 020 chat-pane, 014 summarize endpoint); persistence
+         contract spans 3 storage tiers; backward compatibility is binding.
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 1–10 below with code-review + adr-check at 9.5.
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm task 004 status is 🔲, parallel-safe = ✅,
+      dependencies = none. Read `current-task.md` to verify no prior R5 task is mid-flight
+      on the same files. Read project `CLAUDE.md` §3.1 (reuse mandate), §3.2 (no new
+      flags), §3.6 (BFF publish-size), §3.7 (test obligation), §3.8 (20-file cap).
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically:
+      (a) Read `ChatSession.cs` in full and identify the current record-parameter order;
+      (b) Read `ChatSessionManager.cs` to confirm `JsonSerializer` is the Redis
+      serialization mechanism and that `ChatSession` flows unmodified to
+      `ISessionPersistenceService` (Cosmos) + `IChatDataverseRepository` (cold);
+      (c) Read design.md §4.4 (the binding shape spec for `ChatSessionFile`);
+      (d) Read spec NFR-02 (20-file cap + 500-token threshold + aggressive cleanup).
+      Confirm the design.md §4.4 shape is unchanged since plan v1.
+    </step>
+    <step order="3" name="Plan Implementation">
+      Sketch the diff before editing:
+      (a) Append `IReadOnlyList&lt;ChatSessionFile&gt;? UploadedFiles = null` to `ChatSession`
+          (after `AdditionalDocumentIds`);
+      (b) Add `public const int MaxUploadedFiles = 20;` inside the record body;
+      (c) Author XML doc-comments for the new property + the new record;
+      (d) Create new file or in-file declaration of `ChatSessionFile` (decision: same
+          file `ChatSession.cs` for tight cohesion, or sibling `ChatSessionFile.cs` for
+          separation-of-concerns — pick same-file given the record is tightly bound to
+          its parent and the file is small);
+      (e) Plan the round-trip unit test at
+          `tests/unit/Sprk.Bff.Api.Tests/Models/Ai/Chat/ChatSessionSerializationTests.cs`
+          (or extend existing test file if present).
+      Confirm zero changes to `ChatSessionManager.cs`, `ISessionPersistenceService.cs`,
+      or `IChatDataverseRepository.cs` — additive model property only.
+    </step>
+    <step order="4" name="Implement Model Changes">
+      Edit `src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs`:
+      (a) Add `ChatSessionFile` record with the six fields from design.md §4.4 + XML
+          doc-comments. Document the &lt;500-token chunking-skip threshold + the
+          `SearchDocumentIdsCsv` CSV-format contract in the XML docs;
+      (b) Append `IReadOnlyList&lt;ChatSessionFile&gt;? UploadedFiles = null` to the
+          `ChatSession` positional record (after `AdditionalDocumentIds`);
+      (c) Add `public const int MaxUploadedFiles = 20;` inside the record body;
+      (d) Add XML doc-comments referencing spec NFR-02 + project CLAUDE.md §3.8 +
+          design.md §4.4.
+      Build the BFF: `dotnet build src/server/api/Sprk.Bff.Api/` — MUST succeed clean
+      with no new warnings.
+    </step>
+    <step order="5" name="Verify Backward Compatibility">
+      Run `dotnet build` on the entire repo (`dotnet build`) to confirm no existing
+      `ChatSession` consumers break. Run `dotnet test --filter FullyQualifiedName~ChatSession`
+      to confirm existing ChatSession-related tests still pass. If any test fails because
+      of the new property, the property was not added additively-enough — fix before
+      proceeding.
+    </step>
+    <step order="6" name="Author Round-Trip Serialization Test">
+      Add a unit test at
+      `tests/unit/Sprk.Bff.Api.Tests/Models/Ai/Chat/ChatSessionSerializationTests.cs`
+      (extending if a file exists) with at least these cases:
+      (a) `ChatSession` with `UploadedFiles = null` serializes + deserializes via
+          `System.Text.Json` round-trip identically (pre-R5 wire-compat);
+      (b) `ChatSession` with empty `UploadedFiles = []` round-trips identically;
+      (c) `ChatSession` with 20 `ChatSessionFile` entries round-trips with all 6 fields
+          preserved including a `SearchDocumentIdsCsv` containing &gt; 1 comma-separated ID;
+      (d) `MaxUploadedFiles` const is exposed as `20` (regression guard against drift
+          from spec NFR-02).
+      Run the test: `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — MUST pass.
+    </step>
+    <step order="7" name="Verify Triple-Tier Persistence (Empirical Round-Trip)">
+      Because `ChatSession` flows unmodified through Redis (`JsonSerializer`) + Cosmos
+      (`ISessionPersistenceService.UpsertAsync` accepts the same `ChatSession`) +
+      Dataverse (`IChatDataverseRepository`), the unit-test JSON round-trip in Step 6
+      proves Redis + Cosmos compatibility (both use `System.Text.Json` semantics).
+      For Dataverse cold-tier audit: inspect `IChatDataverseRepository` to confirm whether
+      it serializes the full `ChatSession` (in which case the JSON round-trip already
+      covers it) OR cherry-picks specific fields (in which case verify `UploadedFiles` is
+      NOT cherry-picked, meaning the cold tier intentionally does NOT carry the manifest
+      — which matches NFR-02 "aggressive cleanup-on-session-end" + the cold-tier audit
+      role). Document the finding in task notes; either outcome is acceptable as long as
+      backward compatibility holds.
+    </step>
+    <step order="8" name="BFF Publish-Size Verification (NFR-07 + CLAUDE.md §3.6)">
+      Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`.
+      Measure compressed output (zip the publish folder or use the existing
+      publish-size measurement helper if one is available in `scripts/`). Compare to the
+      ~45.65 MB baseline. Record absolute size + delta in task notes. Expected delta
+      for a model-only change: &lt; 0.1 MB. If delta &gt; 0.5 MB, investigate before
+      marking complete. If delta &gt; 1 MB, STOP and escalate per CLAUDE.md §3.6.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below. Confirm each is testable +
+      passing. Record evidence per criterion in task notes.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against `ChatSession.cs` (and the new test file). Run
+      `adr-check` skill against the same files; specifically verify:
+      - ADR-009 (storage seam) — manifest persistence inherited via existing tiers; no
+        new storage seam introduced
+      - ADR-010 (DI minimalism) — zero new DI registrations
+      - ADR-014 (tenant isolation) — manifest entries do NOT add a redundant `TenantId`
+      - ADR-018 (Feature Flag Scope Discipline) — no new feature flag introduced
+      - ADR-029 (BFF publish hygiene) — size delta within budget
+      Both `code-review` and `adr-check` MUST pass before marking the task complete.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 004 🔲 → ✅.
+      Reset `current-task.md` to next pending task per CLAUDE.md §7. Record in task
+      notes (`notes/task-004-model-extension-evidence.md`):
+      (a) The applied diff of `ChatSession.cs` (or a summary of additions);
+      (b) The serialization-test results;
+      (c) The Dataverse cold-tier audit finding from Step 7;
+      (d) The BFF publish-size measurement + delta vs baseline (per CLAUDE.md §3.6);
+      (e) Zero new DI registrations confirmed (ADR-010);
+      (f) Zero new feature flags confirmed (CLAUDE.md §3.2).
+      Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test the BFF; measure publish-size delta.</tool>
+    <tool name="git">Stage + commit the model + test change on the R5 branch.</tool>
+    <tool name="code-review">Quality-gate skill at Step 9.5.</tool>
+    <tool name="adr-check">ADR-compliance gate skill at Step 9.5.</tool>
+    <tool name="context-handoff">Checkpointing per CLAUDE.md §5 (run after every 3 steps).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs (MODIFIED — adds `ChatSessionFile` record + `UploadedFiles` property + `MaxUploadedFiles` const + XML doc-comments)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Models/Ai/Chat/ChatSessionSerializationTests.cs (NEW or EXTENDED — round-trip + cap + back-compat coverage)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 004 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-004-model-extension-evidence.md (diff summary, test output, Dataverse cold-tier finding, publish-size measurement, DI + flag confirmations)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ChatSession.cs` exposes a new `IReadOnlyList&lt;ChatSessionFile&gt;? UploadedFiles` property (default `null`) appended AFTER `AdditionalDocumentIds` in the positional record signature.</criterion>
+    <criterion testable="true">`ChatSessionFile` record exists in namespace `Sprk.Bff.Api.Models.Ai.Chat` with exactly six fields matching design.md §4.4 verbatim: `FileId` (string), `FileName` (string), `ContentType` (string), `SizeBytes` (long), `SearchDocumentIdsCsv` (string), `UploadedAt` (DateTimeOffset).</criterion>
+    <criterion testable="true">`public const int MaxUploadedFiles = 20;` is declared on `ChatSession` and matches spec NFR-02 / R5 CLAUDE.md §3.8.</criterion>
+    <criterion testable="true">XML doc-comments on `ChatSessionFile` document (a) the &lt;500-token chunking-skip threshold (per NFR-02) and (b) the `SearchDocumentIdsCsv` CSV-format contract.</criterion>
+    <criterion testable="true">`dotnet build` succeeds clean on the full repo with no new warnings.</criterion>
+    <criterion testable="true">Pre-existing `ChatSession`-related tests continue to pass without modification (backward compatibility verified).</criterion>
+    <criterion testable="true">Round-trip serialization test passes for: (a) `UploadedFiles = null`, (b) empty list, (c) 20-entry list with all six fields preserved (including multi-ID CSV) — proving Redis + Cosmos `System.Text.Json` compatibility.</criterion>
+    <criterion testable="true">Dataverse cold-tier audit path is verified to either (a) carry the full `ChatSession` (manifest survives) or (b) intentionally cherry-pick fields excluding `UploadedFiles` (consistent with NFR-02 aggressive cleanup-on-session-end); finding recorded in task notes.</criterion>
+    <criterion testable="true">Zero new `services.AddXxx()` lines added anywhere (ADR-010); zero new feature flags (CLAUDE.md §3.2). Confirmed in task notes.</criterion>
+    <criterion testable="true">BFF publish-size delta measured and reported in task notes; delta &lt; +0.5 MB (target) and &lt; +1 MB (ceiling per CLAUDE.md §3.6); absolute size remains well under 60 MB hard ceiling.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+  </acceptance-criteria>
+</task>
