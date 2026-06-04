@@ -3,7 +3,7 @@
   <metadata>
     <title>Retire @spaarke/events-components/{GridSection, AssignedToFilter, RecordTypeFilter, StatusFilter}</title>
     <phase>4: Phase D — EventsPage Migration</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>031</dependencies>
     <blocks>034</blocks>
@@ -83,6 +83,8 @@
 
   <notes>
     Parallels task 033 (SpaarkeAi Calendar widget migrate) — they touch different surfaces. The audit step is non-negotiable — delete-first-ask-later breaks the build.
+
+    **Completed 2026-06-03 — PARTIAL SCOPE per audit (D-032-01)**: Deleted `AssignedToFilter/`, `RecordTypeFilter/`, `StatusFilter/` (3 of 4 directories) + removed their barrel re-exports from `components/index.ts` + `types/index.ts`. `GridSection/` DEFERRED to task 033 closure because `widgets/CalendarWorkspaceWidget` (the SpaarkeAi Calendar widget task 033 migrates) still imports it. The POML's parallel-safe + parallel-group D1 declaration was factually wrong — both 032 and 033 touch `Spaarke.Events.Components`, so 033's CalendarWorkspaceWidget migration must precede the GridSection deletion. Full audit + decision rationale at [`notes/drafts/032-consumer-audit.md`](../notes/drafts/032-consumer-audit.md). Both builds pass green (events-components `tsc --noEmit` clean; EventsPage Vite build 1259 KB single-file). Task 033's closing step gains: delete GridSection + remove its barrel re-exports.
   </notes>
 
   <execution>

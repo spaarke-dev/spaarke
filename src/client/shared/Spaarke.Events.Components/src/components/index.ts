@@ -18,17 +18,19 @@ export type {
   CalendarDrawerProps,
 } from './CalendarSection';
 
+// GridSection retained pending task 033 (Calendar widget migration) — its
+// last consumer is `widgets/CalendarWorkspaceWidget` which task 033 will
+// migrate to `<DataGrid />`. Deletion of GridSection happens at task 033
+// closure. See projects/spaarke-datagrid-framework-r1/notes/drafts/032-consumer-audit.md.
 export { GridSection } from './GridSection';
 export type { GridSectionProps, IEventRecord } from './GridSection';
 
-export { AssignedToFilter } from './AssignedToFilter';
-export type { AssignedToFilterProps, IUserOption } from './AssignedToFilter';
-
-export { RecordTypeFilter } from './RecordTypeFilter';
-export type { RecordTypeFilterProps, IEventTypeOption } from './RecordTypeFilter';
-
-export { StatusFilter, getStatusOptions, getActionableStatuses } from './StatusFilter';
-export type { StatusFilterProps, IStatusOption } from './StatusFilter';
+// AssignedToFilter, RecordTypeFilter, StatusFilter — RETIRED in task 032
+// (2026-06-03). The new framework's auto-derived filter chips supersede the
+// hand-rolled filter components, and the EventsPage host (rewritten in
+// task 031) no longer mounts them. Re-exports removed; directories deleted.
+// `useAssignedToFilter` + `useStatusFilter` hooks live in
+// `context/EventsPageContext.tsx` and remain available via that barrel.
 
 export { ColumnFilterHeader } from './ColumnFilterHeader';
 export type { ColumnFilterHeaderProps, ColumnFilterType, ColumnFilterOption } from './ColumnFilterHeader';

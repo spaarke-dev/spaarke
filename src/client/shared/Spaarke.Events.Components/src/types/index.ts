@@ -15,13 +15,14 @@ export type {
   IEventDateInfo,
 } from '../components/CalendarSection/CalendarSection';
 
+// IEventRecord retained pending task 033 (Calendar widget migration) —
+// last consumer is `widgets/CalendarWorkspaceWidget`. See
+// projects/spaarke-datagrid-framework-r1/notes/drafts/032-consumer-audit.md.
 export type { IEventRecord } from '../components/GridSection/GridSection';
 
-export type { IUserOption } from '../components/AssignedToFilter/AssignedToFilter';
-
-export type { IEventTypeOption } from '../components/RecordTypeFilter/RecordTypeFilter';
-
-export type { IStatusOption } from '../components/StatusFilter/StatusFilter';
+// IUserOption, IEventTypeOption, IStatusOption — RETIRED in task 032
+// (2026-06-03) along with their component directories. No external
+// consumers; CalendarWorkspaceWidget has its own inline IStatusOption.
 
 export type { SavedView } from '../components/ViewSelectorDropdown/ViewSelectorDropdown';
 
