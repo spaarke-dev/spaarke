@@ -21,8 +21,6 @@ import { makeStyles, tokens, mergeClasses, Textarea, Button, Label, Text } from 
 import {
   ChevronDoubleLeft20Regular,
   ChevronDoubleRight20Regular,
-  Search20Regular,
-  Dismiss20Regular,
 } from '@fluentui/react-icons';
 import type { SearchDomain, SearchFilters, FilterOption, SavedSearch } from '../types';
 import { SearchDomainTabs } from './SearchDomainTabs';
@@ -371,11 +369,16 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
         <DateRangeFilter value={filters.dateRange} onChange={handleDateRangeChange} />
       </div>
 
-      {/* Action row — standard-sized Search + Cancel (task 035 UI alignment) */}
+      {/* Action row — Spaarke standard pattern (matches the EventsPage
+          Calendar widget Apply/Clear in src/client/shared/Spaarke.Events
+          .Components/src/widgets/CalendarWorkspaceWidget/): size="small",
+          no icons, primary + subtle. Task 035 UI alignment v2 — operator
+          flagged that the prior default-sized + iconed version didn't
+          match standard. */}
       <div className={styles.actionRow}>
         <Button
           appearance="primary"
-          icon={<Search20Regular />}
+          size="small"
           onClick={handleSearch}
           disabled={isLoading}
         >
@@ -383,7 +386,7 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
         </Button>
         <Button
           appearance="subtle"
-          icon={<Dismiss20Regular />}
+          size="small"
           onClick={onCancel}
           aria-label="Clear search criteria"
         >

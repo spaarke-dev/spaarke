@@ -104,11 +104,14 @@ const useStyles = makeStyles({
     overflow: 'hidden',
   },
   // Unified command bar row (task 035 UI alignment, 2026-06-04). Holds the
-  // SearchCommandBar (primary + overflow + column picker), the view tabs, and
-  // the visualization settings — replaces the prior two-row split.
+  // SearchCommandBar (Refresh + Columns + Delete + overflow), then the view
+  // tabs (icon-only), then visualization settings. Everything right-aligned
+  // via `justifyContent: flex-end` per operator directive — replaces the
+  // prior two-row split AND the left-leaning layout.
   commandBar: {
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     height: '48px',
     minHeight: '48px',
     paddingLeft: tokens.spacingHorizontalM,

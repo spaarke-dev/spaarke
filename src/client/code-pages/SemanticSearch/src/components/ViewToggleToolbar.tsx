@@ -13,6 +13,7 @@ import {
   tokens,
   TabList,
   Tab,
+  Tooltip,
   type SelectTabData,
   type SelectTabEvent,
 } from '@fluentui/react-components';
@@ -110,10 +111,12 @@ export const ViewToggleToolbar: React.FC<ViewToggleToolbarProps> = ({ viewMode, 
       size="small"
       appearance="transparent"
     >
+      {/* Icon-only tabs per operator directive 2026-06-04. Tooltip on each
+          tab surfaces the label for accessibility + discoverability. */}
       {VIEW_BUTTONS.map(btn => (
-        <Tab key={btn.mode} value={btn.mode} icon={btn.icon} aria-label={btn.ariaLabel}>
-          {btn.label}
-        </Tab>
+        <Tooltip key={btn.mode} content={btn.label} relationship="label">
+          <Tab value={btn.mode} icon={btn.icon} aria-label={btn.ariaLabel} />
+        </Tooltip>
       ))}
     </TabList>
   );

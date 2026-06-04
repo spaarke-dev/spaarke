@@ -1,19 +1,19 @@
 /**
- * SearchCommandBar — Power-Apps-OOB-style unified command bar for the
- * Semantic Search Code Page.
+ * SearchCommandBar — Power-Apps-OOB-style toolbar for the Semantic Search
+ * Code Page.
  *
- * Layout (single row, left → right):
- *   [Refresh] [Delete] [...overflow] | [Columns] | divider | [ViewToggle tabs]
+ * Layout (all items right-aligned; parent App.tsx row supplies the leading
+ * spacer to push the toolbar to the right):
+ *   [Refresh] [Columns] [Delete] [...overflow]
  *
- * The overflow menu hosts the secondary actions that don't fit the
- * "primary + tabs" Power Apps dataset-grid pattern: Email a Link,
- * Open in Web, Open in Desktop, Download, Send to Index, Save Search.
- * Document-only commands stay hidden for Matters/Projects/Invoices
- * domains (unchanged from prior version).
+ * Column picker is the SECOND toolbar item (not in the overflow) per
+ * operator directive 2026-06-04. The overflow `...` Menu hosts secondary
+ * actions: Email a Link / Open in Web / Open in Desktop / Download / Send to
+ * Index / Save Search. Document-only commands remain domain-gated.
  *
- * Task 035 UI alignment (2026-06-04): operator directive to bring the
- * SemanticSearch toolbar in line with the Spaarke dataset grid command
- * bar style + move the column picker into the unified toolbar.
+ * The view tabs + visualization settings render as App.tsx siblings AFTER
+ * this component (i.e. even further right), per the dataset grid command bar
+ * pattern.
  *
  * @see spec.md Section 6.6 / FR-09 — command bar specification
  * @see docs/guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md — the dataset grid contract
@@ -32,7 +32,6 @@ import {
   MenuItem,
   MenuPopover,
   MenuItemCheckbox,
-  Button,
 } from '@fluentui/react-components';
 import {
   DeleteRegular,
@@ -88,17 +87,10 @@ export interface SearchCommandBarProps {
 // =============================================
 
 const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    alignItems: 'center',
-    width: '100%',
-    columnGap: tokens.spacingHorizontalS,
-  },
-  primaryToolbar: {
+  // Toolbar (right-aligned by parent commandBar row). Holds all primary
+  // actions inline: Refresh + Columns + Delete + overflow.
+  toolbar: {
     columnGap: tokens.spacingHorizontalXS,
-  },
-  spacer: {
-    flex: 1,
   },
 });
 
@@ -171,96 +163,23 @@ export const SearchCommandBar: React.FC<SearchCommandBarProps> = ({
   );
 
   return (
-    <div className={styles.root}>
-      {/* Primary: Refresh + Delete inline */}
-      <Toolbar className={styles.primaryToolbar} size="small" aria-label="Search actions">
-        <ToolbarButton icon={<ArrowClockwiseRegular />} onClick={onRefresh}>
-          Refresh
-        </ToolbarButton>
+    <Toolbar className={styles.toolbar} size="small" aria-label="Search actions">
+      <ToolbarButton icon={<ArrowClockwiseRegular />} onClick={onRefresh}>
+        Refresh
+      </ToolbarButton>
 
-        <Tooltip
-          content={hasSelection ? 'Delete selected' : 'Select items to delete'}
-          relationship="label"
-        >
-          <ToolbarButton icon={<DeleteRegular />} disabled={!hasSelection} onClick={handleDelete}>
-            Delete
-          </ToolbarButton>
-        </Tooltip>
-
-        {/* Overflow menu — secondary actions */}
-        <Menu>
-          <MenuTrigger disableButtonEnhancement>
-            <ToolbarButton icon={<MoreHorizontalRegular />} aria-label="More actions" />
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              <MenuItem
-                icon={<MailRegular />}
-                disabled={!isSingle}
-                onClick={handleEmailLink}
-              >
-                Email a Link
-              </MenuItem>
-
-              {isDocumentDomain && (
-                <>
-                  <MenuItem
-                    icon={<OpenRegular />}
-                    disabled={!isSingle}
-                    onClick={handleOpenInWeb}
-                  >
-                    Open in Web
-                  </MenuItem>
-                  <MenuItem
-                    icon={<DesktopRegular />}
-                    disabled={!isSingle}
-                    onClick={handleOpenInDesktop}
-                  >
-                    Open in Desktop
-                  </MenuItem>
-                  <MenuItem
-                    icon={<ArrowDownloadRegular />}
-                    disabled={!isSingle}
-                    onClick={handleDownload}
-                  >
-                    Download
-                  </MenuItem>
-                  <MenuItem
-                    icon={<DatabaseSearchRegular />}
-                    disabled={!hasSelection}
-                    onClick={handleSendToIndex}
-                  >
-                    Send to Index
-                  </MenuItem>
-                </>
-              )}
-
-              <MenuItem icon={<SaveRegular />} onClick={onSaveSearch}>
-                Save Search
-              </MenuItem>
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-      </Toolbar>
-
-      <div className={styles.spacer} />
-
-      {/* Column picker — Menu of checkbox items. Right-aligned within the
-          SearchCommandBar; view tabs + visualization settings render as
-          App.tsx siblings after this component. */}
+      {/* Column picker — SECOND toolbar item (per operator directive
+          2026-06-04). Implemented as a Menu wrapping a ToolbarButton so the
+          checkbox behavior works without leaving the Fluent v9 Toolbar's
+          visual style. */}
       <Menu
         checkedValues={columnCheckedValues}
         onCheckedValueChange={handleColumnsCheckedChange}
       >
         <MenuTrigger disableButtonEnhancement>
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<ColumnTriple20Regular />}
-            aria-label="Choose columns"
-          >
+          <ToolbarButton icon={<ColumnTriple20Regular />} aria-label="Choose columns">
             Columns
-          </Button>
+          </ToolbarButton>
         </MenuTrigger>
         <MenuPopover>
           <MenuList>
@@ -272,7 +191,71 @@ export const SearchCommandBar: React.FC<SearchCommandBarProps> = ({
           </MenuList>
         </MenuPopover>
       </Menu>
-    </div>
+
+      <Tooltip
+        content={hasSelection ? 'Delete selected' : 'Select items to delete'}
+        relationship="label"
+      >
+        <ToolbarButton icon={<DeleteRegular />} disabled={!hasSelection} onClick={handleDelete}>
+          Delete
+        </ToolbarButton>
+      </Tooltip>
+
+      {/* Overflow Menu — secondary actions */}
+      <Menu>
+        <MenuTrigger disableButtonEnhancement>
+          <ToolbarButton icon={<MoreHorizontalRegular />} aria-label="More actions" />
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            <MenuItem
+              icon={<MailRegular />}
+              disabled={!isSingle}
+              onClick={handleEmailLink}
+            >
+              Email a Link
+            </MenuItem>
+
+            {isDocumentDomain && (
+              <>
+                <MenuItem
+                  icon={<OpenRegular />}
+                  disabled={!isSingle}
+                  onClick={handleOpenInWeb}
+                >
+                  Open in Web
+                </MenuItem>
+                <MenuItem
+                  icon={<DesktopRegular />}
+                  disabled={!isSingle}
+                  onClick={handleOpenInDesktop}
+                >
+                  Open in Desktop
+                </MenuItem>
+                <MenuItem
+                  icon={<ArrowDownloadRegular />}
+                  disabled={!isSingle}
+                  onClick={handleDownload}
+                >
+                  Download
+                </MenuItem>
+                <MenuItem
+                  icon={<DatabaseSearchRegular />}
+                  disabled={!hasSelection}
+                  onClick={handleSendToIndex}
+                >
+                  Send to Index
+                </MenuItem>
+              </>
+            )}
+
+            <MenuItem icon={<SaveRegular />} onClick={onSaveSearch}>
+              Save Search
+            </MenuItem>
+          </MenuList>
+        </MenuPopover>
+      </Menu>
+    </Toolbar>
   );
 };
 
