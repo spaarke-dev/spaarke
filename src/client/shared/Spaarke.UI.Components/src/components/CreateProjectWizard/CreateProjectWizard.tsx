@@ -41,6 +41,11 @@ import type { IDataService, INavigationService, IUploadService } from '../../typ
 import type { ILookupItem } from '../../types/LookupTypes';
 import { provisionSecureProject } from './provisioningService';
 import { EventService } from '../CreateEventWizard/eventService';
+import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
+import type {
+  ICreateWorkAssignmentFormState,
+  IAssignWorkState,
+} from '../CreateWorkAssignmentWizard/formTypes';
 
 // ---------------------------------------------------------------------------
 // Association wiring helpers
@@ -388,45 +393,55 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         const projectName = result.projectName!;
 
         // 1b. Create Work Assignment (sprk_workassignment) linked to this project
+        // Delegates to the shared WorkAssignmentService, which performs nav-prop
+        // discovery and applies the Polymorphic Resolver pattern (ADR-024).
+        // Hardcoded relationship-style names would otherwise fail with
+        // "undeclared property" errors.
         if (context.selectedActions.includes('assign-counsel') && context.followOn.assignWorkName.trim()) {
           try {
-            const workAssignmentPayload: Record<string, unknown> = {
-              sprk_name: context.followOn.assignWorkName.trim(),
-              sprk_priority: context.followOn.assignWorkPriority,
+            const waForm: ICreateWorkAssignmentFormState = {
+              recordType: 'project',
+              recordId: projectId,
+              recordName: projectName,
+              assignWithoutRecord: false,
+              name: context.followOn.assignWorkName.trim(),
+              description: context.followOn.assignWorkDescription.trim(),
+              matterTypeId: context.followOn.assignWorkMatterTypeId,
+              matterTypeName: context.followOn.assignWorkMatterTypeName,
+              practiceAreaId: context.followOn.assignWorkPracticeAreaId,
+              practiceAreaName: context.followOn.assignWorkPracticeAreaName,
+              priority: context.followOn.assignWorkPriority,
+              responseDueDate: context.followOn.assignWorkResponseDueDate,
             };
-            if (context.followOn.assignWorkDescription.trim()) {
-              workAssignmentPayload['sprk_description'] = context.followOn.assignWorkDescription.trim();
+            const waAssignWork: IAssignWorkState = {
+              assignedAttorneyId: context.followOn.assignedAttorneyId,
+              assignedAttorneyName: context.followOn.assignedAttorneyName,
+              assignedParalegalId: context.followOn.assignedParalegalId,
+              assignedParalegalName: context.followOn.assignedParalegalName,
+              assignedLawFirmId: context.followOn.assignedOutsideCounselId,
+              assignedLawFirmName: context.followOn.assignedOutsideCounselName,
+              assignedLawFirmAttorneyId: '',
+              assignedLawFirmAttorneyName: '',
+              notifyResources: false,
+            };
+            // authFetch / bffBaseUrl are only consumed for SPE file upload, which
+            // we never trigger here (empty uploadedFiles array). Provide safe
+            // fallbacks so optional props don't break the call.
+            const waService = new WorkAssignmentService(
+              dataService,
+              authFetch ?? fetch.bind(window),
+              bffBaseUrl ?? ''
+            );
+            const waResult = await waService.createWorkAssignment(waForm, [], [], waAssignWork);
+            if (waResult.status === 'error') {
+              warnings.push(
+                `Work assignment could not be created (${waResult.errorMessage ?? 'Unknown error'}). ` +
+                  'You can create it manually from the project record.'
+              );
+            } else {
+              console.info('[CreateProjectWizard] Work assignment created and linked to project:', projectId);
+              if (waResult.warnings.length > 0) warnings.push(...waResult.warnings);
             }
-            if (context.followOn.assignWorkResponseDueDate) {
-              workAssignmentPayload['sprk_responseduedate'] = context.followOn.assignWorkResponseDueDate;
-            }
-            // N:1 link to parent project via relationship
-            workAssignmentPayload['sprk_workassignment_RegardingProject_sprk_project_n1@odata.bind'] =
-              `/sprk_projects(${projectId})`;
-            // Classification lookups
-            if (context.followOn.assignWorkMatterTypeId) {
-              workAssignmentPayload['sprk_MatterType@odata.bind'] =
-                `/sprk_mattertype_refs(${context.followOn.assignWorkMatterTypeId})`;
-            }
-            if (context.followOn.assignWorkPracticeAreaId) {
-              workAssignmentPayload['sprk_PracticeArea@odata.bind'] =
-                `/sprk_practicearea_refs(${context.followOn.assignWorkPracticeAreaId})`;
-            }
-            // Resource lookups
-            if (context.followOn.assignedAttorneyId) {
-              workAssignmentPayload['sprk_AssignedAttorney@odata.bind'] =
-                `/contacts(${context.followOn.assignedAttorneyId})`;
-            }
-            if (context.followOn.assignedParalegalId) {
-              workAssignmentPayload['sprk_AssignedParalegal@odata.bind'] =
-                `/contacts(${context.followOn.assignedParalegalId})`;
-            }
-            if (context.followOn.assignedOutsideCounselId) {
-              workAssignmentPayload['sprk_AssignedOutsideCounsel@odata.bind'] =
-                `/sprk_organizations(${context.followOn.assignedOutsideCounselId})`;
-            }
-            await dataService.createRecord('sprk_workassignment', workAssignmentPayload);
-            console.info('[CreateProjectWizard] Work assignment created and linked to project:', projectId);
           } catch (err) {
             const message = err instanceof Error ? err.message : 'Unknown error';
             warnings.push(
