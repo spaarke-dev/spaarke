@@ -1,12 +1,12 @@
 <task id="010" project="spaarke-ai-platform-unification-r5">
   <metadata>
     <title>D2-01 Seed `sprk_analysisaction` row "Summarize Document for Chat" (Dataverse data deploy)</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>2 hours</estimated-effort>
-    <actual-effort></actual-effort>
+    <actual-effort>~1 hour (definition-authoring portion only; combined with task 011 into one JSON file; main session handles the Dataverse deploy + commit)</actual-effort>
     <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
     <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
     <wave>P2-G1 (parallel-safe with 011; first task of Phase 2)</wave>
     <parallel-safe>true</parallel-safe>

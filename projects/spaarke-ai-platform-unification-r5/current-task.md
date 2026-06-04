@@ -10,12 +10,12 @@
 
 | Field | Value |
 |---|---|
-| **Active flow** | ✅ PHASE 1 COMPLETE — all 9 P1 tasks done (D1-01 through D1-09 + GATE GREEN) |
-| **Pipeline status** | ✅ POML generation; ✅ Phase 1 (9/9 tasks); Phase 2 unblocked |
-| **Phase 1 closeout** | GATE GREEN. Build clean, 6132/6132 tests pass (~59 new in P1), publish 45 MB (delta negligible vs 45.65 MB baseline), no new HIGH CVEs (Kiota pre-exists on master), zero new Program.cs lines, asymmetric-registration audit clean. Evidence: `notes/task-009-phase-1-closeout.md` |
+| **Active flow** | Phase 2 in progress — 5 of 22 P2 tasks done (010, 011, 013, 016, 019) |
+| **Pipeline status** | ✅ Phase 1 (9/9); ✅ Phase 2 Wave A (010+011+013+016+019); next: 012, 014/015, 017/018, 020-022 |
+| **Last wave verified** | Phase 2 Wave A (5 tasks via 4 parallel sub-agents): Dataverse SUM-CHAT@v1 action + summarize-document-for-chat@v1 playbook live on Spaarke Dev 1; TypeScript clean across ui-components + ai-widgets + ConversationPane.tsx (errors filtered to pre-existing files only); 0 BFF .cs touched (publish-size delta = 0). New `scripts/Deploy-AnalysisAction.ps1` companion to Deploy-Playbook.ps1 ships idempotent action upsert (sibling-script approach per task 010 POML Option B). |
 | **Branch** | `work/spaarke-ai-platform-unification-r5` on top of `origin/master` `7e20dc82` |
-| **Next action** | Phase 2 starts. Wave P2-G1 = tasks 010 + 011 (Dataverse seeds — parallel-safe; both deploy via `scripts/Deploy-Playbook.ps1`). Independent of D2-13 (R5 lead contract sign-off gate); that gate only blocks Insights tool integration tasks 024-031, not Summarize tasks 010-022. |
-| **Status** | ready-to-execute (Phase 2 begin) |
+| **Next action** | Phase 2 Wave B: dispatch 012 (orchestrator; depends on 010+011 ✅) in parallel with anything else ready. Then 014+015 (depend on 012). Then 017+018 (depend on 016+013). Then 020/021/022 (depend on 017/018/013). |
+| **Status** | ready-to-execute (Phase 2 mid-execution) |
 
 ### Files Modified This Session (committed)
 - `projects/spaarke-ai-platform-unification-r5/design.md` — initial draft + Insights coordination + v1.1 negotiation integration (commits `8ae4e59c`, `6a6c7a29`, `1ecf41a6`)

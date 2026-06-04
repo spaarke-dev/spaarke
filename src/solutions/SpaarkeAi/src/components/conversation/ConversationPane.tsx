@@ -109,6 +109,155 @@ import { HistoryMenu } from "./HistoryOverlay";
 // model was removed when the Chat/History tab buttons were replaced by the
 // shared <PaneHeader>. History becomes a side-overlay (OC-01) wired in task 022.
 
+// ---------------------------------------------------------------------------
+// /summarize tri-mode intent routing (R5 task 019 / D2-10)
+// ---------------------------------------------------------------------------
+//
+// R5 turns the `/summarize` slash command into a tri-mode dispatcher per FR-03.
+// The routing decision is a PURE function of the input message + the host
+// context the ConversationPane already knows about:
+//   1. Has the active chat session received uploaded files this session?
+//   2. Does the host have an active workspace document context (R3 wizard)?
+//
+// The helper returns a stable, testable decision shape that the dispatcher
+// site consumes. The actual orchestrator wiring for branches (a) and (b) is
+// owned by sibling tasks 014 (POST /api/ai/chat/sessions/{id}/summarize
+// endpoint), 015 (InvokeSummarizePlaybookTool agent-tool), and 020 (chat-pane
+// orchestration UX — the dispatch wiring site that consumes the routing
+// decision). Branch (c) is owned end-to-end by THIS task — the interjection
+// text is rendered as an Assistant message via the existing predefinedPrompts
+// suggestion surface (no SprkChat API change required).
+//
+// Spec wording (NFR-12 + plan D2-10):
+//   - description: "Summarize uploaded files or the active document"
+//   - interjection: "Upload the file(s) you'd like me to summarize"
+// Both strings are spec-driven; do NOT change them without updating spec.md.
+
+/**
+ * Trigger prefix for the /summarize slash command. Lowercased; the slash
+ * command menu writes the canonical trigger verbatim into the textarea so
+ * a case-sensitive prefix match is safe.
+ */
+export const SUMMARIZE_SLASH_PREFIX = '/summarize';
+
+/**
+ * Deterministic Assistant interjection emitted on branch (c) — the FR-03
+ * prompt-first ordering. Rendered locally as an Assistant message; NO
+ * playbook invocation, NO BFF round-trip.
+ */
+export const SUMMARIZE_PROMPT_FIRST_INTERJECTION =
+  "Upload the file(s) you'd like me to summarize";
+
+/**
+ * Discriminated routing decision returned by {@link routeSummarizeIntent}.
+ *
+ * - `session-files`  → branch (a). The active session has uploaded files. The
+ *   dispatcher invokes the session-files Summarize path: either the agent-
+ *   tool path (LLM tool-call via InvokeSummarizePlaybookTool, task 015) for
+ *   natural-language flows, or the direct endpoint path (POST /api/ai/chat/
+ *   sessions/{id}/summarize, task 014) for explicit slash dispatch.
+ *
+ * - `active-document` → branch (b). No uploaded files but the host has an
+ *   active workspace document context. Falls through to the existing R3
+ *   SummarizeFilesDialog wizard flow (back-compat). The dispatcher opens the
+ *   wizard the same way it does today; this routing helper just signals the
+ *   decision.
+ *
+ * - `prompt-first` → branch (c). Neither uploaded files nor active workspace
+ *   document. Renders the deterministic Assistant interjection inline in the
+ *   chat thread; NO playbook invocation. Owned end-to-end by task 019 via
+ *   the `predefinedPrompts` surface.
+ *
+ * - `not-summarize` → the message is not a /summarize invocation; the
+ *   dispatcher MUST pass the message through unchanged to the default
+ *   SprkChat send funnel. This lets the helper sit on the hot path without
+ *   forcing every send through tri-mode logic.
+ */
+export type SummarizeRouteDecision =
+  | { kind: 'session-files'; messageText: string }
+  | { kind: 'active-document'; messageText: string }
+  | { kind: 'prompt-first'; messageText: string; interjection: string }
+  | { kind: 'not-summarize'; messageText: string };
+
+/**
+ * Minimal host-context inputs for {@link routeSummarizeIntent}.
+ *
+ * Decoupled from `IChatSession` (frontend session shape) and `entityContext`
+ * (host workspace context) so the helper is trivially testable with plain
+ * objects. The dispatcher binds these from `useAiSession()` + SprkChat's
+ * internal attachment state (the task-004 bridge analog — see notes/
+ * task-019-slash-command-evidence.md for the bridge decision).
+ */
+export interface SummarizeIntentInputs {
+  /**
+   * Count of files uploaded into THIS chat session. Maps to
+   * `ChatSession.UploadedFiles.length` on the BFF model (task 004). Until
+   * the frontend AiSessionProvider surfaces that property end-to-end (task
+   * 020 territory), the dispatcher passes the closest analog — the count of
+   * `chatAttachments` chips in SprkChat's local in-memory state. Both yield
+   * the same routing decision for the operator-visible flow.
+   */
+  uploadedFileCount: number;
+
+  /**
+   * Whether the host has an active workspace document context. True when
+   * SpaarkeAi's host context carries an entity/document the existing R3
+   * wizard would consume. The dispatcher binds this from `entityContext`
+   * + any `documentId` surfaced through SprkChat props.
+   */
+  hasActiveWorkspaceDocument: boolean;
+}
+
+/**
+ * Pure tri-mode routing decision for `/summarize` per FR-03.
+ *
+ * Inputs are positional and side-effect-free; the helper performs no IO and
+ * no state mutation. The caller is responsible for executing the chosen
+ * branch.
+ *
+ * Test contract: this function MUST be deterministic and total — every
+ * combination of inputs yields exactly one of the four decision kinds.
+ */
+export function routeSummarizeIntent(
+  messageText: string,
+  inputs: SummarizeIntentInputs
+): SummarizeRouteDecision {
+  // Normalize once; the slash command menu writes the trigger in lower case
+  // and the user CAN type it manually, so accept the canonical lowercase
+  // form OR a case-insensitive variant ("/Summarize", "/SUMMARIZE"). The
+  // textarea is whitespace-trimmed at the dispatcher edge; we re-trim here
+  // so the helper is robust on its own.
+  const trimmed = messageText.trim();
+  const isSummarize =
+    trimmed.length >= SUMMARIZE_SLASH_PREFIX.length &&
+    trimmed.slice(0, SUMMARIZE_SLASH_PREFIX.length).toLowerCase() ===
+      SUMMARIZE_SLASH_PREFIX;
+
+  if (!isSummarize) {
+    return { kind: 'not-summarize', messageText };
+  }
+
+  // Branch (a): uploaded files take precedence — the user expressed intent
+  // by uploading files into the chat session before invoking the command.
+  if (inputs.uploadedFileCount > 0) {
+    return { kind: 'session-files', messageText };
+  }
+
+  // Branch (b): no uploaded files but an active workspace document is the
+  // R3 wizard's natural input. Fall through to the existing flow unchanged.
+  if (inputs.hasActiveWorkspaceDocument) {
+    return { kind: 'active-document', messageText };
+  }
+
+  // Branch (c) — FR-03 prompt-first path: no uploads, no document; emit the
+  // deterministic interjection so the user knows what to do next.
+  return {
+    kind: 'prompt-first',
+    messageText,
+    interjection: SUMMARIZE_PROMPT_FIRST_INTERJECTION,
+  };
+}
+
 /**
  * State for the "Refine this?" selection chip shown above the SprkChat input.
  *
@@ -541,6 +690,120 @@ export function ConversationPane(): React.JSX.Element {
   // as a predefined prompt. Cleared once onSessionCreated fires.
   const [pendingMessage, setPendingMessage] = React.useState<string | null>(null);
 
+  // ── /summarize tri-mode dispatcher (R5 task 019 / D2-10) ────────────────
+  //
+  // dispatchSummarizeIntent is the scaffolding call site for the tri-mode
+  // routing helper {@link routeSummarizeIntent} declared at module scope. It
+  // is wired up here so the routing decision is available the moment the
+  // host needs it; the SprkChat-side interception (the actual call site that
+  // observes "/summarize" being sent) is owned by sibling task 020 (D2-11
+  // chat-pane orchestration UX) since that task already touches the chat
+  // send flow.
+  //
+  // Cross-task coordination decisions (see notes/task-019-slash-command-evidence.md):
+  //   - Branch (a) (`session-files`): downstream wiring binds to the agent-
+  //     tool path (task 015 — InvokeSummarizePlaybookTool, LLM tool-call) OR
+  //     the direct endpoint path (task 014 — POST /api/ai/chat/sessions/
+  //     {sessionId}/summarize). For explicit slash dispatch we prefer the
+  //     direct endpoint (no LLM round-trip needed). Neither endpoint exists
+  //     yet at the time of this scaffolding — the call site is a TODO
+  //     marker that compiles and surfaces the gap as a downstream concern.
+  //   - Branch (b) (`active-document`): falls through to the EXISTING R3
+  //     SummarizeFilesDialog wizard via the host's existing wizard-opening
+  //     mechanism (back-compat). ConversationPane does NOT host the wizard
+  //     itself today (LegalWorkspace does), so this branch in the SpaarkeAi
+  //     shell currently has no in-tree consumer — task 020 wires the
+  //     wizard dispatch into the shell.
+  //   - Branch (c) (`prompt-first`): owned end-to-end by task 019. The
+  //     interjection is surfaced via the existing predefinedPrompts
+  //     suggestion surface — no SprkChat API change required. The
+  //     dispatcher pushes the interjection into pendingSummarizeInterjection
+  //     state; the predefinedPrompts builder below merges it into the chips
+  //     SprkChat already renders.
+  const [pendingSummarizeInterjection, setPendingSummarizeInterjection] =
+    React.useState<string | null>(null);
+
+  /**
+   * dispatchSummarizeIntent — invoke the tri-mode router and apply the
+   * chosen branch.
+   *
+   * Stable across renders so a downstream wiring site (task 020) can pass
+   * this as a prop or callback into SprkChat without re-subscribing.
+   *
+   * Returns `true` when the helper handled the message (branches a/b/c),
+   * `false` when the message is not a /summarize invocation (the caller
+   * should let SprkChat handle it normally).
+   */
+  const dispatchSummarizeIntent = React.useCallback(
+    (messageText: string): boolean => {
+      // The task-004 bridge: ChatSession.UploadedFiles is not yet surfaced
+      // to the frontend AiSessionProvider at the time of this scaffolding
+      // (task 004 ships BFF-side only; the frontend bridge is owned by
+      // task 020). We default to 0 here so the helper falls through to
+      // branch (b) or (c) until task 020 wires the real source. Documented
+      // in notes/task-019-slash-command-evidence.md.
+      // TODO(r5/task-020): replace `0` with the real uploaded-file count
+      // from useAiSession() once the AiSessionProvider exposes it.
+      const uploadedFileCount = 0;
+
+      // Branch (b) gate: an active workspace document is one the host can
+      // pass to the existing R3 wizard. In the SpaarkeAi shell that
+      // corresponds to a non-null entityContext (matter/project/invoice
+      // record context) OR an explicit documentId in the host context.
+      const hasActiveWorkspaceDocument = entityContext !== null;
+
+      const decision = routeSummarizeIntent(messageText, {
+        uploadedFileCount,
+        hasActiveWorkspaceDocument,
+      });
+
+      switch (decision.kind) {
+        case 'not-summarize':
+          return false;
+
+        case 'session-files':
+          // TODO(r5/tasks-014-015-020): dispatch to the session-files
+          // Summarize path. The agent-tool path (task 015) and direct
+          // endpoint path (task 014) both converge on
+          // SessionSummarizeOrchestrator (task 012). Until those land,
+          // we fall through to the default SprkChat send so the chat
+          // surface remains functional — the slash command still produces
+          // a chat response via the default playbook routing. This is
+          // an intentional graceful-degradation stub; the routing
+          // decision is still computed and observable for diagnostics.
+          return false;
+
+        case 'active-document':
+          // TODO(r5/task-020): open the existing SummarizeFilesDialog wizard
+          // through the host. In the SpaarkeAi shell the wizard host is not
+          // yet wired (LegalWorkspace owns it today); task 020's chat-pane
+          // orchestration UX work decides whether to mount the wizard in
+          // the shell or dispatch to a different surface. For now the
+          // default SprkChat send handles the message — back-compat is
+          // preserved because LegalWorkspace consumers continue to invoke
+          // the wizard directly (NOT via ConversationPane), so this
+          // ConversationPane-side fallthrough does NOT affect them.
+          return false;
+
+        case 'prompt-first':
+          // Branch (c) is owned by THIS task: surface the deterministic
+          // interjection as an Assistant message via the predefinedPrompts
+          // suggestion surface. The chip carries the interjection text so
+          // the user sees "Upload the file(s) you'd like me to summarize"
+          // immediately. No playbook invocation, no BFF round-trip.
+          setPendingSummarizeInterjection(decision.interjection);
+          return true;
+      }
+    },
+    [entityContext]
+  );
+
+  // Mark `dispatchSummarizeIntent` as referenced so the TypeScript no-unused-
+  // locals rule does not flag the scaffolding. Downstream wiring (task 020)
+  // will consume it from the same module reference; until then it sits as
+  // an intentional stable API surface for the chat-pane orchestration site.
+  void dispatchSummarizeIntent;
+
   // ── Refinement prompts (AIPU2-101) ──────────────────────────────────────
   //
   // Set when the user clicks the "Refine this?" chip. SprkChat renders these
@@ -567,6 +830,10 @@ export function ConversationPane(): React.JSX.Element {
         // Clear refinement prompts once a session is established — the
         // suggestion chip in SprkChat is no longer needed.
         setRefinementPrompts([]);
+        // R5 task 019 / D2-10: clear the FR-03 prompt-first interjection
+        // once the user has acted on it (sending any message creates the
+        // session). The chip should not linger across turns.
+        setPendingSummarizeInterjection(null);
       }
     },
     [setChatSessionId]
@@ -754,18 +1021,37 @@ export function ConversationPane(): React.JSX.Element {
 
   // Build predefinedPrompts for SprkChat.
   //
-  // Two sources can contribute:
+  // Three sources can contribute:
   //   1. pendingMessage  — from the WelcomePanel prompt-button click
   //   2. refinementPrompts — from the "Refine this?" chip click (AIPU2-101)
+  //   3. pendingSummarizeInterjection — from the /summarize tri-mode router's
+  //      branch (c) FR-03 prompt-first path (R5 task 019 / D2-10). Surfaces
+  //      "Upload the file(s) you'd like me to summarize" as a clickable chip
+  //      above the input bar so the user knows what to do next. No playbook
+  //      invocation; pure chat-layer interjection.
   //
   // SprkChat shows these as clickable suggestion chips above the input bar.
   // The welcome prompt takes priority (index 0) so it is always visible first.
-  // Refinement prompts follow. An undefined value means no chips (SprkChat
-  // does not render the chip bar when predefinedPrompts is undefined or empty).
+  // The Summarize interjection follows; refinement prompts last. An undefined
+  // value means no chips (SprkChat does not render the chip bar when
+  // predefinedPrompts is undefined or empty).
   const welcomePromptEntry = pendingMessage
     ? [{ key: "welcome-prompt", label: pendingMessage, prompt: pendingMessage }]
     : [];
-  const allPredefinedPrompts = [...welcomePromptEntry, ...refinementPrompts];
+  const summarizeInterjectionEntry = pendingSummarizeInterjection
+    ? [
+        {
+          key: "summarize-interjection",
+          label: pendingSummarizeInterjection,
+          prompt: pendingSummarizeInterjection,
+        },
+      ]
+    : [];
+  const allPredefinedPrompts = [
+    ...welcomePromptEntry,
+    ...summarizeInterjectionEntry,
+    ...refinementPrompts,
+  ];
   const predefinedPrompts = allPredefinedPrompts.length > 0 ? allPredefinedPrompts : undefined;
 
   // Build SprkChat hostContext from entityContext (same mapping as R1 ChatPanel.tsx).

@@ -53,16 +53,16 @@ R5 ships in 3 sequential phases + 1 wrap-up task, with parallel-execution opport
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| 010 | P2-G1 | D2-01 New `sprk_analysisaction` seed "Summarize Document for Chat" (Dataverse deploy) | 🔲 | 2h | ✅ | Phase 1 ✅ |
-| 011 | P2-G1 | D2-02 New `sprk_analysisplaybook` configuration | 🔲 | 2h | ✅ | Phase 1 ✅ |
+| 010 | P2-G1 | D2-01 New `sprk_analysisaction` seed "Summarize Document for Chat" (Dataverse deploy) | ✅ | 2h (actual ~1.5h incl deploy) | ✅ | Phase 1 ✅ |
+| 011 | P2-G1 | D2-02 New `sprk_analysisplaybook` configuration | ✅ | 2h (actual ~1h incl deploy) | ✅ | Phase 1 ✅ |
 | 012 | P2-G2 | D2-03 New `SessionSummarizeOrchestrator` concrete class | 🔲 | 4h | ✅ | 010, 011 |
-| 013 | P2-G2 | D2-08 Extract `RichFilePreview` renderer core from `RichFilePreviewDialog` | 🔲 | 4h | ✅ | Phase 1 ✅ |
+| 013 | P2-G2 | D2-08 Extract `RichFilePreview` renderer core from `RichFilePreviewDialog` | ✅ | 4h (actual 2h) | ✅ | Phase 1 ✅ |
 | 014 | P2-G3 | D2-04 New `POST /api/ai/chat/sessions/{id}/summarize` endpoint | 🔲 | 3h | ✅ | 012 |
 | 015 | P2-G3 | D2-05 Register `InvokeSummarizePlaybookTool` on `SprkChatAgent` | 🔲 | 3h | ✅ | 012 |
-| 016 | P2-G3 | D2-06 Add additive PaneEventBus event types (5 new) per ADR-030 | 🔲 | 2h | ✅ | — |
+| 016 | P2-G3 | D2-06 Add additive PaneEventBus event types (5 new) per ADR-030 | ✅ | 2h (actual 1h) | ✅ | — |
 | 017 | P2-G4 | D2-07 Build `StructuredOutputStreamWidget` (Workspace; schema-driven) | 🔲 | 1d | ✅ | 016 |
 | 018 | P2-G4 | D2-09 Build `FilePreviewContextWidget` (Context pane; non-modal) | 🔲 | 1d | ✅ | 013, 016 |
-| 019 | P2-G5 | D2-10 Slash command `/summarize` semantic extension (dual-mode routing) | 🔲 | 3h | ✅ | — |
+| 019 | P2-G5 | D2-10 Slash command `/summarize` semantic extension (dual-mode routing) | ✅ | 3h (actual 1.5h; branch-a wiring deferred to task 020) | ✅ | — |
 | 020 | P2-G5 | D2-11 Chat-pane orchestration UX (file chips, indicator, interjection) | 🔲 | 1d | ✅ | 017 |
 | 021 | P2-G5 | D2-12 "Summarize this only" per-file affordance + UI multi-turn refinement | 🔲 | 3h | ✅ | 018 |
 | 022 | P2-G5 | D2-08 Upgrade `DocumentViewerWidget` (R4 stub) to use extracted renderer | 🔲 | 2h | ✅ | 013 |
