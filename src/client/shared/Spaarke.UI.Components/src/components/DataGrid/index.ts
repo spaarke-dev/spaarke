@@ -25,6 +25,33 @@ export type { DataGridTokens } from './tokens';
 export { DataGrid, default as DataGridDefault } from './DataGrid';
 export type { DataGridProps, DataGridHostContext } from './DataGrid';
 
+// ─── DataGridPageShell — canonical Custom Page mount (task 035 hardening) ───
+// Thin wrapper around DataGrid that handles FluentProvider + theme listener +
+// CSS reset injection + URL parentContext parsing + side-pane filter wiring.
+// See docs/guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md for the full pattern.
+export { DataGridPageShell, default as DataGridPageShellDefault } from './DataGridPageShell';
+export type {
+  DataGridPageShellProps,
+  DataGridPageShellSidePaneFilter,
+  UrlParentContextSpec,
+} from './DataGridPageShell';
+
+// ─── Side-pane infrastructure (task 035 generalization) ───
+// Cross-iframe filter transport + React hook + lifecycle orchestrator. Used by
+// DataGridPageShell internally and exposed for hosts that mount <DataGrid />
+// directly.
+export {
+  sendSidePaneFilter,
+  subscribeSidePaneFilter,
+  useSidePaneFilter,
+  DataGridSidePaneOrchestrator,
+} from './sidePane';
+export type {
+  SidePaneFilterMessage,
+  SidePaneFilterTranslator,
+  SidePaneSpec,
+} from './sidePane';
+
 export { useLazyLoad } from './useLazyLoad';
 export type { UseLazyLoadOptions, UseLazyLoadResult } from './useLazyLoad';
 

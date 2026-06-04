@@ -1,32 +1,27 @@
 /**
- * sprk_invoicespage - Invoices Matter Budget Performance drill-through Custom Page.
+ * sprk_invoicespage — Invoices Matter Budget Performance drill-through Custom Page.
  *
- * Shell-only per ADR-026: parses URL params, builds parentContext, mounts FluentProvider
- * + <DataGrid configId=... /> from @spaarke/ui-components. Configjson behavior.parentContextFilter
- * (attribute=sprk_matter, parentContextKey=matterId, operator=eq) drives FetchXML overlay
- * inside the framework (per task 020 D-020-02 + commit fe4f675d). NO business logic here.
+ * **Task 035 hardening (2026-06-04)**: migrated to `<DataGridPageShell>` from
+ * `@spaarke/ui-components`. The shell handles FluentProvider + theme listener
+ * + box-sizing reset + `XrmDataverseClient` instantiation. Page-specific code
+ * shrinks to: configId, parentContext parsing (Xrm.Page fallback retained),
+ * and onBack. See `docs/guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md`.
  *
- * Mark Paid command is deferred to R2 per task 022 mark-paid-decision.md — no
- * registerCommandHandler call is needed in R1.
- *
- * @see projects/spaarke-datagrid-framework-r1/tasks/023-drill-through-custom-pages.poml
- * @see projects/spaarke-datagrid-framework-r1/notes/drafts/022-config-record-id.md
+ * The configjson's `behavior.parentContextFilter` (attribute=sprk_matter,
+ * parentContextKey=matterId, operator=eq) overlays the FetchXML at runtime
+ * (task 020 D-020-02). No business logic lives here.
  */
 import * as React from "react";
 import { createRoot } from "react-dom/client";
-import { FluentProvider } from "@fluentui/react-components";
 import {
-  DataGrid,
-  XrmDataverseClient,
-  resolveCodePageTheme,
-  setupCodePageThemeListener,
+  DataGridPageShell,
+  type DataGridParentContext,
 } from "@spaarke/ui-components";
 
-// Configuration ID from task 022 (sprk_gridconfiguration record for Invoices).
 const CONFIG_ID = "d021827b-9b5e-f111-ab0c-7c1e521545d7";
 
 /**
- * Parse matterId from URL.
+ * Parse matterId from URL with multi-fallback Xrm.Page lookup.
  *
  * VisualHost CardChrome opens this page via `Xrm.Navigation.navigateTo({
  *   pageType: 'webresource', webresourceName, data: '<form-encoded string>'
@@ -34,8 +29,9 @@ const CONFIG_ID = "d021827b-9b5e-f111-ab0c-7c1e521545d7";
  * `entityName`, `filterField`, `filterValue`, `viewId`, `mode`. The Matter
  * record id arrives as `filterValue` inside that envelope.
  *
- * Also tolerates direct-launch URLs (`?matterId=…`) and a JSON envelope for
- * legacy callers.
+ * Also tolerates direct-launch URLs (`?matterId=…`), a JSON envelope for
+ * legacy callers, and falls back to the active parent Matter form's record id
+ * via `Xrm.Page` / `Xrm.Utility.getPageContext` when neither URL path resolves.
  */
 function parseMatterId(): string {
   const params = new URLSearchParams(window.location.search);
@@ -43,21 +39,18 @@ function parseMatterId(): string {
   if (!id) {
     const raw = params.get("data");
     if (raw) {
-      // 1) Form-encoded envelope (VisualHost CardChrome path).
       const inner = new URLSearchParams(raw);
       id = inner.get("filterValue") ?? inner.get("matterId") ?? "";
-      // 2) JSON envelope (legacy fallback).
       if (!id) {
         try {
           const obj = JSON.parse(raw) as { matterId?: string };
           if (obj?.matterId) id = obj.matterId;
-        } catch { /* graceful */ }
+        } catch {
+          /* graceful */
+        }
       }
     }
   }
-  // 3) Fallback: read the active parent Matter form's record id via Xrm.
-  //    The Custom Page dialog is nested deeper than one frame, so we walk
-  //    BOTH `window.parent` AND `window.top` and try multiple Xrm APIs.
   if (!id) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const candidateWindows: any[] = [];
@@ -80,23 +73,33 @@ function parseMatterId(): string {
   return id.replace(/[{}]/g, "");
 }
 
-const App: React.FC = () => {
-  const [theme, setTheme] = React.useState(resolveCodePageTheme);
-  React.useEffect(() => setupCodePageThemeListener(() => setTheme(resolveCodePageTheme())), []);
-  const parentContext = React.useMemo(() => ({ matterId: parseMatterId() }), []);
-  return (
-    <FluentProvider theme={theme} applyStylesToPortals={true} style={{ height: "100%" }}>
-      <DataGrid
-        configId={CONFIG_ID}
-        parentContext={parentContext}
-        dataverseClient={new XrmDataverseClient()}
-        theme={theme}
-        onBack={() => window.close()}
-      />
-    </FluentProvider>
-  );
-};
+function buildParentContext(): DataGridParentContext | undefined {
+  const matterId = parseMatterId();
+  if (!matterId) return undefined;
+  return {
+    entityType: "sprk_matter",
+    id: matterId,
+    name: "",
+    matterId, // also expose under the configjson's parentContextKey
+  } as DataGridParentContext;
+}
+
+const App: React.FC = () => (
+  <DataGridPageShell
+    configId={CONFIG_ID}
+    parentContext={buildParentContext()}
+    onBack={() => window.close()}
+  />
+);
 
 const root = document.getElementById("root");
-if (root) createRoot(root).render(<React.StrictMode><App /></React.StrictMode>);
-else console.error("[sprk_invoicespage] Root element not found");
+if (root) {
+  createRoot(root).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
+  );
+} else {
+  // eslint-disable-next-line no-console
+  console.error("[sprk_invoicespage] Root element not found");
+}
