@@ -5,6 +5,33 @@
 
 ---
 
+## 🚨 MANDATORY: Use Deploy-AllDataGridConsumers for framework changes
+
+When any file in `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/` (or transitive deps like `services/XrmDataverseClient`) changes, EVERY Custom Page that mounts `<DataGrid>` ships a stale framework copy until rebuilt + redeployed. There is NO runtime sharing — each Vite bundle bakes its own copy.
+
+**Always use [`scripts/Deploy-AllDataGridConsumers.ps1`](../../scripts/Deploy-AllDataGridConsumers.ps1)** after framework changes. Do NOT run individual `Deploy-EventsPage.ps1` / `Deploy-CorporateWorkspace.ps1` scripts unless you have a documented reason (e.g. only one consumer changed).
+
+The script:
+- Enumerates every consumer (registry at top of the script — extend it when a new Custom Page mounts `<DataGrid>`)
+- Runs `npm run build` in each
+- PATCHes the matching web resource
+- Single `PublishXml` at the end (atomic cache flush)
+
+```powershell
+$env:DATAVERSE_URL = "https://spaarkedev1.crm.dynamics.com"
+.\scripts\Deploy-AllDataGridConsumers.ps1
+```
+
+**Why this exists**: task 035 UAT iteration 5 (2026-06-04). Operator directive: "we do not want to go through this same UI review and back/forth every time we deploy the dataset grid — this is always going to be part of the grid". Individual consumer redeploys after every framework iteration was the wrong shape — the script makes "framework change → ALL consumers updated" a single command.
+
+**Current registry**:
+- `EventsPage` → `sprk_eventspage.html`
+- `sprk_invoicespage` → `sprk_invoicespage.html`
+- `sprk_kpiassessmentspage` → `sprk_kpiassessmentspage.html`
+- `LegalWorkspace` → `sprk_corporateworkspace` (no `.html` suffix — historical naming)
+
+---
+
 ## Project Status
 
 - **Phase**: Ready for execution (Phase A — Foundation)
