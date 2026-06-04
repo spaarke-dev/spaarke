@@ -151,12 +151,6 @@ export const App: React.FC = () => {
   // unrelated re-renders. Memoized in the JSX consumer below.
   const [calendarHostFilters, setCalendarHostFilters] = React.useState<HostFilterCondition[]>([]);
 
-  // Root element ref + visibility flag — drives the IntersectionObserver
-  // lifecycle hook below (task 035-fix-2 — close side panes when the form
-  // tab navigates away; MDA form tabs HIDE the iframe rather than unmount it,
-  // so beforeunload + pagehide miss this case entirely).
-  const rootRef = React.useRef<HTMLDivElement | null>(null);
-
   React.useEffect(() => setupCodePageThemeListener(() => setTheme(resolveCodePageTheme())), []);
 
   // Calendar side pane: register once on mount (skipped in dialog mode
@@ -189,12 +183,15 @@ export const App: React.FC = () => {
     window.addEventListener('beforeunload', cleanup);
     window.addEventListener('pagehide', cleanup);
 
-    // IntersectionObserver lifecycle: detect form-tab show/hide on the root
-    // sentinel. When the iframe scrolls or its containing tab becomes hidden,
-    // close the side panes; when it returns to visible, re-register the
-    // Calendar pane.
+    // IntersectionObserver lifecycle: detect form-tab show/hide on the
+    // #root mount element. When the iframe scrolls or its containing tab
+    // becomes hidden, close the side panes; when it returns to visible,
+    // re-register the Calendar pane. Observing #root directly (instead of a
+    // wrapper div) keeps the DOM structurally identical to the InvoicesPage
+    // shell — task 035-fix-iteration-3 reverted the wrapper div that was
+    // introduced earlier for the ref attach point.
     let observer: IntersectionObserver | null = null;
-    const node = rootRef.current;
+    const node = document.getElementById('root');
     if (node && typeof IntersectionObserver !== 'undefined') {
       let wasVisible = true;
       observer = new IntersectionObserver(
@@ -244,24 +241,22 @@ export const App: React.FC = () => {
 
   return (
     <FluentProvider theme={theme} applyStylesToPortals={true} style={{ height: '100%' }}>
-      <div ref={rootRef} style={{ height: '100%', width: '100%' }}>
-        <DataGrid
-          configId={EVENT_CONFIG_ID}
-          parentContext={parentContext}
-          dataverseClient={dataverseClient}
-          theme={theme}
-          hostFilters={calendarHostFilters}
-          onRecordOpen={(recordId, record) => {
-            // Override the framework's default record-open (which uses configjson
-            // rowOpen.type=webResource) so EventsPage opens the Event detail
-            // side pane instead — matches the legacy in-app UX. Drill-through
-            // and embedded modes still get the configjson behavior because
-            // those hosts don't reach this code path.
-            const eventTypeId = String((record as Record<string, unknown>)._sprk_eventtype_ref_value ?? '');
-            if (recordId) void openEventDetailPane(recordId, eventTypeId || undefined);
-          }}
-        />
-      </div>
+      <DataGrid
+        configId={EVENT_CONFIG_ID}
+        parentContext={parentContext}
+        dataverseClient={dataverseClient}
+        theme={theme}
+        hostFilters={calendarHostFilters}
+        onRecordOpen={(recordId, record) => {
+          // Override the framework's default record-open (which uses configjson
+          // rowOpen.type=webResource) so EventsPage opens the Event detail
+          // side pane instead — matches the legacy in-app UX. Drill-through
+          // and embedded modes still get the configjson behavior because
+          // those hosts don't reach this code path.
+          const eventTypeId = String((record as Record<string, unknown>)._sprk_eventtype_ref_value ?? '');
+          if (recordId) void openEventDetailPane(recordId, eventTypeId || undefined);
+        }}
+      />
     </FluentProvider>
   );
 };

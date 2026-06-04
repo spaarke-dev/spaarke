@@ -6,6 +6,15 @@
     <title>Events</title>
     <style>
       /* Reset styles for Dataverse Custom Page context */
+      /* `box-sizing: border-box` is REQUIRED — without it, the DataGrid root's
+         inner padding adds to the 100%-of-viewport width/height and the grid
+         overflows the Power Apps modal frame on the right and bottom.
+         Parity with sprk_invoicespage + sprk_kpiassessmentspage Code Page
+         shells. Added 035-fix-iteration-3 (2026-06-03) after UAT showed the
+         Createdon column clipped right + chrome not responsive in modal. */
+      *, *::before, *::after {
+        box-sizing: border-box;
+      }
       html, body, #root {
         margin: 0;
         padding: 0;

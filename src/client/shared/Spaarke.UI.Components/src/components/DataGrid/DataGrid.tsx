@@ -179,21 +179,21 @@ const useStyles = makeStyles({
     // sections in the Power Apps OOB style. Outer surface stays flush with the
     // host modal background.
     //
-    // Tight paddings + minHeight: 0 so the two cards fit cleanly inside:
-    //  - a Power Apps `navigateTo` dialog frame (~30px fixed chrome top/bottom)
-    //  - an MDA form-tab iframe (where the host iframe's height is whatever
-    //    the form layout gives it; root must NOT exceed that)
-    //  - a workspace-widget container (where the parent's flex chain controls
-    //    the available height)
+    // Generous outer padding so the two cards have visible breathing room
+    // from the modal frame — matches the Power Apps OOB layout dimensions
+    // (see notes/testing-screenshots/oob-layout-dimensions.jpg) and gives the
+    // two cards the polished depth that the sprk_invoicespage drill-through
+    // ships. **CRITICAL host requirement**: the Code Page shell `index.html`
+    // MUST set `*, *::before, *::after { box-sizing: border-box; }` — otherwise
+    // this padding adds to the 100%-of-viewport size and the grid overflows.
+    // See sprk_invoicespage/index.html for the canonical reset.
     //
-    // **Task 035-fix-1 (2026-06-03)**: paddings + rowGap REDUCED from
-    // L/M to S/XS, and `minHeight: 0` added, after UAT showed the original
-    // layout overflowed in dialog mode + iframe-embedded modes (the outer
-    // container scrolled instead of `gridScroll` scrolling its rows). The
-    // 50% padding reduction keeps the two-card OOB look but lets the cards
-    // actually fit in tighter viewports without spillage. `minHeight: 0`
-    // is the canonical flex-overflow fix — without it, the natural content
-    // height of the inner card defeats `flex: 1` shrinkage.
+    // **Task 035-fix-iteration-3 (2026-06-03)**: paddings restored to L/M after
+    // iteration 2 shrunk them to S/S and killed the visual card chrome. The
+    // actual root cause of the iteration 1 overflow was a missing `box-sizing`
+    // reset in EventsPage's index.html (since added) — NOT the padding values.
+    // `minHeight: 0` retained as the canonical flex-overflow fix; without it,
+    // the natural content height of the inner card defeats `flex: 1` shrinkage.
     display: 'flex',
     flexDirection: 'column',
     width: '100%',
@@ -202,11 +202,11 @@ const useStyles = makeStyles({
     position: 'relative',
     backgroundColor: tokens.colorNeutralBackground2,
     overflow: 'hidden',
-    rowGap: tokens.spacingVerticalS,
-    paddingTop: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: tokens.spacingHorizontalS,
-    paddingBottom: tokens.spacingVerticalS,
+    rowGap: tokens.spacingVerticalM,
+    paddingTop: tokens.spacingVerticalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingBottom: tokens.spacingVerticalM,
   },
   gridScroll: {
     flex: 1,
