@@ -31,7 +31,7 @@ The recommendation summary across the ten surfaces evaluated:
 | **S8a SessionSummarizationService** | **DON'T ADOPT** | unchanged |
 | **S8b CapabilityRouter** | **PARTIAL** (F5 only, bundle with S1) | in-process BFF |
 
-**Distribution: 1 ADOPT · 5 PARTIAL · 4 DON'T ADOPT.** The single ADOPT (S5B) is greenfield — no migration cost, no code to lift. Every PARTIAL surface either bundles into the S1 cross-cutting lift or defers to a downstream contract decision. Three "DON'T ADOPT" verdicts are decisive (S2, S4, S6); S8a is the textbook anti-fit.
+**Distribution: 1 ADOPT · 5 PARTIAL · 4 DON'T ADOPT.** The single ADOPT (S5B) is greenfield — no migration cost, no code to lift — **and is doubly contingent: on (a) owner sign-off that the canonical multi-day legal workflow surface is a product priority (currently curated-only per [`knowledge/foundry-agent-service/NOTES.md`](../../knowledge/foundry-agent-service/NOTES.md) "TODO stub"), and (b) successful 1-2 week deployment prototyping (§6.4) before any deployment-model commitment.** Every PARTIAL surface either bundles into the S1 cross-cutting lift or defers to a downstream contract decision; the PARTIAL bucket itself decomposes into three distinct shapes (see footnote in §5.11). Three "DON'T ADOPT" verdicts are decisive (S2, S4, S6); S8a is the textbook anti-fit.
 
 The most consequential decisions:
 
@@ -39,7 +39,7 @@ The most consequential decisions:
 
 **S2 is DON'T ADOPT not because Workflows is inadequate, but because the migration is non-incremental.** JPS spans 12 node executors, an orchestration service, an execution engine, an idempotent persistence layer, a Dataverse-stored playbook schema, and a validation plugin in `Sprk.Dataverse.Plugins`. There is no path that lifts one node and leaves the rest. The framework can structurally express most of JPS; the cost to do so is grossly disproportionate to a working production system.
 
-**S1 is PARTIAL because of a specific, named bug, not because of structural mismatch.** Spaarke's middleware decorates `ISprkChatAgent` (a Spaarke interface), NOT `IChatClient` — exactly the hand-rolled equivalent the framework's `.AsBuilder().Use*().Build()` composition subsumes (per [Middleware Learn page](https://learn.microsoft.com/en-us/agent-framework/agents/middleware/), fetched 2026-06-03, `updated_at 2026-04-02`). Every Agents.AI feature except F7 (Workflows) and F9 (A2A) maps cleanly to existing Spaarke code that already approximates the framework idiom. But SprkChat's canonical workload IS multi-tool streaming, and [GitHub Issue #6268](https://github.com/microsoft/agent-framework/issues/6268) (opened 2026-06-02) reports the exact failure mode: `ChatClientAgent.RunStreamingAsync` ends with no assistant text on multi-tool turns. As of synthesis date the issue is `needs-maintainer-triage`. Lifting before resolution would ship a regression in the most-trafficked SprkChat path.
+**S1 is PARTIAL because of a specific, named bug, not because of structural mismatch.** Spaarke's middleware decorates `ISprkChatAgent` (a Spaarke interface), NOT `IChatClient` — exactly the hand-rolled equivalent the framework's `.AsBuilder().Use*().Build()` composition subsumes (per [Middleware Learn page](https://learn.microsoft.com/en-us/agent-framework/agents/middleware/), fetched 2026-06-03, `updated_at 2026-04-02`). Every Agents.AI feature except F7 (Workflows) and F9 (A2A) maps cleanly to existing Spaarke code that already approximates the framework idiom. But SprkChat's canonical workload IS multi-tool streaming, and [GitHub Issue #6268](https://github.com/microsoft/agent-framework/issues/6268) (opened 2026-06-02) reports the exact failure mode: `ChatClientAgent.RunStreamingAsync` ends with no assistant text on multi-tool turns. As of synthesis date the issue is `needs-maintainer-triage`. Lifting before resolution would ship a regression in the most-trafficked SprkChat path. **Reviewer note (task 007 adversarial pass)**: the full issue title qualifies the reproduction as "reasoning model + stateless Responses API" — Spaarke's S1 uses Azure OpenAI GPT-4o (NOT a reasoning model) via Chat Completions (NOT the Responses API). Whether S1 is actually exposed to #6268's reproduction surface is itself an open question — see §8 Q7. If exposure is verified absent, PARTIAL → ADOPT-with-flag is defensible.
 
 The most consequential open question is **S5B's hosting model.** The F12 durable-hosting evidence base is thin — no dedicated `/hosting/` Microsoft Learn page exists within the recency floor, primary evidence is the `04-hosting/` upstream sample tree (entirely new since the 2026-05-14 curated baseline) plus [Devblog D6 "Durable Workflows in Microsoft Agent Framework"](https://devblogs.microsoft.com/dotnet/durable-workflows-in-microsoft-agent-framework/) plus open [Issue #6308](https://github.com/microsoft/agent-framework/issues/6308) ("How to deploy dotnet Hosted agents to Foundry", opened 2026-06-03). Three candidates — Workflows-in-BFF, Workflows-in-Function, Foundry-hosted — each ADR-013-defensible. **The recommendation is to prototype, not pre-commit.** Until the canonical durable HITL surface gets a project SPEC AND a 1-2 week deployment prototype phase runs, deployment is "TBD pending prototype."
 
@@ -306,9 +306,10 @@ The structural fit is the strongest of any surface in this assessment. Every Age
 **Deployment model**: In-process BFF (ADR-013 default; criteria (1) latency, (2) transactional coupling both fail decisively).
 
 **Open questions**:
-1. **Wait or pilot?** Should Spaarke wait for #6268 to land in a shipped 1.x release, or pilot the lift now behind `Sprk.Ai.UseFrameworkAgent` feature flag with fallback to hand-rolled path? (Decision criterion: % of SprkChat traffic that is multi-tool — if >50%, wait; if <20%, pilot.)
+1. **Wait or pilot?** Should Spaarke wait for #6268 to land in a shipped 1.x release, or pilot the lift now behind `Sprk.Ai.UseFrameworkAgent` feature flag with fallback to hand-rolled path? (Decision criterion: % of SprkChat traffic that is multi-tool — if >50%, wait; if <20%, pilot.) **Linked to §8 Q7 (reproduction-scope verification).**
 2. **Compound-intent gate**: Does Spaarke's compound-intent policy fit cleanly into `ApprovalRequiredAIFunction` (framework routes; Spaarke decides which functions to wrap), or are there policy edge cases (conditional approval based on user role, scope, document) that don't map to binary approve/reject?
 3. **Session externalization**: How does Spaarke reconcile its Redis-externalized chat history with `AgentSession`'s in-memory + remote-conversation-id model (per cross-cutting observation 7)? The framework supports `CreateSessionAsync(conversationId)` for remote-thread binding; does this work when the "remote thread" is Spaarke's own Redis cache?
+4. **#6268 reproduction-scope verification** (added by task 007 adversarial review): The issue title qualifies the reproduction as "reasoning model + stateless Responses API." S1's actual API + model substrate (Azure OpenAI GPT-4o via Chat Completions) appears OUTSIDE that reproduction surface. If verification confirms S1 is not exposed, the gating in this recommendation softens materially. See §8 Q7.
 
 ### 5.2 S2 AnalysisOrchestration + JPS playbooks
 
@@ -322,7 +323,9 @@ The structural fit is the strongest of any surface in this assessment. Every Age
 
 JPS is a working production system with its own DSL, executor model, persistence layer, validation pipeline, and Dataverse-stored playbook records. `Microsoft.Agents.AI.Workflows` is conceptually competitive — it has executors, edges, supersteps, checkpoints, multi-agent orchestration patterns — and structurally could host most of what JPS does. But "could host most" is not adoption-grade evidence.
 
-**The decisive factor: no incremental adoption path.** Workflows replaces the orchestration engine; you cannot "lift one node to a Workflow executor" because the surrounding `ExecutionGraph` + `IToolHandlerRegistry` + `INodeService` types don't host them. Either JPS stays, or JPS becomes Workflows wholesale. Migration cost (~30+ files + Dataverse schema + plugins) is grossly disproportionate to the benefit. JPS-specific features Workflows does not natively provide — JPS schema validation, Dataverse-persisted playbook records, the `IAiToolHandler` contract purpose-built for "playbook-driven orchestration, not interactive document analysis" per the doc-comment at [IAiToolHandler.cs:11](../../src/server/api/Sprk.Bff.Api/Services/Ai/IAiToolHandler.cs#L11), `ActionType.AgentService = 60` for Foundry routing — would need re-implementation atop Workflows.
+**The decisive factor: no incremental adoption path for EXISTING JPS playbooks.** Workflows replaces the orchestration engine; you cannot "lift one existing JPS node to a Workflow executor" because the surrounding `ExecutionGraph` + `IToolHandlerRegistry` + `INodeService` types don't host them. Either JPS stays, or JPS becomes Workflows wholesale. Migration cost (~30+ files + Dataverse schema + plugins) is grossly disproportionate to the benefit. JPS-specific features Workflows does not natively provide — JPS schema validation, Dataverse-persisted playbook records, the `IAiToolHandler` contract purpose-built for "playbook-driven orchestration, not interactive document analysis" per the doc-comment at [IAiToolHandler.cs:11](../../src/server/api/Sprk.Bff.Api/Services/Ai/IAiToolHandler.cs#L11), `ActionType.AgentService = 60` for Foundry routing — would need re-implementation atop Workflows.
+
+**Adversarial counter considered (task 007 review)**: A theoretical additive path exists — a new `WorkflowGraphNodeExecutor` could be registered alongside the existing 12 executors, hosting a `Microsoft.Agents.AI.Workflows` sub-graph for FUTURE playbooks that opt in (the `AgentServiceNodeExecutor` for `ActionType.AgentService = 60` is the existing precedent for "this node type delegates to an external orchestration"). This path is structurally feasible but is parked in §5.2 Open Question 2 ("Selective Workflows piloting") because it (a) competes with S5B for the team's Workflows learning bandwidth, (b) requires Dataverse playbook schema additions + `PlaybookValidationPlugin` validation rules, and (c) would deliver value only on net-new playbooks, not the existing production set. The DON'T ADOPT verdict applies to the wholesale lift; the additive path is a deferred architecture-group decision.
 
 **Rationale (≥2 evidence pieces)**:
 - [notes/01 §S2(b)](../../projects/agent-framework-fit-assessment-r1/notes/01-spaarke-ai-surfaces-inventory.md): `AnalysisOrchestrationService` and all 12 node executors use NEITHER Extensions.AI NOR Agents.AI types. The framework path is rebuilding the surface on a different abstraction, not lifting an existing one.
@@ -370,6 +373,8 @@ Builder is structurally the cleanest candidate for `ChatClientAgent` adoption. T
 
 S4 is not agent-shaped. The 13+ job handlers are single-purpose `ProcessAsync` methods — closer to "function" than "agent" in the framework sense. The framework's value-add (agent base, sessions, middleware, tool routing, HITL gates) doesn't apply. The job-handler framework (`IJobHandler`, `JobContract`, `JobOutcome`, `IIdempotencyService`, `ServiceBusJobProcessor`) is Spaarke-defined and works. Replacing it with `Microsoft.Agents.AI.Workflows` durable hosting means abandoning a working Service Bus + Redis + Idempotency contract for a framework feature S4 doesn't need.
 
+**Adversarial counter considered (task 007 review)**: The `04-hosting/DurableWorkflows` upstream sample category (notes/00 §3) does demonstrate Workflows expressing durable, queue-driven pipelines analogous to Spaarke's Service Bus chains (e.g., `ProfileSummaryJobHandler`). A long-term unified-orchestration argument exists. But it fails as an immediate-verdict driver because: (a) S4's existing infrastructure is working production with idempotency + crash-safety contracts the team relies on; (b) the F12 evidence-thin caveat (no `/hosting/` Learn page; Issue #6308 in active triage) that motivates §6.4's "prototype before commit" for S5B applies symmetrically to any S4 re-host argument; (c) the assessment's Open Question 2 already parks this as multi-quarter future state.
+
 **Rationale (≥2 evidence pieces)**:
 - [notes/01 §S4(a)+(b)](../../projects/agent-framework-fit-assessment-r1/notes/01-spaarke-ai-surfaces-inventory.md): No Extensions.AI types in any S4 handler; handlers delegate to thicker services (`IAppOnlyAnalysisService`, `IFileIndexingService`). The AI work is one level deeper than the handler.
 - [notes/03 §F1 Spaarke applicability](../../projects/agent-framework-fit-assessment-r1/notes/03-agent-framework-feature-map.md): "S4 Background jobs — not applicable in general; individual job handlers are deterministic pipelines, not agent loops."
@@ -392,6 +397,8 @@ S4 is not agent-shaped. The 13+ job handlers are single-purpose `ProcessAsync` m
 **Recommendation: PARTIAL — adopt only as part of an S1 lift (not in isolation).**
 
 S5A is structurally a candidate for adoption — `AsAIAgent` simplifies the wrapper, `AgentSession.CreateSessionAsync(conversationId)` replaces the manual Redis-cached-thread-id manipulation, hosted MCP tools become declarable. But: S5A consumes from `SprkChatAgent`-shaped contexts (`AgentServiceRoutingMiddleware` IS the SprkChat pipeline). Lifting S5A without S1 means mixing framework `AIAgent` (Foundry side) with hand-rolled `ISprkChatAgent` (SprkChat side) — a more complex intermediate state than either pure choice. S5A is default-OFF per ADR-018, so adoption value is low until / unless the kill switch flips on; otherwise the lift improves code that doesn't run.
+
+**PARTIAL is CONDITIONAL on S1 lift actually happening (task 007 adversarial pass).** If S1 stays paused indefinitely (e.g., #6268 unresolves for an extended period AND Q7 verification confirms exposure), S5A stays paused with it. Standalone S5A lift is NOT recommended.
 
 **Rationale (≥2 evidence pieces)**:
 - [notes/02 §2.2](../../projects/agent-framework-fit-assessment-r1/notes/02-non-bff-ai-touchpoints-inventory.md): `AgentServiceClient` connects to a pre-provisioned Foundry Agent endpoint, manages threads via direct SDK calls, uses Redis for thread persistence. Framework's `AsAIAgent(...)` + `CreateSessionAsync(conversationId)` collapse this to two API calls.
@@ -445,7 +452,7 @@ The S5B decision splits into two sub-decisions:
 
 S6 uses **`Microsoft.Agents.Builder` / `Microsoft.Agents.Builder.Compat` / `Microsoft.Agents.Core.Models`** — the **M365 Agents SDK** (formerly Bot Framework) — for the agent-channel side. **This is a DIFFERENT SDK from `Microsoft.Agents.AI`** (Agent Framework). They are not interchangeable; the M365 Agents SDK is canonical for building agents that consume from M365 Copilot and Azure Bot Service channels. The S6 design explicitly chose Path A (direct API Plugin + manifests, BFF as adapter) over Copilot Studio; agent gateway endpoints are "THIN ADAPTERS — MUST reuse existing BFF services per spec.md MUST NOT create new AI orchestration logic." Adding `Microsoft.Agents.AI.AIAgent` plumbing as the integration backend would (1) duplicate the agent abstraction, (2) contradict the adapter principle, (3) add a third agent SDK to the project.
 
-The correct nuance: this is NOT a vote against Agent Framework. If BFF AI surfaces (S1, S3, S5B) lift to `AIAgent`, the M365 Agents SDK can invoke them via existing facade types — no `Microsoft.Agents.AI` adoption at the Copilot integration boundary is needed for that to work.
+The correct nuance: this is NOT a vote against Agent Framework. **DON'T ADOPT applies to the Copilot integration BACKEND (the S6 surface itself) only.** If BFF AI surfaces (S1, S3, S5B) lift to `AIAgent`, the M365 Agents SDK can invoke them via existing facade types — no `Microsoft.Agents.AI` adoption at the Copilot integration boundary is needed for that to work. Those underlying surfaces have their own verdicts (S1 PARTIAL, S3 PARTIAL, S5B ADOPT-contingent) which may flow through the integration even though the integration backend itself does not adopt the framework.
 
 **Rationale (≥2 evidence pieces)**:
 - [notes/02 §3.1(c)](../../projects/agent-framework-fit-assessment-r1/notes/02-non-bff-ai-touchpoints-inventory.md): R1 scope explicitly excludes `Microsoft.Agents.AI.*`; gateway described as "thin adapter facades — no new AI orchestration logic."
@@ -477,7 +484,12 @@ S7 spans two parts and only one is in scope:
    - U2: deployment model (separate `Sprk.Insights.Mcp` vs embedded in BFF) — not committed
    - U3: BFF integration seam (wraps `/api/insights/ask` vs directly wraps `IInsightsAi`) — not committed
 
-The assessment's substantive guidance for D-A20 contract authoring: **prefer Agent Framework primitives IF the MCP server is a separate deployable AND hosts agents internally (i.e., agents that orchestrate Insights tool calls or call back to BFF capabilities)**. If the MCP server is a thin transport over a single `IInsightsAi` facade call per tool, plain `ModelContextProtocol` library hosting is simpler and the framework adds nothing.
+The assessment's substantive guidance for D-A20 contract authoring is explicitly branching (task 007 adversarial pass strengthened framing):
+
+- **If the MCP server is a THIN TRANSPORT** (each tool maps 1:1 to an `IInsightsAi` facade call): plain `ModelContextProtocol.AspNetCore` library hosting is simpler, smaller, faster. **DON'T ADOPT Agent Framework** — it adds no value over plain MCP library in this shape.
+- **If the MCP server HOSTS AGENTS INTERNALLY** (agents that orchestrate Insights tool calls or call back to BFF capabilities): **ADOPT Agent Framework primitives** — `AIAgent`, `MapA2A`, agent middleware, Tool Approval are the right primitives.
+
+The PARTIAL verdict expresses "decision pending which shape D-A20 chooses." It is NOT "adopt some, not all." Once D-A20 commits to thin-transport OR agent-hosting, the corresponding sub-verdict applies.
 
 **Rationale (≥2 evidence pieces)**:
 - [notes/02 §4.1(a)+(d)](../../projects/agent-framework-fit-assessment-r1/notes/02-non-bff-ai-touchpoints-inventory.md): "MCP IMPLEMENTATION DEFERRED TO PHASE 2"; contract document (D-A20) is Phase 1 deliverable. Pre-emptive Agent Framework adoption commitment is design-by-assumption, not design-by-contract.
@@ -503,6 +515,8 @@ The assessment's substantive guidance for D-A20 contract authoring: **prefer Age
 
 S8a is the textbook anti-fit for Agent Framework: a single-purpose `IChatClient` consumer with no agent loop, no tool calling, no session, no streaming. Wrapping in `ChatClientAgent` adds the agent abstraction without using any framework value-add. F5 marginal candidacy has qualitative regression risk.
 
+**Asymmetry with S8b explained (task 007 adversarial pass)**: S8b CapabilityRouter is PARTIAL-for-F5 while S8a is DON'T ADOPT. Both are sub-components of S1's lifecycle; both consume `IChatClient`; both do ad-hoc JSON parsing. The differentiator: S8b is a **CLASSIFIER** (binary-shaped output; ad-hoc parsing → strict JSON is upside-only), while S8a is a **SUMMARIZER** (narrative-shaped output with embedded JSON block; strict JSON mode likely degrades the narrative quality that justifies the GPT-4o vs GPT-4o-mini model choice per [`SessionSummarizationService.cs:12-18`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionSummarizationService.cs#L12)). The "legal context preservation" rationale is load-bearing for S8a's verdict — see §8 Q9.
+
 **Rationale (≥2 evidence pieces)**:
 - [notes/01 §S8a](../../projects/agent-framework-fit-assessment-r1/notes/01-spaarke-ai-surfaces-inventory.md): `SessionSummarizationService` uses `IChatClient` directly + GPT-4o with explicit "legal context preservation" rationale at lines 12-18. Single LLM call is not agent-shaped.
 - "Scoped lifetime — fire-and-forget from chat session lifecycle to avoid blocking SSE." Service consumer pattern, not an agent pattern.
@@ -523,6 +537,8 @@ S8a is the textbook anti-fit for Agent Framework: a single-purpose `IChatClient`
 **Recommendation: PARTIAL — adopt structured-output (F5) only, alongside S1 lift.**
 
 S8b is a sub-component of S1 (called from `SprkChatAgentFactory.CreateAgentAsync` per [SprkChatAgentFactory.cs:232-243](../../src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs#L232)). Treating it as independent is artificial — it tracks S1's verdict. When S1 adopts `RunAsync<T>` for `CompoundIntentDetector`, S8b's classifier should adopt the same pattern for consistency. PARTIAL not ADOPT because (a) broader features F1, F2, F4, etc. don't apply to a router, and (b) the change is contingent on S1 lift timing.
+
+**PARTIAL is CONDITIONAL on S1's F5 lift actually happening (task 007 adversarial pass).** Standalone S8b F5 lift is NOT recommended — the F5 benefit is "code aesthetic" not "functional improvement" for a working classifier with <50ms latency target and an optional-dependency pattern (`[FromKeyedServices("raw")] IChatClient?`) that already supports disable-via-3-param-overload. Ride along S1's lift PR set; do not cut a separate S8b ticket.
 
 **Rationale (≥2 evidence pieces)**:
 - [notes/01 §S8b](../../projects/agent-framework-fit-assessment-r1/notes/01-spaarke-ai-surfaces-inventory.md): `CapabilityRouter` consumes the same `[FromKeyedServices("raw")] IChatClient?` keyed singleton SprkChat's `CompoundIntentDetector` uses (cross-cutting observation 4). The two classifier patterns are coupled by construction.
@@ -550,6 +566,18 @@ S8b is a sub-component of S1 (called from `SprkChatAgentFactory.CreateAgentAsync
 
 Distribution: **1 ADOPT · 5 PARTIAL · 4 DON'T ADOPT.** Anti-bias sanity check passes — the assessment surfaces uncomfortable conclusions where evidence supports them.
 
+#### §5.11.1 The PARTIAL bucket decomposes into three distinct shapes (task 007 adversarial pass)
+
+A flat "5 PARTIAL" reading can mask decisional ambiguity. The five PARTIALs are functionally three different verdict-shapes:
+
+| Shape | Surfaces | Meaning |
+|---|---|---|
+| **(a) Conditional on S1 lift** | S5A, S8b | "PARTIAL only if S1 actually lifts; otherwise effectively DON'T ADOPT-in-isolation." Standalone work is NOT recommended. |
+| **(b) Deferred to downstream contract** | S7 | "Decision pending which shape D-A20 chooses (thin transport → DON'T ADOPT framework; agent-hosting → ADOPT framework)." The PARTIAL is a placeholder for a branching commitment, not a middle commitment. |
+| **(c) Adopt-at-maintenance-window** | S1, S3 | "Yes adopt, but timing depends on (S1: #6268 + Q7 verification) or (S3: next significant Builder maintenance window or co-trigger with S1)." |
+
+Reading the distribution as "5 PARTIAL = 5 'maybe' verdicts" overstates the framework's reach. Reading it as the three shapes above produces a clearer decision menu for the owner.
+
 ---
 
 ## 6. Deployment model recommendations
@@ -567,7 +595,7 @@ Default is **in-process BFF** when even one criterion fails.
 
 ADR-013 4-criteria: (1) FAILS (`<500ms` TTFB streaming budget against BFF state); (2) FAILS (per-turn citation context, plan-preview Redis state, session token-budget counter, ChatHistoryManager all share request lifecycle); (3)/(4) N/A. Two criteria fail decisively. **Default holds.**
 
-**Additional**: lift timing gated on Issue #6268. Feature-flag the lift behind `Sprk.Ai.UseFrameworkAgent` toggle so rollback is config flip, not redeploy.
+**Additional**: lift timing gated on Issue #6268 — **but the gating's strictness is itself an open question (§8 Q7)**. The issue's reproduction qualifier ("reasoning model + stateless Responses API") may exclude S1's actual API + model substrate. If verification confirms non-exposure, the gate softens from "wait for fix" to "verify-then-pilot." Feature-flag the lift behind `Sprk.Ai.UseFrameworkAgent` toggle so rollback is config flip, not redeploy, regardless of gating decision.
 
 ### 6.2 S3 Builder → in-process BFF
 
@@ -672,6 +700,8 @@ The four S1-adjacent PARTIAL surfaces (S1, S3, S8a, S8b — and S5A by adoption-
 
 [notes/01 cross-cutting observation 3](../../projects/agent-framework-fit-assessment-r1/notes/01-spaarke-ai-surfaces-inventory.md) named this as the biggest single migration vector for S1. Task 005 reframes: it is also the biggest single migration vector for S3/S8a/S8b/S5A by amortization. **This is the assessment's implied ADR-013 amendment** — the shared middleware-lift infrastructure change is a cross-cutting architectural decision that should be captured in an ADR-013 successor when the lift is approved.
 
+> **Synthesis-level inference disclosure (task 007 adversarial pass)**: notes/05 §2-§3 identifies the middleware lift as a cross-cutting cost shared across S1-family surfaces; the framing of it as "implied ADR-013 amendment territory" is a synthesis-level extension building on (but not directly stated in) the upstream notes. The extension is defensible on its merits — the lift IS cross-cutting, IS architectural, and ADR-013 does not currently codify it — but readers should know it is synthesis judgment, not a direct elevation from notes/05.
+
 ### 7.2 Other shared infrastructure changes
 
 | Change | Surfaces affected | Estimated standalone effort | Notes |
@@ -760,7 +790,7 @@ Ten risks identified across adopt/partial surfaces. Severity: LOW (mitigatable i
 
 ## 8. Open questions / human-decision points
 
-The assessment surfaces issues it does not authoritatively resolve. Per project SPEC §8 acceptance criterion (≥3 open questions), these are the human-decision points:
+The assessment surfaces issues it does not authoritatively resolve. Per project SPEC §8 acceptance criterion (≥3 open questions), these are the human-decision points. Originally surfaced Q1-Q6 at synthesis (task 006); Q7-Q9 added by task 007 adversarial review. **Total: 9 open questions.**
 
 ### Q1. S5B VM-isolation requirement (S5B deployment model)
 
@@ -797,6 +827,24 @@ The assessment surfaces issues it does not authoritatively resolve. Per project 
 **Why this is unresolved**: Per §5.7 Open Question 1, when the deferred R2 MCP server (Tier 3 in `ai-m365-copilot-integration/design.md` §244-275) is implemented, it may host Agent Framework agents internally. This flips S6's verdict from "Agent Framework not the Copilot backend" to "Agent Framework may live in the MCP server consumed BY Copilot." The decision is downstream of both the R2 MCP server SPEC and the S7 D-A20 contract.
 
 **What's needed to resolve**: When the R2 MCP server SPEC is authored (post-R1 M365 Copilot launch), revisit S6's verdict in light of the design choices. If R2 MCP server hosts AF agents (rather than thin transport), the framework adoption boundary moves into S6's territory — partially.
+
+### Q7. Is Spaarke's S1 actually exposed to Issue #6268's reproduction surface? (added by task 007 adversarial review)
+
+**Why this is unresolved**: The full title of [Issue #6268](https://github.com/microsoft/agent-framework/issues/6268) (fetched 2026-06-03 at review time) is **".NET: [Bug]: ChatClientAgent.RunStreamingAsync ends with no assistant text on multi-tool turns (reasoning model + stateless Responses API)"**. The parenthetical CONSTRAINS the reproduction surface to (a) reasoning models (e.g., o-series) AND (b) the stateless Responses API. S1's actual stack — Azure OpenAI GPT-4o (NOT a reasoning model) via the Chat Completions API (NOT the Responses API) — appears to fall OUTSIDE the reproduction surface as documented. If verification confirms S1 is not exposed, the S1 PARTIAL gating (§5.1, §6.1, R1 in §7.4) becomes over-cautious.
+
+**What's needed to resolve**: (1) Confirm S1's `IChatClient` is configured against Azure OpenAI Chat Completions endpoint (not Responses API). Verify in [`AiModule.cs:107-116`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs#L107) DI registration and the underlying `Microsoft.Extensions.AI.OpenAI` client factory. (2) Confirm the deployed model is GPT-4o and not an o-series reasoning model. (3) If both confirm non-exposure, downgrade the gate from "wait for #6268 fix" to "pilot lift behind feature flag with smoke-test coverage of multi-tool streaming." (4) If exposure IS confirmed (S1 uses Responses API OR an o-series model in any code path), retain the wait-for-fix gate.
+
+### Q8. Should S3 Builder lift sequence AHEAD of S1 as a low-risk framework-validation pilot? (added by task 007 adversarial review)
+
+**Why this is unresolved**: Per §5.3, S3 is the assessment's lowest-risk, smallest-blast-radius, framework-best-fit lift (~3-5 files, non-streaming, non-user-facing). It is NOT exposed to Issue #6268's reproduction surface (Builder is non-streaming per [notes/01 §S3(e)](../../projects/agent-framework-fit-assessment-r1/notes/01-spaarke-ai-surfaces-inventory.md)). The PARTIAL framing currently reads "adopt at next significant Builder maintenance window," which defers the lift to a calendar-soft trigger. An adversarial reading: why not sequence S3 FIRST to validate the framework end-to-end in a low-risk surface, before committing to the larger S1 lift?
+
+**What's needed to resolve**: Owner judgment. Sequencing S3 first delivers (a) framework-validation evidence the team can apply to the S1 lift, (b) drops the OpenAI.Chat SDK direct dependency, (c) reduces hardcoded `gpt-4o` per [`BuilderAgentService.cs:50`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Builder/BuilderAgentService.cs#L50). Cost: cycles invested in a non-user-facing surface ahead of any user-impact win. Decision criterion: if the team wants framework-de-risking evidence before committing to S1, S3-first is the pilot. If the team is comfortable lifting S1 directly when #6268 (per Q7 verification) is resolved, S3-first is unnecessary.
+
+### Q9. S8a vs S8b F5 asymmetry — does qualitative-vs-classifier framing justify the verdict gap? (added by task 007 adversarial review)
+
+**Why this is unresolved**: S8a SessionSummarizationService is DON'T ADOPT; S8b CapabilityRouter is PARTIAL-for-F5-only. Both are sub-components of S1's lifecycle; both consume `IChatClient`; both do ad-hoc JSON parsing of LLM output. The assessment differentiates them by output shape — S8b is a classifier (binary-shaped; strict JSON → upside-only); S8a is a summarizer (narrative-shaped with embedded JSON block; strict JSON → likely degrades the legal-context narrative that justifies GPT-4o vs mini per [`SessionSummarizationService.cs:12-18`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionSummarizationService.cs#L12)). The asymmetry rests on the qualitative-regression risk being real and material.
+
+**What's needed to resolve**: Empirical test. Run S8a's current summarization prompt with `ChatResponseFormat.ForJsonSchema<SessionSummary>()` enabled against a representative sample of legal-context session summaries (real or representative synthetic). Compare against current narrative output for (a) information preservation, (b) legal-context fidelity, (c) downstream consumer compatibility. If structured output preserves quality, the S8a verdict can move from DON'T ADOPT to PARTIAL-for-F5. If quality regresses, the verdict holds. Estimated test effort: ~2-4 hours including sample curation. Owner judgment: is this worth the test cycles, or is the asymmetric verdict acceptable as-is?
 
 ---
 
@@ -855,7 +903,7 @@ This appendix is the freshness audit trail for future REFRESH cycles. Every URL 
 | D1 | https://devblogs.microsoft.com/agent-framework/microsoft-agent-framework-version-1-0/ | 2026-06-03 | 2026-04 | §1 | Agent Framework 1.0 GA (April 2026); production-ready signal |
 | D3 | https://devblogs.microsoft.com/agent-framework/microsoft-agent-framework-at-build-2026/ | 2026-06-03 | 2026-06-02 | §1, §9.3 | BUILD 2026 launch context; agent harness, Skills in Toolboxes, procedural memory, Voice Live |
 | D6 | https://devblogs.microsoft.com/dotnet/durable-workflows-in-microsoft-agent-framework/ | 2026-06-03 | 2026 (within recency floor) | §4 F7, §4 F12, §6.4 | Durable workflow hosting narrative; .NET-specific guidance |
-| I1 | https://github.com/microsoft/agent-framework/issues/6268 | 2026-06-03 | opened 2026-06-02 | §1, §5.1, §6.1, §7.4 R1, §8 Q2 | **`.NET ChatClientAgent.RunStreamingAsync` ends with no assistant text on multi-tool turns** — RED FLAG for S1 |
+| I1 | https://github.com/microsoft/agent-framework/issues/6268 | 2026-06-03 (re-checked at review time 2026-06-03 — status unchanged: OPEN, `needs-maintainer-triage`) | opened 2026-06-02; last updated 2026-06-02T23:17:29Z | §1, §5.1, §6.1, §7.4 R1, §8 Q2, **§8 Q7** | **Full title (per task 007 re-fetch): `.NET: [Bug]: ChatClientAgent.RunStreamingAsync ends with no assistant text on multi-tool turns (reasoning model + stateless Responses API)`** — the reproduction-scope qualifier is load-bearing; see §8 Q7 for the exposure-verification question it raises for S1 |
 | I2 | https://github.com/microsoft/agent-framework/issues/6308 | 2026-06-03 | opened 2026-06-03 | §4 F12, §6.4, §7.4 R2 | "How to deploy dotnet Hosted agents to Foundry" — signals Foundry-hosting story in active triage |
 | Repo | https://github.com/microsoft/agent-framework @ SHA `afa7834e2ec8a93b2224fe7ab184b97fbcaa8c9a` | 2026-06-03 | 2026-06-03 20:03 UTC | §4 F3, §4 F7, §4 F8, §4 F12, §6.4 | Upstream sample tree — `02-agents/`, `03-workflows/`, `04-hosting/`; primary evidence for hosting patterns |
 | ADR | [ADR-013-ai-architecture.md](../../.claude/adr/ADR-013-ai-architecture.md) | 2026-06-03 (read at synthesis) | 2026-05-20 | §6 (all subsections), §7, §9.2 | Binding constraint — 4-criteria gate for non-BFF deployable; refined 2026-05-20 |
@@ -890,4 +938,22 @@ This appendix is the freshness audit trail for future REFRESH cycles. Every URL 
 
 ---
 
-*End of assessment. Owner decision required on: (a) accept S1 PARTIAL + wait-for-#6268 default, (b) override and pilot S1 lift now with feature flag, (c) initiate S5B canonical durable HITL legal workflows project SPEC, (d) commit S7 D-A20 contract authoring to explicitly resolve U1/U2/U3, (e) capture the shared middleware-lift infrastructure change in an ADR-013 successor when S1 lift is approved. The choice shapes the next revision of ADR-013 and the unblock note at [`projects/agent-framework-knowledge-r1/UNBLOCK-RECOMMENDATION.md`](../../projects/agent-framework-knowledge-r1/UNBLOCK-RECOMMENDATION.md).*
+*End of assessment. Owner decision required on: (a) accept S1 PARTIAL + wait-for-#6268 default, (b) override and pilot S1 lift now with feature flag, (c) initiate S5B canonical durable HITL legal workflows project SPEC, (d) commit S7 D-A20 contract authoring to explicitly resolve U1/U2/U3, (e) capture the shared middleware-lift infrastructure change in an ADR-013 successor when S1 lift is approved, (f) **(added by task 007 adversarial review)** verify S1's exposure to Issue #6268's reproduction surface per §8 Q7 — exposure-absent finding would soften (a) → (b), (g) **(added by task 007 adversarial review)** decide whether to sequence S3 Builder lift AHEAD of S1 as low-risk framework-validation pilot per §8 Q8. The choice shapes the next revision of ADR-013 and the unblock note at [`projects/agent-framework-knowledge-r1/UNBLOCK-RECOMMENDATION.md`](../../projects/agent-framework-knowledge-r1/UNBLOCK-RECOMMENDATION.md).*
+
+---
+
+## Appendix A — Adversarial review trail (task 007)
+
+This assessment was subjected to a mandatory adversarial review at task 007 per [`projects/agent-framework-fit-assessment-r1/SPEC.md`](../../projects/agent-framework-fit-assessment-r1/SPEC.md) §6. The review:
+
+- Produced 10 per-surface counter-arguments + 3 cross-cutting probes = **13 distinct adversarial inputs**
+- Re-fetched the top 5 most-cited sources (P2, P3, P6, I1, I2) at review time and diffed against original captures
+- Adjudicated each finding: WEAKENS / CHANGES / NEW OPEN QUESTION / NOT APPLICABLE
+- **Zero verdicts flipped.** All 10 per-surface verdicts held under adversarial pressure.
+- **Three NEW open questions** (Q7, Q8, Q9) added to §8 surfacing analytical gaps the synthesis did not adequately disclose
+- **Eight per-surface rationales strengthened** with conditionality / branching / asymmetry framing
+- **Three synthesis-level disclosure footnotes** added (§1 S5B contingency, §5.9 S8a/S8b asymmetry, §7.1 ADR-013-amendment framing as synthesis inference)
+- **One §5.11 PARTIAL-bucket decomposition** added (§5.11.1) clarifying the 5 PARTIAL verdicts decompose into 3 distinct shapes
+- **One §10 I1 row update** capturing #6268's full title (reproduction-scope qualifier) — load-bearing for Q7
+
+Full adversarial review log at [`projects/agent-framework-fit-assessment-r1/notes/07-review-log.md`](../../projects/agent-framework-fit-assessment-r1/notes/07-review-log.md). The review's self-skepticism check (notes/07 §6) concluded the review was sufficiently aggressive; verdicts that held did so because the underlying analysis is well-grounded, not because the review was soft. The bff-extraction precedent applies: uncomfortable conclusions that survive adversarial pressure should be held, not manufactured-revised.
