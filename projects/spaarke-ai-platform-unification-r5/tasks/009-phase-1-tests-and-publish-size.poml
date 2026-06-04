@@ -1,0 +1,379 @@
+<task id="009" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D1-09 Phase 1 Tests + BFF Publish-Size Verification (Phase 1 GATE)</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 1 — Platform Extensions</phase>
+    <wave>P1-G5 (serial GATE; depends on 002, 003, 004, 005, 006, 007, 008; closes Phase 1)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>002, 003, 004, 005, 006, 007, 008</dependencies>
+    <tags>tests, verification, publish-size, cve</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    This task is the **Phase 1 closeout GATE** for R5. Phase 1 ships ONLY when this task
+    passes. It aggregates and runs the unit tests authored by D1-02 through D1-07 plus
+    D1-08 telemetry coverage, fills any test-coverage gaps revealed by the aggregate,
+    measures the cumulative `dotnet publish` BFF size delta for the entire Phase 1
+    series, runs a transitive-CVE scan, smoke-tests the new `spaarke-session-files`
+    cleanup job + index against Spaarke Dev, audits the asymmetric-registration anti-
+    pattern surface created by Phase 1 DI additions, and verifies the existing Summarize
+    wizard back-compat path is unchanged by the new `AnalysisChunk.FieldDelta` variant.
+
+    Per CLAUDE.md §10 and R5 CLAUDE.md §3.6 / §3.7, this task is the binding
+    pre-merge enforcement point for the Phase 1 publish-size + test-obligation rules.
+    Per plan.md Phase 1 phase-gating list, all of the following MUST be green before
+    Phase 2 begins:
+      1. BFF builds clean
+      2. `spaarke-session-files` index provisioned on Spaarke Dev
+      3. SSE `FieldDelta` events produce correct progressive output for the existing
+         Summarize wizard path (back-compat verified)
+      4. Session-files cleanup job runs without error on Spaarke Dev
+      5. Tests pass
+      6. Publish-size delta &lt; +0.5 MB cumulative
+
+    This task does NOT add new production BFF code. It adds tests and produces
+    verification evidence. The single allowed exception: if the aggregate run surfaces
+    a missing test that a prior D1-* task should have authored, this task fills the
+    gap (with the gap recorded in task notes).
+  </prompt>
+
+  <role>
+    Senior .NET test engineer with deep familiarity with the Sprk.Bff.Api test project
+    layout, xUnit conventions, the `dotnet publish` size-measurement protocol from
+    `.claude/constraints/azure-deployment.md`, the CVE-scan workflow per ADR-029, and
+    the asymmetric-registration audit recipe from `.claude/constraints/bff-extensions.md`
+    § F.1. Operator of Spaarke Dev smoke tests for hosted-service + AI Search index
+    health checks.
+  </role>
+
+  <goal>
+    Phase 1 GATE is GREEN. Concretely: every unit-test file authored by tasks 002–008
+    is present + passing; coverage gaps are filled if any are found; `dotnet publish`
+    on `src/server/api/Sprk.Bff.Api/` produces a compressed publish output with delta
+    &lt; +0.5 MB vs the pre-Phase-1 baseline (~45.65 MB → target ≤46.15 MB); no new
+    HIGH-severity CVE surfaces in `dotnet list package --vulnerable --include-transitive`;
+    Spaarke Dev smoke tests confirm the new `spaarke-session-files` cleanup
+    `IHostedService` runs without error and the new AI Search index is reachable; the
+    existing Summarize wizard SSE consumer is back-compat verified (ignores the new
+    `FieldDelta` discriminant); the asymmetric-registration audit (per
+    `.claude/constraints/bff-extensions.md` § F.1) shows zero new conditional-only
+    registrations created by Phase 1. `TASK-INDEX.md` reflects the Phase 1 close
+    (009 ✅; Phase 1 status flipped to ✅).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="publish-size-rule">.claude/constraints/azure-deployment.md</file>
+    <file purpose="bff-extensions">.claude/constraints/bff-extensions.md</file>
+    <file purpose="test-project">tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj</file>
+    <file purpose="test-folder">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+    <file purpose="task-002-poml">projects/spaarke-ai-platform-unification-r5/tasks/002-rag-search-options-session-id-filter.poml</file>
+    <file purpose="task-003-poml">projects/spaarke-ai-platform-unification-r5/tasks/003-rag-indexing-pipeline-parameterization.poml</file>
+    <file purpose="task-004-poml">projects/spaarke-ai-platform-unification-r5/tasks/004-chat-session-uploaded-files-manifest.poml</file>
+    <file purpose="task-005-poml">projects/spaarke-ai-platform-unification-r5/tasks/005-analysis-chunk-field-delta-variant.poml</file>
+    <file purpose="task-006-poml">projects/spaarke-ai-platform-unification-r5/tasks/006-structured-outputs-incremental-json-parser.poml</file>
+    <file purpose="task-007-poml">projects/spaarke-ai-platform-unification-r5/tasks/007-session-files-cleanup-hosted-service.poml</file>
+    <file purpose="task-008-poml">projects/spaarke-ai-platform-unification-r5/tasks/008-telemetry-and-cost-observability.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="plan.md Phase 1 gating">Phase 1 ships only when ALL of: BFF builds clean; `spaarke-session-files` provisioned on Spaarke Dev; SSE `FieldDelta` back-compat verified for existing Summarize wizard path; cleanup job runs without error; tests pass; publish-size delta &lt; +0.5 MB. This task is the binding gate.</constraint>
+    <constraint source="spec NFR-01 / NFR-07">BFF publish-size ceiling 60 MB compressed. R5 cumulative budget ≤ +1 MB (target +0.5 MB). Pre-R5 baseline ~45.65 MB; Phase 1 cumulative target ≤ 46.15 MB compressed.</constraint>
+    <constraint source="spec NFR-13">No new HIGH-severity CVE permitted. `dotnet list package --vulnerable --include-transitive` MUST be clean before Phase 1 closes.</constraint>
+    <constraint source="spec NFR-10">Back-compat for `AnalysisChunk` SSE protocol — existing wizard consumers (LegalWorkspace `SummarizeFilesDialog` via `streamSummarize()`) MUST continue to function with v1.0 protocol and MUST ignore the new `FieldDelta` discriminant. Verify by exercising the existing wizard path with the v2 BFF deployed.</constraint>
+    <constraint source="spec NFR-14">Endpoints mapping unconditionally MUST have unconditional service registration (CLAUDE.md §10 F.1 sub-mechanism). R5 services are unconditionally registered per ADR-018 Flag Scope Discipline; this task AUDITS that no Phase 1 task accidentally introduced an asymmetric registration.</constraint>
+    <constraint source="CLAUDE.md §10 BFF Hygiene item 6">PRs modifying `src/server/api/Sprk.Bff.Api/Services/` MUST add/update tests in `tests/unit/Sprk.Bff.Api.Tests/`. This task is the binding verification of the test-update obligation for tasks 002–007. Gaps surfaced here MUST be filled before Phase 1 closes.</constraint>
+    <constraint source="CLAUDE.md §10 BFF Hygiene item 4">Every BFF-touching task measures publish size. This task aggregates Phase 1's cumulative delta and is the per-phase verification point (in addition to the per-task verifications already performed in 002–008).</constraint>
+    <constraint source="ADR-018">R5 introduces NO new feature flags. All Phase 1 services unconditionally registered. Asymmetric-registration audit (§ F.1) MUST show zero new conditional registrations.</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — framework-dependent linux-x64; report absolute size + diff vs baseline; ≥+5 MB single-task / phase delta requires explicit escalation; ≥55 MB cumulative requires architecture review; ≥60 MB is HARD STOP.</constraint>
+    <constraint source="R5 CLAUDE.md §3.6">R5 budget ≤ +1 MB total (target +0.5 MB). Phase 1 should consume well under half that. If Phase 1 cumulative delta is ≥ +0.5 MB, escalate per CLAUDE.md §6 BEFORE marking the gate green.</constraint>
+    <constraint source="R5 CLAUDE.md §3.7">Endpoints map unconditionally → services register unconditionally. Asymmetric-registration risk is theoretically zero for R5; this task verifies the theory holds in practice.</constraint>
+    <constraint source="project">This task adds tests + verification evidence ONLY. No new production BFF code unless required to fill a gap surfaced by the aggregate run. Any gap-fill code MUST be recorded in task notes with cross-reference to the originating D1-* task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing/bff-aggregate-verification + deployment/publish-size + security/cve-scan</topic>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj</file>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="Publish-size measurement protocol" location=".claude/constraints/azure-deployment.md § 'BFF Publish-Size Per-Task Verification Rule (NFR-01)'">
+        Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`.
+        Zip the output OR measure compressed size of the directory. Compare against the
+        pre-Phase-1 baseline recorded in task 002's notes (first BFF-touching R5 task).
+        Report absolute size + delta in task notes / Phase 1 closeout report. Cross-reference
+        CLAUDE.md §10 + NFR-01 in the report line.
+      </pattern>
+      <pattern name="CVE scan recipe" location="CLAUDE.md §10 item 5 + ADR-029">
+        `dotnet list package --vulnerable --include-transitive` from repo root. Filter for
+        HIGH severity. Compare against the pre-R5 baseline. Any NEW HIGH MUST block Phase 1
+        close until either resolved (package upgrade) or explicitly accepted (ADR amendment).
+      </pattern>
+      <pattern name="Asymmetric-registration audit (§ F.1)" location=".claude/constraints/bff-extensions.md § F.1">
+        Search `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs` (and
+        any other `*Module.cs` files touched in Phase 1) for `if (flag)` blocks wrapping
+        service registrations added in this phase. R5 expectation: ZERO new conditional
+        blocks per ADR-018 Flag Scope Discipline. Any conditional block found MUST either
+        be removed or accompanied by an ADR-030 Null-Object kill-switch impl + P1/P2/P3
+        designation.
+      </pattern>
+      <pattern name="Test aggregate run" location="tests/unit/Sprk.Bff.Api.Tests/">
+        `dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj --logger trx`.
+        Examine output for new test files created by D1-02..D1-08. Expected new test files:
+        `RagServiceSessionIdTests.cs` (task 002), `RagIndexingPipelineSessionFilesTests.cs`
+        (task 003), `ChatSessionUploadedFilesTests.cs` (task 004), `AnalysisChunkFieldDeltaTests.cs`
+        (task 005), `StructuredOutputsParserTests.cs` (task 006), `SessionFilesCleanupJobTests.cs`
+        (task 007), telemetry coverage augmentations (task 008). Confirm presence + green
+        status. Fill gaps if found.
+      </pattern>
+      <pattern name="Back-compat verification for AnalysisChunk SSE" location="src/solutions/LegalWorkspace/src/components/SummarizeFiles/summarizeService.ts">
+        The existing wizard consumes `AnalysisChunk` events via this service. Smoke test:
+        run the existing wizard against the Phase-1-deployed BFF on Spaarke Dev with a
+        sample file; confirm output is unchanged from pre-R5 behavior (no rendering
+        artifacts; ignores unknown `Type = "delta"` events per NFR-10).
+      </pattern>
+      <pattern name="Hosted-service smoke test" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionFilesCleanupJob.cs">
+        Deploy Phase 1 BFF to Spaarke Dev (out of scope for this task to deploy from
+        scratch — assumes prior task's deployment artifact). Tail App Service logs / App
+        Insights for the cleanup job startup + scheduled-execution traces. Confirm no
+        exceptions; confirm at least one execution completes a sweep cycle (may be a no-op
+        if no expired sessions, which is acceptable).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 1 of R5 lands platform extensions that ALL of Phase 2 + Phase 3 depend on.
+      Shipping Phase 1 in a degraded state (failing tests, oversized publish, undetected
+      asymmetric registration, broken back-compat) would compound into the Phase 2
+      vertical slice. Per CLAUDE.md §10 the BFF binding rule REQUIRES per-task publish-size
+      verification AND a phase-level verification at the close of every phase that adds
+      to the BFF. Per R5 CLAUDE.md §3.7 the test obligation requires every D1-* task to
+      have authored its own tests — but historical evidence (Insights r2 task 081 ledger,
+      R2 task suite repair history) shows that test gaps slip through unless an aggregate
+      verification gate runs at phase close. This task IS that gate.
+
+      The asymmetric-registration audit is a particular concern: per
+      `.claude/constraints/bff-extensions.md` § F.1, the Tier 1.5 anti-pattern (conditional
+      service registration paired with unconditional endpoint mapping) has historically
+      produced empirically-undetectable DI failures. R5 should not introduce any of these
+      per ADR-018, but the audit is binding regardless.
+
+      Cost of skipping this gate: a Phase 2 task discovers a Phase 1 regression in flight,
+      blocking the critical path and forcing a rebase across multiple downstream
+      parallel-group tasks.
+    </background>
+    <dependencies>
+      <dependency task="002" status="not-started">D1-02 `RagSearchOptions.sessionId` — tests MUST exist + pass</dependency>
+      <dependency task="003" status="not-started">D1-03 `RagIndexingPipeline` parameterization — tests MUST exist + pass</dependency>
+      <dependency task="004" status="not-started">D1-04 `ChatSession.UploadedFiles[]` — tests MUST exist + pass</dependency>
+      <dependency task="005" status="not-started">D1-05 `AnalysisChunk.FieldDelta` variant — tests + back-compat verification path</dependency>
+      <dependency task="006" status="not-started">D1-06 Structured Outputs + incremental JSON parser — tests MUST exist + pass</dependency>
+      <dependency task="007" status="not-started">D1-07 Session-files cleanup `IHostedService` — tests + Spaarke Dev smoke target</dependency>
+      <dependency task="008" status="not-started">D1-08 Telemetry events + cost observability — telemetry test coverage</dependency>
+    </dependencies>
+    <related-work>
+      <item>Insights r2 task 081 (asymmetric-registration ledger; F.1 sub-mechanism source) — the historical evidence base for the asymmetric-registration audit step in this task.</item>
+      <item>`sdap.bff.api-test-suite-repair-r2` task 011 (18-service Null-Object migration) — the canonical fix pattern if an asymmetric registration is found. Not expected to apply to R5 per ADR-018, but documented as the remediation path if surfaced.</item>
+      <item>R5 task 001 deployment-evidence notes — recorded the pre-Phase-1 publish-size baseline. This task's measurement is compared against that baseline.</item>
+      <item>`projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md` §8 changelog — Phase 1 close entry will reference Phase 1 completion timestamp.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL Declaration">
+      Check context usage. If &gt; 70%, create handoff summary and request `/compact`. Output
+      the mandatory RIGOR LEVEL declaration per root CLAUDE.md §8:
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Phase 1 gate task aggregating tests + publish-size + CVE + smoke + audit
+                  across 7 dependency tasks; blocking gate before Phase 2; back-compat
+                  verification mandatory per NFR-10.
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0 through 10 below.
+      Proceeding with Step 0...
+      ```
+    </step>
+
+    <step order="1" name="Review Progress + Dependency Validation">
+      Read `tasks/TASK-INDEX.md` and confirm tasks 002–008 ALL show ✅. If ANY show 🔲 or 🔄,
+      STOP and report the gate cannot run yet. Read `current-task.md` to confirm 009 is the
+      next pending task. Read each D1-* task's POML to extract:
+        (a) the test file path(s) the task was supposed to author;
+        (b) the per-task publish-size delta the task recorded in its notes;
+        (c) any deferred / open items the task flagged for Phase 1 close.
+      Aggregate the per-task publish-size deltas into the expected cumulative Phase 1
+      delta (informational; the authoritative measurement is Step 4 below).
+    </step>
+
+    <step order="2" name="Gather Resources">
+      Read every file listed in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically extract: (a) the
+      Phase 1 phase-gating list from `plan.md`; (b) the publish-size protocol from
+      `.claude/constraints/azure-deployment.md`; (c) § F.1 of `.claude/constraints/bff-
+      extensions.md` (asymmetric-registration recipe); (d) the test-update obligation
+      from CLAUDE.md §10 item 6. Read the R5 CLAUDE.md §3.6 + §3.7 in full.
+    </step>
+
+    <step order="3" name="Build BFF + Aggregate Test Run">
+      (a) Run `dotnet build src/server/api/Sprk.Bff.Api/` — MUST succeed with zero errors
+          and no new warnings. Capture warning delta vs pre-Phase-1 baseline.
+      (b) Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj --logger
+          "trx;LogFileName=phase1-aggregate.trx"`. MUST show zero failures.
+      (c) For each D1-* task, verify the expected test file(s) (per the POML's `&lt;outputs&gt;`
+          section) exist in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/` and contain at
+          least one passing test per FR/NFR the task targeted. If a test file is missing
+          or under-covered, RECORD the gap in task notes.
+      (d) If gaps surface: AUTHOR the missing tests in this task (record the originating
+          D1-* task ID for traceability). Re-run the aggregate. MUST converge to green.
+    </step>
+
+    <step order="4" name="Cumulative Publish-Size Measurement">
+      (a) Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`.
+      (b) Measure compressed size of `deploy/api-publish/` (zip or `Compress-Archive` then
+          inspect `.Length`).
+      (c) Compute the cumulative Phase 1 delta = current_compressed_size −
+          pre_Phase_1_baseline_compressed_size (per task 002's recorded baseline).
+      (d) Verify: cumulative delta &lt; +0.5 MB. If ≥ +0.5 MB but &lt; +1 MB: still
+          inside the R5 ceiling but flag in PR description per R5 CLAUDE.md §3.6. If ≥ +1
+          MB: ESCALATE per CLAUDE.md §6 — do NOT mark the gate green.
+      (e) Report in task notes using the binding format: `BFF Hygiene §10 + NFR-01
+          verified: Phase 1 publish size = X MB, Phase 1 cumulative delta = +Y MB,
+          baseline = Z MB, ceiling = 60 MB compressed, no new HIGH CVEs.`
+    </step>
+
+    <step order="5" name="CVE Transitive Scan">
+      Run `dotnet list package --vulnerable --include-transitive` from repo root. Capture
+      full output. Filter for entries marked HIGH severity. Compare against the pre-R5
+      baseline (record exists in master pre-R5 commit history). MUST be zero NEW HIGH.
+      Record the full HIGH list (existing + new) in task notes. If new HIGH surfaces:
+      either upgrade the offending package or ESCALATE per CLAUDE.md §6.
+    </step>
+
+    <step order="6" name="Spaarke Dev Smoke Tests (Cleanup Job + Index Reachability)">
+      (a) Confirm Phase 1 BFF is deployed to Spaarke Dev. (Assumed pre-existing via
+          tasks 007 / 008 deploy artifacts; if not, this step BLOCKS until deploy lands.)
+      (b) Index reachability: issue `POST /indexes/spaarke-session-files/docs/search`
+          against Spaarke Dev's AI Search via `az rest` with admin key. Confirm 200 OK
+          with `value: []` (or actual hits if test data seeded). Auth + reachability are
+          the gate; content is informational.
+      (c) Cleanup job smoke: tail Spaarke Dev App Service logs / App Insights for the
+          `SessionFilesCleanupJob` startup trace + at least one scheduled execution
+          (may be a 6h cycle — if waiting is impractical, trigger via the immediate-on-
+          session-end pathway from task 007's manifest). Confirm zero exceptions; confirm
+          at least one cycle completes (sweep count of 0 is acceptable — only zero
+          exceptions matter).
+      (d) Capture evidence in task notes (log query references, screenshot references).
+    </step>
+
+    <step order="7" name="Back-Compat Verification — Existing Summarize Wizard">
+      Per NFR-10: the existing wizard SSE consumer
+      (`src/solutions/LegalWorkspace/src/components/SummarizeFiles/summarizeService.ts`)
+      MUST continue to function unchanged with the Phase-1-deployed BFF that emits the
+      new `FieldDelta` variant on `AnalysisChunk`. Smoke test:
+      (a) Open the existing LegalWorkspace Summarize wizard on Spaarke Dev.
+      (b) Upload a small sample file (within R4 25 MB cap + MIME allow-list).
+      (c) Invoke the existing wizard flow.
+      (d) Observe: SSE stream completes; final result renders correctly; no JS console
+          errors related to unknown `Type = "delta"` events; output schema matches
+          pre-R5 behavior. (The consumer should silently ignore the new discriminant
+          per spec NFR-10.)
+      (e) Capture evidence (DevTools SSE event log + final-output screenshot reference).
+    </step>
+
+    <step order="8" name="Asymmetric-Registration Audit (§ F.1)">
+      Per `.claude/constraints/bff-extensions.md` § F.1:
+      (a) Identify every `*Module.cs` file modified by tasks 002–008. Primary candidate:
+          `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs`.
+      (b) For each modified module file, scan for `if (flag) { ... services.Add... }`
+          blocks ADDED by Phase 1 changes (git diff against pre-Phase-1 baseline).
+      (c) R5 expectation per ADR-018 Flag Scope Discipline + R5 CLAUDE.md §3.2: ZERO
+          new conditional blocks introduced by Phase 1. All R5 services are
+          unconditionally registered.
+      (d) If audit finds a conditional registration: STOP. File a corrective ticket and
+          apply ADR-030 Null-Object kill-switch pattern (P1/P2/P3 per service) OR remove
+          the conditional. Phase 1 gate cannot close until resolved.
+      (e) Record audit outcome (audit-clean OR list of findings + remediation) in task
+          notes.
+    </step>
+
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is testable +
+      passing. Record evidence per criterion in task notes.
+    </step>
+
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against any new test files authored by this task (gap-fill
+      tests, if any). Run `adr-check` skill against new test files + any module changes;
+      verify ADR-018 (no new flags), ADR-029 (publish hygiene), ADR-010 (DI minimalism),
+      ADR-013 (BFF-only — N/A for tests but confirmed), and ADR-014 (tenant isolation —
+      N/A for tests but confirmed). Both gates MUST pass before marking the task ✅.
+    </step>
+
+    <step order="10" name="Phase 1 Closeout + TASK-INDEX Update">
+      (a) Update task 009 POML status to `complete`. Record actual-effort.
+      (b) Update `TASK-INDEX.md`: 009 🔲 → ✅. Flip Phase 1 phase status to ✅.
+      (c) Update `current-task.md` to reset to the next pending task per CLAUDE.md §7.
+          Next-up per TASK-INDEX is the P2-Gate task (023 R5 lead contract review), but
+          P2-G1 tasks 010 + 011 (Dataverse seeds; Phase 1 ✅ dependency) may also be
+          eligible. Set `current-task.md` accordingly.
+      (d) Author the Phase 1 closeout report at
+          `projects/spaarke-ai-platform-unification-r5/notes/phase-1-closeout-report.md`
+          containing: aggregate test run result, cumulative publish-size measurement,
+          CVE scan result, Spaarke Dev smoke evidence, back-compat evidence, asymmetric-
+          registration audit outcome, any gap-fill tests authored by this task, list of
+          carry-over items (if any).
+      (e) Update `projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md`
+          §8 changelog with the Phase 1 close entry (timestamp + reference to the
+          closeout report).
+      (f) Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish + CVE scan</tool>
+    <tool name="az">Azure CLI — AI Search REST calls, App Service log tail, App Insights queries</tool>
+    <tool name="git">Diff Phase 1 changes against pre-Phase-1 baseline for the asymmetric-registration audit</tool>
+    <tool name="code-review">Quality gate at Step 9.5</tool>
+    <tool name="adr-check">Quality gate at Step 9.5</tool>
+    <tool name="bff-deploy">Available if Step 6 requires re-deploy to Spaarke Dev (assumed not needed)</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ (any gap-fill test files authored by this task; recorded with originating D1-* task ID)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 009 🔲 → ✅; Phase 1 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md (§8 changelog: Phase 1 close entry)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/phase-1-closeout-report.md (aggregate test result, cumulative publish-size, CVE scan, smoke evidence, back-compat evidence, asymmetric-registration audit outcome, gap-fill record)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-009-evidence/ (TRX test output, publish-size measurement output, CVE scan output, smoke log captures)</output>
+    <output type="report">Task completion report (per task-execute template Step 6) + Phase 1 GATE GREEN declaration</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` completes with zero errors and zero new warnings vs pre-Phase-1 baseline.</criterion>
+    <criterion testable="true">`dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj` completes with zero failures; every D1-* task (002–008) has an associated passing test file in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/` (gaps filled by this task if any are surfaced).</criterion>
+    <criterion testable="true">Cumulative Phase 1 BFF publish-size delta &lt; +0.5 MB compressed vs pre-Phase-1 baseline (~45.65 MB); reported in task notes using the binding format from `.claude/constraints/azure-deployment.md`.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` shows zero NEW HIGH-severity CVEs vs pre-R5 baseline (full output captured in task notes).</criterion>
+    <criterion testable="true">Spaarke Dev smoke: `spaarke-session-files` index responds to `POST /indexes/spaarke-session-files/docs/search` with 200 OK; cleanup `IHostedService` runs at least one cycle without exceptions (App Insights / App Service logs captured).</criterion>
+    <criterion testable="true">Back-compat: existing LegalWorkspace Summarize wizard SSE consumer continues to produce correct progressive output with the Phase-1-deployed BFF that emits the new `FieldDelta` variant; no JS console errors related to unknown SSE discriminants; output schema matches pre-R5 behavior (per NFR-10).</criterion>
+    <criterion testable="true">Asymmetric-registration audit per `.claude/constraints/bff-extensions.md` § F.1 shows zero new conditional service registrations introduced by Phase 1 changes (per ADR-018 Flag Scope Discipline + R5 CLAUDE.md §3.2).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+    <criterion testable="true">Phase 1 closeout report exists at `projects/spaarke-ai-platform-unification-r5/notes/phase-1-closeout-report.md` and captures all six phase-gating checks (BFF build clean, index provisioned, back-compat verified, cleanup job runs, tests pass, publish-size delta &lt; +0.5 MB).</criterion>
+    <criterion testable="true">`TASK-INDEX.md` reflects: 009 ✅; Phase 1 phase status flipped to ✅; `current-task.md` reset to next pending task per CLAUDE.md §7.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,451 @@
+<task id="008" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D1-08 Telemetry events + cost observability for R5 Summarize-for-Chat</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 1 — Platform Extensions</phase>
+    <wave>P1-G5 (parallel-safe with 007; independent of 009)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none (downstream Phase 3 D3-03 dashboards consume these events)</dependencies>
+    <tags>bff, telemetry, observability, cost</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Instrument the R5 Summarize-for-Chat vertical slice with telemetry that supports
+    cost observability + downstream Phase 3 dashboards (D3-03). Emit a single
+    canonical event `r5.summarize.invocation` from BOTH invocation paths — the
+    agent-tool path (`InvokeSummarizePlaybookTool` registered on `SprkChatAgent`)
+    AND the direct endpoint path (`POST /api/ai/chat/sessions/{id}/summarize`) —
+    with the same property schema so dashboards can compare path mix. Add a
+    per-session `spaarke-session-files` index document-count metric so cost +
+    eviction behavior is queryable from App Insights / Kusto.
+
+    Constraints binding on this task:
+    1. REUSE existing telemetry framework — `AiTelemetry` (Meter
+       `Sprk.Bff.Api.Ai`, OpenTelemetry Counter / Histogram primitives) is the
+       canonical surface for AI metrics. DO NOT introduce a new framework (no
+       ApplicationInsights `TelemetryClient` direct use; OpenTelemetry meter +
+       structured `ILogger` is the established pattern per `AiTelemetry.cs` /
+       `RagTelemetry.cs`).
+    2. Event-name "r5.summarize.invocation" is exact (kebab-case dotted; matches
+       the established `ai.summarize.*` / `rag.search.*` family).
+    3. Cardinality discipline — properties have BOUNDED cardinality. `path` is
+       an enum of two literals (`agent_tool` | `direct_endpoint`);
+       `completion_status` is an enum (`success` | `failed` | `declined` |
+       `cancelled`); `file_count` and `total_tokens` and `latency_ms` are
+       numerics. NEVER include free-form user input, document content, file
+       names, session IDs, or correlation IDs as event-property dimensions
+       (correlation IDs go on the Activity / span context, not as a metric
+       dimension — they explode cardinality and don't fit App Insights metric
+       store).
+    4. NO new feature flags (per R5 CLAUDE.md §3.2 + ADR-018).
+    5. DI registration (if needed at all — `AiTelemetry` is already
+       singleton-registered) goes inside `AnalysisServicesModule.cs` per ADR-010.
+       Zero new top-level `Program.cs` lines.
+    6. BFF publish-size: per-task verification mandatory (R5 CLAUDE.md §3.6).
+       Expected delta ~0 MB (no new packages; reuses existing OpenTelemetry).
+
+    Why the schema must be stable: Phase 3 task 042 (D3-03 dashboards) writes
+    Kusto queries against these exact property names. A schema breaking change
+    later would invalidate the dashboards. Treat the event schema like a
+    public-API surface from this commit forward.
+  </prompt>
+
+  <role>
+    Senior .NET observability engineer with deep experience in OpenTelemetry
+    Meters + Counters + Histograms, Application Insights / Kusto querying, and
+    cardinality discipline for production metric stores. Familiar with the
+    `AiTelemetry` / `RagTelemetry` patterns already in Sprk.Bff.Api.
+  </role>
+
+  <goal>
+    A new `R5SummarizeTelemetry` class (sibling to `AiTelemetry` /
+    `RagTelemetry`) ships in
+    `src/server/api/Sprk.Bff.Api/Telemetry/R5SummarizeTelemetry.cs`. It emits
+    one canonical event `r5.summarize.invocation` (Counter) with bounded
+    dimensions `path`, `completion_status` and three Histograms tracking
+    `file_count`, `total_tokens`, `latency_ms` keyed by those same dimensions.
+    It also emits a Histogram `r5.session_files.index_size` (per-session
+    document count, observed at write-time or eviction-time, dimension =
+    `phase` ∈ {`post_write` | `post_evict` | `post_cleanup`}). Both invocation
+    code paths (`InvokeSummarizePlaybookTool` agent-tool handler AND the direct
+    `SummarizeSessionEndpoint`) call the SAME telemetry method with their
+    respective `path` literal so dashboards see a single coherent event stream.
+    `R5SummarizeTelemetry` is singleton-registered inside `AnalysisServicesModule`
+    (per ADR-010), and its Meter (`Sprk.Bff.Api.R5Summarize`) is wired into
+    `TelemetryModule.AddTelemetryModule()` `AddMeter(...)`. Unit tests verify the
+    expected event shape using OpenTelemetry's `MeterListener` / in-process
+    metric capture pattern. The schema is documented in XML doc-comments on
+    every method and is stable for downstream D3-03 consumption.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="canonical-telemetry-pattern-ai">src/server/api/Sprk.Bff.Api/Telemetry/AiTelemetry.cs</file>
+    <file purpose="canonical-telemetry-pattern-rag">src/server/api/Sprk.Bff.Api/Telemetry/RagTelemetry.cs</file>
+    <file purpose="meter-registration-site">src/server/api/Sprk.Bff.Api/Infrastructure/DI/TelemetryModule.cs</file>
+    <file purpose="di-registration-site">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="bff-extensions-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 CLAUDE.md §3.1 reuse mandate">MUST reuse the established OpenTelemetry `Meter` + `Counter&lt;long&gt;` + `Histogram&lt;double&gt;` / `Histogram&lt;long&gt;` pattern from `AiTelemetry.cs` / `RagTelemetry.cs`. MUST NOT introduce `Microsoft.ApplicationInsights.TelemetryClient` direct usage or any other parallel telemetry framework.</constraint>
+    <constraint source="R5 CLAUDE.md §3.2">NO new feature flags. `R5SummarizeTelemetry` is unconditionally registered.</constraint>
+    <constraint source="R5 CLAUDE.md §3.3 + ADR-010">All registrations inside `AnalysisServicesModule.cs`. Meter wiring inside `TelemetryModule.cs`. ZERO new top-level `Program.cs` lines.</constraint>
+    <constraint source="R5 CLAUDE.md §3.6 + ADR-029 + CLAUDE.md §10">Per-task BFF publish-size verification mandatory. Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, measure compressed output, report absolute + delta vs baseline (~45.65 MB). Expected delta ≈ 0 MB; ≥+5 MB single-task delta requires escalation.</constraint>
+    <constraint source="ADR-014">Tenant isolation — `tenantId` dimension MAY be added per the `RagTelemetry.RecordRagSearchSuccess` precedent (low cardinality given tenant count). `sessionId` MUST NOT be a metric dimension (high cardinality; goes on the Activity / span only).</constraint>
+    <constraint source="ADR-015">Telemetry MUST NOT include document content, file contents, prompt text, or any other PII / customer data as metric dimensions or log structured fields. Only enums, counts, durations, and tenantId (the existing low-cardinality dimension).</constraint>
+    <constraint source="ADR-018 Flag Scope Discipline">R5 introduces no new flags. `R5SummarizeTelemetry` is unconditionally registered (no Null-Object kill-switch coverage needed per R5 CLAUDE.md §3.2).</constraint>
+    <constraint source="ADR-030">No PaneEventBus changes in this task — telemetry is BFF-side OpenTelemetry only. Out of scope: frontend instrumentation.</constraint>
+    <constraint source="spec NFR-06 cost control">Token counts (`total_tokens`) emitted via Histogram so per-session token-budget consumption is queryable. Cost dashboards (D3-03) derive cost-per-session from this Histogram + the existing token-pricing constants.</constraint>
+    <constraint source="spec NFR-13">No new HIGH-severity CVEs introduced by this task. Run `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api` after build; verify clean. Expected to be a no-op (no new packages).</constraint>
+    <constraint source="CLAUDE.md §10 bff-extensions Placement Justification">Telemetry placement: BELONGS in BFF. Justification: instrumentation is intrinsic to the operations being measured (chat-tool dispatch + endpoint handling) and cannot be cleanly extracted into a sidecar. Telemetry layer additions consume zero meaningful publish-size budget. Decision criteria from `bff-extensions.md` satisfied: not a stateless utility; tightly coupled to BFF request lifecycle.</constraint>
+    <constraint source="project — cardinality discipline (BINDING)">Event dimensions: `path` enum of 2 literals, `completion_status` enum of 4 literals, `tenantId` (low-cardinality dimension following `RagTelemetry` precedent). NO `sessionId`, NO correlation IDs, NO user IDs, NO file names, NO prompts, NO model names as dimensions on the main invocation event (model name CAN appear on the existing `ai.summarize.tokens` AiTelemetry counter per existing precedent if needed — but R5 reuses that existing counter rather than duplicating).</constraint>
+    <constraint source="project — schema stability">Property names + types of `r5.summarize.invocation` MUST be treated as a stable downstream contract from this commit. Phase 3 task 042 (D3-03 dashboards) writes Kusto queries against these names. Renames after this task ship require coordinated dashboard updates.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>opentelemetry/dotnet-metrics + structured-logging-conventions</topic>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/AiTelemetry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/RagTelemetry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/AiLatencyTelemetry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/TelemetryModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+      <file>docs/adr/ADR-014-ai-caching-tenant-isolation.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="OpenTelemetry Meter + Counter + Histogram singleton" location="src/server/api/Sprk.Bff.Api/Telemetry/AiTelemetry.cs">
+        Mirror this exact pattern: private `Meter _meter` field, private
+        `Counter&lt;long&gt;` / `Histogram&lt;double&gt;` / `Histogram&lt;long&gt;` instruments,
+        `MeterName` const, static `ActivitySource` for distributed tracing,
+        `Dispose()` releases the meter. Public record-* methods accept the
+        bounded dimensions as method parameters (NOT as `params object[]`
+        property bags). This forces cardinality discipline at the call site.
+      </pattern>
+      <pattern name="Tag list construction with bounded dimensions" location="src/server/api/Sprk.Bff.Api/Telemetry/RagTelemetry.cs">
+        Use `TagList` with explicit kvp adds. Pattern: `{ "status", success ?
+        "success" : "failed" }` for status enums; conditional `tags.Add(...)`
+        for optional dimensions like `tenantId`. NEVER concatenate user input
+        into tag values.
+      </pattern>
+      <pattern name="Meter registration in TelemetryModule" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/TelemetryModule.cs">
+        `services.AddOpenTelemetry().WithMetrics(m =&gt; m.AddMeter("Sprk.Bff.Api.R5Summarize"))`
+        — add the new Meter name to the existing list (lines 22–32). Match the
+        existing comment style (one comment per added meter explaining purpose).
+      </pattern>
+      <pattern name="DI registration alongside AiTelemetry" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs">
+        `services.AddSingleton&lt;AiTelemetry&gt;()` on line 25 is the precedent.
+        Register `R5SummarizeTelemetry` as a sibling singleton in the same
+        method (unconditional — it does NOT require `analysisEnabled` because
+        kill-switch coverage is via `NullSprkChatAgentFactory` per R5 §3.2;
+        the telemetry surface itself is harmless when unused).
+      </pattern>
+      <pattern name="Call-site instrumentation (placeholder for downstream tasks)" location="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs">
+        Downstream task 014 (D2-04 endpoint) + 015 (D2-05 agent tool) will INJECT
+        `R5SummarizeTelemetry` and call its record-* methods at completion of
+        each invocation. Task 008 (THIS task) creates the class + DI wiring +
+        unit tests; it does NOT modify the (not-yet-existing in this branch)
+        endpoint or tool handler. The class is ready-to-consume when 012/014/015
+        ship.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships a chat-driven "Summarize a Document" vertical slice invocable
+      from two paths: (a) `/summarize` slash command → direct endpoint, (b)
+      natural-language prompt → LLM tool-call → `InvokeSummarizePlaybookTool`.
+      Both paths converge on `SessionSummarizeOrchestrator` (task 012). For
+      cost observability, dashboards (Phase 3 task 042 / D3-03) need to see
+      the path mix, file_count distribution, token consumption, and latency
+      distribution as a single coherent event stream — not two parallel event
+      streams from two parallel code paths. This task ships the canonical
+      `r5.summarize.invocation` event + the session-files index-size metric
+      with the schema locked from day one.
+
+      Additionally, per spec NFR-06 (cost control) and Phase 3 D3-03 (cost
+      dashboards), this task surfaces per-session token-budget consumption so
+      operations can monitor budget burn-down + tune the existing
+      `AgentCostControlMiddleware` defaults (10K tokens per session).
+
+      The session-files index-size metric (`r5.session_files.index_size`)
+      supports the cleanup-job tuning question from spec NFR-02 (assumed 6h
+      cleanup cadence; may tune to 1h if storage grows). Without this metric
+      the tuning decision is blind.
+    </background>
+    <dependencies></dependencies>
+    <related-work>
+      <item>`AiTelemetry.RecordTokenUsage` / `RecordSuccess` — existing
+        precedent for token + duration histograms; R5 telemetry is additive on
+        a NEW Meter to keep R5-specific dashboards trivially filterable by
+        meter name without polluting the broader `ai.summarize.*` family.</item>
+      <item>Task 007 (D1-07 session-files cleanup `IHostedService`) writes the
+        eviction-count metric; this task defines the `r5.session_files.index_size`
+        Histogram that 007's cleanup job will record into post-eviction. Both
+        tasks are in P1-G5 + parallel-safe; 007 will reference the histogram
+        method signature this task exposes.</item>
+      <item>Task 014 (D2-04 direct endpoint) + Task 015 (D2-05 agent tool) will
+        INJECT `R5SummarizeTelemetry` and call its record method on completion.
+        This task creates the surface those downstream tasks consume.</item>
+      <item>Phase 3 Task 042 (D3-03) authors the App Insights / Kusto dashboards
+        that query these events. Schema stability from this commit forward is
+        a downstream contract.</item>
+      <item>`RagTelemetry.RecordRagSearchSuccess` includes `tenantId` as a
+        low-cardinality dimension per ADR-014 — R5 follows that precedent on
+        the invocation event.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request
+      `/compact`. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: BFF code change in Telemetry/ + DI module modification +
+        AnalysisServicesModule registration + downstream contract for
+        Phase 3 D3-03 dashboards. Telemetry instrumentation is BFF
+        infrastructure (FULL-rigor per CLAUDE.md §8 decision tree:
+        tags include `bff` + `telemetry`).
+      📖 PROTOCOL STEPS TO EXECUTE: 0 (this) → 1 review → 2 gather →
+        3 plan → 4 implement → 5 verify → 6 tests → 7 publish-size →
+        8 docs → 9 acceptance → 9.5 quality gates → 10 document + complete
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm task 008 status is 🔲,
+      `parallel-safe = ✅`, `dependencies = none`. Read `current-task.md` to
+      check whether 007 or 009 is in flight (parallel-safe with 007; 009
+      depends on this). Read project README for project status.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Extract specifically:
+      (a) the exact `Meter` / `Counter&lt;long&gt;` / `Histogram` constructor +
+      registration shape from `AiTelemetry.cs` (lines 22–162); (b) the
+      `TagList` build pattern from `RagTelemetry.cs.RecordRagSearchSuccess`
+      (lines 184–199); (c) the `AddMeter(...)` registration block in
+      `TelemetryModule.cs` (lines 22–32); (d) the `services.AddSingleton&lt;
+      AiTelemetry&gt;()` precedent at `AnalysisServicesModule.cs` line 25.
+      Confirm `tenantId`-as-dimension precedent at `RagTelemetry.cs` line
+      193.
+    </step>
+    <step order="3" name="Plan Implementation">
+      Confirm placement decision per CLAUDE.md §10 Placement Justification:
+      telemetry instrumentation belongs in BFF (justification documented in
+      `&lt;constraints&gt;`). List the deliverables:
+      - NEW file `src/server/api/Sprk.Bff.Api/Telemetry/R5SummarizeTelemetry.cs`
+      - EDIT `src/server/api/Sprk.Bff.Api/Infrastructure/DI/TelemetryModule.cs`
+        (add Meter to `AddOpenTelemetry().WithMetrics(...)` list + tracing
+        source)
+      - EDIT `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs`
+        (add `services.AddSingleton&lt;R5SummarizeTelemetry&gt;()` alongside the
+        existing AiTelemetry singleton)
+      - NEW test file
+        `tests/unit/Sprk.Bff.Api.Tests/Telemetry/R5SummarizeTelemetryTests.cs`
+
+      Lock the event schema (write down BEFORE coding, treat as contract):
+
+      | Instrument | Type | Dimensions (BOUNDED) |
+      |---|---|---|
+      | `r5.summarize.invocation` | `Counter&lt;long&gt;` | `path` (enum: `agent_tool` \| `direct_endpoint`), `completion_status` (enum: `success` \| `failed` \| `declined` \| `cancelled`), `tenantId` (low-cardinality) |
+      | `r5.summarize.file_count` | `Histogram&lt;long&gt;` | same as above |
+      | `r5.summarize.total_tokens` | `Histogram&lt;long&gt;` | same as above |
+      | `r5.summarize.latency_ms` | `Histogram&lt;double&gt;` | same as above |
+      | `r5.session_files.index_size` | `Histogram&lt;long&gt;` | `phase` (enum: `post_write` \| `post_evict` \| `post_cleanup`), `tenantId` |
+
+      Confirm no other dimensions. Record schema in XML doc-comments on the
+      class + each method.
+    </step>
+    <step order="4" name="Implement R5SummarizeTelemetry class">
+      Create
+      `src/server/api/Sprk.Bff.Api/Telemetry/R5SummarizeTelemetry.cs`
+      following the `AiTelemetry.cs` structural template exactly:
+      - `namespace Sprk.Bff.Api.Telemetry;`
+      - XML doc-comment header documenting purpose + meter name + canonical
+        App Insights / Kusto queries (mirror lines 7–19 of AiTelemetry.cs)
+      - Private `Meter _meter` + `MeterName = "Sprk.Bff.Api.R5Summarize"`
+        + public static `ActivitySource`
+      - Private instruments (one per row in the schema table above)
+      - Constructor creates Meter + instruments with `name`, `unit`,
+        `description` triples following the AiTelemetry style
+      - Public `RecordSummarizeInvocation(string path, string completionStatus,
+        long fileCount, long totalTokens, double latencyMs, string? tenantId
+        = null)` method — accepts `path` and `completionStatus` as STRING
+        ENUMS (validated against private `static readonly` HashSet&lt;string&gt;
+        whitelists; throw ArgumentException on out-of-enum input — this is
+        the cardinality safety mechanism)
+      - Public `RecordSessionFilesIndexSize(string phase, long documentCount,
+        string? tenantId = null)` method — same enum-validation discipline
+        for `phase`
+      - `Dispose()` releases the meter
+      - XML doc-comments on every public method specifying parameters + enum
+        valid values + the dimension set treated as the downstream contract
+
+      Add private `static readonly` HashSets:
+      ```csharp
+      private static readonly HashSet&lt;string&gt; ValidPaths = new() { "agent_tool", "direct_endpoint" };
+      private static readonly HashSet&lt;string&gt; ValidStatuses = new() { "success", "failed", "declined", "cancelled" };
+      private static readonly HashSet&lt;string&gt; ValidPhases = new() { "post_write", "post_evict", "post_cleanup" };
+      ```
+      These are the cardinality enforcement mechanism — invalid input throws
+      at the call site (loud failure during development) rather than silently
+      polluting the metric store with high-cardinality dimensions in production.
+    </step>
+    <step order="5" name="Wire Meter into TelemetryModule">
+      Edit `src/server/api/Sprk.Bff.Api/Infrastructure/DI/TelemetryModule.cs`:
+      - In the `metrics.AddMeter(...)` block (currently lines 22–32), ADD:
+        ```csharp
+        // R5 Summarize meter (D1-08): r5.summarize.invocation + r5.session_files.index_size
+        metrics.AddMeter("Sprk.Bff.Api.R5Summarize");
+        ```
+      - In the `tracing.AddSource(...)` block (currently lines 36–38), ADD:
+        ```csharp
+        tracing.AddSource("Sprk.Bff.Api.R5Summarize");
+        ```
+      Confirm zero new top-level `Program.cs` lines.
+    </step>
+    <step order="6" name="Register R5SummarizeTelemetry in AnalysisServicesModule">
+      Edit
+      `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs`:
+      Add `services.AddSingleton&lt;Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry&gt;();`
+      adjacent to the existing `services.AddSingleton&lt;Sprk.Bff.Api.Telemetry.
+      AiTelemetry&gt;();` registration (line 25). Place it UNCONDITIONALLY (NOT
+      inside the `if (analysisEnabled && documentIntelligenceEnabled)` block)
+      because telemetry-class registration is harmless when not invoked and
+      reduces conditional-registration risk per CLAUDE.md §10 F.1
+      (Asymmetric-Registration anti-pattern).
+    </step>
+    <step order="7" name="Build + verify compilation">
+      Run `dotnet build src/server/api/Sprk.Bff.Api/`. Confirm zero new
+      compiler warnings + zero new compiler errors. Confirm the new
+      `R5SummarizeTelemetry` resolves via DI by running a quick startup
+      smoke (`dotnet run` against the Sprk.Bff.Api project locally for a few
+      seconds → verify no DI resolution errors at `WebApplication.Build()`).
+    </step>
+    <step order="8" name="Write unit tests">
+      Create
+      `tests/unit/Sprk.Bff.Api.Tests/Telemetry/R5SummarizeTelemetryTests.cs`
+      with these test cases:
+      - `RecordSummarizeInvocation_WithValidEnums_EmitsExpectedCounter` —
+        uses OpenTelemetry's `MeterListener` API to capture emitted
+        measurements; asserts: counter incremented by 1 + dimensions present
+        + dimension values match.
+      - `RecordSummarizeInvocation_WithInvalidPath_ThrowsArgumentException` —
+        verifies cardinality safety mechanism.
+      - `RecordSummarizeInvocation_WithInvalidCompletionStatus_ThrowsArgumentException`.
+      - `RecordSummarizeInvocation_WithNullTenantId_DoesNotEmitTenantDimension`.
+      - `RecordSessionFilesIndexSize_WithValidPhase_RecordsHistogram`.
+      - `RecordSessionFilesIndexSize_WithInvalidPhase_ThrowsArgumentException`.
+      - `BothInvocationPaths_RecordViaSameCounter` — sanity check that
+        both `path = "agent_tool"` AND `path = "direct_endpoint"` calls
+        increment the SAME counter (this is the load-bearing single-event-stream
+        invariant the task ships).
+
+      Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — confirm all new
+      tests pass. Confirm no previously-passing test regressed.
+    </step>
+    <step order="9" name="BFF publish-size verification (mandatory per R5 §3.6)">
+      Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o
+      deploy/api-publish/`. Measure the compressed output size (zip the
+      output folder or use `Get-ChildItem | Measure-Object Length -Sum` +
+      apply the established compression-ratio rule). Report in task notes:
+      - Absolute compressed size (e.g., "45.66 MB")
+      - Delta vs prior baseline (~45.65 MB) — expected ≈ 0 MB
+      - Confirm under ceiling (≤60 MB per NFR-01)
+
+      Also run `dotnet list package --vulnerable --include-transitive` —
+      verify no new HIGH-severity CVE introduced (expected no-op since no
+      new packages).
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the new + modified files:
+      - `src/server/api/Sprk.Bff.Api/Telemetry/R5SummarizeTelemetry.cs` (NEW)
+      - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/TelemetryModule.cs` (modified)
+      - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs` (modified)
+      - `tests/unit/Sprk.Bff.Api.Tests/Telemetry/R5SummarizeTelemetryTests.cs` (NEW)
+
+      Run `adr-check` skill against the same files. Verify:
+      - ADR-010 — DI minimalism: zero new top-level `Program.cs` lines;
+        registration inside `AnalysisServicesModule`. ✅
+      - ADR-014 — Tenant isolation: `tenantId` low-cardinality dimension;
+        `sessionId` excluded from dimensions per cardinality discipline. ✅
+      - ADR-015 — No PII / customer data in telemetry dimensions. ✅
+      - ADR-018 — No new feature flags introduced. ✅
+      - ADR-029 — BFF publish hygiene; size delta verified. ✅
+      - ADR-030 — No PaneEventBus changes (out of scope). ✅
+
+      Both gates MUST pass before task complete.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML metadata: `&lt;status&gt;` → `complete`,
+      `&lt;completed&gt;` → today's date, `&lt;actual-effort&gt;` filled.
+      Update `tasks/TASK-INDEX.md`: 008 🔲 → ✅.
+      Reset `current-task.md` to the next pending task per root CLAUDE.md §7.
+      Write task-completion notes to
+      `projects/spaarke-ai-platform-unification-r5/notes/task-008-telemetry-evidence.md`
+      containing:
+      - The locked event schema table (for downstream D3-03 dashboard authors)
+      - Publish-size measurement (absolute + delta + headroom remaining)
+      - CVE scan result (clean / not clean)
+      - Note: downstream tasks 012/014/015 must INJECT
+        `R5SummarizeTelemetry` and call its `RecordSummarizeInvocation(...)`
+        method on completion of each Summarize invocation; task 007's cleanup
+        `IHostedService` must call `RecordSessionFilesIndexSize(...)`
+        post-eviction.
+      - Note: Phase 3 task 042 (D3-03) authors dashboards against this schema;
+        downstream contract is now stable.
+
+      Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish, vulnerability scan</tool>
+    <tool name="git">Stage + commit the new telemetry file + DI edits + tests on the R5 branch</tool>
+    <tool name="code-review">FULL-rigor Step 9.5 quality gate</tool>
+    <tool name="adr-check">FULL-rigor Step 9.5 ADR conformance gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Telemetry/R5SummarizeTelemetry.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/TelemetryModule.cs (MODIFIED — Meter + ActivitySource registration)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (MODIFIED — singleton registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Telemetry/R5SummarizeTelemetryTests.cs (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 008 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-008-telemetry-evidence.md (locked schema table; publish-size measurement; CVE scan; downstream-consumer notes for tasks 007 / 012 / 014 / 015 / 042)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/server/api/Sprk.Bff.Api/Telemetry/R5SummarizeTelemetry.cs` exists and compiles. Class registers a Meter `Sprk.Bff.Api.R5Summarize` and exposes the five instruments per the locked schema (`r5.summarize.invocation` Counter; `r5.summarize.file_count`, `r5.summarize.total_tokens`, `r5.summarize.latency_ms`, `r5.session_files.index_size` Histograms).</criterion>
+    <criterion testable="true">`R5SummarizeTelemetry.RecordSummarizeInvocation(string path, string completionStatus, ...)` validates `path` ∈ {`agent_tool`, `direct_endpoint`} and `completionStatus` ∈ {`success`, `failed`, `declined`, `cancelled`}; throws ArgumentException on out-of-enum input. Cardinality safety verified by unit test.</criterion>
+    <criterion testable="true">`R5SummarizeTelemetry.RecordSessionFilesIndexSize(string phase, ...)` validates `phase` ∈ {`post_write`, `post_evict`, `post_cleanup`}; throws ArgumentException on out-of-enum input. Cardinality safety verified by unit test.</criterion>
+    <criterion testable="true">Both invocation paths (`agent_tool` AND `direct_endpoint`) record to the SAME `r5.summarize.invocation` Counter — verified by the `BothInvocationPaths_RecordViaSameCounter` unit test using OpenTelemetry's `MeterListener` capture.</criterion>
+    <criterion testable="true">`tenantId` appears as an OPTIONAL low-cardinality dimension per ADR-014 / RagTelemetry precedent. `sessionId`, correlation IDs, user IDs, file names, prompts, and document content do NOT appear as dimensions on any instrument.</criterion>
+    <criterion testable="true">`src/server/api/Sprk.Bff.Api/Infrastructure/DI/TelemetryModule.cs` registers Meter `Sprk.Bff.Api.R5Summarize` via `metrics.AddMeter(...)` and ActivitySource via `tracing.AddSource(...)` so OpenTelemetry exports the events.</criterion>
+    <criterion testable="true">`src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs` registers `R5SummarizeTelemetry` as a singleton UNCONDITIONALLY (not gated by `analysisEnabled`). Zero new top-level `Program.cs` lines added by this task.</criterion>
+    <criterion testable="true">`tests/unit/Sprk.Bff.Api.Tests/Telemetry/R5SummarizeTelemetryTests.cs` includes the seven test cases enumerated in Step 8; all pass; no previously-passing test regresses.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with zero new compiler warnings + zero new compiler errors.</criterion>
+    <criterion testable="true">BFF publish-size: `dotnet publish -c Release` measured; absolute compressed size + delta vs ~45.65 MB baseline reported in task notes. Expected delta ≈ 0 MB. Confirmed under 60 MB ceiling. (Per R5 CLAUDE.md §3.6.)</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` against `Sprk.Bff.Api` shows no NEW HIGH-severity CVE introduced by this task (expected no-op).</criterion>
+    <criterion testable="true">Locked event schema table is recorded in task notes (`notes/task-008-telemetry-evidence.md`) as the downstream contract for Phase 3 task 042 (D3-03) Kusto dashboard queries.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5 against all new + modified files.</criterion>
+    <criterion testable="true">Task notes flag downstream-consumer obligations: tasks 012 / 014 / 015 must INJECT `R5SummarizeTelemetry` and call `RecordSummarizeInvocation(...)` on completion; task 007 must call `RecordSessionFilesIndexSize(...)` post-eviction. (This task ships the surface; consumption is downstream.)</criterion>
+  </acceptance-criteria>
+</task>
