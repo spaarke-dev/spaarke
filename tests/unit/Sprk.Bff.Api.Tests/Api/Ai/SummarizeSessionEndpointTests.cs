@@ -59,8 +59,8 @@ public class SummarizeSessionEndpointTests : IClassFixture<SummarizeSessionEndpo
 
     private const string TestTenantId = "00000000-0000-0000-0000-000000000abc";
     private const string TestSessionId = "11111111-2222-3333-4444-555555555555";
-    private const string TestUserOid   = "test-user-r5-summarize-endpoint";
-    private const string TestBearer    = "summarize-session-test-bearer";
+    private const string TestUserOid = "test-user-r5-summarize-endpoint";
+    private const string TestBearer = "summarize-session-test-bearer";
 
     public SummarizeSessionEndpointTests(SummarizeSessionEndpointTestFixture fx)
     {

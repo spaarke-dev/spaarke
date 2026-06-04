@@ -85,14 +85,14 @@ public static class SummarizeSessionEndpoint
     // ─── Stable errorCode extensions (ADR-019) ──────────────────────────────────────
     // These strings are CONTRACT — frontend clients switch on them to render
     // feature-specific UX. Do NOT rename without a corresponding contract update.
-    private const string ErrorCodeTenantMissing       = "auth.tid-missing";
-    private const string ErrorCodeOidMissing          = "auth.oid-missing";
-    private const string ErrorCodeSessionIdRequired   = "sessionId.required";
-    private const string ErrorCodeSessionIdInvalid    = "sessionId.invalid";
-    private const string ErrorCodeTooManyFiles        = "summarize.too-many-files";
-    private const string ErrorCodeSessionNotFound     = "summarize.session-not-found";
-    private const string ErrorCodeFeatureDisabled     = "summarize.feature-disabled";
-    private const string ErrorCodeInternalError       = "summarize.internal-error";
+    private const string ErrorCodeTenantMissing = "auth.tid-missing";
+    private const string ErrorCodeOidMissing = "auth.oid-missing";
+    private const string ErrorCodeSessionIdRequired = "sessionId.required";
+    private const string ErrorCodeSessionIdInvalid = "sessionId.invalid";
+    private const string ErrorCodeTooManyFiles = "summarize.too-many-files";
+    private const string ErrorCodeSessionNotFound = "summarize.session-not-found";
+    private const string ErrorCodeFeatureDisabled = "summarize.feature-disabled";
+    private const string ErrorCodeInternalError = "summarize.internal-error";
 
     /// <summary>
     /// Registers <c>POST /api/ai/chat/sessions/{sessionId}/summarize</c> on the supplied
