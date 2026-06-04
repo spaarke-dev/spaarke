@@ -4,96 +4,61 @@
 
 ---
 
-**Active task**: none — Phase 4 complete (tasks 000, 001, 002, 003, 004, 005 all ✅). Ready for Phase 5 (synthesis).
-**Next task**: task 006 — **synthesis = the canonical assessment document**. This is the project's primary deliverable.
+**Active task**: none — Phase 5 complete (tasks 000-006 all ✅). Primary deliverable landed. Ready for Phase 6.
+**Next task**: task 007 — adversarial review + source recency re-check.
 
-**How to start**: from a fresh session, type `work on task 006` and the harness will invoke `task-execute` with the POML.
-
----
-
-## Last completed task
-
-### Task 005 — Deployment + migration analysis
-- **Output**: `projects/agent-framework-fit-assessment-r1/notes/05-deployment-and-migration.md` (476 lines)
-- **Commit**: `45b93668`
+**How to start**: from a fresh session, type `work on task 007` and the harness will invoke `task-execute` with the POML.
 
 ---
 
-## Key findings for task 006 synthesis (carry forward — these drive §6, §7, §8 of the doc)
+## Project deliverable landed
 
-### Deployment-model recommendations (drives synthesis §6)
-
-| Surface | Verdict (task 004) | Deployment model (task 005) | Confidence |
-|---|---|---|---|
-| **S1 SprkChat** | PARTIAL (gated on #6268) | **In-process BFF** — ADR-013 criteria (1)+(2) fail decisively (latency + transactional coupling) | HIGH |
-| **S3 Builder** | PARTIAL | **In-process BFF** — criterion (4) fails (duplication cost > value for small surface) | HIGH |
-| **S5A Foundry wrapper (shipped)** | PARTIAL | **In-process BFF unchanged** — wrapper-only code simplification | HIGH |
-| **S5B canonical durable HITL** | **ADOPT** ⭐ | **Mixed — prototyping required before commitment** | **LOW** (F12 gap) |
-| **S7 Insights MCP** | PARTIAL | Deferred to D-A20 contract; preliminary read: ADR-013 criteria likely pass | MED |
-| **S8a SessionSummarizationService** | PARTIAL | Fold into S1 perimeter (in-process BFF) | HIGH |
-| **S8b CapabilityRouter** | PARTIAL | Fold into S1 perimeter (in-process BFF) | HIGH |
-| **S2 JPS** | DON'T ADOPT | no migration; no deployment change | — |
-| **S4 Background jobs** | DON'T ADOPT | no migration; no deployment change | — |
-| **S6 M365 Copilot** | DON'T ADOPT | no migration; no deployment change | — |
-
-### S5B is the central undecided question
-
-All four ADR-013 §"Exceptions" criteria PASS for S5B — non-BFF deployable is legitimately permitted. But three candidates (**Workflows-in-BFF · Workflows-in-Function · Foundry-hosted**) cannot be ranked with current sources. Drivers of uncertainty:
-- **F12 evidence gap** (task 003): no `/hosting/` Learn page; GitHub Issue #6308 in active triage
-- **Foundry SKU costs** UNKNOWN
-- **VM-isolation requirement** UNKNOWN (this is also task-004 open question #1)
-
-**Recommendation for synthesis §6**: present S5B's deployment model as "ADR-013 criteria PASS — but choose between three models requires prototyping; do not pre-commit." Frame as honest evidence-thin conclusion, not adversarial fence-sitting.
-
-### Publish-size impact (drives synthesis §7)
-
-- **Baseline**: 45.65 MB (post-Outcome-A from `bff-extensions.md`/BFF extraction assessment baseline)
-- **`Microsoft.Agents.AI 1.0.0-rc1` is already referenced** in `Sprk.Bff.Api.csproj:29-33` (zero source usage per task 001) — so S1/S3/S5A/S8a/S8b lifts to actual use have **net-zero publish-size impact**
-- **S5B only**: adds `Microsoft.Agents.AI.Workflows` + possibly `Hosting.A2A.AspNetCore` + `Foundry` glue (+1.5-6 MB cumulative, UNCERTAIN)
-- **Worst case projection**: ~47-54 MB (well under 80 MB tolerance from `.claude/constraints/bff-extensions.md`)
-
-### Shared infrastructure changes (one cost amortized across surfaces)
-
-S1 + S3 + S8a + S8b all benefit from **one shared change**: lift middleware from per-instance decoration of `ISprkChatAgent` to canonical `chatClient.AsBuilder().Use*().Build()` composition. Task 001 flagged this as "the biggest single migration vector for S1." Frame this as **one cross-cutting change** in the migration cost summary, not four independent migrations.
-
-### Risk register (10 risks; drives synthesis §7) — top 3 HIGH-severity
-
-1. **R1 (HIGH)** — Issue #6268 unresolved; affects S1's canonical multi-tool streaming workload
-2. **R2 (HIGH)** — F12 durable-hosting evidence is thin; pre-commitment on S5B's hosting model is design-by-assumption
-3. **R9 (HIGH)** — S5B mis-scoping risk: framing as "small framework adoption" instead of "build multi-day legal workflows from scratch"
-
-### Migration cost (drives synthesis §7)
-
-**8-17 person-weeks for Phase 1+2+3** (Builder pre-work + shared infra middleware lift + per-surface S1-family lifts).
-- **Excludes S5B** — greenfield, person-quarters not person-weeks
-- **Excludes S7** — deferred to D-A20 contract
-- **Confidence: LOW-MED**
-
-### Open questions for synthesis §8 (carry from tasks 004 + 005)
-
-1. **S5B VM-isolation requirement** (task 004) — determines Foundry-hosted vs Workflows-in-BFF/Function for the sole ADOPT verdict
-2. **S5B prototyping scope** (task 005) — what does a 1-2 week S5B prototype need to validate before SPEC commitment? F12 hosting + Foundry SKU costs + workflow checkpointing under Spaarke load
-3. **S1 wait-or-pilot timing for Issue #6268** (task 004) — wait for shipped 1.x fix, or pilot with feature flag + fallback now?
-4. **S7 D-A20 contract authoring** (task 004) — must address host library + deployment model + BFF seam (three UNKNOWNs)
+### Task 006 — Canonical assessment document
+- **Output**: `docs/assessments/agent-framework-fit-assessment-2026-06-03.md` (893 lines)
+- **Commit**: `cdaab907`
+- **Quality gates** (Step 9.5, FULL rigor):
+  - adr-check ✅ no violations; 2 forward-looking warnings (implied ADR-013 amendment for shared middleware lift; S5B prototyping recommendation) correctly deferred to downstream PRs per scoping decision
+  - code-review ✅ accepted with 2 warnings (W1, W2) routed to task 007 inputs
 
 ---
 
-## Prior phase findings (preserved for synthesis grounding)
+## Inputs for task 007 (adversarial review)
 
-- **Task 000** baseline: SHA `afa7834e` (2026-06-03 "1.9 release"); 34 primary sources, 100% within recency floor; AF 1.0 GA April 2026; #6268 RED FLAG for S1; Tool Approval is framework feature; Workflow HITL is framework-internal not Foundry-exclusive
-- **Task 001** inventory: `Microsoft.Agents.AI` package referenced with ZERO source usage (the "half-adopted" framing has a literal evidence base); S1 only Extensions.AI user; middleware wraps `ISprkChatAgent` not `IChatClient`; 2 S8 surfaces discovered
-- **Task 002** inventory: S5 BIMODAL — SPEC was wrong, corrected to A/B split; S6 uses M365 Agents SDK (distinct from Agent Framework); S7 Phase-2-deferred
-- **Task 003** feature map: 12 features F1-F12; 19 distinct primary-source citations; 94.7% recency; F3 + F12 evidence-thin (F12 came due in task 005, forced LOW confidence on S5B hosting)
-- **Task 004** decision matrix: 10 surfaces; 1 ADOPT / 5 PARTIAL / 4 DON'T ADOPT distribution passes anti-bias check decisively
+### Quality-gate warnings to address (from task 006 Step 9.5)
 
----
+**W1 — S8a verdict divergence from notes/04**
+- Notes/04 §S8a (task 004): PARTIAL — "fold into S1 perimeter once #6268 unblocks"
+- Synthesis §5.9 + §5.11 (task 006): **DON'T ADOPT** — "textbook anti-fit; single-purpose `IChatClient` consumer; F5 marginal lift has qualitative regression risk"
+- The doc does NOT disclose the verdict change inline; future readers reconciling §10 → notes/04 will find the inconsistency without context
+- Task 007 must decide: (a) accept synthesis re-analysis and add inline disclosure footnote, OR (b) restore PARTIAL with notes/04's reasoning
+- Synthesis's deeper rationale is defensible — the F5 qualitative regression concern is genuine — so option (a) likely
 
-## Citation discipline for task 006
+**W2 — Two synthesis judgment-call extensions not disclosed inline**
+- (a) §7.1 + §9.2 frame the shared middleware lift as an "implied ADR-013 amendment" candidate — notes/05 names the middleware lift as one cross-cutting cost but doesn't explicitly call it ADR-amendment territory
+- (b) §8 has 6 open questions (Q1-Q6); notes/04 + notes/05 explicitly named Q1-Q4. Q5 (JPS-vs-Workflows long-term) and Q6 (S6 R2 MCP hosts AF agents internally?) are synthesis-level inferences
+- Both extensions are defensible (≥3 was a floor, not ceiling; ADR amendment is a natural cross-reference for a binding architectural change)
+- Task 007 may add disclosure footnotes or accept as-is — lower stakes than W1
 
-- §10 Sources appendix is **mandatory** — table every primary URL + fetched date + referencing section
-- ≥80% of primary-source citations dated 2026-04-01 onwards
-- Every claim cites: notes/00 (live URLs) for feature facts; notes/01-05 (project-local) for analysis; ADRs/constraints for binding rules
-- No claims citing ONLY the curated `knowledge/agent-framework/` snapshot — orientation only
+### Adversarial-review rigor requirements (from POML 007)
+
+1. **Honest argue-against pass**: For each ADOPT/PARTIAL recommendation, write "what would I write if I were arguing AGAINST adoption here?" and weaken any conclusion that doesn't survive challenge
+2. **Source recency re-check**: Re-WebFetch the top 5 most-cited URLs at review time; treat any material change as a finding (revise conclusion OR add to §8 open questions)
+3. **Top-5 candidates for re-fetch**: P2 (agents/), P3 (workflows/), P6 (middleware/), I1 (#6268), I2 (#6308) — these are the load-bearing citations
+4. **Adversarial sanity check on the 1 ADOPT / 5 PARTIAL / 4 DON'T ADOPT distribution**: does the anti-bias pass actually hold up to scrutiny, or did the assessment over-correct toward DON'T ADOPT to satisfy the guard rail?
+5. **Closing line 893 owner-decisions**: are the 5 enumerated decisions (a-e) the right framing for the human reader, or are they too prescriptive / too vague?
+
+### Acceptance criteria check (already met by task 006)
+
+- [x] Document at `docs/assessments/agent-framework-fit-assessment-2026-06-03.md` with all 10 sections
+- [x] Exec summary fits one page, self-contained
+- [x] Every §4-§7 conclusion cites live primary-source URL with fetched date (not curated snapshot)
+- [x] ≥80% citations within 2026-04-01 floor (actual: 100%)
+- [x] §8 has ≥3 open questions (actual: 6)
+- [x] §9 names agent-framework-knowledge-r1 + ADR-013 forward-references
+- [x] §10 Sources appendix complete (36 rows)
+- [x] Length 800-1500 lines (actual: 893)
+- [x] adr-check + code-review both run at Step 9.5
+- [x] Declarative tone — uncertainty in §8 not body
 
 ---
 
@@ -104,5 +69,11 @@ S1 + S3 + S8a + S8b all benefit from **one shared change**: lift middleware from
 - Phase 2 ✅ (task 003 — feature map)
 - Phase 3 ✅ (task 004 — decision matrix)
 - Phase 4 ✅ (task 005 — deployment + migration)
-- Phase 5 🔲 (task 006 — **synthesis = canonical assessment document**)
-- Phase 6 🔲 (tasks 007, 008 — adversarial review + sign-off)
+- Phase 5 ✅ (task 006 — **canonical assessment document landed**)
+- Phase 6 🔲 (task 007 adversarial review + task 008 sign-off + unblock note)
+
+---
+
+## After Phase 6
+
+Task 008 will write the unblock-recommendation note for `projects/agent-framework-knowledge-r1/UNBLOCK-RECOMMENDATION.md` outlining what the assessment implies for that parked project's SPEC. Per scoping, task 008 does NOT edit the SPEC — only the unblock note.
