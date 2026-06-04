@@ -1,0 +1,84 @@
+<task id="053" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>F4 — Contract v1.1 docs + R5 coordination update</title>
+    <status>not-started</status>
+    <wave>F</wave>
+    <estimated-effort>0.5d</estimated-effort>
+    <tags>docs, contract-versioning, r5-coordination, integration-brief</tags>
+    <dependencies>051, 052</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>MINIMAL</rigor>
+    <wave-item>F4</wave-item>
+  </metadata>
+
+  <prompt>
+    Update the three canonical contract documents to reflect v1.0 → v1.1 contract bump. Add v1.1 schema additions to `design-e3-tool-call-contract.md`. Update the Assistant integration brief with v1.1 endpoint behavior. Update the R5 coordination doc's §8 changelog with the v1.1 ship entry + close touchpoints §4.4 (FieldDelta SSE) + §4.6 (citations). No code changes in this task.
+  </prompt>
+
+  <role>Documentation maintainer + contract version manager.</role>
+
+  <goal>
+    Three documents updated to reflect v1.1 ship. (1) `design-e3-tool-call-contract.md` version header bumped to 1.1 + new §3 streaming schema + new §4.6 href field + v1.1 changelog entry in §12. (2) `notes/insights-engine-assistant-integration-brief.md` §3 (request) + §4 (response) + §5 (error) + §B (sanity checks) updated for v1.1; brief frontmatter contract-version bumped to 1.1. (3) R5 coordination doc (`projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md`) gets new §8 changelog entry "2026-06-XX (late) — Wave F v1.1 shipped" that resolves §4.4 (SSE protocol reuse — Insights adopted) + §4.6 (citations clickable — done).
+  </goal>
+
+  <inputs>
+    <file purpose="contract-v1.0">projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md</file>
+    <file purpose="integration-brief-v1.0">projects/ai-spaarke-insights-engine-r2/notes/insights-engine-assistant-integration-brief.md</file>
+    <file purpose="r5-coordination">C:/code_files/spaarke-wt-spaarke-ai-platform-unification-r5/projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md (cross-worktree)</file>
+    <file purpose="r5-request">projects/ai-spaarke-insights-engine-r2/notes/insights-engine-contract-v1.1-request.md</file>
+    <file purpose="mini-plan">projects/ai-spaarke-insights-engine-r2/notes/wave-f-v1.1-mini-plan.md</file>
+    <file purpose="task-051-output">projects/ai-spaarke-insights-engine-r2/tasks/051-sse-streaming-endpoint.poml (output: SSE event schema as implemented)</file>
+    <file purpose="task-052-output">projects/ai-spaarke-insights-engine-r2/tasks/052-citations-href-projection.poml (output: href URL patterns as implemented)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="r5-§4">Single PR bundles both additions; single minor-version bump v1.0 → v1.1</constraint>
+    <constraint source="r5-§4">Contract changelog entry documents both additions + back-compat note</constraint>
+    <constraint source="ai-procedure-maintenance">R5 coordination doc append-only changelog (do not rewrite §2-§7 history)</constraint>
+    <constraint source="cross-worktree">R5 coordination doc lives in a DIFFERENT worktree. Use the absolute path; main session is permitted to write there per parent worktree convention.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Contract versioning, documentation discipline, coordination doc maintenance protocol</topic>
+    <files>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read F2 + F3 outputs">Confirm actual SSE event schema (from 051 impl) + href URL patterns (from 052 impl) match the design intent. Note any drift to capture in docs.</step>
+    <step order="2" name="design-e3-tool-call-contract.md — v1.1 bump">Update frontmatter `Version: 1.1`. Add §3.5 (NEW — SSE streaming option, Accept-header negotiation). Add §4.6 (NEW — citations[].href optional field schema). Add §12 changelog entry "2026-06-XX (late) — v1.0 → v1.1: SSE streaming added; citations[].href added; no breaking changes". Mark §11 Phase 2 deferrals table: strike "SSE streaming" row and add note "shipped in v1.1". For "actionable citations href" row: IF F1 = Full scope shipped → strike + "shipped in v1.1"; IF F1 = Partial scope → strike "actionable citations href" and add new entry "document-citation href deferred to v1.2 due to plumbing-cost classification of Large from spike F1; observation-citation href shipped in v1.1". Cross-reference the spike's findings doc for the cost rationale.</step>
+    <step order="3" name="integration-brief — v1.1 bump">Bump contract-version frontmatter to 1.1. Update §3 (request) with Accept-header negotiation explanation. Update §4 (response) with SSE event schema sample. Update §4.6 (new subsection — citations[].href). Update §5 error model with mid-stream error semantics. Update §B sanity checks with "SSE not streaming? Check Accept header." entry. Frontmatter last-updated bumped.</step>
+    <step order="4" name="R5 coordination doc — §8 changelog entry">Append new row to §8 changelog table: "2026-06-XX (late) — Wave F v1.1 shipped". Add detailed sub-entry with: (a) Wave F status summary; (b) §4.4 touchpoint RESOLVED (Insights adopted SSE — but with its own event variant; not a full FieldDelta merge); (c) §4.6 touchpoint RESOLVED (citations clickable, href URL pattern). Provenance line with author + date.</step>
+    <step order="5" name="Update TASK-INDEX.md">Mark 050, 051, 052, 053 as ✅. Update Wave F section if exists or add it.</step>
+    <step order="6" name="Update current-task.md">Reflect Wave F complete; project status updated.</step>
+    <step order="7" name="(Optional) memory note">Save a project memory note `insights-engine-r2-wave-f-shipped.md` summarizing the v1.1 ship.</step>
+  </steps>
+
+  <tools>
+    <tool name="edit">Edit existing docs</tool>
+    <tool name="write">If new memory note authored</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md (bumped to v1.1)</output>
+    <output type="docs">projects/ai-spaarke-insights-engine-r2/notes/insights-engine-assistant-integration-brief.md (updated for v1.1)</output>
+    <output type="docs">C:/code_files/spaarke-wt-spaarke-ai-platform-unification-r5/projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md (new §8 changelog entry)</output>
+    <output type="docs">projects/ai-spaarke-insights-engine-r2/tasks/TASK-INDEX.md (Wave F marked ✅)</output>
+    <output type="docs">projects/ai-spaarke-insights-engine-r2/current-task.md (project status updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">design-e3-tool-call-contract.md version is 1.1 with v1.1 changelog entry</criterion>
+    <criterion testable="true">integration brief reflects SSE + href semantics</criterion>
+    <criterion testable="true">R5 coordination doc §8 changelog has new entry resolving touchpoints §4.4 + §4.6</criterion>
+    <criterion testable="true">TASK-INDEX shows 050-053 ✅; Wave F section complete</criterion>
+    <criterion testable="true">current-task.md reflects Wave F shipped + project status</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Sequenced AFTER 051 + 052 because both implementations land first; docs reflect what's actually built.
+
+    Cross-worktree write to R5 coordination doc: the main session has write access to other worktrees under `C:/code_files/`. Sub-agent dispatched for this task is permitted to write to the R5 path — verified via prior Wave E task 042 sub-task C which also wrote to the R5 worktree.
+  </notes>
+</task>

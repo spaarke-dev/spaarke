@@ -251,4 +251,71 @@ public interface IInsightsAi
     Task<AssistantQueryFacadeResult> AssistantQueryAsync(
         AssistantQueryFacadeRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Streaming counterpart to <see cref="AssistantQueryAsync"/> (Wave F task 051 / FR-05
+    /// v1.1). Emits a sequence of <see cref="AssistantQueryChunk"/> chunks the wire endpoint
+    /// projects as Server-Sent Events. Additive — does NOT modify the v1.0 single-shot path.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Chunk sequence per Wave F1 spike Section A + D</b>:
+    /// <list type="bullet">
+    ///   <item><c>progress {step: "classifier_started"}</c> — when classifier invoked.</item>
+    ///   <item><c>progress {step: "classifier_complete", content: path}</c> — classifier returned a path.</item>
+    ///   <item>RAG path: <c>progress {step: "rag_search_started"}</c> →
+    ///   <c>progress {step: "rag_search_complete", content: hitCount}</c> →
+    ///   <c>progress {step: "llm_synthesis_started"}</c> →
+    ///   <c>delta {path: "answer", content: token, sequence: n}</c> × N → <c>result {…}</c>.</item>
+    ///   <item>Playbook path: <c>progress {step: "playbook_started"}</c> →
+    ///   <c>progress {step: "node_complete", content: nodeName}</c> × N → <c>result {…}</c>.</item>
+    ///   <item>Cache-hit path: <c>progress {step: "cache_hit"}</c> → <c>result {…}</c>
+    ///   (short-circuit; no delta sequence per spike Section D).</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// <b>Mid-stream error</b>: implementations emit
+    /// <c>error {errorCode, detail}</c> as the LAST non-sentinel chunk. The wire endpoint
+    /// follows with <c>data: [DONE]\n\n</c>. Stream MUST NOT throw mid-iteration once the
+    /// first chunk has been yielded — convert all errors to <c>error</c> chunks per
+    /// R5 mini-plan §6 decision 4.
+    /// </para>
+    /// <para>
+    /// <b>Pre-stream errors</b>: <see cref="Configuration.FeatureDisabledException"/>
+    /// propagates unchanged BEFORE the first chunk is yielded so the endpoint can return a
+    /// 503 ProblemDetails response with NO SSE body (per ADR-032 kill-switch ordering
+    /// invariant). Validation <see cref="ArgumentException"/> propagates likewise as 400.
+    /// </para>
+    /// <para>
+    /// <b>Zone B → Zone A boundary</b>: the endpoint
+    /// (<c>POST /api/insights/assistant/query</c> when negotiated with
+    /// <c>Accept: text/event-stream</c>) lives in <c>Api/Insights/</c> (Zone B). It MUST
+    /// import ONLY this facade method and <see cref="AssistantQueryChunk"/>. AI internals
+    /// stay behind the facade.
+    /// </para>
+    /// <para>
+    /// <b>Cancellation</b>: the supplied <paramref name="cancellationToken"/> propagates
+    /// to all underlying calls (RAG retrieval, AOAI <c>StreamCompletionAsync</c>, playbook
+    /// engine). Consumer disconnect terminates the stream cleanly.
+    /// </para>
+    /// </remarks>
+    /// <param name="request">Assistant tool-call request — same shape as
+    /// <see cref="AssistantQueryAsync"/>. See <see cref="AssistantQueryFacadeRequest"/>.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>An async sequence of <see cref="AssistantQueryChunk"/>. Always emits at
+    /// least one chunk on success; the terminal chunk is either <c>result</c> or
+    /// <c>error</c>.</returns>
+    /// <exception cref="ArgumentNullException">When <paramref name="request"/> is null.</exception>
+    /// <exception cref="ArgumentException">When required string fields on
+    /// <paramref name="request"/> are null/whitespace.</exception>
+    /// <exception cref="Configuration.FeatureDisabledException">When a required kill-switch
+    /// is OFF, thrown BEFORE the first chunk yields (per ADR-032 P3 + pre-stream
+    /// invariant); the endpoint converts to 503 ProblemDetails.</exception>
+    /// <exception cref="InvalidOperationException">When <c>ForceMode == "playbook"</c> AND
+    /// no default playbook is configured, thrown BEFORE the first chunk yields.</exception>
+    /// <exception cref="System.OperationCanceledException">When <paramref name="cancellationToken"/>
+    /// is signalled.</exception>
+    IAsyncEnumerable<AssistantQueryChunk> AssistantQueryStreamAsync(
+        AssistantQueryFacadeRequest request,
+        CancellationToken cancellationToken = default);
 }

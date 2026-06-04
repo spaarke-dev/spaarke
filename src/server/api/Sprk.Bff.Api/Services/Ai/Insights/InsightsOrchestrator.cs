@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Insights;
@@ -143,6 +145,262 @@ public sealed class InsightsOrchestrator : IInsightsAi
             playbookInvoker: AnswerQuestionAsync,
             ragInvoker: SearchAsync,
             cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<AssistantQueryChunk> AssistantQueryStreamAsync(
+        AssistantQueryFacadeRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Query, nameof(request));
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ParentEntityType, nameof(request));
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ParentEntityId, nameof(request));
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Subject, nameof(request));
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId, nameof(request));
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.CallerOid, nameof(request));
+
+        var sw = Stopwatch.StartNew();
+
+        // ─── Step 1: Routing decision via shared handler logic ────────────────────────
+        // FeatureDisabledException from the classifier propagates BEFORE we yield any chunk
+        // — the endpoint catches it pre-stream and returns 503 ProblemDetails with no SSE
+        // body (ADR-032 kill-switch ordering invariant + Wave F1 spike Section A).
+        yield return new AssistantQueryChunk { Type = "progress", Step = "classifier_started" };
+
+        AssistantToolCallHandler.RoutingDecision routing;
+        try
+        {
+            routing = await _assistantHandler.DecideRouteAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Configuration.FeatureDisabledException)
+        {
+            // Per ADR-032 kill-switch ordering: re-throw BEFORE the first non-control chunk.
+            // We already emitted classifier_started — that's a benign progress marker; the
+            // endpoint will still write 503 ProblemDetails because the exception unwinds the
+            // entire SSE body if it surfaces here. To preserve the "no SSE body on 503"
+            // invariant, the endpoint must guard the DecideRouteAsync call BEFORE opening
+            // the SSE response. See InsightsAssistantEndpoint streaming flow.
+            throw;
+        }
+
+        yield return new AssistantQueryChunk
+        {
+            Type = "progress",
+            Step = "classifier_complete",
+            Content = routing.Path
+        };
+
+        // ─── Step 2: Dispatch path-specific streaming ─────────────────────────────────
+        if (routing.Path == "playbook")
+        {
+            await foreach (var chunk in StreamPlaybookPathAsync(request, routing, cancellationToken).ConfigureAwait(false))
+            {
+                yield return chunk;
+            }
+        }
+        else
+        {
+            await foreach (var chunk in StreamRagPathAsync(request, routing, cancellationToken).ConfigureAwait(false))
+            {
+                yield return chunk;
+            }
+        }
+
+        sw.Stop();
+        _logger.LogInformation(
+            "InsightsOrchestrator.AssistantQueryStreamAsync completed path={Path} intentSource={IntentSource} elapsedMs={ElapsedMs} tenant={TenantId} subject={Scheme}:{Id}",
+            routing.Path, routing.IntentSource, sw.ElapsedMilliseconds,
+            request.TenantId, request.ParentEntityType, request.ParentEntityId);
+    }
+
+    /// <summary>
+    /// Stream the RAG path: emit retrieval progress, then forward AOAI synthesis tokens as
+    /// <c>delta</c> chunks, then emit the final <c>result</c>. Mirrors
+    /// <see cref="SearchAsync"/>'s logic but swaps the single-shot
+    /// <see cref="IOpenAiClient.GetCompletionAsync"/> call for token streaming via
+    /// <see cref="IOpenAiClient.StreamCompletionAsync"/>.
+    /// </summary>
+    private async IAsyncEnumerable<AssistantQueryChunk> StreamRagPathAsync(
+        AssistantQueryFacadeRequest request,
+        AssistantToolCallHandler.RoutingDecision routing,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        // Build RAG facade request (same as single-shot per AssistantToolCallHandler.ExecuteRagPathAsync).
+        var ragRequest = new InsightsSearchFacadeRequest(
+            Query: request.Query,
+            ParentEntityType: request.ParentEntityType,
+            ParentEntityId: request.ParentEntityId,
+            ArtifactType: null,
+            Predicate: null,
+            TopK: 10,
+            TenantId: request.TenantId,
+            CallerPrincipal: request.CallerPrincipal,
+            ForceMode: request.ForceMode);
+
+        yield return new AssistantQueryChunk { Type = "progress", Step = "rag_search_started" };
+
+        // FeatureDisabledException from NullRagService propagates here (ADR-032 P3); the
+        // streaming caller has already emitted classifier_complete chunk(s). The endpoint
+        // converts to a mid-stream `error` chunk via the IsAsyncEnumerable's outer try/catch.
+        var ragResult = await SearchAsync(ragRequest, cancellationToken).ConfigureAwait(false);
+
+        yield return new AssistantQueryChunk
+        {
+            Type = "progress",
+            Step = "rag_search_complete",
+            Content = ragResult.Results.Count.ToString(CultureInfo.InvariantCulture)
+        };
+
+        // Zero-hit short-circuit: no synthesis, emit empty result + done. Matches SearchAsync
+        // semantics (no grounding → no synthesis).
+        if (ragResult.Results.Count == 0)
+        {
+            var emptyResult = _assistantHandler.BuildRagResult(ragResult, streamedAnswer: null, routing.IntentSource, routing.BelowThreshold)
+                with
+            { DurationMs = ragResult.DurationMs };
+            yield return new AssistantQueryChunk { Type = "result", Result = emptyResult };
+            yield break;
+        }
+
+        // Stream LLM synthesis tokens. Build the same prompt SearchAsync uses for parity.
+        yield return new AssistantQueryChunk { Type = "progress", Step = "llm_synthesis_started" };
+
+        var prompt = BuildGroundedSynthesisPrompt(
+            request.Query, request.ParentEntityType, request.ParentEntityId, ragResult.Results);
+
+        var accumulator = new StringBuilder();
+        int sequence = 0;
+        await foreach (var token in _openAi.StreamCompletionAsync(
+            prompt, model: null, maxOutputTokens: 400, cancellationToken).ConfigureAwait(false))
+        {
+            accumulator.Append(token);
+            yield return new AssistantQueryChunk
+            {
+                Type = "delta",
+                Path = "answer",
+                Content = token,
+                Sequence = ++sequence
+            };
+        }
+
+        var streamedAnswer = accumulator.ToString();
+        var ragFinalResult = _assistantHandler.BuildRagResult(ragResult, streamedAnswer, routing.IntentSource, routing.BelowThreshold)
+            with
+        { DurationMs = ragResult.DurationMs };
+        yield return new AssistantQueryChunk { Type = "result", Result = ragFinalResult };
+    }
+
+    /// <summary>
+    /// Stream the playbook path: emit cache-aware progress + final <c>result</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>v1.1 limitation (per F1 spike Section D)</b>: the playbook path emits COARSE-GRAINED
+    /// progress only (<c>playbook_started</c>, <c>playbook_complete</c> OR <c>cache_hit</c>),
+    /// not per-node events. This is because the existing D-P13
+    /// <see cref="IInsightsPlaybookExecutionCache"/> drains the engine stream internally — we
+    /// don't have a peek-then-stream API. Per-node streaming is deferred to v1.2 (would require
+    /// either a cache refactor or bypassing the cache for streaming, both out of v1.1 scope).
+    /// </para>
+    /// <para>
+    /// <b>Cache-hit short-circuit</b>: when the cache serves the answer (synchronous fast path),
+    /// we emit <c>progress {step: "cache_hit"}</c> + <c>result</c> immediately per spike
+    /// Section D. R5's chat agent treats cache-hit as instant render.
+    /// </para>
+    /// </remarks>
+    private async IAsyncEnumerable<AssistantQueryChunk> StreamPlaybookPathAsync(
+        AssistantQueryFacadeRequest request,
+        AssistantToolCallHandler.RoutingDecision routing,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var canonicalName = _assistantHandler.ResolvePlaybookCanonicalName(routing.ClassifierPlaybookHint);
+        var playbookId = _playbookNameMap.CurrentValue.ResolveOrDefault(canonicalName);
+        if (playbookId == Guid.Empty)
+        {
+            // Same error path as the single-shot handler — InvalidOperationException with the
+            // canonical "Default playbook" message. Endpoint catches and maps to 503 with
+            // errorCode = "ai.assistant-default-playbook.unconfigured" BEFORE the stream opens
+            // (this throws before the first chunk yields from this method). Caller must
+            // catch BEFORE calling MoveNextAsync past the first chunk.
+            throw new InvalidOperationException(
+                $"Default playbook '{canonicalName}' is not configured in 'Insights:Playbooks:NameMap:Map'. " +
+                "Configure the playbook Guid per-environment OR omit forceMode to let the classifier route the query.");
+        }
+
+        yield return new AssistantQueryChunk
+        {
+            Type = "progress",
+            Step = "playbook_started",
+            Content = canonicalName
+        };
+
+        // Build playbook request (same shape as AssistantToolCallHandler.ExecutePlaybookPathAsync).
+        var playbookRequest = new InsightsAgentRequest(
+            Question: playbookId,
+            Subject: request.Subject,
+            Parameters: null,
+            TenantId: request.TenantId,
+            AccessibleScopeHash: AssistantToolCallHandler.ComputeAccessibleScopeHash(request.TenantId, request.CallerOid));
+
+        // Invoke single-shot AnswerQuestionAsync (cache-aware). FeatureDisabledException
+        // propagates unchanged.
+        var agentResult = await AnswerQuestionAsync(playbookRequest, cancellationToken).ConfigureAwait(false);
+
+        // Cache-hit short-circuit per F1 spike Section D — emit single cache_hit progress
+        // then go straight to result. No coarse-grained playbook_complete (semantically
+        // redundant when CacheHit signals "no engine ran").
+        if (agentResult.CacheHit)
+        {
+            yield return new AssistantQueryChunk { Type = "progress", Step = "cache_hit" };
+        }
+        else
+        {
+            yield return new AssistantQueryChunk { Type = "progress", Step = "playbook_complete" };
+        }
+
+        var facadeResult = _assistantHandler.BuildPlaybookResult(
+            agentResult, canonicalName, routing.IntentSource, routing.BelowThreshold)
+            with
+        { DurationMs = agentResult.ProcessingTimeMs };
+
+        yield return new AssistantQueryChunk { Type = "result", Result = facadeResult };
+    }
+
+    /// <summary>
+    /// Build the grounded-synthesis prompt for the RAG path. Identical shape to
+    /// <see cref="SynthesizeGroundedSummaryAsync"/> so the streamed answer matches the
+    /// single-shot answer for the same input. Factored out for reuse by the streaming path.
+    /// </summary>
+    private static string BuildGroundedSynthesisPrompt(
+        string query,
+        string parentEntityType,
+        string parentEntityId,
+        IReadOnlyList<InsightsSearchHit> hits)
+    {
+        var contextBuilder = new StringBuilder();
+        for (int i = 0; i < hits.Count; i++)
+        {
+            var hit = hits[i];
+            contextBuilder
+                .Append('[').Append(i + 1).Append("] ")
+                .Append(hit.DocumentName)
+                .Append(" — ")
+                .Append(hit.Snippet)
+                .AppendLine();
+        }
+
+        return
+            "You are a legal research assistant answering questions about a specific " +
+            $"{parentEntityType} (id: {parentEntityId}). " +
+            "Answer the user's question using ONLY the numbered context snippets below. " +
+            "Cite every factual claim with [n] referring to the snippet it came from. " +
+            "If the snippets do not contain enough information to answer, say so plainly. " +
+            "Do NOT fabricate facts not present in the snippets.\n\n" +
+            $"Question: {query}\n\n" +
+            "Context:\n" +
+            contextBuilder.ToString() + "\n" +
+            "Answer (with [n] citations):";
     }
 
     /// <inheritdoc />
