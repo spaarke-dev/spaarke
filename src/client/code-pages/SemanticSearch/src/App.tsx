@@ -103,11 +103,10 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
     overflow: 'hidden',
   },
-  // Unified command bar row (task 035 UI alignment, 2026-06-04). Holds the
-  // SearchCommandBar (Refresh + Columns + Delete + overflow), then the view
-  // tabs (icon-only), then visualization settings. Everything right-aligned
-  // via `justifyContent: flex-end` per operator directive — replaces the
-  // prior two-row split AND the left-leaning layout.
+  // Unified command bar row (task 035 UI alignment v4 — operator UAT
+  // 2026-06-04). Holds the SearchCommandBar (Refresh + Columns + Delete +
+  // overflow), then the view tabs (icon-only), then visualization settings.
+  // Everything right-aligned via `justifyContent: flex-end`.
   commandBar: {
     display: 'flex',
     alignItems: 'center',
@@ -119,6 +118,17 @@ const useStyles = makeStyles({
     columnGap: tokens.spacingHorizontalS,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground1,
+  },
+  // Vertical separator — replaces Fluent v9 `<Divider vertical>` which has
+  // `flex-grow: 1` baked into its default style (Divider is designed to
+  // *push apart* the items around it, the opposite of what we want here).
+  // Fixed 1px width + flexShrink: 0 so it stays a thin static line.
+  // Task 035 UI alignment v4 (2026-06-04).
+  commandBarSeparator: {
+    width: '1px',
+    height: '20px',
+    backgroundColor: tokens.colorNeutralStroke2,
+    flexShrink: 0,
   },
   contentRow: {
     display: 'flex',
@@ -486,9 +496,9 @@ export const App: React.FC<AppProps> = ({
           hiddenColumns={hiddenColumns}
           onHiddenColumnsChange={setHiddenColumns}
         />
-        <Divider vertical style={{ height: '20px' }} />
+        <span className={styles.commandBarSeparator} aria-hidden="true" />
         <ViewToggleToolbar viewMode={viewMode} onViewModeChange={setViewMode} />
-        <Divider vertical style={{ height: '20px' }} />
+        <span className={styles.commandBarSeparator} aria-hidden="true" />
         <VisualizationSettings
           viewMode={viewMode}
           threshold={filters.threshold}
