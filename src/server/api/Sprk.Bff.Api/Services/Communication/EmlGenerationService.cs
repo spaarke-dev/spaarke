@@ -91,10 +91,19 @@ public sealed class EmlGenerationService
         return new EmlResult(bytes, fileName);
     }
 
+    // Windows reserves a stricter superset of invalid filename characters than Linux,
+    // and .eml files are routinely opened on Windows clients (Outlook). Use the
+    // Windows-strict set explicitly so the output is portable regardless of the host
+    // OS that generated the file. Linux Path.GetInvalidFileNameChars() returns only
+    // {'\0','/'}, which would leave '<', '>', '"', etc. in filenames written from a
+    // Linux runner — those filenames break on Windows clients.
+    private static readonly HashSet<char> s_invalidFileNameChars = new(
+        Path.GetInvalidFileNameChars()
+            .Concat(new[] { '<', '>', ':', '"', '/', '\\', '|', '?', '*' }));
+
     private static string SanitizeFileName(string input)
     {
-        var invalid = Path.GetInvalidFileNameChars();
-        var sanitized = new string(input.Where(c => !invalid.Contains(c)).ToArray());
+        var sanitized = new string(input.Where(c => !s_invalidFileNameChars.Contains(c)).ToArray());
         return sanitized.Length > 50 ? sanitized[..50] : sanitized;
     }
 }
