@@ -56,7 +56,7 @@
 | 032 | Retire @spaarke/events-components/{GridSection,AssignedToFilter,RecordTypeFilter,StatusFilter} | STANDARD | ✅ | 031 | D1 | 034 |
 | 033 | SpaarkeAi Calendar widget migrate to new DataGrid — UQ-06 (+ `hostFilters` framework extension) | FULL | ✅ | 030,031 | D1 | 034 |
 | 034 | Phase D deploy (EventsPage + sprk_event record + Calendar widget) | STANDARD | ✅ | 031,032,033 | — | 035 |
-| 035 | Phase D UAT (4 modes + record-link bug closure) | STANDARD | 🔲 | 034 | — | — |
+| 035 | Phase D UAT (4 modes + record-link bug closure) | STANDARD | 🔄 | 034 | — | — |
 
 ### Phase E — SemanticSearch Migration (3 tasks)
 
