@@ -6,6 +6,13 @@
     <title>Legal Workspace</title>
     <style>
       /* Reset for Dataverse iframe context — prevents double scrollbars and margin gaps */
+      /* `box-sizing: border-box` is REQUIRED — without it, the DataGrid root's
+         inner padding adds to the 100%-of-viewport size and the Calendar widget
+         grid overflows the workspace section frame. Parity with sprk_invoicespage.
+         Added 035-fix-iteration-3 (2026-06-03). */
+      *, *::before, *::after {
+        box-sizing: border-box;
+      }
       html, body, #root {
         margin: 0;
         padding: 0;

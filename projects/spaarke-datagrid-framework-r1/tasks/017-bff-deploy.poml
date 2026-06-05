@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Deploy BFF Phase B endpoints to Azure App Service via bff-deploy skill</title>
+    <phase>2: Phase B — BFF Passthrough</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>015,016</dependencies>
+    <blocks>023,024,026,033,041</blocks>
+    <tags>deploy, azure, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task using bff-deploy skill; verifies cache hit rate + publish size post-deploy; honors ADR-029</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment; final Phase B step</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy `Sprk.Bff.Api` with the 5 new Dataverse passthrough endpoints to the dev Azure App Service via the `bff-deploy` skill. Post-deploy: verify all 5 endpoints respond, verify cache hit rate >95% on warm cache, verify publish size within ADR-029 baseline ratchet.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in `bff-deploy` skill, ADR-029 publish hygiene (framework-dependent linux-x64, sourcemap exclusion, baseline ratchet), and Azure Application Insights telemetry.
+  </role>
+
+  <goal>
+    BFF deployed; 5 endpoints live; cache hit rate >95% on second-call test; publish size within ADR-029 budget; Application Insights confirms no error spike.
+  </goal>
+
+  <context>
+    <background>
+      Per spec NFR-08 (cache TTLs) and ADR-029 (publish hygiene). The bff-deploy skill handles the full deploy mechanics. Post-deploy verification confirms the cache strategy works in Redis (not just in-memory dev) and that the 5 endpoints are reachable. Verify via `curl` smoke test + Application Insights query.
+    </background>
+    <relevant-files>
+      <file>scripts/deploy/Deploy-SdapBffApi.ps1</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-029">Framework-dependent linux-x64, sourcemap exclusion, transitive CVE override, size baseline ratchet.</constraint>
+    <constraint source="ADR-019">ProblemDetails returned correctly post-deploy (verify with negative test).</constraint>
+    <constraint source="project">Deploy to DEV environment only in this task; production deploy is gated until UAT (later phases).</constraint>
+    <constraint source="project">Cache hit rate verification: hit each cached endpoint twice; second call should be &lt;100ms (in-memory) or &lt;200ms (Redis hop) — indicates cache hit.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Invoke `bff-deploy` skill against dev environment.</step>
+    <step order="2">Wait for deploy completion; verify App Service slot is "Running".</step>
+    <step order="3">Smoke test all 5 endpoints via `curl` with valid JWT: `/savedquery/{guid}`, `/savedqueries/account`, `/metadata/account`, `POST /fetch`, `/record/account/{guid}`. Expect 200s with correct payloads.</step>
+    <step order="4">Cache hit rate test: hit `/metadata/account` twice in succession. Check Application Insights for two requests; verify second has shorter duration.</step>
+    <step order="5">Negative test: hit endpoint with caller lacking Read privilege; verify 403 ProblemDetails.</step>
+    <step order="6">Publish size check: compare published artifact size to baseline per ADR-029. Document delta.</step>
+    <step order="7">Application Insights query: error rate, p50/p95 latency for the 5 new endpoints (15-minute window post-deploy). Document.</step>
+    <step order="8">Update TASK-INDEX (017 ✅); mark Phase B complete.</step>
+    <step order="9">Document post-deploy metrics in `notes/phase-b-deploy-report.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="bff-deploy">Skill for actual deploy</tool>
+    <tool name="curl">Smoke testing</tool>
+    <tool name="az cli">Application Insights queries</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/phase-b-deploy-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the 5 endpoints post-deploy, when smoke-tested, then all return 200 with correct payloads.</criterion>
+    <criterion testable="true">Given second call to a cached endpoint within TTL, when run, then response latency is significantly lower than first call (indicating cache hit).</criterion>
+    <criterion testable="true">Given publish size measurement, when compared to baseline, then within ADR-029 ratchet budget.</criterion>
+    <criterion testable="true">Given Application Insights query (15-min post-deploy), when reviewed, then no error spike and p50 latency &lt;500ms for the new endpoints.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    DEV deploy only. Production deploy is later (after UAT). If publish size exceeds baseline, do NOT force-push — investigate (often a transitive package surge). Per CLAUDE.md §10 and ADR-029, size discipline is enforced project-by-project.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/bff-deploy/SKILL.md</skill>
+    <protocol>Use bff-deploy skill; perform all post-deploy verification steps; capture metrics in notes/.</protocol>
+  </execution>
+</task>

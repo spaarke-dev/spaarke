@@ -401,9 +401,6 @@ const ConfigCountGrid: React.FC<ConfigCountGridProps> = ({ containerCountByConfi
  *
  * Dark mode: uses Fluent v9 design tokens only (ADR-021). Theme is applied
  * by the parent FluentProvider in App.tsx — no extra wiring needed here.
- *
- * ADR-012: Simple table used for the activity grid (see RecentActivityGrid
- * comment for rationale vs. UniversalDatasetGrid).
  */
 export const DashboardPage: React.FC = () => {
   const styles = useStyles();

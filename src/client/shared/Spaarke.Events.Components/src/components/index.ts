@@ -18,30 +18,17 @@ export type {
   CalendarDrawerProps,
 } from './CalendarSection';
 
-// CalendarFilterPane — record-form side pane filter builder (R4 task 055 B-6
-// Option B). Intentionally coexists with CalendarSection (workspace widget);
-// different user intents. See CalendarFilterPane.tsx header for details.
-export { CalendarFilterPane, toIsoDateString } from './CalendarFilterPane';
-export type {
-  CalendarFilterPaneProps,
-  CalendarFilterPaneOutput,
-  CalendarFilterPaneSingle,
-  CalendarFilterPaneRange,
-  CalendarFilterPaneClear,
-  CalendarFilterPaneFilterType,
-} from './CalendarFilterPane';
-
-export { GridSection } from './GridSection';
-export type { GridSectionProps, IEventRecord } from './GridSection';
-
-export { AssignedToFilter } from './AssignedToFilter';
-export type { AssignedToFilterProps, IUserOption } from './AssignedToFilter';
-
-export { RecordTypeFilter } from './RecordTypeFilter';
-export type { RecordTypeFilterProps, IEventTypeOption } from './RecordTypeFilter';
-
-export { StatusFilter, getStatusOptions, getActionableStatuses } from './StatusFilter';
-export type { StatusFilterProps, IStatusOption } from './StatusFilter';
+// AssignedToFilter, RecordTypeFilter, StatusFilter — RETIRED in task 032
+// (2026-06-03). The new framework's auto-derived filter chips supersede the
+// hand-rolled filter components, and the EventsPage host (rewritten in
+// task 031) no longer mounts them. Re-exports removed; directories deleted.
+// `useAssignedToFilter` + `useStatusFilter` hooks live in
+// `context/EventsPageContext.tsx` and remain available via that barrel.
+//
+// GridSection — RETIRED in task 033b (2026-06-03). Its last consumer
+// (`widgets/CalendarWorkspaceWidget`) migrated to `<DataGrid configId hostFilters/>`
+// (the @spaarke/ui-components DataGrid framework). Directory deleted; barrel
+// re-exports removed. See projects/spaarke-datagrid-framework-r1/notes/drafts/033b-deviations.md.
 
 export { ColumnFilterHeader } from './ColumnFilterHeader';
 export type { ColumnFilterHeaderProps, ColumnFilterType, ColumnFilterOption } from './ColumnFilterHeader';

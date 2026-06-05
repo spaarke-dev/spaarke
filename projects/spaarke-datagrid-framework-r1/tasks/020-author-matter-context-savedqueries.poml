@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Author Matter-context savedqueries for sprk_kpiassessment + sprk_invoice (UQ-04 resolution)</title>
+    <phase>3: Phase C — Matter UI Drill-throughs</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>021,022,025</blocks>
+    <tags>dataverse, solution, schema</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Dataverse record authoring; UQ-04 resolution (owner clarification needed before configjson can reference)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Resolves UQ-04 (column layout decision); blocks downstream configjson authoring</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Resolve UQ-04 (concrete column layouts for sprk_kpiassessment + sprk_invoice Matter-context views) by interviewing the owner (Ralph) on which fields each savedquery should display. Then author two savedqueries in Dataverse: one for `sprk_kpiassessment` (Matter Health drill-through) and one for `sprk_invoice` (Budget Performance drill-through). Both filter by the current Matter ID (passed via URL params from VisualHost CardChrome).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse savedquery records, FetchXML query syntax, layoutXml, and parent-context filter parameter passing via Custom Page URL.
+  </role>
+
+  <goal>
+    Two new savedquery records exist in Dataverse: `sprk_kpiassessment_matter_context_view` and `sprk_invoice_matter_context_view`. Both correctly filter by Matter ID parameter and render expected columns per Ralph's spec.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-CON-01, FR-CON-02, UQ-04. The Matter Health drill-through dialog displays related KPI assessments for the current Matter (passed as `filterField=sprk_matter_lookup, filterValue={matterId}` URL params). Same pattern for Budget Performance → Invoices. The column list per view is a Ralph decision — interview him for: KPI view columns (likely: Name, Score, Status, Updated date) and Invoice view columns (likely: Number, Amount, Status, Due date, Paid date).
+    </background>
+    <relevant-files>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/020-savedquery-column-layouts.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Both savedqueries MUST accept Matter ID as filter parameter via FetchXML `&lt;filter&gt;&lt;condition attribute='sprk_matter_lookup' operator='eq-userid' value='@MatterId'/&gt;&lt;/filter&gt;` pattern (or appropriate dynamic-value syntax).</constraint>
+    <constraint source="project">layoutXml must define column widths matching MDA OOB visual density.</constraint>
+    <constraint source="project">`statecode = 0` only (active records); `querytype = 0` (saved view).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Interview Ralph (escalation point): what columns should KPI Assessment Matter-context view show? Order? Widths? Sort order?</step>
+    <step order="2">Same for Invoice view.</step>
+    <step order="3">Document answers in `notes/drafts/020-savedquery-column-layouts.md`.</step>
+    <step order="4">Use `dataverse-create-schema` skill OR Dataverse MCP tools (`mcp__dataverse__create_record`) to author the 2 savedquery records with appropriate FetchXML + layoutXml.</step>
+    <step order="5">Validate both savedqueries via direct call: `GET /api/data/v9.2/savedqueries({savedqueryid})` returns the record correctly.</step>
+    <step order="6">Document savedQueryIds in `notes/drafts/020-savedquery-ids.md` for tasks 021 + 022 reference.</step>
+    <step order="7">Update TASK-INDEX (020 ✅); unblock 021 + 022.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-create-schema">Skill for authoring savedqueries</tool>
+    <tool name="dataverse MCP">Authoring + validation</tool>
+    <tool name="Edit">Document column layouts</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/020-savedquery-column-layouts.md</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/020-savedquery-ids.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given Ralph's column choices, when 2 savedqueries are created in Dataverse, then both are queryable via Web API.</criterion>
+    <criterion testable="true">Given a sample Matter ID, when each savedquery's FetchXML is run with that filter, then results filter correctly to that Matter.</criterion>
+    <criterion testable="true">Given documented savedQueryIds, when tasks 021 + 022 read them, then they can build configjson `source.savedQueryId` references.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    🔔 HUMAN ESCALATION POINT — UQ-04 requires Ralph's decision on column layouts. Don't proceed past step 2 without explicit answers documented. Once savedQueryIds are documented, tasks 021 + 022 can run in parallel.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Begin with owner interview. Document choices BEFORE authoring records. Use dataverse-create-schema skill for the create.</protocol>
+  </execution>
+</task>

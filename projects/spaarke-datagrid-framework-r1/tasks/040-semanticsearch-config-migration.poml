@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Migrate SemanticSearch sprk_gridconfiguration record to v1.0 schema</title>
+    <phase>5: Phase E — SemanticSearch Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>009</dependencies>
+    <blocks>041,042</blocks>
+    <tags>dataverse, schema, migration</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Schema migration; data preservation critical (SS uses custom fetchXml/layoutXml)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single Dataverse record migration; foundation for Phase E</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Update SemanticSearch's `sprk_gridconfiguration` record (`d99a4352-4913-f111-8343-7ced8d1dc988`): migrate `sprk_configjson` from `{_type: "semantic-search-view", domain, columns, defaultSort}` to v1.0 schema with `source.type = "inline"` preserving the existing custom fetchXml/layoutXml. Per FR-MIG-06.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in `sprk_configjson` v1.0 schema (task 001) and data migration patterns (preserve existing behavior).
+  </role>
+
+  <goal>
+    SemanticSearch config record updated with v1.0 schema; SS code page renders identically post-migration (verified in task 042).
+  </goal>
+
+  <context>
+    <background>
+      Per FR-MIG-06. SemanticSearch's existing configjson is a custom shape predating v1.0 schema. Migration preserves all existing behavior — fetchXml + layoutXml remain unchanged; only the wrapper schema changes. Source type becomes `inline` (provides custom fetchXml directly) rather than `savedquery` (which would require authoring a new savedquery).
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/040-ss-pre-migration-configjson.json</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/040-ss-post-migration-configjson.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">PRESERVE the existing fetchXml + layoutXml — do not alter query semantics.</constraint>
+    <constraint source="project">v1.0 schema MUST validate via `isValidConfigJson`.</constraint>
+    <constraint source="project">Pre-migration backup of original configjson captured.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>docs/guides/CONFIGURATION-MATRIX.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">BACKUP: fetch the existing SS configjson via `mcp__dataverse__read_query`; save to `notes/drafts/040-ss-pre-migration-configjson.json`.</step>
+    <step order="2">Translate to v1.0 schema: `{ _version: "1.0", source: { type: "inline", fetchXml: <existing>, layoutXml: <existing>, entityName: <from old domain field> }, display: { densityDefault: "small" }, filterChips: { mode: "denylist", denylist: [...] }, commandBar: { actions: [...] }, rowOpen: { type: "navigateToForm" } }`. Author in `notes/drafts/040-ss-post-migration-configjson.json`.</step>
+    <step order="3">Validate via `isValidConfigJson`.</step>
+    <step order="4">Update record via `mcp__dataverse__update_record(record_id="d99a4352-...", sprk_configjson=<JSON>)`.</step>
+    <step order="5">Smoke test: fetch record again; verify `sprk_configjson` matches expected.</step>
+    <step order="6">Update TASK-INDEX (040 ✅); unblock 041.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse MCP">read_query + update_record</tool>
+    <tool name="Edit">Document pre/post</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/040-ss-pre-migration-configjson.json</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/040-ss-post-migration-configjson.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the pre-migration backup, when captured, then it accurately reflects current state.</criterion>
+    <criterion testable="true">Given the new configjson, when validated, then `isValidConfigJson` returns true.</criterion>
+    <criterion testable="true">Given the record post-update, when retrieved, then `sprk_configjson._version === "1.0"` and inline fetchXml preserved.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The "inline" source type is the key — it lets us migrate without authoring a new savedquery for SS. If SS ever wants to leverage savedquery (e.g. for paging cookie), that's a future migration.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Backup BEFORE update. Validate JSON BEFORE Dataverse update.</protocol>
+  </execution>
+</task>

@@ -18,7 +18,7 @@
 
 import { useState, useCallback } from 'react';
 import { makeStyles, tokens, mergeClasses, Textarea, Button, Label, Text } from '@fluentui/react-components';
-import { ChevronDoubleLeft20Regular, ChevronDoubleRight20Regular, Search20Regular } from '@fluentui/react-icons';
+import { ChevronDoubleLeft20Regular, ChevronDoubleRight20Regular } from '@fluentui/react-icons';
 import type { SearchDomain, SearchFilters, FilterOption, SavedSearch } from '../types';
 import { SearchDomainTabs } from './SearchDomainTabs';
 import { FilterDropdown } from './FilterDropdown';
@@ -64,6 +64,13 @@ export interface SearchFilterPaneProps {
   onSaveCurrentSearch: () => void;
   /** Whether saved searches are loading */
   isSavedSearchesLoading: boolean;
+  /**
+   * Cancel handler — clears AI Search query + all filters + active saved-search
+   * selection, returning the pane to its initial state. Added in task 035 UI
+   * alignment (operator directive 2026-06-04). Matches the EventsPage Calendar
+   * widget's "Clear" semantics.
+   */
+  onCancel: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +155,15 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalM,
   },
-  searchButton: {
+  // Button row — Spaarke standard pattern: small Search (primary) + Cancel
+  // (subtle), no icons, right-aligned. Matches the EventsPage Calendar widget
+  // Apply/Clear (top-right of its filter row) and Power Apps dialog Save/Cancel
+  // convention. Task 035 UI alignment v3 (operator 2026-06-04 — "the search
+  // and cancel should be on the right side").
+  actionRow: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    columnGap: tokens.spacingHorizontalS,
     marginTop: tokens.spacingVerticalM,
   },
 });
@@ -173,6 +188,7 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
   onSelectSavedSearch,
   onSaveCurrentSearch,
   isSavedSearchesLoading,
+  onCancel,
 }) => {
   const styles = useStyles();
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -353,16 +369,20 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
         <DateRangeFilter value={filters.dateRange} onChange={handleDateRangeChange} />
       </div>
 
-      {/* Search Button */}
-      <Button
-        className={styles.searchButton}
-        appearance="primary"
-        icon={<Search20Regular />}
-        onClick={handleSearch}
-        disabled={isLoading}
-      >
-        Search
-      </Button>
+      {/* Action row — Spaarke standard pattern (matches the EventsPage
+          Calendar widget Apply/Clear in src/client/shared/Spaarke.Events
+          .Components/src/widgets/CalendarWorkspaceWidget/): size="small",
+          no icons, primary + subtle. Task 035 UI alignment v2 — operator
+          flagged that the prior default-sized + iconed version didn't
+          match standard. */}
+      <div className={styles.actionRow}>
+        <Button appearance="primary" size="small" onClick={handleSearch} disabled={isLoading}>
+          Search
+        </Button>
+        <Button appearance="subtle" size="small" onClick={onCancel} aria-label="Clear search criteria">
+          Cancel
+        </Button>
+      </div>
     </div>
   );
 };

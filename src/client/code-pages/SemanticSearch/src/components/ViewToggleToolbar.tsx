@@ -8,7 +8,15 @@
  */
 
 import React, { useCallback } from 'react';
-import { makeStyles, tokens, ToggleButton } from '@fluentui/react-components';
+import {
+  makeStyles,
+  tokens,
+  TabList,
+  Tab,
+  Tooltip,
+  type SelectTabData,
+  type SelectTabEvent,
+} from '@fluentui/react-components';
 import {
   TextBulletListSquareRegular,
   DataScatterRegular,
@@ -71,19 +79,15 @@ const VIEW_BUTTONS: ViewButtonConfig[] = [
 // =============================================
 
 const useStyles = makeStyles({
-  toolbar: {
+  // TabList — `width: fit-content` so the parent `commandBar` row's
+  // `justifyContent: flex-end` can push the tabs to the right. Without it
+  // Fluent's TabList stretches when used as a flex child.
+  // Task 035 UI alignment v3 (operator screenshot 2026-06-04).
+  tabList: {
+    width: 'fit-content',
     display: 'flex',
     alignItems: 'center',
-    width: '100%',
-    gap: tokens.spacingHorizontalS,
-  },
-  spacer: {
-    flex: 1,
-  },
-  toggleGroup: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXXS,
+    columnGap: tokens.spacingHorizontalXXS,
   },
 });
 
@@ -94,33 +98,29 @@ const useStyles = makeStyles({
 export const ViewToggleToolbar: React.FC<ViewToggleToolbarProps> = ({ viewMode, onViewModeChange }) => {
   const styles = useStyles();
 
-  const handleClick = useCallback(
-    (mode: ViewMode) => () => {
-      onViewModeChange(mode);
+  const handleSelect = useCallback(
+    (_ev: SelectTabEvent, data: SelectTabData) => {
+      onViewModeChange(data.value as ViewMode);
     },
     [onViewModeChange]
   );
 
   return (
-    <div className={styles.toolbar}>
-      <div className={styles.spacer} />
-
-      <div className={styles.toggleGroup}>
-        {VIEW_BUTTONS.map(btn => (
-          <ToggleButton
-            key={btn.mode}
-            checked={viewMode === btn.mode}
-            onClick={handleClick(btn.mode)}
-            icon={btn.icon}
-            size="small"
-            appearance={viewMode === btn.mode ? 'primary' : 'subtle'}
-            aria-label={btn.ariaLabel}
-          >
-            {btn.label}
-          </ToggleButton>
-        ))}
-      </div>
-    </div>
+    <TabList
+      className={styles.tabList}
+      selectedValue={viewMode}
+      onTabSelect={handleSelect}
+      size="small"
+      appearance="transparent"
+    >
+      {/* Icon-only tabs per operator directive 2026-06-04. Tooltip on each
+          tab surfaces the label for accessibility + discoverability. */}
+      {VIEW_BUTTONS.map(btn => (
+        <Tooltip key={btn.mode} content={btn.label} relationship="label">
+          <Tab value={btn.mode} icon={btn.icon} aria-label={btn.ariaLabel} />
+        </Tooltip>
+      ))}
+    </TabList>
   );
 };
 

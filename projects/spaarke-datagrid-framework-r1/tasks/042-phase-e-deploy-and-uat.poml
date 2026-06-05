@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Phase E deploy + UAT (SS code page zero-regression visual diff + scenarios)</title>
+    <phase>5: Phase E — SemanticSearch Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>040,041</dependencies>
+    <blocks>none</blocks>
+    <tags>deploy, dataverse, testing, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deploy + UAT combined; visual diff acceptance gate</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Combined deploy + UAT for Phase E (3 tasks total)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy refactored SS code page via `code-page-deploy`. Verify config record (task 040) is live. Run existing SS UAT scenarios; visual diff vs. pre-migration screenshot. Confirm zero regression per FR-MIG-07 acceptance.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer / UAT tester.
+  </role>
+
+  <goal>
+    SS code page deployed; all existing UAT scenarios pass; visual diff shows zero regression.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-MIG-06/07 acceptance criteria. SS has multiple existing UAT scenarios (query, filter, sort, navigate) — all must pass post-migration. Visual diff is the gate per FR-MIG-07.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-datagrid-framework-r1/notes/phase-e-uat-report.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">DEV deploy only.</constraint>
+    <constraint source="project">Zero visual regression.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build SS code page (`npm run build`).</step>
+    <step order="2">Invoke `code-page-deploy` for SS.</step>
+    <step order="3">Verify SS config record (from task 040) live in Dataverse.</step>
+    <step order="4">Run existing SS UAT scenarios — Ralph or designate enumerates the test set (query, filter, sort, pagination, navigate to result).</step>
+    <step order="5">Capture post-migration screenshot; visual diff vs. pre-migration (from task 041).</step>
+    <step order="6">Document UAT findings in `notes/phase-e-uat-report.md`.</step>
+    <step order="7">Update TASK-INDEX (042 ✅); mark Phase E complete.</step>
+  </steps>
+
+  <tools>
+    <tool name="code-page-deploy">Skill</tool>
+    <tool name="ui-test">If Chrome integration available</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/phase-e-uat-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given SS code page deployed, when opened, then renders correctly.</criterion>
+    <criterion testable="true">Given existing UAT scenarios, when re-run, then all pass.</criterion>
+    <criterion testable="true">Given visual diff, when compared, then zero regression.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="SS UAT scenarios">
+      <url>SS code page URL</url>
+      <steps>
+        <step>Run query; verify results render</step>
+        <step>Apply filter; verify filtered results</step>
+        <step>Sort; verify sort works</step>
+        <step>Click result; verify navigates correctly</step>
+      </steps>
+      <expected>All scenarios pass; no regression</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    DEV deploy only. Phase E is the smallest phase (3 tasks) because SS migration is largely already-implemented (SS was the inspiration for the framework).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Deploy + UAT + visual diff. Document.</protocol>
+  </execution>
+</task>

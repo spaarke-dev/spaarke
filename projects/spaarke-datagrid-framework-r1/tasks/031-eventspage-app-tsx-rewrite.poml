@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Rewrite EventsPage/App.tsx as ~150-line thin host (DataGrid + Calendar pane + BulkUpdateEventStatus handler)</title>
+    <phase>4: Phase D — EventsPage Migration</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>009,030</dependencies>
+    <blocks>032,034</blocks>
+    <tags>fluent-ui, frontend, react, e2e-test, migration</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Significant refactor of EventsPage from ~1500 lines to ~150; framework adoption proof point; ADR-021/022/026/028</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `src/solutions/EventsPage/src/App.tsx` exclusively; serial integration of framework</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Rewrite `src/solutions/EventsPage/src/App.tsx` as a ~150-line thin host that: registers Event-specific handlers (`BulkUpdateEventStatus` for Mark Complete / Cancel / Reassign / Archive that the existing `executeBulkStatusUpdate` supports), mounts the Calendar pane in `Xrm.App.sidePanes`, and passes `configId={<from task 030>}` to `<DataGrid />`. Drops `IEventRecord` interface. Calendar pane mutual exclusivity with Event detail pane preserved.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Custom Page React 18, MDA side pane lifecycle (`Xrm.App.sidePanes`), and Spaarke framework adoption patterns.
+  </role>
+
+  <goal>
+    `App.tsx` is ≤200 lines, no `IEventRecord`, Calendar pane preserved, `BulkUpdateEventStatus` handler registered, all 4 modes (system / dialog / embedded / standalone) work, record-link bug closed.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-MIG-02 + FR-MIG-04. The existing `App.tsx` is ~1500 lines of Event-specific grid + filter + CRUD + Calendar logic. Most of it now lives in the framework. The new App.tsx is a thin shell: URL param parse → register handlers → mount FluentProvider + DataGrid + Calendar pane (in Xrm.App.sidePanes). Per design.md §11.5.3, the 4 CRUD operations (`openNewEventForm`, `deleteSelectedEvents`, `executeBulkStatusUpdate`, `openEventDetailPane`) move to framework defaults; only `BulkUpdateEventStatus` (the multi-status registry handler) needs Event-specific registration.
+    </background>
+    <relevant-files>
+      <file>src/solutions/EventsPage/src/App.tsx</file>
+      <file>src/solutions/EventsPage/src/registerEventHandlers.ts</file>
+      <file>src/solutions/EventsPage/src/main.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only; tokens; dark mode.</constraint>
+    <constraint source="ADR-022">React-16-safe imports avoided in framework code; Custom Page can use React 18.</constraint>
+    <constraint source="ADR-026">Vite + vite-plugin-singlefile + React 19 pattern (existing EventsPage already on this).</constraint>
+    <constraint source="ADR-028">All BFF calls via authenticatedFetch (if EventsPage uses BFF; otherwise XrmDataverseClient default).</constraint>
+    <constraint source="project">App.tsx ≤200 lines.</constraint>
+    <constraint source="project">No `IEventRecord` interface in App.tsx — generic record handling only.</constraint>
+    <constraint source="project">Calendar pane mutual exclusivity with Event detail pane preserved.</constraint>
+    <constraint source="project">`rowOpen` default (`webResource`) from configjson — uses `Xrm.Navigation.navigateTo({pageType:"webresource"})` for record links → bug closure.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/design.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/030-config-record-id.md</file>
+    </files>
+    <patterns>
+      <pattern name="executeBulkStatusUpdate lift" location="src/solutions/EventsPage/src/App.tsx#L731">Lift the bulk update pattern into framework `BulkUpdateField` handler; EventsPage registers an Event-specific variant.</pattern>
+      <pattern name="Xrm.App.sidePanes Calendar" location="src/solutions/EventsPage/src/App.tsx">Existing Calendar pane mount logic — preserve.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/fluent-v9-component` skill Step 0.5 checklist.</step>
+    <step order="2">Audit existing App.tsx: identify what stays (Calendar pane, handler registration), what moves to framework (CRUD ops, grid, filters), what's deleted (IEventRecord, Event-specific filter components).</step>
+    <step order="3">Author new `App.tsx` (~150 lines): parse URL params → register `BulkUpdateEventStatus` handler → mount `<FluentProvider applyStylesToPortals>` + `<DataGrid configId={EVENT_CONFIG_ID} dataverseClient={new XrmDataverseClient()}/>` + Calendar pane in `Xrm.App.sidePanes`.</step>
+    <step order="4">Author `registerEventHandlers.ts`: exports `registerEventHandlers(registry)` that calls `registry.registerCommandHandler("BulkUpdateEventStatus", (selectedIds, args) => ...)` lifting from existing `executeBulkStatusUpdate`.</step>
+    <step order="5">Preserve Calendar pane mutual exclusivity — if Event detail pane opens, Calendar collapses; vice versa.</step>
+    <step order="6">Delete `IEventRecord` and any Event-typed grid components from App.tsx (they're now in framework).</step>
+    <step order="7">Build (`npm run build` in `src/solutions/EventsPage/`); verify single-file HTML output.</step>
+    <step order="8">Local dev test: `npm run dev`; verify mock URL renders.</step>
+    <step order="9">Verify line count: `wc -l src/solutions/EventsPage/src/App.tsx` shows ≤200.</step>
+    <step order="10">Grep for forbidden: `grep -E 'IEventRecord|GridSection|AssignedToFilter|RecordTypeFilter|StatusFilter' src/solutions/EventsPage/src/App.tsx` returns nothing.</step>
+    <step order="11">Update TASK-INDEX (031 ✅).</step>
+    <step order="12">Document deviations in `notes/drafts/031-deviations.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + Vite dev</tool>
+    <tool name="grep">Verify forbidden patterns removed</tool>
+    <tool name="Edit">Rewrite App.tsx</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/EventsPage/src/App.tsx (rewritten)</output>
+    <output type="code">src/solutions/EventsPage/src/registerEventHandlers.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `wc -l src/solutions/EventsPage/src/App.tsx`, when run, then result is ≤200 lines.</criterion>
+    <criterion testable="true">Given grep for `IEventRecord` in App.tsx, when run, then zero matches.</criterion>
+    <criterion testable="true">Given dev build, when run, then single-file HTML output produced.</criterion>
+    <criterion testable="true">Given local dev mount with mock URL, when DataGrid renders, then Event rows visible with allowlist chips (4 chips).</criterion>
+    <criterion testable="true">Given `BulkUpdateEventStatus` handler invoked with mock selectedIds + payload, when run, then bulk Promise.all delete/update fires correctly.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="EventsPage all 4 modes (UAT in task 035)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=custom&amp;name=sprk_eventspage</url>
+      <steps>
+        <step>Open EventsPage in system mode; verify renders</step>
+        <step>Verify Calendar pane visible</step>
+        <step>Click row; verify record opens (record-link bug closure check)</step>
+        <step>Toggle dark mode; re-verify</step>
+      </steps>
+      <expected>Renders identically pre/post migration; record-link works in dialog</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    The biggest refactor in the project. The line count target (≤200) is the proof point — if the host can't shrink to that, something's wrong with the framework abstraction. Calendar pane mutual exclusivity is the easiest thing to accidentally break; verify it explicitly. Don't delete the 4 retiring files yet — that's task 032 (after this lands).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Mandatory `/fluent-v9-component` Step 0.5 + `/code-review` + `/adr-check` at end. Verify line count + dev build + handler register.</protocol>
+  </execution>
+</task>

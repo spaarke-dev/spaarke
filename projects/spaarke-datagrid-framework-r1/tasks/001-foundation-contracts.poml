@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Foundation contracts: IDataverseClient interface + GridConfigJson v1.0 types + design tokens</title>
+    <phase>1: Phase A — Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002,003,004,005,006,007,008,009</blocks>
+    <tags>fluent-ui, frontend, typescript, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation creating new abstractions in @spaarke/ui-components; 5+ steps; ADR-012 + ADR-021 constraints; foundation for all of Phase A</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Foundation task — blocks all other Phase A tasks. Must complete serially before anything else can begin.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author the foundation contracts the rest of Phase A depends on: the `IDataverseClient` interface (5 methods), the `sprk_configjson` v1.0 TypeScript discriminated union types, and the `DataGrid/tokens.ts` design tokens that codify MDA Power Apps grid visual parity. These three files are pure-type / pure-token artifacts with no runtime behavior — they are the contracts every other Phase A task imports.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in TypeScript discriminated unions, Fluent UI v9 design tokens, and Dataverse Web API. Follow ADR-021 (Fluent v9 + dark mode + tokens-only) and ADR-022 (React-16-safe framework code).
+  </role>
+
+  <goal>
+    `@spaarke/ui-components` builds clean with:
+    1. `src/services/IDataverseClient.ts` defining the 5-method interface
+    2. `src/types/GridConfigJson.ts` defining the v1.0 schema as a TypeScript discriminated union
+    3. `src/components/DataGrid/tokens.ts` defining all MDA-parity design tokens (NO inline hex)
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-DG-02 (IDataverseClient), FR-DG-03 (configjson schema), FR-DG-10 (tokens), this task lands the three contracts every subsequent Phase A task imports. Without these, parallel work on chips, command bar, DataGrid core, and XrmDataverseClient cannot begin in a type-safe way. See [design.md §6.2, §6.3, §11.5.2] for full schemas.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/IDataverseClient.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/GridConfigJson.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/tokens.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/GridSection/GridSection.tsx</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">`@spaarke/ui-components` is the canonical home — `IDataverseClient` MUST live in `services/`, not in a consumer project.</constraint>
+    <constraint source="ADR-021">NO raw hex anywhere in `tokens.ts`. All colors must derive from Fluent v9 `tokens.*` values. Dark mode parity required.</constraint>
+    <constraint source="ADR-022">Framework code is React-16-safe. NO `useId`, `useSyncExternalStore`, or `createRoot` from React 18. `tokens.ts` has no React deps so it's automatically safe.</constraint>
+    <constraint source="project">`sprk_configjson` schema MUST include `_version: '1.0'` discriminator. Invalid configjson MUST NOT throw — fall back to defaults with `console.warn`.</constraint>
+    <constraint source="project">`IDataverseClient` MUST have exactly 5 methods per [design.md §6.2]: `retrieveSavedQuery`, `retrieveSavedQueriesForEntity`, `retrieveEntityMetadata`, `retrieveMultipleRecords`, `retrieveRecord`.</constraint>
+    <constraint source="project">`DataGrid/tokens.ts` MUST source MDA-parity values from [GridSection.tsx:195-273] (lifted, not re-derived).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="IDataverseClient contract" location="design.md §6.2">5-method contract; `XrmDataverseClient` wraps `Xrm.WebApi` + `Xrm.Utility.getEntityMetadata`; `BffDataverseClient` (Phase B) wraps `authenticatedFetch`.</pattern>
+      <pattern name="sprk_configjson v1.0" location="design.md §6.3">Discriminated union with `_version: '1.0'` discriminator; sub-sections source/display/filterChips/commandBar/rowOpen/secondaryActions/columns/behavior.</pattern>
+      <pattern name="MDA-parity tokens" location="src/client/shared/Spaarke.Events.Components/src/components/GridSection/GridSection.tsx#L195-L273">Lift these styles as named token entries; replace any `var(--*)` or raw hex with `tokens.*` from Fluent v9.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/fluent-v9-component` skill Step 0.5 checklist before authoring any types/tokens (mandatory per FR-DG-13).</step>
+    <step order="2">Author `src/services/IDataverseClient.ts` with 5-method interface, JSDoc on each method documenting return shape per [design.md §6.2].</step>
+    <step order="3">Author `src/types/GridConfigJson.ts` with v1.0 discriminated union types: `GridConfigJson_v1_0`, `SourceConfig`, `DisplayConfig`, `FilterChipsConfig`, `CommandBarConfig`, `RowOpenConfig`, `SecondaryActionConfig`, `ColumnsConfig`, `BehaviorConfig`. Include runtime guard `isValidConfigJson(unknown): config is GridConfigJson_v1_0` that returns false on invalid (no throw).</step>
+    <step order="4">Author `src/components/DataGrid/tokens.ts` lifting MDA-parity styles from `GridSection.tsx:195-273`. All values reference `tokens.*` from `@fluentui/react-components`. Group by surface: `headerBg`, `headerBorder`, `rowHoverBg`, `rowSelectedBg`, `rowFocusOutline`, `cellPadding`, `gridFont`, `commandBarBg`, `chipBg`, `chipBorder`.</step>
+    <step order="5">Update `src/index.ts` to barrel-export the new interface, types, and tokens.</step>
+    <step order="6">Build `@spaarke/ui-components` (`npm run build`). Verify zero TypeScript errors. Verify zero raw hex (`grep -r '#[0-9a-fA-F]\{3,6\}' src/components/DataGrid/tokens.ts` returns nothing).</step>
+    <step order="7">Verify React-16-safety: `grep -r 'useId\|useSyncExternalStore\|createRoot' src/services/IDataverseClient.ts src/types/GridConfigJson.ts src/components/DataGrid/tokens.ts` returns nothing.</step>
+    <step order="8">Update `projects/spaarke-datagrid-framework-r1/tasks/TASK-INDEX.md`: change task 001 status to ✅ completed; mark tasks 002 + 003 as ready (parallel-eligible).</step>
+    <step order="9">If any schema deviations from `design.md §6.3` were made, document in `projects/spaarke-datagrid-framework-r1/notes/drafts/001-schema-deviations.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript via `npm run build`</tool>
+    <tool name="grep">Verify no raw hex / no React-18 APIs</tool>
+    <tool name="Edit">Author the three files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/IDataverseClient.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/GridConfigJson.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/tokens.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `npm run build` in `@spaarke/ui-components`, when TypeScript compiles, then there are zero errors and the three new files appear in the barrel exports.</criterion>
+    <criterion testable="true">Given `tokens.ts`, when grepped for `#[0-9a-fA-F]\{3,6\}`, then zero matches are found.</criterion>
+    <criterion testable="true">Given an invalid configjson object, when `isValidConfigJson(bad)` is called, then it returns `false` without throwing.</criterion>
+    <criterion testable="true">Given the 3 framework files, when grepped for React-18-only APIs (`useId`, `useSyncExternalStore`, `createRoot`), then zero matches are found.</criterion>
+    <criterion testable="true">Given `IDataverseClient.ts`, when compared to design.md §6.2, then all 5 method signatures match exactly.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the lynchpin task — all of Phase A waits on it. Keep scope tight: no runtime logic, only types + tokens + interface. Resist the temptation to also implement `XrmDataverseClient` here (that's task 002). The DataGrid core scaffold (task 003) needs these types but does NOT need the implementation. Once this lands, 002 and 003 can run in parallel as Wave A1.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in `<knowledge><files>`. Apply `<constraints>` strictly. Output the three files exactly as specified. Validate via the acceptance criteria's grep commands before marking complete.
+    </protocol>
+  </execution>
+</task>
