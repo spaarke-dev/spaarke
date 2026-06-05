@@ -443,9 +443,7 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IScopeManagementService>(Moq.MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService>(Moq.MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IModelSelector>(Moq.MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IIntentClassificationService>(Moq.MockBehavior.Loose).Object);
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IEntityResolutionService>(Moq.MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IClarificationService>(Moq.MockBehavior.Loose).Object);
 
             // Semantic Search & Record Search - endpoints are always mapped but services
             // only register when Analysis:Enabled=true && DocumentIntelligence:Enabled=true
