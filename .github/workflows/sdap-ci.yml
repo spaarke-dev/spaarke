@@ -2,9 +2,31 @@ name: SDAP CI
 
 on:
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - 'projects/_backlog/**'
+      - 'projects/x-*/**'   # research/notes-only project folders
+      - '**.md'
+      - '.claude/**'
+      - 'memory/**'
+      - 'knowledge/**'
+      - 'CHANGELOG*'
+      - 'CODEOWNERS'
+      - 'LICENSE*'
   push:
     branches:
       - master
+    paths-ignore:
+      - 'docs/**'
+      - 'projects/_backlog/**'
+      - 'projects/x-*/**'
+      - '**.md'
+      - '.claude/**'
+      - 'memory/**'
+      - 'knowledge/**'
+      - 'CHANGELOG*'
+      - 'CODEOWNERS'
+      - 'LICENSE*'
 
 permissions:
   contents: read

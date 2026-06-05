@@ -1,0 +1,6 @@
+{
+  "_README": "Bundle size baselines for nightly-health.yml drift check. Update via workflow_dispatch with update_baseline=true. Sizes in bytes.",
+  "_last_updated": "2026-06-05 (initial seed from c:/code_files/spaarke fresh master build)",
+  "SemanticSearch_code_page": 1109829,
+  "CreateMatterWizard_solution": 1067000
+}
