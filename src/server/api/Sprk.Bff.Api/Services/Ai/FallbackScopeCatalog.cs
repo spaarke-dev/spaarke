@@ -1,4 +1,4 @@
-using Sprk.Bff.Api.Services.Ai.Prompts;
+using Sprk.Bff.Api.Services.Ai.Builder;
 
 namespace Sprk.Bff.Api.Services.Ai;
 

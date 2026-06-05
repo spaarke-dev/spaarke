@@ -932,14 +932,14 @@ public class BuilderToolExecutor
         var queryLower = query.ToLowerInvariant();
 
         // Helper to check if an entry matches the query
-        bool Matches(Prompts.ScopeCatalogEntry entry) =>
+        bool Matches(ScopeCatalogEntry entry) =>
             string.IsNullOrEmpty(query) ||
             entry.Name.Contains(queryLower, StringComparison.OrdinalIgnoreCase) ||
             entry.DisplayName.Contains(queryLower, StringComparison.OrdinalIgnoreCase) ||
             entry.Description.Contains(queryLower, StringComparison.OrdinalIgnoreCase);
 
         // Helper to calculate match score
-        double CalculateScore(Prompts.ScopeCatalogEntry entry)
+        double CalculateScore(ScopeCatalogEntry entry)
         {
             if (string.IsNullOrEmpty(query)) return 0.5;
             var nameMatch = entry.DisplayName.Contains(queryLower, StringComparison.OrdinalIgnoreCase) ? 0.4 : 0.0;
