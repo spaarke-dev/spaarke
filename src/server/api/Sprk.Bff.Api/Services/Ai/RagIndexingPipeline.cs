@@ -437,11 +437,12 @@ public sealed partial class RagIndexingPipeline
     {
         var now = DateTimeOffset.UtcNow;
         var docs = new List<KnowledgeDocument>(chunks.Count);
+        var isSessionFilesWrite = !string.IsNullOrEmpty(sessionId);
 
         for (int i = 0; i < chunks.Count; i++)
         {
             var chunk = chunks[i];
-            docs.Add(new KnowledgeDocument
+            var doc = new KnowledgeDocument
             {
                 // Format: {documentId}_{suffix}_{chunkIndex} — unique per index type
                 // ("k" knowledge, "d" discovery, "s" session-files per R5 task 003).
@@ -455,16 +456,26 @@ public sealed partial class RagIndexingPipeline
                 ChunkIndex = chunk.Index,
                 ChunkCount = chunks.Count,
                 ContentVector = i < embeddings.Count ? embeddings[i] : ReadOnlyMemory<float>.Empty,
-                // Initialize collection fields to empty (NOT null). Azure Search rejects
-                // null values for Collection(Edm.String) fields with default Nullable=False
-                // semantics — observed as a 400 on the spaarke-session-files index upload
-                // during R5 SC-18 walkthrough 2026-06-05. Existing customer-corpus indexes
-                // (knowledge/discovery) accept empty lists fine; this keeps the same
-                // behavior across all three target indexes.
+                // Tags: must be a non-null empty array, not null. Azure Search rejects null
+                // values for Collection(Edm.String) fields (Nullable=False semantics).
                 Tags = Array.Empty<string>(),
                 CreatedAt = now,
                 UpdatedAt = now
-            });
+            };
+
+            if (isSessionFilesWrite)
+            {
+                // Session-files index schema (infrastructure/ai-search/spaarke-session-files.json)
+                // does NOT declare deploymentModel or privilege_group_ids. Both have non-null
+                // model defaults ("Shared" / empty list) intended for customer-corpus writes,
+                // so we explicitly null them so JsonIgnore.WhenWritingNull suppresses them on
+                // the wire. Without this, Azure Search rejects with 400 "property does not
+                // exist on type 'search.documentFields'" — observed cycle 4 of R5 SC-18 walkthrough.
+                doc.DeploymentModel = null;
+                doc.PrivilegeGroupIds = null;
+            }
+
+            docs.Add(doc);
         }
 
         return docs;
