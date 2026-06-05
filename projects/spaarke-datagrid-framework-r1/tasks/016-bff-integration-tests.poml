@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>BFF integration tests for 5 endpoints (happy path + 403 filter + cache + cross-entity privilege bypass)</title>
+    <phase>2: Phase B — BFF Passthrough</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>011,012,013,014</dependencies>
+    <blocks>017</blocks>
+    <tags>bff-api, api, testing, integration-test, auth</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration tests; testing tag; covers Phase B acceptance gates including security-critical cross-entity privilege bypass test</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Aggregates Phase B endpoints; must wait for all to land</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author Phase B integration tests against dev BFF: each of the 5 endpoints (happy path + 403 read-deny + cache behavior for the 3 cached endpoints). Critical: include the cross-entity privilege bypass test on `/fetch` per ADR-008 (privilege escalation via `&lt;link-entity&gt;` must return 403). Honors the `bff-extensions.md` test-update obligation.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in `WebApplicationFactory` integration test harness, mocked Dataverse `ServiceClient`, and ASP.NET Core auth test patterns.
+  </role>
+
+  <goal>
+    Integration test suite under `tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Dataverse/` covers happy path + 403 + cache (3 endpoints) + cross-entity privilege bypass (`/fetch`); `dotnet test` passes; CI runs them on PR.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-BFF-01..07 acceptance criteria and the `bff-extensions.md` test-update obligation. The cross-entity privilege bypass test is the most important security test — it verifies the FetchXML privilege analyzer (task 013) actually catches `<link-entity>` escalation. Use `WebApplicationFactory` with a `ServiceClient` mock for happy paths and a restricted-user mock for 403 paths. Cache hit-rate tests use the in-memory IDistributedCache via the dev profile.
+    </background>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Dataverse/SavedQueryEndpointsTests.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Dataverse/MetadataEndpointTests.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Dataverse/FetchEndpointTests.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Dataverse/RecordEndpointTests.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Helpers/MockServiceClientFactory.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="bff-extensions.md">Test update obligation — PR modifying `Sprk.Bff.Api/Services/` MUST add corresponding tests. This task closes the obligation for tasks 011-014.</constraint>
+    <constraint source="ADR-008">Cross-entity privilege bypass test mandatory for `/fetch` endpoint.</constraint>
+    <constraint source="testing.md">Integration tests use `WebApplicationFactory&lt;Program&gt;`; mock `IOrganizationService` / `ServiceClient` for Dataverse calls; do NOT hit real tenant in CI.</constraint>
+    <constraint source="project">Test cache hit/miss for the 3 cached endpoints (savedquery, savedqueries, metadata) — verify second call within TTL is &lt;10ms and doesn't hit ServiceClient mock.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="WebApplicationFactory pattern" location=".claude/patterns/testing/unit-test-structure.md">Spaarke convention for BFF integration tests.</pattern>
+      <pattern name="Mocked ServiceClient" location=".claude/patterns/testing/mocking-patterns.md">Inject Moq'd `IOrganizationService` via test fixture.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author `MockServiceClientFactory.cs` helper that creates a Moq'd `IOrganizationService` with configurable `Execute` / `Retrieve` / `RetrieveMultiple` responses.</step>
+    <step order="2">Author `SavedQueryEndpointsTests.cs`: happy path for both endpoints; 403 with restricted-user mock; cache hit verified by counting ServiceClient calls (2 calls = 1 ServiceClient hit + 1 cache hit).</step>
+    <step order="3">Author `MetadataEndpointTests.cs`: happy path; 403; cache hit; payload-size assertion (&lt;50KB for representative entity).</step>
+    <step order="4">Author `FetchEndpointTests.cs`: happy path; 403 on read-deny; **cross-entity privilege bypass test** — FetchXML with `&lt;link-entity name="restricted"&gt;` returns 403 even though caller has Read on primary entity; malformed FetchXML → 400.</step>
+    <step order="5">Author `RecordEndpointTests.cs`: happy path; 404 on missing record; 403; `$select` projection works.</step>
+    <step order="6">Run `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/`; verify all pass.</step>
+    <step order="7">Verify CI workflow includes integration tests (check `.github/workflows/sdap-ci.yml`).</step>
+    <step order="8">Update TASK-INDEX (016 ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Test runner</tool>
+    <tool name="Edit">Author test files</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Dataverse/SavedQueryEndpointsTests.cs</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Dataverse/MetadataEndpointTests.cs</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Dataverse/FetchEndpointTests.cs</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Dataverse/RecordEndpointTests.cs</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Helpers/MockServiceClientFactory.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the test suite, when run via `dotnet test`, then all tests pass.</criterion>
+    <criterion testable="true">Given the cross-entity privilege bypass test (FetchXML with `&lt;link-entity name="restricted"&gt;`), when called by user without Read on `restricted`, then 403 ProblemDetails returned.</criterion>
+    <criterion testable="true">Given the cache-hit test for `/savedquery/{id}`, when called twice within 1 hour, then ServiceClient mock receives only 1 call (second call is cache hit).</criterion>
+    <criterion testable="true">Given `/metadata/{entity}` for representative entity, when response measured, then &lt;50KB.</criterion>
+    <criterion testable="true">Given CI workflow, when integration tests run, then they execute as part of PR checks (not skipped).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The cross-entity privilege bypass test (step 4) is THE most important test in this suite. If it fails, it indicates a security gap — coordinate with reviewer before proceeding to task 017 (deploy). Per `bff-extensions.md` D-05/T-022 enforcement model: PR template + code review (NOT a CI script) catches missing test updates, so the obligation is owned by Claude + reviewer here.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Mandatory `/code-review` on cross-entity privilege bypass test. Verify all tests pass + CI integration before marking complete.</protocol>
+  </execution>
+</task>

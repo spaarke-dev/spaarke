@@ -480,27 +480,32 @@ function parseIsoDate(dateStr: string): Date {
 }
 
 /**
- * Get all days to display for a month (including padding days from prev/next months)
+ * Get all days to display for a month, padding only enough to complete the
+ * weeks that contain current-month days.
+ *
+ * **Task 035 UAT iteration 3 fix**: was `endPadding = 42 - days.length` which
+ * always rendered 6 rows; for short months (e.g. June 2026) the 6th row was
+ * entirely next-month dates. Now pads to the next multiple of 7 so calendar
+ * height varies between 5 and 6 rows by month (standard Power Apps / Outlook
+ * behavior).
  */
 function getMonthDays(year: number, month: number): Date[] {
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const days: Date[] = [];
 
-  // Add padding days from previous month
   const startPadding = firstDay.getDay();
   for (let i = startPadding - 1; i >= 0; i--) {
     const d = new Date(year, month, -i);
     days.push(d);
   }
 
-  // Add days of current month
   for (let d = 1; d <= lastDay.getDate(); d++) {
     days.push(new Date(year, month, d));
   }
 
-  // Add padding days for next month to complete the grid
-  const endPadding = 42 - days.length; // 6 rows of 7 days
+  const weeksNeeded = Math.ceil(days.length / 7);
+  const endPadding = weeksNeeded * 7 - days.length;
   for (let d = 1; d <= endPadding; d++) {
     days.push(new Date(year, month + 1, d));
   }

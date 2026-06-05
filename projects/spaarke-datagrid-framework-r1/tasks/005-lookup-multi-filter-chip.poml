@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>LookupMultiFilterChip with async Combobox + debounced IDataverseClient lookup</title>
+    <phase>1: Phase A — Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>002,003</dependencies>
+    <blocks>009</blocks>
+    <tags>fluent-ui, frontend, react, typescript, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>UI primitive with async data flow; ADR-021 + NFR-03; debouncing + caching logic; Storybook stories required</rigor-reason>
+    <parallel-group>A2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build `<LookupMultiFilterChip />` — a Fluent v9 `Combobox` filter chip with 300ms-debounced type-to-search via `IDataverseClient.retrieveMultipleRecords`. Caches results 60s in component state. Empty search shows top 50 recent records of the lookup target entity. Works for any lookup target (`systemuser`, `sprk_matter`, `sprk_vendor`, etc).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent v9 `Combobox` async options, debouncing patterns, and Dataverse FetchXML `contains` queries.
+  </role>
+
+  <goal>
+    `src/components/DataGrid/chips/LookupMultiFilterChip.tsx` ships with Storybook stories (empty / typing / single-select / multi-select / cleared in light + dark), axe a11y passes, portal fix applied, debounced type-to-search returns matches within 500ms after 300ms idle.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-DG-07 (chip primitive) + FR-DG-13 (async lookup). The chip activates a `<Popover>` containing a Fluent v9 `<Combobox>` with `freeform` mode. User types → debounced (300ms) call to `IDataverseClient.retrieveMultipleRecords(lookupTargetEntity, fetchXmlContains)` → display options. Multi-select model: chip displays count + first-record name; popover shows checked options + selected pills.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/chips/LookupMultiFilterChip.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/storybook/LookupMultiFilterChip.stories.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/IDataverseClient.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only; tokens-only styling; dark mode required.</constraint>
+    <constraint source="ADR-022">React-16-safe.</constraint>
+    <constraint source="NFR-03">`applyStylesToPortals={true}` on the Popover's inner FluentProvider.</constraint>
+    <constraint source="project">Debounce: 300ms idle after last keystroke; cancel in-flight requests on new input.</constraint>
+    <constraint source="project">Cache: 60s TTL in component state (keyed by `lookupTargetEntity + search`); top-50 recent on empty search.</constraint>
+    <constraint source="project">Use `IDataverseClient.retrieveMultipleRecords` — NO direct `Xrm.WebApi` call.</constraint>
+    <constraint source="project">Multi-select semantics: OR within chip (`a = X OR a = Y`); chip emits selected ID array to parent.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 async Combobox" location="https://react.fluentui.dev/?path=/docs/components-combobox--default">`freeform` + `onInput` + `value` controlled; options rendered from async state.</pattern>
+      <pattern name="FetchXML contains" location="design.md §8.1">`&lt;filter&gt;&lt;condition attribute='{name}' operator='like' value='%{search}%'/&gt;&lt;/filter&gt;`</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/fluent-v9-component` skill Step 0.5 checklist.</step>
+    <step order="2">Author `LookupMultiFilterChip.tsx` with props: `{ lookupTargetEntity, primaryNameAttribute, value: Set&lt;string&gt;, onChange, label, dataverseClient }`.</step>
+    <step order="3">Implement debounce hook (`useDebouncedValue(value, 300)`) — pure, no React-18 APIs.</step>
+    <step order="4">Implement cache: `useRef&lt;Map&lt;string, {at: number; records: Record[]}&gt;&gt;()` with 60s TTL check.</step>
+    <step order="5">Implement Combobox: on input → debounced search → call `dataverseClient.retrieveMultipleRecords(lookupTargetEntity, fetchXml)`; empty search → top 50 recent.</step>
+    <step order="6">Multi-select chips: render selected IDs as Fluent v9 `Tag`s inside the Popover; chip itself shows `{first-name} +{N more}` pattern.</step>
+    <step order="7">Wrap Popover content in `<FluentProvider applyStylesToPortals theme={inheritedTheme}>`.</step>
+    <step order="8">Author Storybook stories: empty / typing / single-select / multi-select / cleared / dark mode for each.</step>
+    <step order="9">axe-core scan; verify zero serious/critical.</step>
+    <step order="10">Build + verify; update TASK-INDEX (task 005 ✅).</step>
+    <step order="11">Document deviations in `notes/drafts/005-deviations.md` if any.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + Storybook + axe</tool>
+    <tool name="Edit">Author the file</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/chips/LookupMultiFilterChip.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/storybook/LookupMultiFilterChip.stories.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given user types "Acme" in the Combobox, when 300ms passes, then `IDataverseClient.retrieveMultipleRecords` is called once (not per keystroke) and results render within 500ms.</criterion>
+    <criterion testable="true">Given user re-searches "Acme" within 60s, when the second search runs, then results are returned from cache (no network call).</criterion>
+    <criterion testable="true">Given user opens the chip with empty value, when popover renders, then top 50 most recent records of the lookup target appear.</criterion>
+    <criterion testable="true">Given multi-select with 3 IDs picked, when chip closes, then chip shows "First Name +2" pattern and `onChange` emits the 3-ID set.</criterion>
+    <criterion testable="true">Given dark mode, when popover opens, then it renders with dark-theme colors via applyStylesToPortals.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Async lookup type-to-search">
+      <url>http://localhost:6006/?path=/story/lookupmultifilterchip--default</url>
+      <steps>
+        <step>Click chip; verify popover opens with Combobox</step>
+        <step>Type "Acme"; wait 300ms</step>
+        <step>Verify options appear within 500ms</step>
+        <step>Check 2 options; verify chip closes showing "First Name +1"</step>
+      </steps>
+      <expected>Debounced search works; multi-select state correct</expected>
+    </test>
+    <test name="Dark mode popover (NFR-03)">
+      <steps>
+        <step>Toggle dark mode; open chip popover</step>
+        <step>Verify Combobox + Tag pills render in dark theme</step>
+      </steps>
+      <expected>No light-mode bleed in popover surface</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Parallels tasks 004, 006, 007, 008 (Wave A2). The 300ms debounce + 60s cache are the key affordances — without them, the chip thrashes the network on every keystroke. The empty-state top-50 is what makes the chip feel responsive (zero-input shouldn't mean zero-options).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Mandatory `/fluent-v9-component` Step 0.5. Verify debounce + cache + dark mode before marking complete.</protocol>
+  </execution>
+</task>

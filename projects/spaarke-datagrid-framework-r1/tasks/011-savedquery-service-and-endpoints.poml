@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>SavedQueryService + 2 endpoints: GET savedquery/{id} (1h cache) + GET savedqueries/{entity} (1h cache)</title>
+    <phase>2: Phase B — BFF Passthrough</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>015,016,017</blocks>
+    <tags>bff-api, api, auth, cache, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>2 BFF endpoints + service + cache + auth filter; ADR-008 + ADR-019 + ADR-028 + ADR-029 + bff-extensions.md binding</rigor-reason>
+    <parallel-group>B1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author `SavedQueryService` (cached projection) + 2 BFF endpoints in `Sprk.Bff.Api/Api/Dataverse/`: `GET /api/dataverse/savedquery/{savedQueryId}` returning `{ entityName, fetchXml, layoutXml, name }` and `GET /api/dataverse/savedqueries/{entityLogicalName}` returning `[{ id, name, isDefault, queryType }]`. Both use `IDistributedCache` with 1-hour TTL. Both apply `DataverseAuthorizationFilter` per ADR-008.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, `IDistributedCache` (Redis in prod), `ServiceClient` Dataverse SDK, ADR-008 endpoint filter pattern. Familiar with `Sprk.Bff.Api` DI/configuration.
+  </role>
+
+  <goal>
+    Two new endpoints live in `Sprk.Bff.Api/Api/Dataverse/DataverseEndpoints.cs` (or `SavedQueryEndpoints.cs`), each backed by `SavedQueryService` with 1-hour cache, ADR-008 filter applied, ProblemDetails on errors. `dotnet build` passes; `dotnet test` for the new service passes; cache hit ratio >95% verifiable post-deploy.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-BFF-01 + FR-BFF-02. `RetrieveSavedQuery` via `ServiceClient.Retrieve("savedquery", id, ColumnSet)`; `RetrieveSavedQueriesForEntity` via `RetrieveMultiple` with FetchXML filter `statecode=0 AND returnedtypecode={entityCode} AND querytype=0`. Cache key shape: `dv:savedquery:{id}` and `dv:savedqueries:{entityLogicalName}`. Service uses app-only auth (managed identity) on the Dataverse side; user JWT is for authorization filter only.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Dataverse/DataverseEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/SavedQueryService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/DataverseAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/Models/SavedQueryDto.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/SavedQueryServiceTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">`DataverseAuthorizationFilter` applied to both endpoints — 403 ProblemDetails on Read-privilege deny.</constraint>
+    <constraint source="ADR-019">Errors return ProblemDetails (RFC 7807) — not raw exceptions.</constraint>
+    <constraint source="ADR-028">Authentication via JWT on incoming request; service-side uses managed identity for `ServiceClient`.</constraint>
+    <constraint source="ADR-029">No new NuGet packages without size baseline check; verify `dotnet list package --vulnerable --include-transitive` reveals no new HIGH CVEs.</constraint>
+    <constraint source="bff-extensions.md">Placement Justification (from task 010) referenced in PR description; endpoints mapped unconditionally (no feature flag); corresponding tests in task 016 acknowledged.</constraint>
+    <constraint source="project">Cache TTL exactly 1 hour per FR-BFF-01/02 (`TimeSpan.FromHours(1)`).</constraint>
+    <constraint source="project">`SavedQueryService` is `internal` class with explicit `IDistributedCache` injection — NOT `IMemoryCache`.</constraint>
+    <constraint source="project">Per `bff-extensions.md` test obligation: unit tests for cache hit/miss + happy path + 403 filter behavior MUST be added in task 016 (not skipped).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/010-authorization-filter-shape.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/010-bff-placement-justification.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="ADR-008 filter shape (canonical)" location="projects/spaarke-datagrid-framework-r1/notes/drafts/010-authorization-filter-shape.md">Use the shape designed in task 010.</pattern>
+      <pattern name="IDistributedCache pattern" location=".claude/patterns/caching/distributed-cache.md">`GetStringAsync` → if null, fetch + `SetStringAsync` with absolute expiration.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load Placement Justification + filter shape design from task 010.</step>
+    <step order="2">Author `Models/SavedQueryDto.cs`: `record SavedQueryDto(string EntityName, string FetchXml, string LayoutXml, string Name)` + `record SavedQuerySummaryDto(Guid Id, string Name, bool IsDefault, int QueryType)`.</step>
+    <step order="3">Author `Services/Dataverse/SavedQueryService.cs`: 2 methods (`GetSavedQueryAsync`, `GetSavedQueriesForEntityAsync`), both using `IDistributedCache` with `dv:savedquery:{id}` / `dv:savedqueries:{entity}` keys, 1-hour absolute expiration; cache miss → `IServiceClient.RetrieveAsync` / `RetrieveMultipleAsync` + cache set.</step>
+    <step order="4">Author `Services/Dataverse/DataverseAuthorizationFilter.cs` per task 010's shape; cached-metadata-driven privilege check (entity-only for these 2 endpoints).</step>
+    <step order="5">Author `Api/Dataverse/DataverseEndpoints.cs` (or `SavedQueryEndpoints.cs`) mapping the 2 endpoints to `SavedQueryService` calls; apply filter via `.AddEndpointFilter`.</step>
+    <step order="6">Register `SavedQueryService` and `DataverseAuthorizationFilter` in `Program.cs` DI. Endpoint mapping unconditional per RB-T028-03/04/05/06.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` — verify zero errors.</step>
+    <step order="8">Run `dotnet list package --vulnerable --include-transitive` — verify no new HIGH CVEs.</step>
+    <step order="9">Check publish size delta vs. baseline per ADR-029 (`dotnet publish -c Release -r linux-x64`; compare to baseline).</step>
+    <step order="10">Update TASK-INDEX (011 ✅).</step>
+    <step order="11">Document any deviations from task 010's design in `notes/drafts/011-deviations.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + publish + vuln scan</tool>
+    <tool name="Edit">Author code files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Dataverse/DataverseEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/SavedQueryService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/DataverseAuthorizationFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/Models/SavedQueryDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a valid savedQueryId, when `GET /api/dataverse/savedquery/{id}` is called twice within 1 hour, then the second call returns from cache (verify via telemetry / log).</criterion>
+    <criterion testable="true">Given a request without proper Read privilege on the target entity, when endpoint called, then 403 ProblemDetails is returned (not 200 with empty data).</criterion>
+    <criterion testable="true">Given `dotnet build src/server/api/Sprk.Bff.Api/`, when run, then zero errors.</criterion>
+    <criterion testable="true">Given `dotnet list package --vulnerable --include-transitive`, when run, then no new HIGH CVEs.</criterion>
+    <criterion testable="true">Given publish size measurement, when compared to baseline, then within ADR-029 budget.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallels tasks 012, 013, 014 (Wave B1 — all depend on task 010 and touch separate service files). The 1-hour cache TTL is intentional for dev friction (savedquery edits won't appear instantly) — accepted in R1 per spec.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load task 010's Placement Justification + filter shape. Apply ADR-008/019/028/029 strictly. Verify build + vuln scan + publish size before marking complete.</protocol>
+  </execution>
+</task>

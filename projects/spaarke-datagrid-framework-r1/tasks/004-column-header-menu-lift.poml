@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Lift ColumnHeaderMenu + ColumnFilterHeader from events-components with applyStylesToPortals fix</title>
+    <phase>1: Phase A — Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>009</blocks>
+    <tags>fluent-ui, frontend, react, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code lift with portal-fix; ADR-021 + NFR-03 constraint (dark mode popover compliance); produces Storybook stories</rigor-reason>
+    <parallel-group>A2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Lift `ColumnHeaderMenu` and `ColumnFilterHeader` from `@spaarke/events-components` to `@spaarke/ui-components/components/DataGrid/columnHeader/`. Wrap every `Popover` and `Menu` surface in an inner `<FluentProvider applyStylesToPortals={true}>` to close the dark-mode portal bug (NFR-03). Generalize away from any Event-specific assumptions.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent v9 portal behavior, `applyStylesToPortals`, and accessibility (axe-core, keyboard nav).
+  </role>
+
+  <goal>
+    `src/components/DataGrid/columnHeader/{ColumnHeaderMenu, ColumnFilterHeader}.tsx` lifted, portal fix applied, axe a11y passes in light + dark, keyboard accessible (Enter / Space / Esc / Arrow), Storybook stories for both surfaces.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-DG-09. The Events components version has a known dark-mode portal bug — popovers render with light-mode styles in dark themes because the outer FluentProvider's `applyStylesToPortals` is not propagating. Fix is to wrap the popover surface itself in an inner `<FluentProvider applyStylesToPortals theme={...}>` per [design.md §11.5.4]. Take this opportunity to remove Event-specific column/field assumptions — the lifted version takes a generic `columnLogicalName` instead of `sprk_event*` field names.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/columnHeader/ColumnHeaderMenu.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/columnHeader/ColumnFilterHeader.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/storybook/ColumnHeaderMenu.stories.tsx</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/ColumnHeaderMenu/</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/ColumnFilterHeader/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Dark mode REQUIRED. Every popover surface MUST render correctly in dark theme.</constraint>
+    <constraint source="NFR-03">`applyStylesToPortals={true}` on every FluentProvider wrapping a popover-bearing primitive. EITHER on outer FluentProvider OR inner FluentProvider wrap inside the Popover/Menu surface.</constraint>
+    <constraint source="project">Generic API: NO `sprk_event*`-specific column names or assumptions. Use `columnLogicalName: string` as the only field identifier.</constraint>
+    <constraint source="project">axe-core scan must pass zero serious/critical violations on both light + dark stories.</constraint>
+    <constraint source="project">Keyboard accessibility: Enter / Space opens menu, Esc closes, Arrow keys navigate within menu.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/pcf/fluent-v9-modern-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="applyStylesToPortals inner wrap" location="design.md §11.5.4">When outer FP doesn't propagate, wrap the Popover content in an inner FP with the same theme + `applyStylesToPortals={true}`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/fluent-v9-component` skill Step 0.5 checklist.</step>
+    <step order="2">Copy `ColumnHeaderMenu.tsx` + `ColumnFilterHeader.tsx` from `Spaarke.Events.Components` into `Spaarke.UI.Components/src/components/DataGrid/columnHeader/`.</step>
+    <step order="3">De-Event-type: replace any `sprk_event*` column references with generic `columnLogicalName: string` prop; drop Event-only menu items.</step>
+    <step order="4">Apply portal fix: wrap each `<Popover>` and `<Menu>` content in `<FluentProvider applyStylesToPortals={true} theme={inheritedTheme}>` where `inheritedTheme` comes from `useFluentProviderContextValues` or theme prop.</step>
+    <step order="5">Update `src/components/DataGrid/DataGrid.tsx` (from task 003) to use lifted versions; remove any inline column header logic that should now route through these.</step>
+    <step order="6">Author `storybook/ColumnHeaderMenu.stories.tsx` with light + dark stories for both surfaces.</step>
+    <step order="7">Run axe-core scan on Storybook stories (e.g., via Storybook a11y addon). Verify zero serious/critical violations.</step>
+    <step order="8">Test keyboard accessibility manually: Tab → focus header, Enter/Space → opens menu, Esc → closes, Arrow keys → navigate within menu.</step>
+    <step order="9">Build (`npm run build`); verify zero TypeScript errors; verify Spaarke.Events.Components still builds (we have NOT yet retired its versions — that happens in task 032).</step>
+    <step order="10">Update `projects/spaarke-datagrid-framework-r1/tasks/TASK-INDEX.md`: task 004 ✅.</step>
+    <step order="11">Document any deviations in `notes/drafts/004-deviations.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + Storybook + axe</tool>
+    <tool name="Edit">Author + modify files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/columnHeader/ColumnHeaderMenu.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/columnHeader/ColumnFilterHeader.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/storybook/ColumnHeaderMenu.stories.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `<ColumnHeaderMenu />` opened in dark theme Storybook, when the popover surface renders, then it displays with dark-theme colors (no light-mode bleed).</criterion>
+    <criterion testable="true">Given axe-core scan on light + dark Storybook stories, when run, then zero serious/critical violations.</criterion>
+    <criterion testable="true">Given keyboard focus on column header, when user presses Enter, then menu opens; when Esc, then menu closes; when Arrow keys, then focus moves through menu items.</criterion>
+    <criterion testable="true">Given grep of lifted code for `sprk_event`, when run, then zero matches (de-Event-typed).</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="ColumnHeaderMenu opens">
+      <url>http://localhost:6006/?path=/story/columnheadermenu--default</url>
+      <steps>
+        <step>Click column header in Storybook story</step>
+        <step>Verify menu opens with sort + filter options</step>
+        <step>Click outside; verify menu closes</step>
+      </steps>
+      <expected>Menu opens/closes correctly, no console errors</expected>
+    </test>
+    <test name="Dark mode popover compliance (NFR-03)">
+      <steps>
+        <step>Toggle Storybook dark mode</step>
+        <step>Click column header — open menu</step>
+        <step>Verify menu surface uses dark colors (not light bleed-through)</step>
+      </steps>
+      <expected>applyStylesToPortals working; popover dark theme correct</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Parallels tasks 005, 006, 007, 008 (Wave A2 — all depend on task 003 and touch different files). The `applyStylesToPortals` inner-wrap is the load-bearing fix. Once this is in place, the same pattern applies to the 5 filter chips (tasks 005-008).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Mandatory `/fluent-v9-component` Step 0.5. Verify portal fix in dark mode + axe a11y before marking complete.</protocol>
+  </execution>
+</task>

@@ -486,6 +486,7 @@ public static class ChatEndpoints
                 httpContext,
                 sseWriter,
                 latestUserMessage: effectiveMessage,
+                uploadedFiles: session.UploadedFiles,
                 cancellationToken: cancellationToken);
 
             // Convert session history to AI framework messages for context
@@ -1190,6 +1191,7 @@ public static class ChatEndpoints
                 httpContext,
                 sseWriter,
                 latestUserMessage: lastUserMessage,
+                uploadedFiles: session.UploadedFiles,
                 cancellationToken: cancellationToken);
 
             var history = BuildAiHistory(session.Messages);

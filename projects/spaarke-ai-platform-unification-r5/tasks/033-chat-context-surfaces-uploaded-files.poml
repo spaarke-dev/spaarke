@@ -1,0 +1,143 @@
+<task id="033" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>P2-CLOSEOUT-02 Surface ChatSession.UploadedFiles[] in PlaybookChatContextProvider so the chat agent sees uploaded files</title>
+    <status>🔲</status>
+    <status-note>Closeout task added 2026-06-04. Without this, even after 032 populates UploadedFiles[], the chat agent's tool-call reasoning doesn't know files exist (verbatim agent response on Dev: "I don't see the document uploaded yet"). See notes/summarize-vertical-remediation-plan.md §3.2.</status-note>
+    <estimated-effort>1 hour</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration (CLOSEOUT)</phase>
+    <wave>P2-G9-CLOSEOUT (parallel-safe with 032; both must complete + deploy before 034)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>004 (ChatSession.UploadedFiles model), 011 (Summarize playbook with PlaybookCapabilities.Summarize), 015 (InvokeSummarizePlaybookTool registered behind that capability gate)</dependencies>
+    <tags>bff-api, chat, context-provider, integration, closeout, sev-1-fix</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Update the chat-agent context provider chain so the agent's tool-call
+    reasoning has a clear signal that uploaded files exist in the current
+    session. Without this signal, the LLM correctly declines to invoke
+    InvokeSummarizePlaybookTool because — from its view of context — no files
+    are present.
+
+    The InvokeSummarizePlaybookTool (R5 task 015) is registered in
+    SprkChatAgentFactory.ResolveTools at line ~856 inside the
+    `capabilities.Contains(PlaybookCapabilities.Summarize)` gate. The gate
+    passes for the `summarize-document-for-chat@v1` playbook (deployed via
+    task 011). So the tool IS registered. The agent simply doesn't invoke it
+    because it has no awareness of session files.
+
+    Modify:
+
+    1. `ChatContext.cs` model — add an additive nullable field
+       `IReadOnlyList&lt;ChatSessionFile&gt;? UploadedFiles = null` (backward
+       compatible with all existing consumers; null = no change in behavior).
+
+    2. `PlaybookChatContextProvider.GetContextAsync` (file
+       src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs)
+       — read `session.UploadedFiles` and forward it on the returned
+       `ChatContext`. Three sites to update (one per branch — see lines ~77
+       "no playbook" path, ~118 "standalone host context" path, and the main
+       playbook-resolved path at the end of GetContextAsync).
+
+    3. `SprkChatAgentFactory.CreateAgentAsync` (or wherever the system prompt
+       gets composed from ChatContext) — when
+       `context.UploadedFiles is { Count: > 0 }`, append a SHORT system-prompt
+       suffix like: `"\n\nSession Files: This chat session has {N} uploaded
+       file(s) available for tool calls: {comma-separated fileNames}. When
+       the user asks to summarize, invoke the `invoke_summarize_playbook`
+       tool with these file IDs: {comma-separated fileIds}."`
+
+       Keep wording compact (token budget). Do NOT include file content or
+       chunk text in the prompt — only the manifest (fileId + fileName).
+
+    4. Verify ChatContextMappingService (if it exists) — when used, also
+       propagate UploadedFiles through.
+
+    Update or add unit tests:
+
+    - PlaybookChatContextProvider_GetContextAsync_SurfacesUploadedFiles_WhenSessionHasFiles
+    - PlaybookChatContextProvider_GetContextAsync_LeavesUploadedFilesNull_WhenSessionHasNone
+    - SprkChatAgentFactory_AppendsSessionFilesNoteToSystemPrompt_WhenUploadedFilesPresent
+    - SprkChatAgentFactory_DoesNotAppendNote_WhenUploadedFilesEmpty
+    - Round-trip: ChatSession with 2 UploadedFiles → context → factory →
+      tool invocation receives both fileIds in the InvokeSummarizePlaybookTool
+      argument when the LLM mock chooses to call (verify via captured args)
+
+    NOTE: this task does NOT auto-trigger Summarize after upload (that's
+    task 034). This only ensures the agent SEES the files when reasoning
+    about whether to call the tool in response to user intent.
+
+    Acceptance: with this task deployed (alongside 032), when a user uploads
+    a file and then types "summarize" or "/summarize" in chat, the agent's
+    system prompt includes the file manifest, and the LLM invokes
+    InvokeSummarizePlaybookTool with the correct fileIds.
+  </prompt>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatContext.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/InvokeSummarizePlaybookTool.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookChatContextProviderTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SprkChatAgentFactoryTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/summarize-vertical-remediation-plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/task-030-summarize-walkthrough.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint>Backward-compatible: `UploadedFiles` on ChatContext MUST be nullable with default null; existing callers that don't set it continue to work unchanged.</constraint>
+    <constraint>System-prompt suffix MUST be compact — token budget matters. Manifest only (fileId + fileName); never include extracted text/binary content.</constraint>
+    <constraint>ADR-015: no leakage of file content into logs or prompt context beyond manifest metadata.</constraint>
+    <constraint>R5 §3.1 reuse mandate: do NOT introduce a parallel ChatContext or context provider; extend the existing.</constraint>
+    <constraint>ADR-010 DI minimalism: no new top-level Program.cs registrations; ChatContext + provider + factory are existing surfaces.</constraint>
+    <constraint>Do NOT change the tool description for InvokeSummarizePlaybookTool — task 015 set the LOAD-BEARING description for NFR-12 / UR-01 tool routing; this task only changes the WORLD STATE the LLM sees, not the tool description.</constraint>
+  </constraints>
+
+  <steps>
+    <step>Load notes/summarize-vertical-remediation-plan.md §3.2 + §4 row 033 + §5 acceptance.</step>
+    <step>Read ChatContext.cs, PlaybookChatContextProvider.cs (full), SprkChatAgentFactory.cs lines around system prompt composition.</step>
+    <step>Read existing PlaybookChatContextProvider unit tests + SprkChatAgentFactory unit tests for patterns.</step>
+    <step>Add nullable UploadedFiles field to ChatContext record (additive — record-with semantics).</step>
+    <step>Update all branches in PlaybookChatContextProvider.GetContextAsync to forward session.UploadedFiles into the returned ChatContext.</step>
+    <step>Update SprkChatAgentFactory to inject the file-manifest suffix into the system prompt when context.UploadedFiles is non-empty.</step>
+    <step>Add 5 unit tests per task acceptance criteria.</step>
+    <step>Run `dotnet build -c Release src/server/api/Sprk.Bff.Api/` — verify 0 errors.</step>
+    <step>Run targeted tests + full unit suite — verify all pass; 0 regressions.</step>
+    <step>Per CLAUDE.md §10: publish-size verification (delta expected ≈ 0 since pure logic, no new packages).</step>
+    <step>Commit with conventional message; reference remediation plan.</step>
+    <step>Update TASK-INDEX.md status 🔲 → ✅.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>ChatContext has additive nullable UploadedFiles field; existing callers compile + run unchanged.</criterion>
+    <criterion>PlaybookChatContextProvider surfaces session.UploadedFiles on the returned ChatContext when session has them.</criterion>
+    <criterion>SprkChatAgentFactory adds a compact system-prompt suffix listing uploaded fileId + fileName when context.UploadedFiles non-empty.</criterion>
+    <criterion>System-prompt suffix does NOT include extracted text content (manifest only); prompt token count stays reasonable.</criterion>
+    <criterion>All 5 new unit tests pass; existing tests unaffected.</criterion>
+    <criterion>Full unit suite passes; 0 regressions.</criterion>
+    <criterion>BFF publish-size delta ≤ +50 KB (logic-only change).</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output>Modified files: ChatContext.cs, PlaybookChatContextProvider.cs, SprkChatAgentFactory.cs</output>
+    <output>New/extended tests: PlaybookChatContextProviderTests.cs, SprkChatAgentFactoryTests.cs</output>
+    <output>Evidence note: projects/spaarke-ai-platform-unification-r5/notes/task-033-evidence.md</output>
+    <output>TASK-INDEX.md row 033 flipped 🔲 → ✅</output>
+  </outputs>
+</task>

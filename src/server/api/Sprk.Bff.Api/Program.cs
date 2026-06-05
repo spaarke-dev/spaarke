@@ -1,5 +1,7 @@
 using Sprk.Bff.Api.Api.Reporting;
+using Sprk.Bff.Api.Api.Dataverse;                  // Dataverse passthrough endpoints (Phase B)
 using Sprk.Bff.Api.Infrastructure.DI;
+using Sprk.Bff.Api.Services.Dataverse.Extensions;  // Dataverse DI extension methods (Phase B)
 using Sprk.Bff.Api.Workers.Office;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -38,6 +40,14 @@ builder.Services.AddScoped<Sprk.Bff.Api.Services.ScorecardCalculatorService>();
 
 // Documents module (endpoints + filters)
 builder.Services.AddDocumentsModule();
+
+// Dataverse passthrough — Spaarke DataGrid Framework R1, Phase B
+// (5 endpoints: savedquery x2, metadata, fetch, record; shared authorization filter
+//  with cross-entity FetchXML privilege-bypass mitigation per task 010 design)
+builder.Services.AddDataverseSavedQueryServices();   // task 011: shared infra (filter + privilege checker) + savedquery pair
+builder.Services.AddDataverseMetadataServices();     // task 012: metadata endpoint (6h cache)
+builder.Services.AddDataverseFetchServices();        // task 013: fetch endpoint + FetchXmlEntityExtractor (security-critical)
+builder.Services.AddDataverseRecordServices();       // task 014: record endpoint ($select projection)
 
 // Workers module (Service Bus + BackgroundService)
 builder.Services.AddWorkersModule(builder.Configuration);
@@ -148,6 +158,12 @@ app.UseSpaarkeMiddleware();
 
 // ---- Endpoint Groups ----
 app.MapSpaarkeEndpoints();
+
+// Dataverse passthrough endpoints (Spaarke DataGrid Framework R1, Phase B)
+app.MapSavedQueryEndpoints();   // task 011: GET /api/dataverse/savedquery/{id} + GET /api/dataverse/savedqueries/{entity}
+app.MapMetadataEndpoints();     // task 012: GET /api/dataverse/metadata/{entity}
+app.MapFetchEndpoints();        // task 013: POST /api/dataverse/fetch (cross-entity privilege check)
+app.MapRecordEndpoints();       // task 014: GET /api/dataverse/record/{entity}/{id}
 
 app.Run();
 

@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>MetadataService + GET /api/dataverse/metadata/{entityLogicalName} (6h cache)</title>
+    <phase>2: Phase B — BFF Passthrough</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>015,016,017</blocks>
+    <tags>bff-api, api, auth, cache, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF endpoint + service + 6h cache + auth filter; ADR-008 + ADR-019 + ADR-028 + ADR-029; cross-cutting metadata projection used by chips + filter derivation</rigor-reason>
+    <parallel-group>B1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author `MetadataService` + `GET /api/dataverse/metadata/{entityLogicalName}` endpoint returning projected entity metadata (`primaryIdAttribute`, `primaryNameAttribute`, `attributes[]` with `logicalName`, `attributeType`, `format`, `optionSet?`). `IDistributedCache` with 6-hour TTL. ADR-008 authorization filter applied. Payload &lt;50KB per entity (no unused metadata).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse `RetrieveEntityRequest` / `EntityMetadata`, metadata projection, and `IDistributedCache`.
+  </role>
+
+  <goal>
+    Endpoint returns projected metadata in &lt;50KB per entity, 6-hour cache, 403 on read-deny, ProblemDetails on errors, `dotnet build` passes, publish size within ADR-029 budget.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-BFF-03. The framework's `OptionSetMultiFilterChip` (task 006), filter chip auto-derivation (FR-DG-06), and column rendering all need entity metadata. A 6-hour TTL is sane because metadata only changes on solution import. Payload projected to just the fields the framework needs — full `EntityMetadata` is hundreds of KB; the projection brings it to &lt;50KB. Use `RetrieveEntityRequest` with `EntityFilters.Attributes` only.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Dataverse/DataverseEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/MetadataService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/Models/EntityMetadataDto.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">`DataverseAuthorizationFilter` applied — 403 on Read-privilege deny.</constraint>
+    <constraint source="ADR-019">ProblemDetails on errors.</constraint>
+    <constraint source="ADR-028">JWT validation on incoming; managed identity for Dataverse `ServiceClient`.</constraint>
+    <constraint source="ADR-029">No new NuGet packages without size check.</constraint>
+    <constraint source="bff-extensions.md">Reference Placement Justification (task 010) in PR; test obligation acknowledged for task 016.</constraint>
+    <constraint source="project">Cache TTL exactly 6 hours per FR-BFF-03 (`TimeSpan.FromHours(6)`).</constraint>
+    <constraint source="project">Payload must be &lt;50KB per entity. Verify with a representative entity (e.g., `systemuser`, `account`) post-build.</constraint>
+    <constraint source="project">Projection includes only: `primaryIdAttribute`, `primaryNameAttribute`, `attributes[]` (`logicalName`, `attributeType`, `format?`, `isPrimaryName`, `isPrimaryId`, `optionSet?` for picklist/status/state). NO `attributes[].displayName.localizedLabels[]` arrays (too large).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/010-authorization-filter-shape.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="EntityMetadata projection" location="design.md §6.2">Project to `EntityMetadataDto` shape; drop unused fields.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load task 010 outputs (Placement Justification + filter shape).</step>
+    <step order="2">Author `Models/EntityMetadataDto.cs`: `record EntityMetadataDto(string LogicalName, string PrimaryIdAttribute, string PrimaryNameAttribute, AttributeDto[] Attributes)` + nested `record AttributeDto(string LogicalName, string AttributeType, string? Format, bool IsPrimaryName, bool IsPrimaryId, OptionSetDto? OptionSet)` + `record OptionSetDto(OptionDto[] Options)` + `record OptionDto(int Value, string Label, string? Color)`.</step>
+    <step order="3">Author `Services/Dataverse/MetadataService.cs`: `GetMetadataAsync(string entityLogicalName)` with cache key `dv:metadata:{entity}`, 6h TTL; cache miss → `RetrieveEntityRequest { LogicalName = entity, EntityFilters = EntityFilters.Attributes }` + project to DTO.</step>
+    <step order="4">Wire `GET /api/dataverse/metadata/{entityLogicalName}` endpoint in `DataverseEndpoints.cs`; apply `DataverseAuthorizationFilter`.</step>
+    <step order="5">Register `MetadataService` in `Program.cs` DI.</step>
+    <step order="6">Build + verify zero errors.</step>
+    <step order="7">Manual payload-size check: call endpoint against `systemuser` and `account`; verify response &lt;50KB.</step>
+    <step order="8">Vuln scan + publish size verification.</step>
+    <step order="9">Update TASK-INDEX (012 ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + publish + vuln scan</tool>
+    <tool name="Edit">Author code files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Dataverse/DataverseEndpoints.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/MetadataService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/Models/EntityMetadataDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `GET /api/dataverse/metadata/systemuser`, when called twice within 6 hours, then second call returns from cache.</criterion>
+    <criterion testable="true">Given the response, when measured, then payload is &lt;50KB.</criterion>
+    <criterion testable="true">Given user without Read privilege on target entity, when called, then 403 ProblemDetails returned.</criterion>
+    <criterion testable="true">Given `dotnet build`, when run, then zero errors and no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallels tasks 011, 013, 014 (Wave B1). The 6-hour TTL is the longest among the 5 endpoints because metadata changes are rare (only on solution import). The &lt;50KB projection is the key affordance — without it, every page render fetches hundreds of KB of unused metadata.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load task 010 outputs. Build + payload-size + vuln scan before marking complete.</protocol>
+  </execution>
+</task>

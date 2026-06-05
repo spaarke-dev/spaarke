@@ -4,7 +4,7 @@
 > **Created**: 2026-06-03 (late); POMLs generated 2026-06-04
 > **Source**: `plan.md` Phase Breakdown
 > **Universal task driver**: `task-execute` skill (MANDATORY per root CLAUDE.md §4)
-> **Total tasks**: 37 across 3 phases + wrap-up (Phase 1: 9; Phase 2: 22; Phase 3: 5; wrap-up: 1)
+> **Total tasks**: 41 across 3 phases + closeout + wrap-up (Phase 1: 9; Phase 2: 22; Phase 2 Closeout: 4 [added 2026-06-04 post-walkthrough]; Phase 3: 5; wrap-up: 1)
 
 ---
 
@@ -88,6 +88,21 @@ R5 ships in 3 sequential phases + 1 wrap-up task, with parallel-execution opport
 
 ---
 
+### Phase 2 CLOSEOUT — Summarize-vertical remediation (added 2026-06-04 post-walkthrough; ~4–5h, 4 tasks)
+
+> **Context**: SC-18 walkthrough on Spaarke Dev (2026-06-04) surfaced a Sev-1 integration gap blocking the Summarize vertical end-to-end. R5 backend pieces all deployed but `ChatDocumentEndpoints.UploadDocumentAsync` never wires uploads into `RagIndexingPipeline.IndexSessionFileAsync` or `ChatSession.UploadedFiles[]`. See [`notes/summarize-vertical-remediation-plan.md`](../notes/summarize-vertical-remediation-plan.md) for full context, root cause, and resolution strategy. Tasks 030 + 031 cannot close until this remediation completes + 035 (walkthrough re-run) captures signoff.
+
+| ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
+|---|---|---|---|---|---|---|
+| 032 | P2-G9-CLOSEOUT | P2-CLOSEOUT-01 Wire ChatDocumentEndpoints upload into R5 session-files pipeline (IndexSessionFileAsync + ChatSession.UploadedFiles[] + UpdateSessionCacheAsync) | ✅ 2026-06-04 | 1.5h | ✅ (with 033) | 003, 004, 011, 012 |
+| 033 | P2-G9-CLOSEOUT | P2-CLOSEOUT-02 Surface ChatSession.UploadedFiles[] in PlaybookChatContextProvider so chat agent sees them | ✅ 2026-06-04 | 1h | ✅ (with 032) | 004, 011, 015 |
+| 034 | P2-G10-CLOSEOUT | P2-CLOSEOUT-03 Frontend auto-trigger: when upload completes after summarize intent, auto-invoke summary (pattern B) | 🔲 | 1h | ❌ | 032 + 033 deployed |
+| 035 | P2-G11-CLOSEOUT | P2-CLOSEOUT-04 Re-run SC-18 SME walkthrough end-to-end; capture solo-SME signoff; close 030 + 031 | 🔲 | 30m operator + 5m agent | ❌ | 032 + 033 + 034 deployed |
+
+**Plus (follow-up PR, not a numbered task)**: promote the live-patched `ChatDocumentEndpoints.cs` tid-claim fix (applied to Dev mid-walkthrough 2026-06-04) to master via small PR so the next deploy preserves it.
+
+---
+
 ### Phase 3 — Polish + Future-Use Validation (~2–3 days, 5 tasks)
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
@@ -128,7 +143,10 @@ Tasks within a group can be dispatched in parallel via Skill tool calls (one per
 | **P2-G6** | Phase 2 | 024, 025, 026, 027, 028 | 023 ✅ AND 017 ✅ | Parallel — Insights tool integration suite (5 tasks share `InsightsResponseRenderer`; coordinate via single PR or split into 2 sub-groups) |
 | **P2-G7** | Phase 2 | 029 | 024, 025, 026 ✅ | Serial — error codes + retry depends on tool implementation |
 | **P2-G8** | Phase 2 | 030, 031 | All P2 tasks ✅ | Serial — smoke tests + integration verification |
-| **P3-1** | Phase 3 | 040 | Phase 2 ✅ | Serial — proof-point validation |
+| **P2-G9-CLOSEOUT** | Phase 2 Closeout | 032, 033 | After P2-G8 walkthrough surfaces Sev-1 | **Parallel** (different files: BFF endpoint vs context provider) |
+| **P2-G10-CLOSEOUT** | Phase 2 Closeout | 034 | 032 + 033 deployed | Serial — frontend depends on backend behavior changes |
+| **P2-G11-CLOSEOUT** | Phase 2 Closeout | 035 | 032 + 033 + 034 deployed | Serial — walkthrough validates everything together |
+| **P3-1** | Phase 3 | 040 | Phase 2 ✅ (i.e., 035 ✅) | Serial — proof-point validation |
 | **P3-2** | Phase 3 | 041, 042 | Phase 2 ✅ | Parallel — Get Started card + telemetry dashboards |
 | **P3-3** | Phase 3 | 043, 044 | 040, 041, 042 ✅ | Serial — testing pass + lessons-learned (043 → 044) |
 | **Wrap** | — | 090 | All prior ✅ | Final task |
@@ -141,7 +159,7 @@ Tasks within a group can be dispatched in parallel via Skill tool calls (one per
 
 ## Critical Path
 
-`001 (Index) → 005 (FieldDelta) → 006 (Structured Outputs + parser) → 010 (Action seed) → 012 (Orchestrator) → 014 (Endpoint) → 017 (StructuredOutputStreamWidget) → 020 (Chat-pane UX) → 031 (Phase 2 verification) → 040 (/analyze proof point) → 043 (Operator testing) → 044 (Lessons-learned) → 090 (Wrap-up)`
+`001 (Index) → 005 (FieldDelta) → 006 (Structured Outputs + parser) → 010 (Action seed) → 012 (Orchestrator) → 014 (Endpoint) → 017 (StructuredOutputStreamWidget) → 020 (Chat-pane UX) → 031 (Phase 2 verification) → 032+033 (P2 CLOSEOUT backend) → 034 (P2 CLOSEOUT frontend) → 035 (SC-18 re-run + signoff) → 040 (/analyze proof point) → 043 (Operator testing) → 044 (Lessons-learned) → 090 (Wrap-up)`
 
 Critical path ≈ 13 sequential dependencies. Slack exists in Phase 2 deliverables that can run in parallel within their waves.
 

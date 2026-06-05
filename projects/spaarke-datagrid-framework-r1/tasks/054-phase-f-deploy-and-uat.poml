@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Phase F deploy + UAT (SpeAdminApp DashboardPage visual diff vs UDG)</title>
+    <phase>6: Phase F — Legacy Retirement</phase>
+    <status>completed-partial</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>051,053</dependencies>
+    <blocks>090</blocks>
+    <tags>deploy, dataverse, pcf, testing, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deploy + UAT; visual diff acceptance gate; final retirement step</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final Phase F task; aggregates retirement deploys</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy SpeAdminApp + Spaarke.UI.Components + retired solution to DEV. Verify build passes. Smoke test SpeAdminApp DashboardPage renders identically to pre-migration UDG version (visual diff). Confirm UDG PCF no longer present in solution.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer / UAT tester. Familiar with PCF/Code Page deploy pipeline.
+  </role>
+
+  <goal>
+    Deploys succeed; SpeAdminApp DashboardPage renders correctly; visual diff zero regression; UDG PCF confirmed absent.
+  </goal>
+
+  <context>
+    <background>
+      Final Phase F task. After this, the legacy retirement is complete: 5 DatasetGrid components gone, 4 events-components (from Phase D) gone, UDG PCF gone.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-datagrid-framework-r1/notes/phase-f-deploy-uat.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">DEV deploy only.</constraint>
+    <constraint source="project">Visual diff zero regression for SpeAdminApp DashboardPage.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build SpeAdminApp + Spaarke.UI.Components.</step>
+    <step order="2">Deploy SpeAdminApp via its deploy mechanism.</step>
+    <step order="3">Deploy Spaarke.UI.Components (npm publish if applicable, or solution import).</step>
+    <step order="4">Deploy retired solution to remove UDG.</step>
+    <step order="5">Smoke test SpeAdminApp DashboardPage; visual diff vs. pre-migration screenshot from task 052.</step>
+    <step order="6">Verify UDG no longer appears in Dataverse solution (PowerApps maker portal).</step>
+    <step order="7">Document in `notes/phase-f-deploy-uat.md`; mark Phase F complete.</step>
+    <step order="8">Update TASK-INDEX (054 ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-deploy">Skill</tool>
+    <tool name="pcf-deploy">Skill (for retirement deploy)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/phase-f-deploy-uat.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given deploys, when complete, then zero errors.</criterion>
+    <criterion testable="true">Given DashboardPage post-deploy, when smoke tested, then renders correctly.</criterion>
+    <criterion testable="true">Given pre/post screenshots, when compared, then zero regression.</criterion>
+    <criterion testable="true">Given Dataverse solution, when inspected, then UDG PCF absent.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    DEV deploy only. Production deploy gated on final project wrap-up (task 090). Phase F closes the legacy code surface — the next task (090) is the project wrap-up.
+
+    Closeout (2026-06-04): Closed ✅¹ with revised scope per upstream deviations.
+    - Ran `Deploy-AllDataGridConsumers.ps1` — all 4 framework consumers (EventsPage, sprk_invoicespage,
+      sprk_kpiassessmentspage, LegalWorkspace) rebuilt + PATCHed + atomically published to
+      https://spaarkedev1.crm.dynamics.com. Exit 0.
+    - Built SpeAdminApp (Vite, exit 0, 12.82s, 1889 KB inline bundle) to verify the task 052 docblock
+      scrub didn't regress anything.
+    - "DashboardPage visual diff" criterion N/A — task 052 deviation established DashboardPage was never
+      on UDG, so there is no pre-migration UDG render to compare against.
+    - "UDG PCF absent from Dataverse" criterion is operator-pending: source dir deleted (task 053);
+      the operator must uninstall the deployed `SpaarkeUniversalDatasetGrid` solution from
+      `spaarkedev1.crm.dynamics.com` via the Power Apps maker portal. Runbook in
+      `notes/phase-f-deploy-uat.md` "Operator action" section.
+    - Full deploy report: `notes/phase-f-deploy-uat.md`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Deploy via skills + visual diff verification. Document.</protocol>
+  </execution>
+</task>

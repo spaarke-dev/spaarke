@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>FetchService + POST /api/dataverse/fetch (no cache, cross-entity privilege check)</title>
+    <phase>2: Phase B — BFF Passthrough</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>015,016,017</blocks>
+    <tags>bff-api, api, auth, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF endpoint + service + cross-entity privilege check (security-critical); ADR-008 + ADR-019 + ADR-028; FetchXML parsing for link-entity privilege escalation prevention</rigor-reason>
+    <parallel-group>B1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author `FetchService` + `POST /api/dataverse/fetch` endpoint accepting `{ entityName, fetchXml, pagingCookie? }` and returning `{ entities, moreRecords, pagingCookie }`. NO caching (per FR-BFF-04). ADR-008 authorization filter must check Read privilege on EVERY entity referenced via FetchXML `<link-entity>` (not just the primary one) to prevent privilege bypass.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse `ServiceClient.RetrieveMultipleAsync` with FetchXML, FetchXML parsing for security checks, and paging-cookie chain.
+  </role>
+
+  <goal>
+    Endpoint returns query results with paging-cookie, no caching, roundtrip &lt;500ms p50, cross-entity privilege check enforced (privilege bypass via `<link-entity>` impossible), rejects malformed FetchXML with ProblemDetails.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-BFF-04. This is the only POST endpoint and the only one with cross-entity privilege concerns. FetchXML supports `<link-entity>` joins; a caller with privilege on primary entity X but NOT on linked entity Y could otherwise extract Y's data via the join. The filter MUST parse FetchXML, enumerate every `<entity>` and `<link-entity name="...">`, and verify Read privilege on each. Use the cached metadata privilege from `MetadataService` (task 012) to avoid per-request Dataverse calls.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Dataverse/DataverseEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/FetchService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/Models/FetchRequestDto.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/Models/FetchResponseDto.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/FetchXmlPrivilegeAnalyzer.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">Cross-entity privilege check MANDATORY. Parse FetchXML for every entity reference; check Read privilege on each. No privilege bypass via `&lt;link-entity&gt;`.</constraint>
+    <constraint source="ADR-019">ProblemDetails on malformed FetchXML (400) + on read-deny (403).</constraint>
+    <constraint source="ADR-028">JWT on incoming; managed identity for Dataverse access.</constraint>
+    <constraint source="bff-extensions.md">Placement Justification + test obligation.</constraint>
+    <constraint source="project">NO caching — every request hits Dataverse. Cache only the privilege metadata lookups.</constraint>
+    <constraint source="project">Roundtrip target: &lt;500ms p50 on default tenant.</constraint>
+    <constraint source="project">Malformed FetchXML rejected with `400 ProblemDetails` — NOT `500 InternalServerError`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/010-authorization-filter-shape.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="FetchXML privilege analyzer" location="projects/spaarke-datagrid-framework-r1/notes/drafts/010-authorization-filter-shape.md">Use `XDocument.Parse(fetchXml)` + enumerate `//entity` and `//link-entity` elements; collect entity names; check Read privilege on each via cached metadata.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load task 010 outputs.</step>
+    <step order="2">Author `Models/FetchRequestDto.cs` and `FetchResponseDto.cs`. Request: `{ string EntityName, string FetchXml, string? PagingCookie }`. Response: `{ object[] Entities, bool MoreRecords, string? PagingCookie }`.</step>
+    <step order="3">Author `Services/Dataverse/FetchXmlPrivilegeAnalyzer.cs`: pure class with `IEnumerable&lt;string&gt; ExtractReferencedEntities(string fetchXml)` using `XDocument`; collect primary entity + all `link-entity name=`.</step>
+    <step order="4">Author `Services/Dataverse/FetchService.cs`: `ExecuteAsync(FetchRequestDto)` → `ServiceClient.RetrieveMultipleAsync(new FetchExpression(fetchXml))` + paging-cookie injection per design.md §9.</step>
+    <step order="5">Update `DataverseAuthorizationFilter` to accept `IFetchXmlPrivilegeAnalyzer` for fetch endpoint variant; for fetch endpoint, run analyzer first, then check Read privilege on each entity via cached metadata.</step>
+    <step order="6">Wire `POST /api/dataverse/fetch` in `DataverseEndpoints.cs` with the filter.</step>
+    <step order="7">Register services in `Program.cs` DI.</step>
+    <step order="8">Manual FetchXML privilege bypass test: craft FetchXML with `<link-entity>` on an entity the caller lacks Read on; verify 403 ProblemDetails.</step>
+    <step order="9">Build + vuln scan + publish size verification.</step>
+    <step order="10">Update TASK-INDEX (013 ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + publish + vuln scan</tool>
+    <tool name="Edit">Author code files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Dataverse/DataverseEndpoints.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/FetchService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/FetchXmlPrivilegeAnalyzer.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/Models/FetchRequestDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/Models/FetchResponseDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/DataverseAuthorizationFilter.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a FetchXML query with `&lt;link-entity name="X"&gt;` and caller lacks Read on X, when endpoint called, then 403 ProblemDetails (no data returned).</criterion>
+    <criterion testable="true">Given malformed FetchXML, when endpoint called, then 400 ProblemDetails (not 500).</criterion>
+    <criterion testable="true">Given valid query, when endpoint called, then response &lt;500ms p50 on default tenant.</criterion>
+    <criterion testable="true">Given `dotnet build`, when run, then zero errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    SECURITY-CRITICAL TASK. The FetchXML privilege analyzer is the load-bearing security control — without it, a caller could read any data they have FetchXML knowledge of via crafted `<link-entity>`. Code review for this endpoint should specifically test cross-entity privilege bypass. Parallels tasks 011, 012, 014 (Wave B1).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Mandatory `/code-review` + `/adr-check` on this endpoint due to security-critical nature. Verify privilege bypass test manually.</protocol>
+  </execution>
+</task>

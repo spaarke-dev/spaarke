@@ -52,7 +52,16 @@ export interface IGridConfiguration {
 }
 
 /**
- * Additional configuration stored in sprk_configjson
+ * Additional configuration stored in sprk_configjson — LEGACY schema (pre-R1).
+ *
+ * **For new grid configurations, use {@link DataGridConfiguration}** in
+ * `types/DataGridConfiguration.ts` (Spaarke DataGrid Framework R1+). This legacy
+ * interface persists while its consumers (`DatasetGrid` views, `UniversalDatasetGrid`
+ * PCF, pre-migration SemanticSearch) are still in service. Phase E migrates
+ * SemanticSearch; Phase F retires DatasetGrid + UDG PCF — after both, this type
+ * has no consumers and can be removed.
+ *
+ * See `projects/spaarke-datagrid-framework-r1/` for the migration plan.
  */
 export interface IGridConfigJson {
   /** Custom column overrides */

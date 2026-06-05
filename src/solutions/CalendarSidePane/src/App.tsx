@@ -19,18 +19,22 @@ import {
   tokens,
   makeStyles,
 } from "@fluentui/react-components";
+import { sendSidePaneFilter } from "@spaarke/ui-components";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { parseCalendarParams, getInitialFilterState } from "./utils/parseParams";
 import {
-  sendFilterChanged,
   sendCalendarReady,
   setupMessageListener,
   type IEventDateInfo,
 } from "./utils/postMessage";
 import {
-  CalendarFilterPane,
-  type CalendarFilterPaneOutput,
-} from "@spaarke/events-components";
+  CalendarSection,
+  type CalendarFilterOutput,
+} from "./components";
+
+// Pane id MUST match the host EventsPage's sidePaneFilter.paneId
+// (see src/solutions/EventsPage/src/config/eventConfig.ts → CALENDAR_PANE_ID).
+const PANE_ID = "calendarPane";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -58,7 +62,7 @@ export const App: React.FC = () => {
   const initialFilter = React.useMemo(() => getInitialFilterState(params), [params]);
 
   // Track current filter state (for ready message)
-  const [currentFilter, setCurrentFilter] = React.useState<CalendarFilterPaneOutput | null>(initialFilter);
+  const [currentFilter, setCurrentFilter] = React.useState<CalendarFilterOutput | null>(initialFilter);
 
   // Event dates from parent for calendar indicators
   const [eventDates, setEventDates] = React.useState<IEventDateInfo[]>([]);
@@ -89,12 +93,17 @@ export const App: React.FC = () => {
   }, []); // Only on mount
 
   /**
-   * Handle filter change from CalendarFilterPane (shared lib, R4 task 055 B-6).
-   * Sends postMessage to parent and updates local state.
+   * Handle filter change from CalendarSection.
+   *
+   * **Task 035 hardening (2026-06-04)**: sends via the framework's
+   * `sendSidePaneFilter` channel (paneId='calendarPane') instead of the legacy
+   * `sendFilterChanged` wrapper. The payload is the inner CalendarFilterOutput
+   * directly (no { filter: ... } wrap) — the framework's paneId multiplexing
+   * replaces the per-message wrapping convention.
    */
-  const handleFilterChange = React.useCallback((filter: CalendarFilterPaneOutput | null) => {
+  const handleFilterChange = React.useCallback((filter: CalendarFilterOutput | null) => {
     setCurrentFilter(filter);
-    sendFilterChanged(filter);
+    sendSidePaneFilter({ paneId: PANE_ID, payload: filter });
   }, []);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -104,7 +113,7 @@ export const App: React.FC = () => {
   return (
     <FluentProvider theme={theme}>
       <div className={styles.root}>
-        <CalendarFilterPane
+        <CalendarSection
           eventDates={eventDates}
           onFilterChange={handleFilterChange}
           initialSelectedDate={params.selectedDate ?? undefined}

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Migrate SpeAdminApp/DashboardPage.tsx from UniversalDatasetGrid PCF to new DataGrid</title>
+    <phase>6: Phase F — Legacy Retirement</phase>
+    <status>completed-partial</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>015,050</dependencies>
+    <blocks>053</blocks>
+    <tags>fluent-ui, frontend, react, migration</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Migration consumer code; ADR-021/022; visual parity required; cross-stack (PCF binding → DataGrid)</rigor-reason>
+    <parallel-group>F1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Migrate `src/solutions/SpeAdminApp/src/components/dashboard/DashboardPage.tsx` from binding to `UniversalDatasetGrid` PCF to direct consumption of new `<DataGrid configId={...}/>`. Visual diff: zero regression vs. UDG render.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in SpeAdminApp architecture + PCF binding migration patterns.
+  </role>
+
+  <goal>
+    DashboardPage.tsx consumes new `<DataGrid />` directly; UDG PCF binding removed; visual diff confirms zero regression.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-MIG-09. DashboardPage was using UDG PCF (which is being retired in task 053). The new framework `<DataGrid />` covers all the same features per FR-DG-11. May need an SpeAdminApp-specific `sprk_gridconfiguration` record OR use inline source mode.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpeAdminApp/src/components/dashboard/DashboardPage.tsx</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/052-pre-migration-screenshot.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9; tokens; dark mode.</constraint>
+    <constraint source="ADR-022">React-16-safe consumer.</constraint>
+    <constraint source="project">Visual diff: zero regression.</constraint>
+    <constraint source="project">If DashboardPage needs a new `sprk_gridconfiguration` record, author it here (small).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/fluent-v9-component` skill Step 0.5 checklist.</step>
+    <step order="2">Capture pre-migration screenshot of DashboardPage with UDG.</step>
+    <step order="3">Identify entity DashboardPage displays + the configjson needed. Author a `sprk_gridconfiguration` record if needed.</step>
+    <step order="4">Replace UDG PCF binding in `DashboardPage.tsx` with `<DataGrid configId={dashboardConfigId} dataverseClient={new XrmDataverseClient()}/>`.</step>
+    <step order="5">Remove any UDG-specific shims.</step>
+    <step order="6">Build (`npm run build` in SpeAdminApp); verify zero errors.</step>
+    <step order="7">Local dev test; capture post-migration screenshot.</step>
+    <step order="8">Visual diff vs. pre.</step>
+    <step order="9">Update TASK-INDEX (052 ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + dev</tool>
+    <tool name="Edit">Replace UDG binding</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpeAdminApp/src/components/dashboard/DashboardPage.tsx (modified)</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/052-pre-migration-screenshot.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given build, when run, then zero errors.</criterion>
+    <criterion testable="true">Given grep for `UniversalDatasetGrid` in DashboardPage, when run, then zero matches.</criterion>
+    <criterion testable="true">Given pre/post screenshots, when compared, then zero visual regression.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallels task 051. Once this lands, UDG PCF has no remaining consumers — safe to retire in task 053.
+
+    Closeout (2026-06-04): Closed as ✅¹ no-op. Task 050 audit established that DashboardPage
+    was never on UDG — it uses Fluent v9 `<DataGrid>` directly from `@fluentui/react-components`.
+    The original POML premise traced back to a misleading file-level docblock comment at
+    DashboardPage.tsx:405-406 that *documented a design choice not to use UDG* but was read as
+    if DashboardPage was on UDG. The comment was doubly stale (also referenced a defunct
+    `RecentActivityGrid` sibling component). Action this task: removed those 2 lines from
+    DashboardPage.tsx; preserved the ADR-021 dark-mode comment above. No migration code
+    changes; no screenshots required. Full rationale in
+    `notes/drafts/052-deviations.md`. Downstream: task 053 can proceed immediately
+    (no UDG consumers remain); task 054 UAT shrinks (no DashboardPage visual diff needed).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Mandatory `/fluent-v9-component` Step 0.5. Visual diff verification.</protocol>
+  </execution>
+</task>

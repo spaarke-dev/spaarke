@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Deploy Phase D: EventsPage + sprk_event config record + SpaarkeAi Calendar widget</title>
+    <phase>4: Phase D — EventsPage Migration</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>031,032,033</dependencies>
+    <blocks>035</blocks>
+    <tags>deploy, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task; multiple artifacts</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential deployment</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy Phase D artifacts: rewritten EventsPage Custom Page (via `code-page-deploy`), sprk_event `sprk_gridconfiguration` record (already in Dataverse from task 030 — verify), SpaarkeAi Calendar widget (via SpaarkeAi widget deploy pipeline — likely same workspace-widget deploy mechanism). Verify each independently before moving to UAT.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in `code-page-deploy`, `dataverse-deploy`, and SpaarkeAi workspace widget deploy.
+  </role>
+
+  <goal>
+    EventsPage live in Dataverse with new code; sprk_event config record retrievable; Calendar widget live in SpaarkeAi workspace.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-MIG-01..05. Three deploy targets — different deploy mechanisms. The SpaarkeAi widget deploy may require coordination with the SpaarkeAi build/deploy pipeline owner; document the actual mechanism in `notes/`.
+    </background>
+    <relevant-files>
+      <file>scripts/deploy/Deploy-CodePage.ps1</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">DEV environment only.</constraint>
+    <constraint source="project">EventsPage Custom Page deploy must not invalidate existing form-context iframe usage.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build EventsPage (`npm run build` in `src/solutions/EventsPage/`).</step>
+    <step order="2">Invoke `code-page-deploy` for EventsPage — uploads bundled HTML.</step>
+    <step order="3">Verify sprk_event `sprk_gridconfiguration` record present (from task 030).</step>
+    <step order="4">Deploy SpaarkeAi Calendar widget via its deploy mechanism (coordinate with SpaarkeAi pipeline owner if needed).</step>
+    <step order="5">Smoke test EventsPage: open via system / dialog / embedded / standalone modes (smoke only — full UAT is task 035).</step>
+    <step order="6">Smoke test SpaarkeAi workspace: Calendar widget renders correctly.</step>
+    <step order="7">Update TASK-INDEX (034 ✅).</step>
+    <step order="8">Document in `notes/phase-d-deploy-report.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="code-page-deploy">Skill</tool>
+    <tool name="curl">Smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/phase-d-deploy-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given EventsPage URL, when opened post-deploy, then page renders (full UAT in task 035).</criterion>
+    <criterion testable="true">Given SpaarkeAi workspace, when Calendar widget opened, then renders correctly.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    DEV deploy only. Production deploy gated on UAT.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Use deploy skills. Smoke test all 3 targets before marking complete.</protocol>
+  </execution>
+</task>

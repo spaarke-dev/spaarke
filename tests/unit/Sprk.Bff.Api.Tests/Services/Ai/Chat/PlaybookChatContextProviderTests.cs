@@ -241,6 +241,91 @@ public class PlaybookChatContextProviderTests
         context.KnowledgeScope.ParentEntityId.Should().BeNull();
     }
 
+    // ── R5 task 033 — UploadedFiles surfacing in ChatContext ──────────────────────
+
+    /// <summary>
+    /// When the session manifest carries uploaded files, the provider MUST surface them
+    /// verbatim on the returned <see cref="ChatContext.UploadedFiles"/> so downstream
+    /// agent construction (<see cref="SprkChatAgentFactory"/>) can build a Session Files
+    /// manifest suffix on the system prompt. R5 task 033 acceptance criterion.
+    /// </summary>
+    [Fact]
+    public async Task GetContextAsync_SurfacesUploadedFiles_WhenSessionHasFiles()
+    {
+        // Arrange
+        SetupEmptyScopes();
+
+        var manifest = new List<ChatSessionFile>
+        {
+            new(
+                FileId: "file-001",
+                FileName: "contract.pdf",
+                ContentType: "application/pdf",
+                SizeBytes: 12_345,
+                SearchDocumentIdsCsv: "idx-001",
+                UploadedAt: DateTimeOffset.UtcNow),
+            new(
+                FileId: "file-002",
+                FileName: "schedule.docx",
+                ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                SizeBytes: 6_789,
+                SearchDocumentIdsCsv: "idx-002,idx-003",
+                UploadedAt: DateTimeOffset.UtcNow)
+        };
+
+        var sut = CreateProvider();
+
+        // Act
+        var context = await sut.GetContextAsync(
+            TestDocumentId,
+            TestTenantId,
+            TestPlaybookId,
+            hostContext: null,
+            additionalDocumentIds: null,
+            uploadedFiles: manifest,
+            cancellationToken: CancellationToken.None);
+
+        // Assert — manifest forwarded verbatim onto returned ChatContext.
+        context.UploadedFiles.Should().NotBeNull();
+        context.UploadedFiles!.Should().HaveCount(2);
+        context.UploadedFiles.Should().Contain(f => f.FileId == "file-001" && f.FileName == "contract.pdf");
+        context.UploadedFiles.Should().Contain(f => f.FileId == "file-002" && f.FileName == "schedule.docx");
+    }
+
+    /// <summary>
+    /// When the session has no uploaded files (null or empty manifest), the returned
+    /// <see cref="ChatContext.UploadedFiles"/> MUST be <c>null</c> — backward-compatible
+    /// with pre-R5 callers and standalone chat. R5 task 033 acceptance criterion.
+    /// </summary>
+    [Fact]
+    public async Task GetContextAsync_LeavesUploadedFilesNull_WhenSessionHasNone()
+    {
+        // Arrange
+        SetupEmptyScopes();
+        var sut = CreateProvider();
+
+        // Act — case 1: null manifest (default param, mimicking pre-R5 callers)
+        var contextWhenNull = await sut.GetContextAsync(
+            TestDocumentId,
+            TestTenantId,
+            TestPlaybookId,
+            cancellationToken: CancellationToken.None);
+
+        // Act — case 2: explicit empty manifest (defensive: treated identically to null)
+        var contextWhenEmpty = await sut.GetContextAsync(
+            TestDocumentId,
+            TestTenantId,
+            TestPlaybookId,
+            hostContext: null,
+            additionalDocumentIds: null,
+            uploadedFiles: Array.Empty<ChatSessionFile>(),
+            cancellationToken: CancellationToken.None);
+
+        // Assert — both treatments are equivalent: null surface on returned context.
+        contextWhenNull.UploadedFiles.Should().BeNull();
+        contextWhenEmpty.UploadedFiles.Should().BeNull();
+    }
+
     #region Setup helpers
 
     private PlaybookChatContextProvider CreateProvider()

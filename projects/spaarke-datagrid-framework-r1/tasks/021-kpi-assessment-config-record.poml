@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Author sprk_gridconfiguration record for sprk_kpiassessment (Matter Health drill-through)</title>
+    <phase>3: Phase C — Matter UI Drill-throughs</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>023,025</blocks>
+    <tags>dataverse, schema</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Dataverse record + JSON configjson authoring; depends on sprk_configjson v1.0 schema being right (task 001)</rigor-reason>
+    <parallel-group>C1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author the `sprk_gridconfiguration` record for `sprk_kpiassessment` (Matter Health drill-through). Configjson v1.0: `source.type = "savedquery"` referencing task 020's savedQueryId; `filterChips.mode = "auto"`; `rowOpen.type = "navigateToForm"`; secondary action for "Ask sprkchat about this KPI" per [design.md Appendix].
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in `sprk_gridconfiguration.sprk_configjson` v1.0 schema (task 001) and Dataverse record creation via MCP / Web API.
+  </role>
+
+  <goal>
+    1 new `sprk_gridconfiguration` record exists in Dataverse with valid v1.0 configjson; `<DataGrid configId={...} />` in a Storybook story (or harness) renders correctly using it.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-CON-01. Configjson sub-sections: `_version: "1.0"`; `source: { type: "savedquery", savedQueryId: "<from task 020>" }`; `display: { densityDefault: "small" }`; `filterChips: { mode: "auto" }`; `commandBar: { actions: ["refresh", "export-excel"] }`; `rowOpen: { type: "navigateToForm" }`; `secondaryActions: [{ kind: "ai-assistant", id: "ask-sprkchat-about-kpi", label: "Ask sprkchat" }]`.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/020-savedquery-ids.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/021-kpi-configjson.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">configjson MUST validate against the v1.0 schema (task 001's `isValidConfigJson` guard).</constraint>
+    <constraint source="project">`source.savedQueryId` references task 020's documented ID.</constraint>
+    <constraint source="project">`_version: "1.0"` discriminator present.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>docs/guides/CONFIGURATION-MATRIX.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/design.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/020-savedquery-ids.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read task 020 outputs for the KPI savedQueryId.</step>
+    <step order="2">Author configjson v1.0 in `notes/drafts/021-kpi-configjson.json` per design.md Appendix shape.</step>
+    <step order="3">Validate the configjson against the schema (run `isValidConfigJson(json)` from task 001).</step>
+    <step order="4">Author `sprk_gridconfiguration` record in Dataverse via `dataverse-create-schema` skill OR MCP `create_record`: `sprk_name = "KPI Assessment Matter Health"`, `sprk_entitylogicalname = "sprk_kpiassessment"`, `sprk_configjson = <the JSON>`, `sprk_isdefault = true`, `sprk_sortorder = 100`.</step>
+    <step order="5">Document the new `sprk_gridconfigurationid` GUID in `notes/drafts/021-config-record-id.md` for task 023.</step>
+    <step order="6">Smoke test: `GET /api/data/v9.2/sprk_gridconfigurations({newId})` returns the record correctly.</step>
+    <step order="7">Update TASK-INDEX (021 ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-create-schema">Skill</tool>
+    <tool name="dataverse MCP">create_record + validation</tool>
+    <tool name="Edit">Document configjson</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/021-kpi-configjson.json</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/drafts/021-config-record-id.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the configjson, when validated via `isValidConfigJson`, then it returns true.</criterion>
+    <criterion testable="true">Given the new record, when retrieved via Web API, then `sprk_configjson` matches authored JSON.</criterion>
+    <criterion testable="true">Given a Storybook story passing the new `configId`, when DataGrid mounts, then it renders correctly with the KPI savedquery columns.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallels task 022 (Invoice config record) — both depend on task 020 and touch separate Dataverse records. Once both land, tasks 023 (Custom Pages) and 024 (chart-defs) unblock.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Validate JSON against schema BEFORE Dataverse create. Document record ID for downstream tasks.</protocol>
+  </execution>
+</task>

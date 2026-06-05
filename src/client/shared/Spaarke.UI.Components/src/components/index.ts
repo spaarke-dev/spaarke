@@ -1,13 +1,8 @@
 // Fluent UI v9 Wrappers (Spaarke standards)
 export * from './SprkButton';
 
-// Dataset components
-export * from './DatasetGrid/UniversalDatasetGrid';
-export * from './DatasetGrid/GridView';
-export * from './DatasetGrid/CardView';
-export * from './DatasetGrid/ListView';
-export * from './DatasetGrid/VirtualizedGridView';
-export * from './DatasetGrid/VirtualizedListView';
+// Dataset components — legacy view components retired in Phase F (task 051).
+// Only ViewSelector remains; the new DataGrid framework lives under './DataGrid'.
 export * from './DatasetGrid/ViewSelector';
 
 // Toolbar components
@@ -132,3 +127,6 @@ export * from './TagFilter';
 
 // DocumentRowMenu - 3-dot row-action menu for document grids (FR-SC-02, matter-ui-r1 task 011)
 export * from './DocumentRowMenu';
+
+// DataGrid - Spaarke DataGrid Framework R1 (task 001: tokens; tasks 003-008: component + chips + command bar)
+export * from './DataGrid';

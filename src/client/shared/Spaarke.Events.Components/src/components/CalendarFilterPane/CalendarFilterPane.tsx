@@ -271,13 +271,17 @@ const useStyles = makeStyles({
     alignItems: 'center',
     ...shorthands.gap('4px'),
   },
-  // Calendar content
+  // Calendar content — task 035 UAT iteration 3: removed `overflowY: auto`
+  // so the pane no longer shows an inner scrollbar. Combined with the
+  // weeks-needed fix in getMonthDays (no more 6th all-next-month row),
+  // the content fits the 340px side-pane width cleanly without overflow.
   calendarContent: {
     flex: 1,
+    minHeight: 0,
     display: 'flex',
     flexDirection: 'column',
     ...shorthands.padding('8px', '16px'),
-    overflowY: 'auto',
+    overflowY: 'hidden',
   },
   monthSection: {
     marginBottom: '16px',
@@ -411,27 +415,51 @@ function parseIsoDate(dateStr: string): Date | null {
 }
 
 /**
- * Get all days to display for a month (including padding days from prev/next months)
+ * Format date for display (MMM D, YYYY)
+ */
+function formatDateDisplay(dateStr: string): string {
+  const date = parseIsoDate(dateStr);
+  if (!date) return dateStr;
+  return date.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+/**
+ * Get all days to display for a month, including just enough padding from the
+ * adjacent months to fill complete week rows.
+ *
+ * **Task 035 UAT iteration 3 fix**: previously this padded to exactly 42 cells
+ * (always 6 rows), which produced a 6th row of all-next-month dates for months
+ * that fit in 5 weeks (e.g. June 2026 → 6th row was entirely July dates). Now
+ * we pad to the next multiple of 7 — exactly the number of weeks that contain
+ * at least one current-month day. The calendar height varies between 5 and 6
+ * rows by month, which is the standard Power Apps / Outlook calendar behavior.
  */
 function getMonthDays(year: number, month: number): Date[] {
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const days: Date[] = [];
 
-  // Add padding days from previous month
+  // Add padding days from previous month so the first row aligns with Sunday.
   const startPadding = firstDay.getDay();
   for (let i = startPadding - 1; i >= 0; i--) {
     const d = new Date(year, month, -i);
     days.push(d);
   }
 
-  // Add days of current month
+  // Add days of current month.
   for (let d = 1; d <= lastDay.getDate(); d++) {
     days.push(new Date(year, month, d));
   }
 
-  // Add padding days for next month to complete the grid (6 rows)
-  const endPadding = 42 - days.length;
+  // Add ONLY enough next-month padding to complete the last week that contains
+  // a current-month day. This drops the 6th-all-next-month row that the
+  // previous fixed-42 implementation always produced for short months.
+  const weeksNeeded = Math.ceil(days.length / 7);
+  const endPadding = weeksNeeded * 7 - days.length;
   for (let d = 1; d <= endPadding; d++) {
     days.push(new Date(year, month + 1, d));
   }
